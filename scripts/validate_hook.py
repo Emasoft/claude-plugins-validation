@@ -38,9 +38,11 @@ from cpv_validation_common import (
     COLORS,
     VALID_HOOK_EVENTS,
     ValidationReport,
+    ValidationResult,
     resolve_tool_command,
     save_report_and_print_summary,
 )
+from cpv_parallel_runner import parallel_scan
 
 # Events that support matchers
 EVENTS_WITH_MATCHERS = {
@@ -2849,6 +2851,231 @@ def validate_single_hook(
     return True
 
 
+# ---------------------------------------------------------------------------
+# Parallel per-hook scan (task #384)
+# ---------------------------------------------------------------------------
+#
+# A hooks.json can declare many hooks under many events × matcher blocks.
+# Each leaf hook is validated independently — `validate_single_hook` does not
+# share mutable state with sibling hooks beyond reading the parsed JSON for
+# cross-event reconciliation (e.g. SessionStart venv-setup detection). The
+# heavy work per hook is in `validate_command_hook` → `validate_script` →
+# subprocess-based linters (bash/ruff/jshint) plus Python AST walks for
+# import reconciliation. For a plugin with N hooks, serial = N×(subprocess +
+# AST). Running them through `parallel_scan` (ProcessPoolExecutor) collapses
+# that to ceil(N / workers) × (single-hook cost).
+#
+# The per-task work-unit is a frozen dataclass — pickleable, hashable, and
+# carries everything `scan_one_hook` needs: the hook dict, its event, its
+# enclosing hooks.json data (for cross-event lookups), the plugin root, and
+# the hooks.json file path string (used for `report.hook_path` attribution).
+#
+# `scan_one_hook` (top-level, pickleable) instantiates a FRESH
+# `HookValidationReport`, runs `validate_single_hook` against it, then
+# returns `report.results` — a list of `ValidationResult` dataclasses,
+# themselves pickleable. The main process merges those lists back into the
+# caller's report in input order so the final result is identical to a
+# serial walk (modulo the per-hook INFO header which is emitted upfront
+# before the parallel batch).
+#
+# An env-var escape hatch (`CPV_HOOK_PARALLEL=0`) forces the serial path for
+# parity testing and for debugging — when set the harness is bypassed and
+# `validate_single_hook` is called inline. Default behavior (env unset OR
+# "1") is parallel.
+
+
+@dataclass(frozen=True)
+class _HookWorkUnit:
+    """One leaf hook plus the context needed to validate it in a worker.
+
+    `hooks_json_data` carries the entire parsed hooks.json so per-hook checks
+    (specifically `reconcile_python_runtime_deps`) can look at sibling events
+    — e.g. a UserPromptSubmit hook that invokes a venv python needs to know
+    whether a SessionStart hook elsewhere in the same file installs it.
+
+    All fields are pickleable (dicts of primitives, strings, Path-or-None).
+    Path is converted to its string form to dodge any Path-pickling quirks on
+    Windows worker processes, then reconstructed inside `scan_one_hook`.
+    """
+
+    hook_path_str: str
+    hook: dict[str, Any]
+    event_name: str
+    plugin_root_str: str | None
+    hooks_json_data: dict[str, Any]
+    # Insertion order — used by the caller to slot results back into the
+    # report in deterministic position.
+    order_index: int
+
+
+def scan_one_hook(unit: _HookWorkUnit) -> list[ValidationResult]:
+    """Top-level pickleable worker: validate ONE leaf hook.
+
+    Builds a fresh `HookValidationReport`, runs `validate_single_hook`
+    against it, returns `report.results` — a list of `ValidationResult`
+    dataclasses that the main process appends to its own report.
+
+    Returning a list (not the report itself) is deliberate: `ValidationReport`
+    holds `valid_items` / `failed_items` lists that may contain arbitrary
+    plugin-author objects which may not pickle cleanly across the worker
+    boundary. `ValidationResult` is a simple dataclass of primitives —
+    always pickleable.
+
+    The bool return of `validate_single_hook` is NOT propagated here — its
+    only consumer (`validate_matcher_block`'s `all_valid` flag) can recover
+    the same answer by inspecting the returned results for CRITICAL/MAJOR
+    entries that block the hook (see the merge logic in
+    `_validate_hooks_in_matcher_block`).
+    """
+    plugin_root = Path(unit.plugin_root_str) if unit.plugin_root_str else None
+    fresh = HookValidationReport(hook_path=unit.hook_path_str)
+    validate_single_hook(
+        unit.hook,
+        unit.event_name,
+        plugin_root,
+        fresh,
+        unit.hooks_json_data,
+    )
+    return fresh.results
+
+
+def _hook_parallel_enabled() -> bool:
+    """Read the CPV_HOOK_PARALLEL env-var.
+
+    Returns False when the env var is set to "0" / "false" / "no"
+    (case-insensitive) — the serial path is taken. Any other value, or
+    no value at all, returns True (default = parallel).
+
+    This is the only switch — `n_workers` is left at the harness default
+    (os.cpu_count()) which is the right call for hook validation:
+    per-hook work is CPU-bound (AST walks, regex) plus subprocess linters,
+    and the harness needs enough workers to keep the linters concurrent.
+    """
+    val = os.environ.get("CPV_HOOK_PARALLEL")
+    if val is None:
+        return True
+    return val.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _validate_hooks_in_matcher_block(
+    hooks: list[Any],
+    event_name: str,
+    plugin_root: Path | None,
+    report: HookValidationReport,
+    hooks_json_data: dict[str, Any] | None,
+) -> bool:
+    """Run validate_single_hook over every leaf hook in a matcher block.
+
+    Serial when `CPV_HOOK_PARALLEL=0`, otherwise parallel via the shared
+    `parallel_scan` harness. The serial path is the legacy code; the
+    parallel path constructs work units, runs the harness, then merges
+    per-hook `ValidationResult` lists back into `report.results` in input
+    order so the final order is identical to a serial walk.
+
+    Returns `all_valid` — True iff every hook validated cleanly (no CRITICAL,
+    no MAJOR added). The original `validate_single_hook` boolean return was
+    True iff no early CRITICAL was raised — but downstream consumers
+    (`validate_event_hooks`) use this purely to decide whether to emit the
+    final "All hooks valid" PASSED line. We preserve that signal by checking
+    the merged results.
+    """
+    n = len(hooks)
+    anchor_index = len(report.results)  # for the final CRITICAL-tail scan
+
+    if not _hook_parallel_enabled():
+        # Serial path — kept BIT-IDENTICAL to the pre-task-384 behavior.
+        # Used by the parity regression test (which runs both paths and
+        # asserts the ValidationResult sequences match exactly). Each hook
+        # gets its INFO header emitted IMMEDIATELY before its findings, so
+        # the result order in the report is:
+        #   INFO1, [hook1 findings...], INFO2, [hook2 findings...], ...
+        for i, hook in enumerate(hooks):
+            report.info(f"Validating hook {i + 1} of {n}...")
+            validate_single_hook(hook, event_name, plugin_root, report, hooks_json_data)
+        return not _has_blocking_results_after(report, anchor_index)
+
+    # Parallel path. To preserve EXACTLY the same result-list order as
+    # the serial path (parity invariant required by the spec and pinned
+    # by test_parallel_vs_serial_identical_output), we:
+    #   1. Collect per-hook findings INTO PER-HOOK LISTS (not directly into
+    #      report.results) — non-dict hooks are validated inline, dict
+    #      hooks go through the parallel scan.
+    #   2. Emit each hook's INFO header + its findings in input order, in
+    #      a single serial merge pass after the parallel batch completes.
+    # Building work units upfront also lets us preserve the order-index
+    # mapping so a future change in the harness's ordering (e.g. an
+    # accidental reorder by completion time) would surface as a parity
+    # test failure rather than as silent reordering.
+    plugin_root_str = str(plugin_root) if plugin_root is not None else None
+    json_data = hooks_json_data if hooks_json_data is not None else {}
+
+    # per_hook_results[i] = list[ValidationResult] for hooks[i]. We fill
+    # non-dict entries inline (cheap, no worker overhead, lets
+    # validate_single_hook own the CRITICAL emission semantics) and dict
+    # entries via the parallel batch below.
+    per_hook_results: list[list[ValidationResult]] = [[] for _ in range(n)]
+    work_units: list[_HookWorkUnit] = []
+    work_unit_indices: list[int] = []  # parallel slot in per_hook_results
+    for i, hook in enumerate(hooks):
+        if not isinstance(hook, dict):
+            sub = HookValidationReport(hook_path=report.hook_path)
+            validate_single_hook(hook, event_name, plugin_root, sub, hooks_json_data)
+            per_hook_results[i] = sub.results
+            continue
+        work_units.append(
+            _HookWorkUnit(
+                hook_path_str=report.hook_path,
+                hook=hook,
+                event_name=event_name,
+                plugin_root_str=plugin_root_str,
+                hooks_json_data=json_data,
+                order_index=i,
+            )
+        )
+        work_unit_indices.append(i)
+
+    if work_units:
+        scan_results = parallel_scan(work_units, scan_one_hook)
+        for slot, sr in zip(work_unit_indices, scan_results):
+            if sr.error is not None:
+                # A worker raised — spec mandates "surface as a per-file
+                # WARNING in the report (don't crash the whole validator)".
+                # We attach the warning to this hook's slot so it surfaces
+                # in the correct position in the merged output.
+                per_hook_results[slot] = [
+                    ValidationResult(
+                        level="WARNING",
+                        message=f"Hook worker raised during parallel scan: {sr.error}",
+                        file=report.hook_path,
+                    )
+                ]
+                continue
+            per_hook_results[slot] = sr.findings
+
+    # Merge per-hook results back into the main report in input order,
+    # interleaving each hook's "Validating hook N of M..." INFO header
+    # before its findings. This produces a result sequence identical to
+    # the serial path (verified by the parity test).
+    for i in range(n):
+        report.info(f"Validating hook {i + 1} of {n}...")
+        report.results.extend(per_hook_results[i])
+
+    return not _has_blocking_results_after(report, anchor_index)
+
+
+def _has_blocking_results_after(report: ValidationReport, anchor_index: int) -> bool:
+    """True iff `report.results[anchor_index:]` contains any CRITICAL.
+
+    Matches the original `validate_single_hook` False-return semantics:
+    the serial code returned False only on CRITICAL paths (root not dict,
+    missing 'type', invalid type, missing required field in
+    validate_command_hook/validate_prompt_hook/validate_http_hook/
+    validate_mcp_tool_hook). MAJOR alone did NOT flip False — only the
+    early CRITICAL early-returns did. So the merged check is CRITICAL-only.
+    """
+    return any(r.level == "CRITICAL" for r in report.results[anchor_index:])
+
+
 def validate_matcher_block(
     matcher_block: Any,
     event_name: str,
@@ -2880,14 +3107,15 @@ def validate_matcher_block(
         report.minor("'hooks' array is empty")
         return True
 
-    # Validate each hook
-    all_valid = True
-    for i, hook in enumerate(hooks):
-        report.info(f"Validating hook {i + 1} of {len(hooks)}...")
-        if not validate_single_hook(hook, event_name, plugin_root, report, hooks_json_data):
-            all_valid = False
-
-    return all_valid
+    # Validate each hook — serial-or-parallel based on CPV_HOOK_PARALLEL.
+    # Parallel path uses the shared `parallel_scan` harness from
+    # `cpv_parallel_runner` (task #384). Results merge into `report` in
+    # input order so per-hook findings appear after their corresponding
+    # "Validating hook N of M..." INFO header — identical sequencing to
+    # the pre-parallelization serial loop.
+    return _validate_hooks_in_matcher_block(
+        hooks, event_name, plugin_root, report, hooks_json_data
+    )
 
 
 def validate_event_hooks(

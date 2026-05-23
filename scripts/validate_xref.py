@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -33,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from cpv_parallel_runner import ScanResult, parallel_scan
 from cpv_validation_common import (
     COLORS,
     ValidationReport,
@@ -152,6 +154,46 @@ _DISPATCH_UNQUOTED_VALUE = re.compile(
 #   - bash/shell/sh: shell-command examples (path arguments like
 #     ./skills/foo/ are shell paths, not skill invocations)
 _NOISE_FENCE_LANGS = ("text", "output", "console", "log", "bash", "shell", "sh")
+
+# Plugin-structural directory names that show up as `skills/<dir>` captures in
+# prose like "skills/agents/commands" but are NOT actual skill invocations.
+# Lifted to module scope (task #384) so the parallel worker function below
+# can reference it without rebuilding the set on every per-file call — and
+# so worker processes (which re-import this module) see the same set.
+_SKILL_REF_PLUGIN_DIRS: frozenset[str] = frozenset(
+    {
+        "agents",
+        "commands",
+        "skills",
+        "hooks",
+        "mcp",
+        "monitors",
+        "output-styles",
+        "outputstyles",
+        "lsp",
+        "scripts",
+        "tests",
+        "references",
+        "examples",
+        "templates",
+        "name",
+        "ext",
+        "file",
+        "node",
+        "my-skill",  # common prose / template placeholders
+        "agent",  # singular — prose-like "skills/agent/SKILL.md" template placeholder
+        "command",
+        "skill",
+        "hook",  # singular forms used in prose
+        "rust",
+        "python",
+        "javascript",
+        "typescript",
+        "java",
+        "go",
+        "ruby",  # language names sometimes appear as "skills/python"
+    }
+)
 
 
 def _strip_noise(content: str) -> str:
@@ -274,6 +316,137 @@ def _extract_dispatch_refs(content: str) -> list[tuple[str, str]]:
             seen.add(classified)
 
     return refs
+
+
+# =============================================================================
+# Per-file parallel workers (task #384)
+#
+# Each validator that does a `for file in files: ...` loop over per-file
+# CPU-bound regex work splits that work into two halves:
+#
+#   1. EXTRACTION (per-file, parallelizable) — read the file, strip noise,
+#      run the regex extractors. Returns pickleable tuples of raw refs.
+#      This is what the worker functions below do.
+#
+#   2. RESOLUTION (cross-file, serial) — walk the per-file extraction
+#      results in input order, call _resolve_dispatch_ref / lookup the
+#      pre-built available_agents / available_skills sets, and emit
+#      findings to the report.
+#
+# The harness (cpv_parallel_runner.parallel_scan) handles the parallelism;
+# these workers stay context-free (no validator state, no closures) so they
+# can be pickled across the ProcessPoolExecutor boundary.
+#
+# ``CPV_XREF_PARALLEL=0`` environment variable disables the parallel path
+# and runs the validator serially — useful for debugging, CI environments
+# that pin worker counts, and any tooling that needs deterministic stdout
+# ordering across runs (parallel + processes can interleave any prints we
+# might add inside workers in the future).
+# =============================================================================
+
+
+def _xref_parallel_enabled() -> bool:
+    """Return True iff the parallel scan path should run.
+
+    Honors the ``CPV_XREF_PARALLEL`` escape hatch — when set to ``0`` /
+    ``false`` / ``no`` (case-insensitive) the validator falls back to the
+    serial loop. Default is parallel-on so the common case benefits from
+    the speedup without per-call configuration.
+    """
+    val = os.environ.get("CPV_XREF_PARALLEL", "").strip().lower()
+    if val in {"0", "false", "no", "off"}:
+        return False
+    return True
+
+
+def _xref_extract_dispatch_worker(path: Path) -> list[tuple[str, str]]:
+    """Per-file parallel worker for dispatch-ref extraction.
+
+    Reads ``path``, applies noise stripping, runs the dispatch-ref
+    extractor. Returns ``[(kind, name), ...]`` tuples where ``kind`` is
+    ``"literal"`` or ``"dynamic"``. Empty list if the file is unreadable
+    or contains no dispatch refs.
+
+    NOTE: Read errors are swallowed here and reported as an empty result.
+    The serial join layer can't tell "no refs found" from "couldn't read"
+    just from the worker return, but that matches the existing serial
+    behavior (which also silently skips unreadable files via
+    ``read_text(errors="ignore")``). Any exception OTHER than read errors
+    propagates up to ``parallel_scan`` which captures it in
+    ``ScanResult.error`` for the join layer to surface as a WARNING.
+    """
+    try:
+        content = path.read_text(errors="ignore")
+    except (OSError, UnicodeDecodeError):
+        return []
+    return _extract_dispatch_refs(content)
+
+
+def _xref_extract_command_worker(path: Path) -> list[tuple[str, str]]:
+    """Per-file parallel worker for command-file ref extraction.
+
+    Commands trigger TWO kinds of extraction:
+      * Dispatch refs (subagent_type ...): returned as ``("dispatch", "<kind>:<name>")``
+        where ``<kind>`` is ``literal`` or ``dynamic``.
+      * Prose "spawn <agent> agent" matches: returned as ``("spawn", "<name>")``.
+
+    Tagging the kind in the return tuple lets the serial join layer
+    distinguish the two extraction families without re-running the regex.
+    Returns ``[]`` if the file is unreadable.
+
+    The encoded ``"<kind>:<name>"`` packing for dispatch refs keeps the
+    return type a uniform ``list[tuple[str, str]]`` — important because
+    ``ScanResult.findings`` is a single list and we want to preserve the
+    extraction order across both ref families (dispatch refs first, then
+    spawn refs, matching the original serial code's order).
+    """
+    try:
+        content = path.read_text(errors="ignore")
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    out: list[tuple[str, str]] = []
+    # Dispatch refs (same extractor as the dispatch worker)
+    for kind, name in _extract_dispatch_refs(content):
+        out.append(("dispatch", f"{kind}:{name}"))
+
+    # Spawn-prose refs — share the noise-stripped body with dispatch to
+    # match the original serial behavior (see validate_command_agent_refs).
+    stripped = _strip_noise(content)
+    for spawn_ref in AGENT_SPAWN_PATTERN.findall(stripped):
+        out.append(("spawn", spawn_ref))
+
+    return out
+
+
+def _xref_extract_skill_refs_worker(path: Path) -> list[str]:
+    """Per-file parallel worker for skill-ref extraction.
+
+    Reads ``path``, applies noise stripping, runs ``SKILL_REF_PATTERN``,
+    filters out plugin-structural directory names and trailing-hyphen
+    captures (the belt-and-suspenders defense from issue #27).
+
+    Returns a list of skill-name strings IN THE ORDER they appeared in
+    the file. The serial join layer de-duplicates per its own existing
+    logic (``set(filtered_matches)``); we keep duplicates here so the
+    de-dup happens at the same point in the pipeline as before.
+    """
+    try:
+        content = path.read_text(errors="ignore")
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    stripped = _strip_noise(content)
+    matches = SKILL_REF_PATTERN.findall(stripped)
+
+    # Apply the same two filters as the serial code:
+    # 1. Plugin-structural directory names ("agents", "commands", etc.)
+    # 2. Belt-and-suspenders against trailing-hyphen captures (issue #27)
+    return [
+        m
+        for m in matches
+        if m.lower() not in _SKILL_REF_PLUGIN_DIRS and not m.endswith("-")
+    ]
 
 
 def _get_plugin_name(plugin_root: Path) -> str | None:
@@ -530,16 +703,40 @@ def validate_agent_task_refs(
     if plugin_name is None:
         plugin_name = _get_plugin_name(plugin_root)
 
-    for agent_file in agents_dir.glob("*.md"):
-        try:
-            content = agent_file.read_text(errors="ignore")
-        except Exception as e:
-            report.minor(f"Could not read agent file: {e}", str(agent_file.relative_to(plugin_root)))
+    # Collect agent files in deterministic order so parallel + serial paths
+    # produce identical finding ordering. ``glob`` order varies by platform
+    # (filesystem-dependent on macOS/Linux); ``sorted`` pins it.
+    agent_files = sorted(agents_dir.glob("*.md"))
+
+    # Task #384: extract per-file refs in parallel, then resolve serially.
+    # The CPV_XREF_PARALLEL=0 escape hatch routes through the same code path
+    # via parallel_scan with a synthetic single-result list — easier than
+    # duplicating the resolve/emit loop for the serial fallback.
+    if _xref_parallel_enabled() and len(agent_files) > 1:
+        scan_results = parallel_scan(agent_files, _xref_extract_dispatch_worker)
+    else:
+        scan_results = [
+            ScanResult(
+                file_path=f,
+                findings=_xref_extract_dispatch_worker(f),
+                error=None,
+            )
+            for f in agent_files
+        ]
+
+    for result in scan_results:
+        rel_path = str(result.file_path.relative_to(plugin_root))
+
+        if result.error is not None:
+            # A worker raised — surface as MINOR (matches the old serial
+            # "Could not read agent file" path, which was also MINOR).
+            report.minor(
+                f"Could not read agent file: {result.error}",
+                rel_path,
+            )
             continue
 
-        rel_path = str(agent_file.relative_to(plugin_root))
-        refs = _extract_dispatch_refs(content)
-
+        refs = result.findings
         if refs:
             report.agent_refs[rel_path] = [name for _, name in refs]
 
@@ -645,18 +842,43 @@ def validate_subagent_type_matching(
         if ed_path.is_dir():
             md_files.extend(ed_path.rglob("*.md"))
 
-    for md_file in md_files:
-        # Skip hidden directories and cache directories
-        if any(should_skip_dir(p) for p in md_file.parents):
+    # Filter hidden/cache dirs BEFORE handing the list to the parallel
+    # scanner. This way the worker count + ordering match what the
+    # serial path used to see, and we don't waste worker time on files
+    # we'll discard. Sorting pins per-platform glob order so parallel
+    # output stays deterministic.
+    md_files = sorted(
+        md for md in md_files if not any(should_skip_dir(p) for p in md.parents)
+    )
+
+    # Task #384: per-file extraction in parallel, resolution serial.
+    if _xref_parallel_enabled() and len(md_files) > 1:
+        scan_results = parallel_scan(md_files, _xref_extract_dispatch_worker)
+    else:
+        scan_results = [
+            ScanResult(
+                file_path=f,
+                findings=_xref_extract_dispatch_worker(f),
+                error=None,
+            )
+            for f in md_files
+        ]
+
+    for result in scan_results:
+        rel_path = str(result.file_path.relative_to(plugin_root))
+
+        if result.error is not None:
+            # Worker raised — surface as WARNING per task #384 contract.
+            # The original serial code silently skipped on read errors, so
+            # WARNING is strictly more informative without breaking
+            # backward compatibility on exit codes (WARNING never blocks).
+            report.warning(
+                f"Could not extract dispatch refs from {rel_path}: {result.error}",
+                rel_path,
+            )
             continue
 
-        try:
-            content = md_file.read_text(errors="ignore")
-        except Exception:
-            continue
-
-        rel_path = str(md_file.relative_to(plugin_root))
-        refs = _extract_dispatch_refs(content)
+        refs = result.findings
 
         for kind, ref_agent in refs:
             if kind == "dynamic":
@@ -842,17 +1064,62 @@ def validate_command_agent_refs(
     if plugin_name is None:
         plugin_name = _get_plugin_name(plugin_root)
 
-    for cmd_file in commands_dir.glob("*.md"):
-        try:
-            content = cmd_file.read_text(errors="ignore")
-        except Exception as e:
-            report.minor(f"Could not read command file: {e}", str(cmd_file.relative_to(plugin_root)))
+    cmd_files = sorted(commands_dir.glob("*.md"))
+
+    # Task #384: per-file extraction parallel, resolution serial. The
+    # command worker emits a tagged stream of (kind, payload) tuples
+    # interleaving dispatch refs and spawn refs in the order they
+    # appeared in the file. The join loop below splits them back out
+    # so the existing report-emission order (dispatch findings first
+    # per file, then spawn findings) is preserved.
+    if _xref_parallel_enabled() and len(cmd_files) > 1:
+        scan_results = parallel_scan(cmd_files, _xref_extract_command_worker)
+    else:
+        scan_results = [
+            ScanResult(
+                file_path=f,
+                findings=_xref_extract_command_worker(f),
+                error=None,
+            )
+            for f in cmd_files
+        ]
+
+    # Precompute the fuzzy-match index outside the loop — it depends only
+    # on the available_agents / BUILTIN_AGENTS sets, not per-file content.
+    # Building it once instead of N times shaves a per-file allocation.
+    _available_normalized = {_normalize_subagent_type(a) for a in available_agents}
+    _builtin_normalized = {_normalize_subagent_type(a) for a in BUILTIN_AGENTS}
+
+    for result in scan_results:
+        rel_path = str(result.file_path.relative_to(plugin_root))
+
+        if result.error is not None:
+            # Worker raised — surface as MINOR (matches the old serial
+            # "Could not read command file" path).
+            report.minor(
+                f"Could not read command file: {result.error}",
+                rel_path,
+            )
             continue
 
-        rel_path = str(cmd_file.relative_to(plugin_root))
+        # Split the tagged stream back into the two ref families. We keep
+        # extraction order within each family by appending — the worker
+        # already emits dispatch refs before spawn refs (per the original
+        # serial code's order).
+        dispatch_refs: list[tuple[str, str]] = []
+        spawn_refs: list[str] = []
+        for tag, payload in result.findings:
+            if tag == "dispatch":
+                # payload is encoded as "<kind>:<name>" by the worker
+                kind, _, name = payload.partition(":")
+                dispatch_refs.append((kind, name))
+            elif tag == "spawn":
+                spawn_refs.append(payload)
+            # Unknown tags are silently ignored — keeps the join layer
+            # forward-compatible if the worker grows new categories.
 
         # Subagent_type references via the four-variant extractor (TRDD-25b9be90)
-        for kind, ref_agent in _extract_dispatch_refs(content):
+        for kind, ref_agent in dispatch_refs:
             if kind == "dynamic":
                 report.minor(
                     f"[{RC_GHOST_DISPATCH_DYNAMIC}] Command uses dynamic subagent_type "
@@ -891,15 +1158,13 @@ def validate_command_agent_refs(
         # Spawn/invoke prose patterns (heuristic — keeps the existing behavior
         # but uses the corrected BUILTIN_AGENTS set instead of the old wrong list
         # which contained model names + scout/oracle as if they were built-ins).
-        stripped = _strip_noise(content)
-        spawn_refs = AGENT_SPAWN_PATTERN.findall(stripped)
         for ref_agent in spawn_refs:
             ref_agent_normalized = _normalize_subagent_type(ref_agent)
             if ref_agent_normalized in available_agents:
                 continue
-            if ref_agent_normalized in {_normalize_subagent_type(a) for a in available_agents}:
+            if ref_agent_normalized in _available_normalized:
                 continue  # v2.1.140 fuzzy match
-            if ref_agent_normalized in {_normalize_subagent_type(a) for a in BUILTIN_AGENTS}:
+            if ref_agent_normalized in _builtin_normalized:
                 continue
             report.major(
                 f"Command mentions unknown agent '{ref_agent}'",
@@ -956,66 +1221,40 @@ def validate_skill_refs(
             if skill_md.is_file():
                 file_paths.append(skill_md)
 
-    for file_path in file_paths:
-        # Skip hidden/cache directories
-        if any(should_skip_dir(p) for p in file_path.parents):
+    # Filter hidden/cache dirs BEFORE parallel dispatch and sort for
+    # deterministic order across platforms. (task #384)
+    file_paths = sorted(
+        fp for fp in file_paths if not any(should_skip_dir(p) for p in fp.parents)
+    )
+
+    # Task #384: per-file extraction parallel, serial join below. The
+    # worker handles read + _strip_noise + regex + the _plugin_dirs and
+    # trailing-hyphen filters (matching the old serial code exactly).
+    if _xref_parallel_enabled() and len(file_paths) > 1:
+        scan_results = parallel_scan(file_paths, _xref_extract_skill_refs_worker)
+    else:
+        scan_results = [
+            ScanResult(
+                file_path=f,
+                findings=_xref_extract_skill_refs_worker(f),
+                error=None,
+            )
+            for f in file_paths
+        ]
+
+    for result in scan_results:
+        rel_path = str(result.file_path.relative_to(plugin_root))
+
+        if result.error is not None:
+            # The serial code silently skipped read errors; WARNING here
+            # is strictly more informative without changing exit codes.
+            report.warning(
+                f"Could not extract skill refs from {rel_path}: {result.error}",
+                rel_path,
+            )
             continue
 
-        try:
-            content = file_path.read_text(errors="ignore")
-        except Exception:
-            continue
-
-        rel_path = str(file_path.relative_to(plugin_root))
-        # Apply noise stripping so example bash/shell commands (which
-        # contain `./skills/foo` path arguments) and example log captures
-        # don't false-positive — per TRDD-25b9be90 Phase 5.
-        stripped = _strip_noise(content)
-        matches = SKILL_REF_PATTERN.findall(stripped)
-
-        # Filter out captures that are plugin-structural directory names
-        # (e.g. prose like "skills/agents/commands" captures "agents" but
-        # that's the agents/ folder, not a skill). Per TRDD-25b9be90.
-        _plugin_dirs = {
-            "agents",
-            "commands",
-            "skills",
-            "hooks",
-            "mcp",
-            "monitors",
-            "output-styles",
-            "outputstyles",
-            "lsp",
-            "scripts",
-            "tests",
-            "references",
-            "examples",
-            "templates",
-            "name",
-            "ext",
-            "file",
-            "node",
-            "my-skill",  # common prose / template placeholders
-            "agent",  # singular — prose-like "skills/agent/SKILL.md" template placeholder
-            "command",
-            "skill",
-            "hook",  # singular forms used in prose
-            "rust",
-            "python",
-            "javascript",
-            "typescript",
-            "java",
-            "go",
-            "ruby",  # language names sometimes appear as "skills/python"
-        }
-        filtered_matches = [m for m in matches if m.lower() not in _plugin_dirs]
-        # Belt-and-suspenders defense against issue #27: even with the
-        # tightened regex, any future variant or future code path that
-        # produces a trailing-hyphen capture must not propagate to the
-        # cross-reference comparison (no plugin can ship a skill name
-        # ending in ``-``).
-        filtered_matches = [m for m in filtered_matches if not m.endswith("-")]
-
+        filtered_matches = result.findings
         if filtered_matches:
             report.skill_refs[rel_path] = list(set(filtered_matches))
 

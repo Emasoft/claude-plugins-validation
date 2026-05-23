@@ -693,6 +693,47 @@ def validate_skill(skill_path: Path) -> SkillValidationReport:
     return report
 
 
+def scan_one_skill(skill_dir: Path) -> list[dict]:
+    """Top-level pickleable per-skill scan callable for ``parallel_scan``.
+
+    Task #384: callers that need to validate MANY skills (e.g.
+    ``validate_plugin.validate_skills`` walking ``plugin/skills/*``) want to
+    fan the per-skill work out across CPU cores via
+    ``cpv_parallel_runner.parallel_scan``. That harness requires a top-level
+    importable callable taking exactly one ``Path`` arg and returning a list
+    of pickleable findings — no closures, no shared mutable state.
+
+    This shim wraps ``validate_skill()`` and serialises each
+    ``ValidationResult`` into a plain dict via the existing ``to_dict()``
+    contract. ``ValidationReport`` itself is a normal dataclass and would
+    pickle fine, but returning the report object would force the harness to
+    carry validator-specific types across process boundaries — dicts keep
+    the per-validator surface generic (every parallel-scan agent returns
+    the SAME shape: ``list[dict]`` with at minimum ``level`` + ``message``).
+
+    The aggregator side (``validate_plugin.validate_skills``) reconstructs
+    the per-skill report by feeding each dict back into
+    ``ValidationReport.add(level, message, file, line)`` exactly the way
+    the current serial loop already does (validate_plugin.py:3160).
+
+    Errors raised inside this function bubble back to ``parallel_scan``
+    which captures them into ``ScanResult.error`` (collect mode) — the
+    validator itself never crashes the pool.
+
+    Args:
+        skill_dir: Path to the skill directory (must contain SKILL.md).
+
+    Returns:
+        List of finding dicts, one per ValidationResult on the report.
+        Each dict has ``level`` + ``message`` and optionally ``file`` /
+        ``line`` / ``phase`` / ``category`` / ``suggestion`` / ``fixable``
+        / ``fix_id``. Order matches the order in which the validator
+        appended results — preserved for deterministic downstream output.
+    """
+    report = validate_skill(skill_dir)
+    return [r.to_dict() for r in report.results]
+
+
 def print_results(report: SkillValidationReport, verbose: bool = False) -> None:
     """Print validation results in human-readable format."""
     colors = COLORS

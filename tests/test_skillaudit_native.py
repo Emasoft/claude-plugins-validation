@@ -94,6 +94,13 @@ class TestSkillAuditNativeModule:
             "binascii",
             "hashlib",
             "json",
+            # ``os`` added in task #384 (Agent B1) — pure stdlib,
+            # used only for env-var resolution
+            # (``CPV_SKILLAUDIT_PARALLEL`` escape hatch +
+            # ``CPV_SKILLAUDIT_WORKER_PLUGIN_ROOT`` worker bootstrap).
+            # No network, no subprocess, no filesystem mutation —
+            # iron rule preserved.
+            "os",
             "re",
             "unicodedata",
             "collections.abc",
@@ -101,6 +108,13 @@ class TestSkillAuditNativeModule:
             "pathlib",
             "typing",
             "urllib.parse",
+            # ``cpv_parallel_runner`` lazy-imported inside
+            # ``_scan_path_parallel`` — it's CPV's own stdlib-only
+            # ``concurrent.futures`` harness, NOT a third-party dep.
+            # The import sits in a function body so this top-level
+            # regex walk doesn't see it; if a future refactor moves
+            # it to module scope, allowlist it here.
+            "cpv_parallel_runner",
         }
         import re as _re
 

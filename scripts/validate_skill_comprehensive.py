@@ -2891,6 +2891,68 @@ def validate_skill(
 # =============================================================================
 
 
+def scan_one_skill(
+    skill_dir: Path,
+    *,
+    strict_mode: bool = True,
+    strict_openspec: bool = False,
+    validate_pillars_flag: bool = False,
+    skip_platform_checks: list[str] | None = None,
+    skip_dir_name_check: bool = False,
+) -> list[dict]:
+    """Top-level pickleable per-skill scan callable for ``parallel_scan``.
+
+    Task #384: ``validate_plugin.validate_skills`` (validate_plugin.py:3148)
+    walks ``plugin/skills/<name>/`` serially today; with this shim the same
+    walk can fan out across CPU cores via
+    ``cpv_parallel_runner.parallel_scan``. The harness requires a top-level
+    importable callable taking exactly one positional ``Path`` arg, so the
+    flags below are KEYWORD-ONLY: a parallel-scan caller binds them with
+    ``functools.partial`` (or uses the defaults — which match what
+    ``validate_plugin.validate_skills`` passes today: strict_mode=True,
+    strict_openspec=False, pillars enabled iff dir name starts with
+    ``lang-`` / ``convert-``).
+
+    Findings are serialised to plain dicts via the existing ``to_dict()``
+    contract so the harness only carries pickleable primitives across
+    process boundaries (see ``validate_skill.scan_one_skill`` for the
+    full rationale — same contract, same shape, same reconstruction path
+    on the aggregator side).
+
+    Args:
+        skill_dir: Path to the skill directory (must contain SKILL.md).
+        strict_mode: Enable Nixtla strict mode validation (default True
+            to match validate_plugin.validate_skills callsite).
+        strict_openspec: Enable AgentSkills OpenSpec strict whitelist
+            (default False — same as the validate_plugin callsite).
+        validate_pillars_flag: Enable 8+1 Pillars validation (parallel
+            callers should set this iff ``skill_dir.name`` starts with
+            ``lang-`` or ``convert-`` — that's the existing serial
+            policy in validate_plugin.py:3155).
+        skip_platform_checks: Optional list of platforms to skip
+            platform-specific checks for (e.g. ``["windows"]``).
+        skip_dir_name_check: Suppress the frontmatter-name vs
+            directory-name match (set True only for root-level SKILL.md
+            on CC v2.1.142 plugins — see validate_skill_comprehensive
+            docstring).
+
+    Returns:
+        List of finding dicts in append order. Each dict carries at
+        minimum ``level`` + ``message`` and optionally ``file`` /
+        ``line`` / ``category`` / ``suggestion`` / ``fixable`` / ``fix_id``
+        (the full set surfaced by ComprehensiveValidationResult.to_dict()).
+    """
+    report = validate_skill(
+        skill_dir,
+        strict_mode=strict_mode,
+        strict_openspec=strict_openspec,
+        validate_pillars_flag=validate_pillars_flag,
+        skip_platform_checks=skip_platform_checks,
+        skip_dir_name_check=skip_dir_name_check,
+    )
+    return [r.to_dict() for r in report.results]
+
+
 def print_results(report: ValidationReport, verbose: bool = False) -> None:
     """Print validation results in human-readable format."""
     colors = COLORS

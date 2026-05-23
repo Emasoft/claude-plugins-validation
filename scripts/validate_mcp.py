@@ -30,13 +30,16 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
+from cpv_parallel_runner import parallel_scan
 from cpv_validation_common import (
     COLORS,
     VALID_PLUGIN_ENV_VARS,
     ValidationReport,
+    ValidationResult,
     is_valid_plugin_env_var,
     save_report_and_print_summary,
     validate_component_name,
@@ -378,6 +381,112 @@ def validate_mcp_server(
     report.passed(f"Server {server_name} configuration validated")
 
 
+def scan_one_mcp_server(spec_path: Path) -> list[ValidationResult]:
+    """Top-level worker: validate a single MCP server from a spec sidecar file.
+
+    Called by ``parallel_scan`` (one task per server). The spec file at
+    ``spec_path`` is a small JSON file written by the parent process containing
+    all the data the worker needs:
+
+      ``{"plugin_root": str|None, "file_context": str,
+         "server_name": str, "server_config": dict}``
+
+    The worker constructs a fresh ``ValidationReport``, runs
+    ``validate_mcp_server`` against it, and returns the resulting
+    ``list[ValidationResult]`` — which IS pickleable (dataclass of primitives)
+    and so can be shipped back across the process boundary.
+
+    Returning ``ValidationResult`` objects (not raw dicts) lets the parent
+    merge them into its own report's ``results`` list with no re-construction
+    cost.
+
+    The spec file lives in a tempdir managed by the caller — workers do NOT
+    delete it (parent's ``TemporaryDirectory`` context handles cleanup).
+    """
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    plugin_root_str = spec.get("plugin_root")
+    plugin_root_path = Path(plugin_root_str) if plugin_root_str else None
+    report = ValidationReport()
+    validate_mcp_server(
+        spec["server_name"],
+        spec["server_config"],
+        report,
+        plugin_root=plugin_root_path,
+        file_context=spec.get("file_context", "mcp-config"),
+    )
+    return report.results
+
+
+def _parallel_scan_mcp_servers(
+    servers: list[tuple[str, dict[str, Any], str]],
+    plugin_root: Path | None,
+    report: ValidationReport,
+) -> None:
+    """Parallel-scan a list of ``(server_name, server_config, file_context)``
+    tuples, merging findings into ``report`` in input order.
+
+    Drops below ``parallel_scan`` for any non-trivial server count; below
+    that, the ProcessPoolExecutor spin-up cost dominates the actual
+    validation work and serial is faster. Threshold of 2 is conservative —
+    even one server crossing the process boundary is cheap once the pool is
+    warm, but if there's only ONE server there's nothing to parallelize.
+    """
+    if len(servers) < 2:
+        # Serial path: avoid the ProcessPoolExecutor cold-start tax for the
+        # common case of plugins with 0 or 1 MCP servers.
+        for server_name, server_config, file_context in servers:
+            validate_mcp_server(
+                server_name, server_config, report, plugin_root, file_context
+            )
+        return
+
+    # Write one spec sidecar per server into a tempdir. The dir auto-cleans
+    # on context exit. Per-spec file IO is cheap (a few hundred bytes JSON);
+    # the alternative (passing dicts via functools.partial) would either
+    # pickle the whole spec table N times or require module-level globals
+    # that don't survive process forking.
+    with tempfile.TemporaryDirectory(prefix="cpv_mcp_specs_") as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        spec_paths: list[Path] = []
+        for idx, (server_name, server_config, file_context) in enumerate(servers):
+            # Use a deterministic per-index filename so the sort order
+            # `parallel_scan` preserves matches the iteration order of
+            # `servers`. Server names can't be used directly — they may
+            # contain characters illegal on some filesystems.
+            spec_path = tmpdir_path / f"server_{idx:06d}.json"
+            spec_path.write_text(
+                json.dumps(
+                    {
+                        "plugin_root": str(plugin_root) if plugin_root else None,
+                        "file_context": file_context,
+                        "server_name": server_name,
+                        "server_config": server_config,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            spec_paths.append(spec_path)
+
+        scan_results = parallel_scan(spec_paths, scan_one_mcp_server)
+
+    # Merge findings back into the shared report in input order. The harness
+    # guarantees input-order preservation, so iteration here matches the
+    # iteration order of `servers` — which matches the iteration order of
+    # the parent dict — preserving the existing serial finding order.
+    for scan_result, (server_name, _server_config, _file_context) in zip(
+        scan_results, servers
+    ):
+        if scan_result.error:
+            # The worker raised. Surface as WARNING so the validator keeps
+            # going rather than crashing the whole plugin scan. The original
+            # exception class+message is preserved in `error`.
+            report.warning(
+                f"Internal error validating MCP server '{server_name}': {scan_result.error}"
+            )
+            continue
+        report.results.extend(scan_result.findings)
+
+
 def validate_mcp_config(
     config_path: Path,
     plugin_root: Path | None = None,
@@ -440,18 +549,32 @@ def validate_mcp_config(
 
     report.info(f"Found {len(servers)} MCP server(s) in {rel_path}")
 
-    # Validate each server
+    # Validate each server.
     # Note: duplicate server name detection is not possible here — `servers` is a parsed
     # JSON object whose keys are already deduplicated by the JSON parser into a dict.
+    #
+    # The per-server validation is partitioned in two phases to preserve the
+    # original finding-order invariant of the serial implementation:
+    #
+    #   1. Name-format validation + non-dict-config rejection (cheap, in-process,
+    #      and produces findings that the serial loop emitted BEFORE each
+    #      server's full validation).
+    #   2. Full server validation, parallelized via `_parallel_scan_mcp_servers`
+    #      for servers whose config is a dict.
+    #
+    # Splitting like this means the parallel path only handles the heavy
+    # per-server checks (path resolution, executable probing, env-var syntax),
+    # while name validation stays serial and inline — keeping the message
+    # interleaving identical to the pre-refactor output.
+    parallel_servers: list[tuple[str, dict[str, Any], str]] = []
     for server_name, server_config in servers.items():
-        # Validate server name format — uses shared validate_component_name for uniform rules
         validate_component_name(server_name, "mcp-server", report)
-
         if not isinstance(server_config, dict):
             report.critical(f"Server '{server_name}' config must be an object")
             continue
+        parallel_servers.append((server_name, server_config, rel_path))
 
-        validate_mcp_server(server_name, server_config, report, plugin_root, rel_path)
+    _parallel_scan_mcp_servers(parallel_servers, plugin_root, report)
 
     return report
 
@@ -568,17 +691,19 @@ def validate_plugin_mcp(plugin_root: Path, report: ValidationReport | None = Non
                         )
 
                 elif isinstance(mcp_servers, dict):
-                    # Inline definition
+                    # Inline definition — parallelize per-server validation
+                    # via the same shared harness used by validate_mcp_config.
+                    # See the comment in validate_mcp_config for the
+                    # split-phase rationale (name/format checks stay serial
+                    # and inline so finding order matches the pre-refactor
+                    # output).
                     report.info(f"Found inline mcpServers in plugin.json ({len(mcp_servers)} server(s))")
                     inline_names: list[str] = []
+                    inline_parallel: list[tuple[str, dict[str, Any], str]] = []
                     for server_name, server_config in mcp_servers.items():
                         if isinstance(server_config, dict):
-                            validate_mcp_server(
-                                server_name,
-                                server_config,
-                                report,
-                                plugin_root,
-                                "plugin.json:mcpServers",
+                            inline_parallel.append(
+                                (server_name, server_config, "plugin.json:mcpServers")
                             )
                             inline_names.append(server_name)
                         else:
@@ -586,6 +711,7 @@ def validate_plugin_mcp(plugin_root: Path, report: ValidationReport | None = Non
                                 f"Server '{server_name}' config must be an object",
                                 ".claude-plugin/plugin.json",
                             )
+                    _parallel_scan_mcp_servers(inline_parallel, plugin_root, report)
                     if inline_names:
                         sources["plugin.json:mcpServers"] = inline_names
                 elif isinstance(mcp_servers, list):

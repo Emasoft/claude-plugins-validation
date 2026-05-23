@@ -35,6 +35,7 @@ unavailable tools without touching the host environment.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -1462,22 +1463,47 @@ def lint_repo(
         # executor (which raises ValueError).
         return True
 
-    # max_workers caps at 8 to keep the system responsive on machines
-    # with many subprocess-heavy linters configured. Linters never
-    # share state, so the pool's only contention is the subprocess
-    # spawn syscall and disk IO — both of which scale well beyond 8
-    # in practice but plateau in benefit past that point.
-    max_workers = min(8, len(sorted_langs))
+    # Escape hatch (Agent B2 / task #384): `CPV_LINT_PARALLEL=0` forces
+    # the serial fan-out path. Used in three places:
+    #   1. Parity tests pinning that serial vs parallel produce
+    #      identical findings (same content, same order).
+    #   2. Debugging — if a future linter helper turns out NOT to be
+    #      thread-safe, a user can fall back without editing source.
+    #   3. Single-core CI runners where the ThreadPoolExecutor overhead
+    #      is not worth it (rare; default still parallel).
+    #
+    # Any non-empty value other than "0" / "false" / "no" (case-insensitive)
+    # keeps parallel ON — biased towards staying parallel since the
+    # speedup is real on the typical workload (15 languages, 8-core box).
+    parallel_env = os.environ.get("CPV_LINT_PARALLEL", "1").strip().lower()
+    parallel_enabled = parallel_env not in {"0", "false", "no", ""}
+
     results: list[tuple[str, ValidationReport, str, bool]] = []
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        # `executor.map` preserves input order and is the simplest
-        # way to fan out + collect; we re-sort below anyway in case
-        # the dispatch order changes in a future refactor.
-        for outcome in ex.map(_run_one, sorted_langs):
-            results.append(outcome)
+    if parallel_enabled:
+        # max_workers caps at 8 to keep the system responsive on machines
+        # with many subprocess-heavy linters configured. Linters never
+        # share state, so the pool's only contention is the subprocess
+        # spawn syscall and disk IO — both of which scale well beyond 8
+        # in practice but plateau in benefit past that point.
+        max_workers = min(8, len(sorted_langs))
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            # `executor.map` preserves input order and is the simplest
+            # way to fan out + collect; we re-sort below anyway in case
+            # the dispatch order changes in a future refactor.
+            for outcome in ex.map(_run_one, sorted_langs):
+                results.append(outcome)
+    else:
+        # Serial fallback — preserves byte-identical semantics by calling
+        # the same per-language work function (`_run_one`) one at a time,
+        # in canonical alphabetical order. Same cache, same dispatch,
+        # same report merge order — only the executor is removed.
+        for lang in sorted_langs:
+            results.append(_run_one(lang))
 
     # Replay in canonical (alphabetical) order so logs are stable
-    # across runs even if linters finish in different orders.
+    # across runs even if linters finish in different orders. Serial
+    # path is already alphabetical (we iterated `sorted_langs`), but
+    # the sort is cheap and keeps the contract explicit.
     results.sort(key=lambda t: t[0])
 
     all_passed = True

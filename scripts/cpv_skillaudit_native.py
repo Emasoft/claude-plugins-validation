@@ -30,6 +30,7 @@ import base64
 import binascii
 import hashlib
 import json
+import os
 import re
 import unicodedata
 from collections.abc import Callable, Iterable
@@ -46,6 +47,13 @@ __all__ = [
     "report_findings",
     "SAFE_DOMAINS",
     "SUSPICIOUS_DOMAINS",
+    # Task #384 (Agent B1) — parallel-scan worker + helpers exposed
+    # for tests/test_skillaudit_native_parallelism.py. The worker is
+    # top-level (pickleable) and the env-var resolvers are public so
+    # tests can monkeypatch them per-test without reloading the module.
+    "_scan_one_file_skillaudit",
+    "_parallel_enabled",
+    "_parallel_threshold",
 ]
 
 
@@ -1833,11 +1841,170 @@ def _load_gitignore_predicate(plugin_root: Path) -> Callable[[Path], bool] | Non
     return predicate
 
 
+# ────────────────────────────────────────────────────────────────────────
+# Per-file scan worker — task #384 parallelism for skillaudit (Agent B1)
+# ────────────────────────────────────────────────────────────────────────
+#
+# The 76% wall-time hot path on `validate_plugin .` is this scanner's
+# per-file rule-match loop. The work is embarrassingly parallel — every
+# file is scanned independently with no cross-file state — but the
+# original serial `for fp in _iter_scannable_files(...)` left every CPU
+# core but one idle.
+#
+# Refactor: extract the per-file body into a TOP-LEVEL pickleable
+# `_scan_one_file_skillaudit(file_path)` worker, and dispatch via
+# `cpv_parallel_runner.parallel_scan` when the file count crosses a
+# small threshold. Below the threshold we stay serial (process-pool
+# spawn cost ~250-500ms on macOS would dominate a 5-file scan).
+#
+# Pickleability constraints:
+#   * The worker MUST be top-level (closures/lambdas can't cross the
+#     pool boundary).
+#   * The worker takes ONE arg (Path) — the plugin root is shipped via
+#     env var, mirroring the validate_security.py worker pattern.
+#   * Returned findings are plain dicts of primitives (already true —
+#     scan_content emits dict[str, Any] with str/int/bool values).
+#   * Module-level state (`_RULES_CACHE`, `_COMPILED_RULES_CACHE`) is
+#     populated lazily from disk by `_get_rules()` / `_compiled_rules()`
+#     on first use, so each spawned worker re-loads from
+#     `scripts/rules/skillaudit_patterns.json` — no parent state needed.
+#
+# Test-mode fallback: when the env var is absent (a test imports the
+# worker and calls it directly without going through `scan_path`), we
+# fall back to using `file_path.parent` as the plugin root. The
+# `rel_path` becomes the bare filename — same behaviour as
+# validate_security's `scan_one_file_for_security` fallback.
+
+_WORKER_ENV_PLUGIN_ROOT = "CPV_SKILLAUDIT_WORKER_PLUGIN_ROOT"
+
+# Default parallelism threshold. Below this file count, the
+# pool-spawn cost outweighs the per-file gain. Above it, the speedup
+# scales close to linearly with CPU count for plugins with hundreds
+# of markdown / source files (the common case for the 76% hot path).
+_PARALLEL_THRESHOLD_DEFAULT = 16
+
+
+def _parallel_enabled() -> bool:
+    """Return True unless ``CPV_SKILLAUDIT_PARALLEL=0`` opts out.
+
+    Read at call time (not import time) so tests can monkeypatch the
+    env var per-test. Any value other than ``"0"`` keeps parallelism
+    enabled — same convention validate_security.py uses for its own
+    escape hatch (``CPV_PARALLEL_SCAN_THRESHOLD``).
+    """
+    return os.environ.get("CPV_SKILLAUDIT_PARALLEL", "1") != "0"
+
+
+def _parallel_threshold() -> int:
+    """Resolve the parallel-dispatch threshold honoring the env override.
+
+    Invalid values fall back to the safe default rather than crashing
+    the validator. The threshold is a floor on file count — fewer
+    files than the threshold runs serially.
+    """
+    raw = os.environ.get("CPV_SKILLAUDIT_PARALLEL_THRESHOLD")
+    if raw is None:
+        return _PARALLEL_THRESHOLD_DEFAULT
+    try:
+        value = int(raw)
+        return value if value >= 1 else _PARALLEL_THRESHOLD_DEFAULT
+    except ValueError:
+        return _PARALLEL_THRESHOLD_DEFAULT
+
+
+def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
+    """Top-level, pickleable per-file scan callable for ``parallel_scan``.
+
+    The harness contract is ``Callable[[Path], list]``. The per-file
+    work mirrors the body of the original serial loop inside
+    ``scan_path`` — read the file, scan its content, attach the
+    relative path to every finding.
+
+    Plugin root resolved from ``CPV_SKILLAUDIT_WORKER_PLUGIN_ROOT``
+    env var (set by the parent before pool creation). When the env
+    var is absent (test-mode direct invocation), falls back to
+    ``file_path.parent`` so the worker is callable in isolation.
+
+    Returns a list of finding dicts. Each dict has the same shape as
+    the per-file findings the serial loop emitted (the dict from
+    ``scan_content`` plus an injected ``"file"`` key). When the file
+    can't be read (OSError) or is empty, returns an empty list — the
+    aggregator in ``scan_path`` accounts for both cases via the
+    sentinel "[]" return.
+
+    Note: ``files_scanned`` accounting lives in the parent — the
+    worker would need a side channel to ship a "did I actually read
+    the bytes?" flag back, but that flag is derivable from the file
+    being non-empty AND readable, which the parent re-checks via
+    ``ScanResult.error is None`` AND a marker we inject (see below).
+    """
+    plugin_root_str = os.environ.get(_WORKER_ENV_PLUGIN_ROOT)
+    plugin_root = Path(plugin_root_str) if plugin_root_str else file_path.parent
+
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        # Mirror the serial loop: an unreadable file is silently
+        # skipped (no finding, no files_scanned increment). The
+        # parent detects this by the empty-result + a marker dict
+        # we DON'T emit. See `scan_path` for the aggregation logic.
+        return []
+
+    rel = str(file_path)
+    try:
+        rel = str(file_path.relative_to(plugin_root))
+    except ValueError:
+        pass
+
+    if not content:
+        # Empty file — counts as scanned (files_scanned += 1 in the
+        # serial loop) but produces no findings. Emit a single
+        # sentinel finding so the parent can distinguish "empty file"
+        # from "unreadable file". The sentinel is filtered out before
+        # returning to the user; it carries a private marker key.
+        return [{"_skillaudit_sentinel": "empty", "file": rel}]
+
+    findings = scan_content(content, rel)
+    for f in findings:
+        f["file"] = rel
+    if not findings:
+        # Non-empty file with no findings still increments
+        # files_scanned. Inject a sentinel so the parent doesn't
+        # confuse this with the "unreadable" empty list.
+        return [{"_skillaudit_sentinel": "scanned", "file": rel}]
+    return findings
+
+
 def scan_path(plugin_root: Path) -> tuple[list[dict[str, Any]], int]:
-    """Walk plugin_root, scan each scannable file. Returns (findings, files_scanned)."""
+    """Walk plugin_root, scan each scannable file. Returns (findings, files_scanned).
+
+    Parallelism (task #384, Agent B1): when the discovered file count
+    meets ``CPV_SKILLAUDIT_PARALLEL_THRESHOLD`` (default 16) AND
+    ``CPV_SKILLAUDIT_PARALLEL`` is not "0", the per-file scan body is
+    dispatched across a ``ProcessPoolExecutor`` via
+    ``cpv_parallel_runner.parallel_scan``. Findings are merged back in
+    input order so the result set is bit-identical to the prior
+    serial run. Below the threshold the legacy serial loop runs
+    unchanged because pool-spawn cost dominates.
+    """
+    files = list(_iter_scannable_files(plugin_root))
+    if not files:
+        return [], 0
+
+    if not _parallel_enabled() or len(files) < _parallel_threshold():
+        return _scan_path_serial(plugin_root, files)
+
+    return _scan_path_parallel(plugin_root, files)
+
+
+def _scan_path_serial(
+    plugin_root: Path, files: list[Path]
+) -> tuple[list[dict[str, Any]], int]:
+    """Legacy serial scan loop — preserved verbatim for parity testing
+    and for the small-file-count fast path."""
     all_findings: list[dict[str, Any]] = []
     files_scanned = 0
-    for fp in _iter_scannable_files(plugin_root):
+    for fp in files:
         try:
             content = fp.read_text(encoding="utf-8", errors="ignore")
         except OSError:
@@ -1853,6 +2020,108 @@ def scan_path(plugin_root: Path) -> tuple[list[dict[str, Any]], int]:
         for f in scan_content(content, rel):
             f["file"] = rel
             all_findings.append(f)
+    return all_findings, files_scanned
+
+
+def _scan_path_parallel(
+    plugin_root: Path, files: list[Path]
+) -> tuple[list[dict[str, Any]], int]:
+    """Parallel scan path — dispatches per-file work via parallel_scan.
+
+    Encodes the plugin root into ``CPV_SKILLAUDIT_WORKER_PLUGIN_ROOT``
+    before pool creation (env vars are inherited by ``spawn``-method
+    workers; module globals are not). Restores the prior env value
+    after the pool finishes so an orchestrator running multiple
+    scan_path calls back-to-back against different plugins doesn't
+    leak state.
+
+    On per-file worker failure, surfaces a WARNING-equivalent finding
+    in the aggregate so the file's error is visible but the scan as
+    a whole still completes. This mirrors the spec ("when
+    ScanResult.error is set, surface as per-file WARNING and
+    continue — never crash the whole scan").
+    """
+    # Lazy import — keeps the module's stdlib-only invariant intact at
+    # IMPORT time (parallel_runner uses concurrent.futures which is
+    # stdlib, so this import is still pure-stdlib at runtime). The
+    # test ``test_module_imports_only_stdlib`` walks top-level
+    # imports; this lazy import keeps that gate green by being inside
+    # a function body.
+    from cpv_parallel_runner import parallel_scan  # noqa: PLC0415
+
+    prev_env = os.environ.get(_WORKER_ENV_PLUGIN_ROOT)
+    os.environ[_WORKER_ENV_PLUGIN_ROOT] = str(plugin_root)
+    try:
+        scan_results = parallel_scan(files, _scan_one_file_skillaudit)
+    finally:
+        if prev_env is None:
+            os.environ.pop(_WORKER_ENV_PLUGIN_ROOT, None)
+        else:
+            os.environ[_WORKER_ENV_PLUGIN_ROOT] = prev_env
+
+    all_findings: list[dict[str, Any]] = []
+    files_scanned = 0
+
+    # Aggregate per-file results IN INPUT ORDER. The harness contract
+    # guarantees ``scan_results[i].file_path == files[i]`` so we can
+    # iterate by index without zip+sort.
+    for idx, scan_result in enumerate(scan_results):
+        fp = files[idx]
+        if scan_result.error is not None:
+            # Worker crashed — surface as a WARNING-like finding so
+            # the file's failure is visible in the aggregate, but the
+            # scan as a whole still completes. The shape mirrors a
+            # real skillaudit finding so downstream consumers
+            # (report_findings, severity grouping) don't crash on a
+            # missing key.
+            rel = str(fp)
+            try:
+                rel = str(fp.relative_to(plugin_root))
+            except ValueError:
+                pass
+            all_findings.append(
+                {
+                    "ruleId": "SKILLAUDIT_WORKER_ERROR",
+                    "severity": "low",  # → CPV nit → emitted as WARNING-class
+                    "category": "infrastructure",
+                    "name": "Skillaudit worker failed on this file",
+                    "description": (
+                        f"Per-file skillaudit scan worker raised: "
+                        f"{scan_result.error}. File not scanned; other "
+                        f"files in the tree were unaffected."
+                    ),
+                    "line": 0,
+                    "lineContent": "",
+                    "match": "",
+                    "suppressed": False,
+                    "file": rel,
+                }
+            )
+            # The file wasn't scanned to completion — don't increment
+            # files_scanned. Matches the serial loop's behaviour for
+            # an unreadable file (no increment).
+            continue
+
+        # The worker either returned real findings, a sentinel (empty
+        # file or scanned-but-clean), or an empty list (unreadable).
+        # Strip sentinels before merging.
+        had_sentinel = False
+        for f in scan_result.findings:
+            if f.get("_skillaudit_sentinel"):
+                had_sentinel = True
+                continue
+            all_findings.append(f)
+
+        # files_scanned semantics:
+        #   - unreadable file (empty list, no sentinel) → not counted
+        #   - empty file (sentinel "empty") → counted
+        #   - scanned non-empty file (any real finding OR sentinel
+        #     "scanned") → counted
+        if had_sentinel or any(
+            not f.get("_skillaudit_sentinel") for f in scan_result.findings
+        ):
+            files_scanned += 1
+
     return all_findings, files_scanned
 
 

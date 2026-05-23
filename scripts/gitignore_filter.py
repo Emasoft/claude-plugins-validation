@@ -14,13 +14,125 @@ Usage:
     for path in gi.rglob(plugin_root, "*.pyc"):
         # gitignored matches excluded
         ...
+
+Performance note (v2.101+):
+    Profiling `validate_plugin .` on the CPV repo showed
+    ``pathspec.PathSpec.from_lines`` being called ~1.7M times — once per
+    ``is_ignored`` / ``is_dir_ignored`` check, even when the underlying
+    ``.gitignore`` file is identical between calls. The parsed
+    ``PathSpec`` object is now cached at module level, keyed by the
+    ``.gitignore`` file's ``(abs_path, st_mtime_ns, st_size)`` triple so
+    cache invalidation tracks the file's actual content changes. The
+    public API is unchanged; the only observable difference is wall-time.
 """
 
 from __future__ import annotations
 
+import os
+from collections import OrderedDict
 from pathlib import Path
+from threading import Lock
 
 from cpv_validation_common import is_path_gitignored, parse_gitignore
+
+# --------------------------------------------------------------------------- #
+# Cached PathSpec store
+# --------------------------------------------------------------------------- #
+#
+# Key: (abs_path: str, st_mtime_ns: int, st_size: int)
+#   - `abs_path` is the resolved string form of the .gitignore file path.
+#   - `st_mtime_ns` and `st_size` form the cache-invalidation signature:
+#     when either changes, the cached PathSpec is no longer trusted and a
+#     fresh parse is forced. Tracks the file's actual content state without
+#     re-reading the bytes.
+#
+# Value: tuple[list[str], pathspec.PathSpec | None]
+#   - The first element is the parsed pattern list (for the fallback path
+#     when pathspec is unavailable).
+#   - The second element is the compiled ``pathspec.PathSpec`` (or ``None``
+#     when ``pathspec`` is not importable; the fallback path uses the
+#     pattern list).
+#
+# An `OrderedDict` is used so we can evict the oldest entry when the cache
+# fills up. The default bound (4096) is well above the number of distinct
+# `.gitignore` files seen in a single CPV run, but defensive against
+# pathological cases (e.g. someone scanning a monorepo with thousands of
+# nested .gitignore files).
+#
+# A `Lock` protects the cache for thread safety — CPV doesn't currently
+# spawn validator threads, but a parallel B-series swarm is in flight and
+# the cache must be safe across worker threads regardless.
+_CACHE_MAX_SIZE = 4096
+_PATHSPEC_CACHE: OrderedDict[tuple[str, int, int], tuple[list[str], object]] = OrderedDict()
+_PATHSPEC_CACHE_LOCK = Lock()
+
+
+def _clear_cache() -> None:
+    """Empty the module-level PathSpec cache. Test-only helper.
+
+    Production code MUST NOT call this — invalidation happens automatically
+    when the underlying ``.gitignore`` file's mtime or size changes. Tests
+    need it for isolation (each test should observe a cold cache).
+    """
+    with _PATHSPEC_CACHE_LOCK:
+        _PATHSPEC_CACHE.clear()
+
+
+def _load_pathspec(gitignore_path: Path) -> tuple[list[str], object | None]:
+    """Return (patterns_list, compiled_spec) for ``gitignore_path``.
+
+    The result is cached keyed by ``(abs_path, st_mtime_ns, st_size)`` so a
+    repeat call against an unchanged file returns the same compiled
+    PathSpec object — no re-parse, no ``pathspec.PathSpec.from_lines``
+    invocation. When the file's mtime or size changes, the cache misses
+    and the file is re-read + re-compiled.
+
+    Returns ``([], None)`` when the file does not exist or cannot be read.
+    Returns ``(patterns, None)`` when ``pathspec`` cannot be imported (the
+    fallback path uses the pattern list against the pure-Python matcher).
+    """
+    try:
+        st = gitignore_path.stat()
+    except (OSError, FileNotFoundError):
+        return [], None
+
+    key = (os.fspath(gitignore_path.resolve()), st.st_mtime_ns, st.st_size)
+
+    with _PATHSPEC_CACHE_LOCK:
+        hit = _PATHSPEC_CACHE.get(key)
+        if hit is not None:
+            # Mark as recently used (LRU semantic).
+            _PATHSPEC_CACHE.move_to_end(key)
+            return hit
+
+    # Cache miss — parse + compile outside the lock so unrelated lookups
+    # don't block on a slow .gitignore parse.
+    patterns = parse_gitignore(gitignore_path)
+    spec: object | None = None
+    if patterns:
+        try:
+            import pathspec  # noqa: PLC0415
+
+            spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
+        except ImportError:
+            spec = None
+
+    with _PATHSPEC_CACHE_LOCK:
+        # Re-check in case another thread populated the same key while we
+        # were parsing — harmless either way (same key → same content per
+        # stat invariant), but keep the LRU happy.
+        existing = _PATHSPEC_CACHE.get(key)
+        if existing is not None:
+            _PATHSPEC_CACHE.move_to_end(key)
+            return existing
+        _PATHSPEC_CACHE[key] = (patterns, spec)
+        # Evict oldest if we're over the bound. Unbounded growth in a
+        # long-running orchestrator (many plugins, many .gitignore files)
+        # would be a memory leak.
+        while len(_PATHSPEC_CACHE) > _CACHE_MAX_SIZE:
+            _PATHSPEC_CACHE.popitem(last=False)
+
+    return patterns, spec
 
 
 class GitignoreFilter:
@@ -41,7 +153,13 @@ class GitignoreFilter:
         self.root = plugin_root.resolve()
         self.follow_symlinks = follow_symlinks
         gitignore_path = self.root / ".gitignore"
-        self.patterns = parse_gitignore(gitignore_path) if gitignore_path.is_file() else []
+        # `_load_pathspec` returns ([], None) for a missing .gitignore; that
+        # matches the historical behaviour of `parse_gitignore` (empty
+        # list) and skips the pathspec compile entirely. Otherwise it
+        # returns the cached pattern list AND the cached compiled
+        # PathSpec so per-path `is_ignored` checks don't have to rebuild
+        # the matcher every call.
+        self.patterns, self._spec = _load_pathspec(gitignore_path)
 
     def _is_unsafe_symlink(self, entry: Path) -> bool:
         """Return True when `entry` is a symlink that must be skipped.
@@ -69,6 +187,24 @@ class GitignoreFilter:
             return True
         return False
 
+    def _match(self, rel: str) -> bool:
+        """Run the cached PathSpec against a rel-path string.
+
+        Uses the cached ``pathspec.PathSpec`` when available — this is the
+        whole point of the cache (avoiding the ~1.7M
+        ``pathspec.PathSpec.from_lines`` calls that the un-cached path
+        produced on a single `validate_plugin .` run). When ``pathspec`` is
+        unavailable the call falls through to ``is_path_gitignored``,
+        which uses the pure-Python fallback matcher.
+        """
+        if self._spec is not None:
+            # `match_file` returns bool — keep the public contract identical
+            # to `is_path_gitignored` (which returns bool).
+            return bool(self._spec.match_file(rel))
+        # Fallback path: pathspec unavailable, defer to common helper which
+        # implements its own pathspec-or-fallback chain.
+        return is_path_gitignored(rel, self.patterns)
+
     def is_ignored(self, path: Path) -> bool:
         """Check if a path should be skipped based on .gitignore patterns.
 
@@ -90,7 +226,7 @@ class GitignoreFilter:
                 rel = rel.rstrip("/") + "/"
         except OSError:
             pass
-        return is_path_gitignored(rel, self.patterns)
+        return self._match(rel)
 
     def is_dir_ignored(self, dirpath: Path) -> bool:
         """Check if a directory should be skipped — appends trailing / for dir-only patterns."""
@@ -101,7 +237,7 @@ class GitignoreFilter:
         except ValueError:
             return False
         # Check both with and without trailing slash (gitignore treats dir/ specially)
-        return is_path_gitignored(rel, self.patterns) or is_path_gitignored(rel + "/", self.patterns)
+        return self._match(rel) or self._match(rel + "/")
 
     def _walk_pathlib(
         self,
