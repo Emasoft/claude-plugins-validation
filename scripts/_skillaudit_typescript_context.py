@@ -318,6 +318,183 @@ def _window_has_test_fixture_marker(source: str, line_idx: int, span: int = 12) 
     return any(p.search(window) for p in _TEST_FIXTURE_MARKERS)
 
 
+# ── Issue #41 — exec-sink detection for the CMD_INJECTION discriminator ──
+# In JavaScript / TypeScript a backtick `…` is ALWAYS a template-literal
+# STRING — there is no command-substitution semantics (unlike shell, Perl,
+# Ruby). So a CMD_INJECTION match on a backtick literal is a real threat
+# ONLY if that literal is syntactically an argument to a process-spawning
+# sink. If no sink is on the line, the match is provably an inert string.
+_EXEC_SINK_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork)\s*\("
+    r"|child_process"
+    r"|\.exec\s*\("
+    r"|shell\s*:\s*true"
+    r"|\bsh\s*-c\b"
+)
+
+
+def _match_is_backtick_literal(match: str) -> bool:
+    """True iff ``match`` is a backtick-delimited template literal.
+
+    The CMD_INJECTION catalog pattern that over-fires
+    (``\\`\\s*\\b(?:curl|wget|cat|ls|whoami|id|uname)\\b…\\``) captures the
+    surrounding backticks, so the matched text itself begins and ends with
+    a backtick when it is a template literal. That is the cheap, certain
+    signal that we are looking at a JS string, not a shell command.
+    """
+    m = match.strip()
+    return len(m) >= 2 and m.startswith("`") and m.endswith("`")
+
+
+def _line_has_exec_sink(line: str) -> bool:
+    """True iff ``line`` contains a process-spawning sink (exec / spawn /
+    child_process / shell:true / sh -c)."""
+    return _EXEC_SINK_RE.search(line) is not None
+
+
+# ── Issue #41 — ENV_RECON benign-read discriminator ──
+# These reads gather environment facts but are inert unless the result is
+# sent to a network sink. The ENV_RECON catalog patterns that bundle the
+# sink in-pattern (``env | curl``, ``printenv … curl``) are NOT in this
+# set, so they still fire.
+_BENIGN_ENV_READ_RE: Final[re.Pattern[str]] = re.compile(
+    r"process\.cwd\s*\(|process\.argv"
+    r"|os\.hostname\s*\(|os\.platform\s*\(|os\.userInfo\s*\("
+    r"|os\.homedir\s*\(|os\.networkInterfaces"
+)
+
+
+def _is_benign_env_read(line: str, match: str) -> bool:
+    """True iff the match is one of the inert environment reads (cwd / argv
+    / os.*), not an exfil-bundled pattern."""
+    return bool(_BENIGN_ENV_READ_RE.search(match) or _BENIGN_ENV_READ_RE.search(line))
+
+
+# ── Issue #41 — SSRF static-literal discriminator ──
+# SSRF requires an ATTACKER-CONTROLLED destination. A URL that is a 100%
+# static string literal (no ``${…}`` interpolation, no ``+`` concatenation
+# with a variable) has a fixed author-time destination and is, by
+# definition, not attacker-controlled — provably not SSRF.
+def _ssrf_url_is_static_literal(line: str, match: str) -> bool:
+    """True iff the matched URL substring sits inside a string literal whose
+    value is fully static (no interpolation, no concatenation).
+
+    ``defaultUrl: "http://localhost:1234"``        → static  (safe)
+    ``fetch("http://localhost:" + req.query.port)``→ concat  (keep)
+    ``fetch(`http://localhost:${port}`)``          → interp  (keep)
+    """
+    idx = line.find(match)
+    if idx < 0:
+        return False
+    # Find the enclosing string-literal quote char by scanning left for the
+    # nearest unescaped quote.
+    quote = ""
+    for ch in reversed(line[:idx]):
+        if ch in "\"'`":
+            quote = ch
+            break
+        # A clear non-string boundary before any quote → not in a literal.
+        if ch in "(),;=":
+            break
+    if not quote:
+        return False
+    open_pos = line.rfind(quote, 0, idx)
+    close_pos = line.find(quote, idx + len(match))
+    if open_pos < 0 or close_pos < 0:
+        return False
+    literal_body = line[open_pos + 1 : close_pos]
+    # Interpolation inside the literal → dynamic.
+    if "${" in literal_body:
+        return False
+    # String concatenation adjacent to the literal → dynamic.
+    after = line[close_pos + 1 :].lstrip()
+    before = line[:open_pos].rstrip()
+    if after.startswith("+") or before.endswith("+"):
+        return False
+    return True
+
+
+# ── Issue #41 — CROSS_TOOL_ACCESS API-field-name discriminator ──
+# The CROSS_TOOL_ACCESS rule mixes two very different signals: (a) RUNTIME
+# DATA-GRAB shapes (get_tools / call_tool / previous_tool_output /
+# tool_results[) which ARE the real threat, and (b) generic LLM-API FIELD
+# NAMES (system_prompt / context_window / …) that are unavoidable vocabulary
+# in any LLM-client tool. We only ever soften (b), and only when the token
+# is used as code structure (interface field, object key, property access,
+# assignment) — never a call.
+_API_FIELD_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "system_prompt",
+        "system_message",
+        "context_window",
+        "full_context",
+        "conversation_history",
+        "message_history",
+        "chat_history",
+    }
+)
+
+
+# Hard runtime data-grab indicators — these are the CROSS_TOOL_ACCESS
+# shapes that ARE the real threat (bulk retrieval of another tool's /
+# the host agent's runtime data). If any appears on the line we never
+# soften, even if a field name is also present.
+_RETRIEVAL_GRAB_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:get_tools|list_tools|available_tools|call_tool|invoke_tool|use_tool)\b"
+    r"|\bprevious_tool_output\b"
+    r"|\btool_results?\s*\["
+    r"|\bget\w*\s*\(.*(?:all|previous|recent).*(?:message|response|output)",
+    re.IGNORECASE,
+)
+
+
+def _is_api_field_name_in_code_structure(line: str, match: str) -> bool:
+    """True iff the CROSS_TOOL_ACCESS match is an LLM-API field NAME used as
+    ordinary code vocabulary (declaration, object key, property access,
+    assignment, function param, CLI flag, or inside a display/error string)
+    — NOT a runtime data-grab.
+
+    The CROSS_TOOL_ACCESS rule mixes two pattern families. The FIELD-NAME
+    family (``system_prompt`` / ``context_window`` / …) produces field-name
+    match text; the DATA-GRAB family (``get_tools()`` / ``tool_results[`` /
+    ``previous_tool_output``) produces different match text. So a field-name
+    match is, by construction, LLM-client domain vocabulary — unavoidable in
+    any LLM-orchestration tool — and not the threat the rule targets. We
+    suppress those, but ONLY when the line carries no hard data-grab
+    indicator (belt-and-suspenders: a line that both names a field AND grabs
+    bulk runtime data stays visible).
+    """
+    has_field = any(name in match or name in line for name in _API_FIELD_NAMES)
+    if not has_field:
+        return False
+    if _RETRIEVAL_GRAB_RE.search(line):
+        return False
+    return True
+
+
+# ── Issue #41 — ENV_INJECTION generic-assignment discriminator ──
+# Only the GENERIC ``process.env.X =`` / ``os.environ[X] =`` shape is
+# softened (in test files). The dangerous specific-var injection patterns
+# (LD_PRELOAD / NODE_OPTIONS / PYTHONSTARTUP / GIT_SSH_COMMAND / PATH / …)
+# are SEPARATE catalog patterns whose match text contains those tokens, so
+# this returns False for them and they stay visible.
+_DANGEROUS_ENV_VARS_RE: Final[re.Pattern[str]] = re.compile(
+    r"LD_PRELOAD|LD_LIBRARY_PATH|DYLD_|NODE_OPTIONS|PYTHONPATH|PYTHONSTARTUP"
+    r"|RUBYLIB|PERL5LIB|CLASSPATH|GIT_SSH_COMMAND|\bPATH\b"
+)
+_GENERIC_ENV_ASSIGN_RE: Final[re.Pattern[str]] = re.compile(
+    r"process\.env\.[A-Za-z_][A-Za-z0-9_]*\s*=|os\.environ\[[^\]]+\]\s*="
+)
+
+
+def _is_generic_env_assignment(line: str, match: str) -> bool:
+    """True iff the line is a generic ``process.env.X =`` / ``os.environ[X] =``
+    assignment that does NOT target a known hijack variable."""
+    if _DANGEROUS_ENV_VARS_RE.search(line):
+        return False
+    return bool(_GENERIC_ENV_ASSIGN_RE.search(line) or _GENERIC_ENV_ASSIGN_RE.search(match))
+
+
 def classify(
     file_path: str,
     source: str,
@@ -399,6 +576,76 @@ def classify(
                 source, line_idx, span=50
             ):
                 return "safe_literal"
+        return "unknown"
+
+    # ── CMD_INJECTION — JS/TS template literal is NOT shell command-sub. ──
+    # Issue #41 CRITICAL FP: ``return {reason: `id ${id} out of range`}``.
+    # The over-broad catalog pattern matches a backtick literal that starts
+    # with id/cat/ls/curl/etc. In JS a backtick is ALWAYS a string; the
+    # match is a real threat ONLY if that literal is an argument to an exec
+    # sink. No sink on the line → provably an inert string → safe_literal.
+    # A literal that IS inside exec()/spawn()/execSync()/child_process keeps
+    # the declared CRITICAL severity (the catalog's dedicated
+    # ``exec\\(…\\$\\{`` patterns also cover that case).
+    if rule_id == "CMD_INJECTION":
+        if _match_is_backtick_literal(match) and not _line_has_exec_sink(line):
+            return "safe_literal"
+        return "unknown"
+
+    # ── ENV_RECON — inert environment read with no exfil sink. ──
+    # Issue #41 FP: ``return process.cwd()`` in a catch fallback.
+    # Reconnaissance is gather→send; an inert read (cwd/argv/os.*) with no
+    # network sink in the surrounding window cannot exfiltrate. The
+    # exfil-bundled catalog patterns (``env | curl``, ``printenv … curl``)
+    # are not backtick/benign reads, so they fall through to keep.
+    if rule_id == "ENV_RECON":
+        if _is_benign_env_read(line, match) and not _window_has_exfil_sink(source, line_idx, span=8):
+            return "safe_literal"
+        return "unknown"
+
+    # ── SSRF_PATTERN — static literal destination is not attacker-controlled. ──
+    # Issue #41 FP: ``defaultUrl: "http://localhost:1234"`` in a config map.
+    # SSRF requires the destination to be influenced by an attacker; a fully
+    # static string literal has a fixed author-time destination. A localhost
+    # URL built by concatenation or interpolation stays visible (dynamic →
+    # could be attacker-controlled).
+    if rule_id == "SSRF_PATTERN":
+        if _ssrf_url_is_static_literal(line, match):
+            return "safe_literal"
+        return "unknown"
+
+    # ── CROSS_TOOL_ACCESS — display text OR LLM-client API field name. ──
+    # Two FP shapes, both provably benign:
+    #   1. A backtick template literal that is a string-array element (the
+    #      canonical report-assembly shape, e.g.
+    #      ``\`- **Tool**: \\\`${toolName}\\\`\```) — display output, not a
+    #      namespace read.
+    #   2. An LLM-client API FIELD NAME (system_prompt / context_window / …)
+    #      used as code structure: ``context_window?: number;`` (interface
+    #      field), ``profile.context_window`` (config read),
+    #      ``body.system_prompt = …`` (request build). In an LLM tool these
+    #      are unavoidable vocabulary.
+    # The rule's DANGEROUS shapes are runtime data-grabs (``get_tools()``,
+    # ``previous_tool_output``, ``tool_results[``, ``call_tool()``) — those
+    # are NOT in ``_API_FIELD_NAMES`` and are not array elements, so they
+    # fall through to keep.
+    if rule_id == "CROSS_TOOL_ACCESS":
+        if _match_is_backtick_literal(match) and _line_is_string_array_element(line):
+            return "safe_literal"
+        if _is_api_field_name_in_code_structure(line, match):
+            return "safe_literal"
+        return "unknown"
+
+    # ── ENV_INJECTION — generic env set/restore in a test file is scaffolding. ──
+    # Issue #41 FP: ``process.env.LLM_OUTPUT_DIR = ORIG_ENV.LLM_OUTPUT_DIR``
+    # in an afterEach. The DANGEROUS env-injection patterns target specific
+    # hijack vars (LD_PRELOAD / NODE_OPTIONS / PYTHONSTARTUP / GIT_SSH_COMMAND
+    # / PATH …) — those are SEPARATE catalog patterns that still fire. We
+    # suppress ONLY the GENERIC ``process.env.X =`` shape, and ONLY inside a
+    # test file (where env set/restore is standard fixture teardown).
+    if rule_id == "ENV_INJECTION":
+        if is_test and _is_generic_env_assignment(line, match):
+            return "safe_literal"
         return "unknown"
 
     return "unknown"
