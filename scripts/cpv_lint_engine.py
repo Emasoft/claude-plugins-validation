@@ -44,12 +44,6 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-# markdownlint-cli2 finding shape: "<path>.md:<line>[:<col>] <severity> MD<NNN>".
-# Anything that does not match (uv installer chatter "Resolving dependencies",
-# "Resolved, downloaded and extracted N", "Saved lockfile", etc.) is NOT a
-# markdownlint finding and must not leak through as a NIT report entry.
-_MARKDOWNLINT_FINDING_RE = re.compile(r"\.md:\d+(?::\d+)?\s+(?:error|warning|info)\s+MD\d+")
-
 # Local helpers — the scripts/ dir is on sys.path when validate_plugin.py
 # imports us; tests insert it explicitly via conftest.
 from cpv_scanner_cache import (
@@ -61,6 +55,12 @@ from cpv_scanner_cache import (
 )
 from cpv_validation_common import ValidationReport, ValidationResult, resolve_tool_command
 from gitignore_filter import GitignoreFilter
+
+# markdownlint-cli2 finding shape: "<path>.md:<line>[:<col>] <severity> MD<NNN>".
+# Anything that does not match (uv installer chatter "Resolving dependencies",
+# "Resolved, downloaded and extracted N", "Saved lockfile", etc.) is NOT a
+# markdownlint finding and must not leak through as a NIT report entry.
+_MARKDOWNLINT_FINDING_RE = re.compile(r"\.md:\d+(?::\d+)?\s+(?:error|warning|info)\s+MD\d+")
 
 # Display labels for `[REPO LINT][PYTHON]` style section headers when
 # the engine is invoked from validate_plugin.py — kept short so the
