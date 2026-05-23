@@ -83,7 +83,7 @@ inputs and return contracts.
 | 2 | Fix / migrate | `fix-validation`, `fix-marketplace-validation`, `migrate-marketplace-architecture`, `canonical-pipeline`, `batch-fix-protocol`, `deterministic-codemod`, `marketplace-authoring-contract` |
 | 3 | Scaffold / build | `standardize-plugin`, `create-plugin`, `setup-plugin-repo`, `setup-github-marketplace`, `setup-marketplace-auto-notification`, `link-plugin-marketplace`, `pack-components`, `add-component-to-plugin`, `add-dependency`, `add-hook`, `register-mcp`, `scaffold-agent`, `scaffold-command`, `scaffold-skill` |
 | 4 | Publish / release | `strip-dev-submodules`, `refresh-readme`, `bump-version`, `show-version`, `publish-to-marketplace` |
-| 5 | Routing / UX | `plugin-management`, `cpv-main-menu-skill`, `cpv-format-menu`, `the-skills-menu-create` |
+| 5 | Routing / UX | `plugin-management`, `cpv-main-menu-skill`, `the-skills-menu-create` |
 | 6 | Batch / fleet (TRDD-3dcbb37c) | `cpv-batch-validate`, `cpv-batch-security-audit`, `cpv-batch-caching-audit`, `cpv-batch-caching-optimize`, `cpv-batch-fix`, `cpv-batch-validate-and-fix`, `cpv-batch-full-scan-and-fix` |
 | 7 | Scope-aware diagnostics (TRDD-a175f78d) | `cpv-batch-scope-diagnose`, `cpv-batch-scope-fix`, `cpv-batch-scope-diagnose-and-fix` |
 

@@ -460,13 +460,9 @@ class TestSkillAgentArchitecture:
             # behind TRDD-c0ee9543) wires plugin-creator / plugin-fixer /
             # marketplace-fixer to load it.
             "marketplace-authoring-contract",
-            # TRDD-c50531c2 (v2.90.0 menu unification) deleted the 4 menu
-            # orchestrator commands (cpv-doctor, cpv-fix-validation,
-            # cpv-fix-marketplace-validation, cpv-cache-optimize) which were
-            # the sole loaders of cpv-format-menu. A follow-up wave will
-            # either delete cpv-format-menu or re-wire it through
-            # cpv-main-menu-skill — until then it's intentionally orphaned.
-            "cpv-format-menu",
+            # (cpv-format-menu was safe-deleted in TRDD-4de479a0 Phase 4 —
+            # menu rendering moved to the externalised claude-menu-system
+            # Stop hook via scripts/cpv_menu.py; no orphan to allowlist.)
             # TRDD-c50531c2 (v2.90.0 menu unification) created these 14
             # skills as replacements for the deleted commands of the same
             # role. The orchestrator wiring (which agent loads which skill)
@@ -526,9 +522,12 @@ class TestSkillAgentArchitecture:
             for s in fm.get("skills", []) or []:
                 loaded.add(s)
         # ALSO gather skills invoked by slash-command bodies via the Skill
-        # tool. The v2.89.4 ``cpv-format-menu`` fork-skill (TRDD-3ce2f864)
-        # is the canonical example: loaded by the four orchestrator
-        # commands, never by an agent. The fully-qualified form
+        # tool. Historically this caught the v2.89.4 ``cpv-format-menu``
+        # fork-skill (TRDD-3ce2f864), loaded only by the four (now-deleted)
+        # orchestrator commands — that skill itself was safe-deleted in
+        # TRDD-4de479a0 Phase 4 alongside the renderer it wrapped, but
+        # other command-loaded skills (e.g. the batch family) still rely
+        # on this code path. The fully-qualified form
         # ``skill: "claude-plugins-validation:<name>"`` is the unambiguous
         # marker — bare prose mentions ("this skill", "fork-skill:")
         # don't false-match.
