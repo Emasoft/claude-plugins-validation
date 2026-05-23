@@ -159,20 +159,42 @@ def write_menu(spec: dict, *, cache_base: Path | None = None) -> Path:
 def _cli(argv: list[str]) -> int:
     """CLI for orchestrator command/agent bodies (invoked via Bash).
 
-    Usage: ``cpv_menu.py <spec-path.json>``
-    Prints the queue path on stdout. The menu is emitted by the claude-menu-system
-    Stop hook at the end of THIS turn — end the turn after calling this; never
-    print the menu inline. Route the user's next-turn reply from the fixed
-    key→action map documented in your skill.
+    Usage:
+        ``cpv_menu.py <spec-path.json>``  — read spec from file
+        ``cpv_menu.py -``                  — read spec from stdin (heredoc)
+
+    Stdin mode is the preferred form for orchestrators. It lets the agent
+    emit the menu in a single Bash one-liner with a heredoc, avoiding the
+    Write/Edit tool entirely — no transcript-visible "Write(/tmp/...)" diff
+    panel before the menu appears. The Stop hook handles the actual emit
+    post-turn; the orchestrator should redirect stdout to ``/dev/null`` to
+    keep the transcript silent::
+
+        python "$CLAUDE_PLUGIN_ROOT/scripts/cpv_menu.py" - <<'JSON' >/dev/null
+        { "spec_version": 1, "mode": "menu", ... }
+        JSON
+
+    File-path mode is kept for backwards compatibility and for callers that
+    already have a spec written to disk for other reasons.
+
+    Prints the queue path on stdout (suppress with ``>/dev/null``). The menu
+    is emitted by the claude-menu-system Stop hook at the end of THIS turn —
+    end the turn after calling this; never print the menu inline. Route the
+    user's next-turn reply from the fixed key→action map documented in your
+    skill.
     """
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
-        print("usage: cpv_menu.py <spec-path.json>", file=sys.stderr)
+        print("usage: cpv_menu.py <spec-path.json | ->", file=sys.stderr)
         return 2
-    spec_path = Path(argv[1])
+    source = argv[1]
     try:
-        spec = json.loads(spec_path.read_text(encoding="utf-8"))
+        if source == "-":
+            spec = json.loads(sys.stdin.read())
+        else:
+            spec = json.loads(Path(source).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"cpv_menu: cannot read spec {spec_path}: {exc}", file=sys.stderr)
+        label = "<stdin>" if source == "-" else source
+        print(f"cpv_menu: cannot read spec {label}: {exc}", file=sys.stderr)
         return 2
     try:
         queue_path = write_menu(spec)

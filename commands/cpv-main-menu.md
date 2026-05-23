@@ -87,17 +87,22 @@ The fixed key→action map for the top-level menu:
 
 ## Workflow (the orchestrator MUST follow this exact sequence)
 
-1. **Queue the top-level menu spec** via `cpv_menu.py` and END THE TURN.
-   The claude-menu-system Stop hook emits the menu post-turn via
-   `systemMessage`. NEVER print the menu inline.
+1. **Run the top-level menu's heredoc recipe** from `menu-tree.md` §3.0
+   (single Bash tool call: `python cpv_menu.py - >/dev/null <<'JSON' … JSON`).
+   Then END THE TURN. **Emit ZERO chat text** — no "queued", no "Stop
+   hook will emit", no "menu will appear", no narration of any kind.
+   The menu IS the entire user-visible output. NEVER print the menu
+   inline. NEVER use the Write or Edit tool to stage the spec — the
+   heredoc passes JSON over stdin, which is exactly why this design is
+   silent.
 2. **Wait** for the user's next message. Parse the key (number or letter,
    case-insensitive).
 3. **On `0` at any level** → respond with a single line `Cancelled — no
    actions taken.` and stop.
 4. **On a category key** → look up the action_id in the fixed map above
-   (or in the sub-menu-specific maps in `menu-tree.md`). Queue the
-   corresponding sub-menu spec via `cpv_menu.py` and end the turn.
-   Sub-menus include `B — Back` AND `0 — Cancel / Exit`.
+   (or in the sub-menu-specific maps in `menu-tree.md`). Run the
+   sub-menu's heredoc recipe and end the turn silently. Sub-menus
+   include `B — Back` AND `0 — Cancel / Exit`.
 5. **On a leaf key** → ask required arguments as plain-text questions,
    then execute the chosen command's instructions inline (read its `.md`
    file, follow its bash). Do NOT just print "run /cpv-validate-plugin" —
@@ -106,9 +111,9 @@ The fixed key→action map for the top-level menu:
    `python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" <alias>`
    — never call validate scripts directly from the plugin cache.
 7. **Report back** the compact summary + report-file path.
-8. **Queue the §3.99 "do something else?" menu spec** via `cpv_menu.py`
-   (or the §3.10 post-validate fix menu, for Validate leaves). End the
-   turn. On `0` → `Done.`
+8. **Run the §3.99 "do something else?" heredoc** from `menu-tree.md`
+   (or the §3.10 post-validate fix menu, for Validate leaves) and end
+   the turn silently. On `0` → `Done.`
 
 ## What this command does NOT do
 

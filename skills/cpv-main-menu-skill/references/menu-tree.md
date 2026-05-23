@@ -80,15 +80,25 @@ Per-menu rules:
 
 ### Queue invocation (every orchestrator turn that needs a menu)
 
+Pipe the spec directly into `cpv_menu.py` via a Bash heredoc — ONE
+Bash tool call, no Write/Edit tool, no intermediate tempfile, no
+chat text:
+
 ```bash
-cat > /tmp/cpv-mainmenu-<slug>-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 { ... spec ... }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-<slug>-spec.json
 ```
 
-Then END THE TURN. NEVER print the menu inline; CMS Stop hook emits
-via `systemMessage`.
+Then END THE TURN IMMEDIATELY. **Emit ZERO chat text after the Bash
+call** — no "menu queued", no "Stop hook will emit", no commentary
+of any kind. The menu IS the entire user-visible output for this
+turn. The `>/dev/null` suppresses the queue-path stdout so nothing
+appears between your last text and the post-turn menu emission.
+
+Using the Write or Edit tool to first create the spec file is
+forbidden — it produces a visible `Write(/tmp/...)` diff panel
+before the menu, which is exactly the pollution this design avoids.
 
 `cpv_menu.py` defaults `renumber: false`, so the caller's keys are
 kept verbatim. The orchestrator routes the user's next-turn key from
@@ -384,7 +394,7 @@ Queue the menu spec via `cpv_menu.py` and END THE TURN. NEVER print
 the menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-top-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -407,7 +417,6 @@ cat > /tmp/cpv-mainmenu-top-spec.json <<'JSON'
   "footer": "Type a key (number, H, A, or 0):"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-top-spec.json
 ```
 
 Note that the top-level menu has NO `B — Back` row (it IS the parent
@@ -477,7 +486,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-validate-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -499,7 +508,6 @@ cat > /tmp/cpv-mainmenu-validate-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-spec.json
 ```
 
 All leaves below FIRST run the project-type detection (see top of file)
@@ -535,7 +543,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-validate-component-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -557,7 +565,6 @@ cat > /tmp/cpv-mainmenu-validate-component-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-component-spec.json
 ```
 
 ##### 3.1.2.1 SKILL.md
@@ -630,7 +637,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-validate-style-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -647,7 +654,6 @@ cat > /tmp/cpv-mainmenu-validate-style-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-style-spec.json
 ```
 
 ###### 3.1.2.7.1 Output-style
@@ -688,7 +694,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-validate-mkt-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -707,7 +713,6 @@ cat > /tmp/cpv-mainmenu-validate-mkt-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-mkt-spec.json
 ```
 
 ##### 3.1.3.1 Local folder
@@ -770,7 +775,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-validate-scope-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -787,7 +792,6 @@ cat > /tmp/cpv-mainmenu-validate-scope-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-scope-spec.json
 ```
 
 ##### 3.1.4.1 Project-scope (git-tracked)
@@ -829,7 +833,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-validate-quality-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -851,7 +855,6 @@ cat > /tmp/cpv-mainmenu-validate-quality-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-quality-spec.json
 ```
 
 ##### 3.1.5.1 Security — drill into sub-menu
@@ -916,7 +919,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-validate-other-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -934,7 +937,6 @@ cat > /tmp/cpv-mainmenu-validate-other-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-other-spec.json
 ```
 
 ###### 3.1.5.7.1 Enterprise
@@ -980,7 +982,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-validate-github-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -997,7 +999,6 @@ cat > /tmp/cpv-mainmenu-validate-github-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-github-spec.json
 ```
 
 ##### 3.1.6.1 Plugin from GitHub
@@ -1057,7 +1058,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-validate-batch-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -1080,7 +1081,6 @@ cat > /tmp/cpv-mainmenu-validate-batch-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-batch-spec.json
 ```
 
 The path-source mini-menu (§3.0a) is skipped for these leaves —
@@ -1139,7 +1139,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-validate-batch-scope-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -1157,7 +1157,6 @@ cat > /tmp/cpv-mainmenu-validate-batch-scope-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-validate-batch-scope-spec.json
 ```
 
 - **arg-prompts** (in order for ALL three leaves):
@@ -1197,7 +1196,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-fix-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -1216,7 +1215,6 @@ cat > /tmp/cpv-mainmenu-fix-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-fix-spec.json
 ```
 
 #### 3.2.1 Fix plugin findings
@@ -1282,7 +1280,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-create-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -1307,7 +1305,6 @@ cat > /tmp/cpv-mainmenu-create-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-create-spec.json
 ```
 
 #### 3.6.1 Scaffold a new plugin
@@ -1562,7 +1559,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-manage-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -1589,7 +1586,6 @@ cat > /tmp/cpv-mainmenu-manage-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-manage-spec.json
 ```
 
 #### 3.8.1 List installed plugins
@@ -1770,7 +1766,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-diagnose-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -1793,7 +1789,6 @@ cat > /tmp/cpv-mainmenu-diagnose-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-diagnose-spec.json
 ```
 
 #### 3.4.1 Diagnose plugin
@@ -1885,7 +1880,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-update-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -1901,7 +1896,6 @@ cat > /tmp/cpv-mainmenu-update-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-update-spec.json
 ```
 
 #### 3.5.1 Upgrade to current pipeline standard
@@ -1959,7 +1953,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-publish-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -1979,7 +1973,6 @@ cat > /tmp/cpv-mainmenu-publish-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-publish-spec.json
 ```
 
 #### 3.7.1 Branch protection (current repo)
@@ -2049,7 +2042,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-help-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -2067,7 +2060,6 @@ cat > /tmp/cpv-mainmenu-help-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-help-spec.json
 ```
 
 #### 3.10H.1 Category overview
@@ -2106,7 +2098,7 @@ Fixed key→action map (slug `done`):
 | 0   | done       | Done (exit) — Reply `Done.` and stop                            |
 
 ```bash
-cat > /tmp/cpv-mainmenu-done-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -2121,7 +2113,6 @@ cat > /tmp/cpv-mainmenu-done-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-done-spec.json
 ```
 
 ---
@@ -2152,7 +2143,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-security-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -2179,7 +2170,6 @@ cat > /tmp/cpv-mainmenu-security-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-security-spec.json
 ```
 
 #### 3.16.1 Single plugin (full security pass)
@@ -2288,7 +2278,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-cache-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -2307,7 +2297,6 @@ cat > /tmp/cpv-mainmenu-cache-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-cache-spec.json
 ```
 
 #### 3.3.1 Audit only
@@ -2372,7 +2361,7 @@ Queue the spec via `cpv_menu.py` and end the turn. NEVER print the
 menu inline; CMS Stop hook emits via `systemMessage`:
 
 ```bash
-cat > /tmp/cpv-mainmenu-post-validate-spec.json <<'JSON'
+python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
@@ -2391,7 +2380,6 @@ cat > /tmp/cpv-mainmenu-post-validate-spec.json <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-post-validate-spec.json
 ```
 
 #### 3.10.1 Dispatching the fixer with a minimum severity

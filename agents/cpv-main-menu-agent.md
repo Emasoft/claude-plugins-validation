@@ -103,10 +103,11 @@ the menu is ever shown.
    - **A — Ask the agent** — Let the agent suggest the best next action right now
    - **0 — Cancel / Exit** — Stop without doing anything
 
-   Build the spec and queue it:
+   Run the menu by piping the spec straight into `cpv_menu.py` — ONE
+   Bash tool call, no Write tool, no intermediate file:
 
    ```bash
-   cat > /tmp/cpv-mainmenu-top-spec.json <<'JSON'
+   python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
    {
      "spec_version": 1,
      "mode": "menu",
@@ -129,11 +130,12 @@ the menu is ever shown.
      "footer": "Type a key:"
    }
    JSON
-   python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-top-spec.json
    ```
 
-   Then END THE TURN. The Stop hook emits the menu post-turn via
-   `systemMessage`. NEVER print the menu inline yourself.
+   Then END THE TURN IMMEDIATELY. **Emit ZERO chat text** — no
+   "queued", no "Stop hook will emit", no commentary of any kind.
+   The menu IS the entire user-visible output. Any prose you print
+   after the Bash call is pure transcript pollution.
 
 2. **Wait** for the user's next message. Parse the key (`1..8`, `H`, `A`,
    or `0`). Letter parsing is case-insensitive.
@@ -253,6 +255,16 @@ in the next turn.
   end the turn. The claude-menu-system Stop hook emits the menu post-turn
   via `systemMessage` — zero context cost. Printing the menu inline
   duplicates the render AND burns the agent's context.
+- **NEVER use the Write or Edit tool to create the menu spec file.** The
+  spec is passed to `cpv_menu.py` over stdin via a Bash heredoc — that
+  is ONE Bash tool call. Using Write produces a visible
+  `Write(/tmp/...)` diff panel before the menu, which is exactly the
+  pollution this design avoids.
+- **NEVER emit chat text around a menu invocation.** After the Bash
+  heredoc runs, end the turn IMMEDIATELY. No "queued", no "menu will
+  appear", no "Stop hook will emit", no commentary. The menu IS the
+  output. The same rule applies when re-queueing after an invalid key:
+  run the Bash, end the turn, say nothing.
 - **`A` (Ask the agent) NEVER falls back to a menu**. Once the user picks
   `A`, dispatch the Opus chat sub-agent and stay out of the way until it
   returns `Returning to menu.` — no per-turn menus, no AskUserQuestion,
