@@ -34,6 +34,7 @@ There are **two ways to use CPV**. Pick the one that fits your workflow:
 - **[Part 2: Claude Code Plugin](#part-2-claude-code-plugin)**
   - [Installation](#installation)
   - [AI Agents — The Main Interface](#ai-agents--the-main-interface)
+  - [Menu Architecture](#menu-architecture)
   - [Slash Commands](#slash-commands)
 - [For Developers](#for-developers)
 - [Requirements](#requirements)
@@ -277,6 +278,10 @@ For use in scripts and CI/CD pipelines:
 
 For the full CLI commands reference, see the [official Anthropic docs](https://code.claude.com/docs/en/plugins-reference#cli-commands-reference).
 
+#### Dependencies
+
+CPV depends on **`claude-menu-system >= 0.1.5`** (same `emasoft-plugins` marketplace). It provides the post-turn Stop/SubagentStop hook that renders every CPV menu at zero token cost (see [Menu Architecture](#menu-architecture) below). `claude plugin install` auto-resolves this dependency — no manual step needed. If CMS is missing at runtime, CPV's `cpv_menu` helper fails fast with an actionable install hint (fail-fast, no silent fallback).
+
 ```bash
 # Add the Emasoft marketplace (first time only)
 claude plugin marketplace add emasoft-plugins --url https://github.com/Emasoft/emasoft-plugins
@@ -376,6 +381,21 @@ The semantic validator always warns about the cost and asks for confirmation bef
 The semantic validator (reached via `/cpv-main-menu → 4 Diagnose → semantic`) automatically activates the **Channel Source Security** pillar when the target plugin's `plugin.json` declares a non-empty `channels` array (Claude Code v2.1.80+ research-preview channels). The pillar reads the MCP server entry-point source (TypeScript / JavaScript / Python) and verifies the spec-mandated sender-ID gating per `channels-reference.md` — a check no syntactic validator can perform.
 
 A deterministic prefilter (`scripts/cpv_channel_source_predicate.py`) bounds the LLM's reading and short-circuits the pillar entirely for plugins that do not ship channels — zero opus tokens spent. See [`skills/semantic-validation-skill/references/channel-source-security.md`](skills/semantic-validation-skill/references/channel-source-security.md) for the four rules (CRITICAL: no sender gating, CRITICAL: permission-relay capability without gating, MAJOR: chat-ID-only gating, PASSED: fully gated).
+
+### Menu Architecture
+
+Every CPV menu — the top-level `cpv-main-menu`, the `cpv-doctor` first-contact menu, the post-scan menus emitted by the batch skills (`cpv-batch-validate`, `cpv-batch-security-audit`, `cpv-batch-fix`, etc.), the `plugin-creator` dev-stripping prompts, the `plugin-diagnoser` Phase-9 follow-up, and every sub-menu in between — is rendered by **`claude-menu-system`**'s Stop / SubagentStop / StopFailure hook. The orchestrator writes a small spec JSON, calls the queue helper, and ENDS ITS TURN; the post-turn hook prints the rendered menu through the hook JSON `systemMessage` field. Net effect: **zero token cost regardless of menu size**, menus are shown to the user but NEVER enter the transcript or the prompt cache, no subagent fork, no cache re-prime.
+
+#### Fixed-key routing contract
+
+CPV menus use two key namespaces that never collide:
+
+- **Numbers `1..N`** — the **dynamic list** (plugins / paths / URLs / folders to choose from). Always presented in **alphabetical order**, so "the user typed N" deterministically resolves to the Nth entry of the sorted list. The count varies run-to-run; the agent knows N because it built the list.
+- **Letters** — the **fixed actions** and **reserved navigation**. Each letter is permanently bound to one meaning across all menus and states. Reserved navigation keys are global: **`M`** = Main menu · **`B`** = Back · **`X`** = Exit · **`0`** = Cancel. Per-menu fixed letter→action maps (`D` = Diagnose, `C` = Check, `A` = Ask, …) are immutable at skill-design time and documented in the skill/agent body — they are the **single source of truth** the orchestrator uses to interpret a typed key.
+- **Omission, not relettering** — when an action does not apply right now, its row is simply **not printed** (no gap, no placeholder); the letters of surviving actions never shift. `renumber: false` keeps every key verbatim.
+- **No read-back of the rendered menu** — the orchestrator never inspects what was printed to decide what a key means. The printed menu is presentation only; the typed key is resolved purely against the immutable per-menu map. This is what lets emission be a fire-and-forget post-turn hook with zero context cost.
+
+For the canonical menu spec catalogue (every menu tree CPV emits, in one place), see [`skills/cpv-main-menu-skill/references/menu-tree.md`](skills/cpv-main-menu-skill/references/menu-tree.md).
 
 ### Slash Commands
 

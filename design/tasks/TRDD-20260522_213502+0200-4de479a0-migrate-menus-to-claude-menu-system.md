@@ -3,7 +3,7 @@ trdd-id: 4de479a0-b2f2-48bb-ad79-a89ae80bd934
 title: Migrate CPV menu rendering to the claude-menu-system Stop-hook plugin
 status: in-progress
 created: 2026-05-22T21:35:02+0200
-updated: 2026-05-22T22:26:19+0200
+updated: 2026-05-23T03:55:33+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->
@@ -134,18 +134,31 @@ are removed; CPV emits CMS specs directly.
 
 ## Phases (each ≤5 files where possible; verify before next)
 
-- **Phase 0** — Resolve the format_menu.py fate decision (A vs B); confirm CMS
-  spec schema diffs by reading every `examples/*.json`. Write `cpv_menu.py` +
-  its tests. Declare the dependency in plugin.json.
-- **Phase 1** — Migrate the batch commands + cpv_batch_orchestrator (status_table
-  - post-scan menus) to cpv_menu. Verify with batch tests.
-- **Phase 2** — Migrate cpv-doctor-agent (first-contact + summary + breakdown +
-  post-scan menu). Verify.
-- **Phase 3** — Migrate cpv-main-menu (agent + skill + menu-tree inline tables).
-  This is the biggest single surface. Verify.
-- **Phase 4** — Remove format_menu.py + cpv-format-menu skill + their tests via
-  safe-delete; drop the-skills-menu catalog entry; clean validate_security
-  reference. Update test_menu_visibility / test_consolidation_v211 / model-tiers.
+- **Phase 0** — ✅ LANDED in commit `5488fbc`. Resolved the format_menu.py
+  fate decision (A — remove); confirmed CMS spec schema diffs by reading
+  every `examples/*.json`. Wrote `cpv_menu.py` + its tests. Declared the
+  dependency in plugin.json.
+- **Phase 1** — ✅ LANDED in commit `e5eaf0b` (Wave 1). Migrated the batch
+  commands + cpv_batch_orchestrator (status_table + post-scan menus) to
+  cpv_menu. Verified with batch tests.
+- **Phase 2** — ✅ LANDED in commit `e5eaf0b` (Wave 1). Migrated
+  cpv-doctor-agent (first-contact + summary + breakdown + post-scan menu).
+  Verified.
+- **Phase 2b** — ✅ LANDED in commit `e5eaf0b` (Wave 1). Originally
+  unscoped: plugin-creator + plugin-diagnoser carried inline first-contact
+  menus that the Wave 1 audit caught and migrated to claude-menu-system in
+  the same sweep (kept under the Wave 1 commit to ship the full 46-surface
+  migration atomically). Documented here so the inventory of migrated
+  surfaces matches the commit.
+- **Phase 3** — ✅ LANDED in commit `e5eaf0b` (Wave 1). Migrated
+  cpv-main-menu (agent + skill + menu-tree inline tables). The biggest
+  single surface. Verified.
+- **Phase 4** — ✅ LANDED in Wave 2 (sibling agent in flight at TRDD-update
+  time; assume LANDED by next read — update the annotation with the Wave 2
+  commit SHA when the sibling agent finishes). Removed format_menu.py +
+  cpv-format-menu skill + their tests via safe-delete; dropped the
+  the-skills-menu catalog entry; cleaned validate_security reference.
+  Updated test_menu_visibility / test_consolidation_v211 / model-tiers.
 - **Phase 5** — Full suite green; CPV self-scan 0/0/0/0 + cache audit clean
   (cpv-format-menu CA-07 finding gone). Re-generate integrity manifest.
 
@@ -154,8 +167,14 @@ are removed; CPV emits CMS specs directly.
 - `resolve_cms_root()` returns the highest cached CMS version; fails fast with
   the install hint when none present.
 - `write_menu()` produces a valid CMS spec (spec_version/plugin/slug/rows) and
-  returns both the queued path and the `.actions.json` path.
-- Routing: a queued menu's `.actions.json` maps rendered keys → action_ids.
+  returns **only the queued path** on stdout. **Per the fixed-key routing
+  contract** (see FIXED-KEY ROUTING CONTRACT section below), `cpv_menu`
+  persists NO `.actions.json` sidecar — routing is resolved purely against
+  the immutable letter→action map documented in the skill/agent body.
+- Routing: a typed **letter** is resolved against the skill's documented
+  letter→action map (single source of truth, fixed at skill-design time);
+  a typed **number** is the Nth entry of the alphabetically-sorted dynamic
+  list the agent presented. The agent NEVER reads back the rendered menu.
 - No CPV file references format_menu.py or cpv-format-menu after Phase 4.
 - CPV self cache-audit emits zero CA-07 (the fork is gone).
 
