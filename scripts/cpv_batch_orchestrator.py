@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Batch-skill orchestrator (TRDD-3dcbb37c §2).
+"""Batch-skill orchestrator (TRDD-3dcbb37c §2 + TRDD-4de479a0 Phase 1).
 
 Given a list of ``ResolvedInput`` (the output of
 ``cpv_marketplace_input.resolve``), an ``agent_type``, and an
@@ -7,10 +7,14 @@ Given a list of ``ResolvedInput`` (the output of
 
 1. A **batch plan** JSON written to a session directory:
    ``${TMPDIR}/cpv-batch/<ts>-<agent>/plan.json``.
-2. A **per-plugin status table** in the JSON shape that
-   ``scripts/format_menu.py status_table`` consumes — so the
-   slash-command orchestrator can print one Unicode-bordered table
-   listing every plugin in the batch with its initial status.
+2. A **per-plugin status table** in the **claude-menu-system**
+   spec shape (``spec_version: 1``, ``mode: "status_table"``,
+   ``plugin: "cpv"``, ``slug``, ``row_header``, ``rows: [{label,
+   status, notes}]``). The slash-command orchestrator hands this
+   spec to ``cpv_menu.py`` (the CMS bridge), which queues the
+   table for the CMS Stop hook to emit POST-TURN via
+   ``systemMessage`` — zero token cost, no fork, no context
+   pollution.
 3. A **shard grouping** — every batch with N plugins is split into
    ``ceil(N / max_parallel)`` groups so the main session can dispatch
    one batch group per Agent-tool message (Anthropic spec: only the
@@ -25,6 +29,20 @@ dispatches happen in the slash-command body, which reads
 Default parallelism is 8 (matches ``cpv_batch_planner``). Cap is
 16 — beyond that the message size for a single batch dispatch
 exceeds practical context budgets.
+
+## CMS status_table mapping (TRDD-4de479a0)
+
+CPV used to emit ``status_symbol`` (✓ ✗ ⚠ ◐ ○ ⊝) + a free-form
+``status_label`` (clean / fixed / partial / failed / queued / ...).
+CMS's ``status_table`` mode requires a fixed enum: ``ok``,
+``implemented``, ``missing``, ``buggy``, ``partial``, ``pending``,
+``skipped``, ``info``. We translate by symbol — the label is rolled
+into the ``notes`` cell so no information is lost. The mapping
+favours CMS's intent (``buggy`` for ⚠ "warning" reads more
+correctly in a status table than ``info``):
+
+    ✓ → ok        ✗ → missing       ⚠ → buggy
+    ◐ → partial   ○ → pending       ⊝ → skipped
 
 Iron rule: zero LLM cost. Every step here is deterministic shell
 + JSON.
@@ -96,29 +114,95 @@ def shard_groups(n: int, max_parallel: int) -> list[list[int]]:
     return [list(range(i, min(i + cap, n))) for i in range(0, n, cap)]
 
 
+# CPV-symbol → CMS-enum mapping. CMS's ``status_table`` mode accepts ONLY
+# these enum values, so legacy CPV ``status_symbol`` glyphs must be translated
+# before the spec reaches ``menu_write.py``. See module docstring §"CMS
+# status_table mapping" for the rationale.
+_CMS_STATUS_FOR_SYMBOL: dict[str, str] = {
+    "✓": "ok",
+    "✗": "missing",
+    "⚠": "buggy",
+    "◐": "partial",
+    "○": "pending",
+    "⊝": "skipped",
+}
+
+# Friendly fallback when an agent writes an unrecognised symbol — keep the
+# row visible but mark it ``info`` so CMS still renders it.
+_CMS_DEFAULT_STATUS = "info"
+
+
+def _cms_status(symbol: str) -> str:
+    """Translate a CPV ``status_symbol`` glyph into a CMS ``status`` enum."""
+    return _CMS_STATUS_FOR_SYMBOL.get(symbol, _CMS_DEFAULT_STATUS)
+
+
+def _row_notes(label: str, plugin_kind: str, source_url: str | None, abs_path: str, extra_note: str | None = None) -> str:
+    """Build the ``notes`` cell text.
+
+    CPV rolls the free-form ``status_label`` plus the kind plus the
+    source (URL or path) plus any per-plugin agent-supplied note into a
+    single cell, since CMS's status_table is a fixed three-column shape.
+    """
+    parts = [label, f"kind={plugin_kind}", source_url or abs_path]
+    if extra_note:
+        parts.append(str(extra_note))
+    return " · ".join(p for p in parts if p)
+
+
+def _cms_slug_for(agent_type: str) -> str:
+    """Per-skill stable slug. Stable so the queue path is debuggable."""
+    return f"batch-{agent_type}-status"
+
+
 def status_table_json(
     plugins: Sequence[PluginEntry],
     title: str = "Plugins in this batch",
     initial_status: str = "○",
     initial_status_label: str = "queued",
+    *,
+    slug: str = "batch-status",
 ) -> dict[str, Any]:
-    """Build the JSON dict ``format_menu.py status_table`` consumes."""
+    """Build a **claude-menu-system status_table spec** for ``cpv_menu.py``.
+
+    Returned shape (CMS v0.1.5):
+        {
+          "spec_version": 1,
+          "mode": "status_table",
+          "plugin": "cpv",
+          "slug": <slug>,
+          "title": <title>,
+          "row_header": "Plugin",
+          "rows": [{"label", "status", "notes"}, ...]
+        }
+
+    The orchestrator MUST hand this dict (or its JSON) to
+    ``cpv_menu.py`` (the CMS bridge), which queues it for the CMS Stop
+    hook to emit at turn end via ``systemMessage`` — zero token cost,
+    never enters the transcript.
+
+    ``initial_status_label`` is a free-form CPV string (clean/queued/
+    fixed/...) preserved in the ``notes`` cell since CMS uses a fixed
+    enum for the ``status`` column.
+    """
     rows = []
     for p in plugins:
-        notes_parts = [f"kind={p.kind}"]
-        if p.source_url:
-            notes_parts.append(p.source_url)
-        else:
-            notes_parts.append(p.abs_path)
         rows.append(
             {
-                "name": p.display_name,
-                "status_symbol": initial_status,
-                "status_label": initial_status_label,
-                "notes": " · ".join(notes_parts),
+                "label": p.display_name,
+                "status": _cms_status(initial_status),
+                "notes": _row_notes(initial_status_label, p.kind, p.source_url, p.abs_path),
             }
         )
-    return {"title": title, "rows": rows}
+    return {
+        "spec_version": 1,
+        "mode": "status_table",
+        "plugin": "cpv",
+        "slug": slug,
+        "title": title,
+        "row_header": "Plugin",
+        "rows": rows,
+    }
 
 
 def _build_plugins(resolved: Sequence[ResolvedInput]) -> list[PluginEntry]:
@@ -200,7 +284,13 @@ def write_plan(plan: BatchPlan) -> Path:
 
 
 def write_status_table(plan: BatchPlan, **kwargs: Any) -> Path:
-    """Write the initial ``status_table.json`` (format_menu.py input)."""
+    """Write the initial CMS status_table spec to ``status_table.json``.
+
+    The file lives in the session dir alongside ``plan.json`` so the
+    slash-command body (Step 1 of every batch command) can hand its
+    path to ``cpv_menu.py`` without rebuilding the spec.
+    """
+    kwargs.setdefault("slug", _cms_slug_for(plan.agent_type))
     data = status_table_json(plan.plugins, **kwargs)
     out = Path(plan.session_dir) / "status_table.json"
     out.write_text(json.dumps(data), encoding="utf-8")
@@ -214,9 +304,9 @@ def aggregate_status(
     initial_status_label: str = "queued",
 ) -> dict[str, Any]:
     """Re-read a plan + every per-plugin status JSON the dispatched agents
-    have written so far, and produce the current status_table dict.
+    have written so far, and produce the current CMS status_table spec.
 
-    Each agent is expected to write its per-plugin status as
+    Each agent writes its per-plugin status as
     ``<session_dir>/plugin-<plugin_index>.status.json`` with at least
     these keys::
 
@@ -226,15 +316,20 @@ def aggregate_status(
           "notes": "<optional additional text>"
         }
 
-    Missing files for a plugin keep the initial queued state.
+    (The agents still emit CPV's native ``status_symbol`` form — it's
+    documented in every batch command's agent prompt. The orchestrator
+    translates symbol→CMS-enum here so the agents need no awareness of
+    the CMS spec.) Missing files for a plugin keep the initial queued
+    state.
+
+    Returns a full CMS ``status_table`` spec dict ready to hand to
+    ``cpv_menu.write_menu()`` / the ``cpv_menu.py`` CLI.
     """
     plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
     session_dir = Path(plan_data["session_dir"])
     rows: list[dict[str, Any]] = []
     for p in plan_data["plugins"]:
         idx = p["plugin_index"]
-        notes_parts = [f"kind={p['kind']}"]
-        notes_parts.append(p["source_url"] or p["abs_path"])
         per_status = session_dir / f"plugin-{idx}.status.json"
         if per_status.is_file():
             try:
@@ -246,17 +341,45 @@ def aggregate_status(
         symbol = d.get("status_symbol", initial_status)
         label = d.get("status_label", initial_status_label)
         extra_note = d.get("notes")
-        if extra_note:
-            notes_parts.append(str(extra_note))
         rows.append(
             {
-                "name": p["display_name"],
-                "status_symbol": symbol,
-                "status_label": label,
-                "notes": " · ".join(notes_parts),
+                "label": p["display_name"],
+                "status": _cms_status(symbol),
+                "notes": _row_notes(label, p["kind"], p.get("source_url"), p["abs_path"], extra_note),
             }
         )
-    return {"title": "Batch progress", "rows": rows}
+    return {
+        "spec_version": 1,
+        "mode": "status_table",
+        "plugin": "cpv",
+        "slug": _cms_slug_for(plan_data["agent_type"]),
+        "title": "Batch progress",
+        "row_header": "Plugin",
+        "rows": rows,
+    }
+
+
+def emit_status_table(plan_path: Path) -> Path:
+    """Build the live CMS status_table spec and queue it via ``cpv_menu``.
+
+    Programmatic counterpart to invoking ``cpv_menu.py`` from Bash. This
+    is what ``cpv_batch_orchestrator.py emit-status`` calls (Step 3 in
+    every batch command). The CMS Stop hook will emit the menu at the
+    end of THIS turn via ``systemMessage`` (zero token cost). Returns
+    the queue path that ``menu_write.py`` allocated.
+
+    NEVER print the rendered table inline; the orchestrator's turn must
+    END after this call so the Stop hook can fire. This is the single
+    invariant of the TRDD-4de479a0 routing model.
+    """
+    # Local import — keeps ``cpv_menu`` (which requires CMS) optional for
+    # the side-effect-free plan/aggregate functions above. Importing only
+    # here means tests that exercise plan/aggregate don't need a CMS
+    # install to pass.
+    from cpv_menu import write_menu  # noqa: PLC0415
+
+    spec = aggregate_status(plan_path)
+    return write_menu(spec)
 
 
 # ----------------------- CLI -------------------------------------------
@@ -298,9 +421,15 @@ def _cli(argv: list[str] | None = None) -> int:
 
     p_status = sub.add_parser(
         "status",
-        help="Re-aggregate per-plugin status JSONs into a status_table dict",
+        help="Re-aggregate per-plugin status JSONs into a CMS status_table spec",
     )
     p_status.add_argument("plan_path", type=Path, help="Path to plan.json")
+
+    p_emit = sub.add_parser(
+        "emit-status",
+        help="Re-aggregate + hand the spec to cpv_menu (CMS Stop hook emits post-turn)",
+    )
+    p_emit.add_argument("plan_path", type=Path, help="Path to plan.json")
 
     args = parser.parse_args(argv)
 
@@ -333,6 +462,11 @@ def _cli(argv: list[str] | None = None) -> int:
     if args.command == "status":
         data = aggregate_status(args.plan_path)
         print(json.dumps(data))
+        return 0
+
+    if args.command == "emit-status":
+        queue_path = emit_status_table(args.plan_path)
+        print(queue_path)
         return 0
 
     parser.error("unknown command")

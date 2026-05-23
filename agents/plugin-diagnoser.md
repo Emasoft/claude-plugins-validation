@@ -41,10 +41,11 @@ it is the source of truth.
 
 ## Completion gate — MANDATORY, NON-NEGOTIABLE
 
-When the user picks any "fix" option from the follow-up menu (rows 1-6),
-you orchestrate the dispatch but you DO NOT mark the diagnosis closed
-until a final `validate_plugin.py --strict` run on the post-fix tree
-shows zero CRITICAL/MAJOR/MINOR/NIT.
+When the user picks any "fix" option from the Phase 9 follow-up menu
+(letters `F` / `C` / `J` / `R` / `G` — anything other than `S` sync,
+`D` re-diagnose, or `0` end), you orchestrate the dispatch but you DO
+NOT mark the diagnosis closed until a final `validate_plugin.py --strict`
+run on the post-fix tree shows zero CRITICAL/MAJOR/MINOR/NIT.
 
 If the dispatched fixer returns `[BLOCKED]` (some findings could not be
 auto-fixed), surface that to the user verbatim, list the remaining
@@ -221,30 +222,77 @@ summary table:
 | Duplicates | MAJOR=… | duplicate counts |
 
 ### Phase 9 — Follow-up menu
-After writing the report, print this Unicode-table menu and wait for
-the user's number reply (NEVER use AskUserQuestion):
+After writing the report, render this menu via the claude-menu-system
+bridge (NEVER use AskUserQuestion, NEVER print the menu inline). The
+CMS Stop hook emits at turn end through `systemMessage` — zero token
+cost, NOT in the transcript. End the turn right after the `cpv_menu.py`
+call; the user's next-turn reply is routed through the FIXED letter→action
+map below.
 
+**Fixed letter→action map (immutable, per TRDD-4de479a0 FIXED-KEY contract):**
+
+| Key | action_id            | Label                                                                                       |
+|-----|----------------------|---------------------------------------------------------------------------------------------|
+| F   | full_upgrade         | Full upgrade to current standards (every migration that applies, including WARNINGs)        |
+| C   | critical_only        | Apply only CRITICAL fixes (publish-blockers + security blockers)                            |
+| J   | major_plus_critical  | Apply MAJOR + CRITICAL (publish-blockers, security, cross-platform issues)                  |
+| R   | register_marketplace | Register / create marketplace for this plugin                                               |
+| S   | sync_cache           | Sync cache from GitHub (run `claude plugin update`)                                         |
+| G   | github_branch_rules  | Fix branch rules + Claude action setup (server-side ruleset, bypass actors, action version) |
+| D   | rediagnose           | Re-diagnose after manual fixes                                                              |
+| 0   | end                  | End                                                                                         |
+
+Letter rationale (FIXED-KEY contract — first free letter of the action
+name, preferred): `F` = **F**ull upgrade. `C` = **C**RITICAL only.
+`J` = ma**J**or (M is RESERVED for the global Main-menu nav key, so
+MAJOR falls to its next free, most-distinctive letter — `J`).
+`R` = **R**egister / create marketplace. `S` = **S**ync cache.
+`G` = **G**ithub branch rules + Claude action (B is RESERVED for the
+global Back nav key; "GitHub" is the natural anchor for the
+branch-rules-and-secrets server-side fix). `D` = re-**D**iagnose.
+`0` is the literal CMS-preserved end key. `M`/`B`/`X` are globally
+reserved for Main/Back/Exit and never assigned here.
+
+The map is FIXED at agent-design time and is the SOLE reference for
+routing the user's next-turn reply — NEVER inspect the rendered menu
+to decide what a key means.
+
+**Render recipe (Bash, in the agent body):**
+
+```bash
+PLUGIN_DIAGNOSER_PHASE9_SPEC=$(mktemp -t plugin-diagnoser-phase9-spec.XXXXXX.json)
+cat > "$PLUGIN_DIAGNOSER_PHASE9_SPEC" <<'JSON'
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "plugin-diagnoser",
+  "slug": "phase9-followup",
+  "header": "Diagnosis complete — pick a follow-up action",
+  "rows": [
+    {"key": "F", "action_id": "full_upgrade",         "label": "Full upgrade to current standards (every migration that applies, including WARNINGs)"},
+    {"key": "C", "action_id": "critical_only",        "label": "Apply only CRITICAL fixes (publish-blockers + security blockers)"},
+    {"key": "J", "action_id": "major_plus_critical",  "label": "Apply MAJOR + CRITICAL (publish-blockers, security, cross-platform issues)"},
+    {"key": "R", "action_id": "register_marketplace", "label": "Register / create marketplace for this plugin"},
+    {"key": "S", "action_id": "sync_cache",           "label": "Sync cache from GitHub (run claude plugin update)"},
+    {"key": "G", "action_id": "github_branch_rules",  "label": "Fix branch rules + Claude action setup (ruleset, bypass actors, action version pin)"},
+    {"key": "D", "action_id": "rediagnose",           "label": "Re-diagnose after manual fixes"},
+    {"key": "0", "action_id": "end",                  "label": "End"}
+  ],
+  "footer": "Type a key:"
+}
+JSON
+uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$PLUGIN_DIAGNOSER_PHASE9_SPEC"
 ```
-┏━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ # ┃ Action                                                                                                       ┃
-┡━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ 1 │ Full upgrade to current standards (apply every migration that applies, including WARNINGs)                   │
-│ 2 │ Apply only CRITICAL fixes (publish-blockers + security blockers)                                             │
-│ 3 │ Apply MAJOR + CRITICAL (publish-blockers, security, cross-platform issues)                                   │
-│ 4 │ Register / create marketplace for this plugin                                                                │
-│ 5 │ Sync cache from GitHub (run `claude plugin update`)                                                          │
-│ 6 │ Fix branch rules + Claude action setup (server-side ruleset, bypass actors, action version pin)              │
-│ 7 │ Re-diagnose after manual fixes                                                                               │
-│ 0 │ End                                                                                                          │
-└───┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-Type a number to choose:
-```
+
+End the turn immediately after this call. NEVER print this menu inline.
 
 ### Phase 10 — Dispatch on user choice
-- **1, 2, 3** → dispatch **plugin-fixer** with `min_severity` (1=WARNING, 2=CRITICAL, 3=MAJOR) AND a prompt that explicitly asks for pipeline-migration §1–§5 to run first.
-- **4** → dispatch **plugin-creator** in marketplace-mode (orphan plugin path) — interactive interrogation about marketplace target.
-- **5** → ask the user "Run `claude plugin update <name>@<marketplace>` now? (yes/no)". On yes, run it. On no, print the command for the user to copy.
-- **6** → fix branch rules + Claude action + secrets:
+- **F (`full_upgrade`)** → dispatch **plugin-fixer** with `min_severity=WARNING` AND a prompt that explicitly asks for pipeline-migration §1–§5 to run first.
+- **C (`critical_only`)** → dispatch **plugin-fixer** with `min_severity=CRITICAL` AND the same pipeline-migration §1–§5 prompt.
+- **J (`major_plus_critical`)** → dispatch **plugin-fixer** with `min_severity=MAJOR` AND the same pipeline-migration §1–§5 prompt.
+- **R (`register_marketplace`)** → dispatch **plugin-creator** in marketplace-mode (orphan plugin path) — interactive interrogation about marketplace target.
+- **S (`sync_cache`)** → ask the user "Run `claude plugin update <name>@<marketplace>` now? (yes/no)". On yes, run it. On no, print the command for the user to copy.
+- **G (`github_branch_rules`)** → fix branch rules + Claude action + secrets:
   - **(a)** confirm the user wants to (re)apply the `cpv-branch-rules` ruleset → run `cpv-setup-branch-rules-generic <owner>/<repo>` interactively;
   - **(b)** if Claude action is unpinned or outdated, propose the SHA-pinned latest version via pinact;
   - **(c)** if `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` is missing, instruct the user to set it (never automate secret creation — interactive only);
@@ -265,15 +313,18 @@ Type a number to choose:
        rejected up-front.
     5. On exit code 0 → secret set + verified; on non-zero → surface stderr verbatim
        and re-print the diagnoser's Phase 9 menu so the user can pick a different action.
-- **7** → re-run this whole agent (recursive on the same path).
-- **0** → reply `Done.` and stop.
+- **D (`rediagnose`)** → re-run this whole agent (recursive on the same path).
+- **0 (`end`)** → reply `Done.` and stop.
 
 ## Critical rules
 
 - **NEVER mutate the plugin** in any phase except 10. Phases 1–7 are
   read-only audits.
-- **NEVER use AskUserQuestion** — always print Unicode tables and parse
-  the user's integer reply.
+- **NEVER use AskUserQuestion** — render menus via the claude-menu-system
+  bridge (`scripts/cpv_menu.py`) and route the user's next-turn typed
+  key through the FIXED letter→action map documented in Phase 9. NEVER
+  print menus inline — the CMS Stop hook emits at turn end via
+  `systemMessage` (zero token cost, not in transcript).
 - **ALWAYS write the report to `$MAIN_ROOT/reports/plugin-diagnoser/`** —
   per the agent-reports-location rule.
 - **ALWAYS wait for the user's choice** at phase 9 — do not auto-dispatch.
@@ -308,15 +359,18 @@ Cross-platform: 3 bash hook commands use `set -euo pipefail`
 Marketplace: NOT REGISTERED (no notify-marketplace.yml found)
 Cache sync: not applicable (running from local clone)
 Report: ~/reports/plugin-diagnoser/20260508_193000+0200-old-plugin.md
-[Prints follow-up menu]
-user: 3
+[Queues Phase 9 follow-up menu via cpv_menu.py; ends turn — CMS Stop hook emits via systemMessage]
+user: J
 assistant: [Dispatches plugin-fixer with min_severity=MAJOR + pipeline-migration prompt]
 ✓ Fixed 7 findings (2 CRITICAL, 5 MAJOR). 9 MINOR + 3 WARNING remain (below min_severity).
-[Prints "Do something else?" table]
+[Re-queues the Phase 9 menu via cpv_menu.py; ends turn]
 </example>
 
 ## Token Budget
 
 - ALWAYS write the diagnostic report to disk; return only the path + 5-line summary.
-- The follow-up menu is ~600 chars — keep it intact.
+- The Phase 9 follow-up menu is emitted by the claude-menu-system Stop
+  hook via `systemMessage` — **zero token cost**, NOT in the transcript.
+  Never inline-print it; never measure its size. The whole point of the
+  CMS bridge is that menu size is free regardless of row count.
 - Skill content (plugin-validation-skill, fix-validation) is loaded once per session via frontmatter `skills:`. Do not re-read.

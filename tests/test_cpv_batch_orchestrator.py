@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""Unit tests for ``scripts/cpv_batch_orchestrator.py`` (TRDD-3dcbb37c §2).
+"""Unit tests for ``scripts/cpv_batch_orchestrator.py`` (TRDD-3dcbb37c §2
++ TRDD-4de479a0 Phase 1).
 
 The orchestrator is side-effect-free with respect to subagent
-dispatch: it just turns a list of ``ResolvedInput`` into a JSON
-``plan.json`` + ``status_table.json`` the slash-command body reads
-to know what to fan out and how to render the per-plugin status
-table.
+dispatch: it turns a list of ``ResolvedInput`` into a JSON
+``plan.json`` + a **claude-menu-system status_table spec** the
+slash-command body hands to ``cpv_menu.py`` (the CMS bridge). The
+CMS Stop hook then emits the table at turn end via
+``systemMessage`` — never enters the agent transcript.
 
 Test classes:
 
 1. ``TestShardGroups`` — the pure ``shard_groups()`` helper.
 2. ``TestMakePlan`` — building a ``BatchPlan`` from ``ResolvedInput``.
-3. ``TestStatusTableJson`` — the rows emitted for ``format_menu.py status_table``.
+3. ``TestStatusTableJson`` — the CMS-shaped spec emitted for
+   ``cpv_menu.write_menu`` consumption.
 4. ``TestWritePlan`` — JSON round-trip of plan.json and status_table.json.
 5. ``TestAggregateStatus`` — re-reading per-plugin status files merges
-   into a current status_table.
+   into a current CMS status_table spec.
 6. ``TestCli`` — end-to-end CLI smoke (uses ``Resolved`` inputs from
    a tmp marketplace fixture).
 """
@@ -182,10 +185,18 @@ class TestMakePlan:
         assert plan.max_parallel == DEFAULT_MAX_PARALLEL
 
 
-# ----------------------- 3. status_table_json ----------------------------
+# ----------------------- 3. status_table_json (CMS spec shape) -----------
 
 
 class TestStatusTableJson:
+    def test_spec_envelope_is_cms_status_table(self) -> None:
+        out = status_table_json([])
+        assert out["spec_version"] == 1
+        assert out["mode"] == "status_table"
+        assert out["plugin"] == "cpv"
+        assert out["row_header"] == "Plugin"
+        assert out["slug"] == "batch-status"
+
     def test_local_plugin_row_shows_path(self, tmp_path: Path) -> None:
         entries = [
             PluginEntry(
@@ -197,10 +208,14 @@ class TestStatusTableJson:
             )
         ]
         out = status_table_json(entries)
-        assert out["rows"][0]["status_symbol"] == "○"
-        assert out["rows"][0]["status_label"] == "queued"
-        assert "local" in out["rows"][0]["notes"]
-        assert "kind=plugin" in out["rows"][0]["notes"]
+        row = out["rows"][0]
+        # CMS shape: label/status/notes; ``status`` is the CMS enum, ``notes``
+        # absorbs the legacy status_label + kind + path.
+        assert row["label"] == "local-plug"
+        assert row["status"] == "pending"  # ○ → pending
+        assert "queued" in row["notes"]
+        assert "kind=plugin" in row["notes"]
+        assert "local" in row["notes"]
 
     def test_remote_plugin_row_shows_url(self) -> None:
         entries = [
@@ -220,8 +235,13 @@ class TestStatusTableJson:
             PluginEntry(0, "p", "/p", None, "plugin"),
         ]
         out = status_table_json(entries, initial_status="◐", initial_status_label="working")
-        assert out["rows"][0]["status_symbol"] == "◐"
-        assert out["rows"][0]["status_label"] == "working"
+        # ◐ → partial
+        assert out["rows"][0]["status"] == "partial"
+        assert "working" in out["rows"][0]["notes"]
+
+    def test_custom_slug_passes_through(self) -> None:
+        out = status_table_json([], slug="batch-plugin-validator-status")
+        assert out["slug"] == "batch-plugin-validator-status"
 
 
 # ----------------------- 4. write_plan + write_status_table --------------
@@ -249,14 +269,19 @@ class TestWritePlan:
         plugins = [_ri("x", tmp_path / "x")]
         plan = make_plan(
             plugins,
-            agent_type="x",
-            agent_mode="y",
+            agent_type="plugin-validator",
+            agent_mode="batch_validate",
             session_dir=tmp_path / "sd",
         )
         path = write_status_table(plan)
         assert path.is_file()
         data = json.loads(path.read_text())
-        assert data["rows"][0]["name"] == "x"
+        # CMS-shaped row: label/status/notes
+        assert data["rows"][0]["label"] == "x"
+        assert data["spec_version"] == 1
+        assert data["mode"] == "status_table"
+        # Default slug derives from agent_type so the queue file is debuggable.
+        assert data["slug"] == "batch-plugin-validator-status"
 
 
 # ----------------------- 5. aggregate_status -----------------------------
@@ -272,8 +297,9 @@ class TestAggregateStatus:
         )
         plan_path = write_plan(plan)
         data = aggregate_status(plan_path)
-        assert {r["status_label"] for r in data["rows"]} == {"queued"}
-        assert {r["status_symbol"] for r in data["rows"]} == {"○"}
+        # CMS-enum status: ○ → "pending"; legacy "queued" label rolls into notes.
+        assert {r["status"] for r in data["rows"]} == {"pending"}
+        assert all("queued" in r["notes"] for r in data["rows"])
 
     def test_per_plugin_status_overrides_default(self, tmp_path: Path) -> None:
         sd = tmp_path / "sd"
@@ -284,6 +310,8 @@ class TestAggregateStatus:
             session_dir=sd,
         )
         plan_path = write_plan(plan)
+        # Agents still emit CPV-native status_symbol; the orchestrator
+        # translates symbol→CMS-enum.
         (sd / "plugin-0.status.json").write_text(
             json.dumps({"status_symbol": "✓", "status_label": "clean", "notes": "0/0/0/0"})
         )
@@ -291,25 +319,59 @@ class TestAggregateStatus:
             json.dumps({"status_symbol": "✗", "status_label": "failed", "notes": "3 CRITICAL"})
         )
         data = aggregate_status(plan_path)
-        symbols = [r["status_symbol"] for r in data["rows"]]
-        labels = [r["status_label"] for r in data["rows"]]
-        assert symbols == ["✓", "✗"]
-        assert labels == ["clean", "failed"]
+        statuses = [r["status"] for r in data["rows"]]
+        # ✓ → ok, ✗ → missing per the CMS mapping table.
+        assert statuses == ["ok", "missing"]
+        # Labels + agent-supplied notes both roll into the notes cell.
+        assert "clean" in data["rows"][0]["notes"]
         assert "0/0/0/0" in data["rows"][0]["notes"]
+        assert "failed" in data["rows"][1]["notes"]
         assert "3 CRITICAL" in data["rows"][1]["notes"]
+
+    def test_aggregate_status_returns_full_cms_spec(self, tmp_path: Path) -> None:
+        sd = tmp_path / "sd"
+        plan = make_plan(
+            [_ri("a", tmp_path / "a")],
+            agent_type="plugin-fixer",
+            agent_mode="batch_per_plugin",
+            session_dir=sd,
+        )
+        plan_path = write_plan(plan)
+        data = aggregate_status(plan_path)
+        assert data["spec_version"] == 1
+        assert data["mode"] == "status_table"
+        assert data["plugin"] == "cpv"
+        assert data["slug"] == "batch-plugin-fixer-status"
+        assert data["row_header"] == "Plugin"
 
     def test_malformed_status_json_falls_back_to_queued(self, tmp_path: Path) -> None:
         sd = tmp_path / "sd"
         plan = make_plan(
             [_ri("a", tmp_path / "a")],
-            agent_type="x",
-            agent_mode="y",
+            agent_type="plugin-validator",
+            agent_mode="batch_validate",
             session_dir=sd,
         )
         plan_path = write_plan(plan)
         (sd / "plugin-0.status.json").write_text("not json at all")
         data = aggregate_status(plan_path)
-        assert data["rows"][0]["status_label"] == "queued"
+        # Falls back to ○ → "pending" status with "queued" rolled into notes.
+        assert data["rows"][0]["status"] == "pending"
+        assert "queued" in data["rows"][0]["notes"]
+
+    def test_unknown_symbol_falls_back_to_info(self, tmp_path: Path) -> None:
+        """Defensive: an agent that emits an unrecognised symbol still renders."""
+        sd = tmp_path / "sd"
+        plan = make_plan(
+            [_ri("a", tmp_path / "a")],
+            agent_type="plugin-validator",
+            agent_mode="batch_validate",
+            session_dir=sd,
+        )
+        plan_path = write_plan(plan)
+        (sd / "plugin-0.status.json").write_text(json.dumps({"status_symbol": "🔥", "status_label": "spicy"}))
+        data = aggregate_status(plan_path)
+        assert data["rows"][0]["status"] == "info"
 
 
 # ----------------------- 6. CLI smoke ------------------------------------
@@ -390,8 +452,13 @@ class TestCli:
             timeout=30,
         )
         data = json.loads(result.stdout)
-        assert data["rows"][0]["status_symbol"] == "✓"
-        assert data["rows"][0]["status_label"] == "validated"
+        # CMS spec shape returned from `status`: agent emits ✓ → "ok"; agent-supplied
+        # label + notes roll into the notes cell so no information is lost.
+        assert data["spec_version"] == 1
+        assert data["mode"] == "status_table"
+        assert data["rows"][0]["status"] == "ok"
+        assert "validated" in data["rows"][0]["notes"]
+        assert "0/0/0/0" in data["rows"][0]["notes"]
 
     def test_no_url_flag_rejects_url(self, tmp_path: Path) -> None:
         sd = tmp_path / "sd"

@@ -54,7 +54,18 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   --max-parallel "$MAX_PARALLEL"
 ```
 
-Print the initial status table.
+Capture the orchestrator's stdout (``PLAN``, ``STATUS_TABLE``,
+``SESSION_DIR``, ``PLUGIN_COUNT``, ``DISPATCH_GROUPS``). Queue the
+initial status table for the claude-menu-system Stop hook (emitted
+post-turn via ``systemMessage`` — zero token cost, NEVER printed
+inline by the orchestrator):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$STATUS_TABLE"
+```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at
+turn end.
 
 ## Step 2 — Dispatch full-scan-and-fix agents in parallel
 
@@ -124,20 +135,46 @@ for plugin_index in group:
 
 ## Step 3 — Mid-batch status refresh
 
+Queue the live status table via the orchestrator's ``emit-status``
+subcommand (aggregates every per-plugin status JSON, hands the CMS
+spec to ``cpv_menu`` — Stop hook emits at turn end):
+
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" status \
-  "$SESSION_DIR/plan.json" \
-| python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" status_table /dev/stdin
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+  emit-status "$SESSION_DIR/plan.json"
 ```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at
+turn end. End the turn after this call.
 
 ## Step 4 — Final summary
 
-After every plugin has reported, print the final status table +
-one-line summary:
+After every plugin has reported:
 
-```text
-DONE: plugins=N clean=X fixed=Y partial=Z failed=W. Total FPs verified: F. Reports under {session_dir}/.
-```
+1. Queue the final status table:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+     emit-status "$SESSION_DIR/plan.json"
+   ```
+
+2. Print a one-line summary inline (text, not a menu):
+
+   ```text
+   DONE: plugins=N clean=X fixed=Y partial=Z failed=W. Total FPs verified: F. Reports under {session_dir}/.
+   ```
+
+End the turn. The CMS Stop hook emits the final table via systemMessage.
+
+## Fixed key→action map
+
+`/cpv-batch-full-scan-and-fix` is a maximum-coverage one-shot
+same-turn fleet sweep; the status table is informational only. No
+numbered or lettered action rows. The slug ``batch-plugin-fixer-status``
+is reserved for plugin-fixer-driven batch commands (shared with
+`/cpv-batch-fix`, `/cpv-batch-validate-and-fix`). The fixed key→action
+map is empty by design; future post-scan menus extend this contract
+with letter→action rows.
 
 ## When to use this vs the separate batch skills
 

@@ -44,11 +44,17 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   --max-parallel "$MAX_PARALLEL"
 ```
 
-Print the initial status table:
+Queue the initial status table for the claude-menu-system Stop hook
+(emitted post-turn via ``systemMessage`` — zero token cost, NEVER
+printed inline by the orchestrator):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" status_table "$(cat "$STATUS_TABLE")"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$STATUS_TABLE"
 ```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at turn end.
+End the turn after this call. The user's next reply (if any) is routed
+purely from the fixed letter→action map in §"Fixed key→action map" below.
 
 ## Step 2 — Dispatch security-audit agents in parallel
 
@@ -96,27 +102,58 @@ for plugin_index in group:
 
 ## Step 3 — Mid-batch status refresh
 
+Queue the live status table via the orchestrator's ``emit-status``
+subcommand (one shot — aggregates every per-plugin status JSON and
+hands the CMS spec to ``cpv_menu`` for emission via the Stop hook at
+turn end):
+
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" status \
-  "$SESSION_DIR/plan.json" \
-| python3 "${CLAUDE_PLUGIN_ROOT}/scripts/format_menu.py" status_table /dev/stdin
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+  emit-status "$SESSION_DIR/plan.json"
 ```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at
+turn end. End the turn after this call. Statuses are translated from
+CPV symbols (✓ ✗ ⚠ ○) to the CMS enum
+(``ok``/``missing``/``buggy``/``pending``) by the orchestrator.
 
 ## Step 4 — Final summary
 
-After every plugin has reported, print the final table + one-line
-summary:
+After every plugin has reported:
 
-```text
-DONE: plugins=N clean=X findings=Y warning-only=Z. Reports under {session_dir}/.
-```
+1. Queue the final status table (same call as Step 3):
 
-If any plugin has findings, append the fix prompt:
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+     emit-status "$SESSION_DIR/plan.json"
+   ```
 
-```text
-Run `/cpv-batch-fix {target}` to dispatch plugin-fixer agents across
-the plugins with findings.
-```
+2. Print a one-line summary inline (text, not a menu):
+
+   ```text
+   DONE: plugins=N clean=X findings=Y warning-only=Z. Reports under {session_dir}/.
+   ```
+
+3. If any plugin has findings, append the fix-prompt inline:
+
+   ```text
+   Run `/cpv-batch-fix {target}` to dispatch plugin-fixer agents across
+   the plugins with findings.
+   ```
+
+End the turn. The CMS Stop hook emits the final table via systemMessage.
+
+## Fixed key→action map
+
+`/cpv-batch-security-audit` is a one-shot fleet security scan; the
+status table is informational only. No numbered or lettered action
+rows — the user's next move is to run `/cpv-batch-fix` (text summary).
+The slug ``batch-plugin-validator-status`` is shared with
+`/cpv-batch-validate` (both invoke the same plugin-validator agent
+type, so the orchestrator's auto-derived slug collides — intentional;
+they emit one row per plugin in identical shape). The fixed
+key→action map is empty by design; future post-scan menus extend this
+contract with letter→action rows.
 
 ## Why a dedicated security command?
 
