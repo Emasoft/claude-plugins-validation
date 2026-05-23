@@ -39,7 +39,6 @@ from validate_agent import (  # noqa: E402
     validate_agents_directory,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixture helpers — write a directory of N realistic agent files.
 # ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from cpv_parallel_runner import parallel_scan
 from cpv_validation_common import (
     COLORS,
     VALID_HOOK_EVENTS,
@@ -42,7 +43,6 @@ from cpv_validation_common import (
     resolve_tool_command,
     save_report_and_print_summary,
 )
-from cpv_parallel_runner import parallel_scan
 
 # Events that support matchers
 EVENTS_WITH_MATCHERS = {

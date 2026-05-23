@@ -24,7 +24,6 @@ from scripts.cpv_parallel_runner import (
     parallel_scan_aggregated,
 )
 
-
 # ---------------------------------------------------------------------------
 # Top-level scan callables — MUST be pickleable, hence module-scope.
 # Each one models a different validator-shaped behavior.

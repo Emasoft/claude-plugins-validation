@@ -60,7 +60,6 @@ from cpv_skillaudit_native import (  # noqa: E402
     scan_path,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixture builder
 # ---------------------------------------------------------------------------
@@ -521,7 +520,6 @@ class TestWorkerContract:
         """ProcessPoolExecutor requires the worker to round-trip through pickle."""
         import pickle
 
-        from cpv_skillaudit_native import _scan_one_file_skillaudit
 
         # If the worker is a closure or has a captured non-pickleable
         # cell, this would raise TypeError or PicklingError.
@@ -530,7 +528,6 @@ class TestWorkerContract:
 
     def test_worker_returns_list_of_dicts(self, tmp_path):
         """The worker contract: returns list[dict], not a packed tuple."""
-        from cpv_skillaudit_native import _scan_one_file_skillaudit
 
         f = tmp_path / "test.md"
         f.write_text("# Hello\nClean content.\n", encoding="utf-8")
@@ -550,7 +547,6 @@ class TestWorkerContract:
         the bare filename — same as validate_security's analogous
         fallback.
         """
-        from cpv_skillaudit_native import _scan_one_file_skillaudit
 
         monkeypatch.delenv("CPV_SKILLAUDIT_WORKER_PLUGIN_ROOT", raising=False)
         f = tmp_path / "isolated.md"

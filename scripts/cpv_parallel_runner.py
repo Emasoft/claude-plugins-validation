@@ -31,24 +31,44 @@ nothing else; validators retain their domain logic.
 from __future__ import annotations
 
 import os
-from concurrent.futures import ProcessPoolExecutor, TimeoutError as FutTimeoutError
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import TimeoutError as FutTimeoutError
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Sequence, TypeVar
+from typing import Any, Callable, Sequence, TypeVar
 
 T = TypeVar("T")
 
 
+# NOTE: the ``files`` parameter and ``ScanResult.file_path`` were initially
+# typed as ``Sequence[Path]`` / ``Path`` because the first 5 validators
+# (security, skill, command, agent, hook) all walked file trees. Wave A6
+# (validate_hook) and A8 (validate_cache) introduced "work unit" dataclasses
+# that bundle a file path with parse metadata the worker needs at construct
+# time (avoiding a re-parse in the worker process). The harness itself
+# never inspects the element type — it just forwards each item through to
+# ``scan_func`` — so we generalise the API to ``Sequence[Any]`` /
+# ``Any``. Callers retain full type safety at THEIR boundary because they
+# control both ``files`` and ``scan_func``; mypy at the call site still
+# enforces that ``scan_func`` accepts the element type.
+
+
 @dataclass(frozen=True)
 class ScanResult:
-    """One file's scan outcome. ``findings`` is empty when ``error`` is set."""
+    """One file's scan outcome. ``findings`` is empty when ``error`` is set.
 
-    file_path: Path
+    ``file_path`` is typed ``Any`` to support both plain ``Path`` and
+    bespoke per-validator work-unit dataclasses (e.g. ``_HookWorkUnit``,
+    ``_CacheWorkUnit``). At the call site the validator knows what it
+    passed in and casts appropriately.
+    """
+
+    file_path: Any
     findings: list
     error: str | None = None
 
 
-def _run_one(scan_func: Callable[[Path], list], path: Path) -> list:
+def _run_one(scan_func: Callable[[Any], list], path: Any) -> list:
     """Top-level worker shim for ``chunk_size == 1`` (one file per task).
 
     ProcessPoolExecutor needs pickleable callables at the submission boundary.
@@ -64,7 +84,7 @@ def _run_one(scan_func: Callable[[Path], list], path: Path) -> list:
 
 
 def _run_batch(
-    scan_func: Callable[[Path], list], paths: list[Path]
+    scan_func: Callable[[Any], list], paths: list[Any]
 ) -> list[tuple[int, list, str | None]]:
     """Top-level worker shim for ``chunk_size > 1`` (N files per task).
 
@@ -90,8 +110,8 @@ def _run_batch(
 
 
 def parallel_scan(
-    files: Sequence[Path],
-    scan_func: Callable[[Path], list],
+    files: Sequence[Any],
+    scan_func: Callable[[Any], list],
     *,
     n_workers: int | None = None,
     chunk_size: int = 1,
@@ -359,8 +379,8 @@ def _run_in_batches(
 
 
 def parallel_scan_aggregated(
-    files: Sequence[Path],
-    scan_func: Callable[[Path], list],
+    files: Sequence[Any],
+    scan_func: Callable[[Any], list],
     aggregator: Callable[[list[ScanResult]], T],
     **kwargs,
 ) -> T:

@@ -34,8 +34,7 @@ if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
 
 from cpv_parallel_runner import parallel_scan  # noqa: E402
-from validate_skill import scan_one_skill, validate_skill  # noqa: E402
-
+from validate_skill import scan_one_skill  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Fixture helpers — generate minimal valid skill dirs the validator accepts.
