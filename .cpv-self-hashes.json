@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-23T19:48:30+00:00",
+  "computed_at": "2026-05-23T21:03:56+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
