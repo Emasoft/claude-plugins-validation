@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-23T21:03:56+00:00",
+  "computed_at": "2026-05-23T21:05:21+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
@@ -62,6 +62,7 @@
     "design/tasks/TRDD-20260523_153413+0200-747d7bbc-cc-v2-1-143-plugin-dependency-cascade.md": "sha256:7680272e1621b3e4ecba79daaeaaaf5b84aa09691b76a694f719f83c8f59f6db",
     "design/tasks/TRDD-20260523_170858+0200-40f46a83-scan-cache-re2-binary-scanning.md": "sha256:fef03104091300a49f52c29a290ee920989977f97ed6250c63fa5a5f1ff3a6be",
     "design/tasks/TRDD-20260523_210834+0200-b13fbdd6-skillaudit-context-certainty.md": "sha256:93237d4ac240caf17fa43a9a221e88d34b8775246c04dfcc1d831f4bb3868c1a",
+    "design/tasks/TRDD-20260523_230328+0200-12f8196d-skillaudit-optional-ai-triage.md": "sha256:9efd1c1a9cdb0e1bd2d0e120af7a2b9b41ac77ecab951e6d00a0edf1ac5a01ad",
     "design/tasks/TRDD-26446eed-ea5e-43e7-886c-8512866d92be-semantic-channel-source.md": "sha256:b20480b2cf4e0a97cc06e53a32a39a4d09a4740b94c92804298a8286d88d991c",
     "design/tasks/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md": "sha256:e2f55a383481238d738aaea92cfdbcb0ce34e6f1bdeab22a3b641cfca583431d",
     "design/tasks/TRDD-2be75e88-3c23-4c91-9e4e-5ce315b497dc-scope-validators.md": "sha256:6aba8e45a304a4b8b33177decdc271a7e1677098d7b5e09903f132f73cabff68",
