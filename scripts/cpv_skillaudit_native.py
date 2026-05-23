@@ -726,6 +726,17 @@ def _context_classifier_verdict(
         except ImportError:
             return ""
         classifier_verdict = _yaml_classify(file_path, content, line_idx, match, rule_id)
+    elif fp_lower.endswith((".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")):
+        # Issue #39 — TS/JS classifier for CRED_ENV_READ, TOKEN_STEAL,
+        # SECRET_* and SQL_INJECTION FP shapes documented in issue #39
+        # (MCP server reading its own API key, redaction allow-list
+        # regex, test-fixture synthetic secrets, test-fixture sample
+        # SQL strings).
+        try:
+            from _skillaudit_typescript_context import classify as _ts_classify  # type: ignore[import-not-found]
+        except ImportError:
+            return ""
+        classifier_verdict = _ts_classify(file_path, content, line_idx, match, rule_id)
     else:
         return ""
 

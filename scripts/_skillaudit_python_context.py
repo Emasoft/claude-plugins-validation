@@ -399,6 +399,43 @@ def _find_enclosing_call(tree: ast.AST, line: int) -> ast.Call | None:
     return best
 
 
+def _find_enclosing_shell_call(tree: ast.AST, line: int) -> ast.Call | None:
+    """Return a shell-reaching ``ast.Call`` covering ``line`` if one exists.
+
+    Issue #39 fix: when a CMD_INJECTION pattern matches inside an
+    f-string that wraps a ``subprocess.run([...])``, the OUTERMOST
+    enclosing call is e.g. ``lines.append(f"... {subprocess.run([...]).stdout} ...")``.
+    Both calls span exactly the matched line so
+    ``_find_enclosing_call`` picks the first one ast.walk yields
+    (top-down BFS = the outer call). The outer call's qualname is
+    ``lines.append`` which is not in ``_SHELL_CALL_FQNAMES`` — so the
+    classifier falls through to "unknown" → "keep" instead of
+    recognising the SAFE inner ``subprocess.run([...])`` call.
+
+    This helper finds the deepest covering Call whose qualname is in
+    ``_SHELL_CALL_FQNAMES``, so the classifier can verdict on THAT
+    call's argv shape (typically the safe list-form). Returns None
+    when no shell-reaching call covers the line.
+    """
+    best: ast.Call | None = None
+    best_span = float("inf")
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", None)
+        if start is None or end is None or not (start <= line <= end):
+            continue
+        qn = _node_qualname(node.func)
+        if qn not in _SHELL_CALL_FQNAMES and qn not in _DYNAMIC_EXEC_FQNAMES:
+            continue
+        span = end - start
+        if span < best_span:
+            best = node
+            best_span = span
+    return best
+
+
 def _line_is_full_comment(source_line: str) -> bool:
     """True iff the stripped source line begins with ``#``."""
     return source_line.lstrip().startswith("#")
@@ -479,6 +516,30 @@ def classify(
                     return "safe_literal"
                 break  # weak-hash call found but not identity context; let the regex match stand
 
+    # Issue #39 — for CMD_INJECTION / SHELL_EXEC rules, prefer the
+    # INNER shell-reaching call when one exists. This fixes the FP
+    # shape where the matched line is an f-string that wraps a
+    # subprocess.run([...]) call, e.g.
+    #
+    #     lines.append(f"Generated: {subprocess.run(['date', '+%Y%m%d'],
+    #                                              capture_output=True).stdout.strip()}")
+    #
+    # The OUTERMOST call (lines.append) spans the matched line, but
+    # its qualname is not in _SHELL_CALL_FQNAMES — so the original
+    # _find_enclosing_call returned None for classifier purposes, and
+    # the safe inner subprocess.run([...]) was never classified.
+    # _find_enclosing_shell_call picks the deepest shell-reaching call
+    # specifically; if it returns one, classify by THAT call's argv
+    # shape (typically safe_literal for list-form argv).
+    if rule_id in {"CMD_INJECTION", "SHELL_EXEC"}:
+        inner = _find_enclosing_shell_call(tree, line)
+        if inner is not None:
+            qn = _node_qualname(inner.func)
+            if qn is not None:
+                v = _classify_call(inner, qn)
+                if v is not None:
+                    return v
+
     call = _find_enclosing_call(tree, line)
     if call is not None:
         qualname = _node_qualname(call.func)
@@ -489,6 +550,64 @@ def classify(
         # Enclosing call exists but its qualname or shape doesn't fit
         # the known shell/exec patterns — fall through to the
         # string-literal / unknown branch.
+
+    # Issue #39 — DESERIALIZATION FP: ruamel.yaml YAML(typ="rt") /
+    # YAML(typ="safe") instance loaders are safe-by-default; the
+    # match on yaml.load( is being conflated with PyYAML's
+    # yaml.load() which IS unsafe. Detect the shape:
+    #
+    #     yaml = YAML(typ="rt")   # or "safe", or default-call YAML()
+    #     yaml.indent(...)        # OR yaml.preserve_quotes = True (rt marker)
+    #     ...
+    #     data = yaml.load(f)
+    #
+    # When the local variable `yaml` is assigned from a YAML(...) Call
+    # in the SAME function/module (and not reassigned to pyyaml), the
+    # load is via ruamel.yaml's instance API → safe.
+    if rule_id == "DESERIALIZATION" and _is_ruamel_yaml_safe_load(tree, source, line):
+        return "safe_literal"
+
+    # Issue #39 — CRED_ENV_READ FP: matched substring `credentials.json`
+    # is part of a Path literal pointing at the user's OWN credential
+    # store (e.g. `Path.home() / ".claude" / ".credentials.json"`).
+    # That's a self-config read by a statusline / diagnostic script,
+    # not credential theft. Detect:
+    #
+    #     <var> = Path.home() / "<dotdir>" / ".credentials.json"
+    #
+    # AST shape: line is an Assign whose value is a BinOp chain of
+    # Path division operators with at least one Constant containing
+    # ".credentials.json" AND a Path.home() Call upstream in the chain.
+    if rule_id == "CRED_ENV_READ" and _is_self_credentials_path(tree, line, match):
+        return "safe_literal"
+
+    # Issue #39 — CMD_INJECTION FP: the matched substring (`| sh`,
+    # `| bash`, `; curl`, etc.) is inside a pure-string Constant that
+    # lives in a module-level pure-literal data structure (List of
+    # Tuples of strings). Example from publish.py:
+    #
+    #     REQUIRED_TOOLS: list[tuple[str, str]] = [
+    #         ("uvx", "curl -LsSf https://astral.sh/uv/install.sh | sh"),
+    #         ...
+    #     ]
+    #
+    # The string is data the program shows the user as an install
+    # hint — never passed to a shell. AST shape: match position is
+    # inside a Constant string that is reachable via List/Tuple/Set/
+    # Dict containers from a module-level Assign/AnnAssign target.
+    if rule_id == "CMD_INJECTION" and _match_inside_module_data_literal(tree, line, source, match):
+        return "safe_literal"
+
+    # Issue #39 — SECRET_* FP: synthetic test-fixture secret in a
+    # Python test file. The fixture line constructs a fake key like
+    #     secret = "sk-" + "a" * 24
+    # and the matched substring is the obvious-fake constructed
+    # constant (or its sample value in a trailing comment).
+    if rule_id.startswith("SECRET_") and _is_python_test_file(file_path):
+        if _is_synthetic_secret_construction(tree, line, source):
+            return "safe_literal"
+        if _is_obvious_fake_secret_string(match):
+            return "safe_literal"
 
     # SECONDARY PATH 0: SSRF_ADVANCED false-positive on
     # ``<urly_name> = <pure_internal_call>(<args>)`` where the
@@ -729,4 +848,433 @@ def _line_is_safe_internal_assignment(tree: ast.AST, line: int, line_text: str) 
         return False  # method call on object — needs deeper analysis
     if re.match(r"^\s*[A-Za-z_]\w*\s*=\s*_[A-Za-z_]+\s*\([^)f]*\)\s*$", line_text):
         return True
+    return False
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Issue #39 helpers (TRDD: closes #39)
+# ────────────────────────────────────────────────────────────────────────
+
+# The set of yaml-loader instance APIs that ARE safe by design.
+#   ruamel.yaml.YAML(typ="rt")     — round-trip loader, never executes constructors
+#   ruamel.yaml.YAML(typ="safe")   — explicit safe loader
+#   ruamel.yaml.YAML()             — default is "rt"
+# All three load via the instance method ``yaml.load(stream)``, not via
+# the module-level ``yaml.load(stream)`` of PyYAML. The DESERIALIZATION
+# rule's regex matches both call shapes — we need AST to distinguish.
+_RUAMEL_SAFE_TYPES: Final[frozenset[str]] = frozenset({"rt", "safe", "base"})
+
+
+def _is_ruamel_yaml_safe_load(tree: ast.AST, source: str, line: int) -> bool:
+    """True iff ``line`` calls ``<var>.load(...)`` where ``<var>`` was
+    assigned from ``YAML(typ="rt"|"safe"|"base")`` (or ``YAML()``) or
+    from ``ruamel.yaml.YAML(...)`` in the same enclosing scope.
+
+    Identifies the ruamel.yaml round-trip loader FP shape (issue #39):
+
+        from ruamel.yaml import YAML
+        yaml = YAML(typ="rt")
+        yaml.preserve_quotes = True
+        yaml.indent(mapping=2, sequence=4, offset=2)
+        with SETTINGS_PATH.open("r", encoding="utf-8") as f:
+            data = yaml.load(f)   # <-- matched by rule, but safe
+
+    Conservative: returns True ONLY when an explicit ``YAML(...)`` call
+    is found assigning the same variable name used in the matched
+    ``.load(...)``. A plain ``import yaml; yaml.load(...)`` is PyYAML
+    and stays suspect.
+    """
+    # 1. Find the Call on the matched line: <recv>.load(...).
+    receiver_name: str | None = None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", None)
+        if start is None or end is None or not (start <= line <= end):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr == "load":
+            recv = func.value
+            if isinstance(recv, ast.Name):
+                receiver_name = recv.id
+                break
+    if receiver_name is None:
+        return False
+
+    # 2. Search the module for an assignment of that name to a
+    #    YAML(...) constructor call.
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        # Get the assignment target name.
+        target_name: str | None = None
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name) and tgt.id == receiver_name:
+                    target_name = tgt.id
+                    break
+        else:  # AnnAssign
+            if isinstance(node.target, ast.Name) and node.target.id == receiver_name:
+                target_name = node.target.id
+        if target_name is None:
+            continue
+        val = node.value
+        if not isinstance(val, ast.Call):
+            continue
+        # Accept `YAML(...)` (bare name), `ruamel.yaml.YAML(...)`,
+        # `ryaml.YAML(...)` (any alias).
+        f = val.func
+        is_yaml_ctor = False
+        if isinstance(f, ast.Name) and f.id == "YAML":
+            is_yaml_ctor = True
+        elif isinstance(f, ast.Attribute) and f.attr == "YAML":
+            is_yaml_ctor = True
+        if not is_yaml_ctor:
+            continue
+        # If no `typ=` kwarg, default is "rt" → safe.
+        # If `typ=` is given, must be in _RUAMEL_SAFE_TYPES.
+        typ_kw = None
+        for kw in val.keywords:
+            if kw.arg == "typ":
+                typ_kw = kw.value
+                break
+        if typ_kw is None:
+            return True  # default constructor is "rt" → safe
+        if isinstance(typ_kw, ast.Constant) and typ_kw.value in _RUAMEL_SAFE_TYPES:
+            return True
+        # Other typ values ("unsafe", "full") → not safe; let the rule fire.
+        return False
+    return False
+
+
+# Paths that, when used as a Path-literal in source, indicate the
+# program reading its OWN credential file (not stealing someone
+# else's). These are the canonical locations a statusline / diagnostic
+# script reads. Exact basename match.
+_SELF_CREDENTIAL_BASENAMES: Final[frozenset[str]] = frozenset(
+    {
+        ".credentials.json",
+        "credentials.json",
+        "auth.json",
+        ".auth.json",
+        "token.json",
+        ".token.json",
+        ".npmrc",
+        ".pypirc",
+        ".gitconfig",
+        ".netrc",
+    }
+)
+
+
+def _is_self_credentials_path(tree: ast.AST, line: int, match: str) -> bool:
+    """True iff the match `credentials.json` sits inside a Path literal
+    that points at the program's OWN credentials store, not at an
+    arbitrary external one.
+
+    AST shape recognised: an Assign/AnnAssign on ``line`` whose value
+    is a chained Path division (``Path.home() / "..." / ".credentials.json"``)
+    where the last Constant element is ``.credentials.json``. Direct
+    Constant ``"~/.claude/.credentials.json"`` also counts.
+
+    Conservative: only the canonical basenames in
+    ``_SELF_CREDENTIAL_BASENAMES`` qualify. A line referencing a
+    third-party credential store like ``/etc/aws/credentials.json``
+    where the path is hardcoded by the attacker would NOT match this
+    helper (its basename is on the list, but the AST shape needs a
+    Path.home()/cwd anchor — see _path_chain_has_home_anchor).
+    """
+    if "credentials.json" not in match and "credentials.json" not in (match or ""):
+        # Light pre-filter; the dispatcher already matched the rule
+        # before calling us. We don't gate on match-text — we gate on
+        # AST shape.
+        pass
+
+    # Walk the assignment on this line.
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        n_line = getattr(node, "lineno", None)
+        if n_line != line:
+            continue
+        val = getattr(node, "value", None)
+        if val is None:
+            continue
+        if _path_chain_has_home_anchor_and_safe_basename(val):
+            return True
+    # Also handle the case where the line is not an assignment but a
+    # bare expression / function call argument that ends in a Path
+    # chain (rare in practice).
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.BinOp):
+            continue
+        n_line = getattr(node, "lineno", None)
+        e_line = getattr(node, "end_lineno", None)
+        if n_line is None or e_line is None or not (n_line <= line <= e_line):
+            continue
+        if _path_chain_has_home_anchor_and_safe_basename(node):
+            return True
+    return False
+
+
+def _path_chain_has_home_anchor_and_safe_basename(node: ast.AST) -> bool:
+    """True iff ``node`` is a Path-division chain
+    (``Path.home() / ... / "<basename>"``) whose terminal element is a
+    Constant in ``_SELF_CREDENTIAL_BASENAMES`` AND whose root is a
+    ``Path.home()`` / ``Path.cwd()`` / ``os.path.expanduser(...)`` Call.
+
+    The chain may have any number of intermediate Constant string
+    elements (``Path.home() / ".claude" / ".credentials.json"``). We
+    walk the BinOp tree looking for: at least one Path.home() / cwd /
+    expanduser anchor AND at least one Constant whose value is in
+    the safe basename set.
+    """
+    has_home_anchor = False
+    has_safe_basename = False
+
+    def visit(n: ast.AST) -> None:
+        nonlocal has_home_anchor, has_safe_basename
+        if isinstance(n, ast.Constant) and isinstance(n.value, str):
+            base = n.value.rsplit("/", 1)[-1]
+            if base in _SELF_CREDENTIAL_BASENAMES:
+                has_safe_basename = True
+            return
+        if isinstance(n, ast.Call):
+            f = n.func
+            # Path.home() / Path.cwd()
+            if isinstance(f, ast.Attribute) and f.attr in {"home", "cwd"}:
+                if isinstance(f.value, ast.Name) and f.value.id == "Path":
+                    has_home_anchor = True
+            # os.path.expanduser(...) / Path(...).expanduser()
+            elif isinstance(f, ast.Attribute) and f.attr == "expanduser":
+                has_home_anchor = True
+            return
+        if isinstance(n, ast.BinOp):
+            visit(n.left)
+            visit(n.right)
+            return
+
+    visit(node)
+    return has_home_anchor and has_safe_basename
+
+
+def _match_inside_module_data_literal(
+    tree: ast.AST, line: int, source: str, match: str
+) -> bool:
+    """True iff ``match`` text on ``line`` is inside a pure-string
+    Constant that is reachable via pure-literal containers
+    (List / Tuple / Set / Dict / nested) from a module-level
+    Assign / AnnAssign target.
+
+    Catches the publish.py FP:
+
+        REQUIRED_TOOLS: list[tuple[str, str]] = [
+            ("uvx", "curl -LsSf https://astral.sh/uv/install.sh | sh"),
+            ...
+        ]
+
+    A `| sh` substring inside the constant is data — never executed.
+
+    Conservative: ALL elements in the container chain must be
+    pure-string / pure-numeric Constants OR nested pure-literal
+    containers. Any Name / Call / variable injection breaks the
+    "pure data" property and the helper returns False.
+    """
+    if not source:
+        return False
+    lines = source.splitlines()
+    if not (0 <= line - 1 < len(lines)):
+        return False
+    line_text = lines[line - 1]
+    if match and match not in line_text:
+        return False
+
+    # Find the deepest Constant string that covers `line` AND contains
+    # `match` in its `.value`. Strings inside containers may span one
+    # or many lines; we accept any covering Constant.
+    target_const: ast.Constant | None = None
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            continue
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", None)
+        if start is None or end is None or not (start <= line <= end):
+            continue
+        if not match or match in node.value:
+            target_const = node
+            break
+    if target_const is None:
+        return False
+
+    # Walk the AST and check whether `target_const` is a descendant of
+    # a module-level Assign/AnnAssign whose value is a pure-literal
+    # container tree.
+    return _node_is_in_module_level_pure_data_assign(tree, target_const)
+
+
+def _node_is_in_module_level_pure_data_assign(tree: ast.AST, target: ast.AST) -> bool:
+    """True iff ``target`` is reachable via pure-literal containers
+    from the value of a Module-level Assign / AnnAssign.
+
+    REQUIRES the assign's value to be a container (List / Tuple / Set
+    / Dict) — a bare Constant value (single triple-quoted string
+    assigned to a CONSTANT_NAME) does NOT qualify, because a
+    triple-quoted documentation string is the canonical safe_doc
+    shape that the multi-line-string-literal check already handles.
+    Treating it as safe_literal here would short-circuit the
+    safe_doc path and break callers that depend on the historical
+    "documentation string with embedded subprocess.run example" →
+    safe_doc verdict.
+    """
+
+    def _is_pure_literal_data(n: ast.AST) -> bool:
+        if isinstance(n, ast.Constant):
+            return True
+        if isinstance(n, (ast.List, ast.Tuple, ast.Set)):
+            return all(_is_pure_literal_data(e) for e in n.elts)
+        if isinstance(n, ast.Dict):
+            return all(
+                _is_pure_literal_data(k) and _is_pure_literal_data(v)
+                for k, v in zip(n.keys, n.values, strict=False)
+                if k is not None  # **kwargs unpacking → not pure
+            )
+        return False
+
+    def _contains_target(n: ast.AST, t: ast.AST) -> bool:
+        if n is t:
+            return True
+        for child in ast.iter_child_nodes(n):
+            if _contains_target(child, t):
+                return True
+        return False
+
+    # Module body only — class/function-scope assignments don't
+    # qualify (they're runtime data, but the literal-shape guarantee
+    # only holds when the module-level binding is the single source).
+    if not isinstance(tree, ast.Module):
+        return False
+    for stmt in tree.body:
+        if not isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+            continue
+        val = stmt.value
+        if val is None:
+            continue
+        # Iron rule: only CONTAINER literals qualify, not bare
+        # Constant strings. A `CONSTANT = """..."""` triple-quoted
+        # string is documentation; the safe_doc multi-line check
+        # owns that case.
+        if not isinstance(val, (ast.List, ast.Tuple, ast.Set, ast.Dict)):
+            continue
+        if not _is_pure_literal_data(val):
+            continue
+        if _contains_target(val, target):
+            return True
+    return False
+
+
+# Path / basename markers that identify a Python test file. Used by
+# the SECRET_* heuristic to scope synthetic-secret-fixture recognition.
+def _is_python_test_file(file_path: str) -> bool:
+    """True iff ``file_path`` looks like a Python test or fixture
+    file. Accepts basenames starting with ``test_`` and ending with
+    ``.py``; ``conftest.py``; ``*_test.py``; or any path containing a
+    ``tests``/``test``/``__tests__``/``fixtures``/``__mocks__`` dir."""
+    fp = file_path.replace("\\", "/").lower()
+    if not fp:
+        return False
+    parts = fp.split("/")
+    base = parts[-1]
+    if not base.endswith(".py"):
+        return False
+    if base.startswith("test_") or base.endswith("_test.py") or base == "conftest.py":
+        return True
+    for d in ("tests", "test", "__tests__", "fixtures", "__fixtures__", "__mocks__", "mocks"):
+        if d in parts:
+            return True
+    return False
+
+
+_OBVIOUS_FAKE_SECRET_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
+    re.compile(p)
+    for p in (
+        r"\bsk-(?:proj-)?([A-Za-z0-9])\1{15,}\b",
+        r"\bsk-(?:proj-)?(?:0123456789|1234567890|abcdef|deadbeef|test|fake|dummy|sample|example)",
+        r"\bsk-(?:proj-)?(?:[0-9]{1,5}[a-f]{1,5}){2,}\b",
+    )
+)
+
+
+def _is_obvious_fake_secret_string(match: str) -> bool:
+    """True iff ``match`` is a synthetic test-fixture secret —
+    ``sk-aaaa…``, ``sk-1234567890``, ``sk-deadbeef…``, etc. — that
+    a human can immediately recognise as test data.
+
+    Mirrors ``_skillaudit_typescript_context._FAKE_SECRET_PATTERNS``
+    so Python and TS test files share the same synthetic-secret
+    grammar. The classifier only applies this in Python test files
+    (gated by ``_is_python_test_file`` in the caller).
+    """
+    if not match:
+        return False
+    return any(p.search(match) for p in _OBVIOUS_FAKE_SECRET_PATTERNS)
+
+
+def _is_synthetic_secret_construction(tree: ast.AST, line: int, source: str) -> bool:
+    """True iff ``line`` is an assignment whose RHS constructs a
+    synthetic-looking secret from string-concat / string-multiply
+    operations involving only literal strings.
+
+    Recognises shapes like:
+
+        secret = "sk-" + "a" * 24
+        token  = "sk-test-" + "1" * 30
+        key    = "sk-proj-" + "deadbeef" * 4
+
+    These are the canonical Python test-fixture patterns for "build a
+    string that LOOKS like a real secret to feed to the scanner". The
+    classifier walks the BinOp chain and confirms every operand is
+    pure-literal (Constant string or Constant int) — any variable
+    reference disqualifies (real secrets read from env or config
+    would have a Name/Attribute node somewhere in the RHS).
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        if getattr(node, "lineno", None) != line:
+            continue
+        val = getattr(node, "value", None)
+        if val is None:
+            continue
+        if _expr_is_pure_string_arithmetic(val):
+            return True
+    return False
+
+
+def _expr_is_pure_string_arithmetic(node: ast.AST) -> bool:
+    """True iff ``node`` is a tree of BinOp / Constant / safe coercion
+    operations that produces a string at runtime AND contains no
+    variable / function-call inputs other than `str(...)` /
+    `bytes(...)` coercions of literal constants.
+
+    Used to distinguish synthetic secret-fixture construction
+    (``"sk-" + "a" * 24``) from real env-driven secret assembly
+    (``"sk-" + os.environ["X"]`` — would have a Subscript node).
+    """
+    if isinstance(node, ast.Constant):
+        # Strings, ints, bytes all qualify.
+        return isinstance(node.value, (str, int, bytes))
+    if isinstance(node, ast.BinOp):
+        return _expr_is_pure_string_arithmetic(node.left) and _expr_is_pure_string_arithmetic(node.right)
+    if isinstance(node, ast.JoinedStr):
+        # f-string with only pure-literal interior counts.
+        return all(_expr_is_pure_string_arithmetic(v) for v in node.values)
+    if isinstance(node, ast.FormattedValue):
+        return _expr_is_pure_string_arithmetic(node.value)
+    if isinstance(node, ast.Call):
+        # Only safe coercions of pure-literal args.
+        f = node.func
+        if isinstance(f, ast.Name) and f.id in {"str", "bytes", "int", "float", "repr"}:
+            return all(_expr_is_pure_string_arithmetic(a) for a in node.args)
+        return False
     return False
