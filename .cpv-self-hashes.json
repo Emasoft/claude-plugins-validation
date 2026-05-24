@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-24T18:24:12+00:00",
+  "computed_at": "2026-05-24T22:00:24+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
@@ -148,7 +148,7 @@
     "scripts/cpv_security_benchmark.py": "sha256:c2b8b9d2a1e4d528471a36f7625604b67542c016647f36b1fb0fa8801b5a3ab0",
     "scripts/cpv_setup_auth.py": "sha256:154a0365ea2187876858730899b084e0e82484ade62e22ae15af7a4fb48ba400",
     "scripts/cpv_skill_scanner.py": "sha256:31bff56df20377e2e66a760bc95e6483a8092464c53543a2b1f8a74cec939464",
-    "scripts/cpv_skillaudit_native.py": "sha256:4a50f9a9e60074129d451161a12fc81739df463f251b65ff3d0e8a7155ff9b3f",
+    "scripts/cpv_skillaudit_native.py": "sha256:87f22ccb25ac1b6622d06986cafc2ae28c64fa9b9e5e096cb41e36ddc2ec0a1c",
     "scripts/cpv_staging.py": "sha256:533bc780c1f185ba22fb12ff9ad0531f5745d7c78f76824590e01c038cfccd5f",
     "scripts/cpv_strip_dev.py": "sha256:ad76bd77d55afd0061476b813da15024ca6b7b2b738f62bd7f09bfbbb6d71813",
     "scripts/cpv_taint_engine.py": "sha256:1cf84978299c030b3c3eff3cf6a54b24fd6b881cd0f41e6528f100523d6e5a2e",
@@ -492,6 +492,7 @@
     "tests/test_issue_38_skillaudit_overfire.py": "sha256:f1a19bf11540524cfbac14c2c99db04c4f36a64f71afff3b1a8996c454ce8b84",
     "tests/test_issues_27_28_29.py": "sha256:a9f177017d51f32d2946089abec0d0cea3a598bd0d40fb92876714cedf910518",
     "tests/test_issues_30_31_batch_thresholds.py": "sha256:cf02ce59a767d0695119adc781f2978995a018f05c3753d46c874fe27aa2b5dd",
+    "tests/test_issues_40_42_skillaudit_fp.py": "sha256:ab39533d9fc18f7486f0e3b14392d14d6de9b638e5890e40afd8d517dba45296",
     "tests/test_legacy_integrity_fallback.py": "sha256:224185451af5d646d7762207cae8a193263b28fec21b6145b007774ea26ea5f1",
     "tests/test_legacy_pipeline_scripts.py": "sha256:7fa9bd9256121ea23ea0d2fe35983cf9610a7372e026a5f72d39c23983fdb683",
     "tests/test_lint_cache_integration.py": "sha256:cd8e44038411371d3710f154dad22418099ba15a3a512bf680f1128430cae777",
