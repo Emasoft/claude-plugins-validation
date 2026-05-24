@@ -122,7 +122,15 @@ class TestConfidenceClassifier:
         )
         assert verdict == "demote"
 
-    def test_github_actions_ssti_demoted(self) -> None:
+    def test_github_actions_ssti_suppressed(self) -> None:
+        # v2.106.0 (issue #40 root cause A): a GitHub Actions ``${{ … }}``
+        # expression is GitHub's sandboxed context-expression syntax,
+        # categorically NOT a Jinja2 / Mako / ERB server-side template.
+        # The v2.99.1 behaviour merely DEMOTED it (still publish-blocking
+        # under --strict); v2.106.0 SUPPRESSES it (the ``$`` prefix is a
+        # reliable discriminator — Jinja is bare ``{{ }}``). GHA *script
+        # injection* is a separate concern handled by the workflow
+        # validators / zizmor, not the Jinja-SSTI rule.
         import cpv_skillaudit_native as native
 
         lines = ["  group: auto-merge-${{ github.event.pull_request.number }}"]
@@ -136,7 +144,7 @@ class TestConfidenceClassifier:
             cb_ranges,
             file_path="workflow.yml",
         )
-        assert verdict == "demote", "GitHub Actions context expressions are NOT SSTI — demote, but keep visible"
+        assert verdict == "suppress", "GitHub Actions context expressions are NOT Jinja SSTI — suppress"
 
     def test_python_docstring_execution_class_suppresses(self) -> None:
         """Issue #40: an EXECUTION-class match (CMD_INJECTION) inside a true

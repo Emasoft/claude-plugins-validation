@@ -997,6 +997,39 @@ def _context_classifier_verdict(
             # fire, the heuristic chain falls through to "keep" — the
             # rule's declared severity stands.
             return ""
+        # Issue #40 root cause B — SOFT-intent and EXECUTION-class
+        # matches in a pure-DOCUMENTATION path (references/, docs/,
+        # examples/, README/CHANGELOG/…) are EXAMPLES that no pipeline
+        # ever executes as a shell and no pipeline ever loads as an
+        # agent instruction — exactly the reasoning the INTENT-HARD
+        # branch above already applies. A security skill that DOCUMENTS
+        # the attack patterns it defends against must be able to show a
+        # ``curl … | sh`` recipe or a ``${{ }}`` injection example
+        # without every example demoting to a publish-blocking NIT under
+        # ``--strict``. Suppress.
+        #
+        # EXCEPTION — secret-VALUE detectors (``SECRET_*`` per-vendor
+        # rules, ``HARDCODED_SECRET`` generic) are NOT "examples": a real
+        # credential committed in a README / references doc is a genuine
+        # PUBLIC leak (anyone reading the repo sees it), so secret-value
+        # findings keep their visibility in every path. A documented
+        # *placeholder* (``YOUR_API_KEY`` / ``sk-xxxx``) is still
+        # suppressed earlier by the placeholder check at the top of
+        # ``_confidence``.
+        #
+        # Mandate-preserving scope: this branch is reached ONLY for
+        # ``safe_doc`` context — prose, inline-code, markdown tables, and
+        # DATA-language fences (json/yaml/…). A markdown bash/sh fenced
+        # block returns ``"unknown"`` from the markdown classifier (NOT
+        # ``safe_doc``), so it flows to the heuristic chain and stays
+        # VISIBLE — the ".md code blocks are agent-executable, keep
+        # visible" mandate is intact. Instruction-loadable surfaces
+        # (SKILL.md, agents/, commands/, CLAUDE.md, .claude/rules/) are
+        # NOT documentation-only, so they still demote (an agent might
+        # act on the line).
+        _is_secret_value_rule = rule_id.startswith("SECRET_") or rule_id == "HARDCODED_SECRET"
+        if _is_documentation_only_path(file_path) and not _is_secret_value_rule:
+            return "suppress"
         if rule_id in _INTENT_SOFT_SIGNAL_RULES:
             # Soft signals — the rule's verb / concept appears benignly
             # in plugin self-description docs. Demote to NIT so the
@@ -1062,6 +1095,22 @@ def _confidence(
     if cb_map[line_idx] and _code_block_has_placeholder(lines, cb_ranges, line_idx):
         return "suppress"
     if re.search(r"`credentials\.json`", line):
+        return "suppress"
+
+    # Issue #40 root cause A — SSTI vs GitHub Actions. A ``${{ … }}``
+    # expression is GitHub's context-expression syntax (a sandboxed
+    # runtime), NEVER a Jinja2 / Mako / ERB server-side template. The
+    # SSTI Jinja rule matches the inner ``{{ … }}``, so any GHA field
+    # whose name contains a Jinja-global substring trips it —
+    # ``pull_request`` ⊃ ``request``, ``steps.x.outputs.config`` ⊃
+    # ``config``, etc. The ``$`` prefix is the reliable discriminator
+    # (Jinja is bare ``{{ }}``; GHA is ``${{ }}``). Categorical
+    # suppress regardless of file type — GHA *script injection* is a
+    # SEPARATE concern handled by the workflow validators / zizmor, not
+    # by the Jinja-SSTI rule. Runs before the context classifier so it
+    # wins over the safe_doc→demote verdict that would otherwise leave
+    # a publish-blocking NIT under --strict.
+    if rule_id == "SSTI" and "${{" in line:
         return "suppress"
 
     # v2.100.0 — Layer 0: per-file-type context classifier (runs after
@@ -1138,12 +1187,13 @@ def _confidence(
     if file_path and _is_in_line_comment(lines[line_idx], file_path):
         return "demote"
 
-    # v2.99.1 — SSTI false positive on GitHub Actions ``${{ github.* }}``
-    # expressions. These are GitHub's context-expression syntax (a
-    # well-known, sandboxed runtime), not server-side templating.
-    if rule_id == "SSTI" and file_path.lower().endswith((".yml", ".yaml")):
-        if re.search(r"\$\{\{\s*github\.", lines[line_idx]):
-            return "demote"
+    # NOTE: the v2.99.1 ``.yml``-only ``${{ github.* }}`` SSTI demote
+    # special-case that used to live here was superseded in v2.106.0 by
+    # the categorical ``rule_id == "SSTI" and "${{" in line`` suppressor
+    # at the top of this function (issue #40 root cause A) — that runs
+    # before the context classifier, covers every file type, and
+    # suppresses rather than merely demotes. Removed to avoid a dead
+    # second code path.
 
     return "keep"
 
@@ -2193,6 +2243,48 @@ def _parallel_threshold() -> int:
         return _PARALLEL_THRESHOLD_DEFAULT
 
 
+def _is_skillaudit_catalog_json(content: str, file_path: Path) -> bool:
+    """True iff ``content`` IS a SkillAudit pattern catalog (issue #42).
+
+    A plugin that vendors CPV's offline auditor ships a copy of the rule
+    catalog (``skillaudit_patterns.json``). The catalog is DATA that
+    describes malicious code — it literally contains sensitive-path,
+    ``eval(`` and ``curl … | sh`` strings as *pattern strings* — so the
+    scanner would otherwise self-match ~214 findings against it.
+
+    Recognised by SCHEMA, never by filename: a vendored copy under any
+    name is treated as data, and a hostile ``.json`` cannot evade scanning
+    by name because it would have to actually BE a valid pattern catalog —
+    at which point its "patterns" are inert match strings (the catalog
+    format executes nothing). So there is no evasion hole.
+
+    The shape that must hold: a top-level object with a ``rules`` array
+    whose entries are overwhelmingly rule-shaped (``patterns`` list plus an
+    ``id``/``name``). A handful of stray non-rule entries is tolerated, but
+    a random config ``.json`` (no ``rules`` array of pattern-bearing
+    objects) is NOT recognised and is scanned normally.
+    """
+    if file_path.suffix.lower() not in (".json", ".jsonc"):
+        return False
+    try:
+        data = json.loads(content)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    rules = data.get("rules")
+    if not isinstance(rules, list) or len(rules) < 5:
+        return False
+    rule_shaped = sum(
+        1
+        for r in rules
+        if isinstance(r, dict) and isinstance(r.get("patterns"), list) and ("id" in r or "name" in r)
+    )
+    # Overwhelming majority must be rule-shaped — a single object that
+    # happens to have a "rules" key cannot trip this.
+    return rule_shaped >= max(5, int(0.8 * len(rules)))
+
+
 def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
     """Top-level, pickleable per-file scan callable for ``parallel_scan``.
 
@@ -2272,6 +2364,15 @@ def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
         # from "unreadable file". The sentinel is filtered out before
         # returning to the user; it carries a private marker key.
         return [{"_skillaudit_sentinel": "empty", "file": rel}]
+
+    # Issue #42 — a scanned plugin that VENDORS CPV's offline auditor
+    # ships a copy of the rule catalog (skillaudit_patterns.json). The
+    # catalog is DATA describing malicious patterns, so the scanner would
+    # self-match ~214 findings against its own pattern strings. Recognise
+    # it by schema (see _is_skillaudit_catalog_json — name-agnostic, no
+    # evasion hole) and count it as scanned-with-no-findings.
+    if _is_skillaudit_catalog_json(content, file_path):
+        return [{"_skillaudit_sentinel": "scanned", "file": rel}]
 
     # v2.104.0 — cache GET. Hash the textual content (NOT the raw
     # bytes — _content_hash already encodes utf-8) and look up against

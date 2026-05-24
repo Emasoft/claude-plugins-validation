@@ -737,7 +737,7 @@
         "(?:Jinja2|jinja2)\\.(?:Template|Environment)\\s*\\(.*(?:req|input|param|body)",
         "Mako.*Template\\s*\\(.*(?:req|input|param|body)",
         "ERB\\.new\\s*\\(.*(?:params|request|input)",
-        "\\{\\{.*(?:config|self|request|lipsum|cycler|joiner|namespace).*\\}\\}",
+        "\\{\\{.*\\b(?:config|self|request|lipsum|cycler|joiner|namespace)\\b.*\\}\\}",
         "\\{\\{.*(?:__class__|__subclasses__|__globals__|__builtins__|__import__).*\\}\\}",
         "\\{%.*(?:import|system|popen|exec|eval).*%\\}",
         "pug\\.(?:render|compile)\\s*\\(.*(?:req|input|param|body)",
