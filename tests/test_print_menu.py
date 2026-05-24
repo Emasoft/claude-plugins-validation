@@ -266,6 +266,19 @@ class TestCli:
         assert sent["header"] == "H"
         assert [r["key"] for r in sent["rows"]] == ["1", "P", "R", "A", "B", "M", "0"]
 
+    def test_slug_flag_beats_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A --slug flag overrides a file's slug (consistent flag-wins precedence)."""
+        self._cms(tmp_path, monkeypatch)
+        f = tmp_path / "dyn.json"
+        f.write_text(json.dumps({"entries": ["x"], "slug": "fromfile"}), encoding="utf-8")
+        out = io.StringIO()
+        monkeypatch.setattr("sys.stdout", out)
+        rc = print_menu._cli(
+            ["print_menu.py", "dynamic", "--from-file", str(f), "--slug", "fromflag"]
+        )
+        assert rc == 0
+        assert _received_spec(Path(out.getvalue().strip()))["slug"] == "fromflag"
+
     def test_raw_stdin(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         self._cms(tmp_path, monkeypatch)
         monkeypatch.setattr("sys.stdin", _StringStdin(json.dumps(_menu_spec())))

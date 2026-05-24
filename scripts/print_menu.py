@@ -259,7 +259,7 @@ def _cli_fixed(args: list[str]) -> dict:
 def _cli_dynamic(args: list[str]) -> dict:
     payload: str | None = None
     from_file: str | None = None
-    slug = "dynamic"
+    slug: str | None = None
     header: str | None = None
     footer: str | None = None
     i = 0
@@ -303,7 +303,7 @@ def _cli_dynamic(args: list[str]) -> dict:
         extra_options = data.get("extra_options")
         header = header or data.get("header")
         footer = footer or data.get("footer")
-        slug = data.get("slug", slug)
+        slug = slug or data.get("slug")  # flag wins, then file, then default (below)
     else:
         raise ValueError("dynamic json must be a list of entries or an object")
 
@@ -316,7 +316,7 @@ def _cli_dynamic(args: list[str]) -> dict:
         )
 
     return assemble_dynamic_spec(
-        entries, extra_options=extra_options, header=header, footer=footer, slug=slug
+        entries, extra_options=extra_options, header=header, footer=footer, slug=slug or "dynamic"
     )
 
 
@@ -340,9 +340,9 @@ def _cli(argv: list[str]) -> int:
             spec = _cli_dynamic(argv[2:])
         else:
             spec = _cli_raw(cmd)  # '-' (stdin) or a spec file path
-    except (ValueError, OSError, json.JSONDecodeError) as exc:
-        label = cmd if cmd not in ("fixed", "dynamic") else f"{cmd}"
-        print(f"print_menu ({label}): {exc}", file=sys.stderr)
+    except (ValueError, OSError) as exc:
+        # json.JSONDecodeError is a ValueError subclass — already covered.
+        print(f"print_menu ({cmd}): {exc}", file=sys.stderr)
         return 2
     try:
         queue_path = write_menu(spec)
