@@ -40,7 +40,7 @@ from __future__ import annotations
 import re
 from typing import Final, Literal
 
-ContextVerdict = Literal["safe_doc", "code_fence_neutral", "unknown"]
+ContextVerdict = Literal["safe_literal", "safe_doc", "code_fence_neutral", "unknown"]
 
 _EXECUTABLE_LANGS: Final[frozenset[str]] = frozenset(
     {
@@ -153,11 +153,6 @@ def _line_has_only_inline_code(line: str) -> bool:
     return bool(line.strip()) and not stripped_text
 
 
-def _line_text_outside_inline_code(line: str) -> str:
-    """Return the line content with ``\\`…\\``` spans removed."""
-    return re.sub(r"`[^`\n]+`", "", line)
-
-
 def _match_falls_inside_inline_code(line: str, match: str) -> bool:
     """True iff ``match`` only appears within ``\\`…\\``` spans on this line.
 
@@ -236,6 +231,228 @@ def _has_defensive_vocab_nearby(lines: list[str], line_idx: int, span: int = 5) 
     return False
 
 
+# ────────────────────────────────────────────────────────────────────────
+# 100%-certain-benign discriminators (TRDD-ef3fc7d8)
+# ────────────────────────────────────────────────────────────────────────
+#
+# Three narrow shapes the rule catalog over-fires on, where STATIC
+# context proves the match is NOT a threat. Each branch is self-guarded
+# so the same surface carrying a real threat (recon piped to a network
+# sink, a BIP-39 crypto seed mnemonic, an actual ``os.system()`` call,
+# or payload construction) is NOT suppressed. All three return
+# ``safe_literal`` → SUPPRESS in the dispatcher.
+#
+# They run BEFORE the fence/prose branch split in ``classify`` so they
+# are context-independent: a provably-benign shape is benign whether it
+# sits in prose, in a column-0 fence, or in an INDENTED fence (the
+# `_FENCE_RE` anchor `^` does not match indented fences, so an indented
+# ```bash recipe under a `- **execution**:` bullet would otherwise be
+# seen as prose → safe_doc → demote → NIT; these discriminators make
+# the verdict independent of that fence-recognition gap).
+
+# Execution-class rule ids this classifier applies the recon / inert-
+# token discriminators to. Defined locally — importing
+# `_EXECUTION_CLASS_RULES` from `cpv_skillaudit_native` would be a
+# circular import (that module imports THIS one).
+_EXECUTION_CLASS_RULES_MD: Final[frozenset[str]] = frozenset(
+    {
+        "CMD_INJECTION",
+        "SHELL_EXEC",
+        "REVERSE_SHELL",
+        "PRIVILEGE_ESC",
+        "CODE_EXECUTION",
+        "OBFUSCATION",
+    }
+)
+
+# Pure-reconnaissance commands: read-only, no side effects. Their
+# output cannot harm anything UNLESS it reaches a network egress sink
+# (see ``_context_has_network_sink``).
+_BENIGN_RECON_CMDS: Final[frozenset[str]] = frozenset(
+    {
+        "whoami",
+        "id",
+        "uname",
+        "hostname",
+        "pwd",
+        "date",
+        "tty",
+        "groups",
+        "arch",
+        "logname",
+        "users",
+        "uptime",
+        "tput",
+        "basename",
+        "dirname",
+    }
+)
+
+# A command substitution ``$(cmd …)`` or `` `cmd …` `` — captures the
+# inner command name (group ``a`` for ``$(…)``, ``b`` for backticks).
+_CMD_SUB_RE: Final[re.Pattern[str]] = re.compile(r"\$\(\s*(?P<a>[A-Za-z][\w./-]*)|`\s*(?P<b>[A-Za-z][\w./-]*)")
+
+# Network egress sinks — an actual network CLIENT command/function, or a
+# raw socket redirect. A recon value reaching any of these COULD be
+# exfiltrated, so the recon substitution is NOT certified benign.
+#
+# Deliberately does NOT include a bare ``https?://`` clause: a URL is a
+# sink only when something SENDS to it. A URL passed as a positional
+# argument to a LOCAL command (e.g. ``python validator.py
+# "https://github.com/$REPO"`` — the validator fetches the target, the
+# recon value never travels there) must not forfeit the certification.
+# Real exfil always carries a client token (``curl``/``wget``/
+# ``requests.post``/…) or a ``/dev/tcp`` redirect, which IS matched.
+_NETWORK_SINK_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:curl|wget|nc|ncat|netcat|telnet|ssh|scp|sftp|ftp|ftps|rsync|socat|"
+    r"Invoke-WebRequest|Invoke-RestMethod|iwr|"
+    r"requests\.(?:get|post|put|patch|delete|request)|urllib|urlopen|"
+    r"httpx|aiohttp|http\.client|fetch|axios)\b"
+    r"|/dev/(?:tcp|udp)/",
+    re.IGNORECASE,
+)
+
+# Payload-construction sinks for an inert token sitting inside a string:
+# a redirect into a script file, or a pipe straight into an interpreter.
+# If the token is being written to an executable or fed to a runtime,
+# it is no longer an inert mention.
+_PAYLOAD_SINK_RE: Final[re.Pattern[str]] = re.compile(
+    r">>?\s*\S+\.(?:py|sh|bash|zsh|js|mjs|cjs|rb|pl|php|ps1|bat|cmd)\b"
+    r"|\|\s*(?:python[0-9.]*|bash|sh|zsh|node|ruby|perl|php|pwsh|powershell)\b",
+    re.IGNORECASE,
+)
+
+_MNEMONIC_RE: Final[re.Pattern[str]] = re.compile(r"mnemonic", re.IGNORECASE)
+
+# "mnemonic" adjacent to a crypto-wallet qualifier on the SAME line —
+# this IS a BIP-39 seed-phrase signal (e.g. "wallet recovery mnemonic",
+# "mnemonic seed words").
+_MNEMONIC_CRYPTO_ADJ_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:seed|wallet|recovery|crypto\w*|bip[\s_-]?0?39|hd|keystore|backup|key)[\s_-]+mnemonic"
+    r"|mnemonic[\s_-]+(?:phrase|seed|words?|wallet|recovery|backup|key)",
+    re.IGNORECASE,
+)
+
+# Strong standalone crypto-wallet vocabulary. Presence anywhere in the
+# context window means "mnemonic" is plausibly a real seed phrase, so
+# the finding is NOT certified benign.
+_CRYPTO_VOCAB_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:seed[\s_-]?phrase|wallet|recovery[\s_-]?(?:phrase|words?)|"
+    r"crypto(?:currenc(?:y|ies))?|bip[\s_-]?0?39|hd[\s_-]?wallet|keystore|"
+    r"private[\s_-]?key|passphrase|metamask|ledger[\s_-]?(?:wallet|live)|trezor|"
+    r"blockchain|ethereum|bitcoin|solana|coinbase)\b",
+    re.IGNORECASE,
+)
+
+
+def _context_has_network_sink(lines: list[str], line_idx: int, span: int = 3) -> bool:
+    """True iff any line within ±``span`` of ``line_idx`` contains a
+    network egress sink. A recon value reaching one of these could be
+    exfiltrated, which forfeits the benign-recon certification."""
+    lo = max(0, line_idx - span)
+    hi = min(len(lines) - 1, line_idx + span)
+    return any(_NETWORK_SINK_RE.search(lines[i]) for i in range(lo, hi + 1))
+
+
+def _context_has_payload_sink(lines: list[str], line_idx: int, span: int = 2) -> bool:
+    """True iff any line within ±``span`` contains a payload-construction
+    sink (redirect into a script file, or a pipe into an interpreter)."""
+    lo = max(0, line_idx - span)
+    hi = min(len(lines) - 1, line_idx + span)
+    return any(_PAYLOAD_SINK_RE.search(lines[i]) for i in range(lo, hi + 1))
+
+
+def _is_benign_recon_cmdsub(match: str) -> bool:
+    """True iff ``match`` is a command substitution whose inner command
+    is a pure-reconnaissance, read-only command (``whoami``/``id``/…).
+
+    The leading path is stripped so ``$(/usr/bin/whoami)`` still
+    resolves to ``whoami``.
+    """
+    if not match:
+        return False
+    m = _CMD_SUB_RE.search(match)
+    if m is None:
+        return False
+    cmd = (m.group("a") or m.group("b") or "").lower()
+    cmd = cmd.rsplit("/", 1)[-1]
+    return cmd in _BENIGN_RECON_CMDS
+
+
+def _is_inert_token_in_string(line: str, match: str) -> bool:
+    """True iff ``match`` is an inert identifier token (no shell
+    substitution syntax) sitting INSIDE a double-quoted string AND not
+    the head of a call (``token(``).
+
+    Such a token is a literal mention — a ``grep`` search pattern, an
+    ``echo`` banner, a documentation reference — never an executed call.
+    Command substitutions / parameter expansions (``$(…)``, `` `…` ``,
+    ``${…}``) DO execute inside double quotes, so they are excluded here
+    and handled by the benign-recon discriminator instead.
+    """
+    if not match:
+        return False
+    if "$(" in match or "`" in match or "${" in match:
+        return False
+    if not _match_inside_quoted_string(line, match):
+        return False
+    # An actual call shape (``os.system(``) stays suspect even if the
+    # name somehow sits inside quotes.
+    idx = line.find(match)
+    while idx != -1:
+        if line[idx + len(match) :].lstrip().startswith("("):
+            return False
+        idx = line.find(match, idx + 1)
+    return True
+
+
+def _certain_benign_literal(
+    line: str,
+    lines: list[str],
+    line_idx: int,
+    match: str,
+    rule_id: str,
+) -> bool:
+    """Return True iff ``match`` is a 100%-certain-benign shape that must
+    be SUPPRESSED regardless of fence/prose context.
+
+    Each branch is self-guarded so the same surface carrying a real
+    threat is NOT suppressed. See the module section header above.
+    """
+    # (1) CRYPTO_THEFT "mnemonic" with NO crypto-wallet vocabulary in
+    #     context → the English word "mnemonic" (a memory aid), not a
+    #     BIP-39 seed phrase. e.g. "Action letters are mnemonics".
+    if rule_id == "CRYPTO_THEFT" and _MNEMONIC_RE.search(match):
+        lo = max(0, line_idx - 3)
+        hi = min(len(lines) - 1, line_idx + 3)
+        window = "\n".join(lines[lo : hi + 1])
+        if not _MNEMONIC_CRYPTO_ADJ_RE.search(window) and not _CRYPTO_VOCAB_RE.search(window):
+            return True
+
+    # (2) Benign reconnaissance command substitution ``$(whoami)`` with
+    #     no network egress sink in context → the value cannot leave the
+    #     machine. e.g. CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run …
+    if (
+        rule_id in _EXECUTION_CLASS_RULES_MD
+        and _is_benign_recon_cmdsub(match)
+        and not _context_has_network_sink(lines, line_idx, span=3)
+    ):
+        return True
+
+    # (3) Inert execution token inside a quoted string (a grep pattern,
+    #     an echo banner, a doc reference) — not a call, with no payload
+    #     or network sink. e.g. echo "… os.system in Python scripts …".
+    if (
+        rule_id in _EXECUTION_CLASS_RULES_MD
+        and _is_inert_token_in_string(line, match)
+        and not _context_has_payload_sink(lines, line_idx, span=2)
+        and not _context_has_network_sink(lines, line_idx, span=2)
+    ):
+        return True
+
+    return False
+
+
 def classify(
     file_path: str,
     source: str,
@@ -254,6 +471,15 @@ def classify(
     fence_map = _build_fence_map(source)
     line = lines[line_idx]
     fence_state = fence_map[line_idx]
+
+    # 100%-certain-benign discriminators (TRDD-ef3fc7d8) run FIRST and
+    # are context-independent — a provably-benign shape is benign in
+    # prose, in a recognised fence, or in an indented (unrecognised)
+    # fence. ``safe_literal`` → SUPPRESS in the dispatcher. Each branch
+    # is self-guarded (see ``_certain_benign_literal``), so a real
+    # threat wearing the same surface still surfaces.
+    if _certain_benign_literal(line, lines, line_idx, match, rule_id):
+        return "safe_literal"
 
     if fence_state is None:
         # Outside any fence — prose, list, heading, table.
