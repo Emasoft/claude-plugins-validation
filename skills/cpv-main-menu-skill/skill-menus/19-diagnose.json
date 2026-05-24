@@ -1,0 +1,21 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "diagnose",
+  "header": "Diagnose — deep audit + (opt-in) AI-graded review",
+  "rows": [
+    {"key": "1", "action_id": "diag_plugin",  "label": "Diagnose plugin (deep audit) — Full audit + structured report + follow-up menu"},
+    {"key": "2", "action_id": "diag_critical","label": "Apply CRITICAL fixes only — Fix only publish-blockers + security blockers"},
+    {"key": "3", "action_id": "diag_major",   "label": "Apply MAJOR + CRITICAL fixes — Fix publishing-blockers + non-cross-platform"},
+    {"key": "4", "action_id": "diag_sync",    "label": "Sync cached install with GitHub — Compare cache version to latest tag"},
+    {"key": "5", "action_id": "diag_register","label": "Check + fix marketplace registration — Verify listed; offer register / create"},
+    {"key": "6", "action_id": "diag_branch",  "label": "Audit branch rules + Claude action setup — ruleset / bypass / pin / secrets"},
+    {"key": "7", "action_id": "diag_xplat",   "label": "Cross-platform audit — `.sh` / os.path / shell=True / bash hook constructs"},
+    {"key": "8", "action_id": "diag_semantic","label": "AI-graded semantic review (opus, EXPENSIVE — 10-50× normal cost)"},
+    {"key": "A", "action_id": "ask",          "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",         "label": "Back — Go back to the top-level menu"},
+    {"key": "0", "action_id": "cancel",       "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

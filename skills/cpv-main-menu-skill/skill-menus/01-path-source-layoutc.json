@@ -1,0 +1,16 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "path-source-layoutc",
+  "header": "Layout C (marketplace-in-plugin) — what to validate",
+  "rows": [
+    {"key": "1", "action_id": "whole_repo",  "label": "Whole repo (marketplace AND its bundled plugin together)"},
+    {"key": "2", "action_id": "plugin_part", "label": "Just the plugin part of this repo"},
+    {"key": "3", "action_id": "mkt_part",    "label": "Just the marketplace part of this repo"},
+    {"key": "T", "action_id": "type_path",   "label": "Type a different path / name / URL"},
+    {"key": "A", "action_id": "ask",         "label": "Ask the agent for a recommendation"},
+    {"key": "0", "action_id": "cancel",      "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

@@ -1,0 +1,15 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "path-source-mkt",
+  "header": "Marketplace folder — what to validate",
+  "rows": [
+    {"key": "1", "action_id": "mkt_plus_all", "label": "This marketplace AND every plugin it lists"},
+    {"key": "2", "action_id": "mkt_only",     "label": "Just the marketplace listing (skip the plugins)"},
+    {"key": "T", "action_id": "type_path",    "label": "Type a different path / name / URL"},
+    {"key": "A", "action_id": "ask",          "label": "Ask the agent for a recommendation"},
+    {"key": "0", "action_id": "cancel",       "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

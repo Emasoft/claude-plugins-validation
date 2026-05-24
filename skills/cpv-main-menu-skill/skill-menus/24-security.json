@@ -1,0 +1,25 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "security",
+  "header": "Security — pick scan target / scanner",
+  "rows": [
+    {"key": "1",  "action_id": "sec_full",       "label": "Single plugin (full security pass) — All rule packs + 5 external scanners"},
+    {"key": "2",  "action_id": "sec_github",     "label": "Single plugin from GitHub URL — Auto-clone github.com URL → scan → cleanup"},
+    {"key": "3",  "action_id": "sec_giturl",     "label": "Single plugin from arbitrary git URL — gitlab/SSH/self-hosted → scan → cleanup"},
+    {"key": "4",  "action_id": "sec_archive",    "label": "Single plugin from local archive (.zip/.tar.gz) — Extract → scan → cleanup"},
+    {"key": "5",  "action_id": "sec_mkt",        "label": "Marketplace (every plugin, tree-scan-once) — fclones-dedup + scanners once"},
+    {"key": "6",  "action_id": "sec_loose",      "label": "Loose / flat skill pack (--loose) — Skip the .claude-plugin/ precondition"},
+    {"key": "7",  "action_id": "sec_ccaudit",    "label": "Single scanner only (cc-audit)"},
+    {"key": "8",  "action_id": "sec_tirith",     "label": "Single scanner only (tirith)"},
+    {"key": "9",  "action_id": "sec_trufflehog", "label": "Single scanner only (trufflehog) — secret scanner"},
+    {"key": "10", "action_id": "sec_semgrep",    "label": "Single scanner only (semgrep) — p/security-audit + p/secrets"},
+    {"key": "11", "action_id": "sec_cisco",      "label": "Single scanner only (Cisco AI Defense)"},
+    {"key": "12", "action_id": "sec_telemetry",  "label": "Telemetry hazards only — PLUGIN_SEED_DIR / SHELL_PREFIX / etc."},
+    {"key": "A",  "action_id": "ask",            "label": "Ask the agent"},
+    {"key": "B",  "action_id": "back",           "label": "Back — Go back to the Validate sub-menu"},
+    {"key": "0",  "action_id": "cancel",         "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

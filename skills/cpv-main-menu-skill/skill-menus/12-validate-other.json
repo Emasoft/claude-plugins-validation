@@ -1,0 +1,16 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-other",
+  "header": "Validate — enterprise / scoring / telemetry",
+  "rows": [
+    {"key": "1", "action_id": "enterprise", "label": "Enterprise — Compliance / governance / IT-managed-settings rules"},
+    {"key": "2", "action_id": "scoring",    "label": "Scoring self-check — Verify CPV's own pass / fail / severity logic"},
+    {"key": "3", "action_id": "telemetry",  "label": "Telemetry hazards (risky env vars) — PLUGIN_SEED_DIR / SHELL_PREFIX / etc."},
+    {"key": "A", "action_id": "ask",        "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",       "label": "Back — Go back to the Specific-quality-check menu"},
+    {"key": "0", "action_id": "cancel",     "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

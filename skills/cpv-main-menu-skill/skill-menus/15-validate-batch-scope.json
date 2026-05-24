@@ -1,0 +1,16 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-batch-scope",
+  "header": "Validate — scope-aware doctor (LOCAL only)",
+  "rows": [
+    {"key": "1", "action_id": "scope_diagnose", "label": "Diagnose (read-only) — /cpv-batch-scope-diagnose"},
+    {"key": "2", "action_id": "scope_fix",      "label": "Fix (apply fixes) — /cpv-batch-scope-fix"},
+    {"key": "3", "action_id": "scope_diag_fix", "label": "Diagnose + fix (same-turn) — /cpv-batch-scope-diagnose-and-fix"},
+    {"key": "A", "action_id": "ask",            "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",           "label": "Back — Go back to the Batch / fleet menu"},
+    {"key": "0", "action_id": "cancel",         "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

@@ -1,0 +1,20 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-component",
+  "header": "Validate — single component",
+  "rows": [
+    {"key": "1", "action_id": "comp_skill",   "label": "SKILL.md — Header (frontmatter), structure, and content rules"},
+    {"key": "2", "action_id": "comp_agent",   "label": "Agent .md — Header, model, tools, examples (2+ <example> blocks)"},
+    {"key": "3", "action_id": "comp_command", "label": "Command .md — Header, target agent, tool allowlist, argument hint"},
+    {"key": "4", "action_id": "comp_hook",    "label": "Hook (hooks.json) — hooks.json layout + event names + the scripts the hook calls"},
+    {"key": "5", "action_id": "comp_mcp",     "label": "MCP server — setup (transport, env vars, security checks)"},
+    {"key": "6", "action_id": "comp_lsp",     "label": "LSP server — Language-server setup in plugin.json"},
+    {"key": "7", "action_id": "comp_style",   "label": "Output-style or Rule file — Output-style files or .claude/rules/*.md"},
+    {"key": "A", "action_id": "ask",          "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",         "label": "Back — Go back to the Validate menu"},
+    {"key": "0", "action_id": "cancel",       "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

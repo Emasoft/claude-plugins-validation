@@ -1,0 +1,14 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "path-source-plugin",
+  "header": "Plugin folder — what to validate",
+  "rows": [
+    {"key": "1", "action_id": "this_plugin", "label": "This plugin (the one in the current folder)"},
+    {"key": "T", "action_id": "type_path",   "label": "Type a different path / name / URL"},
+    {"key": "A", "action_id": "ask",         "label": "Ask the agent for a recommendation"},
+    {"key": "0", "action_id": "cancel",      "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

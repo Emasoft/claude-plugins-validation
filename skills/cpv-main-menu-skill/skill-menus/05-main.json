@@ -1,0 +1,21 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "main",
+  "header": "CPV — pick a category",
+  "rows": [
+    {"key": "1", "action_id": "validate",       "label": "Validate — Check that a plugin / marketplace / component is well-formed"},
+    {"key": "2", "action_id": "fix",            "label": "Fix — Auto-fix issues that a previous validation found"},
+    {"key": "3", "action_id": "cache_optimize", "label": "Optimize for Cache — Prompt-cache invalidation audit + cache-aware refactor (CA-01..CA-06)"},
+    {"key": "4", "action_id": "diagnose",       "label": "Diagnose — Deep audit + AI-graded quality review (semantic, opus, on request)"},
+    {"key": "5", "action_id": "update",         "label": "Update — Upgrade plugin to latest canonical pipeline standard"},
+    {"key": "6", "action_id": "create",         "label": "Create — Scaffold plugin, marketplace, skill, agent, command, hook, MCP server"},
+    {"key": "7", "action_id": "publish",        "label": "Publish & Migrate — Branch rules, link to marketplace, publish, migrate marketplace"},
+    {"key": "8", "action_id": "manage",         "label": "Manage — List installed plugins, install / update / enable / disable / doctor"},
+    {"key": "H", "action_id": "help",           "label": "Help / About — Show the menu overview, list of commands, version"},
+    {"key": "A", "action_id": "ask",            "label": "Ask the agent — Let the agent suggest the best next action right now"},
+    {"key": "0", "action_id": "cancel",         "label": "Cancel / Exit — Stop without doing anything"}
+  ],
+  "footer": "Type a key (number, H, A, or 0):"
+}
