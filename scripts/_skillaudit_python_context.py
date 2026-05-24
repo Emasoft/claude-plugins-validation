@@ -665,6 +665,96 @@ def _is_html_unescape(line: str, match: str) -> bool:
     return "html.unescape" in line
 
 
+# Issue #42 — a string COMPILED as a regular expression is inert data: it
+# describes a match, it is never executed. A scanner / validator that
+# ships a pattern catalog (CPV's own ``cpv_skillaudit_*.py``,
+# ``scan-for-prompt-injection.py`` — and any plugin doing input
+# validation) has regex literals like ``r"curl.*\|.*sh"`` /
+# ``r"eval\("`` / a sensitive-system-path matcher whose dangerous-looking
+# substrings are the scanner's own vocabulary, not a live threat.
+# Recognised by the two real shapes: a literal passed (directly or in a
+# pure-literal container fed through a comprehension) to ``re.<func>(...)``.
+_RE_PATTERN_FUNCS: Final[frozenset[str]] = frozenset(
+    {"compile", "match", "search", "fullmatch", "sub", "subn", "split", "findall", "finditer"}
+)
+
+
+def _is_re_module_pattern_call(node: ast.AST) -> bool:
+    """True iff ``node`` is a ``re.<func>(...)`` call on the stdlib ``re``
+    module (the receiver must literally be the name ``re`` — third-party
+    ``regex.compile`` and aliased imports are intentionally excluded so the
+    discriminator stays conservative)."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr in _RE_PATTERN_FUNCS
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "re"
+    )
+
+
+def _match_inside_re_pattern_literal(tree: ast.AST, line: int, source: str, match: str) -> bool:
+    """True iff ``match`` sits inside a string Constant that is a regex
+    PATTERN literal (issue #42).
+
+    Two precise shapes are accepted (no looser "an re.compile is somewhere
+    in this statement" heuristic, which would over-match):
+
+    1. The Constant is within the FIRST positional argument subtree of a
+       ``re.<func>(...)`` call — e.g. ``re.compile(r"curl.*\\|.*sh")`` or
+       ``re.match("a" "b", x)``.
+    2. The Constant is an element of a pure-literal container (List / Tuple
+       / Set, possibly nested) that is the ``.iter`` of a comprehension
+       whose ``.elt`` is a ``re.<func>(...)`` call — e.g.
+       ``tuple(re.compile(p) for p in (r"readFile", r"fs\\.read", …))``.
+
+    A regex pattern is never executed, so suppressing a dangerous-looking
+    substring inside it is safe: any actual misuse would live in the CODE
+    that consumes the compiled pattern (a ``.sub`` into an ``exec`` sink,
+    etc.), which is separate, still-visible code.
+    """
+    if not source:
+        return False
+    lines = source.splitlines()
+    if not (0 <= line - 1 < len(lines)):
+        return False
+    if match and match not in lines[line - 1]:
+        return False
+
+    target: ast.Constant | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            start = getattr(node, "lineno", None)
+            end = getattr(node, "end_lineno", None)
+            if start is not None and end is not None and start <= line <= end and (not match or match in node.value):
+                target = node
+                break
+    if target is None:
+        return False
+
+    # Shape 1 — target inside the first arg of an re.<func>(...) call.
+    for node in ast.walk(tree):
+        if _is_re_module_pattern_call(node):
+            args = node.args  # type: ignore[attr-defined]
+            if args and any(sub is target for sub in ast.walk(args[0])):
+                return True
+
+    # Shape 2 — target in the pure-literal iter of a comprehension whose
+    # elt compiles a regex.
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.GeneratorExp, ast.ListComp, ast.SetComp)):
+            continue
+        if not _is_re_module_pattern_call(node.elt):
+            continue
+        for gen in node.generators:
+            if any(sub is target for sub in ast.walk(gen.iter)):
+                return True
+
+    return False
+
+
 def classify(
     file_path: str,
     source: str,
@@ -717,6 +807,19 @@ def classify(
         return "unknown"
 
     line = line_idx + 1  # ast uses 1-based line numbers
+
+    # Issue #42 — a match inside a regex PATTERN literal (compiled via
+    # ``re.<func>(...)``) is the scanner's own detection vocabulary, not a
+    # live threat. Applies to ALL rules: a pattern string is inert data
+    # whether it looks like a shell command, a prompt-injection phrase, or
+    # a secret format — ``re`` compiles it for MATCHING, never executes it.
+    # Any real misuse lives in the code that CONSUMES the compiled pattern
+    # (a ``.sub`` result fed to ``exec``, etc.), which is separate,
+    # still-visible code. Runs before the call-shape checks: a regex line's
+    # enclosing call is ``re.compile``, never a shell call, so this cannot
+    # shadow a real ``os.system(...)`` / ``subprocess(... shell=True)``.
+    if _match_inside_re_pattern_literal(tree, line, source, match):
+        return "safe_literal"
 
     # PRIMARY PATH: find the enclosing Call. A line that contains a
     # shell-reaching call SHAPE must be classified by that shape — the
