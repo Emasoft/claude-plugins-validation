@@ -997,39 +997,16 @@ def _context_classifier_verdict(
             # fire, the heuristic chain falls through to "keep" — the
             # rule's declared severity stands.
             return ""
-        # Issue #40 root cause B — SOFT-intent and EXECUTION-class
-        # matches in a pure-DOCUMENTATION path (references/, docs/,
-        # examples/, README/CHANGELOG/…) are EXAMPLES that no pipeline
-        # ever executes as a shell and no pipeline ever loads as an
-        # agent instruction — exactly the reasoning the INTENT-HARD
-        # branch above already applies. A security skill that DOCUMENTS
-        # the attack patterns it defends against must be able to show a
-        # ``curl … | sh`` recipe or a ``${{ }}`` injection example
-        # without every example demoting to a publish-blocking NIT under
-        # ``--strict``. Suppress.
-        #
-        # EXCEPTION — secret-VALUE detectors (``SECRET_*`` per-vendor
-        # rules, ``HARDCODED_SECRET`` generic) are NOT "examples": a real
-        # credential committed in a README / references doc is a genuine
-        # PUBLIC leak (anyone reading the repo sees it), so secret-value
-        # findings keep their visibility in every path. A documented
-        # *placeholder* (``YOUR_API_KEY`` / ``sk-xxxx``) is still
-        # suppressed earlier by the placeholder check at the top of
-        # ``_confidence``.
-        #
-        # Mandate-preserving scope: this branch is reached ONLY for
-        # ``safe_doc`` context — prose, inline-code, markdown tables, and
-        # DATA-language fences (json/yaml/…). A markdown bash/sh fenced
-        # block returns ``"unknown"`` from the markdown classifier (NOT
-        # ``safe_doc``), so it flows to the heuristic chain and stays
-        # VISIBLE — the ".md code blocks are agent-executable, keep
-        # visible" mandate is intact. Instruction-loadable surfaces
-        # (SKILL.md, agents/, commands/, CLAUDE.md, .claude/rules/) are
-        # NOT documentation-only, so they still demote (an agent might
-        # act on the line).
-        _is_secret_value_rule = rule_id.startswith("SECRET_") or rule_id == "HARDCODED_SECRET"
-        if _is_documentation_only_path(file_path) and not _is_secret_value_rule:
-            return "suppress"
+        # EXECUTION-class examples in documentation paths are NOT
+        # suppressed here. The v2.105.0 review of issue #40 deliberately
+        # kept them VISIBLE (demoted) — "left visible rather than risk a
+        # markdown-prose blanket suppress" — and the maintainer mandate
+        # is to NOT relax any strict validation rule. A `curl … | sh` or
+        # `${{ }}` example in references/README is borderline (an agent
+        # reading progressive-disclosure references/ COULD act on it), so
+        # it is NOT a 100%-certain non-threat and stays visible. The
+        # author addresses it (reword / use a placeholder), per the
+        # "authors fix issues, not silence them" gate philosophy.
         if rule_id in _INTENT_SOFT_SIGNAL_RULES:
             # Soft signals — the rule's verb / concept appears benignly
             # in plugin self-description docs. Demote to NIT so the
