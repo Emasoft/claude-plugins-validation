@@ -1,0 +1,20 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate",
+  "header": "Validate — what to check",
+  "rows": [
+    {"key": "1", "action_id": "val_plugin",    "label": "Plugin (full audit) — Run every check we have on a whole plugin folder"},
+    {"key": "2", "action_id": "val_component", "label": "Single component — Skill / agent / command / hook / MCP / LSP / output-style / rule"},
+    {"key": "3", "action_id": "val_mkt",       "label": "Marketplace — Local folder / GitHub / any git URL / inline settings.json"},
+    {"key": "4", "action_id": "val_scope",     "label": "Scope — Project-scope (git-tracked) / Local-scope (not in git)"},
+    {"key": "5", "action_id": "val_quality",   "label": "Specific quality check — Security / cache / xref / docs / encoding / lint / other"},
+    {"key": "6", "action_id": "val_github",    "label": "From GitHub — Plugin or marketplace pulled from a GitHub repo"},
+    {"key": "7", "action_id": "val_batch",     "label": "Batch / fleet (v2.101.0) — Multiple plugins (marketplace / list / @listfile / scope)"},
+    {"key": "A", "action_id": "ask",           "label": "Ask the agent for a recommendation"},
+    {"key": "B", "action_id": "back",          "label": "Back — Go back to the top-level menu"},
+    {"key": "0", "action_id": "cancel",        "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

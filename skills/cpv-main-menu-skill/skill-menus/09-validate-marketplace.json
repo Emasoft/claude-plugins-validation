@@ -1,0 +1,17 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-marketplace",
+  "header": "Validate — marketplace source",
+  "rows": [
+    {"key": "1", "action_id": "mkt_local",  "label": "Local folder — A marketplace folder on this machine"},
+    {"key": "2", "action_id": "mkt_github", "label": "GitHub (owner/repo) — Clone a marketplace from a GitHub repo"},
+    {"key": "3", "action_id": "mkt_giturl", "label": "Any git URL — GitLab / Bitbucket / SSH / self-hosted"},
+    {"key": "4", "action_id": "mkt_inline", "label": "Inline (settings.json) — Marketplace blocks pasted directly"},
+    {"key": "A", "action_id": "ask",        "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",       "label": "Back — Go back to the Validate menu"},
+    {"key": "0", "action_id": "cancel",     "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

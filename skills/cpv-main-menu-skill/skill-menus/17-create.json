@@ -1,0 +1,23 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "create",
+  "header": "Create — what to scaffold",
+  "rows": [
+    {"key": "1",  "action_id": "new_plugin",       "label": "New plugin (latest pipeline standard) — Fresh plugin repo"},
+    {"key": "2",  "action_id": "new_mkt",          "label": "New marketplace — Fresh marketplace repo from scratch (Layout A/B/C)"},
+    {"key": "3",  "action_id": "new_skill",        "label": "New skill (in existing plugin) — Add skills/<name>/SKILL.md"},
+    {"key": "4",  "action_id": "new_agent",        "label": "New agent (in existing plugin) — Add agents/<name>.md"},
+    {"key": "5",  "action_id": "new_command",      "label": "New slash command (in existing plugin) — Add commands/<name>.md"},
+    {"key": "6",  "action_id": "new_hook",         "label": "New hook (in existing plugin) — Append entry to hooks/hooks.json"},
+    {"key": "7",  "action_id": "new_mcp",          "label": "New MCP server (in existing plugin) — Register server in .mcp.json"},
+    {"key": "8",  "action_id": "pack_components",  "label": "Pack components into a plugin (multi-select)"},
+    {"key": "9",  "action_id": "add_deps",         "label": "Add dependencies (existing plugin) — --add NAME[@MKT[@VER]] OR --from PATH-OR-URL"},
+    {"key": "10", "action_id": "impl_skills_menu", "label": "Implement the-skills-menu method (existing) — Decouple skills from agents"},
+    {"key": "A",  "action_id": "ask",              "label": "Ask the agent"},
+    {"key": "B",  "action_id": "back",             "label": "Back — Go back to the top-level menu"},
+    {"key": "0",  "action_id": "cancel",           "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

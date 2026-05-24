@@ -1,0 +1,13 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "done",
+  "header": "Anything else?",
+  "rows": [
+    {"key": "1", "action_id": "go_main", "label": "Do something else — Go back to the top-level menu"},
+    {"key": "A", "action_id": "ask",     "label": "Ask the agent"},
+    {"key": "0", "action_id": "done",    "label": "Done (exit) — Reply `Done.` and stop"}
+  ],
+  "footer": "Type a key:"
+}

@@ -1,0 +1,17 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "post-validate",
+  "header": "Validation finished — fix the findings?",
+  "rows": [
+    {"key": "1", "action_id": "fix_all",      "label": "Fix ALL issues (incl. WARNING) — Dispatch fixer on every finding"},
+    {"key": "2", "action_id": "fix_nit",      "label": "Fix NIT and higher — Skip WARNING-only findings"},
+    {"key": "3", "action_id": "fix_minor",    "label": "Fix MINOR and higher — Skip NIT and WARNING"},
+    {"key": "4", "action_id": "fix_major",    "label": "Fix MAJOR and higher — Only fix publish-blockers (and CRITICALs)"},
+    {"key": "5", "action_id": "fix_critical", "label": "Fix CRITICAL only — Strictest mode (loaders/security blockers only)"},
+    {"key": "A", "action_id": "ask",          "label": "Ask the agent"},
+    {"key": "0", "action_id": "end",          "label": "End — Done; exit without running the fixer"}
+  ],
+  "footer": "Type a key:"
+}

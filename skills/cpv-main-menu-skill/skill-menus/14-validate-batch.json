@@ -1,0 +1,21 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-batch",
+  "header": "Validate — batch / fleet (v2.101.0)",
+  "rows": [
+    {"key": "1", "action_id": "batch_validate",    "label": "Validate (read-only, fan-out) — /cpv-batch-validate"},
+    {"key": "2", "action_id": "batch_security",    "label": "Security audit (5 ext. scanners) — /cpv-batch-security-audit"},
+    {"key": "3", "action_id": "batch_cache_audit", "label": "Caching audit (CA-01..CA-06) — /cpv-batch-caching-audit"},
+    {"key": "4", "action_id": "batch_cache_opt",   "label": "Caching optimize (audit + fix) — /cpv-batch-caching-optimize"},
+    {"key": "5", "action_id": "batch_fix",         "label": "Fix (per-plugin) — /cpv-batch-fix"},
+    {"key": "6", "action_id": "batch_val_fix",     "label": "Validate + fix (same-turn) — /cpv-batch-validate-and-fix"},
+    {"key": "7", "action_id": "batch_full",        "label": "Full scan + fix (same-turn) — /cpv-batch-full-scan-and-fix"},
+    {"key": "8", "action_id": "batch_scope",       "label": "Scope-aware doctor (LOCAL only) — /cpv-batch-scope-diagnose"},
+    {"key": "A", "action_id": "ask",               "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",              "label": "Back — Go back to the Validate menu"},
+    {"key": "0", "action_id": "cancel",            "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

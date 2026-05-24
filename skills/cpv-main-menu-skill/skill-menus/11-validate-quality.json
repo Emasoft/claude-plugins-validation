@@ -1,0 +1,20 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-quality",
+  "header": "Validate — specific quality check",
+  "rows": [
+    {"key": "1", "action_id": "q_security", "label": "Security — Security scanners + rule packs (drills into §3.16)"},
+    {"key": "2", "action_id": "q_cache",    "label": "Cache patterns — Prompt-cache invalidation audit (dispatches to §3.3)"},
+    {"key": "3", "action_id": "q_xref",     "label": "Cross-references (xref) — Stale references between agents/skills/commands"},
+    {"key": "4", "action_id": "q_docs",     "label": "Documentation — README + doc structure rules"},
+    {"key": "5", "action_id": "q_encoding", "label": "File encoding — UTF-8, BOM marker, line endings on every .md/.json/.yaml"},
+    {"key": "6", "action_id": "q_lint",     "label": "Lint scripts (ruff / mypy / shellcheck) — Run linters on every script"},
+    {"key": "7", "action_id": "q_other",    "label": "Other (enterprise/scoring/telem) — Compliance / scoring / telemetry hazards"},
+    {"key": "A", "action_id": "ask",        "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",       "label": "Back — Go back to the Validate menu"},
+    {"key": "0", "action_id": "cancel",     "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

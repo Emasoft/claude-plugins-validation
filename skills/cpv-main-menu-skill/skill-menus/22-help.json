@@ -1,0 +1,16 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "help",
+  "header": "Help / About",
+  "rows": [
+    {"key": "1", "action_id": "help_top",     "label": "Show the top-level menu — Re-queue the main menu (the 8 categories)"},
+    {"key": "2", "action_id": "help_list",    "label": "List every CPV command — Print the name + description of every /cpv-* command"},
+    {"key": "3", "action_id": "help_version", "label": "Show CPV version — Read the version from .claude-plugin/plugin.json"},
+    {"key": "A", "action_id": "ask",          "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",         "label": "Back — Go back to the top-level menu"},
+    {"key": "0", "action_id": "cancel",       "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

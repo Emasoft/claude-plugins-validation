@@ -1,0 +1,17 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "cache",
+  "header": "Optimize for Cache — prompt-cache invalidation audit + refactor",
+  "rows": [
+    {"key": "1", "action_id": "cache_audit",   "label": "Audit only (CA-01..CA-06) — Pure read-only audit, per-rule findings"},
+    {"key": "2", "action_id": "cache_fix",     "label": "Audit + auto-fix (loop) — Dispatch cache-optimizer-agent in priority order"},
+    {"key": "3", "action_id": "cache_broader", "label": "Audit + broader cache-aware refactoring — Adds Phase 4 (CLAUDE.md split, etc.)"},
+    {"key": "4", "action_id": "cache_project", "label": "Audit project root (not a plugin) — Scans .claude/ + CLAUDE.md"},
+    {"key": "A", "action_id": "ask",           "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",          "label": "Back — Go back to the top-level menu"},
+    {"key": "0", "action_id": "cancel",        "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

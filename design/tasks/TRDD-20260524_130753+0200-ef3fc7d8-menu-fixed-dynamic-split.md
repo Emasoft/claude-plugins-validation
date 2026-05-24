@@ -3,7 +3,7 @@ trdd-id: ef3fc7d8-04f2-438f-b861-66f23d40115b
 title: Menu fixed/dynamic split — print_menu.py with skill-menus dirs and minimal dynamic payload
 status: in-progress
 created: 2026-05-24T13:07:53+0200
-updated: 2026-05-24T13:07:53+0200
+updated: 2026-05-24T18:12:48+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->
@@ -109,6 +109,34 @@ M. Main menu
    `cpv_menu.py` + `test_cpv_menu.py`; update the `validate_security.py` self-scan
    reference; grep proves no `cpv_menu` refs remain; regenerate the integrity
    manifest; full suite + self-scan green; bump version. (Push only on explicit ask.)
+
+## Progress
+
+- **Phase 1 — DONE** (commits `0bfb07d`, `88145cd`): `scripts/print_menu.py`
+  with `tests/test_print_menu.py` (36 tests). Self-audit fixed slug
+  precedence and dead code.
+- **Phase 2 — DONE**: 26 fixed menus extracted to
+  `skills/cpv-main-menu-skill/skill-menus/NN-*.json`; recipes rewritten to
+  `print_menu.py fixed NN` (no heredocs left; `print_menu.py` used 82× in
+  menu-tree.md, 19× in SKILL.md; 0 `cpv_menu.py` refs). `tests/test_cpv_main_menu_specs.py`
+  (134 spec round-trip tests) green.
+  - **Deviation / important finding (heuristic fix, commit `4f8d6ed`):** Phase 2
+    surfaced 9 SkillAudit self-scan NIT findings that were *pre-existing* in
+    v2.105.0 (proven by cold-scanning HEAD — identical 9, different line
+    numbers). They were masked earlier by the scan cache (cache key =
+    content_hash + catalog_hash + __version__; classifier-logic edits are NOT in
+    the key, so warm-cache reads served stale clean results). Fixed via 3
+    self-guarded `safe_literal` discriminators in `_skillaudit_markdown_context.py`
+    (mnemonic-no-crypto-context, benign-recon-no-network-sink, inert-token-in-
+    string) — NOT a catalog edit (avoids the cache cascade). Two-sided tests in
+    `tests/test_skillaudit_markdown_certain_benign.py` (21). Cold self-scan now
+    0/0/0/0 + WARNING-only.
+  - **Follow-up worth tracking:** the scan-cache key should fold in the 5
+    `_skillaudit_*_context.py` classifier hashes (alongside the catalog hash) so
+    classifier edits invalidate the cache without needing `CPV_SCAN_CACHE=0`.
+    User-facing correctness is already fine (publish bumps `__version__`), so this
+    is a dev-ergonomics hardening, not a release blocker.
+- **Phases 3-5 — pending.**
 
 ## Test scenarios (Phase 1)
 

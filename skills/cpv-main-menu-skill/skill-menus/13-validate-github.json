@@ -1,0 +1,15 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-github",
+  "header": "Validate — from GitHub",
+  "rows": [
+    {"key": "1", "action_id": "gh_plugin", "label": "Plugin (owner/repo) — Check a plugin from a GitHub repo"},
+    {"key": "2", "action_id": "gh_mkt",    "label": "Marketplace (owner/repo) — Check a marketplace from a GitHub repo"},
+    {"key": "A", "action_id": "ask",       "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",      "label": "Back — Go back to the Validate menu"},
+    {"key": "0", "action_id": "cancel",    "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

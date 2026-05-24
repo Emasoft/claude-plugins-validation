@@ -1,0 +1,25 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "manage",
+  "header": "Manage — installed plugins and registry",
+  "rows": [
+    {"key": "1",  "action_id": "mgr_list",          "label": "List installed plugins — Show every plugin Claude Code knows about"},
+    {"key": "2",  "action_id": "mgr_install",       "label": "Install / update / enable / off — Hand off to the plugin-manager agent"},
+    {"key": "3",  "action_id": "mgr_doctor",        "label": "Health check — Look for problems in registry, settings, and cache"},
+    {"key": "4",  "action_id": "mgr_scanners",      "label": "Install external scanners — Install all the security scanners CPV uses"},
+    {"key": "5",  "action_id": "mgr_prune",         "label": "Prune old cached plugin versions — Free disk space"},
+    {"key": "6",  "action_id": "mgr_publish",       "label": "Bump version + publish — Bump patch / minor / major and run pipeline"},
+    {"key": "7",  "action_id": "mgr_version",       "label": "Show CPV version — Read the version from .claude-plugin/plugin.json"},
+    {"key": "8",  "action_id": "mgr_readme",        "label": "Refresh plugin README — Re-build the auto-generated README sections"},
+    {"key": "10", "action_id": "mgr_standardize",   "label": "Standardize plugin — Re-write the plugin's publish.py + CI + retry helpers"},
+    {"key": "11", "action_id": "mgr_add_component", "label": "Add component — Add a new skill / agent / command / hook / mcp to a plugin"},
+    {"key": "12", "action_id": "mgr_strip_dev",     "label": "Move tests to a sub-repo — Move tests/ into a separate git submodule (PSS)"},
+    {"key": "13", "action_id": "mgr_migrate_mkt",   "label": "Migrate marketplace.json — Normalize old source.url, detect dead 404s"},
+    {"key": "A",  "action_id": "ask",               "label": "Ask the agent"},
+    {"key": "B",  "action_id": "back",              "label": "Back — Go back to the top-level menu"},
+    {"key": "0",  "action_id": "cancel",            "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

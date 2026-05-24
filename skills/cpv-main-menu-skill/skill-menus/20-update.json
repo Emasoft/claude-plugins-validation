@@ -1,0 +1,14 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "update",
+  "header": "Update — upgrade plugin to current canonical pipeline standard",
+  "rows": [
+    {"key": "1", "action_id": "upd_upgrade", "label": "Upgrade plugin to current pipeline standard — Apply ALL pipeline-migration steps (§1–§5)"},
+    {"key": "A", "action_id": "ask",         "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",        "label": "Back — Go back to the top-level menu"},
+    {"key": "0", "action_id": "cancel",      "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

@@ -1,0 +1,18 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "publish",
+  "header": "Publish & Migrate — branch rules, link, publish, migrate",
+  "rows": [
+    {"key": "1", "action_id": "pub_branch_here","label": "Protect this repo's branches — Apply branch-protection rules to `origin`"},
+    {"key": "2", "action_id": "pub_branch_any", "label": "Protect another repo's branches — Apply branch-protection rules to any owner/repo"},
+    {"key": "3", "action_id": "pub_link",       "label": "Link a plugin to a marketplace — Register a plugin in a marketplace's plugin list"},
+    {"key": "4", "action_id": "pub_publish",    "label": "Publish plugin to its marketplace — Run the full publish pipeline"},
+    {"key": "5", "action_id": "pub_migrate",    "label": "Migrate marketplace layout (A ↔ B ↔ C) — Convert marketplace.json layout"},
+    {"key": "A", "action_id": "ask",            "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",           "label": "Back — Go back to the top-level menu"},
+    {"key": "0", "action_id": "cancel",         "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

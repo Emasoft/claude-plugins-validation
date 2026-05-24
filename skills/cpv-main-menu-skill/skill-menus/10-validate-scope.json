@@ -1,0 +1,15 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-scope",
+  "header": "Validate — scope",
+  "rows": [
+    {"key": "1", "action_id": "scope_project", "label": "Project-scope (git-tracked) — Files in .claude/ that ARE checked into git"},
+    {"key": "2", "action_id": "scope_local",   "label": "Local-scope (not in git) — settings.local.json + ~/.claude.json state"},
+    {"key": "A", "action_id": "ask",           "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",          "label": "Back — Go back to the Validate menu"},
+    {"key": "0", "action_id": "cancel",        "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}

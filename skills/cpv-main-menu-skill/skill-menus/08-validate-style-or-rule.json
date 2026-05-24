@@ -1,0 +1,15 @@
+{
+  "spec_version": 1,
+  "mode": "menu",
+  "plugin": "cpv",
+  "slug": "validate-style-or-rule",
+  "header": "Validate — output-style or rule file",
+  "rows": [
+    {"key": "1", "action_id": "style_file", "label": "Output-style — Output-style files in .claude/output-styles/"},
+    {"key": "2", "action_id": "rule_file",  "label": "Rule file — Rule-file headers and content (.claude/rules/*.md)"},
+    {"key": "A", "action_id": "ask",        "label": "Ask the agent"},
+    {"key": "B", "action_id": "back",       "label": "Back — Go back to the Single-component menu"},
+    {"key": "0", "action_id": "cancel",     "label": "Cancel / Exit"}
+  ],
+  "footer": "Type a key:"
+}
