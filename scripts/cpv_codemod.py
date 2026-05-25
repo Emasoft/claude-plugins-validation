@@ -44,6 +44,7 @@ import re
 import shutil
 import sys
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -329,14 +330,41 @@ def _apply_add_standard_sections(text: str) -> str:
 
 
 # ── Subcommand: external-skip-list ────────────────────────────────────────────
-def _apply_external_skip_list(plugin_root: Path) -> tuple[bool, str]:
+@dataclass(frozen=True)
+class SkipListResult:
+    """Structured outcome of ``_apply_external_skip_list``.
+
+    ``ok`` is the success signal the exit code is derived from — a clean
+    no-op (manifest missing, no vendored dirs, already excluded) is still
+    ``ok=True`` (exit 0); only a genuine inability to proceed is ``ok=False``.
+    Deriving the exit code from this flag — rather than substring-matching
+    ``summary`` — means the human-readable text can be reworded without
+    silently flipping the CLI's exit status (finding #9).
+
+    ``changed`` is True only when ``apply`` was set AND the manifest was
+    actually rewritten; in dry-run it is always False even when a write
+    WOULD have happened (see ``would_change``).
+    """
+
+    changed: bool
+    ok: bool
+    summary: str
+    would_change: bool = False
+
+
+def _apply_external_skip_list(plugin_root: Path, *, apply: bool) -> SkipListResult:
     """Add detected vendored dirs to plugin.json's cpv exclusion list.
 
-    Returns (changed, summary).
+    Honors the module-wide dry-run-by-default contract (finding #1): in
+    dry-run (``apply=False``) the manifest is NEVER written — instead the
+    diff is printed and ``would_change`` reports what an ``--apply`` run
+    would do. In apply mode the manifest is backed up (mirroring the
+    markdown transforms' backup behavior) BEFORE it is rewritten.
     """
     manifest = plugin_root / ".claude-plugin" / "plugin.json"
     if not manifest.is_file():
-        return False, f"No .claude-plugin/plugin.json under {plugin_root}"
+        # No manifest to update is a clean no-op, not a failure.
+        return SkipListResult(changed=False, ok=True, summary=f"No .claude-plugin/plugin.json under {plugin_root}")
     raw = manifest.read_text(encoding="utf-8")
     data = json.loads(raw)
     detected: set[str] = set()
@@ -346,18 +374,34 @@ def _apply_external_skip_list(plugin_root: Path) -> tuple[bool, str]:
         if child.is_dir() and child.name in VENDORED_DIR_NAMES:
             detected.add(child.name)
     if not detected:
-        return False, "No vendored directories detected"
+        return SkipListResult(changed=False, ok=True, summary="No vendored directories detected")
     cpv_block = data.setdefault("cpv", {})
     existing = set(cpv_block.get("exclude_paths", []))
     new = sorted(existing | detected)
     if new == sorted(existing):
-        return False, f"All {len(detected)} vendored paths already excluded"
+        return SkipListResult(
+            changed=False, ok=True, summary=f"All {len(detected)} vendored paths already excluded"
+        )
     cpv_block["exclude_paths"] = new
     new_raw = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
     if new_raw == raw:
-        return False, "No change after re-serialization"
+        return SkipListResult(changed=False, ok=True, summary="No change after re-serialization")
+    added = len(detected - existing)
+    # Always show the diff so the user can review it (dry-run AND apply).
+    _print_diff(manifest.relative_to(plugin_root), raw, new_raw)
+    if not apply:
+        return SkipListResult(
+            changed=False,
+            ok=True,
+            would_change=True,
+            summary=f"Would add {added} vendored path(s) to cpv.exclude_paths (dry-run — re-run with --apply to write)",
+        )
+    backup_root = _backup_dir(plugin_root)
+    _backup_file(manifest, plugin_root, backup_root)
     manifest.write_text(new_raw, encoding="utf-8")
-    return True, f"Added {len(detected - existing)} vendored path(s) to cpv.exclude_paths"
+    return SkipListResult(
+        changed=True, ok=True, summary=f"Added {added} vendored path(s) to cpv.exclude_paths"
+    )
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -403,9 +447,11 @@ def _run_subcommand(
 ) -> int:
     """Run one subcommand across the plugin tree. Returns exit code."""
     if transform == "external-skip-list":
-        changed, summary = _apply_external_skip_list(plugin_root)
-        print(f"[{transform}] {summary}")
-        return 0 if changed or "already excluded" in summary or "No vendored" in summary else 1
+        result = _apply_external_skip_list(plugin_root, apply=apply)
+        print(f"[{transform}] {result.summary}")
+        # Exit code comes from the structured `ok` flag — never from
+        # scraping `summary` (finding #9). Reword the text freely.
+        return 0 if result.ok else 1
     backup_root = _backup_dir(plugin_root)
     files_touched = 0
     for md_path in _walk_markdown(plugin_root):

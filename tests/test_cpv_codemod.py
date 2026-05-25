@@ -255,8 +255,9 @@ class TestExternalSkipList:
         plugin_root = _make_plugin(tmp_path)
         (plugin_root / "external").mkdir()
         (plugin_root / "node_modules").mkdir()
-        changed, _summary = cpv_codemod._apply_external_skip_list(plugin_root)
-        assert changed
+        result = cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
+        assert result.changed
+        assert result.ok
         manifest = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         assert "external" in manifest["cpv"]["exclude_paths"]
         assert "node_modules" in manifest["cpv"]["exclude_paths"]
@@ -264,18 +265,20 @@ class TestExternalSkipList:
     def test_no_vendored_dirs_returns_false(self, tmp_path):
         plugin_root = _make_plugin(tmp_path)
         (plugin_root / "src").mkdir()
-        changed, summary = cpv_codemod._apply_external_skip_list(plugin_root)
-        assert not changed
-        assert "No vendored" in summary
+        result = cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
+        assert not result.changed
+        assert result.ok
+        assert "No vendored" in result.summary
 
     def test_already_excluded_paths_idempotent(self, tmp_path):
         plugin_root = _make_plugin(tmp_path)
         (plugin_root / "external").mkdir()
-        cpv_codemod._apply_external_skip_list(plugin_root)
+        cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
         # Run again — should report no NEW additions
-        changed, summary = cpv_codemod._apply_external_skip_list(plugin_root)
-        assert not changed
-        assert "already excluded" in summary
+        result = cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
+        assert not result.changed
+        assert result.ok
+        assert "already excluded" in result.summary
 
     def test_gitmodules_paths_included(self, tmp_path):
         plugin_root = _make_plugin(tmp_path)
@@ -283,8 +286,8 @@ class TestExternalSkipList:
             '[submodule "vendored/lib"]\n  path = vendored/lib\n  url = https://example.com/lib.git\n',
             encoding="utf-8",
         )
-        changed, _summary = cpv_codemod._apply_external_skip_list(plugin_root)
-        assert changed
+        result = cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
+        assert result.changed
         manifest = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         assert "vendored/lib" in manifest["cpv"]["exclude_paths"]
 
