@@ -671,7 +671,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: cannot read marketplace.json: {e}", file=sys.stderr)
         return 1
 
-    marketplace_dir = mkpl_path.parent if mkpl_path.parent.name == ".claude-plugin" else mkpl_path.parent
+    # If marketplace.json lives in .claude-plugin/, the marketplace dir is its
+    # grandparent; otherwise it is the parent. (Was a no-op ternary — both arms
+    # returned .parent — immediately overwritten by this same conditional.)
+    marketplace_dir = mkpl_path.parent
     if mkpl_path.parent.name == ".claude-plugin":
         marketplace_dir = mkpl_path.parent.parent
 

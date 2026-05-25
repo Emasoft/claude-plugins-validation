@@ -539,7 +539,15 @@ def _extract_tar(archive: Path, dest: Path, mode: str):
         if PYTHON_VERSION >= (3, 12):
             # extractall with filter="data" is safe against path traversal (Python 3.12+)
             # NOTE: filter kwarg only works on extractall(), NOT on extract()
-            tf.extractall(dest, filter="data")
+            # filter="data" raises a tarfile.FilterError subclass
+            # (OutsideDestinationError / AbsoluteLinkError / SpecialFileError / …)
+            # on a malicious entry. Catch it so an unsafe tar fails IDENTICALLY to
+            # the ZIP path and the pre-3.12 manual loop — clean message + cleanup +
+            # exit 1 — instead of a raw traceback that leaves a partial tree behind.
+            try:
+                tf.extractall(dest, filter="data")
+            except tarfile.FilterError as exc:
+                _abort_archive(dest, archive, f"unsafe tar entry: {exc}")
         else:
             # Manual path-traversal and symlink prevention for older Python
             # Append os.sep so /tmp/abc doesn't match /tmp/abcdef (path traversal bypass)
