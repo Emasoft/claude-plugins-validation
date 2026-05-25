@@ -445,9 +445,10 @@ class TestValidateCommandAgentRefsExtended:
         info_msgs = [r.message for r in report.results if r.level == "INFO"]
         assert any("No commands/" in m for m in info_msgs)
 
-    def test_command_with_unknown_spawn_pattern_reports_major(self, tmp_path: Path):
-        """When a command uses 'spawn unknown-bot agent' pattern with non-builtin agent, a MAJOR issue is reported."""
-        # Covers lines 424-435 (AGENT_SPAWN_PATTERN + builtin check)
+    def test_command_with_unknown_spawn_pattern_reports_warning(self, tmp_path: Path):
+        """A PROSE spawn/invoke mention of an unknown agent is an advisory WARNING,
+        not a blocking MAJOR (audit doc #6 recalibration — the heuristic fires on
+        innocuous English like 'use the browser agent')."""
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
         (commands_dir / "run.md").write_text(
@@ -457,9 +458,10 @@ class TestValidateCommandAgentRefsExtended:
         report = CrossReferenceValidationReport()
         validate_command_agent_refs(tmp_path, report, set())
 
-        assert report.has_major
-        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("custom-bot" in m for m in major_msgs)
+        # Recalibrated to WARNING — must NOT block (no MAJOR), but stays visible.
+        assert not report.has_major
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("custom-bot" in m for m in warning_msgs)
 
 
 class TestValidateSkillRefs:

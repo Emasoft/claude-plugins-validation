@@ -4668,7 +4668,8 @@ NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
 # Maximum recommended values for names and descriptions
 MAX_NAME_LENGTH = 64  # Official Claude Code spec: max 64 characters for skill/component names
-MAX_DESCRIPTION_LENGTH = 1024
+# (MAX_DESCRIPTION_LENGTH removed — dead since the char→token migration replaced
+# it with DESCRIPTION_TOKEN_LIMIT below. audit MINOR agent #6)
 MIN_BODY_CHARS = 100
 MAX_BODY_WORDS = 2000
 

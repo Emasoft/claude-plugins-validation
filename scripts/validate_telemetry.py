@@ -122,8 +122,9 @@ OTEL_ALL_ENV_VARS: frozenset[str] = frozenset(
         "OTEL_TRACES_EXPORT_INTERVAL",
         # Resource attributes
         "OTEL_RESOURCE_ATTRIBUTES",
-        # v2.1.111+ — full request/response bodies (CRITICAL when shipped)
-        "OTEL_LOG_RAW_API_BODIES",
+        # NOTE: OTEL_LOG_RAW_API_BODIES (v2.1.111+, full request/response bodies,
+        # CRITICAL when shipped) lives in the "Log exfiltration" group above — it
+        # was listed twice here; the duplicate was removed. (audit NIT doc #8)
         # v2.1.117+ — debounce for the otelHeadersHelper refresh
         "CLAUDE_CODE_OTEL_HEADERS_HELPER_DEBOUNCE_MS",
         # v2.1.121 — beta tracing opt-ins. Plugin-shipped values are

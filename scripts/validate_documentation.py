@@ -422,7 +422,10 @@ def validate_broken_links(plugin_path: Path, report: DocumentationValidationRepo
         # — those are handled by validate_image_references, and without it the
         # link regex would double-report every image as a broken link too.
         scrubbed = _strip_code_regions(content)
-        links = re.findall(r"(?<!!)\[([^\]]*)\]\(([^)]+)\)", scrubbed)
+        # Target group allows ONE level of balanced parens so a real filename
+        # like `path/file(1).md` is not truncated at the first `)` (which would
+        # false-flag `path/file(1` as a broken link). (audit WARNING doc #5)
+        links = re.findall(r"(?<!!)\[([^\]]*)\]\(((?:[^()]|\([^()]*\))*)\)", scrubbed)
 
         for link_text, link_target in links:
             target = link_target.strip()
@@ -805,7 +808,9 @@ def validate_image_references(plugin_path: Path, report: DocumentationValidation
 
         # Find all image references: ![alt](path), ignoring code regions.
         scrubbed = _strip_code_regions(content)
-        images = re.findall(r"!\[([^\]]*)\]\(([^)]+)\)", scrubbed)
+        # Balanced-paren target group (parity with the link check above) so an
+        # image path like `img/pic(1).png` is not truncated. (audit WARNING doc #5)
+        images = re.findall(r"!\[([^\]]*)\]\(((?:[^()]|\([^()]*\))*)\)", scrubbed)
 
         for alt_text, img_path in images:
             target = img_path.strip()
@@ -1005,6 +1010,11 @@ def print_json(report: DocumentationValidationReport) -> None:
             "critical": sum(1 for r in report.results if r.level == "CRITICAL"),
             "major": sum(1 for r in report.results if r.level == "MAJOR"),
             "minor": sum(1 for r in report.results if r.level == "MINOR"),
+            # WARNING + NIT are emitted heavily by this validator now (README
+            # existence, advisory heuristics) — JSON consumers were getting an
+            # incomplete count. (audit MINOR doc #4)
+            "warning": sum(1 for r in report.results if r.level == "WARNING"),
+            "nit": sum(1 for r in report.results if r.level == "NIT"),
             "info": sum(1 for r in report.results if r.level == "INFO"),
             "passed": sum(1 for r in report.results if r.level == "PASSED"),
         },

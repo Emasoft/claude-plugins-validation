@@ -325,13 +325,22 @@ class TestValidateDescriptionField:
         validate_description_field(frontmatter, "body", report)
         assert report.has_minor
 
-    def test_long_description_reports_minor(self):
-        """Description longer than 500 characters should report MINOR (line 205)."""
-        frontmatter = {"description": "A" * 501}
+    def test_over_token_limit_description_reports_major(self):
+        """A description over the canonical DESCRIPTION_TOKEN_LIMIT reports a
+        token-based MAJOR (audit MINOR agent #10 — replaced the old char MINOR)."""
+        # ~300 distinct words → clearly more than 200 tokens.
+        frontmatter = {"description": " ".join(f"word{i}" for i in range(300))}
         report = _make_report()
         validate_description_field(frontmatter, "body", report)
-        minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
-        assert any("long" in m for m in minor_msgs)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("token" in m.lower() for m in major_msgs), [r.message for r in report.results]
+
+    def test_within_token_limit_description_no_major(self):
+        """Two-sided: a short, valid description produces no token MAJOR."""
+        frontmatter = {"description": "A concise skill that greets the user politely when asked."}
+        report = _make_report()
+        validate_description_field(frontmatter, "body", report)
+        assert not any("token" in r.message.lower() and r.level == "MAJOR" for r in report.results)
 
 
 class TestValidateContextField:

@@ -56,9 +56,11 @@ except ImportError:
 from cpv_validation_common import (  # noqa: E402  (import below conditional yaml fallback)
     BUILTIN_AGENT_TYPES,
     COLORS,
+    DESCRIPTION_TOKEN_LIMIT,
     SKILL_FRONTMATTER_FIELDS,
     VALID_CONTEXT_VALUES,
     ValidationReport,
+    check_token_limit,
     save_report_and_print_summary,
     validate_component_name,
 )
@@ -214,11 +216,17 @@ def validate_description_field(frontmatter: dict[str, Any], body: str, report: V
             "SKILL.md",
         )
 
-    if len(desc) > 500:
-        report.minor(
-            f"Description is long ({len(desc)} chars), consider shortening",
-            "SKILL.md",
-        )
+    # Token-based description gate — single source of truth (DESCRIPTION_TOKEN_LIMIT),
+    # same canonical limit the comprehensive validator enforces. Replaces the old
+    # pre-migration char-based `len(desc) > 500` MINOR. (audit MINOR agent #10)
+    check_token_limit(
+        desc,
+        DESCRIPTION_TOKEN_LIMIT,
+        report,
+        "SKILL.md",
+        "Description",
+        "Shorten it — a long description dilutes the trigger signal.",
+    )
 
     report.passed("'description' field present", "SKILL.md")
 

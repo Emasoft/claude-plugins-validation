@@ -143,6 +143,17 @@ def validate_path_value(
     if plugin_root and "${CLAUDE_PLUGIN_ROOT}" in value:
         resolved = value.replace("${CLAUDE_PLUGIN_ROOT}", str(plugin_root))
         resolved_path = Path(resolved)
+        # Security check: detect path traversal out of plugin root, mirroring
+        # validate_mcp.validate_path_value. A ${CLAUDE_PLUGIN_ROOT}/../escape that
+        # resolves outside plugin_root means the LSP command/cwd reads files
+        # outside the plugin — previously this passed with only an INFO. (audit MINOR lsp #6)
+        try:
+            resolved_abs = resolved_path.resolve()
+            plugin_root_abs = plugin_root.resolve()
+            resolved_abs.relative_to(plugin_root_abs)
+        except (ValueError, OSError):
+            report.major(f"Path traverses outside plugin root in {context}: {value} (resolves to {resolved_path})")
+            return
         # Check existence for ANY resolved path, not only those with an extension.
         # Extensionless executables (e.g. "pyright-langserver", "gopls") would
         # otherwise silently skip the existence check and produce no signal
@@ -642,7 +653,11 @@ def validate_plugin_lsp(
                                 file_context="plugin.json:lspServers",
                             )
                         else:
-                            report.major(
+                            # Parity with the external wrapped-config path (which
+                            # uses CRITICAL for the identical structural error) —
+                            # a non-object server config is the same runtime
+                            # breakage regardless of source. (audit MINOR lsp #5)
+                            report.critical(
                                 f"Server '{inline_name}' config must be an object "
                                 "in plugin.json:lspServers"
                             )

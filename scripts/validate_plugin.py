@@ -613,30 +613,33 @@ def _collect_manifest_referenced_dirs(plugin_root: Path) -> set[str]:
             value = manifest.get(field)
             if value is None:
                 continue
-            # Inline object/array: walk it directly
-            if isinstance(value, (dict, list)):
+            # Three mutually-exclusive shapes (audit NIT lsp #8 — the old
+            # `if (dict,list)` + `if str` + `elif list` double-processed a list
+            # and read as dead code):
+            #   dict → inline object, walk directly
+            #   str  → path reference, load the file and walk it
+            #   list → array of EITHER inline objects OR path-string references
+            if isinstance(value, dict):
                 for s in _walk_for_command_args(value):
                     referenced |= _extract_referenced_dirs_from_text(s)
-            # Path string: also load the referenced file (if it exists) and walk it
-            if isinstance(value, str):
-                ref_path = value
-                if ref_path.startswith("./"):
-                    ref_path = ref_path[2:]
+            elif isinstance(value, str):
+                ref_path = value[2:] if value.startswith("./") else value
                 ref_file = plugin_root / ref_path
                 ref_data = _safe_load(ref_file)
                 if ref_data is not None:
                     for s in _walk_for_command_args(ref_data):
                         referenced |= _extract_referenced_dirs_from_text(s)
-            # Array of path strings (e.g. mcpServers: ["./a.json", "./b.json"])
             elif isinstance(value, list):
                 for entry in value:
-                    if not isinstance(entry, str):
-                        continue
-                    ref_path = entry[2:] if entry.startswith("./") else entry
-                    ref_file = plugin_root / ref_path
-                    ref_data = _safe_load(ref_file)
-                    if ref_data is not None:
-                        for s in _walk_for_command_args(ref_data):
+                    if isinstance(entry, str):
+                        ref_path = entry[2:] if entry.startswith("./") else entry
+                        ref_file = plugin_root / ref_path
+                        ref_data = _safe_load(ref_file)
+                        if ref_data is not None:
+                            for s in _walk_for_command_args(ref_data):
+                                referenced |= _extract_referenced_dirs_from_text(s)
+                    else:
+                        for s in _walk_for_command_args(entry):
                             referenced |= _extract_referenced_dirs_from_text(s)
 
     return referenced
@@ -3189,12 +3192,13 @@ def validate_readme(plugin_root: Path, report: ValidationReport) -> None:
     """Validate README and all documentation — delegates to validate_documentation().
 
     `validate_documentation` (validate_documentation.py) is the single source of
-    truth for the 13 documentation rules (README existence at CRITICAL,
-    installation/usage/description sections, broken links, image refs, CHANGELOG,
-    heading hierarchy, code-fence closure + language tags, list/table structure).
-    It OWNS the README-existence finding, so the old inline MINOR existence check
-    is removed. The badge-marker check below is NOT part of validate_documentation
-    and is preserved here.
+    truth for the 13 documentation rules (README existence at WARNING — advisory,
+    non-blocking, per the TRDD-021250b5 recalibration; installation/usage/
+    description sections, broken links, image refs, CHANGELOG, heading hierarchy,
+    code-fence closure + language tags, list/table structure). It OWNS the
+    README-existence finding, so the old inline existence check is removed. The
+    badge-marker check below is NOT part of validate_documentation and is
+    preserved here.
     """
     doc_report = validate_documentation_full(plugin_root)
     for result in doc_report.results:

@@ -218,11 +218,15 @@ def _strip_noise(content: str) -> str:
     Returns:
         Content with noise regions blanked out.
     """
-    # Strip leading frontmatter
+    # Strip leading frontmatter. Blank every non-newline char to a space but
+    # KEEP the newlines, so the line numbers (and any future byte offsets) of the
+    # body stay correct — the old code collapsed the whole block to one line of
+    # spaces, contradicting this function's own newline-preserving contract.
+    # (audit NIT doc #7)
     if content.startswith("---\n"):
         m = re.match(r"^---\n.*?\n---\n", content, re.DOTALL)
         if m:
-            content = (" " * (m.end() - m.start() - 1)) + "\n" + content[m.end() :]
+            content = re.sub(r"[^\n]", " ", m.group(0)) + content[m.end() :]
 
     def _blank(m: re.Match[str]) -> str:
         # Preserve newlines so line numbers stay correct.
@@ -1160,14 +1164,21 @@ def validate_command_agent_refs(
         # which contained model names + scout/oracle as if they were built-ins).
         for ref_agent in spawn_refs:
             ref_agent_normalized = _normalize_subagent_type(ref_agent)
-            if ref_agent_normalized in available_agents:
-                continue
+            # (doc #9) The normalized-vs-raw `in available_agents` check was
+            # redundant — `_available_normalized` (normalized forms of the same
+            # set) fully covers it on the next line.
             if ref_agent_normalized in _available_normalized:
                 continue  # v2.1.140 fuzzy match
             if ref_agent_normalized in _builtin_normalized:
                 continue
-            report.major(
-                f"Command mentions unknown agent '{ref_agent}'",
+            # (doc #6) This is a PROSE heuristic — it fires on innocuous English
+            # like "use the browser agent" / "we use the X agent". It is NOT a
+            # structural dispatch error (the ghost-dispatch path above stays
+            # CRITICAL), so per the calibration rule it is advisory WARNING, not
+            # a blocking MAJOR.
+            report.warning(
+                f"Command prose mentions a possible agent name '{ref_agent}' that is not a known agent "
+                "(heuristic — ignore if this is ordinary prose, not a dispatch)",
                 rel_path,
             )
 
