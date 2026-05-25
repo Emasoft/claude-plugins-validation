@@ -99,18 +99,29 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any] | None, str, int]:
     if not content.startswith("---"):
         return None, content, 0
 
-    # Find closing ---
-    parts = content.split("---", 2)
-    if len(parts) < 3:
+    # Split on the closing `---` DELIMITER LINE — never a bare `---` substring.
+    # `content.split("---", 2)` corrupts valid frontmatter whose VALUE contains
+    # `---` (e.g. `description: "use --- as a separator"`), truncating the YAML
+    # and producing a false "Malformed frontmatter". Opener and closer must each
+    # be `---` alone on their own line.
+    lines = content.split("\n")
+    if lines[0].strip() != "---":
+        return None, content, 0
+    closing_idx = None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            closing_idx = idx
+            break
+    if closing_idx is None:
         return None, content, 0
 
+    fm_text = "\n".join(lines[1:closing_idx])
+    body = "\n".join(lines[closing_idx + 1 :])
     try:
-        frontmatter = _yaml_safe_load(parts[1])
+        frontmatter = _yaml_safe_load(fm_text)
         if frontmatter is None:
             frontmatter = {}
-        body = parts[2]
-        # Count lines to find frontmatter end
-        fm_end_line = parts[0].count("\n") + parts[1].count("\n") + 2
+        fm_end_line = closing_idx + 1
         return frontmatter, body, fm_end_line
     except _YAMLError:
         return None, content, 0

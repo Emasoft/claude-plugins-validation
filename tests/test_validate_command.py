@@ -380,10 +380,23 @@ class TestValidateAllowedToolsField:
         assert not any(r.level == "MINOR" and "empty" in r.message for r in report.results)
         assert any(r.level == "WARNING" and "omit" in r.message.lower() for r in report.results)
 
-    def test_invalid_tool_in_list_reports_major(self):
-        """An unknown tool name in the list should produce MAJOR (lines 305, 308-309)."""
+    def test_unknown_tool_in_list_reports_info_not_major(self):
+        """A well-formed but UNKNOWN tool name is advisory INFO, not blocking MAJOR.
+
+        TRDD-021250b5: an unknown-but-well-formed tool is almost always a custom /
+        new / MCP tool CPV's VALID_TOOLS list doesn't know yet. Agents and skills
+        treat this as advisory; commands now match (INFO). Two-sided companion:
+        a genuinely MALFORMED pattern still reports MAJOR (see below).
+        """
         report = CommandValidationReport()
         validate_allowed_tools_field({"allowed-tools": ["Bash", "NonExistentTool"]}, "bad-tool.md", report)
+        assert any(r.level == "INFO" and "may be custom" in r.message for r in report.results)
+        assert not any(r.level == "MAJOR" and "NonExistentTool" in r.message for r in report.results)
+
+    def test_malformed_tool_pattern_reports_major(self):
+        """A genuinely MALFORMED tool pattern (bad syntax) still reports MAJOR."""
+        report = CommandValidationReport()
+        validate_allowed_tools_field({"allowed-tools": ["Bash(unclosed"]}, "bad-fmt.md", report)
         assert any(r.level == "MAJOR" and "Invalid tool pattern" in r.message for r in report.results)
 
 

@@ -3031,7 +3031,9 @@ def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_c
             # 'name' has no skills/<name>/ folder to be matched against.
             skill_report = validate_skill_comprehensive(
                 plugin_root,
-                strict_mode=True,
+                # Nixtla strict mode is a quality opinion, not Anthropic-validity —
+                # see the matching call below; do not block valid skills on it.
+                strict_mode=False,
                 strict_openspec=False,
                 validate_pillars_flag=False,
                 skip_platform_checks=skip_platform_checks,
@@ -3071,7 +3073,14 @@ def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_c
         # Use comprehensive validator with all checks enabled
         skill_report = validate_skill_comprehensive(
             skill_dir,
-            strict_mode=True,  # Enable Nixtla strict mode
+            # Nixtla "strict mode" (required sections, first/second-person voice)
+            # is an enterprise QUALITY standard, NOT Anthropic-validity — a minimal
+            # Anthropic-valid skill (name + description + body) has none of those
+            # sections yet is perfectly loadable. Imposing strict mode as BLOCKING
+            # on every plugin's skills produced ~8 false MAJORs on a valid minimal
+            # skill (TRDD-021250b5 severity principle). Strict mode stays opt-in via
+            # the standalone `validate_skill --strict`.
+            strict_mode=False,
             strict_openspec=False,  # Don't require OpenSpec 6-field whitelist for plugins
             validate_pillars_flag=skill_name.startswith(("lang-", "convert-")),  # Auto-enable for lang-*/convert-*
             skip_platform_checks=skip_platform_checks,
