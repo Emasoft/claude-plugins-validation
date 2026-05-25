@@ -323,11 +323,22 @@ class HybridMatcher:
                         rule_id,
                         str(exc)[:120],
                     )
-                    # Remove from RE2 layer.
-                    self._re2_rule_ids = [r for r in self._re2_rule_ids if r != rule_id]
+                    # Route to the Python-re fallback for matching. We do NOT
+                    # remove rule_id from `_re2_rule_ids`: that list is
+                    # index-PARALLEL to the compiled RE2 Set (Add order == Set
+                    # index) and the pattern is still IN the Set at its original
+                    # index. Removing it here would shift every later index by
+                    # one, so `Set.Match()` results would map to the WRONG
+                    # rule_id. Instead the scan loop skips this index naturally
+                    # because `_re2_compiled_individual` has no entry for it
+                    # (the individual compile failed) → it falls to fallback,
+                    # which now carries it. (audit MAJOR #7)
                     self._add_to_fallback(rule_id, self._patterns[rule_id], re2_error=str(exc))
 
-            self._stats.re2_compiled = len(self._re2_rule_ids)
+            # Count rules that ACTUALLY have a working individual RE2 compile —
+            # `_re2_rule_ids` may include ids that were demoted to fallback (kept
+            # only to preserve Set-index alignment, see above).
+            self._stats.re2_compiled = len(self._re2_compiled_individual)
 
         self._emit_routing_log()
 
