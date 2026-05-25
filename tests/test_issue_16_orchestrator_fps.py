@@ -6,14 +6,17 @@ Coverage by category:
      consumers, allow_orchestrator_traversal opt-out)
 - C: npm-package shape skip (`is_npm_package_shape`)
 - D: TOC threshold ≥500 lines (short reference files emit INFO not MINOR)
-- E: description cap raised when trigger phrases present
-     (`description_has_trigger_phrases`)
+- E: REMOVED in TRDD-021250b5 — the trigger-phrase description exemption
+     (`description_has_trigger_phrases`) is gone; description limits are
+     token-based (200 tokens) and non-negotiable
 - F: vendored-path skip (`is_vendored_path` covers external/, vendor/,
      third_party/, node_modules/, .gitmodules submodules, cpv.exclude_paths)
 - I: numbered-prose Instructions list accepted as valid checklist
      (`has_numbered_prose_steps`)
-- B: SKILL.md size cap configurable via cpv.max_chars / cpv.max_lines /
-     cpv.skill_size_severity in plugin.json
+- B: generic cpv config loader (`load_cpv_config`) round-trips supported keys.
+     NOTE: the size-override keys cpv.max_chars / cpv.max_lines /
+     cpv.skill_size_severity were removed in TRDD-021250b5 (size limits are
+     token-based and non-negotiable)
 """
 
 from __future__ import annotations
@@ -70,30 +73,10 @@ class TestNpmPackageShape:
         assert not cvc.is_npm_package_shape("README.md")
 
 
-# ── Category E: trigger-phrase description exemption ────────────────────────
-
-
-class TestTriggerPhrases:
-    def test_use_when_phrase_detected(self):
-        assert cvc.description_has_trigger_phrases("Long description. Use when X happens.")
-
-    def test_trigger_with_detected(self):
-        assert cvc.description_has_trigger_phrases("Skill X. Trigger with foo bar.")
-
-    def test_include_keywords_detected(self):
-        assert cvc.description_has_trigger_phrases("Skill X. Include keywords: a, b, c.")
-
-    def test_useful_when_detected(self):
-        assert cvc.description_has_trigger_phrases("Skill X. Useful when Y is true.")
-
-    def test_no_trigger_phrase_returns_false(self):
-        assert not cvc.description_has_trigger_phrases("Just a plain skill description.")
-
-    def test_empty_returns_false(self):
-        assert not cvc.description_has_trigger_phrases("")
-
-    def test_case_insensitive(self):
-        assert cvc.description_has_trigger_phrases("Skill X. USE WHEN something.")
+# ── Category E removed: trigger-phrase description exemption ────────────────
+# The `description_has_trigger_phrases` helper and the trigger-phrase length
+# exemption were removed in TRDD-021250b5 — description limits are now token-
+# based (200 tokens) and non-negotiable, with no per-phrase exemption.
 
 
 # ── Category F: vendored-path skip ──────────────────────────────────────────
@@ -222,19 +205,23 @@ class TestCpvConfigLoader:
         assert cvc.load_cpv_config(plugin_root) == {}
 
     def test_cpv_block_returned_verbatim(self, tmp_path):
+        # load_cpv_config is a generic parser of the plugin.json `cpv` block —
+        # it returns whatever valid keys are present. (The old size-override keys
+        # max_chars / max_lines / skill_size_severity were removed in
+        # TRDD-021250b5; this test now exercises current, supported cpv keys.)
         cvc._load_cpv_config_cached.cache_clear()
         plugin_root = _make_plugin_with_cpv_config(
             tmp_path,
             {
-                "max_chars": 12000,
-                "max_lines": 800,
-                "skill_size_severity": "warning",
+                "allow_root_dirs": ["design", "templates"],
+                "allow_orchestrator_traversal": ["skills/canonical-pipeline"],
+                "allow_pipeline_drift": ["scripts/foo.py"],
             },
         )
         cfg = cvc.load_cpv_config(plugin_root)
-        assert cfg["max_chars"] == 12000
-        assert cfg["max_lines"] == 800
-        assert cfg["skill_size_severity"] == "warning"
+        assert cfg["allow_root_dirs"] == ["design", "templates"]
+        assert cfg["allow_orchestrator_traversal"] == ["skills/canonical-pipeline"]
+        assert cfg["allow_pipeline_drift"] == ["scripts/foo.py"]
 
     def test_invalid_json_returns_empty(self, tmp_path):
         cvc._load_cpv_config_cached.cache_clear()
