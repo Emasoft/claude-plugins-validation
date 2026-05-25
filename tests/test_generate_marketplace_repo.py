@@ -31,6 +31,8 @@ from generate_marketplace_repo import (  # noqa: E402
     _marketplace_json,
     _plugin_entry,
     _readme,
+    _update_catalog_workflow,
+    _validate_workflow,
     generate_marketplace_repo,
     validate_name,
     validate_plugin_repo,
@@ -488,3 +490,85 @@ class TestLocalOnlyGeneration:
         assert (target / "cliff.toml").exists()
         assert (target / ".claude-plugin" / "marketplace.json").exists()
         assert (target / "README.md").exists()
+
+
+# =============================================================================
+# Group 8: Generated GitHub Actions workflow hardening (audit mgmt #7/#8/#9)
+# =============================================================================
+
+
+class TestGeneratedWorkflowHardening:
+    """The scaffolded .github/workflows/*.yml must follow CPV's gh-actions rule.
+
+    The 10-agent audit (TRDD-021250b5 follow-up) flagged the generated
+    marketplace workflows for missing least-privilege ``permissions:``,
+    missing ``concurrency:`` serialization, and jobs without a
+    ``timeout-minutes`` cap. These two-sided tests pin the hardening so a
+    future template edit cannot silently regress it.
+    """
+
+    def _parse(self, yml_text: str) -> dict:
+        yaml = pytest.importorskip("yaml")
+        doc = yaml.safe_load(yml_text)
+        assert isinstance(doc, dict)
+        return doc
+
+    def test_validate_workflow_has_least_privilege_permissions(self):
+        """validate.yml declares a top-level read-only token (no write, no omit)."""
+        doc = self._parse(_validate_workflow())
+        assert doc.get("permissions") == {"contents": "read"}
+
+    def test_validate_workflow_has_concurrency(self):
+        """validate.yml serializes per-ref with cancel-in-progress."""
+        doc = self._parse(_validate_workflow())
+        conc = doc.get("concurrency")
+        assert isinstance(conc, dict)
+        assert conc.get("cancel-in-progress") is True
+
+    def test_validate_workflow_job_has_timeout(self):
+        """Every job in validate.yml caps runtime with timeout-minutes."""
+        doc = self._parse(_validate_workflow())
+        jobs = doc.get("jobs", {})
+        assert jobs, "validate.yml has no jobs"
+        for job_name, cfg in jobs.items():
+            assert "timeout-minutes" in cfg, f"{job_name} missing timeout-minutes"
+
+    def test_validate_workflow_pins_third_party_action_to_sha(self):
+        """The third-party astral-sh/setup-uv action is pinned to a full SHA."""
+        text = _validate_workflow()
+        # First-party actions/* may use tags; third-party MUST be SHA-pinned.
+        assert "astral-sh/setup-uv@" in text
+        # A 40-hex SHA pin (not a bare @v4 tag) must be present.
+        import re
+
+        assert re.search(r"astral-sh/setup-uv@[0-9a-f]{40}", text), (
+            "setup-uv must be pinned to a 40-char commit SHA"
+        )
+
+    def test_update_catalog_workflow_has_permissions(self):
+        """update-catalog.yml needs contents:write (it pushes README) — but declared, not omitted."""
+        doc = self._parse(_update_catalog_workflow("demo"))
+        assert doc.get("permissions") == {"contents": "write"}
+
+    def test_update_catalog_workflow_has_concurrency(self):
+        """update-catalog.yml serializes pushes (cancel-in-progress: false to avoid losing commits)."""
+        doc = self._parse(_update_catalog_workflow("demo"))
+        conc = doc.get("concurrency")
+        assert isinstance(conc, dict)
+        # README-push workflow must QUEUE, not cancel, so no commit is dropped.
+        assert conc.get("cancel-in-progress") is False
+
+    def test_update_catalog_workflow_job_has_timeout(self):
+        """The update-readme job caps runtime with timeout-minutes (audit mgmt #9)."""
+        doc = self._parse(_update_catalog_workflow("demo"))
+        jobs = doc.get("jobs", {})
+        assert jobs, "update-catalog.yml has no jobs"
+        for job_name, cfg in jobs.items():
+            assert "timeout-minutes" in cfg, f"{job_name} missing timeout-minutes"
+
+    def test_both_generated_workflows_parse_as_yaml(self):
+        """Two-sided: the generated YAML is well-formed (not just regex-asserted)."""
+        for text in (_validate_workflow(), _update_catalog_workflow("demo")):
+            doc = self._parse(text)
+            assert "on" in doc or True in doc  # PyYAML maps bare `on:` to True
+            assert "jobs" in doc
