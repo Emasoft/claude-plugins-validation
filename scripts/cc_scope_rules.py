@@ -618,7 +618,10 @@ def classify_folder_scope(folder: Path, repo_root: Path | None = None) -> Scope:
       resolves outside ``repo_root`` (safer to treat symlink-escape as
       "missing" so neither scope validator follows it — see aegis
       MEDIUM-1 and llm-ext LOGIC-2)
-    - ``no-git``: the folder has no ``.git`` ancestor
+    - ``no-git``: the folder has no ``.git`` ancestor, OR the git
+      ``ls-files`` probe itself failed (git unavailable / transient
+      timeout / OSError mid-run) — both mean "git could not classify
+      this", distinct from "untracked"
     - ``local``: the folder is git-ignored OR has zero tracked files
     - ``project``: the folder has at least one tracked file inside it
     """
@@ -640,7 +643,16 @@ def classify_folder_scope(folder: Path, repo_root: Path | None = None) -> Scope:
         return "no-git"
     result = _run_git(["ls-files", "--", f"{rel}/"], repo_root)
     if result is None:
-        return "local"
+        # The ls-files probe itself failed (git vanished mid-run, a
+        # transient timeout, or an OSError) even though find_git_root
+        # succeeded moments earlier. That is "git unavailable", NOT
+        # "untracked" — return the no-git sentinel rather than conflating
+        # it with local-scope. Every consumer treats no-git and local
+        # identically (validate_local_scope checks `in ("local",
+        # "no-git")`; validate_project_scope checks `== "project"`), so
+        # this preserves downstream behaviour while reporting the cause
+        # accurately.
+        return "no-git"
     if result.returncode == 0 and result.stdout.strip():
         return "project"
     return "local"

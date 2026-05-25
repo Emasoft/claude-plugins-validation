@@ -11,9 +11,11 @@ REQUIRE local filesystem access. URL inputs cannot reach
 
 The resolver provides:
 
-* ``resolve_scope_inputs(input_spec, *, allow_url=False)`` — wraps
-  ``cpv_marketplace_input.resolve`` with the URL-rejection flag set.
-  Remote shapes raise immediately with a clear remediation hint.
+* ``resolve_scope_inputs(input_spec, *, default_to_pwd=True)`` —
+  wraps ``cpv_marketplace_input.resolve`` with ``allow_url=False``
+  pinned internally. Remote shapes raise immediately with a clear
+  remediation hint; empty input falls back to ``$PWD`` when
+  ``default_to_pwd`` is true.
 * ``parse_scope_flag(scope)`` — validates one of ``user``,
   ``project``, ``local``, ``full`` (the four documented values)
   and returns the canonical lowercase form.
@@ -52,8 +54,8 @@ URL_REJECTED_MESSAGE = (
     "       A valid Claude installation (~/.claude/) is necessary to\n"
     "       diagnose user/project/local-scope extensions. URL inputs\n"
     "       cannot reach the filesystem state of a Claude installation.\n"
-    "       Use cpv-batch-validate or cpv-batch-doctor for source-tree\n"
-    "       scans of remote plugins."
+    "       Use cpv-batch-validate or cpv-batch-security-audit for\n"
+    "       source-tree scans of remote plugins."
 )
 
 

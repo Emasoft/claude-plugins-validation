@@ -38,8 +38,8 @@ ERROR: cpv-batch-scope-* skills require LOCAL project paths.
        A valid Claude installation (~/.claude/) is necessary to
        diagnose user/project/local-scope extensions. URL inputs
        cannot reach the filesystem state of a Claude installation.
-       Use cpv-batch-validate or cpv-batch-doctor for source-tree
-       scans of remote plugins.
+       Use cpv-batch-validate or cpv-batch-security-audit for
+       source-tree scans of remote plugins.
 ```
 
 …and stop.
