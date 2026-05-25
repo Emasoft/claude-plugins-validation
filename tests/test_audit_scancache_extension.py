@@ -230,7 +230,9 @@ def test_scan_same_bytes_different_extension_no_collision(tmp_path: Path) -> Non
     assert md_sev == ["critical"]
 
 
-def test_scan_same_extension_different_path_is_cache_hit(tmp_path: Path) -> None:
+def test_scan_same_extension_different_path_is_cache_hit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Shares a bucket (end-to-end): same content + same ext, two dirs → HIT.
 
     With a shared plugin root, ``a/foo.py`` and ``b/foo.py`` relativise
@@ -244,10 +246,10 @@ def test_scan_same_extension_different_path_is_cache_hit(tmp_path: Path) -> None
     root = tmp_path / "plugin"
     (root / "a").mkdir(parents=True)
     (root / "b").mkdir(parents=True)
-    # Make rel paths a/foo.py and b/foo.py.
-    import os
-
-    os.environ["CPV_SKILLAUDIT_WORKER_PLUGIN_ROOT"] = str(root)
+    # Make rel paths a/foo.py and b/foo.py. MUST go through monkeypatch (NOT raw
+    # os.environ[...]=) so it is restored on teardown and can't leak into other
+    # tests in the process.
+    monkeypatch.setenv("CPV_SKILLAUDIT_WORKER_PLUGIN_ROOT", str(root))
 
     a_file = root / "a" / "foo.py"
     a_file.write_text(_DIVERGENT_CONTENT)
@@ -277,18 +279,22 @@ def test_scan_same_extension_different_path_is_cache_hit(tmp_path: Path) -> None
     assert _data_exfil_severity(a_result) == _data_exfil_severity(b_result)
 
 
-def test_scan_cache_disabled_still_runs_each_classifier(tmp_path: Path) -> None:
+def test_scan_cache_disabled_still_runs_each_classifier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``CPV_SCAN_CACHE=0`` is unaffected: every scan runs its own classifier.
 
     With the cache off there is no shared state to collide, so each
     extension's classifier always runs — the ``.md`` verdict must be
     its own even when scanned after the ``.py`` one.
     """
-    import os
-
     import cpv_skillaudit_native as native
 
-    os.environ["CPV_SCAN_CACHE"] = "0"
+    # MUST go through monkeypatch (NOT raw os.environ[...]=) so it is restored
+    # on teardown — a raw assignment leaks CPV_SCAN_CACHE=0 into every
+    # subsequent test in the process, silently disabling the cache and
+    # breaking unrelated cache-contract tests downstream.
+    monkeypatch.setenv("CPV_SCAN_CACHE", "0")
 
     py_file = tmp_path / "foo.py"
     py_file.write_text(_DIVERGENT_CONTENT)
