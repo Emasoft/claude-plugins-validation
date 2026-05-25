@@ -155,24 +155,27 @@ class TestRunCpvValidate:
 
 
 class TestRunSkillAudit:
-    """Tests for _run_skill_audit() subprocess execution."""
-
-    @patch("manage_github_validate.shutil.which", return_value=None)
-    def test_audit_returns_1_when_skill_audit_missing(self, mock_which, tmp_path):
-        """_run_skill_audit() returns 1 when skill-audit binary is not on PATH."""
-        rc = _run_skill_audit(tmp_path)
-        assert rc == 1
+    """Tests for _run_skill_audit() — now delegates to CPV's NATIVE security
+    audit (validate_security.py + skillaudit Check 27), not the external
+    skill-audit pip tool. (audit MAJOR mgmt #3)"""
 
     @patch("manage_github_validate.subprocess.run")
-    @patch("manage_github_validate.shutil.which", return_value="/usr/local/bin/skill-audit")
-    def test_audit_returns_subprocess_exit_code(self, mock_which, mock_run, tmp_path):
-        """_run_skill_audit() returns the subprocess exit code from skill-audit."""
+    def test_audit_delegates_to_validate_security(self, mock_run, tmp_path):
+        """_run_skill_audit() runs validate_security.py and returns its exit code."""
         mock_run.return_value = MagicMock(returncode=0)
         rc = _run_skill_audit(tmp_path)
         assert rc == 0
         call_args = mock_run.call_args[0][0]
-        assert call_args[0] == "/usr/local/bin/skill-audit"
-        assert "-v" in call_args
+        # Native delegation: python validate_security.py <target> — NOT the
+        # external skill-audit binary.
+        assert "python" in str(call_args[0])
+        assert any(str(a).endswith("validate_security.py") for a in call_args)
+
+    @patch("manage_github_validate.subprocess.run")
+    def test_audit_returns_nonzero_on_findings(self, mock_run, tmp_path):
+        """Two-sided: a non-zero exit from the native validator propagates."""
+        mock_run.return_value = MagicMock(returncode=2)
+        assert _run_skill_audit(tmp_path) == 2
 
 
 class TestHighLevelOrchestrators:

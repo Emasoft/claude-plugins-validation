@@ -232,8 +232,13 @@ def run_script(
         result = subprocess.run(cmd, timeout=timeout, cwd=str(cwd) if cwd else None)
         return result.returncode
     except subprocess.TimeoutExpired:
-        print(f"  {YELLOW}TIMEOUT: {script.name} exceeded {timeout}s — skipping{NC}")
-        return 0
+        # FAIL-CLOSED: a timeout means validation did NOT complete, so we do NOT
+        # know the tree is clean. Returning 0 here let an unvalidated tree push,
+        # silently defeating the iron-rule pre-push gate. Return non-zero so the
+        # push is BLOCKED — re-run with a longer timeout or fix the slowness.
+        # (audit MAJOR publish #3)
+        print(f"  {RED}TIMEOUT: {script.name} exceeded {timeout}s — FAILED (push blocked){NC}")
+        return 1
 
 
 def extract_version(filepath: Path) -> str | None:

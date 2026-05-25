@@ -19,7 +19,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from cpv_management_common import err, info, ok, warn
+from cpv_management_common import err, info, ok
 from manage_marketplace import _normalize_github_source
 
 __all__ = [
@@ -66,17 +66,17 @@ def _run_cpv_validate(target: Path, script_name: str = "validate_plugin.py") -> 
 
 
 def _run_skill_audit(target: Path) -> int:
-    """Run skill-audit on target. Returns exit code."""
-    audit_bin = shutil.which("skill-audit")
-    if not audit_bin:
-        warn("'skill-audit' not found. Install: pip install skill-audit")
-        return 1
-    info("Running security audit (skill-audit)...")
-    result = subprocess.run(
-        [audit_bin, str(target), "-v"],
-        timeout=300,
-    )
-    return result.returncode
+    """Run CPV's NATIVE security audit on target. Returns exit code.
+
+    Delegates to ``validate_security.py``, which runs the in-process skillaudit
+    Check 27 (``cpv_skillaudit_native.py``) plus the full security validator.
+    The old path shelled out to the EXTERNAL ``skill-audit`` pip tool that CPV
+    deliberately replaced — when that tool was absent the audit was silently
+    skipped (degraded vs. the native scanner used everywhere else in CPV).
+    (audit MAJOR mgmt #3)
+    """
+    info("Running native security audit (validate_security.py + skillaudit Check 27)...")
+    return _run_cpv_validate(target, "validate_security.py")
 
 
 def validate_github_plugin(repo: str) -> int:
