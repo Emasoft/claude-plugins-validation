@@ -56,6 +56,7 @@ from cpv_validation_common import (
     check_remote_execution_guard,
     is_vendored_path,
     load_cpv_config,
+    removed_cpv_size_keys_present,
     save_report_and_print_summary,
     validate_component_name,
     validate_md_file_paths,
@@ -1103,6 +1104,21 @@ def validate_manifest(
         return None
 
     report.passed("plugin.json is valid JSON", ".claude-plugin/plugin.json")
+
+    # Fail-loud deprecation (TRDD-021250b5): the cpv.* size-override keys
+    # (max_chars / max_lines / skill_size_severity) were removed — skill size
+    # limits are now token-based and non-negotiable. Emit the WARNING ONCE here,
+    # at the plugin level, where plugin.json is read a single time. (It used to
+    # live in the per-skill token-budget check, which made validate_plugin fire
+    # one identical warning per skill — 44× on CPV itself.)
+    _removed_size_keys = removed_cpv_size_keys_present(load_cpv_config(plugin_root))
+    if _removed_size_keys:
+        report.warning(
+            "plugin.json cpv." + ", cpv.".join(_removed_size_keys) + " no longer "
+            "supported — skill size limits are token-based and non-negotiable "
+            "(TRDD-021250b5).",
+            ".claude-plugin/plugin.json",
+        )
 
     # Required field: name (per Anthropic docs, ONLY 'name' is required)
     if "name" not in manifest:
