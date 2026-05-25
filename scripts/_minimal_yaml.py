@@ -57,17 +57,55 @@ def _coerce_scalar(raw: str) -> Any:
     return s
 
 
+def _split_inline_items(body: str, raw: str) -> list[str]:
+    """Split an inline-list body on top-level commas, honoring quotes.
+
+    A comma inside a ``'...'`` or ``"..."`` quoted token does NOT separate
+    items, so ``a, "b,c"`` yields ``['a', '"b,c"']`` (two items) rather than
+    naively splitting into three. An unquoted nested-flow character
+    (``[ ] { }``) raises :class:`YAMLError` — nested flow sequences are
+    outside the supported subset — but the same character inside a quoted
+    token is treated as ordinary text.
+    """
+    items: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    for ch in body:
+        if quote is not None:
+            current.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            current.append(ch)
+            continue
+        if ch in ("[", "]", "{", "}"):
+            raise YAMLError(f"nested flow sequences not supported: {raw!r}")
+        if ch == ",":
+            items.append("".join(current))
+            current = []
+            continue
+        current.append(ch)
+    if quote is not None:
+        raise YAMLError(f"unterminated quote in inline list: {raw!r}")
+    items.append("".join(current))
+    return items
+
+
 def _parse_inline_list(raw: str) -> list[Any]:
-    """Parse ``[a, b, c]`` flow-sequence syntax (no nesting)."""
+    """Parse ``[a, b, c]`` flow-sequence syntax (no nesting).
+
+    Commas inside quoted tokens are preserved, so ``[a, "b,c"]`` parses to
+    two items, matching pyyaml on the supported subset.
+    """
     inner = raw.strip()
     if not (inner.startswith("[") and inner.endswith("]")):
         raise YAMLError(f"expected inline list, got: {raw!r}")
     body = inner[1:-1].strip()
     if not body:
         return []
-    if "[" in body or "]" in body or "{" in body or "}" in body:
-        raise YAMLError(f"nested flow sequences not supported: {raw!r}")
-    return [_coerce_scalar(item) for item in body.split(",")]
+    return [_coerce_scalar(item) for item in _split_inline_items(body, raw)]
 
 
 def safe_load(text: str) -> dict[str, Any] | None:

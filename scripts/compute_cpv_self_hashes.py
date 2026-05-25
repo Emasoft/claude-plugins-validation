@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """DEPRECATED — renamed to scripts/_plugin_compute_hashes.py in v2.51.0.
 
-Removed in v2.53.0. See TRDD-bbff5bc5 (publish.py auth standard).
+Compat shim — STILL SHIPPED at v2.105.0; removal originally planned for
+v2.53.0 was deferred and has not yet happened. See TRDD-bbff5bc5
+(publish.py auth standard). Re-exports every public name from
+`_plugin_compute_hashes`.
 
 This module is a thin re-export shim that forwards every public name
 to `_plugin_compute_hashes`. A one-shot DeprecationWarning is emitted
@@ -22,7 +25,8 @@ from pathlib import Path as _Path
 _w.warn(
     "scripts/compute_cpv_self_hashes.py is renamed to scripts/_plugin_compute_hashes.py "
     "(TRDD-bbff5bc5). Update your invocation to use the new path — the legacy name "
-    "is removed in v2.53.0.",
+    "is deprecated and will be removed in a future release (removal originally "
+    "planned for v2.53.0 was deferred).",
     DeprecationWarning,
     stacklevel=2,
 )
