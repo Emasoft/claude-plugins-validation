@@ -775,6 +775,79 @@ def validate_submodule_health(
 # =============================================================================
 
 
+# Advisory GitHub-Actions hardening signals. CPV ships these defaults in its
+# OWN generated workflows (generate_plugin_repo.py / generate_marketplace_repo.py:
+# least-privilege permissions, SHA-pinned third-party actions, per-job timeouts).
+# These regexes let CPV ALSO surface the same recommendations for a marketplace's
+# hand-written workflows — advisory only, so the pipeline grade is untouched.
+_WF_USES_LINE_RE = re.compile(r"^\s*-?\s*uses:\s*(?P<ref>[^\s#]+)", re.MULTILINE)
+_WF_SHA_PINNED_RE = re.compile(r"@[0-9a-fA-F]{40}$")
+# actions/* and github/* are GitHub-owned orgs — tag refs are acceptable there
+# (tag-rewriting is not a realistic threat). Everything else is third-party.
+_WF_FIRST_PARTY_ACTION_RE = re.compile(r"^(?:actions|github)/")
+
+
+def _check_workflow_hardening(
+    workflow_path: Path,
+    report: PipelineValidationReport,
+    category: str,
+) -> None:
+    """Emit advisory (INFO) GitHub-Actions hardening findings for one workflow.
+
+    Three checks, mirroring CPV's own gh-actions hardening rule:
+    1. a top-level ``permissions:`` block (least privilege),
+    2. ``timeout-minutes`` on every job (the default is 6h),
+    3. third-party ``uses:`` actions pinned to a 40-char commit SHA.
+
+    All findings are INFO (0 points) so they never change the pipeline grade —
+    this closes the audit's "CPV neither emits nor enforces the hardening it
+    ships" coverage gap without making a hardening nudge a blocking failure.
+    """
+    data = load_yaml_file(workflow_path)
+    if not isinstance(data, dict):
+        return  # YAML parse failures are reported by the structural checks
+    rel = str(workflow_path)
+
+    # 1. Top-level permissions block.
+    if "permissions" not in data:
+        report.info(
+            category,
+            f"{workflow_path.name}: no top-level 'permissions:' block — add "
+            "'permissions: { contents: read }' (or the minimal set) for least privilege",
+            rel,
+        )
+
+    # 2. Per-job timeout-minutes.
+    jobs = data.get("jobs")
+    if isinstance(jobs, dict):
+        for job_name, job_cfg in jobs.items():
+            if isinstance(job_cfg, dict) and "timeout-minutes" not in job_cfg:
+                report.info(
+                    category,
+                    f"{workflow_path.name}: job '{job_name}' has no 'timeout-minutes' "
+                    "(defaults to 6h — set a cap to avoid burning runner minutes on a hang)",
+                    rel,
+                )
+
+    # 3. Unpinned third-party actions.
+    text = workflow_path.read_text(encoding="utf-8")
+    for m in _WF_USES_LINE_RE.finditer(text):
+        ref = m.group("ref").strip()
+        # Local composite actions (./…) and docker:// images are out of scope.
+        if ref.startswith((".", "docker://")):
+            continue
+        action = ref.split("@", 1)[0]
+        if _WF_FIRST_PARTY_ACTION_RE.match(action):
+            continue  # GitHub-owned org — tag refs acceptable
+        if not _WF_SHA_PINNED_RE.search(ref):
+            report.info(
+                category,
+                f"{workflow_path.name}: third-party action '{ref}' is not SHA-pinned — "
+                "pin to a full 40-char commit SHA to prevent tag-rewriting attacks",
+                rel,
+            )
+
+
 def validate_marketplace_workflows(
     marketplace_path: Path,
     report: PipelineValidationReport,
@@ -788,6 +861,8 @@ def validate_marketplace_workflows(
     - update-submodules.yml has workflow_dispatch for manual trigger (2 pts, MINOR)
     - update-submodules.yml runs sync script (3 pts, MAJOR)
     - validate.yml exists for CI (3 pts, MINOR)
+    - (advisory, INFO) every workflow: least-privilege permissions, per-job
+      timeout-minutes, SHA-pinned third-party actions
     """
     category = "marketplace_workflows"
     workflows_dir = marketplace_path / ".github" / "workflows"
@@ -952,6 +1027,13 @@ def validate_marketplace_workflows(
             str(validate_workflow),
             "Create validate.yml to run validation checks on PRs and pushes",
         )
+
+    # Advisory (INFO) GitHub-Actions hardening pass over every workflow file
+    # present — least-privilege permissions, per-job timeouts, SHA-pinned
+    # third-party actions. INFO so the grade is untouched (audit #10: CPV now
+    # surfaces the same hardening it ships in its own generated workflows).
+    for wf in sorted(workflows_dir.glob("*.yml")) + sorted(workflows_dir.glob("*.yaml")):
+        _check_workflow_hardening(wf, report, category)
 
 
 # =============================================================================
