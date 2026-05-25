@@ -21,6 +21,7 @@ if str(scripts_dir) not in sys.path:
 
 from validate_marketplace_pipeline import (
     PipelineValidationReport,
+    _check_workflow_hardening,
     validate_marketplace_pipeline,
     validate_marketplace_structure,
     validate_marketplace_workflows,
@@ -152,6 +153,92 @@ class TestValidateMarketplaceWorkflows:
         passed_results = [r for r in cat.results if r.level == "PASSED"]
         assert any("repository_dispatch" in r.message for r in passed_results)
         assert any("workflow_dispatch" in r.message for r in passed_results)
+
+
+class TestWorkflowHardeningAdvisory:
+    """audit #10 - advisory (INFO) GHA hardening checks on marketplace workflows.
+
+    CPV now surfaces the same hardening it ships (permissions / timeout / SHA-pin)
+    for a marketplace's hand-written workflows, as INFO so the grade is untouched.
+    """
+
+    _UNHARDENED = (
+        "name: Update\n"
+        "on:\n  repository_dispatch:\n    types: [plugin-updated]\n  workflow_dispatch:\n"
+        "jobs:\n"
+        "  sync:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: astral-sh/setup-uv@v4\n"
+        "      - run: echo sync\n"
+    )
+
+    _HARDENED = (
+        "name: Update\n"
+        "on:\n  repository_dispatch:\n    types: [plugin-updated]\n  workflow_dispatch:\n"
+        "permissions:\n  contents: read\n"
+        "jobs:\n"
+        "  sync:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    timeout-minutes: 15\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "      - uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4\n"
+        "      - run: echo sync\n"
+    )
+
+    def _infos(self, report, category="marketplace_workflows"):
+        cat = report.categories[category]
+        return [r for r in cat.results if r.level == "INFO"]
+
+    def test_unhardened_workflow_flags_all_three(self, tmp_path):
+        wf = tmp_path / "update-submodules.yml"
+        wf.write_text(self._UNHARDENED, encoding="utf-8")
+        report = PipelineValidationReport(marketplace_path=tmp_path)
+        _check_workflow_hardening(wf, report, "marketplace_workflows")
+        msgs = " ".join(r.message for r in self._infos(report))
+        assert "permissions" in msgs
+        assert "timeout-minutes" in msgs
+        assert "SHA-pinned" in msgs  # astral-sh/setup-uv@v4 is third-party, tag-pinned
+
+    def test_hardened_workflow_flags_nothing(self, tmp_path):
+        """Two-sided: a fully hardened workflow produces zero INFO advisories."""
+        wf = tmp_path / "update-submodules.yml"
+        wf.write_text(self._HARDENED, encoding="utf-8")
+        report = PipelineValidationReport(marketplace_path=tmp_path)
+        _check_workflow_hardening(wf, report, "marketplace_workflows")
+        assert self._infos(report) == []
+
+    def test_first_party_action_tag_is_not_flagged(self, tmp_path):
+        """actions/* and github/* may use tag refs — only third-party needs a SHA."""
+        wf = tmp_path / "ci.yml"
+        wf.write_text(
+            "name: CI\non:\n  push:\n"
+            "permissions:\n  contents: read\n"
+            "jobs:\n  build:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - uses: actions/checkout@v4\n      - uses: github/codeql-action@v3\n",
+            encoding="utf-8",
+        )
+        report = PipelineValidationReport(marketplace_path=tmp_path)
+        _check_workflow_hardening(wf, report, "marketplace_workflows")
+        # No SHA-pin advisory for actions/checkout or github/codeql-action.
+        assert not any("SHA-pinned" in r.message for r in self._infos(report))
+
+    def test_advisory_does_not_change_grade(self, tmp_path):
+        """INFO advisories add 0 points — score is identical with/without them."""
+        mp = _make_marketplace(
+            tmp_path,
+            marketplace_json={"name": "m", "version": "1.0.0", "plugins": []},
+            gitmodules="# empty\n",
+            workflows={"update-submodules.yml": self._UNHARDENED},
+        )
+        report = PipelineValidationReport(marketplace_path=mp)
+        validate_marketplace_workflows(mp, report)
+        cat = report.categories["marketplace_workflows"]
+        # INFO results carry 0 possible points (don't inflate the denominator).
+        info_possible = sum(r.points_possible for r in cat.results if r.level == "INFO")
+        assert info_possible == 0.0
+        assert len([r for r in cat.results if r.level == "INFO"]) >= 1
 
 
 class TestValidateMarketplacePipeline:
