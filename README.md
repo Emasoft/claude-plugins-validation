@@ -26,6 +26,7 @@ There are **two ways to use CPV**. Pick the one that fits your workflow:
 
 - [What Does CPV Check?](#what-does-cpv-check)
   - [Claude Code Documentation](#claude-code-documentation)
+- [Usage](#usage)
 - **[Part 1: Standalone Validation (via uvx)](#part-1-standalone-validation-via-uvx)**
   - [Getting Started](#getting-started)
   - [Available Scripts](#available-scripts)
@@ -140,6 +141,14 @@ CPV validates plugins against the official Claude Code specification. If you are
 - [Skills reference](https://code.claude.com/docs/en/skills) -- SKILL.md frontmatter, substitutions, dynamic context
 - [Hooks reference](https://code.claude.com/docs/en/hooks) -- 27 hook events, matchers, hook types
 - [Claude Code release notes](https://docs.anthropic.com/en/release-notes/claude-code) -- latest changes and plugin updates
+
+---
+
+## Usage
+
+There are two ways to use CPV: via `uvx` (no install) or as a Claude Code plugin.
+See [Part 1](#part-1-standalone-validation-via-uvx) for terminal/CI use and
+[Part 2](#part-2-claude-code-plugin) for the interactive plugin with agents and menus.
 
 ---
 
