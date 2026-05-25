@@ -57,19 +57,26 @@ from cpv_validation_common import (  # noqa: E402  (import below conditional yam
     BUILTIN_AGENT_TYPES,
     COLORS,
     DESCRIPTION_TOKEN_LIMIT,
+    MIN_DESCRIPTION_CHARS,
     SKILL_FRONTMATTER_FIELDS,
     VALID_CONTEXT_VALUES,
     ValidationReport,
     check_token_limit,
+    is_valid_model,
     save_report_and_print_summary,
     validate_component_name,
 )
+from cpv_validation_common import parse_frontmatter as _shared_parse_frontmatter  # noqa: E402
 
 # Maximum recommended SKILL.md line count per Anthropic docs
 MAX_SKILL_LINES = 500
 
 # Known frontmatter fields per official docs
 KNOWN_FRONTMATTER_FIELDS = SKILL_FRONTMATTER_FIELDS
+
+# Identifier rule for `arguments` names — compiled once (single source of truth).
+# A valid name must be a Python-style identifier so `$<name>` substitution works.
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 @dataclass
@@ -94,44 +101,24 @@ def validate_skill_md_exists(skill_path: Path, report: ValidationReport) -> bool
 def parse_frontmatter(content: str) -> tuple[dict[str, Any] | None, str, int]:
     """Parse YAML frontmatter from skill content.
 
-    Returns:
-        Tuple of (frontmatter_dict, body_content, frontmatter_end_line)
-        Returns (None, content, 0) if no frontmatter found
+    Thin wrapper over the shared ``cpv_validation_common.parse_frontmatter``
+    (single source of truth — BOM strip + delimiter-LINE closer, audit m5/m6).
+    Injects this module's pyyaml-or-``_minimal_yaml`` fallback (issue #14) so a
+    host venv without pyyaml can still parse skill frontmatter.
+
+    Returns ``(frontmatter_dict, body_content, frontmatter_end_line)`` and
+    ``(None, content, 0)`` when no frontmatter is found.
     """
-    if not content.startswith("---"):
-        return None, content, 0
-
-    # Split on the closing `---` DELIMITER LINE — never a bare `---` substring.
-    # `content.split("---", 2)` corrupts valid frontmatter whose VALUE contains
-    # `---` (e.g. `description: "use --- as a separator"`), truncating the YAML
-    # and producing a false "Malformed frontmatter". Opener and closer must each
-    # be `---` alone on their own line.
-    lines = content.split("\n")
-    if lines[0].strip() != "---":
-        return None, content, 0
-    closing_idx = None
-    for idx in range(1, len(lines)):
-        if lines[idx].strip() == "---":
-            closing_idx = idx
-            break
-    if closing_idx is None:
-        return None, content, 0
-
-    fm_text = "\n".join(lines[1:closing_idx])
-    body = "\n".join(lines[closing_idx + 1 :])
-    try:
-        frontmatter = _yaml_safe_load(fm_text)
-        if frontmatter is None:
-            frontmatter = {}
-        fm_end_line = closing_idx + 1
-        return frontmatter, body, fm_end_line
-    except _YAMLError:
-        return None, content, 0
+    return _shared_parse_frontmatter(content, yaml_loader=_yaml_safe_load, yaml_error=_YAMLError)
 
 
 def validate_frontmatter(_skill_path: Path, content: str, report: ValidationReport) -> dict[str, Any] | None:
     """Validate YAML frontmatter structure and content."""
     del _skill_path  # parameter reserved for per-file reporting
+    # Strip a leading UTF-8 BOM so the `startswith("---")` checks below agree
+    # with parse_frontmatter (which strips it too). Without this, a BOM-prefixed
+    # file would be mislabelled "No YAML frontmatter found". (audit MINOR m6)
+    content = content.lstrip("﻿")
     # Check frontmatter exists
     if not content.startswith("---"):
         report.info("No YAML frontmatter found (optional but recommended)", "SKILL.md")
@@ -210,7 +197,7 @@ def validate_description_field(frontmatter: dict[str, Any], body: str, report: V
         )
         return
 
-    if len(desc) < 10:
+    if len(desc) < MIN_DESCRIPTION_CHARS:
         report.minor(
             "Description is very short (may not help Claude decide when to use)",
             "SKILL.md",
@@ -388,7 +375,19 @@ def validate_model_field(frontmatter: dict[str, Any], report: ValidationReport) 
         )
         return
 
-    report.passed(f"'model' field present: {model}", "SKILL.md")
+    # Value-check the model via the shared single source of truth (same gate the
+    # command + comprehensive validators use). Previously this path checked the
+    # TYPE only, so a garbage value like `model: gpt-4` passed silently. (audit
+    # MINOR m3 / MAJOR M1)
+    if not is_valid_model(model):
+        report.major(
+            f"Invalid 'model' value: {model}. Valid: sonnet, opus, haiku, inherit, "
+            "default, opusplan (optionally with [1m]), or full ID like claude-opus-4-6",
+            "SKILL.md",
+        )
+        return
+
+    report.passed(f"'model' field valid: {model}", "SKILL.md")
 
 
 def validate_argument_hint_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:
@@ -439,7 +438,10 @@ def validate_arguments_field(frontmatter: dict[str, Any], report: ValidationRepo
         return []
 
     # Validate each name is a valid identifier — required for `$<name>` substitution.
-    invalid = [n for n in names if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", n)]
+    # Partition once via the module-compiled _IDENT_RE (single source of truth);
+    # the old code ran re.fullmatch on every name TWICE with an inline literal. (audit NIT n2)
+    valid = [n for n in names if _IDENT_RE.fullmatch(n)]
+    invalid = [n for n in names if n not in valid]
     if invalid:
         report.major(
             f"'arguments' names must be valid identifiers (letters/digits/underscores, "
@@ -448,7 +450,7 @@ def validate_arguments_field(frontmatter: dict[str, Any], report: ValidationRepo
         )
 
     report.passed(f"'arguments' field present: {names}", "SKILL.md")
-    return [n for n in names if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", n)]
+    return valid
 
 
 def validate_hooks_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:

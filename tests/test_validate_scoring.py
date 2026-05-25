@@ -606,3 +606,91 @@ class TestPrintQualityReport:
         assert "Good" in captured
         assert "Fair" in captured
         assert "Poor" in captured
+
+
+# =========================================================================
+# M2 regression — scoring must NOT double-count per-element findings.
+#
+# Before the fix, run_all_validators ran BOTH the "plugin" bundle (which
+# called validate_plugin's validate_agents/skills/commands/hooks/mcp, each
+# delegating to the comprehensive per-element validators) AND the dedicated
+# agent/skill/command/hooks/mcp work units (calling the SAME comprehensive
+# validators). Every per-element finding therefore landed in two reports and
+# was deducted twice by categorize_results.
+#
+# These tests are TWO-SIDED:
+#   * the "no double-count" side asserts per-element findings DO NOT appear in
+#     reports["plugin"]; and
+#   * the "coverage preserved" side asserts they DO still appear in the
+#     dedicated reports["agents"] (so the fix removed the duplicate, not the
+#     coverage).
+# =========================================================================
+
+
+def _plugin_with_findable_agent(tmp_path: Path) -> Path:
+    """A minimal valid plugin whose single agent file is missing a description,
+    guaranteeing the comprehensive agent validator emits at least one finding."""
+    plugin_dir = tmp_path / "dc-plugin"
+    (plugin_dir / ".claude-plugin").mkdir(parents=True)
+    (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": "dc-plugin",
+                "version": "1.0.0",
+                "description": "Fixture plugin used to verify scoring never double-counts.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    agents_dir = plugin_dir / "agents"
+    agents_dir.mkdir()
+    # No 'description' field → comprehensive agent validator produces findings.
+    (agents_dir / "a.md").write_text("---\nname: a\n---\nagent body\n", encoding="utf-8")
+    return plugin_dir
+
+
+def _agent_findings_in(report: ValidationReport) -> list[str]:
+    """Per-agent findings produced by the comprehensive validator carry the
+    ``agents/<file>`` path. The plugin-level structural check only emits the
+    generic 'agents/ directory exists' message (path None), so filtering on the
+    file path cleanly separates per-element findings from structural ones."""
+    return [r.message for r in report.results if (r.file or "").startswith("agents/")]
+
+
+def _run_scoring_path(plugin_root: Path, *, parallel: bool) -> dict[str, ValidationReport]:
+    import os
+
+    prev = os.environ.get("CPV_SCORING_PARALLEL")
+    os.environ["CPV_SCORING_PARALLEL"] = "1" if parallel else "0"
+    try:
+        return run_all_validators(plugin_root)
+    finally:
+        if prev is None:
+            os.environ.pop("CPV_SCORING_PARALLEL", None)
+        else:
+            os.environ["CPV_SCORING_PARALLEL"] = prev
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+def test_plugin_bundle_does_not_carry_agent_findings(tmp_path, parallel):
+    """No-double-count side: per-agent findings must NOT leak into reports['plugin']."""
+    plugin = _plugin_with_findable_agent(tmp_path)
+    reports = _run_scoring_path(plugin, parallel=parallel)
+    leaked = _agent_findings_in(reports["plugin"])
+    assert leaked == [], (
+        "Per-agent findings leaked into the plugin bundle report — the plugin "
+        f"unit is re-running the per-element validators again (double-count). Leaked: {leaked}"
+    )
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+def test_dedicated_agents_report_still_carries_findings(tmp_path, parallel):
+    """Coverage-preserved side: the dedicated agents report MUST still hold the
+    per-agent findings — the fix removed the duplicate, not the coverage."""
+    plugin = _plugin_with_findable_agent(tmp_path)
+    reports = _run_scoring_path(plugin, parallel=parallel)
+    assert "agents" in reports, "dedicated 'agents' report unit missing"
+    assert len(reports["agents"].results) > 0, (
+        "Dedicated agents report is empty — the per-element agent validator is no "
+        "longer running anywhere, which would mean agent findings are now uncounted."
+    )

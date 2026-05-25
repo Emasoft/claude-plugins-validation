@@ -27,7 +27,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -40,9 +39,19 @@ from cpv_validation_common import (
     VALID_PLUGIN_ENV_VARS,
     ValidationReport,
     ValidationResult,
-    is_valid_plugin_env_var,
+    is_absolute_path,
     save_report_and_print_summary,
+    validate_env_var_syntax,
 )
+
+# is_absolute_path / validate_env_var_syntax are imported from
+# cpv_validation_common (single source of truth) and stay importable from this
+# module (`from validate_lsp import is_absolute_path`) because an imported name
+# is a module attribute. They used to be defined locally and drifted from the
+# MCP copies (audit DRY-DRIFT #3); importing them makes drift impossible.
+# validate_path_value stays local — the MCP and LSP variants differ on purpose
+# (LSP checks existence for extensionless binaries; MCP adds a relative-path
+# nudge and gates existence on a file extension).
 
 # Known LSP server configuration fields
 KNOWN_LSP_FIELDS = {
@@ -79,48 +88,8 @@ KNOWN_LANGUAGE_SERVERS = {
     "css-language-server": "vscode-css-languageserver",
 }
 
-# Environment variable pattern
-ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
-
 # Plugin-specific environment variables
 PLUGIN_ENV_VARS = VALID_PLUGIN_ENV_VARS
-
-
-def is_absolute_path(path: str) -> bool:
-    """Check if a path appears to be an absolute path.
-
-    Detects POSIX absolute paths ("/foo"), Windows drive-letter paths using
-    either separator ("C:\\foo" or "C:/foo"), Windows UNC paths ("\\\\server\\share"
-    or "//server/share"), and tilde-expansion paths ("~/foo"). Paths starting
-    with a "${VAR}" env-var reference are never considered absolute because
-    their absoluteness depends on expansion context.
-    """
-    if path.startswith("${"):
-        return False
-    if path.startswith(("/", "\\", "~")):
-        return True
-    # Windows drive-letter paths: "C:\foo" or "C:/foo". Detect on any platform
-    # because LSP configs may be authored on Windows and shipped cross-platform.
-    if len(path) >= 3 and path[1] == ":" and path[2] in ("\\", "/") and path[0].isalpha():
-        return True
-    return False
-
-
-def validate_env_var_syntax(value: str, report: ValidationReport, context: str) -> None:
-    """Validate environment variable syntax in a string value."""
-    if "${" in value:
-        open_count = value.count("${")
-        close_count = value.count("}")
-        if open_count != close_count:
-            report.major(f"Malformed env var syntax (unclosed braces) in {context}")
-            return
-
-        for match in ENV_VAR_PATTERN.finditer(value):
-            var_name = match.group(1)
-            default = match.group(2)
-
-            if default is None and not is_valid_plugin_env_var(var_name):
-                report.info(f"Env var ${{{var_name}}} has no default value in {context}")
 
 
 def validate_path_value(

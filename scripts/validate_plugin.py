@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import fnmatch
 import glob as _glob
 import json
 import os
@@ -123,6 +124,18 @@ _SEMVER_ATOM_RE = re.compile(
 # Hyphen range "x.y.z - a.b.c" (3 tokens separated by a bare dash and spaces).
 _SEMVER_HYPHEN_RE = re.compile(
     r"^\s*\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?\s+-\s+\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?\s*$"
+)
+
+# Exact semver for a plugin's OWN `version` (semver.org §2): full
+# MAJOR.MINOR.PATCH, no leading zeros, optional -prerelease / +build, FULLY
+# anchored. Unlike the dependency-RANGE check above, a plugin version is a
+# single concrete version, not a range — `re.match(r"^\d+\.\d+\.\d+", v)`
+# (no `$`) wrongly accepted trailing garbage ("1.2.3foo"), extra components
+# ("1.2.3.4"), and leading zeros ("01.02.03"), all of which break the
+# version-bump / publish tooling that consumes this field.
+_PLUGIN_VERSION_RE = re.compile(
+    r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+    r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
 )
 
 
@@ -386,7 +399,23 @@ def validate_dependencies(
                         "reference; allowlist check skipped (no hosting marketplace context)",
                         ".claude-plugin/plugin.json",
                     )
-                elif hosting_name is not None and market != hosting_name:
+                elif hosting_name is None:
+                    # A hosting marketplace WAS supplied/discovered but it has no
+                    # usable `name` — the cross-marketplace allowlist is keyed on
+                    # the hosting name, so the check below cannot run. Without
+                    # this branch the enforcement was silently skipped (a
+                    # malformed marketplace.json bypassing the install-blocking
+                    # check). Surface it as INFO so the gap is visible; the
+                    # missing `name` itself is the marketplace validator's hard
+                    # error to report, not the plugin's.
+                    report.info(
+                        f"'dependencies[{i}].marketplace' = '{market}' is a cross-marketplace "
+                        "reference, but the hosting marketplace.json has no usable 'name' — "
+                        "allowlist check skipped. Fix the hosting marketplace.json's 'name' "
+                        "so cross-marketplace dependencies can be enforced.",
+                        ".claude-plugin/plugin.json",
+                    )
+                elif market != hosting_name:
                     if hosting_allowlist is None or market not in hosting_allowlist:
                         allow_desc = sorted(hosting_allowlist) if hosting_allowlist is not None else "<none declared>"
                         report.major(
@@ -418,6 +447,17 @@ def validate_dependencies(
 # v2.1.121 — userConfig per-key `type` enum (5 values).
 USER_CONFIG_TYPE_ENUM = frozenset({"string", "number", "boolean", "directory", "file"})
 
+# Maps each userConfig `type` to the Python type(s) a `default` value may hold.
+# directory/file are path strings. bool is handled specially for "number" (a
+# bool is a subclass of int but is NOT a valid numeric default).
+USER_CONFIG_TYPE_TO_PYTHON: dict[str, tuple[type, ...]] = {
+    "string": (str,),
+    "number": (int, float),
+    "boolean": (bool,),
+    "directory": (str,),
+    "file": (str,),
+}
+
 
 def validate_user_config_structure(manifest: dict[str, Any], report: ValidationReport) -> None:
     """Validate the ``userConfig`` root per plugins-reference.md (v2.1.121).
@@ -433,8 +473,14 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
         return
     uc = manifest["userConfig"]
     if not isinstance(uc, dict):
-        # The inline validator in validate_manifest already emits a MAJOR for
-        # non-dict userConfig — no need to duplicate it here.
+        # This helper is the single source of truth for userConfig (the inline
+        # block in validate_manifest was removed in v2.106 to stop double-counting
+        # — the duplicate findings inflated the MAJOR count). It must therefore
+        # emit the non-dict MAJOR itself.
+        report.major(
+            f"'userConfig' must be an object, got {type(uc).__name__}",
+            ".claude-plugin/plugin.json",
+        )
         return
     # v2.1.121 spec — full sub-field set (9 fields total).
     known_sub = frozenset(
@@ -460,7 +506,13 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
             )
             continue
         if not isinstance(entry, dict):
-            # Inline validator already reports a MAJOR — do not duplicate.
+            # SSOT: emit the non-dict-entry MAJOR here (the inline block that
+            # used to own it was removed in v2.106 to stop double-counting).
+            report.major(
+                f"'userConfig.{key}' must be an object with 'title' and 'type', "
+                f"got {type(entry).__name__}",
+                ".claude-plugin/plugin.json",
+            )
             continue
 
         # v2.1.121 — required sub-fields.
@@ -534,6 +586,24 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
                 ".claude-plugin/plugin.json",
             )
 
+        # default/type-match — when BOTH a valid type and a default are present
+        # their runtime types must agree (the inline block that used to own this
+        # check was removed in v2.106). bool is a subclass of int, so exclude it
+        # when the declared type is "number".
+        declared = entry.get("type")
+        if "default" in entry and isinstance(declared, str) and declared in USER_CONFIG_TYPE_ENUM:
+            expected_py_types = USER_CONFIG_TYPE_TO_PYTHON.get(declared, ())
+            default_value = entry["default"]
+            is_match = isinstance(default_value, expected_py_types)
+            if declared == "number" and isinstance(default_value, bool):
+                is_match = False
+            if not is_match:
+                report.major(
+                    f"'userConfig.{key}.default' type ({type(default_value).__name__}) "
+                    f"does not match declared type ({declared})",
+                    ".claude-plugin/plugin.json",
+                )
+
         # Unknown sub-fields — MINOR so authors notice typos.
         for extra in set(entry.keys()) - known_sub:
             report.minor(
@@ -557,7 +627,12 @@ def _extract_referenced_dirs_from_text(text: str) -> set[str]:
 
 
 def _walk_for_command_args(node: Any) -> list[str]:
-    """Recursively collect string values from `command` / `args` keys in nested dicts/lists."""
+    """Recursively collect string values from `command` / `url` / `args` / `env` keys.
+
+    `command` and `url` contribute their string value; `args` contributes its
+    string list items; `env` contributes its dict's string values. Used to
+    discover plugin-bundled folders referenced from the manifest.
+    """
     out: list[str] = []
     if isinstance(node, dict):
         for k, v in node.items():
@@ -1160,9 +1235,10 @@ def validate_manifest(
                 f"Version must be a string, got {type(version).__name__}: {version}",
                 ".claude-plugin/plugin.json",
             )
-        elif not re.match(r"^\d+\.\d+\.\d+", version):
+        elif not _PLUGIN_VERSION_RE.match(version):
             report.major(
-                f"Version must be semver format: {version}",
+                f"Version must be semver format (MAJOR.MINOR.PATCH, optional "
+                f"-prerelease / +build, no leading zeros, no trailing garbage): {version}",
                 ".claude-plugin/plugin.json",
             )
 
@@ -1365,120 +1441,21 @@ def validate_manifest(
                         ".claude-plugin/plugin.json",
                     )
 
-    # Validate userConfig schema (v2.1.80): keys must be identifiers, each entry needs title + type.
-    # Claude Code's runtime validator enforces 'title' as REQUIRED — issue #9 documented a v1.7.0
-    # release of token-reporter that passed CPV but failed at install with:
-    #   userConfig.<key>.title: Invalid input: expected string, received undefined
-    # Issue #??? (2026-04-18): runtime ALSO enforces 'type' as REQUIRED via Zod .enum() — when
-    # missing, Zod emits "userConfig.<key>.type: Invalid option: expected one of
-    # \"string\"|\"number\"|\"boolean\"|\"directory\"|\"file\"". The docs-listed types
-    # (integer/array/object) are NOT accepted by the runtime; the runtime accepts exactly 5.
-    # Mirror the runtime schema strictly to catch this at validation time.
-    USERCONFIG_VALID_TYPES = {"string", "number", "boolean", "directory", "file"}
-    USERCONFIG_TYPE_TO_PYTHON: dict[str, tuple[type, ...]] = {
-        "string": (str,),
-        "number": (int, float),
-        "boolean": (bool,),
-        "directory": (str,),  # path string
-        "file": (str,),  # path string
-    }
-    if "userConfig" in manifest:
-        uc = manifest["userConfig"]
-        if not isinstance(uc, dict):
-            report.major(f"'userConfig' must be an object, got {type(uc).__name__}", ".claude-plugin/plugin.json")
-        else:
-            for key, entry in uc.items():
-                if not isinstance(key, str) or not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", key):
-                    report.major(f"'userConfig' key '{key}' must be a valid identifier", ".claude-plugin/plugin.json")
-                if not isinstance(entry, dict):
-                    report.major(
-                        f"'userConfig.{key}' must be an object with 'title' and 'type'",
-                        ".claude-plugin/plugin.json",
-                    )
-                    continue
-                # title (REQUIRED — runtime rejects the manifest at install time without it)
-                if "title" not in entry:
-                    report.major(
-                        f"'userConfig.{key}' missing required 'title' field — Claude Code runtime "
-                        f"rejects this at install time",
-                        ".claude-plugin/plugin.json",
-                    )
-                elif not isinstance(entry["title"], str):
-                    report.major(
-                        f"'userConfig.{key}.title' must be a string, got {type(entry['title']).__name__}",
-                        ".claude-plugin/plugin.json",
-                    )
-                # description (recommended)
-                if "description" not in entry:
-                    report.minor(f"'userConfig.{key}' missing 'description' field", ".claude-plugin/plugin.json")
-                elif not isinstance(entry["description"], str):
-                    report.major(f"'userConfig.{key}.description' must be a string", ".claude-plugin/plugin.json")
-                # type (REQUIRED — runtime rejects missing type with "Invalid option: expected one of ...")
-                declared_type: str | None = None
-                if "type" not in entry:
-                    report.major(
-                        f"'userConfig.{key}' missing required 'type' field — Claude Code runtime "
-                        f"rejects this at install time with 'Invalid option: expected one of "
-                        f'"string"|"number"|"boolean"|"directory"|"file"\'',
-                        ".claude-plugin/plugin.json",
-                    )
-                elif not isinstance(entry["type"], str):
-                    report.major(
-                        f"'userConfig.{key}.type' must be a string, got {type(entry['type']).__name__}",
-                        ".claude-plugin/plugin.json",
-                    )
-                elif entry["type"] not in USERCONFIG_VALID_TYPES:
-                    report.major(
-                        f"'userConfig.{key}.type' must be one of "
-                        f"{sorted(USERCONFIG_VALID_TYPES)}, got {entry['type']!r} — "
-                        f"Claude Code runtime rejects this at install time",
-                        ".claude-plugin/plugin.json",
-                    )
-                else:
-                    declared_type = entry["type"]
-                # default (optional, but if both type and default present, types must match)
-                if "default" in entry and declared_type is not None:
-                    expected_py_types = USERCONFIG_TYPE_TO_PYTHON.get(declared_type, ())
-                    default_value = entry["default"]
-                    # bool is a subclass of int — exclude when checking number
-                    is_match = isinstance(default_value, expected_py_types)
-                    if declared_type == "number" and isinstance(default_value, bool):
-                        is_match = False
-                    if not is_match:
-                        report.major(
-                            f"'userConfig.{key}.default' type ({type(default_value).__name__}) "
-                            f"does not match declared type ({declared_type})",
-                            ".claude-plugin/plugin.json",
-                        )
-                # sensitive (optional, must be bool)
-                if "sensitive" in entry and not isinstance(entry["sensitive"], bool):
-                    report.major(f"'userConfig.{key}.sensitive' must be a boolean", ".claude-plugin/plugin.json")
-            report.passed(f"'userConfig' schema valid: {len(uc)} config(s)", ".claude-plugin/plugin.json")
+    # Inline `userConfig` validation was removed here (v2.106): it duplicated
+    # `validate_user_config_structure()` (called below at the end of this
+    # function), so every userConfig defect was counted TWICE — inflating the
+    # MAJOR/MINOR totals in the verdict's count table. The helper is now the
+    # single source of truth: it owns the full v2.1.121 9-field schema AND the
+    # non-dict / non-dict-entry MAJORs and the default/type-match check that
+    # this inline block used to own (folded into the helper so no coverage was
+    # lost).
 
-    # Validate channels schema (v2.1.85): server is required, must match mcpServers key
-    if "channels" in manifest:
-        ch = manifest["channels"]
-        if not isinstance(ch, list):
-            report.major(f"'channels' must be an array, got {type(ch).__name__}", ".claude-plugin/plugin.json")
-        else:
-            mcp_keys = set()
-            if "mcpServers" in manifest and isinstance(manifest["mcpServers"], dict):
-                mcp_keys = set(manifest["mcpServers"].keys())
-            for i, entry in enumerate(ch):
-                if not isinstance(entry, dict):
-                    report.major(f"'channels[{i}]' must be an object", ".claude-plugin/plugin.json")
-                    continue
-                if "server" not in entry:
-                    report.major(f"'channels[{i}]' missing required 'server' field", ".claude-plugin/plugin.json")
-                elif not isinstance(entry["server"], str):
-                    report.major(f"'channels[{i}].server' must be a string", ".claude-plugin/plugin.json")
-                elif mcp_keys and entry["server"] not in mcp_keys:
-                    report.major(
-                        f"'channels[{i}].server' = '{entry['server']}' does not match any mcpServers key",
-                        ".claude-plugin/plugin.json",
-                    )
-            if ch:
-                report.passed(f"'channels' schema valid: {len(ch)} channel(s)", ".claude-plugin/plugin.json")
+    # Inline `channels` validation was removed here (v2.106), same reason: it
+    # duplicated `validate_channels_structure()` (called below). The helper is
+    # the single source of truth and is strictly broader — it resolves
+    # mcpServers via `_mcp_server_keys` (handling the path-string and
+    # {"mcpServers": {...}} wrapper forms the inline block never covered) and
+    # validates per-channel userConfig.
 
     # Inline `lspServers` validation was removed here (TRDD-021250b5 Phase 3):
     # the comprehensive `validate_plugin_lsp()` is now the single source of truth
@@ -1593,6 +1570,14 @@ def validate_manifest(
                 if is_default
                 else ""
             )
+            # Severity is MAJOR (not CRITICAL) by deliberate choice: an agents
+            # folder-path drops ONLY the agents at runtime. The sibling
+            # hooks-default check above is CRITICAL because its failure CASCADES
+            # — a duplicate hooks file disables the plugin's OTHER capabilities
+            # too (MCP servers fail with "hook-load-failed"), a strictly larger
+            # blast radius. Both tiers block and mark the plugin INVALID, so the
+            # verdict is correct either way; the tier difference reflects the
+            # difference in blast radius, not a coverage gap.
             report.major(
                 f"Field 'agents' contains folder path '{path_str}' — Claude Code's manifest validator "
                 f"REJECTS folder paths in the 'agents' field with the cryptic error 'agents: Invalid input' "
@@ -1923,6 +1908,28 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         except (json.JSONDecodeError, OSError):
             pass
 
+    # Hoisted out of the per-directory loop below (was re-read once per
+    # candidate directory): the cpv.allow_root_dirs allow-list and the parsed
+    # .gitignore patterns are plugin-wide, so reading/parsing them once is
+    # O(1) instead of O(number-of-top-level-dirs). The gitignore helpers are
+    # imported once here rather than inside the loop body.
+    cpv_cfg = load_cpv_config(plugin_root)
+    allow_roots = cpv_cfg.get("allow_root_dirs", [])
+    allow_roots_set = {d for d in allow_roots if isinstance(d, str)} if isinstance(allow_roots, list) else set()
+    gitignore_patterns: list[Any] | None = None
+    try:
+        from cpv_validation_common import (
+            is_path_gitignored,  # noqa: PLC0415
+            parse_gitignore,  # noqa: PLC0415
+        )
+
+        gitignore_path = plugin_root / ".gitignore"
+        if gitignore_path.is_file():
+            gitignore_patterns = parse_gitignore(gitignore_path)
+    except (ImportError, OSError, ValueError):
+        is_path_gitignored = None  # type: ignore[assignment]
+        gitignore_patterns = None
+
     # Also skip hidden dirs and _dev dirs
     for item in plugin_root.iterdir():
         if not item.is_dir():
@@ -1949,29 +1956,23 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         # opt-out of edge-case directory names.
         if is_vendored_path(Path(dirname), plugin_root):
             continue
-        cpv_cfg = load_cpv_config(plugin_root)
-        allow_roots = cpv_cfg.get("allow_root_dirs", [])
-        if isinstance(allow_roots, list) and dirname in allow_roots:
+        if dirname in allow_roots_set:
             continue
         # Issue #37 — directories the plugin explicitly excludes from
         # distribution via .gitignore are not part of "what the plugin
         # ships" and therefore can't cause an empty install. Common
         # patterns: research material (INPUT_DEV/, _research/), training
         # fixtures (samples/, fixtures/), local builds (build/, dist/)
-        # that the publish pipeline doesn't include in the tarball.
-        try:
-            from cpv_validation_common import (
-                is_path_gitignored,  # noqa: PLC0415
-                parse_gitignore,  # noqa: PLC0415
-            )
-
-            gitignore_path = plugin_root / ".gitignore"
-            if gitignore_path.is_file():
-                _patterns = parse_gitignore(gitignore_path)
-                if is_path_gitignored(dirname, _patterns) or is_path_gitignored(dirname + "/", _patterns):
+        # that the publish pipeline doesn't include in the tarball. The
+        # .gitignore was parsed ONCE above the loop; just consult it here.
+        if gitignore_patterns is not None and is_path_gitignored is not None:
+            try:
+                if is_path_gitignored(dirname, gitignore_patterns) or is_path_gitignored(
+                    dirname + "/", gitignore_patterns
+                ):
                     continue
-        except (ImportError, OSError, ValueError):
-            pass
+            except (OSError, ValueError):
+                pass
         # Severity: MAJOR (was WARNING). The user's directive: "NO DEVIATION
         # FROM THE STANDARD can be allowed unless you declare the custom
         # folder in plugin.json". An undeclared non-standard root folder
@@ -2324,64 +2325,86 @@ def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
     # no-op. validate_security.py::main does this for its own
     # Check 27; validate_plugin must do the same when invoking
     # skillaudit directly.
+    #
+    # The arm/scan/report sequence is wrapped in try/finally that DISARMS
+    # the self-scan flag afterwards. The flag lives in module-global state
+    # inside validate_security; validate_plugin's functions are invoked
+    # in-process (test suite, batch orchestrator, any caller that validates
+    # several plugins in sequence). Without the finally-disarm, the flag set
+    # while scanning a CPV-self target would stay armed and a SUBSEQUENT
+    # external plugin's scan could read plugin A's stale self-scan state and
+    # wrongly suppress its findings. Disarming to the module default
+    # (inactive) after each run keeps the global consistent with the one-shot
+    # CLI contract.
     self_scan = is_cpv_self_scan(plugin_root)
-    _set_cpv_self_scan(self_scan, plugin_root=plugin_root, notice_report=None)
+    try:
+        _set_cpv_self_scan(self_scan, plugin_root=plugin_root, notice_report=None)
 
-    # When scanning CPV itself, gitignored files are dev artifacts
-    # (rechecker notifications at the repo root, scratch tmp files,
-    # design notes, etc.) — they should not surface as findings. Use
-    # validate_plugin's GitignoreFilter to identify and skip them.
-    # When scanning an EXTERNAL plugin we deliberately do NOT skip
-    # gitignored content: a malicious plugin might gitignore its
-    # payload to evade casual review.
-    from typing import Callable as _Callable  # noqa: PLC0415
+        # When scanning CPV itself, gitignored files are dev artifacts
+        # (rechecker notifications at the repo root, scratch tmp files,
+        # design notes, etc.) — they should not surface as findings. Use
+        # validate_plugin's GitignoreFilter to identify and skip them.
+        # When scanning an EXTERNAL plugin we deliberately do NOT skip
+        # gitignored content: a malicious plugin might gitignore its
+        # payload to evade casual review.
+        from typing import Callable as _Callable  # noqa: PLC0415
 
-    gitignore_check: _Callable[[str], bool] | None = None
-    if self_scan and _gi is not None:
+        gitignore_check: _Callable[[str], bool] | None = None
+        if self_scan and _gi is not None:
 
-        def _is_gitignored(rel_path: str) -> bool:
-            try:
-                rel = Path(rel_path)
-                if not rel.is_absolute():
-                    rel = plugin_root / rel
-                return _gi.is_ignored(rel)  # type: ignore[union-attr]
-            except (OSError, ValueError):
+            def _is_gitignored(rel_path: str) -> bool:
+                try:
+                    rel = Path(rel_path)
+                    if not rel.is_absolute():
+                        rel = plugin_root / rel
+                    return _gi.is_ignored(rel)  # type: ignore[union-attr]
+                except (OSError, ValueError):
+                    return False
+
+            gitignore_check = _is_gitignored
+
+        def _should_skip(file_path: str, line: int | None) -> bool:
+            if not file_path:
                 return False
-
-        gitignore_check = _is_gitignored
-
-    def _should_skip(file_path: str, line: int | None) -> bool:
-        if not file_path:
+            if _is_always_skip_basename(file_path):
+                return True
+            if cpv_self_scan_skip(file_path):
+                return True
+            if _is_vendored_dep_path(file_path):
+                return True
+            if _is_dev_scratch_path(file_path):
+                return True
+            if _is_test_file_path(file_path):
+                return True
+            # v2.99.1 — gitignored content during self-scan only.
+            if gitignore_check is not None and gitignore_check(file_path):
+                return True
+            if isinstance(line, int) and line > 0:
+                try:
+                    fpath = Path(file_path)
+                    if not fpath.is_absolute():
+                        fpath = plugin_root / fpath
+                    if fpath.is_file() and fpath.stat().st_size < 2_000_000:
+                        # errors="replace" (not "ignore"): the body is consumed
+                        # by line-anchored matchers (cpv_self_scan_skip_line uses
+                        # the reported line number). "ignore" DROPS undecodable
+                        # bytes, which can shift content off its real line;
+                        # "replace" substitutes U+FFFD and preserves line/offset
+                        # alignment so the line lookup stays accurate.
+                        body = fpath.read_text(encoding="utf-8", errors="replace")
+                        if cpv_self_scan_skip_line(file_path, body, int(line)):
+                            return True
+                        if is_fp_corpus_markdown(file_path, body):
+                            return True
+                except OSError:
+                    pass
             return False
-        if _is_always_skip_basename(file_path):
-            return True
-        if cpv_self_scan_skip(file_path):
-            return True
-        if _is_vendored_dep_path(file_path):
-            return True
-        if _is_dev_scratch_path(file_path):
-            return True
-        if _is_test_file_path(file_path):
-            return True
-        # v2.99.1 — gitignored content during self-scan only.
-        if gitignore_check is not None and gitignore_check(file_path):
-            return True
-        if isinstance(line, int) and line > 0:
-            try:
-                fpath = Path(file_path)
-                if not fpath.is_absolute():
-                    fpath = plugin_root / fpath
-                if fpath.is_file() and fpath.stat().st_size < 2_000_000:
-                    body = fpath.read_text(encoding="utf-8", errors="ignore")
-                    if cpv_self_scan_skip_line(file_path, body, int(line)):
-                        return True
-                    if is_fp_corpus_markdown(file_path, body):
-                        return True
-            except OSError:
-                pass
-        return False
 
-    skillaudit_report_findings(result, plugin_root, report, should_skip=_should_skip)
+        skillaudit_report_findings(result, plugin_root, report, should_skip=_should_skip)
+    finally:
+        # Restore the module default (inactive) so the armed flag never leaks
+        # into a subsequent in-process scan of a different plugin.
+        _set_cpv_self_scan(False)
 
 
 def validate_telemetry(plugin_root: Path, report: ValidationReport) -> None:
@@ -2421,7 +2444,7 @@ def _has_shebang(path: Path) -> bool:
     try:
         with open(path, "rb") as f:
             return f.read(2) == b"#!"
-    except Exception:
+    except OSError:
         return False
 
 
@@ -2575,7 +2598,7 @@ def _file_has_script_shebang(path: Path) -> bool:
         return False
     try:
         first_line = head.split(b"\n", 1)[0].decode("utf-8", errors="replace")
-    except Exception:
+    except (UnicodeDecodeError, ValueError):
         return False
     return bool(_SCRIPT_SHEBANG_RE.match(first_line))
 
@@ -3000,6 +3023,89 @@ def validate_manifest_skill_paths(plugin_root: Path, report: ValidationReport) -
     return True
 
 
+def _validate_declared_skill_contents(
+    plugin_root: Path,
+    report: ValidationReport,
+    skip_platform_checks: list[str] | None,
+) -> None:
+    """Run the comprehensive 190-rule validator on each declared skill.
+
+    Called when ``plugin.json`` declares a ``skills`` array. The path-existence
+    findings are already emitted by ``validate_manifest_skill_paths``; this
+    function adds the *content* validation (frontmatter, name/description,
+    token budget, skill security suite) that path-existence checks do NOT
+    cover — without it, a plugin that opts into an explicit ``skills`` array
+    gets its skills validated for existence only and a broken/oversized skill
+    body ships clean.
+
+    Only entries that resolve to an EXISTING skill directory (a folder
+    containing SKILL.md, or the parent of a directly-listed SKILL.md) are
+    content-validated; missing/malformed entries already produced their MAJOR
+    in ``validate_manifest_skill_paths`` and have no body to validate. Each
+    resolved directory is validated once (de-duplicated), mirroring the
+    default ``skills/`` walk's flags and path-prefix transfer.
+    """
+    plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
+    if not plugin_json.is_file():
+        return
+    try:
+        manifest = json.loads(plugin_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(manifest, dict):
+        return
+    skills_field = manifest.get("skills")
+    if not isinstance(skills_field, list):
+        return
+
+    plugin_root_resolved = plugin_root.resolve()
+    seen: set[Path] = set()
+    for entry in skills_field:
+        if not isinstance(entry, str):
+            continue
+        candidate = (plugin_root / entry).resolve()
+        # Reject path-traversal (validate_manifest_skill_paths already emitted
+        # the MAJOR for these — never validate content outside the plugin root).
+        try:
+            candidate.relative_to(plugin_root_resolved)
+        except ValueError:
+            continue
+        # Resolve the entry to the skill DIRECTORY: a folder containing
+        # SKILL.md → the folder itself; a direct SKILL.md file → its parent.
+        if candidate.is_dir() and (candidate / "SKILL.md").is_file():
+            skill_dir = candidate
+        elif candidate.is_file() and candidate.name == "SKILL.md":
+            skill_dir = candidate.parent
+        else:
+            # Missing / not-a-skill — already flagged by the path validator.
+            continue
+        if skill_dir in seen:
+            continue
+        seen.add(skill_dir)
+
+        # Path prefix for transferred findings: the skill dir relative to the
+        # plugin root (POSIX), so messages point at the real on-disk location
+        # rather than a synthetic skills/<name> path.
+        try:
+            rel_prefix = skill_dir.resolve().relative_to(plugin_root_resolved).as_posix()
+        except ValueError:
+            rel_prefix = skill_dir.name
+        skill_name = skill_dir.name
+
+        skill_report = validate_skill_comprehensive(
+            skill_dir,
+            # Same flags as the default skills/ walk below: Nixtla strict mode
+            # is a quality opinion (not Anthropic-validity), so keep it opt-in.
+            strict_mode=False,
+            strict_openspec=False,
+            validate_pillars_flag=skill_name.startswith(("lang-", "convert-")),
+            skip_platform_checks=skip_platform_checks,
+        )
+        for result in skill_report.results:
+            file_path = f"{rel_prefix}/{result.file}" if result.file else rel_prefix
+            report.add(result.level, result.message, file_path, result.line)
+
+
 def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_checks: list[str] | None = None) -> None:
     """Validate all skills in the plugin's skills/ directory.
 
@@ -3011,13 +3117,18 @@ def validate_skills(plugin_root: Path, report: ValidationReport, skip_platform_c
     CC v2.1.136+ semantics: when plugin.json declares a ``skills`` array,
     that list is AUTHORITATIVE and the default ``skills/`` directory walk
     is suppressed. ``validate_manifest_skill_paths`` runs first and
-    returns True when it consumed the field — in that case this function
-    early-returns so we don't double-validate (or validate skills the
-    plugin author intentionally hid).
+    returns True when it consumed the field — in that case we still run the
+    comprehensive per-skill content validator on each declared skill (the
+    path validator only checks existence), then return so we don't fall
+    through to the default ``skills/`` walk and double-validate.
     """
     if validate_manifest_skill_paths(plugin_root, report):
-        # plugin.json::skills is the authoritative source — every listed
-        # path is the responsibility of the manifest validator above.
+        # plugin.json::skills is the authoritative DISCOVERY source. The path
+        # validator above checked existence/shape; now validate the CONTENT of
+        # each declared skill (frontmatter, token budget, security suite) —
+        # otherwise a whole class of plugins (those opting into an explicit
+        # skills array) would get existence-only validation.
+        _validate_declared_skill_contents(plugin_root, report, skip_platform_checks)
         return
 
     skills_dir = plugin_root / "skills"
@@ -3117,7 +3228,7 @@ def validate_output_styles(plugin_root: Path, report: ValidationReport) -> None:
     for md_file in md_files:
         try:
             content = md_file.read_text(encoding="utf-8")
-        except Exception as e:
+        except (OSError, UnicodeDecodeError) as e:
             report.major(f"Cannot read output style: {e}", f"output-styles/{md_file.name}")
             continue
 
@@ -3478,7 +3589,7 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
 
     try:
         content = gitignore_path.read_text(encoding="utf-8")
-    except Exception as e:
+    except (OSError, UnicodeDecodeError) as e:
         report.minor(f"Could not read .gitignore: {e}")
         return
 
@@ -3513,8 +3624,6 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     # venv named `venv/` was covered when the gitignore only contained `.venv/`,
     # because "venv" is a substring of ".venv". Use fnmatch against the normalised
     # pattern body so exact directory names are required (glob still supported).
-    import fnmatch
-
     def _gitignore_covers(name: str, gitignore_lines: list[str]) -> bool:
         lower_name = name.lower()
         for raw in gitignore_lines:
@@ -3765,7 +3874,7 @@ def validate_workflow_inline_python(plugin_root: Path, report: ValidationReport)
     for yaml_path in yaml_files:
         try:
             content = yaml_path.read_text(encoding="utf-8")
-        except Exception:
+        except (OSError, UnicodeDecodeError):
             continue
 
         rel_path = str(yaml_path.relative_to(plugin_root))
@@ -3791,8 +3900,15 @@ def validate_workflow_inline_python(plugin_root: Path, report: ValidationReport)
         report.passed(f"No inline Python quoting issues in {len(yaml_files)} workflow file(s)")
 
 
-def print_results(report: ValidationReport, verbose: bool = False) -> None:
-    """Print validation results in human-readable format."""
+def print_results(report: ValidationReport, verbose: bool = False, strict: bool = False) -> None:
+    """Print validation results in human-readable format.
+
+    ``strict`` mirrors the CLI ``--strict`` flag. When set, the verdict banner
+    is computed from ``exit_code_strict()`` (which blocks on NIT) so the
+    printed banner agrees with the process exit code — otherwise a NIT-only
+    strict run would print "All checks passed" while exiting 4 (NIT-block),
+    contradicting itself for the reader/CI.
+    """
     colors = COLORS
 
     counts = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0, "INFO": 0, "PASSED": 0}
@@ -3827,14 +3943,20 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
         print(f"  {color}[{r.level}]{reset} {r.message}{file_info}{line_info}")
 
     print("\n" + "-" * 60)
-    if report.exit_code == 0:
+    # Under --strict the displayed verdict MUST match the strict exit code
+    # (which blocks on NIT); otherwise a NIT-only strict run prints "passed"
+    # while exiting non-zero.
+    verdict_code = report.exit_code_strict() if strict else report.exit_code
+    if verdict_code == 0:
         print(f"{colors['PASSED']}✓ All checks passed{colors['RESET']}")
-    elif report.exit_code == 1:
+    elif verdict_code == 1:
         print(f"{colors['CRITICAL']}✗ CRITICAL issues found - plugin will not work{colors['RESET']}")
-    elif report.exit_code == 2:
+    elif verdict_code == 2:
         print(f"{colors['MAJOR']}✗ MAJOR issues found - significant problems{colors['RESET']}")
-    else:
+    elif verdict_code == 3:
         print(f"{colors['MINOR']}! MINOR issues found - may affect UX{colors['RESET']}")
+    else:  # EXIT_NIT (4) — only reachable under --strict
+        print(f"{colors['NIT']}! NIT issues found - blocked by --strict{colors['RESET']}")
 
     # Machine-readable summary for CI/CD parsing
     print(
@@ -4288,7 +4410,7 @@ def _collect_run_blocks(content: str) -> list[tuple[str, int]]:
     # ── Structural pass via yaml.safe_load ────────────────────────────
     try:
         doc = yaml.safe_load(content)
-    except Exception:
+    except yaml.YAMLError:
         doc = None
 
     def _walk(node: Any) -> None:
@@ -4520,7 +4642,7 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
 
         if is_cpv_self_scan(plugin_root):
             return
-    except Exception:
+    except ImportError:
         # Best-effort import; if validate_security is unavailable, fall through
         # to the manifest-name heuristic below.
         plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
@@ -4529,7 +4651,7 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
                 manifest_data = json.loads(plugin_json.read_text(encoding="utf-8"))
                 if isinstance(manifest_data, dict) and manifest_data.get("name") == "claude-plugins-validation":
                     return
-            except Exception:
+            except (OSError, json.JSONDecodeError):
                 pass
 
     # Read the plugin's manifest so we can populate template params.
@@ -4538,7 +4660,7 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
         return  # validate_required_files already flags this
     try:
         manifest_data = json.loads(plugin_json.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return
 
     # Import the generator and the params helper.
@@ -4548,12 +4670,12 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
     try:
         import generate_plugin_repo as gen_module
         from standardize_plugin import _params_from_manifest
-    except Exception:
+    except ImportError:
         return
 
     try:
         params = _params_from_manifest(manifest_data)
-    except Exception:
+    except Exception:  # noqa: BLE001 — _params_from_manifest is an external helper; any failure here just disables the optional drift check, never the run
         return
 
     # Issue #28 (v2.97.0): implement the `cpv.allow_pipeline_drift`
@@ -4602,7 +4724,7 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
 
             sig = inspect.signature(gen_func)
             expected_content = gen_func(params) if sig.parameters else gen_func()
-        except Exception:
+        except Exception:  # noqa: BLE001 — gen_func is an arbitrary template generator; a failure in one just skips that file's drift check
             continue
         if actual_content == expected_content:
             continue
@@ -4794,14 +4916,14 @@ def validate_legacy_pipeline_scripts(plugin_root: Path, report: ValidationReport
 
         if is_cpv_self_scan(plugin_root):
             return
-    except Exception:
+    except ImportError:
         plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
         if plugin_json.is_file():
             try:
                 manifest_data = json.loads(plugin_json.read_text(encoding="utf-8"))
                 if isinstance(manifest_data, dict) and manifest_data.get("name") == "claude-plugins-validation":
                     return
-            except Exception:
+            except (OSError, json.JSONDecodeError):
                 pass
 
     for rel_path, replaced_by, reason in _LEGACY_PIPELINE_SCRIPTS:
@@ -5050,7 +5172,7 @@ def validate_workflow_best_practices(plugin_root: Path, report: ValidationReport
     for wf in workflows_dir.glob("*.yml"):
         try:
             content = wf.read_text(encoding="utf-8", errors="replace")
-        except Exception:
+        except (OSError, UnicodeDecodeError):
             continue
         rel = str(wf.relative_to(plugin_root))
         # Check for uv pip install --system (should use uvx)
@@ -5140,7 +5262,7 @@ def validate_submodule_containment(plugin_root: Path, report: ValidationReport) 
         return
     try:
         parent_display = str(parent)
-    except Exception:
+    except Exception:  # noqa: BLE001 — str() on a Path is pathological; degrade the INFO message rather than crash the run
         parent_display = "<parent>"
     report.info(
         f"Plugin is a submodule of {parent_display}. Parent repo CI will not run this plugin's pipeline automatically."
@@ -5243,8 +5365,6 @@ def _lockfile_is_gitignored(lockfile_name: str, patterns: list[str]) -> bool:
     for a lockfile (`uv.lock`, `*.lock`, `/Cargo.lock`) rather than
     implementing the full gitignore grammar.
     """
-    import fnmatch
-
     lower_name = lockfile_name.lower()
     for pat in patterns:
         # Strip leading slash — anchored pattern, still a basename match
@@ -5344,8 +5464,13 @@ def _classify_path(path: Path) -> str:
                 break
             ancestor = ancestor.parent
         return "standalone_skill"
-    # Project-scoped Claude config (.claude/ in a project root)
-    if name == ".claude" or (path / "settings.json").is_file() and (path / "plugins").is_dir():
+    # Project-scoped Claude config (.claude/ in a project root): a dir literally
+    # named `.claude` (the canonical marker), OR any dir that structurally looks
+    # like one by carrying BOTH settings.json and a plugins/ subdir. The explicit
+    # parens disambiguate operator precedence — `and` binds tighter than `or`, so
+    # without them the reader cannot tell whether the plugins/ requirement also
+    # gates the `.claude` name (it does not, and should not).
+    if name == ".claude" or ((path / "settings.json").is_file() and (path / "plugins").is_dir()):
         return "claude_project_config"
     # Global Claude plugin cache
     try:
@@ -5574,8 +5699,15 @@ def _run_parallel_batch(
         slot_name, sub_report, slot_exc = slot
         main_report.merge(sub_report)
         if slot_exc is not None:
-            # Match the boundary-error pattern in _run_xref_in_pipeline.
-            main_report.minor(f"Validator '{slot_name}' failed: {type(slot_exc).__name__}: {slot_exc}")
+            # A comprehensive validator that crashed mid-run is an INDETERMINATE
+            # result: whatever findings it would have produced (potentially
+            # CRITICAL — e.g. the xref validator owns RC-GHOST-DISPATCH-001) are
+            # lost. Surfacing the crash at MAJOR (not MINOR) keeps the verdict
+            # blocking/INVALID so a validator bug cannot silently let a bad
+            # plugin pass, while the rest of the batch still proceeds (we do not
+            # re-raise). This mirrors the fail-closed posture of the gitmodules
+            # import-failure path (CRITICAL) — a crash is never a clean pass.
+            main_report.major(f"Validator '{slot_name}' crashed: {type(slot_exc).__name__}: {slot_exc}")
 
 
 def _run_xref_in_pipeline(plugin_root: Path, report: ValidationReport) -> None:
@@ -5599,7 +5731,10 @@ def _run_xref_in_pipeline(plugin_root: Path, report: ValidationReport) -> None:
     try:
         xref_report = validate_cross_references(plugin_root)
     except Exception as e:  # noqa: BLE001 — defensive boundary
-        report.minor(f"Cross-reference validation failed: {e}")
+        # MAJOR: the xref validator owns RC-GHOST-DISPATCH-001 (CRITICAL). A
+        # crash here loses that check — surface it as a blocking finding so the
+        # verdict cannot pass on an indeterminate cross-reference scan.
+        report.major(f"Cross-reference validation crashed: {type(e).__name__}: {e}")
         return
 
     # Merge results into the main report. Each ValidationResult is
@@ -5664,7 +5799,13 @@ def _run_cache_audit_separate(plugin_root: Path, main_report_path: str | None, r
             cache_print_results(cache_report, True)
         finally:
             sys.stdout = old_stdout
-        cache_path.write_text(buffer.getvalue())
+        # Atomic write: tmp sibling + os.replace, matching the canonical
+        # save_report_and_print_summary pattern. A bare write_text leaves a
+        # truncated/partial report on disk if the process is interrupted
+        # mid-write, and a reader would then consume a corrupt cache report.
+        tmp_cache_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
+        tmp_cache_path.write_text(buffer.getvalue())
+        os.replace(tmp_cache_path, cache_path)
         if warning_count:
             pointer = (
                 f"Cache audit: {warning_count} WARNING(s) (CA-01..CA-06, non-blocking) — "
@@ -5706,7 +5847,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Validate a Claude Code plugin against all validation rules.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=("This is the main entry point. It orchestrates all 17 sub-validators.\n\n" + launcher_epilog("plugin")),
+        epilog=(
+            "This is the main entry point. It orchestrates all 17 sub-validators.\n"
+            "Security: the in-process pass is the native skillaudit port (mandatory,\n"
+            "in-process). The full validate_security 27-Check suite is a separate\n"
+            "standalone CLI run by the publish pipeline / `cpv-validate-security`.\n\n"
+            + launcher_epilog("plugin")
+        ),
     )
     parser.add_argument(
         "--verbose",
@@ -6043,7 +6190,10 @@ def main() -> int:
             try:
                 fn(plugin_root, report, *pos_args, **kw_args)
             except Exception as exc:  # noqa: BLE001 — match parallel error-capture
-                report.minor(f"Validator '{name}' failed: {type(exc).__name__}: {exc}")
+                # MAJOR, not MINOR: a crashed validator is indeterminate and its
+                # (possibly CRITICAL) findings are lost — keep the verdict
+                # blocking. Mirrors the parallel path above.
+                report.major(f"Validator '{name}' crashed: {type(exc).__name__}: {exc}")
 
     # ---------------------------------------------------------------------
     # Phase 3 (SERIAL) — settings/language detection/lockfiles + epilogue.
@@ -6066,10 +6216,16 @@ def main() -> int:
     else:
         if args.report:
             save_report_and_print_summary(
-                report, Path(args.report), "Plugin Validation", print_results, args.verbose, plugin_path=args.path
+                report,
+                Path(args.report),
+                "Plugin Validation",
+                print_results,
+                args.verbose,
+                args.strict,
+                plugin_path=args.path,
             )
         else:
-            print_results(report, args.verbose)
+            print_results(report, args.verbose, args.strict)
         # Always surface the cache-audit pointer on stdout (it is INFO-level in
         # the report, which non-verbose summaries hide) so the user sees where
         # the separate cache report landed regardless of verbosity.

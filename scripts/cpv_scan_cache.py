@@ -459,6 +459,29 @@ def get_cached_findings(
     if not isinstance(findings, list):
         return None
 
+    # Per-element shape check (audit MINOR #9). The consumer skips
+    # non-dict elements and, if EVERY element is skipped, treats the file
+    # as scanned-clean — so a same-UID-poisoned row of non-dicts would
+    # silently degrade to a false negative. Require every element to be a
+    # dict; on failure, DELETE the row (like the non-decodable-JSON path
+    # above) and return None so the next run rescans from scratch rather
+    # than trusting a corrupt/poisoned entry.
+    if not all(isinstance(e, dict) for e in findings):
+        try:
+            conn3 = _open_connection(path)
+            conn3.execute(
+                "DELETE FROM scan_cache "
+                "WHERE content_hash = ? "
+                "AND catalog_hash = ? "
+                "AND scanner_version = ? "
+                "AND file_ext = ?",
+                (content_hash, catalog_hash, scanner_version, file_ext),
+            )
+            conn3.close()
+        except sqlite3.Error:
+            pass
+        return None
+
     return findings
 
 

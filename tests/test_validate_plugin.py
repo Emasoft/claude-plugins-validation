@@ -1075,16 +1075,21 @@ class TestValidateUserConfig:
         return report
 
     def test_userconfig_missing_title_reports_major(self, tmp_path):
-        """Issue #9: missing title field must be flagged as MAJOR (runtime rejects at install)."""
+        """Issue #9: missing title field must be flagged as MAJOR (runtime rejects at install).
+
+        v2.106: the inline userConfig block was removed (it duplicated
+        validate_user_config_structure). The SSOT helper phrases the same defect
+        as a missing required SUB-FIELD; assert on the stable token "title".
+        """
         report = self._run(tmp_path, {"MY_OPT": {"type": "number", "default": 10000, "description": "test"}})
         majors = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("missing required 'title'" in m for m in majors), majors
+        assert any("missing required sub-field 'title'" in m for m in majors), majors
 
     def test_userconfig_title_must_be_string(self, tmp_path):
         """userConfig.<key>.title with non-string value must be flagged as MAJOR."""
-        report = self._run(tmp_path, {"MY_OPT": {"title": 42, "description": "x"}})
+        report = self._run(tmp_path, {"MY_OPT": {"title": 42, "description": "x", "type": "string"}})
         majors = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("title' must be a string" in m for m in majors), majors
+        assert any("title' must be a non-empty string" in m for m in majors), majors
 
     def test_userconfig_invalid_type_reports_major(self, tmp_path):
         """userConfig.<key>.type with an unknown value must be flagged as MAJOR."""
@@ -1093,7 +1098,7 @@ class TestValidateUserConfig:
             {"MY_OPT": {"title": "Opt", "description": "x", "type": "potato"}},
         )
         majors = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("type' must be one of" in m and "potato" in m for m in majors), majors
+        assert any("type' = 'potato' is not a valid type" in m for m in majors), majors
 
     def test_userconfig_default_type_mismatch_reports_major(self, tmp_path):
         """When type='number' but default is a string, validator must flag the mismatch."""
@@ -1129,7 +1134,7 @@ class TestValidateUserConfig:
             {"github_repo": {"title": "GitHub repo", "description": "x", "sensitive": False}},
         )
         majors = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("missing required 'type'" in m for m in majors), majors
+        assert any("missing required sub-field 'type'" in m for m in majors), majors
 
     def test_userconfig_type_integer_rejected(self, tmp_path):
         """'integer' was previously accepted by CPV but runtime rejects it — must now be MAJOR."""
@@ -1138,7 +1143,7 @@ class TestValidateUserConfig:
             {"COUNT": {"title": "Count", "description": "x", "type": "integer"}},
         )
         majors = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("type' must be one of" in m and "integer" in m for m in majors), majors
+        assert any("type' = 'integer' is not a valid type" in m for m in majors), majors
 
     def test_userconfig_type_array_rejected(self, tmp_path):
         """'array' was previously accepted by CPV but runtime rejects it — must now be MAJOR."""
@@ -1147,7 +1152,7 @@ class TestValidateUserConfig:
             {"ITEMS": {"title": "Items", "description": "x", "type": "array"}},
         )
         majors = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("type' must be one of" in m and "array" in m for m in majors), majors
+        assert any("type' = 'array' is not a valid type" in m for m in majors), majors
 
     def test_userconfig_type_object_rejected(self, tmp_path):
         """'object' was previously accepted by CPV but runtime rejects it — must now be MAJOR."""
@@ -1156,7 +1161,7 @@ class TestValidateUserConfig:
             {"CFG": {"title": "Config", "description": "x", "type": "object"}},
         )
         majors = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("type' must be one of" in m and "object" in m for m in majors), majors
+        assert any("type' = 'object' is not a valid type" in m for m in majors), majors
 
     def test_userconfig_type_directory_accepted(self, tmp_path):
         """'directory' is one of the 5 runtime-valid types — must validate clean."""
@@ -1189,18 +1194,21 @@ class TestValidateUserConfig:
         """Regression guard (2026-04-18): the 5-type whitelist MUST match the runtime Zod enum.
 
         Claude Code's runtime accepts exactly {"string", "number", "boolean", "directory", "file"}.
-        ANY change to USERCONFIG_VALID_TYPES — additions (`integer`, `array`, `object` etc.)
+        ANY change to the type whitelist — additions (`integer`, `array`, `object` etc.)
         or removals — breaks install-time compatibility. If this test fails, verify the change
         against the runtime Zod schema first; do not relax the assertion.
+
+        v2.106: the inline userConfig block (which carried a local
+        USERCONFIG_VALID_TYPES literal) was removed. The single source of truth
+        is now the module-level USER_CONFIG_TYPE_ENUM frozenset consumed by
+        validate_user_config_structure. Assert against that SSOT instead.
         """
-        import inspect
+        import validate_plugin
 
-        from validate_plugin import validate_manifest  # noqa: F401 — exercise import path
-
-        src = inspect.getsource(validate_manifest)
-        # The whitelist literal must appear in the validator source
-        assert 'USERCONFIG_VALID_TYPES = {"string", "number", "boolean", "directory", "file"}' in src, (
-            "USERCONFIG_VALID_TYPES whitelist has drifted from the runtime Zod enum. "
+        assert validate_plugin.USER_CONFIG_TYPE_ENUM == frozenset(
+            {"string", "number", "boolean", "directory", "file"}
+        ), (
+            "USER_CONFIG_TYPE_ENUM whitelist has drifted from the runtime Zod enum. "
             "The runtime rejects any type outside {string, number, boolean, directory, file}. "
             "If the runtime schema has changed, update this test with the new runtime literal."
         )
@@ -1246,7 +1254,7 @@ class TestValidateUserConfig:
             },
         )
         missing_type_majors = [
-            r.message for r in report.results if r.level == "MAJOR" and "missing required 'type' field" in r.message
+            r.message for r in report.results if r.level == "MAJOR" and "missing required sub-field 'type'" in r.message
         ]
         assert len(missing_type_majors) == 11, (
             f"Expected 11 missing-type MAJORs (one per userConfig entry), got {len(missing_type_majors)}. "
@@ -3600,3 +3608,251 @@ class TestPhase16LayoutC:
         report = ValidationReport()
         validate_layout_c_consistency(plugin_dir, report)
         assert report.results == []
+
+
+class TestAuditFixesV2106:
+    """Two-sided regression tests for the v2.106 deep-audit fixes.
+
+    Each test asserts BOTH the corrected behavior AND that the corresponding
+    valid input still passes — so a fix that merely suppressed the symptom
+    (e.g. blanket-skipping a check) would fail the second assertion.
+    """
+
+    @staticmethod
+    def _plugin_with(tmp_path: Path, name: str, manifest_extra: dict) -> Path:
+        plugin_dir = tmp_path / name
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        manifest = {"name": name, "version": "1.0.0", "description": "x", **manifest_extra}
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest))
+        return plugin_dir
+
+    @staticmethod
+    def _write_skill(plugin_dir: Path, rel_dir: str, frontmatter_name: str) -> None:
+        sk = plugin_dir / rel_dir
+        sk.mkdir(parents=True, exist_ok=True)
+        (sk / "SKILL.md").write_text(
+            f"---\nname: {frontmatter_name}\n"
+            f"description: A test skill that does a thing when the user asks for it.\n---\n\n"
+            f"Body content explaining the skill.\n"
+        )
+
+    # ── M1: declared `skills` array gets CONTENT validation ──────────────
+    def test_declared_skills_array_runs_content_validation(self, tmp_path):
+        """A skill declared via plugin.json `skills` with a broken body (name/dir
+        mismatch) MUST be caught — existence-only validation would miss it."""
+        plugin_dir = self._plugin_with(tmp_path, "decl-skills-bad", {"skills": ["./skills/my-skill/"]})
+        # frontmatter name deliberately mismatches the directory name → MAJOR.
+        self._write_skill(plugin_dir, "skills/my-skill", "totally-wrong-name")
+        report = ValidationReport()
+        validate_skills(plugin_dir, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("must match directory name" in m for m in majors), majors
+
+    def test_declared_skills_array_valid_skill_passes(self, tmp_path):
+        """The other side: a VALID declared skill produces no skill-content MAJORs
+        (proves content validation is not blanket-failing every declared skill)."""
+        plugin_dir = self._plugin_with(tmp_path, "decl-skills-ok", {"skills": ["./skills/my-skill/"]})
+        self._write_skill(plugin_dir, "skills/my-skill", "my-skill")
+        report = ValidationReport()
+        validate_skills(plugin_dir, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert majors == [], majors
+
+    def test_declared_skills_array_skill_md_file_entry_validated(self, tmp_path):
+        """A direct SKILL.md file entry resolves to its parent dir and is
+        content-validated (broken body still caught)."""
+        plugin_dir = self._plugin_with(tmp_path, "decl-skills-file", {"skills": ["./skills/my-skill/SKILL.md"]})
+        self._write_skill(plugin_dir, "skills/my-skill", "totally-wrong-name")
+        report = ValidationReport()
+        validate_skills(plugin_dir, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("must match directory name" in m for m in majors), majors
+
+    # ── M2: channels validated exactly once (no duplicate findings) ──────
+    def test_channels_defect_emitted_once(self, tmp_path):
+        """A single channels[].server cross-ref defect must produce exactly ONE
+        MAJOR (was two before the inline-block deletion inflated the count)."""
+        plugin_dir = self._plugin_with(
+            tmp_path,
+            "ch-dup",
+            {"mcpServers": {"real": {"command": "x"}}, "channels": [{"server": "missing"}]},
+        )
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        server_majors = [
+            r.message
+            for r in report.results
+            if r.level == "MAJOR" and "missing" in r.message and "mcpServers" in r.message
+        ]
+        assert len(server_majors) == 1, server_majors
+
+    def test_channels_valid_passes(self, tmp_path):
+        """The other side: a valid channels entry produces no channels MAJOR."""
+        plugin_dir = self._plugin_with(
+            tmp_path,
+            "ch-ok",
+            {"mcpServers": {"real": {"command": "x"}}, "channels": [{"server": "real"}]},
+        )
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        ch_majors = [r.message for r in report.results if r.level == "MAJOR" and "channels" in r.message]
+        assert ch_majors == [], ch_majors
+
+    # ── M3: userConfig validated exactly once (no duplicate findings) ────
+    def test_userconfig_defect_emitted_once(self, tmp_path):
+        """A single userConfig missing-type defect must produce exactly ONE MAJOR
+        mentioning the missing type (was two before the inline-block deletion)."""
+        plugin_dir = self._plugin_with(
+            tmp_path,
+            "uc-dup",
+            {"userConfig": {"OPT": {"title": "Opt", "description": "x"}}},
+        )
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        type_majors = [
+            r.message for r in report.results if r.level == "MAJOR" and "OPT" in r.message and "'type'" in r.message
+        ]
+        assert len(type_majors) == 1, type_majors
+
+    def test_userconfig_default_type_mismatch_still_caught_after_dedup(self, tmp_path):
+        """The default/type-match check (moved from the deleted inline block into
+        the SSOT helper) must still fire."""
+        plugin_dir = self._plugin_with(
+            tmp_path,
+            "uc-mismatch",
+            {"userConfig": {"OPT": {"title": "Opt", "description": "x", "type": "number", "default": "nan"}}},
+        )
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("does not match declared type (number)" in m for m in majors), majors
+
+    def test_userconfig_non_dict_still_caught_after_dedup(self, tmp_path):
+        """Non-dict userConfig (whose MAJOR the inline block used to own) must
+        still be flagged by the SSOT helper."""
+        plugin_dir = self._plugin_with(tmp_path, "uc-nondict", {"userConfig": "not-a-dict"})
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("'userConfig' must be an object" in m for m in majors), majors
+
+    # ── m1: cross-mkt allowlist gap is VISIBLE when hosting name missing ──
+    def test_cross_marketplace_missing_hosting_name_emits_info(self, tmp_path):
+        """When a hosting marketplace is supplied but lacks a usable `name`, the
+        skipped allowlist check must surface an INFO (not silently vanish)."""
+        from validate_plugin import validate_dependencies
+
+        manifest = {"dependencies": [{"name": "dep-plugin", "marketplace": "other-mkt"}]}
+        report = ValidationReport()
+        validate_dependencies(manifest, report, hosting_marketplace={"allowCrossMarketplaceDependenciesOn": []})
+        infos = [r.message for r in report.results if r.level == "INFO"]
+        assert any("no usable 'name'" in m for m in infos), infos
+        # Two-sided: must NOT emit the cross-mkt MAJOR (the check could not run).
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("allowCrossMarketplaceDependenciesOn allowlist" in m for m in majors), majors
+
+    def test_cross_marketplace_with_name_still_enforced(self, tmp_path):
+        """The other side: a hosting marketplace WITH a name still enforces the
+        allowlist (the missing-name branch did not weaken enforcement)."""
+        from validate_plugin import validate_dependencies
+
+        manifest = {"dependencies": [{"name": "dep-plugin", "marketplace": "other-mkt"}]}
+        report = ValidationReport()
+        validate_dependencies(
+            manifest,
+            report,
+            hosting_marketplace={"name": "host-mkt", "allowCrossMarketplaceDependenciesOn": []},
+        )
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("allowCrossMarketplaceDependenciesOn allowlist" in m for m in majors), majors
+
+    # ── m2: plugin version regex anchored ────────────────────────────────
+    @pytest.mark.parametrize("bad", ["1.2.3garbage", "1.2.3.4.5", "01.02.03", "1.2", "v1.2.3", "1.2.3-"])
+    def test_version_regex_rejects_invalid(self, tmp_path, bad):
+        """Anchored semver: trailing garbage / extra components / leading zeros
+        / short / v-prefixed / empty-prerelease all MUST be rejected."""
+        plugin_dir = self._plugin_with(tmp_path, "ver-bad", {})
+        # overwrite version with the bad value
+        pj = plugin_dir / ".claude-plugin" / "plugin.json"
+        pj.write_text(json.dumps({"name": "ver-bad", "version": bad, "description": "x"}))
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        assert any(
+            r.level == "MAJOR" and "semver" in r.message for r in report.results
+        ), f"{bad!r} should be rejected; got {[r.message for r in report.results if r.level == 'MAJOR']}"
+
+    @pytest.mark.parametrize("good", ["1.2.3", "0.0.0", "10.20.30", "1.2.3-rc.1", "1.2.3+build", "0.1.0"])
+    def test_version_regex_accepts_valid(self, tmp_path, good):
+        """The other side: valid semver (incl. 0-components, prerelease, build)
+        must NOT be flagged."""
+        plugin_dir = self._plugin_with(tmp_path, "ver-ok", {})
+        pj = plugin_dir / ".claude-plugin" / "plugin.json"
+        pj.write_text(json.dumps({"name": "ver-ok", "version": good, "description": "x"}))
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        version_majors = [r.message for r in report.results if r.level == "MAJOR" and "semver" in r.message]
+        assert version_majors == [], f"{good!r} should be accepted; got {version_majors}"
+
+    # ── m3: self-scan flag disarmed after the skillaudit pass ────────────
+    def test_skillaudit_disarms_self_scan_flag(self, tmp_path):
+        """_run_skillaudit_native must leave the module-global self-scan flag
+        DISARMED so it cannot leak into a subsequent in-process scan."""
+        import validate_security
+        from validate_plugin import _run_skillaudit_native
+
+        plugin_dir = self._plugin_with(tmp_path, "scan-plugin", {})
+        report = ValidationReport()
+        # Pre-arm to a sentinel TRUE so we can prove the finally-disarm runs.
+        validate_security._set_cpv_self_scan(True, plugin_root=tmp_path)
+        try:
+            _run_skillaudit_native(plugin_dir, report)
+            assert validate_security._CPV_SELF_SCAN_ACTIVE is False
+            assert validate_security._CPV_SELF_PLUGIN_ROOT is None
+        finally:
+            validate_security._set_cpv_self_scan(False)
+
+    # ── n4: --strict NIT verdict banner matches the strict exit code ─────
+    def test_print_results_strict_nit_banner(self, tmp_path, capsys):
+        """Under strict, a NIT-only report must print the NIT-block banner (not
+        'All checks passed') so the banner agrees with exit code 4."""
+        report = ValidationReport()
+        report.nit("a nitpick")
+        print_results(report, verbose=False, strict=True)
+        out = capsys.readouterr().out
+        assert "NIT issues found" in out
+        assert "All checks passed" not in out
+
+    def test_print_results_nonstrict_nit_banner_passes(self, tmp_path, capsys):
+        """The other side: without strict, a NIT-only report still prints
+        'All checks passed' (NIT does not block in non-strict mode)."""
+        report = ValidationReport()
+        report.nit("a nitpick")
+        print_results(report, verbose=False, strict=False)
+        out = capsys.readouterr().out
+        assert "All checks passed" in out
+
+    # ── m5: _classify_path precedence (named .claude vs settings+plugins) ─
+    def test_classify_path_named_dot_claude(self, tmp_path):
+        """A dir literally named `.claude` classifies as project config even
+        without settings.json + plugins/."""
+        from validate_plugin import _classify_path
+
+        d = tmp_path / ".claude"
+        d.mkdir()
+        assert _classify_path(d) == "claude_project_config"
+
+    def test_classify_path_settings_plus_plugins(self, tmp_path):
+        """A non-`.claude` dir with BOTH settings.json and plugins/ also
+        classifies as project config; one alone does not."""
+        from validate_plugin import _classify_path
+
+        both = tmp_path / "cfgdir"
+        both.mkdir()
+        (both / "settings.json").write_text("{}")
+        (both / "plugins").mkdir()
+        assert _classify_path(both) == "claude_project_config"
+
+        only_settings = tmp_path / "only-settings"
+        only_settings.mkdir()
+        (only_settings / "settings.json").write_text("{}")
+        assert _classify_path(only_settings) != "claude_project_config"

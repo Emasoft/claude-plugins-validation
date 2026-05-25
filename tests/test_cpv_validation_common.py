@@ -299,6 +299,70 @@ class TestScoring:
         assert report.score == 62
 
 
+class TestValidationReportAddForwardsMetadata:
+    """audit m9 — ValidationReport.add must forward category + suggestion.
+
+    Two-sided: when the keywords ARE supplied they reach the stored
+    ValidationResult (and to_dict); when they are OMITTED the result keeps
+    the canonical defaults (category=='', suggestion is None). This is the
+    widening that lets scope-merge / rules-replay paths preserve the two
+    fields end-to-end.
+    """
+
+    def test_add_forwards_category_and_suggestion(self):
+        report = ValidationReport()
+        report.add(
+            "MINOR",
+            "msg",
+            "f.py",
+            7,
+            category="architecture",
+            suggestion="do X instead",
+        )
+        r = report.results[-1]
+        assert r.category == "architecture"
+        assert r.suggestion == "do X instead"
+        # And they round-trip through to_dict (the serialised report).
+        d = r.to_dict()
+        assert d["category"] == "architecture"
+        assert d["suggestion"] == "do X instead"
+
+    def test_add_defaults_when_metadata_omitted(self):
+        """Two-sided: positional callers (the vast majority) are unaffected."""
+        report = ValidationReport()
+        report.add("MAJOR", "msg", "f.py", 3)
+        r = report.results[-1]
+        assert r.category == ""
+        assert r.suggestion is None
+        # Omitted metadata must NOT appear in to_dict (keeps output lean).
+        d = r.to_dict()
+        assert "category" not in d
+        assert "suggestion" not in d
+
+    def test_add_keeps_phase_fixable_fix_id_alongside_metadata(self):
+        """All seven metadata fields coexist (no positional clobbering)."""
+        report = ValidationReport()
+        report.add(
+            "CRITICAL",
+            "msg",
+            "f.py",
+            1,
+            phase="security",
+            fixable=True,
+            fix_id="FX-1",
+            category="manifest",
+            suggestion="hint",
+        )
+        r = report.results[-1]
+        assert (r.phase, r.fixable, r.fix_id, r.category, r.suggestion) == (
+            "security",
+            True,
+            "FX-1",
+            "manifest",
+            "hint",
+        )
+
+
 class TestSeverityConversion:
     """Tests for severity level conversion functions."""
 
@@ -1505,3 +1569,105 @@ class TestV2_1_120_to_126Additions:
         assert "allowManagedReadPathsOnly" in KNOWN_SETTINGS_KEYS
         # Regression guard: sibling key must also still be there.
         assert "allowManagedDomainsOnly" in KNOWN_SETTINGS_KEYS
+
+
+class TestSharedDescriptionThreshold:
+    """audit m4 — MIN_DESCRIPTION_CHARS is the single source for the
+    "very short description" threshold across skill/command/comprehensive."""
+
+    def test_value_is_ten(self):
+        from cpv_validation_common import MIN_DESCRIPTION_CHARS
+
+        assert MIN_DESCRIPTION_CHARS == 10
+
+    def test_all_three_validators_import_the_same_constant(self):
+        import validate_command
+        import validate_skill
+        import validate_skill_comprehensive
+        from cpv_validation_common import MIN_DESCRIPTION_CHARS
+
+        assert validate_skill.MIN_DESCRIPTION_CHARS is MIN_DESCRIPTION_CHARS
+        assert validate_command.MIN_DESCRIPTION_CHARS is MIN_DESCRIPTION_CHARS
+        assert validate_skill_comprehensive.MIN_DESCRIPTION_CHARS is MIN_DESCRIPTION_CHARS
+
+
+class TestSharedParseFrontmatter:
+    """audit m5 — single shared parse_frontmatter (BOM strip + optional
+    yaml_loader). Two-sided: valid frontmatter parses, malformed/BOM/edge
+    cases behave correctly, and the loader-injection contract is enforced."""
+
+    def test_basic_parse(self):
+        from cpv_validation_common import parse_frontmatter
+
+        fm, body, end = parse_frontmatter("---\nname: x\ndescription: d\n---\nBODY\n")
+        assert fm == {"name": "x", "description": "d"}
+        assert body == "BODY\n"
+        assert end == 4  # closing `---` is line 4 (1-based)
+
+    def test_leading_bom_is_stripped(self):
+        from cpv_validation_common import parse_frontmatter
+
+        # A BOM-prefixed file must NOT be treated as having no frontmatter.
+        fm, _body, _end = parse_frontmatter("﻿---\nname: y\n---\nB\n")
+        assert fm == {"name": "y"}
+
+    def test_value_containing_triple_dash_not_truncated(self):
+        from cpv_validation_common import parse_frontmatter
+
+        fm, _body, _end = parse_frontmatter('---\ndescription: "use --- as a sep"\n---\nB\n')
+        assert fm == {"description": "use --- as a sep"}
+
+    def test_no_frontmatter_returns_none(self):
+        from cpv_validation_common import parse_frontmatter
+
+        assert parse_frontmatter("just body, no fm\n") == (None, "just body, no fm\n", 0)
+
+    def test_unterminated_frontmatter_returns_none(self):
+        from cpv_validation_common import parse_frontmatter
+
+        content = "---\nname: x\nno closing delimiter\n"
+        assert parse_frontmatter(content) == (None, content, 0)
+
+    def test_malformed_yaml_returns_none_via_injected_error(self):
+        from cpv_validation_common import parse_frontmatter
+
+        class _Err(Exception):
+            pass
+
+        def _loader(_text: str):
+            raise _Err("bad yaml")
+
+        content = "---\nname: x\n---\nB\n"
+        # Injected loader raises the injected error type → graceful (None, ...).
+        assert parse_frontmatter(content, yaml_loader=_loader, yaml_error=_Err) == (None, content, 0)
+
+    def test_injected_loader_is_used(self):
+        from cpv_validation_common import parse_frontmatter
+
+        sentinel = {"injected": True}
+        fm, _body, _end = parse_frontmatter(
+            "---\nname: x\n---\nB\n",
+            yaml_loader=lambda _t: sentinel,
+            yaml_error=Exception,
+        )
+        assert fm is sentinel
+
+    def test_loader_and_error_must_be_paired(self):
+        from cpv_validation_common import parse_frontmatter
+
+        with pytest.raises(ValueError):
+            parse_frontmatter("---\nx: 1\n---\n", yaml_loader=lambda _t: {})
+        with pytest.raises(ValueError):
+            parse_frontmatter("---\nx: 1\n---\n", yaml_error=Exception)
+
+    def test_all_three_validators_delegate_to_shared(self):
+        """The three module wrappers are thin delegates — same parse outcome."""
+        import validate_command
+        import validate_skill
+        import validate_skill_comprehensive
+
+        doc = "---\nname: z\ndescription: hello world here\n---\nBODY TEXT\n"
+        expected = ({"name": "z", "description": "hello world here"}, "BODY TEXT\n", 4)
+        assert validate_skill.parse_frontmatter(doc) == expected
+        assert validate_command.parse_frontmatter(doc) == expected
+        assert validate_skill_comprehensive.parse_frontmatter(doc) == expected

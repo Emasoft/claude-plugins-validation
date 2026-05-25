@@ -422,6 +422,25 @@ def tree_merkle(file_paths: list[Path], *, base: Path | None = None) -> str:
 # Phase B linters run inside a ThreadPoolExecutor.
 _VERSION_CACHE: dict[str, str] = {}
 _VERSION_LOCK = threading.Lock()
+# Per-scanner probe locks (audit NIT #12). The TOCTOU in the old code —
+# check-under-lock, RELEASE, then spawn the subprocess — let two threads
+# both miss and both spawn ``<tool> --version``. We now serialize the
+# PROBE per scanner so the same tool spawns at most once, while DIFFERENT
+# tools still probe concurrently (a single global lock across a 10s
+# subprocess would needlessly serialize the whole Phase-B linter pool).
+_VERSION_PROBE_LOCKS: dict[str, threading.Lock] = {}
+_VERSION_PROBE_LOCKS_GUARD = threading.Lock()
+
+
+def _probe_lock_for(scanner_name: str) -> threading.Lock:
+    """Return the dedicated probe lock for ``scanner_name``, creating it
+    once. The registry mutation itself is guarded by a short-held lock."""
+    with _VERSION_PROBE_LOCKS_GUARD:
+        lock = _VERSION_PROBE_LOCKS.get(scanner_name)
+        if lock is None:
+            lock = threading.Lock()
+            _VERSION_PROBE_LOCKS[scanner_name] = lock
+        return lock
 
 
 def get_scanner_version(scanner_name: str) -> str:
@@ -432,6 +451,11 @@ def get_scanner_version(scanner_name: str) -> str:
     ``--version`` invocation fails — the cache key still partitions
     correctly, just with less granularity.
 
+    Concurrency (audit NIT #12): the cheap cache hit is checked under the
+    fast ``_VERSION_LOCK``; on a miss we acquire a PER-SCANNER probe lock
+    and DOUBLE-CHECK the cache before spawning, so the same tool's
+    ``--version`` runs at most once even under the Phase-B ThreadPoolExecutor.
+
     Special-cased scanners that don't accept a flat ``--version``:
       - go's ``go version``
       - none others currently
@@ -440,45 +464,55 @@ def get_scanner_version(scanner_name: str) -> str:
         if scanner_name in _VERSION_CACHE:
             return _VERSION_CACHE[scanner_name]
 
-    if not shutil.which(scanner_name):
+    # Serialize the probe for THIS scanner so two threads can't both spawn
+    # ``<tool> --version``. Different tools hold different locks → still
+    # concurrent.
+    with _probe_lock_for(scanner_name):
+        # Double-check: another thread may have populated the cache while
+        # we waited for the probe lock.
         with _VERSION_LOCK:
-            _VERSION_CACHE[scanner_name] = "unknown"
-        return "unknown"
+            if scanner_name in _VERSION_CACHE:
+                return _VERSION_CACHE[scanner_name]
 
-    # Most CPV scanners accept --version; ``go`` uses ``go version``
-    # without a flag prefix. The fall-through after a non-zero exit
-    # also catches edge cases like cargo (which emits its version on
-    # the FIRST line of stderr only when stdout is a TTY).
-    if scanner_name == "go":
-        argv = ["go", "version"]
-    else:
-        argv = [scanner_name, "--version"]
+        if not shutil.which(scanner_name):
+            with _VERSION_LOCK:
+                _VERSION_CACHE[scanner_name] = "unknown"
+            return "unknown"
 
-    try:
-        result = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        version = "unknown"
-    else:
-        # Prefer stdout; fall back to stderr (some tools — notably
-        # gofmt — print --version to stderr instead).
-        raw = (result.stdout or result.stderr or "").strip()
-        # Take only the first non-empty line; trim whitespace.
-        first = ""
-        for line in raw.splitlines():
-            stripped = line.strip()
-            if stripped:
-                first = stripped
-                break
-        version = first or "unknown"
+        # Most CPV scanners accept --version; ``go`` uses ``go version``
+        # without a flag prefix. The fall-through after a non-zero exit
+        # also catches edge cases like cargo (which emits its version on
+        # the FIRST line of stderr only when stdout is a TTY).
+        if scanner_name == "go":
+            argv = ["go", "version"]
+        else:
+            argv = [scanner_name, "--version"]
 
-    with _VERSION_LOCK:
-        _VERSION_CACHE[scanner_name] = version
-    return version
+        try:
+            result = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            version = "unknown"
+        else:
+            # Prefer stdout; fall back to stderr (some tools — notably
+            # gofmt — print --version to stderr instead).
+            raw = (result.stdout or result.stderr or "").strip()
+            # Take only the first non-empty line; trim whitespace.
+            first = ""
+            for line in raw.splitlines():
+                stripped = line.strip()
+                if stripped:
+                    first = stripped
+                    break
+            version = first or "unknown"
+
+        with _VERSION_LOCK:
+            _VERSION_CACHE[scanner_name] = version
+        return version
 
 
 def reset_version_cache() -> None:

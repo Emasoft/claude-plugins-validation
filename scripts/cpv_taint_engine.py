@@ -390,6 +390,48 @@ def analyze_module(tree: ast.Module) -> list[TaintFinding]:
     return findings
 
 
+# Statement fields that hold NESTED STATEMENT blocks. Sinks inside these
+# are found when ``analyze_block`` recurses into them, NOT by the
+# enclosing statement's own-expression walk — otherwise every nested sink
+# is inspected once per enclosing level (O(depth) redundant work AND
+# duplicate findings). (audit MINOR #5)
+_NESTED_STMT_FIELDS: frozenset[str] = frozenset({"body", "orelse", "finalbody", "handlers"})
+
+
+def _own_calls(stmt: ast.stmt) -> Iterable[ast.Call]:
+    """Yield every ``ast.Call`` reachable from ``stmt``'s OWN expressions,
+    WITHOUT descending into nested statement blocks (if/for/while/try
+    bodies, function/class bodies, except handlers).
+
+    This is the expression-level half of ``ast.walk(stmt)``: it finds
+    sinks nested arbitrarily deep inside THIS statement's expressions
+    (``foo(bar(os.system(x)))``) exactly once, while leaving sinks that
+    live in child statements to ``analyze_block``'s recursion. The result
+    is each sink inspected exactly once with taint state still flowing
+    correctly through branches (the recursion shares ``scope_state``).
+    """
+    stack: list[ast.AST] = [stmt]
+    first = True
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.Call):
+            yield node
+        for field_name, value in ast.iter_fields(node):
+            # Do NOT cross into nested statement blocks — recursion owns
+            # them. Only skip these on the ROOT statement; deeper nodes are
+            # all expressions/operators and never carry these field names
+            # as statement lists, but guarding the root is what matters.
+            if first and field_name in _NESTED_STMT_FIELDS:
+                continue
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, ast.AST):
+                        stack.append(item)
+            elif isinstance(value, ast.AST):
+                stack.append(value)
+        first = False
+
+
 def _analyze_stmt(
     stmt: ast.stmt,
     state: _TaintState,
@@ -407,12 +449,13 @@ def _analyze_stmt(
     elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
         _process_assignment(stmt.target, stmt.value, state)
 
-    # Walk every Call node in this statement looking for sinks
-    for node in ast.walk(stmt):
-        if isinstance(node, ast.Call):
-            sink_desc = _is_sink_call(node)
-            if sink_desc:
-                _check_sink_args(node, sink_desc, state, findings)
+    # Inspect every Call in this statement's OWN expressions for sinks.
+    # Nested-statement-block sinks are handled by analyze_block recursion,
+    # so each sink is checked exactly once (audit MINOR #5).
+    for node in _own_calls(stmt):
+        sink_desc = _is_sink_call(node)
+        if sink_desc:
+            _check_sink_args(node, sink_desc, state, findings)
 
 
 def _process_assignment(

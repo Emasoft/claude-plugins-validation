@@ -896,3 +896,92 @@ class TestNamedArgSubstitutionShellVarHeuristic:
         validate_skill_content(content, report, declared_args=[])
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("$myArg" in m and "not declared" in m for m in major_msgs)
+
+
+# =============================================================================
+# audit m3 / M1 — validate_skill.py model field must value-check via is_valid_model
+# Two-sided: documented aliases pass; a garbage model value is MAJOR.
+# =============================================================================
+
+
+class TestValidateModelFieldValueCheck:
+    """audit m3: the skill model gate previously accepted ANY string."""
+
+    def test_opus_1m_alias_passes(self):
+        """The documented `opus[1m]` 1M-context alias must PASS (not MAJOR)."""
+        report = _make_report()
+        validate_model_field({"model": "opus[1m]"}, report)
+        assert not report.has_major
+        assert any(r.level == "PASSED" and "model" in r.message for r in report.results)
+
+    def test_default_alias_passes(self):
+        """The `default` alias must PASS."""
+        report = _make_report()
+        validate_model_field({"model": "default"}, report)
+        assert not report.has_major
+
+    def test_full_model_id_passes(self):
+        """A full model ID like claude-opus-4-6 must PASS."""
+        report = _make_report()
+        validate_model_field({"model": "claude-opus-4-6"}, report)
+        assert not report.has_major
+
+    def test_garbage_model_value_reports_major(self):
+        """A garbage model value (`gpt-4`) must now be MAJOR (was silently accepted)."""
+        report = _make_report()
+        validate_model_field({"model": "gpt-4"}, report)
+        assert any(r.level == "MAJOR" and "Invalid 'model' value" in r.message for r in report.results)
+
+
+# =============================================================================
+# audit n2 — validate_arguments_field identifier partition (no double regex eval)
+# Two-sided: valid identifiers returned; invalid ones flagged + excluded.
+# =============================================================================
+
+
+class TestValidateArgumentsFieldIdentifiers:
+    """audit n2: arguments names partitioned once via the module _IDENT_RE."""
+
+    def test_valid_argument_names_returned(self):
+        """Valid identifier names pass and are returned for cross-validation."""
+        from validate_skill import validate_arguments_field  # noqa: PLC0415
+
+        report = _make_report()
+        result = validate_arguments_field({"arguments": "issue branch_name _x2"}, report)
+        assert result == ["issue", "branch_name", "_x2"]
+        assert not report.has_major
+
+    def test_invalid_argument_name_flagged_and_excluded(self):
+        """An invalid name (`2bad`) is reported MAJOR and excluded from the result."""
+        from validate_skill import validate_arguments_field  # noqa: PLC0415
+
+        report = _make_report()
+        result = validate_arguments_field({"arguments": ["good", "2bad"]}, report)
+        assert "good" in result
+        assert "2bad" not in result
+        assert any(r.level == "MAJOR" and "valid identifiers" in r.message for r in report.results)
+
+
+# =============================================================================
+# audit m6 — leading UTF-8 BOM must not hide skill frontmatter
+# =============================================================================
+
+
+class TestSkillBomFrontmatterHandling:
+    """audit m6: a BOM-prefixed SKILL.md must still parse its frontmatter."""
+
+    def test_bom_prefixed_frontmatter_parses(self):
+        """parse_frontmatter recognises frontmatter after a leading BOM."""
+        content = "﻿---\nname: my-skill\ndescription: Do a thing well\n---\nBody.\n"
+        frontmatter, body, _ = parse_frontmatter(content)
+        assert frontmatter is not None
+        assert frontmatter["name"] == "my-skill"
+        assert body.strip() == "Body."
+
+    def test_bom_prefixed_validate_frontmatter_not_treated_absent(self):
+        """validate_frontmatter must NOT report 'No YAML frontmatter found' on a BOM file."""
+        content = "﻿---\nname: my-skill\ndescription: Do a thing well\n---\nBody.\n"
+        report = _make_report()
+        result = validate_frontmatter(Path("x"), content, report)
+        assert result is not None
+        assert not any("No YAML frontmatter found" in r.message for r in report.results)

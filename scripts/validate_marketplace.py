@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import json
+import os
 import re
 import subprocess
 import sys
@@ -338,16 +339,33 @@ RESERVED_MARKETPLACE_NAMES = {
 # plugin-marketplaces.md:160, names like "official-claude-plugins" or
 # "anthropic-tools-v2" are also blocked. Severity is MAJOR (not CRITICAL)
 # because these are suspected impersonations, not the canonical reserved names.
+#
+# These patterns are deliberately NARROW. Prefixing a community marketplace
+# with the bare "claude-" / "claude-code-" / "claude-plugins-" forms is
+# extremely common and is NOT impersonation — e.g. CPV's own sibling repo is
+# named "claude-plugins-validation", and "claude-code-helpers" is a typical
+# community name. Flagging those at MAJOR (which marks INVALID) was a
+# false-positive (m3). We therefore match only the genuinely official-looking
+# shapes: anything claiming to be "official", anything under the "anthropic-"
+# vendor prefix, and "claude-marketplace*" (the singular generic that mimics
+# THE official marketplace). The exact reserved names
+# (claude-code-marketplace, claude-code-plugins, …) are already blocked at
+# CRITICAL via RESERVED_MARKETPLACE_NAMES, so the fuzzy net does not need to
+# cover the wide community prefixes.
 RESERVED_MARKETPLACE_IMPERSONATION_PATTERNS = (
-    re.compile(r"^official-claude"),
+    re.compile(r"^official-"),
     re.compile(r"^anthropic-"),
-    re.compile(r"^claude-code-"),
-    re.compile(r"^claude-plugins-"),
     re.compile(r"^claude-marketplace"),
 )
 
 # NAME_PATTERN and MAX_NAME_LENGTH imported from cpv_validation_common
 # VERSION_PATTERN imported from cpv_validation_common as SEMVER_PATTERN
+
+# GitHub "owner/repo" shorthand — exactly two path segments of url-safe chars
+# (letters, digits, '.', '_', '-') with no whitespace and no extra slashes.
+# Used to reject slash-bearing garbage like "a/b/c/d" or "not a url just/slash"
+# that older slash-only checks accepted as a "valid shorthand" (m11).
+GITHUB_SHORTHAND_PATTERN = re.compile(r"[\w.-]+/[\w.-]+")
 
 # Required README sections for GitHub deployment
 # These patterns match common section header formats (# Section, ## Section, ### Section)
@@ -392,6 +410,21 @@ REQUIRED_INSTALLATION_STEPS = {
 # =============================================================================
 # Validation Functions
 # =============================================================================
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write ``content`` to ``path`` atomically (m9).
+
+    Writes to a sibling ``.tmp`` file then ``os.replace()`` into place — an
+    atomic rename on the same filesystem. A plain ``write_text`` leaves a
+    truncated/partial report on disk if the process is interrupted mid-write
+    (SIGINT, disk-full, container OOM); the report is consumed by the
+    plugin-fixer pipeline and CI, which would then parse garbage.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    os.replace(tmp_path, path)
 
 
 def validate_marketplace_file(
@@ -566,8 +599,8 @@ def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResul
                     ),
                     file=json_path,
                     suggestion=(
-                        "Rename to avoid the prefixes 'official-claude', 'anthropic-', 'claude-code-', "
-                        "'claude-plugins-', or 'claude-marketplace'"
+                        "Rename to avoid the prefixes 'official-', 'anthropic-', or 'claude-marketplace' "
+                        "(a community 'claude-' / 'claude-code-' / 'claude-plugins-' prefix is fine)"
                     ),
                 )
             )
@@ -1071,6 +1104,15 @@ def _validate_marketplace_userconfig(
     return results
 
 
+# m10 — memo for the pluginRoot prefix, keyed on (resolved marketplace.json
+# path, mtime_ns). `_read_marketplace_plugin_root` is called once per relative
+# plugin-source resolution; for a 30-entry Layout-B marketplace that was 30+
+# full read+json.loads of the SAME constant file. The mtime component keeps the
+# memo correct across a mutate-then-revalidate of the same dir in one process
+# (a naive process-lifetime cache would return a stale pluginRoot in tests).
+_PLUGIN_ROOT_CACHE: dict[tuple[str, int], str] = {}
+
+
 def _read_marketplace_plugin_root(marketplace_dir: Path) -> str:
     """Return the marketplace.json `metadata.pluginRoot` prefix (or empty string).
 
@@ -1083,6 +1125,9 @@ def _read_marketplace_plugin_root(marketplace_dir: Path) -> str:
     *used* it when resolving per-plugin relative paths, which caused spurious
     MAJORs for marketplaces that relied on this prefix. Load the value here
     so downstream resolvers can apply it uniformly.
+
+    The result is memoized per (path, mtime) so repeated resolutions within one
+    validation run do not re-read and re-parse the same file (m10).
     """
     for candidate in (
         marketplace_dir / "marketplace.json",
@@ -1091,17 +1136,26 @@ def _read_marketplace_plugin_root(marketplace_dir: Path) -> str:
         if not candidate.is_file():
             continue
         try:
+            stat = candidate.stat()
+        except OSError:
+            continue
+        cache_key = (str(candidate), stat.st_mtime_ns)
+        cached = _PLUGIN_ROOT_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+        try:
             data = json.loads(candidate.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return ""
-        if not isinstance(data, dict):
-            return ""
-        metadata = data.get("metadata")
-        if isinstance(metadata, dict):
-            root = metadata.get("pluginRoot")
-            if isinstance(root, str):
-                return root
-        return ""
+        root_value = ""
+        if isinstance(data, dict):
+            metadata = data.get("metadata")
+            if isinstance(metadata, dict):
+                root = metadata.get("pluginRoot")
+                if isinstance(root, str):
+                    root_value = root
+        _PLUGIN_ROOT_CACHE[cache_key] = root_value
+        return root_value
     return ""
 
 
@@ -1276,6 +1330,36 @@ def _validate_nested_plugin(
     The subprocess approach avoids brittle cross-module imports and also
     isolates any sys.exit() calls inside the plugin validator.
     """
+    # n2 — self-reference guard. A `directory` source with path "." resolves to
+    # the marketplace root itself. Running validate_plugin.py on a marketplace
+    # root (which has marketplace.json but no plugin.json) would validate the
+    # whole marketplace tree as if it were a single plugin — bounded, never an
+    # infinite loop (validate_plugin.py does not call back into marketplace
+    # validation), but pointless and noisy. Skip it explicitly.
+    resolved_root = nested_root.resolve()
+    has_plugin_manifest = (
+        (resolved_root / ".claude-plugin" / "plugin.json").is_file()
+        or (resolved_root / "plugin.json").is_file()
+    )
+    has_marketplace_manifest = (
+        (resolved_root / "marketplace.json").is_file()
+        or (resolved_root / ".claude-plugin" / "marketplace.json").is_file()
+    )
+    if has_marketplace_manifest and not has_plugin_manifest:
+        return [
+            ValidationResult(
+                level="INFO",
+                category="plugin",
+                message=(
+                    f"Nested plugin '{plugin_id}' resolves to a marketplace root "
+                    f"({resolved_root}) with no plugin.json — skipping self-referential "
+                    "recursive validation"
+                ),
+                file=json_path,
+                suggestion="Point the source at a plugin subfolder, not the marketplace root",
+            )
+        ]
+
     scripts_dir = Path(__file__).resolve().parent
     validator = scripts_dir / "validate_plugin.py"
     if not validator.exists():
@@ -1499,18 +1583,33 @@ def validate_plugin_source(
                 )
             )
 
-        # Check source-specific required fields
+        # Check source-specific required fields.
+        # n4 — `git-subdir` documents `subdir` as canonical and `path` as a
+        # one-release-compat alias (see _KNOWN_SOURCE_FIELDS_BY_TYPE), yet
+        # SOURCE_REQUIRED_FIELDS lists `path` as the required sub-field. Treat
+        # the two as interchangeable so a source that uses ONLY the canonical
+        # `subdir` is not falsely flagged "requires 'path'". Either name
+        # satisfies the requirement; neither is required when the other present.
+        _SUBDIR_ALIASES = {"subdir", "path"}
         required = SOURCE_REQUIRED_FIELDS.get(source_type, set())
         for field_name in required:
-            if field_name not in source and field_name not in plugin:
-                results.append(
-                    ValidationResult(
-                        level="MAJOR",
-                        category="plugin",
-                        message=f"Plugin '{plugin_id}' with source type '{source_type}' requires '{field_name}'",
-                        file=json_path,
-                    )
+            if field_name in source or field_name in plugin:
+                continue
+            # git-subdir: `subdir` and `path` satisfy each other.
+            if (
+                source_type == "git-subdir"
+                and field_name in _SUBDIR_ALIASES
+                and any(alias in source or alias in plugin for alias in _SUBDIR_ALIASES)
+            ):
+                continue
+            results.append(
+                ValidationResult(
+                    level="MAJOR",
+                    category="plugin",
+                    message=f"Plugin '{plugin_id}' with source type '{source_type}' requires '{field_name}'",
+                    file=json_path,
                 )
+            )
 
         # Validate SHA format (all source types that support it).
         # v2.22.3 — GAP-7: accept uppercase hex (git itself permits [A-F] SHAs)
@@ -1706,38 +1805,31 @@ def validate_repository_url(
         )
         return results
 
-    # Try to parse as URL
-    try:
-        parsed = urlparse(repository)
-        if not parsed.scheme:
-            # Could be a GitHub shorthand (owner/repo)
-            if "/" in repository and not repository.startswith("."):
-                pass  # Valid shorthand
-            else:
-                results.append(
-                    ValidationResult(
-                        level="MINOR",
-                        category="plugin",
-                        message=f"Plugin '{plugin_id}' repository URL may be invalid: {repository}",
-                        file=json_path,
-                        suggestion="Use full URL or GitHub shorthand (owner/repo)",
-                    )
-                )
-        elif parsed.scheme not in ("http", "https", "git", "ssh"):
+    # Parse as URL. urlparse() does not raise for str input — a bare try/except
+    # here was unreachable dead code (n7), so the scheme checks below stand alone.
+    parsed = urlparse(repository)
+    if not parsed.scheme:
+        # No scheme — the only accepted schemeless form is a GitHub "owner/repo"
+        # shorthand. Validate the actual shape instead of accepting anything that
+        # merely contains a "/": "a/b/c/d" and "not a url just/slash" used to pass
+        # silently (m11). A valid shorthand is exactly two path segments of
+        # url-safe chars with no whitespace.
+        if not GITHUB_SHORTHAND_PATTERN.fullmatch(repository):
             results.append(
                 ValidationResult(
                     level="MINOR",
                     category="plugin",
-                    message=f"Plugin '{plugin_id}' repository has unusual scheme: {parsed.scheme}",
+                    message=f"Plugin '{plugin_id}' repository URL may be invalid: {repository}",
                     file=json_path,
+                    suggestion="Use full URL or GitHub shorthand (owner/repo)",
                 )
             )
-    except Exception:
+    elif parsed.scheme not in ("http", "https", "git", "ssh"):
         results.append(
             ValidationResult(
                 level="MINOR",
                 category="plugin",
-                message=f"Plugin '{plugin_id}' repository URL could not be parsed",
+                message=f"Plugin '{plugin_id}' repository has unusual scheme: {parsed.scheme}",
                 file=json_path,
             )
         )
@@ -1975,24 +2067,14 @@ def validate_github_deployment(
         # Validate README content
         results.extend(validate_readme_content(readme_path))
 
-    # Check each plugin subfolder has README.md
+    # Check each plugin subfolder has README.md. Use the canonical local-root
+    # resolver so `directory`-dict sources and `metadata.pluginRoot`-prefixed
+    # plugins resolve to the same folder every other validator sees, and so the
+    # `..` traversal guard is applied uniformly (m6 — previously a 4th divergent
+    # resolution copy that ignored pluginRoot and the dict `directory` source).
     for plugin in plugins:
-        source = plugin.get("source")
         plugin_name = plugin.get("name", "unknown")
-
-        # Determine plugin path
-        plugin_path: Path | None = None
-        if isinstance(source, str) and source.startswith("./"):
-            plugin_path = marketplace_dir / source[2:]
-        elif isinstance(source, str) and not source.startswith(("http", "git@")):
-            plugin_path = marketplace_dir / source
-        elif "path" in plugin:
-            path_val = plugin["path"]
-            if isinstance(path_val, str):
-                if path_val.startswith("./"):
-                    plugin_path = marketplace_dir / path_val[2:]
-                elif not path_val.startswith("/"):
-                    plugin_path = marketplace_dir / path_val
+        plugin_path = _resolve_local_plugin_root(plugin, marketplace_dir)
 
         if plugin_path and plugin_path.exists() and plugin_path.is_dir():
             plugin_readme = plugin_path / "README.md"
@@ -2081,7 +2163,7 @@ def validate_readme_content(readme_path: Path) -> list[ValidationResult]:
         r"\[INSERT",
         r"<your-",
         r"PLACEHOLDER",
-        r"TBD",
+        r"\bTBD\b",  # word-anchored so it can't match a substring (n6)
     ]
     for placeholder_pattern in placeholder_patterns:
         if re.search(placeholder_pattern, content, re.IGNORECASE):
@@ -2324,9 +2406,20 @@ def validate_git_submodules(
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 pass  # Git command failed, skip this check
 
-    # Info message if all checks passed
+    # Info message if all checks passed.
+    # `submodules` is keyed by submodule PATH (e.g. "plugins/foo"), not by plugin
+    # name, so a bare `name in submodules` membership test is ~always False for
+    # the canonical "plugins/<name>" layout and the INFO never fired (m5). Match
+    # by path tail using the same logic as the per-plugin submodule check above.
     if not any(r.level in ("CRITICAL", "MAJOR") for r in results):
-        submod_count = len([p for p in plugins if p.get("name") in submodules])
+        submod_count = sum(
+            1
+            for p in plugins
+            if any(
+                sp == p.get("name") or sp.endswith("/" + str(p.get("name")))
+                for sp in submodules
+            )
+        )
         if submod_count > 0:
             results.append(
                 ValidationResult(
@@ -2422,8 +2515,15 @@ def validate_marketplace_private_info(
             for match in pattern.finditer(content):
                 matched_text = match.group(1) if match.lastindex else match.group(0)
 
-                # Skip if this looks like a regex pattern
-                if any(c in matched_text for c in r"[]\^$.*+?{}|()"):
+                # Skip if this looks like a regex *pattern* rather than a real path.
+                # Only treat unambiguous regex metacharacters as a signal: anchors
+                # (^ $), quantifiers (* ? { }), alternation (|), the escape char (\),
+                # and char-classes ([ ]). Deliberately EXCLUDE '.', '+', '(' and ')'
+                # — those occur constantly in genuine filesystem paths
+                # (file extensions, dotted dirs, 'build+test', 'my(project)') and
+                # skipping on them turned this security scanner into a false-negative
+                # for any real home-path leak that happened to contain one (m1).
+                if any(c in matched_text for c in r"[]\^$*?{}|"):
                     continue
 
                 # Skip allowed documentation paths
@@ -2495,17 +2595,15 @@ def validate_marketplace_private_info(
             scan_file(root_file, root_file_name)
             total_files += 1
 
-    # Scan each plugin subfolder
+    # Scan each plugin subfolder. Use the canonical local-root resolver so the
+    # scanner covers EXACTLY the same on-disk plugins every other validator
+    # covers — including Layout-B plugins shipped via a `directory` dict source,
+    # the legacy `path` field, and any source relying on `metadata.pluginRoot`.
+    # A bespoke resolver here was a security false-negative: a private home-path
+    # leak inside a `directory`-source plugin sailed through unscanned (M3).
     for plugin in plugins:
-        source = plugin.get("source")
         plugin_name = plugin.get("name", "unknown")
-
-        # Determine plugin path
-        plugin_path: Path | None = None
-        if isinstance(source, str) and source.startswith("./"):
-            plugin_path = marketplace_dir / source[2:]
-        elif isinstance(source, str) and not source.startswith(("http", "git@")):
-            plugin_path = marketplace_dir / source
+        plugin_path = _resolve_local_plugin_root(plugin, marketplace_dir)
 
         if plugin_path and plugin_path.exists() and plugin_path.is_dir():
             total_files += scan_directory(plugin_path, plugin_name)
@@ -2579,12 +2677,14 @@ def validate_github_source_required(
             )
             continue
 
-        # Validate it looks like a GitHub URL
+        # Validate it looks like a GitHub URL. The schemeless branch accepts only
+        # a well-formed "owner/repo" shorthand — not any string containing a "/"
+        # (m11; the bare slash test silently accepted "a/b/c/d").
         if not (
             repository.startswith("https://github.com/")
             or repository.startswith("git@github.com:")
-            or "/" in repository
-        ):  # Allow shorthand owner/repo
+            or GITHUB_SHORTHAND_PATTERN.fullmatch(repository)
+        ):
             results.append(
                 ValidationResult(
                     level="MINOR",
@@ -3371,8 +3471,7 @@ Examples:
     if early_error:
         if args.report:
             report_path = Path(args.report)
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text(f"# Marketplace Validation\n\nCRITICAL: {early_error}\n", encoding="utf-8")
+            _atomic_write_text(report_path, f"# Marketplace Validation\n\nCRITICAL: {early_error}\n")
             print("Marketplace Validation: FAIL (critical)")
             print("  CRITICAL:1")
             print(f"  Report: {report_path}")
@@ -3411,8 +3510,7 @@ Examples:
         }
         print(json.dumps(output, indent=2))
     elif args.report:
-        Path(args.report).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.report).write_text(format_report(report, args.verbose))
+        _atomic_write_text(Path(args.report), format_report(report, args.verbose))
         print_compact_summary(report, "Marketplace Validation", Path(args.report), plugin_path=args.marketplace_path)
     else:
         print(format_report(report, args.verbose))

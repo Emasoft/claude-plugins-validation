@@ -119,6 +119,36 @@ class TestSettingsRejectedKeys:
         validate_project_scope(project, report)
         assert any("skipDangerousModePermissionPrompt" in m for m in _messages(report, "CRITICAL"))
 
+    def test_skip_dangerous_nested_null_is_still_critical(self, project: Path) -> None:
+        """M1 regression: the key present as explicit null must STILL be flagged.
+
+        Claude Code keys on the KEY existing, not its value — a repo shipping
+        ``{"permissions": {"skipDangerousModePermissionPrompt": null}}`` must
+        not slip past the auto-bypass detector. (Before the fix the walker
+        tested ``cursor is not None`` and missed the null case.)
+        """
+        _commit(
+            project,
+            ".claude/settings.json",
+            '{"permissions": {"skipDangerousModePermissionPrompt": null}}\n',
+        )
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        assert any("skipDangerousModePermissionPrompt" in m for m in _messages(report, "CRITICAL"))
+
+    def test_permissions_present_without_rejected_key_is_clean(self, project: Path) -> None:
+        """M1 two-sided: a permissions block that does NOT contain the rejected
+        nested key must produce NO false CRITICAL for it — the presence walker
+        must only fire when the full path actually exists."""
+        _commit(
+            project,
+            ".claude/settings.json",
+            '{"permissions": {"defaultMode": "default"}}\n',
+        )
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        assert not any("skipDangerousModePermissionPrompt" in m for m in _messages(report, "CRITICAL"))
+
 
 # =============================================================================
 # settings.json MAJOR rules — managed-only + global-config keys
@@ -149,6 +179,24 @@ class TestSettingsManagedOnlyKeys:
         report = ValidationReport()
         validate_project_scope(project, report)
         assert any("allowManagedHooksOnly" in m for m in _messages(report, "MAJOR"))
+
+    def test_managed_nested_disable_auto_mode_is_major(self, project: Path) -> None:
+        """permissions.disableAutoMode is a managed-only nested kill-switch — MAJOR."""
+        _commit(project, ".claude/settings.json", '{"permissions": {"disableAutoMode": "disable"}}\n')
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        assert any("disableAutoMode" in m for m in _messages(report, "MAJOR"))
+
+    def test_managed_nested_disable_auto_mode_null_is_still_major(self, project: Path) -> None:
+        """M1 regression: managed-only nested key present as null is STILL flagged.
+
+        Like the rejected-nested case, presence of the key (not its value) is
+        what places it in the wrong scope, so a null value must not escape.
+        """
+        _commit(project, ".claude/settings.json", '{"permissions": {"disableAutoMode": null}}\n')
+        report = ValidationReport()
+        validate_project_scope(project, report)
+        assert any("disableAutoMode" in m for m in _messages(report, "MAJOR"))
 
 
 class TestSettingsGlobalConfigKeys:
@@ -354,6 +402,51 @@ class TestMcpJson:
         report = ValidationReport()
         validate_project_scope(project, report)
         assert any("mcpServers" in m for m in _messages(report, "MAJOR"))
+
+    def test_clean_mcp_json_passed_not_suppressed_by_settings_minor(self, project: Path) -> None:
+        """m1 regression: a clean .mcp.json must emit its own PASSED line even
+        when settings.json (validated earlier into the SAME report) produced a
+        MINOR. Before the fix the PASSED gate tested whole-report has_minor, so
+        an unrelated settings.json MINOR silently suppressed .mcp.json's PASSED.
+        """
+        # settings.json: a home-path statusLine → MINOR.
+        _commit(
+            project,
+            ".claude/settings.json",
+            json.dumps({"statusLine": {"command": "/Users/alice/bin/status.sh"}}) + "\n",
+        )
+        # .mcp.json: completely clean (valid mcpServers, no findings).
+        _commit(
+            project,
+            ".mcp.json",
+            json.dumps({"mcpServers": {"ok": {"command": "node", "args": ["s.js"]}}}) + "\n",
+        )
+        report = ValidationReport()
+        validate_project_scope(project, report)
+
+        # settings.json MINOR present (the suppressor condition).
+        assert any("statusLine" in m for m in _messages(report, "MINOR"))
+        # .mcp.json's own PASSED line must still appear.
+        assert any(".mcp.json project-scope rules OK" in m for m in _messages(report, "PASSED")), (
+            "clean .mcp.json PASSED line was suppressed by an unrelated settings.json MINOR"
+        )
+
+    def test_dirty_mcp_json_does_not_emit_passed(self, project: Path) -> None:
+        """m1 two-sided: a .mcp.json that DOES have its own MINOR must NOT emit
+        the 'rules OK' PASSED line — the slice gate must still react to this
+        file's own findings."""
+        _commit(
+            project,
+            ".mcp.json",
+            json.dumps({"mcpServers": {"local": {"command": "/Users/alice/bin/mcp"}}}) + "\n",
+        )
+        report = ValidationReport()
+        validate_project_scope(project, report)
+
+        assert any("mcpServers.local.command" in m for m in _messages(report, "MINOR"))
+        assert not any(".mcp.json project-scope rules OK" in m for m in _messages(report, "PASSED")), (
+            "a .mcp.json with its own MINOR wrongly emitted the 'rules OK' PASSED line"
+        )
 
     def test_untracked_mcp_json_emits_warning(self, project: Path) -> None:
         """.mcp.json that exists but is not committed is a WARNING per docs."""
@@ -1130,3 +1223,45 @@ class TestProjectMcpJsonDeepValidation:
         assert any("typo-field" in m and "commandz" in m for m in all_msgs), (
             f"Deep MCP validator must flag unknown field; got: {all_msgs}"
         )
+
+
+class TestMergeSubreportProjectForwardsMetadata:
+    """audit m9 — _merge_subreport_project must preserve category + suggestion.
+
+    Two-sided mirror of the local-scope merge test: present metadata survives,
+    absent metadata stays default.
+    """
+
+    def test_merge_preserves_category_and_suggestion(self) -> None:
+        from validate_project_scope import _merge_subreport_project
+
+        sub = ValidationReport()
+        sub.add(
+            "MAJOR",
+            "deep finding",
+            "a.json",
+            9,
+            phase="security",
+            fixable=True,
+            fix_id="FX-2",
+            category="manifest",
+            suggestion="add the required key",
+        )
+        parent = ValidationReport()
+        _merge_subreport_project(sub, parent, "[agent bar]")
+        merged = parent.results[-1]
+        assert merged.message == "[agent bar] deep finding"
+        assert merged.category == "manifest"
+        assert merged.suggestion == "add the required key"
+        assert (merged.phase, merged.fixable, merged.fix_id) == ("security", True, "FX-2")
+
+    def test_merge_keeps_defaults_when_absent(self) -> None:
+        from validate_project_scope import _merge_subreport_project
+
+        sub = ValidationReport()
+        sub.add("MINOR", "plain", "b.json", 1)
+        parent = ValidationReport()
+        _merge_subreport_project(sub, parent, "[skill baz]")
+        merged = parent.results[-1]
+        assert merged.category == ""
+        assert merged.suggestion is None

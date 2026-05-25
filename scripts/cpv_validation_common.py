@@ -340,16 +340,35 @@ VALID_HOOK_EVENTS = {
 #   prompt   — synthesize a prompt response without executing code
 #   agent    — dispatch to a sub-agent
 #
-# Not every event accepts every type. SessionStart and Setup fire BEFORE
-# MCP servers connect, so only `command` and `mcp_tool` are supported.
-# Lifecycle/notification events do not support `prompt` or `agent`.
+# Not every event accepts every type. This module is the SINGLE SOURCE OF
+# TRUTH for the per-event hook-type matrix — validate_hook.py imports the two
+# sets below (aliased to COMMAND_STRICT_EVENTS / COMMAND_ONLY_EVENTS) rather
+# than keeping its own copy, so the two can never drift again.
+#
+# Three tiers (per hooks.md "Prompt-based hooks" + the v2.1.142 changelog
+# "configuring a prompt- or agent-type hook for SessionStart/Setup/
+# SubagentStart now shows a clear 'use a command-type hook instead' error"):
+#   tier 3 — HOOK_EVENTS_COMMAND_ONLY (SessionStart, Setup): fire BEFORE MCP
+#            servers connect → only `command` + `mcp_tool`.
+#   tier 2 — HOOK_EVENTS_NO_PROMPT_OR_AGENT: support command/http/mcp_tool but
+#            NOT prompt/agent (Claude Code rejects those at load time).
+#   tier 1 — everything else (tool events, UserPromptSubmit/Expansion, and the
+#            Stop family incl. Stop/SubagentStop/PermissionDenied/TeammateIdle/
+#            TaskCreated): the full 5-type set, prompt/agent INCLUDED.
 
 VALID_HOOK_TYPES: frozenset[str] = frozenset({"command", "http", "mcp_tool", "prompt", "agent"})
 
-# Events that fire BEFORE MCP servers connect — only command + mcp_tool.
+# Tier 3 — events that fire BEFORE MCP servers connect: only command + mcp_tool.
 HOOK_EVENTS_COMMAND_ONLY: frozenset[str] = frozenset({"SessionStart", "Setup"})
 
-# Events that DO NOT support `prompt` or `agent` types (per hooks.md grouping).
+# Tier 2 — events that support command/http/mcp_tool but NOT prompt/agent.
+# This is the EXACT set hooks.md lists; it MUST stay identical to
+# validate_hook.COMMAND_ONLY_EVENTS (which now imports this very set).
+# PermissionDenied and TeammateIdle are deliberately NOT here — hooks.md
+# groups them with the Stop family (tier 1, all five types), and
+# test_prompt_on_tier1_event_is_accepted pins that they ACCEPT prompt/agent.
+# An earlier copy of this set wrongly included them, contradicting the
+# corrected validate_hook.py — that drift is what this consolidation removes.
 HOOK_EVENTS_NO_PROMPT_OR_AGENT: frozenset[str] = frozenset(
     {
         "ConfigChange",
@@ -359,13 +378,11 @@ HOOK_EVENTS_NO_PROMPT_OR_AGENT: frozenset[str] = frozenset(
         "FileChanged",
         "InstructionsLoaded",
         "Notification",
-        "PermissionDenied",
         "PostCompact",
         "PreCompact",
         "SessionEnd",
         "StopFailure",
         "SubagentStart",
-        "TeammateIdle",
         "WorktreeCreate",
         "WorktreeRemove",
     }
@@ -375,10 +392,14 @@ HOOK_EVENTS_NO_PROMPT_OR_AGENT: frozenset[str] = frozenset(
 def hook_types_allowed_for_event(event: str) -> frozenset[str]:
     """Return the allowed hook types for the given event name.
 
-    Per hooks.md (v2.1.121):
+    Single source of truth for the per-event type matrix (validate_hook.py
+    reuses the underlying sets). Per hooks.md + the v2.1.142 changelog:
     - SessionStart / Setup: only `command` and `mcp_tool` (servers not yet connected).
-    - Lifecycle events (CwdChanged, ConfigChange, etc.): no `prompt` / `agent`.
-    - Tool events + UserPromptSubmit/Expansion + Stop family: full 5-type set.
+    - Tier-2 lifecycle events (CwdChanged, ConfigChange, Notification, etc.):
+      command/http/mcp_tool but NOT prompt/agent.
+    - Everything else — tool events, UserPromptSubmit/Expansion, and the Stop
+      family (Stop/SubagentStop/PermissionDenied/TeammateIdle/TaskCreated):
+      the full 5-type set, prompt/agent included.
     """
     if event in HOOK_EVENTS_COMMAND_ONLY:
         return frozenset({"command", "mcp_tool"})
@@ -842,6 +863,151 @@ def is_valid_plugin_env_var(name: str) -> bool:
     if name in VALID_PLUGIN_ENV_VARS:
         return True
     return any(p.match(name) for p in PLUGIN_ENV_VAR_PATTERNS)
+
+
+# =============================================================================
+# Shared env-var + absolute-path helpers (single source of truth for MCP/LSP)
+# =============================================================================
+#
+# validate_mcp.py and validate_lsp.py historically kept byte-for-byte copies of
+# ENV_VAR_PATTERN / is_absolute_path / validate_env_var_syntax. The copies
+# drifted (the MCP is_absolute_path once missed `~/`, `C:/` and UNC paths that
+# the LSP one caught — audit DRY-DRIFT #3 / MCP-ABS-ASYM #1). They now import
+# these definitions, so the two can never disagree again. NOTE: validate_path_value
+# is deliberately NOT hoisted — the MCP and LSP variants differ on purpose (MCP
+# adds a relative-path "should use ${CLAUDE_PLUGIN_ROOT}" MINOR and gates the
+# existence check on a file extension; LSP checks existence for extensionless
+# binaries too and emits a different message), so unifying them would change
+# behavior.
+
+# Environment variable pattern: ${VAR} or ${VAR:-default}.
+ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def is_absolute_path(path: str) -> bool:
+    """Check if a path appears to be an absolute path (without env var substitution).
+
+    Detects POSIX absolute paths ("/foo"), Windows drive-letter paths using
+    either separator ("C:\\foo" or "C:/foo"), Windows UNC paths ("\\\\server\\share"
+    or "//server/share"), and tilde-expansion paths ("~/foo"). Paths starting
+    with a "${VAR}" env-var reference are never considered absolute because
+    their absoluteness depends on expansion context.
+
+    Detection runs on any platform (not just the host OS) because plugin
+    configs may be authored on Windows and shipped cross-platform.
+    """
+    if path.startswith("${"):
+        return False
+    if path.startswith(("/", "\\", "~")):
+        return True
+    # Windows drive-letter paths: "C:\foo" or "C:/foo".
+    if len(path) >= 3 and path[1] == ":" and path[2] in ("\\", "/") and path[0].isalpha():
+        return True
+    return False
+
+
+def validate_env_var_syntax(value: str, report: ValidationReport, context: str) -> None:
+    """Validate environment variable syntax in a string value.
+
+    A raw `${`-vs-`}` count comparison produced a false MAJOR on valid input
+    like "${VAR:-x}extra}" (one `${`, two `}`) — audit MCP-BRACE-FP #15.
+    Instead, flag a `${` ONLY when no valid env-var reference begins at that
+    position: that still catches the genuine failures (unclosed `${VAR`, empty
+    `${}`, invalid name `${1BAD}`) without false-flagging a valid ref trailed
+    by a literal brace. INFO is emitted for required (no-default) env vars that
+    are not recognized plugin vars.
+    """
+    if "${" in value:
+        valid_starts = {m.start() for m in ENV_VAR_PATTERN.finditer(value)}
+        search_idx = value.find("${")
+        while search_idx != -1:
+            if search_idx not in valid_starts:
+                report.major(f"Malformed env var syntax (unclosed braces) in {context}")
+                return
+            search_idx = value.find("${", search_idx + 2)
+
+        for match in ENV_VAR_PATTERN.finditer(value):
+            var_name = match.group(1)
+            default = match.group(2)
+            if default is None and not is_valid_plugin_env_var(var_name):
+                report.info(f"Env var ${{{var_name}}} has no default value in {context} - config will fail if not set")
+
+
+# =============================================================================
+# Shared frontmatter parsing + description threshold (single source of truth)
+# =============================================================================
+#
+# validate_skill.py, validate_skill_comprehensive.py and validate_command.py
+# each carried a byte-for-byte copy of parse_frontmatter and the literal `10`
+# "very short description" threshold. The copies were kept in sync by hand and
+# had already drifted once (a missing BOM strip; audit m6). Centralising them
+# here makes drift impossible.
+
+# Minimum description length below which a skill/command description is flagged
+# "very short" (one MINOR). Shared so the three validators agree.
+MIN_DESCRIPTION_CHARS = 10
+
+
+def parse_frontmatter(
+    content: str,
+    *,
+    yaml_loader: Callable[[str], Any] | None = None,
+    yaml_error: type[BaseException] | tuple[type[BaseException], ...] | None = None,
+) -> tuple[dict[str, Any] | None, str, int]:
+    """Parse YAML frontmatter from a skill/command file.
+
+    Returns ``(frontmatter_dict, body_content, frontmatter_end_line)`` and
+    ``(None, content, 0)`` when there is no parseable frontmatter.
+
+    ``yaml_loader`` / ``yaml_error`` are optional so callers can inject their
+    own backend: validate_skill.py passes its pyyaml-or-``_minimal_yaml``
+    fallback (issue #14) so the script stays importable without pyyaml. When
+    omitted, pyyaml is imported lazily (matching what validate_command.py and
+    validate_skill_comprehensive.py did inline). They MUST be supplied together
+    or both omitted.
+
+    A leading UTF-8 BOM (U+FEFF) is stripped before the delimiter check: a BOM
+    is valid UTF-8 (encoding validation passes) but it prefixes the opening
+    ``---``, so without stripping it a BOM-prefixed file (common from Windows
+    editors) would be silently treated as having NO frontmatter (audit m6).
+
+    The closing delimiter is matched as a ``---`` LINE, never a bare ``---``
+    substring: ``content.split("---", 2)`` corrupts valid frontmatter whose
+    VALUE contains ``---`` (e.g. ``description: "use --- as a separator"``).
+    """
+    if (yaml_loader is None) != (yaml_error is None):
+        raise ValueError("parse_frontmatter: pass yaml_loader and yaml_error together, or neither")
+    if yaml_loader is None or yaml_error is None:
+        import yaml
+
+        yaml_loader = yaml.safe_load
+        yaml_error = yaml.YAMLError
+
+    content = content.lstrip("﻿")
+    if not content.startswith("---"):
+        return None, content, 0
+
+    lines = content.split("\n")
+    if lines[0].strip() != "---":
+        return None, content, 0
+    closing_idx = None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            closing_idx = idx
+            break
+    if closing_idx is None:
+        return None, content, 0
+
+    fm_text = "\n".join(lines[1:closing_idx])
+    body = "\n".join(lines[closing_idx + 1 :])
+    try:
+        frontmatter = yaml_loader(fm_text)
+        if frontmatter is None:
+            frontmatter = {}
+        fm_end_line = closing_idx + 1
+        return frontmatter, body, fm_end_line
+    except yaml_error:
+        return None, content, 0
 
 
 # =============================================================================
@@ -1815,7 +1981,15 @@ def is_sample_file(path: str) -> bool:
 
 
 # Severity tier order (worst → least). Used by demote_severity().
-SEVERITY_TIERS: tuple[str, ...] = ("critical", "major", "minor", "warning", "info", "passed")
+#
+# MUST mirror the canonical hierarchy declared at the top of this module
+# (CRITICAL > MAJOR > MINOR > NIT > WARNING > INFO > PASSED). `nit` sits
+# between `minor` and `warning`: it is a real finding tier (blocks in
+# --strict) and the demotion ladder must step THROUGH it, not over it.
+# Omitting `nit` made `demote_severity("minor")` skip straight to
+# "warning" — a two-tier jump that violated the "one tier per step"
+# contract `effective_severity` documents.
+SEVERITY_TIERS: tuple[str, ...] = ("critical", "major", "minor", "nit", "warning", "info", "passed")
 
 
 def demote_severity(level: str, by: int = 1) -> str:
@@ -4884,9 +5058,23 @@ class ValidationReport:
         phase: str | None = None,
         fixable: bool = False,
         fix_id: str | None = None,
+        *,
+        category: str = "",
+        suggestion: str | None = None,
     ) -> None:
-        """Add a validation result."""
-        self.results.append(ValidationResult(level, message, file, line, phase, fixable, fix_id))
+        """Add a validation result.
+
+        ``category`` and ``suggestion`` are keyword-only so existing positional
+        callers are unaffected. They exist because ``ValidationResult`` carries
+        both fields, but every merge / rules-replay path that funnels a result
+        back through ``add()`` used to DROP them (the constructor was called
+        positionally up to ``fix_id`` only). Forwarding them here makes the
+        scope-merge and rules-filter replays lossless for category/suggestion
+        (audit scope-doc m9). Defaults match ``ValidationResult`` exactly.
+        """
+        self.results.append(
+            ValidationResult(level, message, file, line, phase, fixable, fix_id, category, suggestion)
+        )
 
     def passed(self, message: str, file: str | None = None) -> None:
         """Add a passed check."""
@@ -4900,6 +5088,13 @@ class ValidationReport:
         ``getattr(report, level)(msg, file, line)`` don't need a special
         case. The line is recorded on the result and rendered in the
         per-finding line whenever present.
+
+        The convenience wrappers do NOT expose ``category`` / ``suggestion`` —
+        those flow only through ``add()`` (the funnel the scope-merge and
+        rules-replay paths use; audit m9). The comprehensive skill validator
+        overrides these wrappers with category-aware variants for its own
+        scoring; keeping the base wrappers narrow avoids forcing every such
+        subclass override to also carry the extra kwargs.
         """
         self.add("INFO", message, file, line)
 

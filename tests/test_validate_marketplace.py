@@ -490,6 +490,43 @@ class TestValidatePluginSource:
         results = validate_plugin_source(plugin, "myplugin", tmp_path, "mp.json")
         assert any(r.level == "MAJOR" and "invalid source type" in r.message for r in results)
 
+    def test_git_subdir_canonical_subdir_not_flagged_missing_path(self, tmp_path):
+        """n4: git-subdir using only the canonical `subdir` must NOT be flagged 'requires path'.
+
+        `subdir` and `path` are interchangeable aliases for git-subdir; the
+        required-field check must accept either.
+        """
+        from validate_marketplace import validate_plugin_source
+
+        plugin = {
+            "name": "myplugin",
+            "source": {"source": "git-subdir", "url": "https://github.com/o/r", "subdir": "pkgs/x"},
+        }
+        results = validate_plugin_source(plugin, "myplugin", tmp_path, "mp.json")
+        assert not any("requires 'path'" in r.message for r in results), (
+            f"canonical subdir was wrongly flagged: {[r.message for r in results]}"
+        )
+
+    def test_git_subdir_with_path_alias_accepted(self, tmp_path):
+        """n4: git-subdir using the `path` alias must still satisfy the requirement (benign side)."""
+        from validate_marketplace import validate_plugin_source
+
+        plugin = {
+            "name": "myplugin",
+            "source": {"source": "git-subdir", "url": "https://github.com/o/r", "path": "pkgs/x"},
+        }
+        results = validate_plugin_source(plugin, "myplugin", tmp_path, "mp.json")
+        assert not any("requires 'path'" in r.message for r in results)
+        assert not any("requires 'subdir'" in r.message for r in results)
+
+    def test_git_subdir_missing_both_subdir_and_path_is_major(self, tmp_path):
+        """n4 (threat side): git-subdir with NEITHER subdir nor path must still produce a MAJOR."""
+        from validate_marketplace import validate_plugin_source
+
+        plugin = {"name": "myplugin", "source": {"source": "git-subdir", "url": "https://github.com/o/r"}}
+        results = validate_plugin_source(plugin, "myplugin", tmp_path, "mp.json")
+        assert any(r.level == "MAJOR" and "requires 'path'" in r.message for r in results)
+
     def test_dict_source_file_type_is_settings_level_only(self, tmp_path):
         """GAP-1 (v2.22.2): 'file' source is valid only at settings.json level,
         not as a per-plugin source in marketplace.json. Per plugin-marketplaces.md:223-229
@@ -621,6 +658,27 @@ class TestValidateRepositoryUrl:
         results = validate_repository_url("owner/repo", "myplugin", "mp.json")
         assert len(results) == 0
 
+    def test_slash_bearing_garbage_rejected(self):
+        """A schemeless string with a space must NOT pass as a shorthand (m11)."""
+        from validate_marketplace import validate_repository_url
+
+        results = validate_repository_url("not a url just/slash", "myplugin", "mp.json")
+        assert any(r.level == "MINOR" and "may be invalid" in r.message for r in results)
+
+    def test_too_many_path_segments_rejected(self):
+        """A schemeless 'a/b/c/d' must NOT pass as a two-segment owner/repo shorthand (m11)."""
+        from validate_marketplace import validate_repository_url
+
+        results = validate_repository_url("a/b/c/d", "myplugin", "mp.json")
+        assert any(r.level == "MINOR" and "may be invalid" in r.message for r in results)
+
+    def test_dotted_owner_repo_shorthand_accepted(self):
+        """A legitimate shorthand with dots/hyphens (owner.name/repo-x) must still pass clean (m11)."""
+        from validate_marketplace import validate_repository_url
+
+        results = validate_repository_url("my-org.io/repo-x", "myplugin", "mp.json")
+        assert len(results) == 0
+
 
 class TestValidatePluginsArray:
     """Tests for validate_plugins_array covering duplicates, non-dict entries."""
@@ -682,6 +740,45 @@ class TestValidateGithubDeployment:
         results = validate_github_deployment(tmp_path, plugins)
         assert any(r.level == "MINOR" and "subfolder missing README.md" in r.message for r in results)
 
+    def _marketplace_readme(self, root: Path) -> None:
+        """Write a complete marketplace-root README so only per-plugin checks remain."""
+        (root / "README.md").write_text(
+            "# MP\n## Installation\nclaude plugin marketplace add\nclaude plugin install\nverify\nrestart\n"
+            "## Update\n## Uninstall\n## Troubleshooting\nhook path not found\nold version after update\nrestart claude code\n"
+        )
+
+    def test_directory_source_plugin_readme_checked(self, tmp_path):
+        """A `directory`-dict-source plugin's subfolder must get the per-plugin README check (m6).
+
+        The old bespoke resolver ignored the dict `directory` source, so such a
+        plugin was silently skipped — never flagged for a missing README.
+        """
+        from validate_marketplace import validate_github_deployment
+
+        self._marketplace_readme(tmp_path)
+        plugin_dir = tmp_path / "plugins" / "dir-plugin"
+        plugin_dir.mkdir(parents=True)  # no README inside
+
+        plugins = [{"name": "dir-plugin", "source": {"source": "directory", "path": "./plugins/dir-plugin"}}]
+        results = validate_github_deployment(tmp_path, plugins)
+        assert any(
+            r.level == "MINOR" and "dir-plugin" in r.message and "subfolder missing README.md" in r.message
+            for r in results
+        ), f"directory-source plugin README not checked: {[r.message for r in results]}"
+
+    def test_directory_source_plugin_with_readme_passes(self, tmp_path):
+        """A `directory`-source plugin WITH a README must not be flagged (m6, benign side)."""
+        from validate_marketplace import validate_github_deployment
+
+        self._marketplace_readme(tmp_path)
+        plugin_dir = tmp_path / "plugins" / "ok-plugin"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "README.md").write_text("# ok-plugin\n")
+
+        plugins = [{"name": "ok-plugin", "source": {"source": "directory", "path": "./plugins/ok-plugin"}}]
+        results = validate_github_deployment(tmp_path, plugins)
+        assert not any("subfolder missing README.md" in r.message for r in results)
+
 
 class TestValidateReadmeContent:
     """Tests for validate_readme_content covering missing sections, installation steps, placeholders, troubleshooting."""
@@ -720,6 +817,36 @@ class TestValidateReadmeContent:
         )
         results = validate_readme_content(readme)
         assert any(r.level == "MINOR" and "placeholder content" in r.message for r in results)
+
+    def _complete_readme_body(self) -> str:
+        """A README body with every required section/topic so only the placeholder check can fire."""
+        return (
+            "# MP\n## Installation\nclaude plugin marketplace add\nclaude plugin install\nverify\nrestart\n"
+            "## Update\n## Uninstall\n## Troubleshooting\n"
+            "hook path not found\nold version after update\nrestart claude code\n"
+        )
+
+    def test_tbd_word_anchored_flags_real_placeholder(self, tmp_path):
+        """A standalone 'TBD' token must still be flagged as placeholder content (n6, threat side)."""
+        from validate_marketplace import validate_readme_content
+
+        readme = tmp_path / "README.md"
+        readme.write_text(self._complete_readme_body() + "Release date: TBD\n")
+        results = validate_readme_content(readme)
+        assert any(r.level == "MINOR" and "placeholder content" in r.message for r in results)
+
+    def test_tbd_substring_not_false_flagged(self, tmp_path):
+        """A word merely CONTAINING 'tbd' as a substring must NOT trip the placeholder check (n6, benign side).
+
+        The pattern is now word-anchored (\\bTBD\\b); an unanchored substring
+        match would false-positive on words like 'subtbdir'.
+        """
+        from validate_marketplace import validate_readme_content
+
+        readme = tmp_path / "README.md"
+        readme.write_text(self._complete_readme_body() + "See the subtbdir layout for details.\n")
+        results = validate_readme_content(readme)
+        assert not any("placeholder content" in r.message for r in results)
 
     def test_missing_troubleshooting_topics_produces_minor(self, tmp_path):
         """Troubleshooting section missing required topics must produce MINOR (lines 989-1008)."""
@@ -779,6 +906,82 @@ class TestValidateGitSubmodules:
         plugins = [{"name": "unlisted-plugin", "source": {"source": "github", "repo": "owner/unlisted"}}]
         results = validate_git_submodules(tmp_path, plugins)
         assert any(r.level == "MAJOR" and "not a git submodule" in r.message for r in results)
+
+    def test_submodule_summary_info_fires_for_plugins_layout(self, tmp_path):
+        """The 'configured as git submodules' INFO must fire for the canonical plugins/<name> layout (m5).
+
+        `submodules` is keyed by PATH ('plugins/foo'), so the old name-membership
+        test ('foo' in submodules) was ~always False and the summary never emitted.
+        """
+        from validate_marketplace import validate_git_submodules
+
+        (tmp_path / ".git").mkdir()
+        gitmodules = tmp_path / ".gitmodules"
+        gitmodules.write_text(
+            '[submodule "plugins/foo"]\n\tpath = plugins/foo\n\turl = https://github.com/o/foo\n'
+        )
+        plugin_dir = tmp_path / "plugins" / "foo"
+        plugin_dir.mkdir(parents=True)
+        # Mark the submodule as a checked-out dir so it isn't flagged "not a submodule".
+        (plugin_dir / ".git").write_text("gitdir: ../../.git/modules/plugins/foo\n")
+
+        plugins = [{"name": "foo", "source": {"source": "github", "repo": "o/foo"}}]
+        results = validate_git_submodules(tmp_path, plugins)
+        assert not any(r.level in ("CRITICAL", "MAJOR") for r in results)
+        assert any(r.level == "INFO" and "configured as git submodules" in r.message for r in results)
+
+
+class TestMarketplacePrivateInfoResolution:
+    """M3/m1: private-info scanner coverage for Layout-B sources and metachar paths."""
+
+    def test_directory_source_plugin_is_scanned(self, tmp_path):
+        """A `directory`-dict-source plugin must be scanned for private path leaks (M3).
+
+        The scanner previously resolved only `./x` and bare-string sources, so a
+        leak inside a `{source:"directory", path:"./plugins/x"}` plugin was a
+        security false-negative — completely unscanned.
+        """
+        from validate_marketplace import validate_marketplace_private_info
+
+        plugin_dir = tmp_path / "plugins" / "leaky"
+        plugin_dir.mkdir(parents=True)
+        # A real home-path leak with a non-example username.
+        (plugin_dir / "config.md").write_text("path: /Users/realdev/secret/project/file.txt\n")
+
+        plugins = [{"name": "leaky", "source": {"source": "directory", "path": "./plugins/leaky"}}]
+        results = validate_marketplace_private_info(tmp_path, plugins)
+        assert any(
+            r.level in ("CRITICAL", "MAJOR") and "realdev" in r.message for r in results
+        ), f"directory-source plugin was not scanned: {[r.message for r in results]}"
+
+    def test_clean_directory_source_plugin_passes(self, tmp_path):
+        """A clean `directory`-source plugin must NOT produce a private-info finding (M3, benign side)."""
+        from validate_marketplace import validate_marketplace_private_info
+
+        plugin_dir = tmp_path / "plugins" / "clean"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "config.md").write_text("path: ${CLAUDE_PLUGIN_ROOT}/data/file.txt\n")
+
+        plugins = [{"name": "clean", "source": {"source": "directory", "path": "./plugins/clean"}}]
+        results = validate_marketplace_private_info(tmp_path, plugins)
+        assert not any(r.level in ("CRITICAL", "MAJOR") for r in results)
+
+    def test_dotted_home_path_leak_not_skipped(self, tmp_path):
+        """A home-path leak containing '.' must be flagged, not silently skipped (m1).
+
+        The old metachar skip-set included '.', so a real path like
+        /Users/realdev/a.b.c/ was dropped as if it were a regex pattern.
+        """
+        from validate_marketplace import validate_marketplace_private_info
+
+        infra = tmp_path / "scripts"
+        infra.mkdir()
+        (infra / "thing.py").write_text('CONFIG = "/Users/realdev/a.b.c/data/file.txt"\n')
+
+        results = validate_marketplace_private_info(tmp_path, [])
+        assert any(
+            r.level in ("CRITICAL", "MAJOR") and "realdev" in r.message for r in results
+        ), f"dotted home path was skipped: {[r.message for r in results]}"
 
 
 class TestValidateGithubSourceRequired:
@@ -1162,18 +1365,46 @@ class TestV221MarketplaceReservedFuzzy:
         results = validate_marketplace_name("anthropic-tools-v2", "test.json")
         assert any(r.level == "MAJOR" and "impersonate" in r.message.lower() for r in results)
 
-    def test_claude_code_prefix_blocked(self):
-        """Names starting with 'claude-code-' must produce MAJOR impersonation finding."""
+    def test_community_claude_code_prefix_not_impersonation(self):
+        """A community 'claude-code-' prefix is NOT impersonation and must not be flagged (m3).
+
+        Prefixing a community marketplace with 'claude-code-' is extremely common
+        and not an attempt to impersonate an official Anthropic marketplace. The
+        exact reserved names (claude-code-marketplace, claude-code-plugins) are
+        still blocked at CRITICAL via RESERVED_MARKETPLACE_NAMES.
+        """
         from validate_marketplace import validate_marketplace_name
 
         results = validate_marketplace_name("claude-code-superhub", "test.json")
-        assert any(r.level == "MAJOR" and "impersonate" in r.message.lower() for r in results)
+        assert not any("impersonate" in r.message.lower() for r in results)
 
-    def test_claude_plugins_prefix_blocked(self):
-        """Names starting with 'claude-plugins-' must produce MAJOR impersonation finding."""
+    def test_community_claude_plugins_prefix_not_impersonation(self):
+        """A community 'claude-plugins-' prefix is NOT impersonation — incl. CPV's own sibling (m3).
+
+        The champion validator must not flag its own sibling repo naming
+        convention ('claude-plugins-validation') as a suspected impersonation.
+        """
         from validate_marketplace import validate_marketplace_name
 
         results = validate_marketplace_name("claude-plugins-foo", "test.json")
+        assert not any("impersonate" in r.message.lower() for r in results)
+
+        # CPV's own sibling marketplace naming must pass cleanly.
+        cpv_sibling = validate_marketplace_name("claude-plugins-validation", "test.json")
+        assert not any("impersonate" in r.message.lower() for r in cpv_sibling)
+
+    def test_official_prefix_blocked(self):
+        """A bare 'official-' prefix (any vendor) must still produce a MAJOR impersonation finding."""
+        from validate_marketplace import validate_marketplace_name
+
+        results = validate_marketplace_name("official-plugins-hub", "test.json")
+        assert any(r.level == "MAJOR" and "impersonate" in r.message.lower() for r in results)
+
+    def test_claude_marketplace_prefix_blocked(self):
+        """'claude-marketplace*' mimics THE official marketplace and must still be flagged MAJOR."""
+        from validate_marketplace import validate_marketplace_name
+
+        results = validate_marketplace_name("claude-marketplace-mirror", "test.json")
         assert any(r.level == "MAJOR" and "impersonate" in r.message.lower() for r in results)
 
     def test_unrelated_name_accepted(self):
@@ -1653,3 +1884,87 @@ class TestV2223MarketplaceMinorFixes:
         assert not any(r.level in {"MINOR", "MAJOR", "CRITICAL"} and "userConfig" in r.message for r in results), (
             f"valid userConfig must be silent: {[(r.level, r.message) for r in results]}"
         )
+
+
+class TestNestedPluginSelfReferenceGuard:
+    """n2: _validate_nested_plugin must not validate a marketplace root as a plugin."""
+
+    def test_marketplace_root_as_nested_plugin_is_skipped(self, tmp_path):
+        """A nested root that is a marketplace (marketplace.json, no plugin.json) is skipped with INFO (n2)."""
+        from validate_marketplace import _validate_nested_plugin
+
+        (tmp_path / "marketplace.json").write_text(
+            json.dumps({"name": "mp", "owner": {"name": "x"}, "plugins": []})
+        )
+        results = _validate_nested_plugin(tmp_path, "self-ref", "mp.json")
+        assert any(
+            r.level == "INFO" and "self-referential" in r.message for r in results
+        ), f"expected self-reference skip INFO: {[(r.level, r.message) for r in results]}"
+
+    def test_real_nested_plugin_still_validated(self, tmp_path):
+        """A nested root that IS a plugin (has plugin.json) must NOT be skipped (n2, benign side)."""
+        from validate_marketplace import _validate_nested_plugin
+
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "p", "version": "1.0.0"}))
+        results = _validate_nested_plugin(tmp_path, "real", "mp.json")
+        # The self-reference INFO must NOT appear — the plugin was actually validated.
+        assert not any("self-referential" in r.message for r in results)
+
+
+class TestPluginRootMemoization:
+    """m10: _read_marketplace_plugin_root memoizes per (path, mtime) without going stale."""
+
+    def test_pluginroot_value_correct_and_cached(self, tmp_path):
+        """Repeated reads return the same pluginRoot and do not re-parse a constant file (m10)."""
+        from validate_marketplace import _read_marketplace_plugin_root
+
+        (tmp_path / "marketplace.json").write_text(
+            json.dumps({"name": "mp", "metadata": {"pluginRoot": "./plugins"}, "plugins": []})
+        )
+        first = _read_marketplace_plugin_root(tmp_path)
+        second = _read_marketplace_plugin_root(tmp_path)
+        assert first == "./plugins"
+        assert second == "./plugins"
+
+    def test_pluginroot_memo_invalidated_on_file_change(self, tmp_path):
+        """A rewrite of marketplace.json (new mtime) must be reflected, not served stale (m10)."""
+        import os
+        import time
+
+        from validate_marketplace import _read_marketplace_plugin_root
+
+        mp = tmp_path / "marketplace.json"
+        mp.write_text(json.dumps({"name": "mp", "metadata": {"pluginRoot": "./old"}, "plugins": []}))
+        assert _read_marketplace_plugin_root(tmp_path) == "./old"
+
+        # Rewrite with a different pluginRoot and bump mtime so the memo key changes
+        # even if the write lands within the same clock tick.
+        mp.write_text(json.dumps({"name": "mp", "metadata": {"pluginRoot": "./new"}, "plugins": []}))
+        future = time.time() + 10
+        os.utime(mp, (future, future))
+        assert _read_marketplace_plugin_root(tmp_path) == "./new"
+
+
+class TestMarketplaceReportAtomicWrite:
+    """m9: the --report write must land atomically with no leftover .tmp file."""
+
+    def test_report_written_and_no_tmp_left(self, tmp_path):
+        """main() --report produces the final report and leaves no sibling .tmp (m9)."""
+        from unittest.mock import patch
+
+        from validate_marketplace import main
+
+        (tmp_path / "marketplace.json").write_text(
+            json.dumps({"name": "mp", "owner": {"name": "x"}, "plugins": []})
+        )
+        report_path = tmp_path / "out" / "report.md"
+        with patch(
+            "sys.argv",
+            ["validate_marketplace.py", str(tmp_path), "--report", str(report_path)],
+        ):
+            main()
+        assert report_path.is_file()
+        assert report_path.read_text().strip() != ""
+        # The atomic-rename helper must not leave the sibling temp file behind.
+        assert not (report_path.parent / (report_path.name + ".tmp")).exists()

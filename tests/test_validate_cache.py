@@ -20,6 +20,7 @@ from validate_cache import (  # noqa: E402
     _DYNAMIC_PLACEHOLDER,
     _DYNAMIC_SHELL_CMD,
     _strip_fences_for_dynamic_check,
+    scan_component_for_context_fork,
     scan_component_for_model_override,
     scan_hook_for_fork_unsafe,
     scan_hook_for_prefix_mutation,
@@ -532,3 +533,133 @@ class TestRegexSanity:
         # $(echo "hi") is dynamic in shell semantics but produces stable output;
         # CA-01 is intentionally narrow and only flags well-known dynamic tools.
         assert _DYNAMIC_SHELL_CMD.search("$(echo 'hi')") is None
+
+
+# -----------------------------------------------------------------------------
+# Audit fixes — two-sided regression tests
+# (audit 20260525_155959+0200-validate-mcp-lsp-cache.md)
+# -----------------------------------------------------------------------------
+
+
+class TestCacheCRLFFrontmatter:
+    """#5 CACHE-CRLF — CRLF-authored frontmatter must not escape CA-04 / CA-07."""
+
+    def test_crlf_model_override_still_caught(self, tmp_path: Path) -> None:
+        """A CRLF-authored `model: opus` still fires CA-04 (was silently skipped)."""
+        plugin = _make_plugin(tmp_path)
+        skill_dir = plugin / "skills" / "crlf-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\r\nname: crlf-skill\r\ndescription: d\r\nmodel: opus\r\n---\r\n\r\nBody\r\n"
+        )
+        report = ValidationReport()
+        scan_component_for_model_override(skill_dir / "SKILL.md", report, plugin, "skill")
+        assert any("CA-04" in r.message for r in report.results)
+
+    def test_lf_model_override_still_caught(self, tmp_path: Path) -> None:
+        """The LF case is unchanged (no regression)."""
+        plugin = _make_plugin(tmp_path)
+        skill_dir = plugin / "skills" / "lf-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: lf-skill\ndescription: d\nmodel: opus\n---\n\nBody\n")
+        report = ValidationReport()
+        scan_component_for_model_override(skill_dir / "SKILL.md", report, plugin, "skill")
+        assert any("CA-04" in r.message for r in report.results)
+
+    def test_crlf_model_inherit_not_flagged(self, tmp_path: Path) -> None:
+        """`model: inherit` (CRLF) is exempt — no false CA-04."""
+        plugin = _make_plugin(tmp_path)
+        skill_dir = plugin / "skills" / "inherit-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\r\nname: inherit-skill\r\ndescription: d\r\nmodel: inherit\r\n---\r\n\r\nBody\r\n"
+        )
+        report = ValidationReport()
+        scan_component_for_model_override(skill_dir / "SKILL.md", report, plugin, "skill")
+        assert not any("CA-04" in r.message for r in report.results)
+
+    def test_crlf_context_fork_still_caught(self, tmp_path: Path) -> None:
+        """A CRLF-authored `context: fork` still fires CA-07."""
+        plugin = _make_plugin(tmp_path)
+        skill_dir = plugin / "skills" / "fork-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\r\nname: fork-skill\r\ndescription: d\r\ncontext: fork\r\n---\r\n\r\nBody\r\n"
+        )
+        report = ValidationReport()
+        scan_component_for_context_fork(skill_dir / "SKILL.md", report, plugin, "skill")
+        assert any("CA-07" in r.message for r in report.results)
+
+
+class TestCacheWriteOpFDRedirect:
+    """#7 CACHE-WRITEOP-FP — FD redirects (2>/dev/null) must not trip CA-02."""
+
+    def test_fd_redirect_with_claude_md_mention_does_not_fire(self, tmp_path: Path) -> None:
+        """`2>/dev/null && echo CLAUDE.md is fine` is NOT a prefix write (the FP)."""
+        plugin = _make_plugin(tmp_path)
+        (plugin / "hooks").mkdir()
+        script = plugin / "hooks" / "init.sh"
+        script.write_text("#!/bin/bash\nfoo 2>/dev/null && echo CLAUDE.md is fine\n")
+        script.chmod(0o755)
+        report = ValidationReport()
+        scan_hook_for_prefix_mutation(script, "SessionStart", report, plugin)
+        assert [r for r in report.results if "CA-02" in r.message] == []
+
+    def test_genuine_redirect_to_claude_md_still_fires(self, tmp_path: Path) -> None:
+        """A real `> CLAUDE.md` write from SessionStart still fires CA-02."""
+        plugin = _make_plugin(tmp_path)
+        (plugin / "hooks").mkdir()
+        script = plugin / "hooks" / "init.sh"
+        script.write_text("#!/bin/bash\necho 'x' > ~/.claude/CLAUDE.md\n")
+        script.chmod(0o755)
+        report = ValidationReport()
+        scan_hook_for_prefix_mutation(script, "SessionStart", report, plugin)
+        assert [r for r in report.results if "CA-02" in r.message]
+
+
+class TestCacheCA05RedirectAware:
+    """#8 CACHE-CA05-BROAD — cat/find/ls redirected to a file must not fire CA-05."""
+
+    def test_cat_redirected_to_file_does_not_fire(self, tmp_path: Path) -> None:
+        """`cat x > CLAUDE.md` is a WRITE, not a stdout dump — no CA-05 (the FP)."""
+        plugin = _make_plugin(tmp_path)
+        (plugin / "hooks").mkdir()
+        script = plugin / "hooks" / "init.sh"
+        script.write_text("#!/bin/bash\ncat template.txt > out.txt\n")
+        script.chmod(0o755)
+        report = ValidationReport()
+        scan_hook_for_unbounded_output(script, "SessionStart", report, plugin)
+        assert [r for r in report.results if "CA-05" in r.message] == []
+
+    def test_bare_cat_dump_still_fires(self, tmp_path: Path) -> None:
+        """A bare `cat bigfile` (dumps to stdout) still fires CA-05."""
+        plugin = _make_plugin(tmp_path)
+        (plugin / "hooks").mkdir()
+        script = plugin / "hooks" / "init.sh"
+        script.write_text("#!/bin/bash\ncat bigfile\n")
+        script.chmod(0o755)
+        report = ValidationReport()
+        scan_hook_for_unbounded_output(script, "SessionStart", report, plugin)
+        assert [r for r in report.results if "CA-05" in r.message]
+
+    def test_find_redirected_to_file_does_not_fire(self, tmp_path: Path) -> None:
+        """`find . -name x > out.txt` is captured to a file — no CA-05."""
+        plugin = _make_plugin(tmp_path)
+        (plugin / "hooks").mkdir()
+        script = plugin / "hooks" / "init.sh"
+        script.write_text("#!/bin/bash\nfind . -name '*.py' > listing.txt\n")
+        script.chmod(0o755)
+        report = ValidationReport()
+        scan_hook_for_unbounded_output(script, "SessionStart", report, plugin)
+        assert [r for r in report.results if "CA-05" in r.message] == []
+
+    def test_bare_find_dump_still_fires(self, tmp_path: Path) -> None:
+        """A bare `find . -name x` (dumps to stdout) still fires CA-05."""
+        plugin = _make_plugin(tmp_path)
+        (plugin / "hooks").mkdir()
+        script = plugin / "hooks" / "init.sh"
+        script.write_text("#!/bin/bash\nfind . -name '*.py'\n")
+        script.chmod(0o755)
+        report = ValidationReport()
+        scan_hook_for_unbounded_output(script, "SessionStart", report, plugin)
+        assert [r for r in report.results if "CA-05" in r.message]

@@ -490,9 +490,15 @@ class TestRunParallelBatch:
             "finding-from-C",
         ], f"Order drift: {messages}"
 
-    def test_crashed_task_surfaces_as_minor(self, tmp_path):
-        """A validator that raises must NOT crash the batch — it
-        surfaces as a MINOR finding on the umbrella report."""
+    def test_crashed_task_surfaces_as_major(self, tmp_path):
+        """A validator that raises must NOT crash the batch, but its crash IS
+        surfaced as a blocking MAJOR on the umbrella report.
+
+        v2.106 (audit n2): a crashed comprehensive validator is an
+        INDETERMINATE result — whatever findings it would have produced
+        (potentially CRITICAL) are lost — so the verdict must stay blocking.
+        Two-sided: the surviving good tasks still PASS (batch proceeds) AND
+        the crash blocks via MAJOR (verdict not silently downgraded)."""
         from cpv_validation_common import ValidationReport
 
         def good(plugin_root, report):
@@ -509,11 +515,13 @@ class TestRunParallelBatch:
         umbrella = ValidationReport()
         _run_parallel_batch(tasks, tmp_path, umbrella)
 
-        # 2 PASSED + 1 MINOR (from the boundary-error handler).
+        # 2 PASSED (batch kept going) + 1 MAJOR (the crash, blocking).
         levels = [r.level for r in umbrella.results]
         assert levels.count("PASSED") == 2
-        assert levels.count("MINOR") == 1
-        minor_msg = next(r.message for r in umbrella.results if r.level == "MINOR")
-        assert "bad" in minor_msg
-        assert "RuntimeError" in minor_msg
-        assert "kaboom" in minor_msg
+        assert levels.count("MAJOR") == 1
+        assert levels.count("MINOR") == 0
+        major_msg = next(r.message for r in umbrella.results if r.level == "MAJOR")
+        assert "bad" in major_msg
+        assert "crashed" in major_msg
+        assert "RuntimeError" in major_msg
+        assert "kaboom" in major_msg

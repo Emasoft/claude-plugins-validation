@@ -512,8 +512,16 @@ class TestValidateSecurity:
     """Tests for validate_security (lines 450-465)."""
 
     def test_hardcoded_secret_reports_critical(self):
-        """Content containing an AWS key pattern should produce CRITICAL (line 450)."""
-        content = "---\nname: deploy\n---\nUse key: AKIAIOSFODNN7EXAMPLE1"
+        """A REAL (non-placeholder) AWS key should produce CRITICAL (audit M3).
+
+        Uses a synthetic key that is NOT the canonical AWS docs example
+        (AKIAIOSFODNN7EXAMPLE) and carries no placeholder markers, so the new
+        suppression must NOT swallow it. The old fixture used
+        ``AKIAIOSFODNN7EXAMPLE1`` whose 16-char capture collapses to the
+        canonical placeholder — which now (correctly) suppresses, so a real
+        regression test needs a genuine-looking key.
+        """
+        content = "---\nname: deploy\n---\nUse key: AKIA1234567890ABCDEF"
         report = CommandValidationReport()
         validate_security(content, "secret.md", report)
         assert any(r.level == "CRITICAL" and "SECURITY" in r.message for r in report.results)
@@ -639,3 +647,105 @@ class TestPrintResultsAndJson:
         assert output["counts"]["major"] == 1
         assert output["counts"]["passed"] == 1
         assert len(output["results"]) == 2
+
+
+# =============================================================================
+# audit M3 — validate_security placeholder/example-secret suppression
+# Two-sided: real secrets still CRITICAL; documented example secrets suppressed.
+# =============================================================================
+
+
+class TestValidateSecurityPlaceholderSuppression:
+    """audit M3: per-command secret scan must match the whole-plugin scanner."""
+
+    def test_aws_canonical_example_secret_suppressed(self):
+        """AWS's own docs placeholder AKIAIOSFODNN7EXAMPLE must NOT be CRITICAL."""
+        content = "---\nname: deploy\n---\nExample only: AKIAIOSFODNN7EXAMPLE"
+        report = CommandValidationReport()
+        validate_security(content, "doc.md", report)
+        assert not any(r.level == "CRITICAL" for r in report.results)
+
+    def test_placeholder_api_key_line_suppressed(self):
+        """A `your-api-key-here` style placeholder line must NOT be CRITICAL."""
+        content = '---\nname: deploy\n---\napi_key = "your-api-key-here-aaaaaaaaaaaa"'
+        report = CommandValidationReport()
+        validate_security(content, "doc.md", report)
+        assert not any(r.level == "CRITICAL" for r in report.results)
+
+    def test_env_var_placeholder_line_suppressed(self):
+        """A `${ENV}` template value on the line must NOT be CRITICAL."""
+        content = '---\nname: deploy\n---\napi_key = "${OPENAI_SECRET_TOKEN_VALUE}"'
+        report = CommandValidationReport()
+        validate_security(content, "doc.md", report)
+        assert not any(r.level == "CRITICAL" for r in report.results)
+
+    def test_real_aws_key_still_critical(self):
+        """A genuine-looking AWS key (not the canonical example) stays CRITICAL."""
+        content = "---\nname: deploy\n---\nAWS_KEY=AKIA1234567890ABCDEF"
+        report = CommandValidationReport()
+        validate_security(content, "secret.md", report)
+        assert any(r.level == "CRITICAL" and "SECURITY" in r.message for r in report.results)
+
+    def test_real_secret_reports_line_number(self):
+        """A real secret now reports the FILE line number of the offending line."""
+        content = "---\nname: deploy\n---\nintro line\nAWS_KEY=AKIA1234567890ABCDEF"
+        report = CommandValidationReport()
+        validate_security(content, "secret.md", report)
+        crit = [r for r in report.results if r.level == "CRITICAL"]
+        assert crit and crit[0].line == 5  # line 1=---, 2=name, 3=---, 4=intro, 5=key
+
+
+# =============================================================================
+# audit n1 — validate_body_content instruction detection on WORD boundaries
+# Two-sided: substring-only prose no longer counts as instructions; real verbs do.
+# =============================================================================
+
+
+class TestValidateBodyInstructionWordBoundaries:
+    """audit n1: 'if'/'do' must not match inside 'specific'/'window'."""
+
+    def test_substring_only_prose_reports_info(self):
+        """Prose containing 'specific'/'window' (substring if/do) lacks instructions."""
+        # 'specific' contains 'if'; 'window' contains 'do' — the old substring
+        # scan wrongly treated this as instructional and suppressed the advisory.
+        body = "Operates on specific window contents. " * 4
+        content = f"---\nname: t\n---\n{body}"
+        report = CommandValidationReport()
+        validate_body_content(content, "prose.md", report)
+        assert any(r.level == "INFO" and "clear instructions" in r.message for r in report.results)
+
+    def test_real_instruction_verb_no_info(self):
+        """A real instruction word ('execute') as a whole word suppresses the advisory."""
+        body = "Execute the deploy step and verify the result is correct. " * 3
+        content = f"---\nname: t\n---\n{body}"
+        report = CommandValidationReport()
+        validate_body_content(content, "instr.md", report)
+        assert not any(r.level == "INFO" and "clear instructions" in r.message for r in report.results)
+
+
+# =============================================================================
+# audit m6 — leading UTF-8 BOM must not hide the frontmatter
+# =============================================================================
+
+
+class TestBomFrontmatterHandling:
+    """audit m6: a BOM-prefixed command must still parse its frontmatter."""
+
+    def test_bom_prefixed_frontmatter_parses(self):
+        """parse_frontmatter recognises frontmatter after a leading BOM."""
+        content = "﻿---\nname: deploy\ndescription: Deploy the app to prod\n---\nBody."
+        frontmatter, body, _ = parse_frontmatter(content)
+        assert frontmatter is not None
+        assert frontmatter["name"] == "deploy"
+        assert body.strip() == "Body."
+
+    def test_bom_prefixed_command_no_false_no_frontmatter_critical(self, tmp_path):
+        """A BOM-prefixed command file must NOT report 'No YAML frontmatter found'."""
+        cmd = tmp_path / "deploy.md"
+        cmd.write_text(
+            "﻿---\nname: deploy\ndescription: Deploy the app to prod safely\n---\n"
+            "Run the deploy steps and verify the output is correct.\n",
+            encoding="utf-8",
+        )
+        report = validate_command(cmd)
+        assert not any("No YAML frontmatter found" in r.message for r in report.results)

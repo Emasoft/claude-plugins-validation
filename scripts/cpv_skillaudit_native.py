@@ -35,7 +35,7 @@ import re
 import unicodedata
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 __all__ = [
@@ -125,6 +125,29 @@ def _compiled_rules() -> list[tuple[dict[str, Any], list[re.Pattern[str]]]]:
     return compiled
 
 
+# Severity ordering for the skillaudit-internal severity vocabulary
+# (NOT the CPV severity model — these are the raw rule/catalog levels
+# scan_content emits before CPV maps them). Used by the (ruleId, line)
+# dedup to keep the strongest finding when a catalog rule and a secondary
+# scanner collide on one key (audit MINOR #4).
+_SEVERITY_RANK: dict[str, int] = {
+    "info": 0,
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+    "critical": 4,
+}
+
+
+def _severity_rank(severity: str) -> int:
+    """Return a sortable rank for a skillaudit severity string.
+
+    Unknown / empty severities rank below ``info`` so a well-formed
+    finding always wins over a malformed one in the dedup.
+    """
+    return _SEVERITY_RANK.get(severity.lower(), -1)
+
+
 # ────────────────────────────────────────────────────────────────────────
 # v2.104.0 — module version + catalog hash + opt-in helper modules
 # ────────────────────────────────────────────────────────────────────────
@@ -200,13 +223,15 @@ except ImportError:  # pragma: no cover — feature absent
     _CACHE_AVAILABLE = False
 
 try:
-    from cpv_binary_scanner import is_binary as _binary_is_binary  # noqa: PLC0415
+    from cpv_binary_scanner import BINARY_PREFIX as _BINARY_PREFIX  # noqa: PLC0415
+    from cpv_binary_scanner import is_binary as _binary_is_binary
     from cpv_binary_scanner import scan_binary as _binary_scan_binary
 
     _BINARY_AVAILABLE = True
 except ImportError:  # pragma: no cover — feature absent
     _binary_is_binary = None  # type: ignore[assignment]
     _binary_scan_binary = None  # type: ignore[assignment]
+    _BINARY_PREFIX = "[extracted from binary] "
     _BINARY_AVAILABLE = False
 
 try:
@@ -305,6 +330,57 @@ def _hybrid_matcher() -> Any:
         _HYBRID_MATCHER_INIT_FAILED = True
         return None
     return _HYBRID_MATCHER
+
+
+def _prefilter_rule_ids(text: str) -> frozenset[str] | None:
+    """Return the set of catalog rule_ids whose pattern matches ``text``
+    somewhere, computed in ONE RE2 ``Set`` pass — or ``None`` when the
+    fast matcher is unavailable / disabled (the caller then runs every
+    rule, exactly as before).
+
+    This is the wiring that finally delivers the module's advertised
+    O(N_text) speedup (audit MAJOR #1). It is used as a PRE-FILTER, not a
+    replacement: the expensive per-line Python ``re`` loop in
+    ``scan_content`` still runs — but ONLY for the (usually small) subset
+    of rules that the single-pass matcher proved can match. Rules with
+    zero matches anywhere in the file are skipped entirely.
+
+    Correctness contract (why this changes NOTHING about the findings):
+
+    * The matcher compiles every pattern case-INSENSITIVE (``_case_insensitive``),
+      the same as the live ``_compiled_rules`` IGNORECASE loop, so the
+      pre-filter never excludes a rule the per-line loop would have hit.
+    * ``RE2::Set::Match`` over the WHOLE text is a superset gate: if a
+      pattern matches any single line, it also matches the joined text
+      (line boundaries only ADD ``\n`` characters, never remove a match)
+      — UNLESS the pattern is anchored to start/end-of-string in a way
+      that behaves differently on a multi-line blob. To stay sound we
+      compile the matcher per-line-agnostic and fall back to running ALL
+      rules whenever the matcher is unavailable; we never DROP a rule on
+      the basis of a non-match for a multiline-anchored pattern because
+      such patterns would be in the result set anyway (``re2`` matches
+      ``^``/``$`` against the blob's line boundaries by default, matching
+      Python ``re`` line semantics under the same input).
+    * The flattened keys are ``"<rule_id>#<idx>"``; we split on the LAST
+      ``"#"`` so rule_ids that themselves contain ``#`` survive.
+
+    Returns ``None`` (NOT an empty set) when the matcher can't run, so the
+    caller distinguishes "no pre-filter available → run everything" from
+    "pre-filter ran and matched nothing → run nothing".
+    """
+    matcher = _hybrid_matcher()
+    if matcher is None:
+        return None
+    try:
+        pairs = matcher.scan(text)
+    except Exception:  # pragma: no cover — matcher must never break a scan
+        return None
+    rule_ids: set[str] = set()
+    for flat_key, _match in pairs:
+        # Flattened key is "<rule_id>#<idx>" — rsplit so a rule_id that
+        # itself contains '#' is preserved.
+        rule_ids.add(flat_key.rsplit("#", 1)[0])
+    return frozenset(rule_ids)
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -430,15 +506,19 @@ _DOC_CONTEXT_WORDS: tuple[re.Pattern[str], ...] = tuple(
         r"\bquick\s+start\b",
         r"\bapi\s+reference\b",
         r"\bdocumentation\b",
-        r"\bguide\b",
-        r"\boverview\b",
+        # audit NIT #11: ``generate`` / ``guide`` / ``overview`` removed —
+        # they are extremely common in legitimate code comments and
+        # surrounding prose, so a ±5-line window around them over-demoted
+        # CRED_ENV_READ / TOKEN_STEAL findings near the everyday word
+        # "generate" ("We generate output here" one line from a real
+        # ``os.environ['SECRET_TOKEN']``). The remaining triggers are
+        # either multi-word doc phrases or unambiguous doc nouns.
         r"\bsave\s+your\b",
         r"\bstore\s+your\b",
         r"\bset\s+your\b",
         r"\badd\s+your\b",
         r"\bget\s+your\b",
         r"\bcreate\s+your\b",
-        r"\bgenerate\b",
     )
 )
 
@@ -780,6 +860,30 @@ _INTENT_SOFT_SIGNAL_RULES: frozenset[str] = frozenset(
 # safe-doc-keeping. The split above adds finer-grained control.
 _INTENT_CLASS_RULES: frozenset[str] = _INTENT_HARD_SIGNAL_RULES | _INTENT_SOFT_SIGNAL_RULES
 
+# **Hidden-content hard signals**: the subset of INTENT_HARD rules whose
+# threat does NOT depend on the host file being loaded as an agent
+# instruction. Invisible / zero-width / bidi Unicode and decoded hidden
+# payloads are STEGANOGRAPHIC channels — they hide content from human
+# review regardless of the file surface. README / CHANGELOG / docs ARE
+# routinely fed to agents ("summarize this repo's README", "what does
+# this plugin do"), so a hidden-Unicode prompt-injection in a README is
+# a real attack, not inert documentation prose.
+#
+# These rules must therefore be EXCLUDED from the documentation-only-path
+# suppression carve-out (issue #38). The carve-out remains valid for the
+# natural-language-prose injection rules (PROMPT_INJECT etc.) whose threat
+# genuinely requires the file to be read as instructions — but NOT for
+# the hidden-content class. (audit MAJOR #3)
+_HIDDEN_CONTENT_HARD_SIGNAL_RULES: frozenset[str] = frozenset(
+    {
+        "INVISIBLE_UNICODE_RAW",
+        "BASE64_DECODE_THREAT",
+        "HEX_DECODE_THREAT",
+        "UNICODE_ESCAPE_DECODE_THREAT",
+        "CHARCODE_DECODE_THREAT",
+    }
+)
+
 # Rules whose threat is delivered THROUGH a JSON/YAML metadata field — the
 # `description` / `title` of an MCP tool or plugin manifest is itself an
 # LLM-READ attack surface (the model reads tool descriptions when deciding to
@@ -1009,7 +1113,16 @@ def _context_classifier_verdict(
             # still fires on instruction-loadable paths (SKILL.md,
             # agents/, commands/, output-styles/, .claude/rules/,
             # CLAUDE.md) where prose IS a delivery vector.
-            if _is_documentation_only_path(file_path):
+            #
+            # EXCEPTION (audit MAJOR #3): hidden-content hard signals
+            # (invisible/zero-width/bidi Unicode + decoded hidden
+            # payloads) are steganographic — they hide content from human
+            # review regardless of whether the file is instruction-loadable,
+            # and README/CHANGELOG/docs ARE fed to agents for
+            # summarisation. Do NOT suppress those in doc-only paths;
+            # defer to the heuristic chain so they stay visible (they end
+            # in "keep" unless a placeholder/other safety-net fires).
+            if _is_documentation_only_path(file_path) and rule_id not in _HIDDEN_CONTENT_HARD_SIGNAL_RULES:
                 return "suppress"
             # Hard signals — prose IS the threat-delivery vector. Defer
             # to the heuristic chain so placeholder-suppression
@@ -1917,8 +2030,24 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
     # classifier instead of a binary suppress/keep: hard-suppress only
     # for placeholder-driven matches, demote-to-WARNING for plausible
     # documentation context, keep for high-confidence threats.
+    #
+    # v2.106.0 (audit MAJOR #1): RE2 pre-filter. One O(N_text) RE2 ``Set``
+    # pass over the whole content tells us WHICH catalog rules can match
+    # at all; we then run the expensive per-line Python loop ONLY for that
+    # subset. ``None`` means the fast matcher is unavailable/disabled —
+    # then ``prefilter`` is treated as "match everything" so behaviour is
+    # byte-identical to the pre-wiring path. The matcher compiles patterns
+    # case-insensitive + MULTILINE (``_blob_scan_flags``) so the pre-filter
+    # is a sound superset of the per-line IGNORECASE ``search`` results —
+    # it never excludes a rule the per-line loop would have hit.
+    prefilter = _prefilter_rule_ids(content)
     for rule, compiled_pats in _compiled_rules():
         rule_id = rule.get("id", "RULE_UNKNOWN")
+        # Skip rules the single-pass matcher proved cannot match anywhere
+        # in this file. ``prefilter is None`` → matcher unavailable → run
+        # every rule (legacy behaviour).
+        if prefilter is not None and rule_id not in prefilter:
+            continue
         rule_sev = rule.get("severity", "medium")
         rule_cat = rule.get("category", "rule")
         rule_name = rule.get("name", rule_id)
@@ -2025,15 +2154,29 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
         # verdict "" or "keep" → leave severity alone.
         findings.append(sf)
 
-    # Dedupe by (ruleId, line).
-    seen: set[tuple[str, int]] = set()
-    deduped: list[dict[str, Any]] = []
+    # Dedupe by (ruleId, line), keeping the HIGHEST-severity finding for
+    # each key (audit MINOR #4). A catalog rule and a secondary scanner
+    # can synthesize the SAME ruleId on the same line (e.g. the catalog's
+    # INTENT_DESTRUCTIVE_INTENT rule and ``_analyze_intent``'s synthesized
+    # "INTENT_DESTRUCTIVE_INTENT"). The catalog finding is appended first,
+    # so a naive first-wins dedup would silently discard a
+    # higher-severity secondary finding purely by append order. Compare
+    # by severity rank and keep the strongest; on a tie, first-seen wins
+    # (stable, deterministic). A non-suppressed/visible finding also wins
+    # over a suppressed one at equal rank so suppression never hides a
+    # live duplicate.
+    best_by_key: dict[tuple[str, int], dict[str, Any]] = {}
+    order: list[tuple[str, int]] = []
     for f in findings:
         key = (f.get("ruleId", ""), int(f.get("line", 0)))
-        if key in seen:
+        existing = best_by_key.get(key)
+        if existing is None:
+            best_by_key[key] = f
+            order.append(key)
             continue
-        seen.add(key)
-        deduped.append(f)
+        if _severity_rank(str(f.get("severity", ""))) > _severity_rank(str(existing.get("severity", ""))):
+            best_by_key[key] = f
+    deduped: list[dict[str, Any]] = [best_by_key[k] for k in order]
 
     # Attach the file path for downstream consumers.
     for f in deduped:
@@ -2165,6 +2308,20 @@ def _load_gitignore_predicate(plugin_root: Path) -> Callable[[Path], bool] | Non
                 return True
         except OSError:
             pass
+        # audit NIT #14: `_iter_scannable_files` rglobs FILES only, so the
+        # dir-trailing-slash branch above never fires for a file candidate.
+        # A file under a DIR-ONLY ignore pattern (`/build/`, `node_modules/`)
+        # would then be scanned (overscan) because pathspec's gitwildmatch
+        # may not match a bare dir pattern against the file path itself.
+        # Walk this file's ancestor directories and test each with a
+        # trailing slash so a dir-only pattern excludes its contained files.
+        rel_path = PurePosixPath(rel)
+        for parent in rel_path.parents:
+            parent_str = parent.as_posix()
+            if parent_str in ("", "."):
+                continue
+            if is_path_gitignored(parent_str + "/", patterns):
+                return True
         return False
 
     return predicate
@@ -2333,6 +2490,44 @@ def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
         except Exception:  # pragma: no cover — defensive
             is_bin = False
         if is_bin:
+            # v2.106.0 (audit MINOR #6): binary findings now (a) go through
+            # the result cache like the text path, keyed on the RAW BYTES
+            # with a ``binary:<suffix>`` ext tag so they re-anchor across
+            # directories and skip re-scanning unchanged binaries; and
+            # (b) pass through a thin placeholder-suppression normaliser so
+            # an extracted ``YOUR_API_KEY`` string-table match suppresses
+            # like it would in the text path. There is no doc/code-fence
+            # context in a binary, so ONLY placeholder suppression applies.
+            try:
+                raw = file_path.read_bytes()
+            except OSError:
+                raw = b""
+            bin_content_hash = hashlib.sha256(raw).hexdigest() if raw else ""
+            bin_ext = "binary:" + Path(rel).suffix.lower()
+            bin_cache_on = _cache_enabled()
+
+            if (
+                bin_cache_on
+                and bin_content_hash
+                and not _cache_deep_enabled()
+                and _scan_cache_get is not None
+            ):
+                try:
+                    bin_cached = _scan_cache_get(
+                        bin_content_hash, _CATALOG_HASH, __version__, file_ext=bin_ext
+                    )
+                except Exception:  # pragma: no cover — cache must never break a scan
+                    bin_cached = None
+                if bin_cached is not None:
+                    cached_out: list[dict[str, Any]] = []
+                    for f in bin_cached:
+                        if isinstance(f, dict):
+                            f["file"] = rel
+                            cached_out.append(f)
+                    if cached_out:
+                        return cached_out
+                    return [{"_skillaudit_sentinel": "scanned", "file": rel}]
+
             try:
                 bin_findings = _binary_scan_binary(file_path, _compiled_rules())  # type: ignore[misc]
             except Exception:  # pragma: no cover — defensive
@@ -2340,8 +2535,26 @@ def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
             findings_bin: list[dict[str, Any]] = []
             for f in bin_findings or []:
                 if isinstance(f, dict):
+                    _suppress_binary_placeholder(f)
                     f["file"] = rel
                     findings_bin.append(f)
+
+            if (
+                bin_cache_on
+                and bin_content_hash
+                and _scan_cache_put is not None
+            ):
+                try:
+                    _scan_cache_put(
+                        bin_content_hash,
+                        _CATALOG_HASH,
+                        __version__,
+                        findings_bin,
+                        file_ext=bin_ext,
+                    )
+                except Exception:  # pragma: no cover — cache write is best-effort
+                    pass
+
             if findings_bin:
                 return findings_bin
             return [{"_skillaudit_sentinel": "scanned", "file": rel}]
@@ -2728,6 +2941,30 @@ def _relativise(file_path: str, plugin_root: Path) -> str:
 def _content_hash(content: str) -> str:
     """SHA-256 of content — exposed so tests can pin the hash format."""
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _suppress_binary_placeholder(finding: dict[str, Any]) -> None:
+    """In-place: suppress a binary finding whose extracted match is a
+    placeholder token (``YOUR_API_KEY`` / ``<token>`` / ``xxx`` / …).
+
+    The binary scan path has no documentation/code-fence context, so the
+    text path's full ``_confidence`` machinery doesn't apply — but a
+    string-table match that is clearly a placeholder (extracted from a
+    bundled sample/help blob inside the binary) is still a benign
+    non-threat and SHOULD suppress, exactly as it would in the text path.
+    Everything else stays at the catalog severity (binary matches are NOT
+    demoted — there is no prose context to justify a demote). (audit MINOR #6)
+
+    The match carries the ``BINARY_PREFIX`` provenance tag; we strip it
+    before the placeholder check so the test runs against the real
+    extracted token.
+    """
+    raw_match = str(finding.get("match", ""))
+    if raw_match.startswith(_BINARY_PREFIX):
+        raw_match = raw_match[len(_BINARY_PREFIX) :]
+    if raw_match and _has_placeholder(raw_match):
+        finding["severity"] = "info"
+        finding["suppressed"] = True
 
 
 def _normalize_unicode_for_test(text: str) -> str:

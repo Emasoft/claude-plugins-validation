@@ -313,7 +313,8 @@ class TestSeverityDemotion:
         [
             ("critical", "major"),
             ("major", "minor"),
-            ("minor", "warning"),
+            ("minor", "nit"),  # NIT is a real tier — must NOT be skipped
+            ("nit", "warning"),
             ("warning", "info"),
             ("info", "passed"),
             ("passed", "passed"),  # clamped at lowest
@@ -323,8 +324,20 @@ class TestSeverityDemotion:
         assert demote_severity(level, by=1) == expected
 
     def test_multi_step_demotion(self) -> None:
-        """Demoting by 3 from CRITICAL lands at WARNING."""
-        assert demote_severity("critical", by=3) == "warning"
+        """Demoting by 3 from CRITICAL steps through nit: critical→major→minor→nit."""
+        # critical(0) → major(1) → minor(2) → nit(3). NIT now occupies the
+        # slot the old (buggy) ladder skipped, so by=3 lands on "nit", not
+        # "warning". Two-sided guard: it must NOT skip past nit to warning.
+        assert demote_severity("critical", by=3) == "nit"
+        assert demote_severity("critical", by=4) == "warning"
+
+    def test_nit_is_in_severity_tiers(self) -> None:
+        """Two-sided regression: NIT sits between minor and warning in the ladder."""
+        assert "nit" in SEVERITY_TIERS
+        assert SEVERITY_TIERS.index("minor") < SEVERITY_TIERS.index("nit") < SEVERITY_TIERS.index("warning")
+        # Stepping off minor reaches nit, and stepping off nit reaches warning.
+        assert demote_severity("minor", by=1) == "nit"
+        assert demote_severity("nit", by=1) == "warning"
 
     def test_clamp_at_lowest(self) -> None:
         """Demoting beyond the bottom tier clamps at 'passed'."""

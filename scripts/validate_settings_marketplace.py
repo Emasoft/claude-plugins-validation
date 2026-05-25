@@ -83,6 +83,13 @@ def validate_source_object(
     """
     ctx = _fmt_ctx(marketplace_name, field="source")
 
+    # Snapshot the blocking-finding count at entry so the inline-`settings`
+    # PASSED verdict below reflects only THIS source object's findings, not
+    # findings produced by sibling entries that share the same report (m7 —
+    # the PASSED line used to inspect the whole report, so one bad earlier
+    # entry suppressed a later good entry's "valid" line and vice versa).
+    blocking_at_entry = sum(1 for r in report.results if r.level in ("CRITICAL", "MAJOR"))
+
     # 1. Must have a 'source' key (type discriminator)
     source_type = source_obj.get("source")
     if source_type is None:
@@ -192,6 +199,24 @@ def validate_source_object(
                     file_label,
                 )
 
+    elif source_type == "file":
+        # v2.1.98+ — `file` is a valid settings source type (requires `path`,
+        # an absolute path to a marketplace.json file). It previously had no
+        # per-type shape check, so a present-but-wrong-typed `path` (e.g.
+        # path: 123) slipped past the presence check unvalidated (m8). Mirror
+        # the `directory` branch: assert `path` is a string and advise it is
+        # machine-local.
+        path_val = source_obj.get("path")
+        if path_val is not None:
+            if not isinstance(path_val, str):
+                report.major(f"{ctx}.path: must be a string, got {type(path_val).__name__}", file_label)
+            else:
+                report.warning(
+                    f"{ctx}: file source points to a local marketplace.json path ('{path_val}') — "
+                    "only usable on this machine; do not ship this in a plugin settings snippet",
+                    file_label,
+                )
+
     elif source_type in ("hostPattern", "pathPattern"):
         # v2.22.3 — GAP-5: the `hostPattern`/`pathPattern` values are regex
         # strings (plugin-marketplaces.md:645-669). Previously CPV only
@@ -277,7 +302,8 @@ def validate_source_object(
                                 f"{entry_ctx}.source: must be a string or object, got {type(p_source).__name__}",
                                 file_label,
                             )
-                if not report.has_critical and not report.has_major:
+                blocking_now = sum(1 for r in report.results if r.level in ("CRITICAL", "MAJOR"))
+                if blocking_now == blocking_at_entry:
                     report.passed(f"{ctx}: inline settings source with {len(plugins_val)} plugin(s) valid", file_label)
 
 

@@ -233,6 +233,51 @@ def test_validate_source_object_direct_call_for_npm():
     assert any(r.level == "PASSED" and "npm source valid" in r.message for r in report.results)
 
 
+def test_inline_settings_verdict_is_per_entry_not_global(tmp_path: Path):
+    """m7: a valid inline-`settings` entry must get its PASSED line even after an earlier bad entry.
+
+    The PASSED verdict used to inspect the WHOLE shared report, so a MAJOR
+    produced by an EARLIER entry suppressed this good entry's 'valid' line.
+    """
+    report = ValidationReport()
+    # Earlier entry: a github source with a malformed repo → produces a MAJOR.
+    validate_source_object(
+        {"source": "github", "repo": "no-slash-here"},
+        "bad-earlier",
+        report,
+        "settings.json",
+    )
+    assert report.has_major  # precondition: the report now carries a MAJOR
+
+    # Later entry: a fully-valid inline settings marketplace. Its PASSED line
+    # must still fire despite the pre-existing MAJOR from the earlier entry.
+    valid_inline = {
+        "source": "settings",
+        "name": "inline-mp",
+        "plugins": [{"name": "good-plugin", "source": "owner/repo"}],
+    }
+    validate_source_object(valid_inline, "good-later", report, "settings.json")
+    assert any(
+        r.level == "PASSED" and "good-later" in r.message and "valid" in r.message
+        for r in report.results
+    ), f"per-entry PASSED suppressed by sibling MAJOR: {[(r.level, r.message) for r in report.results]}"
+
+
+def test_inline_settings_own_error_suppresses_its_passed(tmp_path: Path):
+    """m7 (vulnerable side): an inline-`settings` entry with ITS OWN bad plugin must NOT get a PASSED line."""
+    report = ValidationReport()
+    bad_inline = {
+        "source": "settings",
+        "name": "inline-mp",
+        # plugin entry missing required 'source' → MAJOR attributable to THIS entry.
+        "plugins": [{"name": "broken-plugin"}],
+    }
+    validate_source_object(bad_inline, "self-bad", report, "settings.json")
+    assert not any(
+        r.level == "PASSED" and "self-bad" in r.message for r in report.results
+    ), "an inline source with its own error must not be reported valid"
+
+
 def test_extra_known_marketplaces_not_an_object_is_critical():
     """If extraKnownMarketplaces is a list instead of an object, it is reported as CRITICAL."""
     report = ValidationReport()
@@ -267,6 +312,39 @@ def test_file_source_type_missing_path_is_major(tmp_path: Path):
     report = validate_settings_marketplace_file(settings_path)
     assert report.has_major
     assert any("bad-file-mp" in m and "path" in m for m in (r.message for r in report.results if r.level == "MAJOR"))
+
+
+def test_file_source_type_wrong_typed_path_is_major(tmp_path: Path):
+    """m8: a 'file' source with a present-but-wrong-typed `path` (int) must be shape-checked → MAJOR.
+
+    Previously `file` had no per-type sanity branch, so a path:123 slipped past
+    the required-field PRESENCE check entirely unvalidated.
+    """
+    settings_path = _write_settings(
+        tmp_path,
+        {EXTRA_KNOWN_MARKETPLACES_KEY: {"typed-file-mp": {"source": {"source": "file", "path": 123}}}},
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert report.has_major
+    assert any(
+        "typed-file-mp" in m and "path" in m and "must be a string" in m
+        for m in (r.message for r in report.results if r.level == "MAJOR")
+    )
+
+
+def test_file_source_type_string_path_emits_local_warning(tmp_path: Path):
+    """m8: a valid 'file' source with a string `path` advises it is machine-local (WARNING, benign side)."""
+    settings_path = _write_settings(
+        tmp_path,
+        {EXTRA_KNOWN_MARKETPLACES_KEY: {"local-file-mp": {"source": {"source": "file", "path": "/opt/mp.json"}}}},
+    )
+    report = validate_settings_marketplace_file(settings_path)
+    assert not report.has_major
+    assert any(
+        "local-file-mp" in r.message and "only usable on this machine" in r.message
+        for r in report.results
+        if r.level == "WARNING"
+    )
 
 
 def test_host_pattern_source_type_accepted(tmp_path: Path):

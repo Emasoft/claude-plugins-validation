@@ -231,12 +231,15 @@ def _flag_managed_only_nested_keys_local(data: dict[str, Any], report: Validatio
     """
     for path_tuple in sorted(MANAGED_ONLY_NESTED_KEYS):
         cursor: Any = data
+        # Flag on key PRESENCE, not value — a managed-only key present as null
+        # is still placed in the wrong scope (see validate_project_scope).
+        found = True
         for segment in path_tuple:
             if not isinstance(cursor, dict) or segment not in cursor:
-                cursor = None
+                found = False
                 break
             cursor = cursor[segment]
-        if cursor is not None:
+        if found:
             dotted = ".".join(path_tuple)
             report.major(
                 (
@@ -316,6 +319,9 @@ def validate_settings_local_json(settings_path: Path, report: ValidationReport) 
     TOCTOU window between the schema check here and the subtree walk below.
     """
     file_label = ".claude/settings.local.json"
+    # Snapshot so the PASSED gate reflects THIS file only (audit m1) — keeps the
+    # gate order-independent rather than relying on this being the first check.
+    start_idx = len(report.results)
     data = _load_json_or_report(settings_path, MAX_SETTINGS_JSON_BYTES, report, file_label)
     if data is None:
         return None
@@ -332,7 +338,8 @@ def validate_settings_local_json(settings_path: Path, report: ValidationReport) 
     _flag_deprecated_keys(data, report, file_label)
     _flag_missing_schema_local(data, report, file_label)
 
-    if not report.has_critical and not report.has_major and not report.has_minor:
+    own_levels = {r.level for r in report.results[start_idx:]}
+    if not own_levels & {"CRITICAL", "MAJOR", "MINOR"}:
         report.passed(f"{file_label} local-scope rules OK", file_label)
     return data
 
@@ -874,6 +881,12 @@ def _merge_subreport(subreport: ValidationReport, parent: ValidationReport, labe
     WARNING/INFO/PASSED). The sub-validator's "all good" summary lines are
     preserved verbatim — double-summary is cheap and the caller controls
     how they surface.
+
+    Forwards ``phase``/``fixable``/``fix_id`` so auto-fixable findings stay
+    auto-fixable when surfaced through scope validation (TRDD-f4e2d385), and
+    ``category``/``suggestion`` so a sub-validator's sub-category tag and
+    remediation hint survive the merge (audit m9 — closed by widening
+    ``ValidationReport.add`` in cpv_validation_common.py).
     """
     for r in subreport.results:
         parent.add(
@@ -881,6 +894,11 @@ def _merge_subreport(subreport: ValidationReport, parent: ValidationReport, labe
             f"{label_prefix} {r.message}",
             r.file,
             r.line,
+            phase=r.phase,
+            fixable=r.fixable,
+            fix_id=r.fix_id,
+            category=r.category,
+            suggestion=r.suggestion,
         )
 
 
@@ -1049,7 +1067,20 @@ def validate_local_rules_deep(rules_dir: Path, repo_root: Path, project_root: Pa
                 resolved = None
             if resolved is not None and resolved in tracked:
                 continue
-        report.add(r.level, f"[rules] {r.message}", r.file, r.line)
+        # Forward phase/fixable/fix_id so rules findings stay auto-fixable when
+        # surfaced through scope validation (audit m2), plus category/suggestion
+        # now that ValidationReport.add accepts them (audit m9).
+        report.add(
+            r.level,
+            f"[rules] {r.message}",
+            r.file,
+            r.line,
+            phase=r.phase,
+            fixable=r.fixable,
+            fix_id=r.fix_id,
+            category=r.category,
+            suggestion=r.suggestion,
+        )
 
 
 # =============================================================================

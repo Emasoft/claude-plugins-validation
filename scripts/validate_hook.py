@@ -43,6 +43,25 @@ from cpv_validation_common import (
     resolve_tool_command,
     save_report_and_print_summary,
 )
+from cpv_validation_common import (
+    HOOK_EVENTS_COMMAND_ONLY as COMMAND_STRICT_EVENTS,
+)
+from cpv_validation_common import (
+    HOOK_EVENTS_NO_PROMPT_OR_AGENT as COMMAND_ONLY_EVENTS,
+)
+
+# COMMAND_STRICT_EVENTS / COMMAND_ONLY_EVENTS are imported (aliased) from
+# cpv_validation_common, which is the single source of truth for the per-event
+# hook-type matrix. They used to be defined locally here, but that copy drifted
+# from the shared one (it disagreed on whether PermissionDenied / TeammateIdle
+# accept prompt/agent). Importing the shared sets makes drift impossible.
+#   COMMAND_STRICT_EVENTS  (= HOOK_EVENTS_COMMAND_ONLY): tier 3 — SessionStart /
+#       Setup fire before MCP servers connect → only `command` + `mcp_tool`.
+#   COMMAND_ONLY_EVENTS    (= HOOK_EVENTS_NO_PROMPT_OR_AGENT): tier 2 — support
+#       command/http/mcp_tool but NOT prompt/agent (Claude Code rejects those
+#       at load time per the v2.1.142 changelog). Stop/SubagentStop/
+#       PermissionDenied/TeammateIdle/TaskCreated are tier 1 (all five types)
+#       and are intentionally absent from both sets.
 
 # Events that support matchers
 EVENTS_WITH_MATCHERS = {
@@ -65,9 +84,12 @@ EVENTS_WITH_MATCHERS = {
     "ElicitationResult",  # matcher: MCP server name (v2.1.76)
     "FileChanged",  # matcher: filename/basename pattern (v2.1.83)
     "PermissionDenied",  # matcher: tool_name (v2.1.89) — fires when auto mode classifier denies
+    "UserPromptExpansion",  # matcher: command_name (skill/command name) — fires when a prompt-type slash command expands
 }
 
-# Events that do NOT support matchers (matcher field is ignored)
+# Events that do NOT support matchers (matcher field is ignored). Per the hooks
+# spec: these "don't support matchers and always fire on every occurrence. If
+# you add a matcher field to these events, it is silently ignored."
 EVENTS_WITHOUT_MATCHERS = {
     "UserPromptSubmit",
     "Stop",
@@ -77,43 +99,19 @@ EVENTS_WITHOUT_MATCHERS = {
     "WorktreeCreate",
     "WorktreeRemove",
     "CwdChanged",  # v2.1.83
+    "PostToolBatch",  # v2.1.121 era — fires after a parallel tool batch resolves; matcher ignored
 }
 
 # Valid hook types (5 as of v2.1.118: command, http, mcp_tool, prompt, agent).
 VALID_HOOK_TYPES = {"command", "http", "mcp_tool", "prompt", "agent"}
 
-# Events that only support "command", "http", and "mcp_tool" hooks
-# (no prompt / agent — lifecycle/notification events that don't support
-# prompt-synthesis or sub-agent dispatch).
-COMMAND_ONLY_EVENTS = {
-    "ConfigChange",
-    "InstructionsLoaded",
-    "Notification",
-    "PermissionDenied",
-    "PreCompact",
-    "PostCompact",  # v2.1.76
-    "SessionEnd",
-    "SessionStart",
-    "SubagentStart",
-    "TeammateIdle",
-    "WorktreeCreate",
-    "WorktreeRemove",
-    "Elicitation",  # v2.1.76
-    "ElicitationResult",  # v2.1.76
-    "CwdChanged",  # v2.1.83
-    "FileChanged",  # v2.1.83
-    "TaskCreated",  # v2.1.84
-    "StopFailure",  # v2.1.78
-}
-
-# Events that ONLY support `command` and `mcp_tool` hooks — strict subset.
-# Per hooks.md (v2.1.121), SessionStart and Setup fire BEFORE MCP servers
-# connect, so they reject `http`, `prompt`, and `agent` types. The `mcp_tool`
-# type is allowed but will report "not connected" on first run.
-COMMAND_STRICT_EVENTS = {
-    "SessionStart",
-    "Setup",
-}
+# NOTE: COMMAND_ONLY_EVENTS (tier 2 — no prompt/agent) and COMMAND_STRICT_EVENTS
+# (tier 3 — command/mcp_tool only) are imported at the top of this module from
+# cpv_validation_common, the single source of truth for the per-event hook-type
+# matrix. SessionStart lives ONLY in COMMAND_STRICT_EVENTS (the leading `if` in
+# validate_single_hook always wins over the COMMAND_ONLY `elif`), and
+# Stop/SubagentStop/PermissionDenied/TeammateIdle/TaskCreated are tier 1 (all
+# five types) so they are absent from both sets.
 
 # Common tool names for matcher validation hints
 COMMON_TOOL_NAMES = {
@@ -681,8 +679,12 @@ def validate_event_name(event_name: str, report: ValidationReport) -> bool:
         return False
     # Legacy/extended events — still accepted but nudge users toward the current spec.
     if event_name == "Setup":
+        # Single authoritative version string for the Setup-deprecation claim,
+        # kept in sync with validate_hook_output.py and cpv_validation_common.py
+        # (all say v2.1.109). Setup is retained in VALID_HOOK_EVENTS for gating
+        # only; it is not listed in the current hooks spec.
         report.warning(
-            "Hook event 'Setup' is not in the current official spec (as of Claude Code v2.1.98). "
+            "Hook event 'Setup' is not in the current official spec (as of Claude Code v2.1.109). "
             "It may be legacy or deprecated. Verify intent; remove if unused."
         )
     return True
@@ -710,7 +712,18 @@ def _check_matcher_values(
 
 def validate_matcher(matcher: Any, event_name: str, report: ValidationReport) -> bool:
     """Validate a matcher pattern."""
-    # Events without matchers - warn if matcher provided
+    # Type check runs FIRST, before the no-matcher early-return below, so a
+    # malformed-type matcher (dict/int/list) is reported uniformly as MAJOR
+    # regardless of whether the event actually consumes the matcher. A
+    # non-string matcher is always a JSON-shape authoring error worth blocking,
+    # even on an event where the matcher is otherwise ignored at runtime.
+    # `None`/`""`/`"*"` are the legitimate "match all" / absent sentinels and
+    # are exempt.
+    if matcher is not None and matcher != "" and matcher != "*" and not isinstance(matcher, str):
+        report.major(f"Matcher must be a string, got {type(matcher).__name__}")
+        return False
+
+    # Events without matchers - warn if a (string) matcher is provided.
     if event_name in EVENTS_WITHOUT_MATCHERS:
         if matcher is not None and matcher != "":
             report.info(f"Matcher '{matcher}' provided for {event_name} (matchers are ignored for this event)")
@@ -719,10 +732,6 @@ def validate_matcher(matcher: Any, event_name: str, report: ValidationReport) ->
     # Matcher is optional - empty or missing means "match all"
     if matcher is None or matcher == "" or matcher == "*":
         return True
-
-    if not isinstance(matcher, str):
-        report.major(f"Matcher must be a string, got {type(matcher).__name__}")
-        return False
 
     # Validate regex syntax
     try:
@@ -1757,7 +1766,12 @@ def lint_bash_script(script_path: Path, report: ValidationReport) -> None:
 
     except subprocess.TimeoutExpired:
         report.minor(f"shellcheck timeout for {script_path.name}")
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
+        # Only swallow subprocess/OS flakiness (spawn failure, weird exit,
+        # broken pipe) as a soft MINOR. A programming error in CPV itself
+        # (TypeError/AttributeError/etc.) is NOT caught here — it propagates so
+        # the bug surfaces loudly (fail-fast), instead of masquerading as a
+        # benign "linter unavailable" skip.
         report.minor(f"shellcheck error: {e}")
 
 
@@ -1796,7 +1810,9 @@ def lint_python_script(script_path: Path, report: ValidationReport) -> None:
 
         except subprocess.TimeoutExpired:
             report.minor(f"ruff timeout for {script_path.name}")
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
+            # Subprocess/OS flakiness only — a CPV-internal bug propagates
+            # (fail-fast) rather than being downgraded to a soft MINOR.
             report.minor(f"ruff error: {e}")
     else:
         report.minor(f"ruff not available locally or via uvx, skipping lint for {script_path.name}")
@@ -1845,7 +1861,9 @@ def lint_python_script(script_path: Path, report: ValidationReport) -> None:
 
         except subprocess.TimeoutExpired:
             report.minor(f"mypy timeout for {script_path.name}")
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
+            # Subprocess/OS flakiness only — a CPV-internal bug propagates
+            # (fail-fast) rather than being downgraded to a soft MINOR.
             report.minor(f"mypy error: {e}")
     else:
         report.minor(f"mypy not available locally or via uvx, skipping type check for {script_path.name}")
@@ -1897,7 +1915,9 @@ def lint_js_script(script_path: Path, report: ValidationReport) -> None:
 
     except subprocess.TimeoutExpired:
         report.minor(f"eslint timeout for {script_path.name}")
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
+        # Subprocess/OS flakiness only — a CPV-internal bug propagates
+        # (fail-fast) rather than being downgraded to a soft MINOR.
         report.minor(f"eslint error: {e}")
 
 
@@ -2519,7 +2539,11 @@ def validate_prompt_hook(
     if "$ARGUMENTS" not in prompt:
         report.info("Prompt doesn't contain $ARGUMENTS placeholder (input JSON will be appended automatically)")
 
-    report.passed(f"Prompt: {prompt[:60]}...")
+    # Snapshot blocking-finding count so the per-hook PASSED can be suppressed
+    # if the optional model/timeout checks below add a MAJOR/MINOR for this hook
+    # (a green "Prompt: ..." PASSED must not coexist with a finding for the same
+    # hook).
+    blocking_before = sum(1 for res in report.results if res.level in {"MAJOR", "MINOR"})
 
     # Validate optional model field
     if "model" in hook:
@@ -2553,6 +2577,13 @@ def validate_prompt_hook(
                 "(hooks.md L2147). Confirm this is intentional."
             )
 
+    # Emit the per-hook PASSED only AFTER all sub-checks, and only if the
+    # optional model/timeout validation above did not add a MAJOR/MINOR for this
+    # hook — otherwise a contradictory green "Prompt: ..." PASSED line would sit
+    # alongside the finding in --verbose output.
+    blocking_after = sum(1 for res in report.results if res.level in {"MAJOR", "MINOR"})
+    if blocking_after == blocking_before:
+        report.passed(f"Prompt: {prompt[:60]}...")
     return True
 
 
@@ -2701,41 +2732,66 @@ def validate_single_hook(
         report.critical(f"Invalid hook type: '{hook_type}'. Valid types: {sorted(VALID_HOOK_TYPES)}")
         return False
 
-    # Validate hook type is allowed for this event
+    # Validate hook type is allowed for this event.
+    #
+    # The hooks spec (https://code.claude.com/docs/en/hooks) restricts hook
+    # TYPES per event in EXACTLY ONE place: SessionStart and Setup fire before
+    # MCP servers connect, so they accept ONLY `command` and `mcp_tool`. No
+    # other event documents a per-type restriction — prompt/agent hooks are
+    # implicitly permitted on every other event. We therefore BLOCK (CRITICAL)
+    # only the spec-documented SessionStart/Setup case; for the lifecycle /
+    # notification events in COMMAND_ONLY_EVENTS we emit a non-blocking WARNING
+    # (an advisory that prompt/agent there is unusual / likely less effective),
+    # because rejecting a spec-permitted shape would be a false-positive INVALID
+    # verdict. Verified against the authoritative spec 2026-05-25.
     if event_name in COMMAND_STRICT_EVENTS and hook_type not in {"command", "mcp_tool"}:
-        # hooks.md (v2.1.121) — SessionStart and Setup fire BEFORE MCP servers
-        # connect, so they only accept `command` and `mcp_tool` hook types.
-        # `mcp_tool` will report "not connected" on first run; this is documented.
+        # Tier 3 — SessionStart and Setup fire BEFORE MCP servers connect, so they
+        # only accept `command` and `mcp_tool` hook types. `mcp_tool` will report
+        # "not connected" on first run; this is documented.
         hook_path_str = report.hook_path
         report.critical(
             f"Event '{event_name}' only supports 'command' and 'mcp_tool' hooks, not '{hook_type}'. "
-            "Per hooks.md, http/prompt/agent hooks fire after MCP servers connect and so are not supported here.",
+            "Per the hooks spec, http/prompt/agent hooks fire after MCP servers connect and so are not supported here.",
             hook_path_str,
         )
     elif hook_type in {"prompt", "agent"} and event_name in COMMAND_ONLY_EVENTS:
+        # Tier 2 — a SPEC VIOLATION, not a nudge. hooks.md "Prompt-based hooks"
+        # lists these events as supporting command/http/mcp_tool but NOT
+        # prompt/agent, and the v2.1.142 changelog confirms Claude Code rejects
+        # the config at LOAD time ("use a command-type hook instead"). A config
+        # the runtime refuses to load is broken → CRITICAL (this restores the
+        # behavior pinned by tests/test_v2_1_142_changelog.py; an earlier change
+        # wrongly downgraded it to a non-blocking WARNING on the false premise
+        # that only SessionStart/Setup restrict types).
         hook_path_str = report.hook_path
         report.critical(
             f"Event '{event_name}' only supports 'command', 'http', and 'mcp_tool' hooks, not '{hook_type}'. "
-            "Prompt and agent hooks are not supported for this event.",
+            "Claude Code rejects a prompt/agent hook on this event at load time (v2.1.142): "
+            "use a 'command'-type hook instead.",
             hook_path_str,
         )
 
-    # Validate async field (only valid on command/http hooks)
-    if hook.get("async") is True and hook_type not in {"command", "http"}:
-        hook_path_str = report.hook_path
-        report.major(
-            f"'async: true' is only supported on 'command' or 'http' hooks, not '{hook_type}'. Prompt and agent hooks cannot run asynchronously.",
-            hook_path_str,
-        )
-
-    # asyncRewake implies async per hooks.md L305. Flag contradictions.
+    # Validate async / asyncRewake — both are COMMAND-hook-only fields per the
+    # hooks spec (they appear only in the "Command hook fields" table; http,
+    # mcp_tool, prompt and agent hooks do NOT support them). The single
+    # type-validity gate for `async` lives in the `"async" in hook` block below
+    # (deduplicated — there used to be a second, contradictory check here that
+    # wrongly allowed `async` on http). `asyncRewake` (which implies async) is
+    # gated here.
     if "asyncRewake" in hook:
         rewake_val = hook.get("asyncRewake")
-        if rewake_val is True and hook.get("async") is False:
-            hook_path_str = report.hook_path
+        hook_path_str = report.hook_path
+        if hook_type != "command":
+            report.major(
+                f"'asyncRewake' is only supported on 'command' hooks, not '{hook_type}' hooks. "
+                "Per the hooks spec, async/asyncRewake are command-hook fields only.",
+                hook_path_str,
+            )
+        elif rewake_val is True and hook.get("async") is False:
+            # asyncRewake implies async — `async: false` contradicts it.
             report.minor(
-                "'asyncRewake: true' implies 'async: true' (hooks.md L305) — "
-                "'async: false' contradicts it and the hook will still run in the background.",
+                "'asyncRewake: true' implies 'async: true' — 'async: false' contradicts it "
+                "and the hook will still run in the background.",
                 hook_path_str,
             )
 
@@ -2813,13 +2869,22 @@ def validate_single_hook(
                 "PostToolUse event."
             )
 
-    # Validate 'async' field — only valid on command hooks
+    # Validate 'async' field — COMMAND-hook-only per the hooks spec (it appears
+    # only in the "Command hook fields" table; http/mcp_tool/prompt/agent hooks
+    # do NOT support it). This is the SINGLE source of truth for async type
+    # validity — the redundant, contradictory check that previously also lived
+    # in the event-gating region above (and wrongly allowed `async` on http) was
+    # removed. A non-command hook declaring `async` is an invalid shape, so it
+    # blocks (MAJOR), consistent with the asyncRewake gate above.
     if "async" in hook:
         async_val = hook["async"]
         if not isinstance(async_val, bool):
             report.major(f"'async' must be a boolean, got {type(async_val).__name__}")
         elif hook_type != "command":
-            report.minor(f"'async' field is only valid on command hooks, not '{hook_type}' hooks")
+            report.major(
+                f"'async' is only supported on 'command' hooks, not '{hook_type}' hooks. "
+                "Per the hooks spec, async/asyncRewake are command-hook fields only."
+            )
 
     # Validate 'model' field — only valid on prompt/agent hooks
     if "model" in hook and hook_type not in ("prompt", "agent"):
