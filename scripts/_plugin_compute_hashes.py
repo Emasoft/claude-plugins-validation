@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -236,10 +237,23 @@ def compute_manifest(plugin_root: Path) -> dict[str, object]:
 
 
 def _atomic_write(out_path: Path, payload: str) -> None:
-    """Write payload to out_path atomically (tmp + rename, same dir)."""
+    """Write payload to out_path atomically and durably (tmp + fsync + rename).
+
+    fsync the tmp file's contents to disk BEFORE the rename so a power loss
+    between the buffered write and the rename cannot leave an empty/partial
+    file renamed into place. The manifest is written right before a
+    commit/push gate, so durability matters — this mirrors the same
+    flush()+os.fsync()+os.replace() guarantee that cpv_scanner_cache.put()
+    already provides for the result cache.
+    """
     tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
-    tmp_path.write_text(payload, encoding="utf-8")
-    tmp_path.replace(out_path)
+    # Use a real fd so flush()+fsync() push the bytes to the platter before
+    # the atomic rename. os.replace() is atomic on POSIX and NTFS alike.
+    with open(tmp_path, "w", encoding="utf-8") as fh:
+        fh.write(payload)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp_path, out_path)
 
 
 def write_manifest(plugin_root: Path, manifest: dict[str, object]) -> tuple[Path, Path]:

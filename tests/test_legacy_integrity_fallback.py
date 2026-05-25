@@ -28,7 +28,7 @@ def _fresh_import(modname: str):
 
 def test_cpv_integrity_shim_emits_deprecation_warning():
     """Importing `cpv_integrity` MUST print a DeprecationWarning that names
-    the new module and the removal release (v2.53.0)."""
+    the new module and references the (deferred) v2.53.0 removal target."""
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always")
         _fresh_import("cpv_integrity")
