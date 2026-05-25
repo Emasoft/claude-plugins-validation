@@ -181,9 +181,18 @@ def _walk_with_lines(
     """
     out: list[tuple[tuple[str, ...], int, int]] = []
     if isinstance(obj, str):
-        # Find the encoded form in source. Pre-compute once per value.
-        encoded = json.dumps(obj)
-        idx = source.find(encoded)
+        # Find the encoded form in source. A JSON string can be written with raw
+        # non-ASCII chars (``"é"``) OR ``\uXXXX`` escapes — try the raw form
+        # first (the common case), then the ASCII-escaped form. Without this a
+        # value containing non-ASCII lost its line/path and the covering
+        # DANGEROUS-key context (hooks[].command) was dropped. (audit MINOR #13)
+        idx = -1
+        encoded = ""
+        for candidate in (json.dumps(obj, ensure_ascii=False), json.dumps(obj)):
+            idx = source.find(candidate)
+            if idx >= 0:
+                encoded = candidate
+                break
         if idx >= 0:
             start_line = source.count("\n", 0, idx) + 1
             end_line = source.count("\n", 0, idx + len(encoded)) + 1
