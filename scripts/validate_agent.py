@@ -31,10 +31,10 @@ from typing import Any
 import yaml
 from cpv_parallel_runner import ScanResult, parallel_scan
 from cpv_validation_common import (
+    AGENT_DESCRIPTION_TOKEN_LIMIT,
     BUILTIN_AGENT_TYPES,
     COLORS,
     MAX_BODY_WORDS,
-    MAX_DESCRIPTION_LENGTH,
     MIN_BODY_CHARS,
     SECRET_PATTERNS,
     USER_PATH_PATTERNS,
@@ -44,6 +44,7 @@ from cpv_validation_common import (
     VALID_PERMISSION_MODES,
     VALID_TOOLS,
     ValidationReport,
+    check_token_limit,
     check_utf8_encoding,
     is_plugin_shipped_agent,
     is_valid_model,
@@ -94,12 +95,16 @@ PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS: frozenset[str] = frozenset(
         "name",
         "description",
         "tools",
+        "disallowedTools",
         "model",
         "effort",
+        "skills",
         "system-prompt",
         "context",
         "memory",
         "isolation",
+        "maxTurns",
+        "background",
         "initialPrompt",
         "agent",
     }
@@ -269,11 +274,14 @@ def validate_description_field(frontmatter: dict[str, Any], filename: str, repor
             filename,
         )
 
-    if len(desc) > MAX_DESCRIPTION_LENGTH:
-        report.major(
-            f"Description exceeds {MAX_DESCRIPTION_LENGTH} chars ({len(desc)} chars)",
-            filename,
-        )
+    check_token_limit(
+        desc,
+        AGENT_DESCRIPTION_TOKEN_LIMIT,
+        report,
+        filename,
+        "Agent 'description'",
+        "Tighten it to a focused trigger sentence — agents have no separate when_to_use.",
+    )
 
     # Angle brackets check (breaks XML in prompts)
     if "<" in desc or ">" in desc:
@@ -1103,11 +1111,12 @@ def validate_plugin_shipped_allowed_fields(
 ) -> None:
     """GAP-79 (v2.22.3): Enforce the narrower plugin-shipped agent field list.
 
-    Per plugins-reference.md:70, plugin-shipped agents accept exactly these 11
-    fields: ``name, description, tools, model, effort, system-prompt, context,
-    memory, isolation, initialPrompt, agent``. Fields OUTSIDE this set (but
-    inside the broader KNOWN_FRONTMATTER_FIELDS superset accepted for
-    project/user agents) emit a MINOR so authors notice the drift.
+    Per plugins-reference.md:70, plugin-shipped agents accept exactly these 15
+    fields: ``name, description, tools, disallowedTools, model, effort, skills,
+    system-prompt, context, memory, isolation, maxTurns, background,
+    initialPrompt, agent``. Fields OUTSIDE this set (but inside the broader
+    KNOWN_FRONTMATTER_FIELDS superset accepted for project/user agents) emit a
+    MINOR so authors notice the drift.
 
     ``hooks``/``mcpServers``/``permissionMode`` are NOT double-reported here:
     those already trigger MAJORs via PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS

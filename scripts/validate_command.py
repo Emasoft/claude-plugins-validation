@@ -3,7 +3,7 @@
 Claude Plugins Validation - Command Validator
 
 Validates individual command markdown files according to Claude Code command spec.
-Based on: https://code.claude.com/docs/en/custom-slash-commands.md
+Based on: https://code.claude.com/docs/en/skills.md
 
 Usage:
     uv run python scripts/validate_command.py path/to/command.md
@@ -32,13 +32,16 @@ import yaml
 from cpv_parallel_runner import ScanResult, parallel_scan
 from cpv_validation_common import (
     COLORS,
+    DESCRIPTION_TOKEN_LIMIT,
     EXIT_CRITICAL,
     EXIT_MAJOR,
     EXIT_OK,
     SECRET_PATTERNS,
     USER_PATH_PATTERNS,
     VALID_TOOLS,
+    WHEN_TO_USE_TOKEN_LIMIT,
     ValidationReport,
+    check_token_limit,
     check_utf8_encoding,
     is_valid_model,
     save_report_and_print_summary,
@@ -49,19 +52,28 @@ from cpv_validation_common import (
 # Command-Specific Constants
 # =============================================================================
 
-# Maximum description length for commands (same as skills — truncated at 250 chars in listing)
-MAX_COMMAND_DESCRIPTION_LENGTH = 250
-
 # Minimum body content length (characters)
 MIN_COMMAND_BODY_CHARS = 100
 
-# Known frontmatter fields per official docs (command-specific)
+# Known frontmatter fields per official docs (commands share the skill field set)
 KNOWN_FRONTMATTER_FIELDS = {
+    # Core command/skill fields
     "name",
     "description",
     "allowed-tools",
     "model",
     "argument-hint",
+    # Skill fields now accepted for commands (commands-as-skills per skills.md)
+    "when_to_use",
+    "arguments",
+    "disable-model-invocation",
+    "user-invocable",
+    "effort",
+    "context",
+    "agent",
+    "shell",
+    "hooks",
+    "paths",
 }
 
 # Pattern for allowed-tools with optional pattern: ToolName or ToolName(pattern*)
@@ -207,7 +219,7 @@ def validate_name_field(frontmatter: dict[str, Any], filename: str, report: Comm
 
 
 def validate_description_field(frontmatter: dict[str, Any], filename: str, report: CommandValidationReport) -> None:
-    """Validate the 'description' frontmatter field (REQUIRED, max 60 chars)."""
+    """Validate the 'description' frontmatter field (token-based: description <=200 tok, when_to_use <=100 tok)."""
     if "description" not in frontmatter:
         report.major("Missing 'description' field (required)", filename)
         return
@@ -222,12 +234,15 @@ def validate_description_field(frontmatter: dict[str, Any], filename: str, repor
         report.major("'description' cannot be empty", filename)
         return
 
-    # Length check - COMMANDS have shorter max (60 chars vs 1024 for agents)
-    if len(desc) > MAX_COMMAND_DESCRIPTION_LENGTH:
-        report.major(
-            f"Description exceeds {MAX_COMMAND_DESCRIPTION_LENGTH} chars ({len(desc)} chars). Command descriptions must be brief for slash command menu.",
-            filename,
-        )
+    # Token-based length check (shared with skills)
+    check_token_limit(
+        desc,
+        DESCRIPTION_TOKEN_LIMIT,
+        report,
+        filename,
+        "Command 'description'",
+        "Tighten to a focused sentence — move detail into the command body.",
+    )
 
     # Angle brackets check (breaks XML in prompts)
     if "<" in desc or ">" in desc:
@@ -244,6 +259,18 @@ def validate_description_field(frontmatter: dict[str, Any], filename: str, repor
         )
 
     report.passed("'description' field valid", filename)
+
+    # Validate when_to_use if present
+    wtu = frontmatter.get("when_to_use") or ""
+    if isinstance(wtu, str) and wtu.strip():
+        check_token_limit(
+            wtu,
+            WHEN_TO_USE_TOKEN_LIMIT,
+            report,
+            filename,
+            "Command 'when_to_use'",
+            "Tighten it.",
+        )
 
 
 def validate_allowed_tools_field(frontmatter: dict[str, Any], filename: str, report: CommandValidationReport) -> None:
