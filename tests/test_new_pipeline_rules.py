@@ -521,12 +521,17 @@ class TestReadmeBadgeMarkers:
         msgs = [r.message for r in report.results if r.level == "WARNING"]
         assert any("badge" in m.lower() for m in msgs)
 
-    def test_no_readme_reports_minor(self, tmp_path):
-        """Missing README.md reports MINOR and no badge check."""
+    def test_no_readme_reports_warning(self, tmp_path):
+        """Missing README.md reports WARNING (advisory) and no badge check.
+
+        TRDD-021250b5: a missing README is a documentation-quality matter, not
+        runtime breakage or Anthropic-invalidity, so validate_readme (delegating
+        to the comprehensive doc validator) reports it as WARNING — non-blocking.
+        """
         plugin = _make_plugin(tmp_path)
         report = ValidationReport()
         validate_readme(plugin, report)
-        msgs = [r.message for r in report.results if r.level == "MINOR"]
+        msgs = [r.message for r in report.results if r.level == "WARNING"]
         assert any("readme" in m.lower() for m in msgs)
 
 

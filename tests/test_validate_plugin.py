@@ -36,6 +36,7 @@ from validate_plugin import (  # noqa: E402
     validate_cross_platform,
     validate_gitignore,
     validate_license,
+    validate_lsp,
     validate_manifest,
     validate_readme,
     validate_skills,
@@ -631,13 +632,18 @@ class TestValidateCommands:
         assert any("Valid YAML frontmatter" in m for m in passed_msgs)
 
     def test_command_file_no_frontmatter(self, tmp_path):
-        """validate_command_file reports CRITICAL when frontmatter is missing (lines 388-394)."""
+        """validate_command_file reports CRITICAL when frontmatter is missing.
+
+        TRDD-021250b5 Phase 3: validate_command_file now delegates to the
+        comprehensive command validator, which phrases the finding as
+        "Missing YAML frontmatter markers ...".
+        """
         cmd = tmp_path / "bad.md"
         cmd.write_text("Just plain text, no frontmatter at all.")
         report = ValidationReport()
         validate_command_file(cmd, report)
         critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
-        assert any("No frontmatter" in m for m in critical_msgs)
+        assert any("frontmatter" in m.lower() for m in critical_msgs)
 
     def test_command_file_name_mismatch(self, tmp_path):
         """validate_command_file reports MAJOR when name does not match filename (lines 418-422)."""
@@ -674,33 +680,52 @@ class TestValidateAgents:
         assert any("1 agent file(s)" in m for m in info_msgs)
 
     def test_agent_file_no_frontmatter(self, tmp_path):
-        """validate_agent_file reports CRITICAL with no frontmatter (lines 450-456)."""
+        """validate_agent_file reports CRITICAL with no frontmatter.
+
+        TRDD-021250b5 Phase 3: validate_agent_file now delegates to the
+        comprehensive agent validator, which phrases the finding as
+        "No YAML frontmatter found (required)".
+        """
         agent = tmp_path / "bad-agent.md"
         agent.write_text("No frontmatter here")
         report = ValidationReport()
         validate_agent_file(agent, report)
         critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
-        assert any("No frontmatter in agent file" in m for m in critical_msgs)
+        assert any("frontmatter" in m.lower() for m in critical_msgs)
 
     def test_agent_file_empty_frontmatter(self, tmp_path):
-        """validate_agent_file reports CRITICAL with empty frontmatter (lines 469-470)."""
+        """validate_agent_file flags empty frontmatter as INVALID via missing required fields.
+
+        TRDD-021250b5 Phase 3: the comprehensive agent validator parses empty
+        frontmatter as ``{}`` and reports the missing required field
+        ("Missing 'description'", MAJOR) — which still makes the agent INVALID —
+        rather than a separate "Empty frontmatter" CRITICAL.
+        """
         agent = tmp_path / "empty-fm.md"
         agent.write_text("---\n---\n\n# Empty\n")
         report = ValidationReport()
         validate_agent_file(agent, report)
-        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
-        assert any("Empty frontmatter" in m for m in critical_msgs)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("Missing 'description'" in m for m in major_msgs)
 
     def test_agent_file_missing_name_and_description(self, tmp_path):
-        """validate_agent_file reports CRITICAL and MAJOR for missing fields (lines 476-480)."""
+        """validate_agent_file: missing description is MAJOR; missing name is lenient.
+
+        TRDD-021250b5 Phase 3: the comprehensive agent validator treats the agent
+        ``name`` as OPTIONAL — it is derived from the filename when absent (INFO
+        "will use filename"), per Claude Code's spec. So a missing ``name`` is NOT
+        a blocking finding; only the missing ``description`` is MAJOR.
+        """
         agent = tmp_path / "partial.md"
         agent.write_text("---\nmodel: sonnet\n---\n\n# Partial\n")
         report = ValidationReport()
         validate_agent_file(agent, report)
-        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("Missing 'name'" in m for m in critical_msgs)
+        info_msgs = [r.message for r in report.results if r.level == "INFO"]
         assert any("Missing 'description'" in m for m in major_msgs)
+        # missing name is advisory (derived from filename), not blocking
+        assert any("name" in m.lower() and "filename" in m.lower() for m in info_msgs)
+        assert not any("Missing 'name'" in m for m in major_msgs)
 
 
 class TestValidateGitignore:
@@ -858,24 +883,30 @@ class TestPrintResults:
 class TestValidateReadmeAndLicense:
     """Tests for validate_readme and validate_license."""
 
-    def test_readme_missing_reports_minor(self, tmp_path):
-        """validate_readme reports MINOR when README.md is missing (lines 912-918)."""
+    def test_readme_missing_reports_warning(self, tmp_path):
+        """validate_readme reports WARNING (advisory) when README.md is missing.
+
+        TRDD-021250b5: validate_readme delegates to the comprehensive doc
+        validator. A missing README is a documentation-quality matter, not
+        runtime breakage or Anthropic-invalidity, so it is WARNING (non-blocking)
+        — a README-less plugin is VALID with a warning.
+        """
         plugin_dir = tmp_path / "no-readme"
         plugin_dir.mkdir()
         report = ValidationReport()
         validate_readme(plugin_dir, report)
-        minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
-        assert any("README.md not found" in m for m in minor_msgs)
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("README.md is missing" in m for m in warning_msgs)
 
     def test_readme_exists_reports_passed(self, tmp_path):
-        """validate_readme reports PASSED when README.md exists (line 916)."""
+        """validate_readme reports PASSED when README.md exists."""
         plugin_dir = tmp_path / "has-readme"
         plugin_dir.mkdir()
         (plugin_dir / "README.md").write_text("# My Plugin\n")
         report = ValidationReport()
         validate_readme(plugin_dir, report)
         passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
-        assert any("README.md found" in m for m in passed_msgs)
+        assert any("README.md exists" in m for m in passed_msgs)
 
     # ------------------------------------------------------------------
     # v2.26.0: badge-markers warning only fires when badges are present
@@ -2109,7 +2140,15 @@ class TestV223Gap10MonitorSkillCrossRef:
 
 
 class TestV223LspInlineTypeChecks:
-    """GAP-65/66/67/68: inline lspServers optional fields get MINOR on wrong type."""
+    """lspServers optional fields get MAJOR on wrong type.
+
+    TRDD-021250b5 Phase 3: the inline lspServers type-checks were removed from
+    validate_manifest and the whole-plugin path now delegates to the
+    comprehensive LSP validator via ``validate_lsp`` (single source of truth).
+    The comprehensive validator reads ``plugin.json:lspServers`` and reports a
+    wrong-type field at MAJOR (a runtime-breaking schema violation), with a
+    ``Server <name> '<field>' ...`` message — stronger than the old inline MINOR.
+    """
 
     def _lsp_manifest(self, **config_overrides):
         """Build a plugin manifest with one inline LSP entry applying the overrides."""
@@ -2125,85 +2164,85 @@ class TestV223LspInlineTypeChecks:
             "lspServers": {"pyright": base_config},
         }
 
-    def test_lsp_args_non_array_emits_minor(self, tmp_path):
-        """lspServers.<name>.args not a list → MINOR (plugins-reference.md:243)."""
+    def test_lsp_args_non_array_emits_major(self, tmp_path):
+        """lspServers.<name>.args not a list → MAJOR (plugins-reference.md:243)."""
         manifest = self._lsp_manifest(args="--foo")  # should be a list
         plugin_dir = _write_plugin(tmp_path, "lsp-args-bad", manifest)
         report = ValidationReport()
-        validate_manifest(plugin_dir, report)
-        minors = [r.message for r in report.results if r.level == "MINOR"]
-        assert any("'args' must be an array" in m for m in minors), (
-            f"Expected MINOR for wrong args type; got MINORs: {minors}"
+        validate_lsp(plugin_dir, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("'args' must be an array" in m for m in majors), (
+            f"Expected MAJOR for wrong args type; got MAJORs: {majors}"
         )
 
-    def test_lsp_env_non_object_emits_minor(self, tmp_path):
-        """lspServers.<name>.env not a dict → MINOR (plugins-reference.md:245)."""
+    def test_lsp_env_non_object_emits_major(self, tmp_path):
+        """lspServers.<name>.env not a dict → MAJOR (plugins-reference.md:245)."""
         manifest = self._lsp_manifest(env=["KEY=VAL"])  # should be an object
         plugin_dir = _write_plugin(tmp_path, "lsp-env-bad", manifest)
         report = ValidationReport()
-        validate_manifest(plugin_dir, report)
-        minors = [r.message for r in report.results if r.level == "MINOR"]
-        assert any("'env' must be an object" in m for m in minors), (
-            f"Expected MINOR for wrong env type; got MINORs: {minors}"
+        validate_lsp(plugin_dir, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("'env' must be an object" in m for m in majors), (
+            f"Expected MAJOR for wrong env type; got MAJORs: {majors}"
         )
 
-    def test_lsp_env_non_string_value_emits_minor(self, tmp_path):
-        """lspServers.<name>.env[key] non-string value → MINOR."""
+    def test_lsp_env_non_string_value_emits_major(self, tmp_path):
+        """lspServers.<name>.env[key] non-string value → MAJOR."""
         manifest = self._lsp_manifest(env={"PORT": 8080})  # value must be string
         plugin_dir = _write_plugin(tmp_path, "lsp-env-nonstr", manifest)
         report = ValidationReport()
-        validate_manifest(plugin_dir, report)
-        minors = [r.message for r in report.results if r.level == "MINOR"]
-        assert any("env['PORT']" in m and "must be a string" in m for m in minors), (
-            f"Expected MINOR for non-string env value; got MINORs: {minors}"
+        validate_lsp(plugin_dir, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("env[PORT]" in m and "must be a string" in m for m in majors), (
+            f"Expected MAJOR for non-string env value; got MAJORs: {majors}"
         )
 
-    def test_lsp_settings_non_object_emits_minor(self, tmp_path):
-        """lspServers.<name>.settings not a dict → MINOR (plugins-reference.md:241-252)."""
+    def test_lsp_settings_non_object_emits_major(self, tmp_path):
+        """lspServers.<name>.settings not a dict → MAJOR (plugins-reference.md:241-252)."""
         manifest = self._lsp_manifest(settings="strict")  # should be an object
         plugin_dir = _write_plugin(tmp_path, "lsp-settings-bad", manifest)
         report = ValidationReport()
-        validate_manifest(plugin_dir, report)
-        minors = [r.message for r in report.results if r.level == "MINOR"]
-        assert any("'settings' must be an object" in m for m in minors), (
-            f"Expected MINOR for wrong settings type; got MINORs: {minors}"
+        validate_lsp(plugin_dir, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("'settings' must be an object" in m for m in majors), (
+            f"Expected MAJOR for wrong settings type; got MAJORs: {majors}"
         )
 
-    def test_lsp_init_options_non_object_emits_minor(self, tmp_path):
-        """lspServers.<name>.initializationOptions not a dict → MINOR."""
+    def test_lsp_init_options_non_object_emits_major(self, tmp_path):
+        """lspServers.<name>.initializationOptions not a dict → MAJOR."""
         manifest = self._lsp_manifest(initializationOptions=42)
         plugin_dir = _write_plugin(tmp_path, "lsp-init-bad", manifest)
         report = ValidationReport()
-        validate_manifest(plugin_dir, report)
-        minors = [r.message for r in report.results if r.level == "MINOR"]
-        assert any("'initializationOptions' must be an object" in m for m in minors), (
-            f"Expected MINOR for wrong initializationOptions type; got MINORs: {minors}"
+        validate_lsp(plugin_dir, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("'initializationOptions' must be an object" in m for m in majors), (
+            f"Expected MAJOR for wrong initializationOptions type; got MAJORs: {majors}"
         )
 
-    def test_lsp_workspace_folder_non_string_emits_minor(self, tmp_path):
-        """lspServers.<name>.workspaceFolder not a string → MINOR."""
+    def test_lsp_workspace_folder_non_string_emits_major(self, tmp_path):
+        """lspServers.<name>.workspaceFolder not a string → MAJOR."""
         manifest = self._lsp_manifest(workspaceFolder=["./src"])  # should be a string
         plugin_dir = _write_plugin(tmp_path, "lsp-wf-bad", manifest)
         report = ValidationReport()
-        validate_manifest(plugin_dir, report)
-        minors = [r.message for r in report.results if r.level == "MINOR"]
-        assert any("'workspaceFolder' must be a string" in m for m in minors), (
-            f"Expected MINOR for wrong workspaceFolder type; got MINORs: {minors}"
+        validate_lsp(plugin_dir, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("'workspaceFolder' must be a string" in m for m in majors), (
+            f"Expected MAJOR for wrong workspaceFolder type; got MAJORs: {majors}"
         )
 
-    def test_lsp_restart_on_crash_non_bool_emits_minor(self, tmp_path):
-        """lspServers.<name>.restartOnCrash not a bool → MINOR (plugins-reference.md:251)."""
+    def test_lsp_restart_on_crash_non_bool_emits_major(self, tmp_path):
+        """lspServers.<name>.restartOnCrash not a bool → MAJOR (plugins-reference.md:251)."""
         manifest = self._lsp_manifest(restartOnCrash="yes")  # should be a bool
         plugin_dir = _write_plugin(tmp_path, "lsp-roc-bad", manifest)
         report = ValidationReport()
-        validate_manifest(plugin_dir, report)
-        minors = [r.message for r in report.results if r.level == "MINOR"]
-        assert any("'restartOnCrash' must be a boolean" in m for m in minors), (
-            f"Expected MINOR for non-boolean restartOnCrash; got MINORs: {minors}"
+        validate_lsp(plugin_dir, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("'restartOnCrash' must be a boolean" in m for m in majors), (
+            f"Expected MAJOR for non-boolean restartOnCrash; got MAJORs: {majors}"
         )
 
-    def test_lsp_valid_optional_fields_no_minor(self, tmp_path):
-        """Correct types across all optional LSP fields → no MINOR emitted."""
+    def test_lsp_valid_optional_fields_no_major(self, tmp_path):
+        """Correct types across all optional LSP fields → no MAJOR emitted."""
         manifest = self._lsp_manifest(
             args=["--flag", "--flag2"],
             env={"LOGLEVEL": "info"},
@@ -2214,11 +2253,11 @@ class TestV223LspInlineTypeChecks:
         )
         plugin_dir = _write_plugin(tmp_path, "lsp-ok", manifest)
         report = ValidationReport()
-        validate_manifest(plugin_dir, report)
+        validate_lsp(plugin_dir, report)
         unexpected = [
             r.message
             for r in report.results
-            if r.level == "MINOR"
+            if r.level == "MAJOR"
             and any(
                 kw in r.message
                 for kw in (
@@ -2231,7 +2270,7 @@ class TestV223LspInlineTypeChecks:
                 )
             )
         ]
-        assert not unexpected, f"Unexpected MINORs on valid LSP config: {unexpected}"
+        assert not unexpected, f"Unexpected MAJORs on valid LSP config: {unexpected}"
 
 
 class TestV223CrossMarketplaceDeps:
