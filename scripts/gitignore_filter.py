@@ -135,6 +135,34 @@ def _load_pathspec(gitignore_path: Path) -> tuple[list[str], object | None]:
     return patterns, spec
 
 
+# Dot-directories that are VCS metadata / tool caches / virtualenvs and never
+# carry plugin content worth validating. `rglob` always prunes these. It does
+# NOT prune other dot-directories (`.github/`, `.claude/`, `.claude-plugin/`,
+# `.vscode/`) — those hold real, validatable content (workflows, agent/skill
+# configs, LSP settings), and blanket-skipping every dot-dir silently hid them
+# from the linter and the documentation validator (audit finding).
+_VCS_CACHE_DIR_NAMES: frozenset[str] = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".bzr",
+        ".venv",
+        ".tox",
+        ".nox",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".cache",
+        ".eggs",
+        ".idea",
+        ".gradle",
+        ".terraform",
+        ".trashcan",
+    }
+)
+
+
 class GitignoreFilter:
     """Gitignore-aware file filter — loads patterns once, reuses for all scans.
 
@@ -346,11 +374,13 @@ class GitignoreFilter:
                 if self._is_unsafe_symlink(entry):
                     continue
                 if entry.is_dir():
-                    # Skip hidden dirs (.git, .venv, etc.) AND gitignored
-                    # dirs at descent time. Matches `_walk_pathlib`'s
-                    # pruning so behaviour is consistent across both
-                    # iterators.
-                    if entry.name.startswith(".") and entry.name != ".":
+                    # Prune VCS/cache/virtualenv dot-dirs and gitignored dirs at
+                    # descent time. Do NOT blanket-skip every dot-dir: `.github/`,
+                    # `.claude/`, `.claude-plugin/`, `.vscode/` carry real content
+                    # (workflows, agent/skill configs, LSP settings) that the
+                    # linter + documentation validator MUST see. Blanket-skipping
+                    # all dot-dirs silently hid them (audit finding).
+                    if entry.name in _VCS_CACHE_DIR_NAMES:
                         continue
                     if self.is_dir_ignored(entry):
                         continue

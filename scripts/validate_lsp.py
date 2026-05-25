@@ -446,22 +446,34 @@ def validate_lsp_config(
 
     report.passed(f"{rel_path} is valid JSON")
 
-    # Check for languageServers field
+    if not isinstance(config, dict):
+        report.critical(f"LSP config root must be an object in {rel_path}")
+        return report
+
+    # Check for a wrapper field first (languageServers/lspServers/servers).
     servers_key = None
     for key in ("languageServers", "lspServers", "servers"):
         if key in config:
             servers_key = key
             break
 
-    if servers_key is None:
-        report.info(f"No language server definitions found in {rel_path}")
-        return report
-
-    servers = config[servers_key]
-
-    if not isinstance(servers, dict):
-        report.critical(f"'{servers_key}' must be an object in {rel_path}")
-        return report
+    if servers_key is not None:
+        servers = config[servers_key]
+        if not isinstance(servers, dict):
+            report.critical(f"'{servers_key}' must be an object in {rel_path}")
+            return report
+    else:
+        # Unwrapped form — the OFFICIAL `.lsp.json` shape per docs: top-level
+        # keys ARE server names, each value a server config. Detected exactly as
+        # _extract_lsp_server_names_from_config_file does (all values are dicts),
+        # so the field-validation path and the collision path agree on what a
+        # valid unwrapped `.lsp.json` looks like — without this fallback the
+        # single most common standalone LSP config escaped ALL per-server checks.
+        if config and all(isinstance(v, dict) for v in config.values()):
+            servers = config
+        else:
+            report.info(f"No language server definitions found in {rel_path}")
+            return report
 
     if not servers:
         report.info(f"No LSP servers defined in {rel_path}")

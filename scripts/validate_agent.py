@@ -170,18 +170,30 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any] | None, str, int]:
     if not content.startswith("---"):
         return None, content, 0
 
-    # Find closing ---
-    parts = content.split("---", 2)
-    if len(parts) < 3:
+    # Split on the closing `---` DELIMITER LINE — never a bare `---` substring.
+    # `content.split("---", 2)` corrupts valid frontmatter whose VALUE contains
+    # `---` (e.g. `description: "use --- as a separator"`), truncating the YAML
+    # and producing a false "Malformed frontmatter". The opener and closer must
+    # each be `---` alone on their own line (CommonMark/YAML front-matter rule).
+    lines = content.split("\n")
+    if lines[0].strip() != "---":
+        return None, content, 0
+    closing_idx = None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            closing_idx = idx
+            break
+    if closing_idx is None:
         return None, content, 0
 
+    fm_text = "\n".join(lines[1:closing_idx])
+    body = "\n".join(lines[closing_idx + 1 :])
     try:
-        frontmatter = yaml.safe_load(parts[1])
+        frontmatter = yaml.safe_load(fm_text)
         if frontmatter is None:
             frontmatter = {}
-        body = parts[2]
-        # Count lines to find frontmatter end
-        fm_end_line = parts[0].count("\n") + parts[1].count("\n") + 2
+        # 1-based line number of the closing `---`.
+        fm_end_line = closing_idx + 1
         return frontmatter, body, fm_end_line
     except yaml.YAMLError:
         return None, content, 0
@@ -1076,13 +1088,15 @@ def validate_hooks_field(frontmatter: dict[str, Any], filename: str, report: Age
                     continue
 
                 hook_type = hook["type"]
-                # Per hooks.md L278-283 the 4 valid hook types are
-                # {command, http, prompt, agent}. Agent-scoped hooks accept
-                # the same set.
-                if hook_type not in {"command", "http", "prompt", "agent"}:
+                # The 5 valid hook types as of v2.1.118 are
+                # {command, http, mcp_tool, prompt, agent} — kept in lockstep
+                # with validate_hook.VALID_HOOK_TYPES (the authority). Agent-scoped
+                # hooks accept the same set; omitting mcp_tool was a false positive
+                # that rejected a valid hook config.
+                if hook_type not in {"command", "http", "mcp_tool", "prompt", "agent"}:
                     report.major(
                         f"Invalid hook type '{hook_type}' in '{event_name}[{i}].hooks[{j}]'. "
-                        "Valid types: command, http, prompt, agent",
+                        "Valid types: command, http, mcp_tool, prompt, agent",
                         filename,
                     )
                     continue
