@@ -100,8 +100,8 @@ This document contains all 190+ validation rules extracted from multiple validat
 | D01 | Description must be a string | MAJOR | OpenSpec |
 | D02 | Description must be non-empty | MAJOR | OpenSpec |
 | D03 | Description min 20 characters | MINOR | Nixtla |
-| D04 | Description max 1024 characters | MAJOR | OpenSpec |
-| D05 | Description max 200 chars (recommended) | MINOR | Meta-Skill |
+| D04 | Description max 200 tokens (bpe estimate; TRDD-021250b5, was 1024 chars) | MAJOR | OpenSpec |
+| D05 | `when_to_use` max 100 tokens (TRDD-021250b5) | MAJOR | Claude Code |
 | D06 | Must include "Use when..." phrase (strict mode) | MAJOR | Nixtla |
 | D07 | Should include "Trigger with..." phrase (strict mode) | MINOR | Nixtla |
 | D08 | No first person ("I can", "I will") | MAJOR | Nixtla |
@@ -119,10 +119,10 @@ This document contains all 190+ validation rules extracted from multiple validat
 
 | Rule ID | Rule | Severity | Source |
 |---------|------|----------|--------|
-| T01 | SKILL.md max 500 lines (warning) | MINOR | Nixtla |
-| T02 | SKILL.md max 800 lines (error) | MAJOR | Nixtla |
-| T03 | Word count max 3500 (warning) | MINOR | Nixtla |
-| T04 | Word count max 5000 (error) | MAJOR | Nixtla |
+| T01 | SKILL.md body max 5000 tokens (bpe estimate; TRDD-021250b5, was 5000 words) | MAJOR | Nixtla |
+| T02 | SKILL.md max 500 lines (structural cap) | MAJOR | Nixtla |
+| T03 | `description` max 200 tokens (TRDD-021250b5) | MAJOR | OpenSpec |
+| T04 | `when_to_use` max 100 tokens (TRDD-021250b5) | MAJOR | Claude Code |
 | T05 | Frontmatter max 12K chars (warning) | MINOR | Nixtla |
 | T06 | Frontmatter max 15K chars (error) | MAJOR | Nixtla |
 | T07 | Progressive disclosure required for large skills | MAJOR | Meta-Skill |

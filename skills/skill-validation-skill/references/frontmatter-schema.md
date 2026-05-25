@@ -48,8 +48,7 @@ name: pdf-processing
 | **Type** | string |
 | **Required** | Yes |
 | **Min Length** | 20 characters (recommended) |
-| **Max Length** | 1024 characters (hard limit) |
-| **Recommended** | < 200 characters |
+| **Max Length** | 200 tokens (MAJOR; bpe estimate) — TRDD-021250b5; was 1024 chars hard / <200 chars recommended |
 | **Quality** | Must describe WHAT and WHEN to use |
 
 **Example**:
@@ -320,12 +319,11 @@ def validate_name(name: str, directory_name: str) -> list[str]:
 | Check | Strict Mode | Standard Mode |
 |-------|-------------|---------------|
 | Non-empty | CRITICAL | CRITICAL |
-| Max 1024 chars | MAJOR | MAJOR |
+| Max 200 tokens (TRDD-021250b5; was 1024 chars) | MAJOR | MAJOR |
 | "Use when..." phrase | MAJOR | INFO |
 | "Trigger with..." phrase | MINOR | INFO |
 | No first person | MAJOR | INFO |
 | No second person | MAJOR | INFO |
-| Under 200 chars | MINOR | INFO |
 
 ---
 
