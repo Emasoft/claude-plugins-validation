@@ -4,8 +4,8 @@ The cache is a CVE-class component (security findings could be served
 stale if invalidation is wrong) so the test surface is intentionally
 broad:
 
-  - Triple-key invalidation (content, catalog, scanner_version each
-    independently invalidate)
+  - Quadruple-key invalidation (content, catalog, scanner_version,
+    file_ext each independently invalidate)
   - Storage location chain (5 candidates, monkeypatched env vars)
   - Mode-bit invariants (0o600 file, 0o700 dir)
   - Corruption recovery (the file becomes invalid mid-lifetime)
@@ -142,7 +142,7 @@ def test_get_returns_none_on_miss() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 2. Triple-key invalidation — each key must independently invalidate
+# 2. Multi-key invalidation — each key must independently invalidate
 # ---------------------------------------------------------------------------
 
 
@@ -195,7 +195,7 @@ def test_prune_by_age_removes_stale_entries(
     # Insert an entry, then back-date it 15 days via direct sqlite.
     put_cached_findings("old", "cat", "v1", [{"x": 1}])
 
-    cache_path = isolated_cache_env / "scan-cache.sqlite"
+    cache_path = isolated_cache_env / cpv_scan_cache._CACHE_FILENAME
     fifteen_days_ago = int(time.time()) - (15 * 86_400)
     conn = sqlite3.connect(str(cache_path))
     conn.execute(
@@ -234,7 +234,7 @@ def test_prune_by_entry_count_drops_oldest_lru(
 
     # Back-date them with a fixed monotonic gap so LRU order matches
     # insertion order. Use raw sqlite to bypass autocommit timestamp.
-    cache_path = isolated_cache_env / "scan-cache.sqlite"
+    cache_path = isolated_cache_env / cpv_scan_cache._CACHE_FILENAME
     conn = sqlite3.connect(str(cache_path))
     base = int(time.time()) - 10_000
     for i in range(5):
@@ -289,7 +289,7 @@ def test_reset_cache_drops_every_entry() -> None:
 def test_cache_file_has_0600_mode(isolated_cache_env: Path) -> None:
     """The SQLite file mode must be 0o600 after the first write."""
     put_cached_findings("c", "cat", "v1", [{"x": 1}])
-    cache_path = isolated_cache_env / "scan-cache.sqlite"
+    cache_path = isolated_cache_env / cpv_scan_cache._CACHE_FILENAME
     file_mode = stat.S_IMODE(os.stat(cache_path).st_mode)
     assert file_mode == 0o600, (
         f"Expected 0o600 on cache file but got 0o{file_mode:o}"
@@ -315,7 +315,7 @@ def test_cache_parent_dir_has_0700_mode(isolated_cache_env: Path) -> None:
 
 def test_corruption_recovery_on_get(isolated_cache_env: Path) -> None:
     """Garbage file → next get wipes and rebuilds; returns MISS, not crash."""
-    cache_path = isolated_cache_env / "scan-cache.sqlite"
+    cache_path = isolated_cache_env / cpv_scan_cache._CACHE_FILENAME
     # Make the parent dir exist so the file can land beside it.
     cache_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     cache_path.write_bytes(b"this is not a sqlite database, just random bytes\x00\x01\x02")
@@ -330,7 +330,7 @@ def test_corruption_recovery_on_get(isolated_cache_env: Path) -> None:
 
 def test_corruption_recovery_on_put(isolated_cache_env: Path) -> None:
     """Garbage file → next put wipes and writes; no crash."""
-    cache_path = isolated_cache_env / "scan-cache.sqlite"
+    cache_path = isolated_cache_env / cpv_scan_cache._CACHE_FILENAME
     cache_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     cache_path.write_bytes(b"corrupt")
 
@@ -344,7 +344,7 @@ def test_corrupt_findings_json_returns_none(isolated_cache_env: Path) -> None:
     """Stored findings_json that isn't valid JSON → get returns None."""
     # Bypass put() and write garbage directly into the row.
     put_cached_findings("c1", "cat", "v1", [{"x": 1}])
-    cache_path = isolated_cache_env / "scan-cache.sqlite"
+    cache_path = isolated_cache_env / cpv_scan_cache._CACHE_FILENAME
     conn = sqlite3.connect(str(cache_path))
     conn.execute(
         "UPDATE scan_cache SET findings_json = ? WHERE content_hash = ?",
@@ -364,7 +364,7 @@ def test_corrupt_findings_non_list_returns_none(isolated_cache_env: Path) -> Non
     a list and will crash on iteration otherwise.
     """
     put_cached_findings("c1", "cat", "v1", [{"x": 1}])
-    cache_path = isolated_cache_env / "scan-cache.sqlite"
+    cache_path = isolated_cache_env / cpv_scan_cache._CACHE_FILENAME
     conn = sqlite3.connect(str(cache_path))
     conn.execute(
         "UPDATE scan_cache SET findings_json = ? WHERE content_hash = ?",
@@ -390,8 +390,8 @@ def test_location_chain_priority_1_explicit_dir(
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(tmp_path / "cpd_loser"))
 
     put_cached_findings("c", "cat", "v1", [{"x": 1}])
-    assert (target / "scan-cache.sqlite").exists()
-    assert not (tmp_path / "cpd_loser" / "scan-cache.sqlite").exists()
+    assert (target / cpv_scan_cache._CACHE_FILENAME).exists()
+    assert not (tmp_path / "cpd_loser" / cpv_scan_cache._CACHE_FILENAME).exists()
 
 
 def test_location_chain_priority_2_claude_plugin_data(
@@ -403,7 +403,7 @@ def test_location_chain_priority_2_claude_plugin_data(
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(target))
 
     put_cached_findings("c", "cat", "v1", [{"x": 1}])
-    assert (target / "scan-cache.sqlite").exists()
+    assert (target / cpv_scan_cache._CACHE_FILENAME).exists()
 
 
 def test_location_chain_priority_3_dot_claude_plugins_data(
@@ -426,7 +426,7 @@ def test_location_chain_priority_3_dot_claude_plugins_data(
         / "plugins"
         / "data"
         / "claude-plugins-validation"
-        / "scan-cache.sqlite"
+        / cpv_scan_cache._CACHE_FILENAME
     )
     assert expected.exists()
 
@@ -462,7 +462,7 @@ def test_location_chain_priority_4_xdg_cache_home(
 
     try:
         put_cached_findings("c", "cat", "v1", [{"x": 1}])
-        expected = xdg / "cpv" / "scan-cache.sqlite"
+        expected = xdg / "cpv" / cpv_scan_cache._CACHE_FILENAME
         assert expected.exists()
     finally:
         # Restore writability so pytest's tmp_path teardown can clean up.
@@ -472,7 +472,7 @@ def test_location_chain_priority_4_xdg_cache_home(
 def test_location_chain_priority_5_github_runner_temp(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """GITHUB_ACTIONS=true + RUNNER_TEMP → cpv-scan-cache.sqlite there.
+    """GITHUB_ACTIONS=true + RUNNER_TEMP → the GHA cache file lands there.
 
     Higher-priority candidates are nudged into unwritable state so the
     resolver actually falls through to candidate #5.
@@ -506,7 +506,7 @@ def test_location_chain_priority_5_github_runner_temp(
 
     try:
         put_cached_findings("c", "cat", "v1", [{"x": 1}])
-        assert (runner_tmp / "cpv-scan-cache.sqlite").exists()
+        assert (runner_tmp / cpv_scan_cache._CACHE_FILENAME_GHA).exists()
     finally:
         os.chmod(blocked_dot_claude, 0o700)
         os.chmod(xdg, 0o700)
@@ -568,7 +568,7 @@ def test_cache_stats_returns_plausible_numbers(isolated_cache_env: Path) -> None
     # Fresh — entries 0, path set, file may not exist yet.
     stats0 = cache_stats()
     assert stats0["path"] is not None
-    assert "scan-cache.sqlite" in stats0["path"]
+    assert cpv_scan_cache._CACHE_FILENAME in stats0["path"]
     assert stats0["entries"] == 0
     assert stats0["size_bytes"] >= 0
     assert stats0["hit_count"] >= 0

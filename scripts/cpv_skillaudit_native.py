@@ -2374,25 +2374,37 @@ def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
 
     # v2.104.0 — cache GET. Hash the textual content (NOT the raw
     # bytes — _content_hash already encodes utf-8) and look up against
-    # (content_hash, catalog_hash, engine_version). CPV_SCAN_CACHE=0
+    # (content_hash, catalog_hash, engine_version, file_ext). CPV_SCAN_CACHE=0
     # disables; CPV_SCAN_CACHE_DEEP=1 forces a miss but still writes
     # back so a release can pre-warm a fresh cache without an explicit
     # purge step.
+    #
+    # file_ext is part of the key because scan_content -> the context
+    # classifier dispatches on the file SUFFIX (.py/.json/.md/.yml/.ts),
+    # so the SAME bytes produce a DIFFERENT verdict under a different
+    # extension. Without the extension in the key, whichever extension is
+    # scanned FIRST poisons the lookup for every other extension with its
+    # own classifier's verdict (cross-extension collision -> FP or FN).
+    # Path(rel).suffix.lower() matches the classifier's extension dispatch.
     content_hash = _content_hash(content)
+    file_ext = Path(rel).suffix.lower()
     cache_on = _cache_enabled()
     if cache_on and not _cache_deep_enabled() and _scan_cache_get is not None:
         try:
-            cached = _scan_cache_get(content_hash, _CATALOG_HASH, __version__)
+            cached = _scan_cache_get(
+                content_hash, _CATALOG_HASH, __version__, file_ext=file_ext
+            )
         except Exception:  # pragma: no cover — cache must never break a scan
             cached = None
         if cached is not None:
             findings_cached: list[dict[str, Any]] = []
             for f in cached:
                 if isinstance(f, dict):
-                    # Re-anchor file path — the cache key is content-
-                    # only, so the same bytes scanned at a different
-                    # path still hits. The cached entry must reflect
-                    # THIS scan's file location.
+                    # Re-anchor file path — the cache key is
+                    # (content, catalog, version, extension), NOT the
+                    # full path, so the same bytes + same extension
+                    # scanned at a different directory still hits. The
+                    # cached entry must reflect THIS scan's file location.
                     f["file"] = rel
                     findings_cached.append(f)
             if findings_cached:
@@ -2405,8 +2417,10 @@ def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
 
     # v2.104.0 — cache PUT (always, including in DEEP mode, so an
     # explicit re-warm pass populates the cache). We persist the
-    # findings stripped of the per-scan "file" key — the cache is
-    # content-keyed, file paths get re-anchored on GET above.
+    # findings stripped of the per-scan "file" key — the key is
+    # (content, catalog, version, extension), file paths get re-anchored
+    # on GET above. file_ext keeps two same-content/different-extension
+    # scans in separate rows (no overwrite, no cross-extension collision).
     if cache_on and _scan_cache_put is not None:
         try:
             to_cache: list[dict[str, Any]] = []
@@ -2414,7 +2428,9 @@ def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
                 # shallow copy minus the file path
                 f_copy = {k: v for k, v in f.items() if k != "file"}
                 to_cache.append(f_copy)
-            _scan_cache_put(content_hash, _CATALOG_HASH, __version__, to_cache)
+            _scan_cache_put(
+                content_hash, _CATALOG_HASH, __version__, to_cache, file_ext=file_ext
+            )
         except Exception:  # pragma: no cover — cache must never break a scan
             pass
 
