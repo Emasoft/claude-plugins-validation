@@ -486,13 +486,25 @@ def _script_of(ch: str) -> str:
 
 
 def _estimate_heuristic(text: str) -> int:
-    """Conservative per-script token estimate when the vocab is unavailable."""
+    """Conservative per-script token estimate when the vocab is unavailable.
+
+    Emoji, symbols, and combining marks tokenize HEAVILY — a single code point
+    can become several BPE tokens (one per UTF-8 byte in the worst case). The old
+    code counted them at ratio 1.0 (1 token/char), which UNDER-counted emoji/
+    symbol-dense input by up to ~25%, violating the module's never-under-count
+    guarantee (this is the fallback tier — the one place the guarantee must hold).
+    For ``other`` scripts and combining marks (category ``M*``) we use the UTF-8
+    byte length as the conservative per-char bound. (audit MAJOR token #1)
+    """
     if not text:
         return 0
     token_sum = 0.0
     for ch in text:
-        ratio = _SCRIPT_RATIOS[_script_of(ch)]
-        token_sum += 1.0 / ratio
+        script = _script_of(ch)
+        if script == "other" or unicodedata.category(ch).startswith("M"):
+            token_sum += float(max(1, len(ch.encode("utf-8"))))
+        else:
+            token_sum += 1.0 / _SCRIPT_RATIOS[script]
     return math.ceil(token_sum * HEURISTIC_MARGIN)
 
 
