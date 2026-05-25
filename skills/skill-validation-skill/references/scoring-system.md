@@ -108,8 +108,8 @@ The Syntactic Score (0-100) maps to three tiers:
 
 **Causes**:
 - Name format invalid
-- Description too long (>1024 chars)
-- Token budget exceeded (>800 lines)
+- Description too long (>200 tokens; TRDD-021250b5, was >1024 chars)
+- Token budget exceeded (SKILL.md body >5000 tokens or >500 lines)
 - Required sections missing (strict mode)
 - Referenced files not found
 - First/second person in description (strict mode)

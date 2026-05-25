@@ -385,19 +385,20 @@ description: "Analyzes CSV files and generates summary reports."
 
 ### MINOR: Description is long
 
-**Error message**: `Description is long ({len} chars), consider shortening` (basic, >500) or `Description is long ({len} chars), consider shortening to < 200` (comprehensive, >200)
+**Error message**: `Description is long ({len} chars), consider shortening` (basic script `validate_skill.py`, >500 chars)
 **Severity**: MINOR
-**Source**: Both scripts — `validate_description_field()`
-**Root cause**: The description exceeds recommended length.
+**Source**: `validate_skill.py` — `validate_description_field()`
+**Root cause**: The description exceeds the basic script's char-based readability advisory.
+**Note**: The comprehensive script (`validate_skill_comprehensive.py`) no longer emits a char-based MINOR here — its description-size gate is the 200-token MAJOR limit (TRDD-021250b5; see "Description exceeds maximum length" above).
 **Fix**: Move detailed instructions to the body content; keep description concise.
 
 ### MAJOR: Description exceeds maximum length
 
-**Error message**: `Description exceeds 1024 characters ({len} chars)`
+**Error message**: `'description' is ~N tokens (limit 200; bpe estimate). Tighten to a focused sentence...`
 **Severity**: MAJOR
 **Source**: `validate_skill_comprehensive.py` — `validate_description_field()`
-**Root cause**: Description exceeds the 1024-character hard limit.
-**Fix**: Drastically shorten the description. Move content to body.
+**Root cause**: Description exceeds the 200-token limit (TRDD-021250b5; was a 1024-character hard limit). The limit is now token-based and non-negotiable — there is no per-plugin override.
+**Fix**: Trim the description to ≤200 tokens — keep one focused sentence describing WHAT the skill does and WHEN to use it. Move any detailed instructions, examples, or background into the SKILL.md body or `references/` (progressive disclosure).
 
 ### MAJOR: Description must include 'Use when' phrase (strict mode)
 
