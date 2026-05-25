@@ -68,6 +68,24 @@ _SHELL_CALL_FQNAMES: Final[frozenset[str]] = frozenset(
 # _confidence).
 _DYNAMIC_EXEC_FQNAMES: Final[frozenset[str]] = frozenset({"eval", "exec", "compile", "__import__"})
 
+# Sinks that execute a STRING command directly (no ``shell=True`` kwarg needed) —
+# feeding a regex-pattern string into one of these executes it. Used by the
+# re-pattern-literal suppressor to refuse suppression when the pattern is
+# consumed by an exec sink on the same statement. (audit MAJOR #9)
+_STRING_CMD_EXEC_FQNAMES: Final[frozenset[str]] = (
+    frozenset(
+        {
+            "os.system",
+            "os.popen",
+            "commands.getoutput",
+            "commands.getstatusoutput",
+            "pty.spawn",
+            "asyncio.create_subprocess_shell",
+        }
+    )
+    | _DYNAMIC_EXEC_FQNAMES
+)
+
 # Hash functions flagged by INSECURE_CRYPTO. The matcher fires on the
 # function reference itself; the AST classifier then checks the call
 # context — these are commonly used for non-cryptographic identity
@@ -104,6 +122,27 @@ _IDENTITY_TARGET_NAMES: Final[frozenset[str]] = frozenset(
         "file_hash",
         "path_hash",
     }
+)
+
+# Substrings that mark an assignment target as security-sensitive. Weak-hashing
+# (md5/sha1) a value destined for one of these is the exact INSECURE_CRYPTO
+# threat, never benign "identity usage" — so it must stay visible regardless of
+# .hexdigest()/slice shape. Substring match: ``user_password``, ``access_token``,
+# ``secret_hash`` all qualify. (audit MAJOR #8) Plain tuple (not a compiled
+# regex) because ``re`` is deferred-imported further down this module.
+_SECURITY_TARGET_STEMS: Final[tuple[str, ...]] = (
+    "password",
+    "passwd",
+    "passphrase",
+    "secret",
+    "token",
+    "credential",
+    "apikey",
+    "api_key",
+    "privatekey",
+    "private_key",
+    "authkey",
+    "auth_key",
 )
 
 
@@ -695,6 +734,32 @@ def _is_re_module_pattern_call(node: ast.AST) -> bool:
     )
 
 
+def _re_literal_feeds_exec_sink(tree: ast.AST, target: ast.Constant) -> bool:
+    """True iff the regex-pattern Constant ``target`` is consumed by a dangerous
+    exec sink — ``os.system``/``eval``/``exec``/… directly, or ``subprocess.*``/
+    ``asyncio.create_subprocess_*`` with ``shell=True``.
+
+    A regex pattern is normally inert (suppressible), but the moment its string
+    is fed into a shell/exec sink (``subprocess.run(re.compile(r"…").pattern,
+    shell=True)``) it IS executed, so the suppression must not apply. (audit
+    MAJOR #9)
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        qn = _node_qualname(node.func)
+        if qn is None:
+            continue
+        # The pattern Constant must live inside one of the sink's positional args.
+        if not any(sub is target for arg in node.args for sub in ast.walk(arg)):
+            continue
+        if qn in _STRING_CMD_EXEC_FQNAMES:
+            return True
+        if qn in _SHELL_CALL_FQNAMES and _shell_kwarg_is_true(node):
+            return True
+    return False
+
+
 def _match_inside_re_pattern_literal(tree: ast.AST, line: int, source: str, match: str) -> bool:
     """True iff ``match`` sits inside a string Constant that is a regex
     PATTERN literal (issue #42).
@@ -732,6 +797,12 @@ def _match_inside_re_pattern_literal(tree: ast.AST, line: int, source: str, matc
                 target = node
                 break
     if target is None:
+        return False
+
+    # The pattern is inert ONLY if it is not consumed by an exec sink on the
+    # same statement. ``subprocess.run(re.compile(r"…").pattern, shell=True)``
+    # executes the pattern string, so it must stay visible. (audit MAJOR #9)
+    if _re_literal_feeds_exec_sink(tree, target):
         return False
 
     # Shape 1 — target inside the first arg of an re.<func>(...) call.
@@ -1112,20 +1183,24 @@ def _weak_hash_is_identity_usage(source: str, line_idx: int) -> bool:
     identity (cache key, session ID, dedupe signature), not for
     cryptographic security.
 
-    Signals (any one is sufficient):
+    Identity is certified by any of:
 
-    * The call is chained through ``.hexdigest()`` and the result is
-      sliced (`[:N]`).
-    * The result is assigned to a name in ``_IDENTITY_TARGET_NAMES``.
-    * The call's argument is an f-string / encoded short identifier
-      (``f"{x}@{y}".encode()``) — characteristic of compound-key
-      hashing, not message authentication.
+    * The digest is sliced (``[:N]``) — a truncated hash is a lookup key.
+    * The result is chained through ``.hexdigest()`` AND assigned to a name in
+      ``_IDENTITY_TARGET_NAMES`` (``cache_key``, ``etag``, …).
+    * The weak-hash call is directly assigned to an identity name (AST shapes
+      the line regex misses: ``AnnAssign`` / ``AugAssign`` / ``NamedExpr`` /
+      tuple-unpack).
 
-    These signals each independently disqualify the call as a real
-    INSECURE_CRYPTO finding. The matcher would still fire on
-    ``hashlib.md5(password.encode()).digest()`` (no hexdigest, no
-    slice, no identity-name target) because none of the signals
-    apply — the security-relevant shape stays flagged.
+    A SECURITY-sensitive target (``*password*`` / ``*secret*`` / ``*token*`` /
+    ``*credential*`` / ``*_key``) ALWAYS overrides → returns ``False`` (stays
+    visible): weak-hashing such a value is the exact INSECURE_CRYPTO threat.
+
+    A bare ``.hexdigest()`` with no slice and no identity target is NOT
+    sufficient on its own — that was the false-negative the audit found
+    (``password_digest = hashlib.md5(pw).hexdigest()`` was being suppressed).
+    ``hashlib.md5(password.encode()).digest()`` (no hexdigest, no slice, no
+    identity target) stays flagged too. (audit MAJOR #8)
     """
     try:
         tree = ast.parse(source)
@@ -1133,43 +1208,61 @@ def _weak_hash_is_identity_usage(source: str, line_idx: int) -> bool:
         return False
     line = line_idx + 1
 
+    # The matched line must be covered by a weak-hash call, else nothing to do.
+    if not any(
+        isinstance(n, ast.Call)
+        and _node_qualname(n.func) in _WEAK_HASH_FQNAMES
+        and getattr(n, "lineno", None) is not None
+        and getattr(n, "end_lineno", None) is not None
+        and n.lineno <= line <= n.end_lineno  # type: ignore[operator]
+        for n in ast.walk(tree)
+    ):
+        return False
+
+    line_text = source.splitlines()[line_idx]
+    # Simple LHS assignment target — captures the last component of a dotted
+    # target (``self.cache_key`` → ``cache_key``). Good enough for the
+    # security-override and the hexdigest-identity gate; the AST pass below
+    # covers compound shapes (tuple-unpack / AnnAssign / NamedExpr).
+    lhs_match = re.match(r"\s*(?:[A-Za-z_]\w*\.)*([A-Za-z_]\w*)\s*(?::[^=]+)?\s*=(?!=)", line_text)
+    lhs_name = lhs_match.group(1) if lhs_match else ""
+
+    # (override) security-sensitive target → NEVER identity usage.
+    if lhs_name:
+        lhs_lower = lhs_name.lower()
+        if any(stem in lhs_lower for stem in _SECURITY_TARGET_STEMS):
+            return False
+
+    # (1) sliced digest anywhere on the line → truncated lookup key.
+    if re.search(r"\)\s*\[\s*:\s*\d+\s*\]", line_text):
+        return True
+    # (2) hexdigest chain assigned to an identity-named target. Bare hexdigest
+    #     WITHOUT an identity target is no longer sufficient (audit MAJOR #8).
+    if ".hexdigest()" in line_text and lhs_name in _IDENTITY_TARGET_NAMES:
+        return True
+
+    # (3) weak-hash call directly assigned to an identity name — AST shapes the
+    #     line regex misses (AnnAssign / AugAssign / NamedExpr / tuple-unpack).
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        # Must be the weak-hash call.
         qual = _node_qualname(node.func)
         if qual not in _WEAK_HASH_FQNAMES:
             continue
-        # Must cover the matched line.
         start = getattr(node, "lineno", None)
         end = getattr(node, "end_lineno", None)
         if start is None or end is None or not (start <= line <= end):
             continue
-        # Walk parent chain via ast.walk and find the enclosing
-        # Subscript / Assign for context.
         for parent in ast.walk(tree):
-            for field, value in ast.iter_fields(parent):
+            for _field, value in ast.iter_fields(parent):
                 children = value if isinstance(value, list) else [value]
                 for child in children:
                     if child is not node:
                         continue
-                    # Check whether the parent expression eventually
-                    # yields a sliced hexdigest assigned to an identity
-                    # name. We look at the whole-line source instead of
-                    # walking many AST hops — simpler + adequate.
-                    line_text = source.splitlines()[line_idx]
-                    # hexdigest() chain → identity.
-                    if ".hexdigest()" in line_text:
-                        return True
-                    # `[:N]` slice anywhere on the line → identity.
-                    if re.search(r"\)\s*\[\s*:\s*\d+\s*\]", line_text):
-                        return True
-                    # Assignment target is an identity name.
                     if isinstance(parent, ast.Assign):
                         for tgt in parent.targets:
                             if isinstance(tgt, ast.Name) and tgt.id in _IDENTITY_TARGET_NAMES:
                                 return True
-                            # Tuple-unpack: (a, b) = expr
                             if isinstance(tgt, ast.Tuple):
                                 for elt in tgt.elts:
                                     if isinstance(elt, ast.Name) and elt.id in _IDENTITY_TARGET_NAMES:

