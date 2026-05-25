@@ -4573,15 +4573,44 @@ def is_path_gitignored(rel_path: str, patterns: list[str]) -> bool:
     if not patterns:
         return False
     rel_path = rel_path.replace("\\", "/").lstrip("/")
-    try:
-        import pathspec  # noqa: PLC0415
-    except ImportError:
+    spec = _compile_gitignore_spec(tuple(patterns))
+    if spec is None:
         # Defensive fallback for environments where pathspec is not
         # installed (should never happen in CPV proper — pathspec is a
         # direct dependency in pyproject.toml as of v2.101.2).
         return _is_path_gitignored_fallback(rel_path, patterns)
-    spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
-    return spec.match_file(rel_path)
+    # pathspec is untyped, so match_file() is Any; coerce to the declared
+    # bool return (match_file already returns a plain bool at runtime).
+    return bool(spec.match_file(rel_path))
+
+
+@functools.lru_cache(maxsize=512)
+def _compile_gitignore_spec(patterns: tuple[str, ...]) -> Any:
+    """Compile + memoize a ``pathspec`` PathSpec for ``patterns``.
+
+    ``is_path_gitignored`` is called once per path inside hot tree-walk
+    loops (cpv_skillaudit_native, validate_plugin) — millions of calls
+    against the *same* pattern set during a single scan. Re-running
+    ``pathspec.PathSpec.from_lines`` on every call re-parses every
+    gitignore line each time, which dominated the walk's CPU. Keying the
+    compiled spec on the immutable ``tuple(patterns)`` collapses that to
+    one compile per distinct pattern set.
+
+    ``functools.lru_cache`` is thread-safe under CPython (cache mutation
+    happens under the GIL), so no explicit lock is needed — the parallel
+    analogue ``gitignore_filter._load_pathspec`` only needs its own Lock
+    because it keys on a *mutable* file-stat tuple and re-checks after a
+    lock-free parse; here the key fully determines the value so a plain
+    LRU is sufficient.
+
+    Returns the compiled PathSpec, or ``None`` when ``pathspec`` cannot
+    be imported (caller falls back to the pure-Python matcher).
+    """
+    try:
+        import pathspec  # noqa: PLC0415
+    except ImportError:
+        return None
+    return pathspec.PathSpec.from_lines("gitwildmatch", patterns)
 
 
 def _is_path_gitignored_fallback(rel_path: str, patterns: list[str]) -> bool:
@@ -5565,7 +5594,6 @@ def is_valid_kebab_case(name: str) -> bool:
 COLORS = {
     "CRITICAL": "\033[91m",  # Red
     "MAJOR": "\033[93m",  # Yellow
-    "MAJOR_DARK": "\033[33m",  # Dark Yellow
     "MINOR": "\033[94m",  # Blue
     "NIT": "\033[96m",  # Cyan — blocks only in --strict
     "WARNING": "\033[95m",  # Magenta — never blocks, always reported
@@ -5970,7 +5998,10 @@ def save_report_and_print_summary(
     import io
     import sys
 
-    # Capture full verbose output
+    # Capture full verbose output. The stdout swap is wrapped in
+    # try/finally so the real stdout is ALWAYS restored even if print_fn
+    # raises — otherwise a buggy print_fn would leave every subsequent
+    # print() in the process writing into a dead StringIO.
     old_stdout = sys.stdout
     sys.stdout = buffer = io.StringIO()
     try:
@@ -5978,9 +6009,16 @@ def save_report_and_print_summary(
     finally:
         sys.stdout = old_stdout
 
-    # Write captured output to report file
+    # Write captured output to the report file atomically: write to a
+    # sibling .tmp then os.replace() into place (same atomic-rename
+    # pattern the integrity-manifest writer uses). A non-atomic
+    # write_text leaves a truncated/partial report on disk if the process
+    # is interrupted mid-write — readers (CI, the orchestrator) would then
+    # consume a corrupt report.
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(buffer.getvalue())
+    tmp_path = report_path.with_suffix(report_path.suffix + ".tmp")
+    tmp_path.write_text(buffer.getvalue())
+    os.replace(tmp_path, report_path)
 
     # Print compact summary to real stdout
     print_compact_summary(report, title, report_path, plugin_path=plugin_path)
