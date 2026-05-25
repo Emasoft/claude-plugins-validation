@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from cpv_management_common import save_json_safe
 from cpv_validation_common import get_plugin_root
 
 
@@ -248,14 +249,15 @@ def update_marketplace_json(
         marketplace_data["plugins"] = plugins
         marketplace_data["last_updated"] = new_entry["last_modified"]
 
-    # Write updated marketplace.json
+    # Write updated marketplace.json ATOMICALLY (tmp + os.replace + timestamped
+    # backup). A crash/signal/disk-full mid-write must never truncate the
+    # marketplace registry — save_json_safe writes a sibling .tmp then atomically
+    # renames it over the target, so the file is always either the old or the new
+    # complete content, never a half-written mix.
     try:
-        with open(marketplace_path, "w", encoding="utf-8") as f:
-            json.dump(marketplace_data, f, indent=2)
-            f.write("\n")
-
+        save_json_safe(marketplace_path, marketplace_data)
         return True, f"Updated marketplace.json with version {new_entry['version']}", True
-    except Exception as e:
+    except OSError as e:
         return False, f"Error writing marketplace.json: {e}", False
 
 

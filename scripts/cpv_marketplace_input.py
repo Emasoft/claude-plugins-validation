@@ -665,6 +665,7 @@ def resolve(
     input_spec: str | list[str],
     *,
     allow_url: bool = True,
+    _seen_listfiles: frozenset[Path] | None = None,
 ) -> list[ResolvedInput]:
     """Top-level resolver — accepts every shape described in the
     module docstring.
@@ -676,19 +677,26 @@ def resolve(
         allow_url: if False, URL specs raise InputResolutionError.
             Used by scope-aware skills (TRDD-a175f78d) which reject
             URL inputs.
+        _seen_listfiles: PRIVATE. The set of already-expanded ``@listfile``
+            paths on the current resolution chain, used to break a
+            self-referential / cyclic ``@a → @b → @a`` reference before it
+            recurses into a ``RecursionError`` (which is NOT an
+            ``InputResolutionError`` and would crash the consuming skill
+            with a raw traceback). Callers never pass this.
 
     Returns:
         A list of ResolvedInput. Empty list means the input spec
         resolved to zero items (e.g. an empty list file).
 
     Raises:
-        InputResolutionError: on ambiguous or unresolvable input.
+        InputResolutionError: on ambiguous or unresolvable input, including
+            a circular ``@listfile`` reference.
     """
     if isinstance(input_spec, list):
         # Recurse over each entry; flatten.
         out: list[ResolvedInput] = []
         for entry in input_spec:
-            out.extend(resolve(entry, allow_url=allow_url))
+            out.extend(resolve(entry, allow_url=allow_url, _seen_listfiles=_seen_listfiles))
         return out
 
     spec = input_spec.strip()
@@ -704,13 +712,17 @@ def resolve(
     if "," in spec and not spec.startswith("@") and not is_url_shape(spec):
         parts = [p.strip() for p in spec.split(",") if p.strip()]
         if len(parts) > 1 and all(is_url_shape(p) or Path(p).expanduser().exists() for p in parts):
-            return resolve(parts, allow_url=allow_url)
+            return resolve(parts, allow_url=allow_url, _seen_listfiles=_seen_listfiles)
 
     # @listfile shape.
     if spec.startswith("@"):
         list_path = Path(spec[1:]).expanduser().resolve()
+        seen = _seen_listfiles or frozenset()
+        if list_path in seen:
+            chain = " → ".join(str(p) for p in (*seen, list_path))
+            raise InputResolutionError(f"circular @listfile reference detected: {chain}")
         specs = _resolve_list_file(list_path)
-        return resolve(specs, allow_url=allow_url)
+        return resolve(specs, allow_url=allow_url, _seen_listfiles=seen | {list_path})
 
     # URL shape?
     if is_url_shape(spec):

@@ -731,8 +731,11 @@ def find_active_versions(cache_root: Path | None = None) -> dict[tuple[str, str]
                 for key, on in (data.get("enabledPlugins") or {}).items():
                     if on and isinstance(key, str):
                         enabled_keys.add(key)
-        except Exception:
-            pass
+        except (OSError, ValueError) as exc:
+            # A corrupt ~/.claude.json must not silently degrade the enabled-plugin
+            # enumeration — surface it so the user knows the active-version map may
+            # be incomplete (ValueError covers json.JSONDecodeError).
+            warn(f"Could not read {claude_json} for enabled-plugin enumeration: {exc}")
 
     # Source 2: ~/.claude/settings.json (user-scope)
     if SETTINGS_FILE.exists():
@@ -742,8 +745,8 @@ def find_active_versions(cache_root: Path | None = None) -> dict[tuple[str, str]
                 for key, on in (settings.get("enabledPlugins") or {}).items():
                     if on and isinstance(key, str):
                         enabled_keys.add(key)
-        except Exception:
-            pass
+        except (OSError, ValueError) as exc:
+            warn(f"Could not read {SETTINGS_FILE} for enabled-plugin enumeration: {exc}")
 
     # Each enabled key looks like "plugin@marketplace" — we don't get the
     # version directly; Claude Code resolves it at install time. The cached
