@@ -4421,20 +4421,17 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                             "usr" + _slash + "local" + _slash + "bin",
                         )
                     )
-                    # Suppress ONLY when the safe POSIX path begins AT the
-                    # match position. The RC-112 regex matches just the
-                    # short prefix (`/usr/`, `/bin/`, `/etc/`), so a plain
-                    # `safe in matched_text` can never see the longer
-                    # allowlist entries (`/usr/local/bin`, `/bin/sh`) — the
-                    # original code relied on `safe in line` for that, but
-                    # `in line` matched the safe substring ANYWHERE on the
-                    # line, so `y = "/etc/shadow"; x = "/usr/local/bin"`
-                    # had its genuine `/etc/` hit suppressed merely because
-                    # an unrelated safe path sat elsewhere. Anchoring the
-                    # check to `line[match.start():]` confirms the matched
-                    # prefix is the START of a known-safe path (suppress)
-                    # rather than just co-occurring with one (flag).
-                    # (audit m7)
+                    # Suppress ONLY when a known-safe POSIX path begins AT the
+                    # match position. The RC-112 regex matches just the short
+                    # system-dir prefix, so a plain `safe in matched_text` can
+                    # never see the longer allowlist entries. The original code
+                    # relied on `safe in line`, but `in line` matched the safe
+                    # substring ANYWHERE on the line — so a line carrying BOTH a
+                    # sensitive system path AND, elsewhere, an unrelated safe
+                    # path had its genuine sensitive hit wrongly suppressed.
+                    # Anchoring to `line[match.start():]` confirms the matched
+                    # prefix is the START of a known-safe path (suppress) rather
+                    # than just co-occurring with one (flag). (audit m7)
                     line_from_match = line[match.start() :]
                     if any(line_from_match.startswith(safe) for safe in KNOWN_SAFE_PATHS):
                         continue
