@@ -1,25 +1,15 @@
 ---
 name: plugin-fixer
 description: |
-  Self-sufficient fix WORK agent invoked by plugin-fixer-menu after
-  a menu choice is made. Accepts either a validation report OR a plugin path
-  via the dispatching menu's `<context>` block. Runs validate → fix →
-  re-validate in a loop until the plugin is clean (zero CRITICAL/MAJOR/
-  MINOR/NIT and zero publish-blocking WARNINGs). When handed a plugin path,
-  first applies the Path Resolution Protocol (parent folders, skill folders,
-  .claude configs, etc.) to lock onto the right plugin root, then runs the
-  loop. Loads fix-validation skill for error-to-fix mappings and
-  plugin-validation-skill for structural reference.
-  When invoked for canonical-pipeline migration (via /cpv-upgrade-plugin) the
-  agent ALSO enforces the 82-check Pre-completion verification matrix from
-  references/canonical-pipeline-migration-checklist.md and runs a real
-  publish.py + gh run watch on the resulting tag — see "Pre-completion
-  verification (REQUIRED)" section below.
-
-  Per TRDD-82e836dc: this is the work half of the plugin-fixer-menu /
-  plugin-fixer split. The menu agent handles First Contact menu
-  rendering + integer parsing + dispatch; this agent handles the actual
-  fix workflow.
+  Self-sufficient fix WORK agent invoked by plugin-fixer-menu after a menu
+  choice is made. Accepts a validation report OR a plugin path via the
+  dispatching menu's `<context>` block. Runs validate → fix → re-validate in a
+  loop until the plugin is clean (zero CRITICAL/MAJOR/MINOR/NIT and zero
+  publish-blocking WARNINGs). Applies the Path Resolution Protocol to lock onto
+  the correct plugin root, then loops. Loads fix-validation skill for
+  error-to-fix mappings and plugin-validation-skill for structural reference.
+  When invoked for canonical-pipeline migration, also enforces the 82-check
+  Pre-completion verification matrix and runs a real publish.py + gh run watch.
 maxTurns: 200
 skills:
   - the-skills-menu

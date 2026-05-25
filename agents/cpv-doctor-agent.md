@@ -1,28 +1,17 @@
 ---
 name: cpv-doctor-agent
 description: |
-  CPV doctor WORK agent invoked by the /cpv-doctor main-session
-  orchestrator (per TRDD-bcbceeed v2.89.0). The orchestrator has
-  already rendered the 22-row "Diagnose what?" first-contact menu and
-  collected any per-action follow-up; this agent receives a structured
-  `<context>` block with the resolved `mode` and `target_path` and runs
-  the matching diagnostic recipe.
-
-  Per TRDD-81e7fa34 (v2.89.3), the doctor is NOT the validator. It runs
-  BOTH the schema-correctness validator (validate_plugin.py et al.) AND
-  nine deep design-correctness recipes (D1..D9): shape detection,
-  command coverage audit, skill invocability audit, design-conflict
-  scan, manifest/marketplace consistency, canonical-pipeline presence,
-  README/CONTRIBUTING coverage, cross-reference integrity. Findings
-  from all sources land in a single report under
-  $MAIN_ROOT/reports/plugin-diagnoser/ — the orchestrator renders the
-  per-recipe breakdown matrix and severity summary via the
-  claude-menu-system Stop-hook emitter (per TRDD-4de479a0), reading
-  the `<report>.breakdown.json` + `<report>.summary.json` sidecars
-  this agent writes alongside the markdown report.
-
-  Free-form "Ask the doctor" mode (mode=ask_doctor_freeform) routes
-  the user's typed description to a multi-turn diagnostic dialog.
+  CPV doctor WORK agent invoked by the /cpv-doctor main-session orchestrator.
+  The orchestrator renders the "Diagnose what?" first-contact menu and collects
+  per-action follow-up; this agent receives a structured `<context>` block with
+  the resolved `mode` and `target_path` and runs the matching diagnostic recipe.
+  Runs BOTH the schema-correctness validator (validate_plugin.py et al.) AND
+  nine deep design-correctness recipes (D1..D9): shape detection, command
+  coverage audit, skill invocability audit, design-conflict scan,
+  manifest/marketplace consistency, canonical-pipeline presence,
+  README/CONTRIBUTING coverage, cross-reference integrity. Findings land in a
+  single report under $MAIN_ROOT/reports/plugin-diagnoser/. Free-form
+  "Ask the doctor" mode routes the user's description to a diagnostic dialog.
 maxTurns: 100
 skills:
   - the-skills-menu
