@@ -37,7 +37,6 @@ staging tree and handles cross-fs fallbacks) and `cpv_install_scanners.py`
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -152,11 +151,15 @@ def run_fclones(stage_root: Path) -> DedupResult:
             [
                 "fclones",
                 "group",
-                str(stage_root),
                 "--format",
                 "json",
                 "--hidden",  # include dotfiles (scanners may flag .env etc.)
                 "--no-ignore",  # CPV must see EVERY file the scanners would see
+                # `--` ends option parsing so a stage_root that happens to begin
+                # with `-` is treated as a path, not a flag. stage_root is
+                # CPV-internal today, but the separator is the standard guard.
+                "--",
+                str(stage_root),
             ],
             capture_output=True,
             text=True,
@@ -276,10 +279,28 @@ def _extract_group_members(group: object) -> list[Path]:
 # ── Apply dedup (delete non-canonical hardlinks) ───────────────────
 
 
+def _is_within(candidate: Path, boundary: Path) -> bool:
+    """True iff ``candidate`` resolves to a path inside ``boundary``.
+
+    ``boundary`` is expected to be already-resolved (an absolute, symlink-free
+    Path). ``candidate`` is resolved here so a relative path or a path with
+    ``..`` segments is normalised before the containment check. A candidate
+    whose path cannot be resolved (e.g. an unreadable parent) is treated as
+    NOT within the boundary — fail-safe, since we'd rather skip a delete than
+    risk one outside the staging tree.
+    """
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return False
+    return resolved == boundary or boundary in resolved.parents
+
+
 def apply_dedup(
     dedup_map: dict[Path, list[Path]],
     *,
     dry_run: bool = False,
+    stage_root: Path | None = None,
 ) -> tuple[int, int]:
     """Delete all non-canonical members in ``dedup_map`` from disk.
 
@@ -294,17 +315,42 @@ def apply_dedup(
         dry_run: When True, computes ``files_removed`` and ``bytes_saved``
             stats without actually deleting anything. Used by tests and
             by ``cpv-doctor --plan-dedup`` to preview a dedup operation.
+        stage_root: Optional containment boundary. When provided, every
+            victim is verified to resolve INSIDE ``stage_root`` before it is
+            unlinked; any victim that escapes the boundary is skipped (it is
+            neither deleted nor counted). This is defense-in-depth: fclones
+            only ever reports paths under the tree it scanned, so in normal
+            operation no victim escapes — but a hand-built or tampered
+            ``dedup_map`` cannot trick ``apply_dedup`` into deleting outside
+            the staging tree. When ``None`` (the default) no containment
+            check is applied, preserving the original behaviour for callers
+            that don't pass a boundary.
 
     Returns:
         ``(files_removed, bytes_saved)``. Both zero when ``dedup_map`` is
         empty. Files that fail to delete (already gone, permission denied,
         directory entry vanished) are silently ignored — the dedup count
-        reflects the actual disk state, not the intent.
+        reflects the actual disk state, not the intent. Files skipped by the
+        containment guard are also not counted.
     """
+    boundary: Path | None = None
+    if stage_root is not None:
+        try:
+            boundary = stage_root.resolve()
+        except OSError:
+            # If the boundary itself can't be resolved we cannot safely
+            # vouch for ANY victim, so treat the whole pass as a no-op
+            # rather than risk an unguarded delete (fail-safe).
+            return 0, 0
+
     files_removed = 0
     bytes_saved = 0
     for _canonical, members in dedup_map.items():
         for victim in members[1:]:  # skip index 0 (the canonical)
+            if boundary is not None and not _is_within(victim, boundary):
+                # Victim escapes the staging tree — refuse to delete it.
+                # Skipped victims are not counted in the dedup stats.
+                continue
             try:
                 size = victim.stat().st_size if victim.is_file() else 0
             except OSError:
@@ -400,7 +446,7 @@ def _cli_main(argv: list[str]) -> int:
         print(f"  canonical={canonical}  dup_count={len(members) - 1}")
 
     if result.dedup_map:
-        files, bytes_ = apply_dedup(result.dedup_map, dry_run=not args.apply)
+        files, bytes_ = apply_dedup(result.dedup_map, dry_run=not args.apply, stage_root=args.stage_root)
         verb = "would remove" if not args.apply else "removed"
         print(f"{verb} {files} file(s) ({bytes_} bytes)")
     return 0
@@ -410,7 +456,3 @@ if __name__ == "__main__":  # pragma: no cover
     import sys
 
     sys.exit(_cli_main(sys.argv[1:]))
-
-
-# Suppress "unused import" warning when os is only used in tests/CLI futures
-_ = os
