@@ -408,6 +408,31 @@ def _parallel_scan_lsp_servers(
         report.results.extend(scan_result.findings)
 
 
+def _looks_like_unwrapped_lsp_server_map(config: dict[str, Any]) -> bool:
+    """True iff a wrapper-less object is an unwrapped ``.lsp.json`` server map.
+
+    The official ``.lsp.json`` shape has top-level keys = server names and each
+    value = a server config. We only treat a wrapper-less object as a server
+    map when it is non-empty, every value is a dict, AND at least one value
+    carries a recognized LSP server field (``KNOWN_LSP_FIELDS``).
+
+    That last clause is what distinguishes a real server map from an arbitrary
+    JSON object such as ``{"someOtherKey": {}}`` — without it, any
+    dict-of-empty-dicts would be misread as a (malformed) server map and the
+    "no language server definitions found" INFO would never fire. Requiring a
+    recognized field still admits command-less-but-otherwise-server-shaped
+    entries (e.g. ``{"go": {"extensionToLanguage": {...}}}``) so the per-server
+    validator can flag the genuinely-missing ``command`` rather than the whole
+    file silently dropping out of LSP validation.
+    """
+    if not config:
+        return False
+    values = list(config.values())
+    if not all(isinstance(v, dict) for v in values):
+        return False
+    return any(KNOWN_LSP_FIELDS & set(v.keys()) for v in values)
+
+
 def validate_lsp_config(
     config_path: Path,
     plugin_root: Path | None = None,
@@ -464,12 +489,13 @@ def validate_lsp_config(
             return report
     else:
         # Unwrapped form — the OFFICIAL `.lsp.json` shape per docs: top-level
-        # keys ARE server names, each value a server config. Detected exactly as
-        # _extract_lsp_server_names_from_config_file does (all values are dicts),
-        # so the field-validation path and the collision path agree on what a
-        # valid unwrapped `.lsp.json` looks like — without this fallback the
-        # single most common standalone LSP config escaped ALL per-server checks.
-        if config and all(isinstance(v, dict) for v in config.values()):
+        # keys ARE server names, each value a server config. Detected via the
+        # shared `_looks_like_unwrapped_lsp_server_map` helper (same predicate
+        # used by `_extract_lsp_server_names_from_config_file`), so the
+        # field-validation path and the collision path agree on what a valid
+        # unwrapped `.lsp.json` looks like — without this fallback the single
+        # most common standalone LSP config escaped ALL per-server checks.
+        if _looks_like_unwrapped_lsp_server_map(config):
             servers = config
         else:
             report.info(f"No language server definitions found in {rel_path}")
@@ -528,9 +554,11 @@ def _extract_lsp_server_names_from_config_file(config_path: Path) -> list[str]:
         wrapped = data.get(wrapper_key)
         if isinstance(wrapped, dict):
             return list(wrapped.keys())
-    # Unwrapped form: top-level keys ARE server names (each value must be a dict).
-    # Skip if the file is wrapped in some other unrelated structure.
-    if all(isinstance(v, dict) for v in data.values()) and data:
+    # Unwrapped form: top-level keys ARE server names (each value a server
+    # config). Uses the same `_looks_like_unwrapped_lsp_server_map` predicate as
+    # `validate_lsp_config` so name-extraction and field-validation agree — an
+    # arbitrary dict-of-empty-dicts is NOT a server map.
+    if _looks_like_unwrapped_lsp_server_map(data):
         return list(data.keys())
     return []
 

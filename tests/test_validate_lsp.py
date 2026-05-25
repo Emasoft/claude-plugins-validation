@@ -534,6 +534,59 @@ class TestValidateLspConfigExtended:
         assert _has_message_containing(report, "1 LSP server")
 
 
+class TestUnwrappedLspServerMapDiscriminator:
+    """The unwrapped `.lsp.json` heuristic must distinguish a real server map
+    from an arbitrary dict-of-dicts (audit FP recalibration, batch-1 follow-up).
+
+    A wrapper-less object is treated as an unwrapped server map ONLY when at
+    least one value carries a recognized LSP field — otherwise the validator
+    must say "no language server definitions found" rather than misreading an
+    unrelated object as a (malformed) server map.
+    """
+
+    def test_dict_of_empty_dicts_is_not_a_server_map(self, tmp_path):
+        """`{"someKey": {}}` has no LSP fields → INFO 'no definitions', not a server."""
+        config_file = tmp_path / "lsp-config.json"
+        config_file.write_text(json.dumps({"someOtherKey": {}}))
+        report = validate_lsp_config(config_file, plugin_root=tmp_path)
+        assert _has_message_containing(report, "No language server definitions found")
+        # And it must NOT have been treated as a server (no per-server findings).
+        assert not _has_message_containing(report, "Found 1 LSP server")
+
+    def test_unrelated_nested_json_is_not_a_server_map(self, tmp_path):
+        """A dict-of-dicts with no recognized LSP field is not a server map."""
+        config_file = tmp_path / "lsp-config.json"
+        config_file.write_text(json.dumps({"a": {"b": 1}, "c": {"d": 2}}))
+        report = validate_lsp_config(config_file, plugin_root=tmp_path)
+        assert _has_message_containing(report, "No language server definitions found")
+
+    def test_command_bearing_unwrapped_config_is_a_server_map(self, tmp_path):
+        """Two-sided: a real unwrapped `.lsp.json` (has command) IS validated per-server."""
+        config_file = tmp_path / "lsp-config.json"
+        config_file.write_text(
+            json.dumps({"gopls": {"command": "gopls", "extensionToLanguage": {".go": "go"}}})
+        )
+        report = validate_lsp_config(config_file, plugin_root=tmp_path)
+        assert _has_message_containing(report, "1 LSP server")
+        assert not _has_message_containing(report, "No language server definitions found")
+
+    def test_command_less_but_server_shaped_config_still_validated(self, tmp_path):
+        """Two-sided: a server-SHAPED unwrapped entry missing `command` is still
+        recognized as a server (so the per-server validator flags the real defect)
+        rather than silently dropping out of LSP validation entirely."""
+        config_file = tmp_path / "lsp-config.json"
+        # Has a recognized LSP field (extensionToLanguage) but no command.
+        config_file.write_text(json.dumps({"go": {"extensionToLanguage": {".go": "go"}}}))
+        report = validate_lsp_config(config_file, plugin_root=tmp_path)
+        # Recognized as a server map (NOT "no definitions")...
+        assert not _has_message_containing(report, "No language server definitions found")
+        # ...and the genuinely-missing command is surfaced.
+        assert any(
+            r.level in ("CRITICAL", "MAJOR") and "command" in r.message.lower()
+            for r in report.results
+        ), f"missing command should be flagged: {[r.message for r in report.results]}"
+
+
 class TestValidatePluginLspExtended:
     """Extended tests for validate_plugin_lsp with real config files."""
 
