@@ -1740,8 +1740,13 @@ def _is_self_scan_eligible(file_path: str) -> bool:
     # `test_evil.py` cannot evade scanning.
     if basename.startswith("test_") and basename.endswith(".py"):
         return True
-    # Test fixtures contain pattern strings by design.
-    if "/tests/fixtures/" in file_normalized:
+    # Test fixtures contain pattern strings by design. The `startswith` clause is
+    # REQUIRED for RELATIVE paths (`tests/fixtures/evil.py` has no leading `/`) —
+    # without it the in-process walker (which yields relative paths) returned
+    # False here while _plugin_compute_hashes hashed them, so the 29 tracked
+    # fixture files were scanned during self-scan (self-FP). Keep in lockstep
+    # with _plugin_compute_hashes.is_self_scan_eligible. (audit MAJOR cache #3)
+    if "/tests/fixtures/" in file_normalized or file_normalized.startswith("tests/fixtures/"):
         return True
     # CPV rule catalogs (e.g. scripts/rules/skillaudit_patterns.json —
     # v2.99.0 native skillaudit port; moved into scripts/ in v2.99.3 so

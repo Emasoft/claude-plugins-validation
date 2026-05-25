@@ -34,6 +34,7 @@ unavailable tools without touching the host environment.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -1254,6 +1255,61 @@ def _replay_results_into_report(
         report.results.append(result)
 
 
+# Per-language linter config files. Editing one of these changes the lint
+# OUTPUT for the same source bytes, so its content MUST be folded into the cache
+# key — otherwise an edit to `.markdownlint.json` / ruff config / `.eslintrc`
+# returned stale findings for up to the 30-day TTL. (audit MAJOR cache #1)
+_LANG_CONFIG_FILENAMES: dict[str, tuple[str, ...]] = {
+    "markdown": (
+        ".markdownlint.json",
+        ".markdownlint.jsonc",
+        ".markdownlint.yaml",
+        ".markdownlint.yml",
+        ".markdownlintrc",
+        ".markdownlint-cli2.jsonc",
+        ".markdownlint-cli2.yaml",
+        ".markdownlint-cli2.cjs",
+    ),
+    "python": ("pyproject.toml", "ruff.toml", ".ruff.toml", "setup.cfg", "tox.ini"),
+    "javascript": (
+        ".eslintrc",
+        ".eslintrc.js",
+        ".eslintrc.cjs",
+        ".eslintrc.json",
+        ".eslintrc.yml",
+        ".eslintrc.yaml",
+        "eslint.config.js",
+        "eslint.config.mjs",
+        "eslint.config.cjs",
+        "package.json",
+        "tsconfig.json",
+    ),
+    "yaml": (".yamllint", ".yamllint.yaml", ".yamllint.yml"),
+    "shell": (".shellcheckrc",),
+    "rust": ("rustfmt.toml", ".rustfmt.toml", "clippy.toml", ".clippy.toml"),
+    "dockerfile": (".hadolint.yaml", ".hadolint.yml"),
+    "css": (".stylelintrc", ".stylelintrc.json", ".stylelintrc.yaml", "stylelint.config.js"),
+    "sql": (".sqlfluff",),
+}
+
+
+def _config_fingerprint(lang: str, plugin_root: Path) -> str:
+    """Hash the resolved linter config files for ``lang`` that exist under
+    ``plugin_root`` so editing one invalidates the lint cache. (audit MAJOR cache #1)"""
+    h = hashlib.sha256()
+    for name in _LANG_CONFIG_FILENAMES.get(lang, ()):
+        cfg = plugin_root / name
+        try:
+            if cfg.is_file():
+                h.update(name.encode("utf-8"))
+                h.update(b"\0")
+                h.update(cfg.read_bytes())
+                h.update(b"\0")
+        except OSError:
+            continue
+    return h.hexdigest()
+
+
 def _build_cache_key(
     lang: str,
     files: list[Path],
@@ -1283,6 +1339,9 @@ def _build_cache_key(
     # for the same file content (a missing tool is MAJOR vs WARNING).
     args = list(flag_list)
     args.append(f"strict_missing_tools={strict_missing_tools}")
+    # Fold the resolved linter config content into the key so editing a config
+    # file invalidates the cache (audit MAJOR cache #1).
+    args.append(f"config_fingerprint={_config_fingerprint(lang, plugin_root)}")
     args_hash = sha256_of_args(args)
 
     primary_tool = _PRIMARY_TOOL.get(lang, lang)
