@@ -109,3 +109,12 @@ rck-*-merge-pending.md
 # Reproducible via the docstring at the top of that test file. Not
 # committed to keep the CPV repo size reasonable.
 /tests/fixtures/issue_33_no_fp_janitor/
+
+# CI-generated artifacts written into the repo root by .github/workflows/release.yml.
+# The Release workflow captures `validate_plugin.py . --strict` output to
+# validation-report.txt and copies CHANGELOG.md to changelog.txt, both uploaded
+# as release assets. They MUST be gitignored: (1) they're generated, never source;
+# (2) the validator's own gitignore-aware tree walk then skips validation-report.txt,
+# so its captured output can't trip the encoding control-character check on itself.
+/validation-report.txt
+/changelog.txt

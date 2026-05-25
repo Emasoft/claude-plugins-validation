@@ -34,7 +34,7 @@ jobs:
       - name: Run full plugin validation (strict — same gate as pre-push hook)
         run: |
           set +e
-          uv run python scripts/validate_plugin.py . --verbose --strict > validation-report.txt 2>&1
+          uv run python scripts/validate_plugin.py . --verbose --strict --no-color > validation-report.txt 2>&1
           exit_code=$?
           set -e
           cat validation-report.txt

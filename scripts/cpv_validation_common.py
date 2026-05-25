@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -5781,12 +5782,11 @@ def is_valid_kebab_case(name: str) -> bool:
 # Color Formatting (for terminal output)
 # =============================================================================
 
-# ANSI color codes — IMMUTABLE. Never mutate this dict at runtime; use
-# `set_color_enabled(False)` instead. Mutating the dict is shared-state
+# ANSI color codes — IMMUTABLE raw table. Never mutate at runtime; toggle
+# output via `set_color_enabled(False)`. Mutating a shared dict is shared-state
 # pollution that flares under pytest-xdist parallel workers (one worker's
-# `--no-color` validate run clobbers COLORS for every other worker's
-# subsequent `colorize()` call in the same process).
-COLORS = {
+# `--no-color` run would clobber colors for every other worker in the process).
+_RAW_COLORS = {
     "CRITICAL": "\033[91m",  # Red
     "MAJOR": "\033[93m",  # Yellow
     "MINOR": "\033[94m",  # Blue
@@ -5799,18 +5799,53 @@ COLORS = {
     "DIM": "\033[2m",  # Dim
 }
 
-# Color-enabled flag. False → colorize/format_result emit no ANSI codes.
-# Set via set_color_enabled() — never mutate COLORS itself.
+# Color-enabled flag. False → every COLORS read AND colorize/format_result
+# emit no ANSI codes. Set via set_color_enabled() — never mutate the table.
 _COLOR_ENABLED: bool = True
+
+
+class _ColorMap(Mapping):
+    """ANSI color table that honors the global ``_COLOR_ENABLED`` flag.
+
+    Reading any key returns its ANSI escape when colors are enabled, or ``""``
+    when disabled (``--no-color`` / non-TTY stdout). This is the SINGLE point
+    that makes every direct ``COLORS['X']`` read respect the flag — not only
+    ``colorize()`` / ``format_result()``. Before this, ~100 direct reads
+    (summary headers, ``[REPO LINT]`` banners, per-validator output) leaked raw
+    ``\\033[`` codes into redirected output even under ``--no-color``, which
+    (a) made captured CI report files unreadable and (b) tripped the encoding
+    control-character check when the release workflow scanned its own report.
+
+    The raw table is never mutated, so there is no pytest-xdist shared-state
+    pollution — the per-process ``_COLOR_ENABLED`` flag is the only switch.
+    Dict-compatible: ``COLORS['X']`` raises ``KeyError`` for unknown keys,
+    ``COLORS.get('X', '')`` and ``'X' in COLORS`` work via the Mapping ABC.
+    """
+
+    __slots__ = ()
+
+    def __getitem__(self, key: str) -> str:
+        code = _RAW_COLORS[key]  # KeyError for unknown keys (dict-compatible)
+        return code if _COLOR_ENABLED else ""
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(_RAW_COLORS)
+
+    def __len__(self) -> int:
+        return len(_RAW_COLORS)
+
+
+# Public color table. Reads honor _COLOR_ENABLED; see _ColorMap.
+COLORS: Mapping[str, str] = _ColorMap()
 
 
 def set_color_enabled(enabled: bool) -> None:
     """Toggle ANSI color output globally for this process.
 
     Call this from a CLI's main() when --no-color is passed or stdout
-    isn't a TTY. Replaces the older "for k in COLORS: COLORS[k] = ''"
-    pattern which was shared-state pollution that broke under
-    pytest-xdist parallel workers.
+    isn't a TTY. Flips the per-process _COLOR_ENABLED flag that every
+    COLORS read (via _ColorMap) and colorize()/format_result() consult —
+    never mutates the raw color table, so it is pytest-xdist-safe.
     """
     global _COLOR_ENABLED
     _COLOR_ENABLED = bool(enabled)
