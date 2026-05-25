@@ -1208,29 +1208,6 @@ def is_npm_package_shape(text: str) -> bool:
     return bool(_NPM_SHAPE_RE.match(text.strip()))
 
 
-def description_has_trigger_phrases(description: str) -> bool:
-    """True if a skill `description:` contains explicit trigger-phrase markers.
-
-    Issue #16 category E: when a description packs trigger phrases like
-    "use when …", "trigger with …", "include keywords …", the length cap
-    should be raised — these phrases earn the longer description.
-    """
-    if not description:
-        return False
-    text = description.lower()
-    markers = (
-        "use when",
-        "use this when",
-        "trigger with",
-        "trigger when",
-        "use this skill when",
-        "include keywords",
-        "useful when",
-        "invoke when",
-    )
-    return any(marker in text for marker in markers)
-
-
 def is_orchestrator_skill(skill_name: str, skills_root: Path, threshold: int = 3) -> bool:
     """True if `skill_name` is referenced by ≥`threshold` sibling skills via `../`.
 
