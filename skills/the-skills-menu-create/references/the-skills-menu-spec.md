@@ -247,13 +247,16 @@ MAJOR/MINOR by the validator and block the migrated plugin's publish.
 Generate the structural sections too — synthesise conservative,
 accurate text from the plugin's actual skills.
 
-If the catalog grows past the harness's per-file soft cap (CPV: ~5000
-chars), move the full per-skill table into
-`skills/the-skills-menu/references/skills-catalog.md` and keep a
+If the catalog grows past the skill-body budget (CPV: 5,000 **tokens** —
+the runtime keeps only ~5,000 tokens of a skill body after auto-compaction,
+so anything beyond that is silently dropped), move the full per-skill table
+into `skills/the-skills-menu/references/skills-catalog.md` and keep a
 domain-grouped summary table in `SKILL.md` (progressive disclosure),
-exactly as CPV's own catalog does. Set
-`cpv.skill_size_severity: warning` (or the host harness equivalent) in
-`plugin.json` only if a justified overflow remains after the split.
+exactly as CPV's own catalog does. The budget is **token-based and
+non-negotiable** — there is no per-plugin override (the old
+`cpv.max_chars` / `cpv.max_lines` / `cpv.skill_size_severity` keys were
+removed in TRDD-021250b5); the only fix for an oversized body is the
+progressive-disclosure split.
 
 ### Catalog sections
 
