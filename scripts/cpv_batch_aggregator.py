@@ -34,7 +34,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+# Schema version of the ``index.json`` this aggregator consumes. Must track
+# ``cpv_batch_planner.SCHEMA_VERSION`` (the planner is the producer). v2 added
+# scope-based ownership; load_index() warns if the index it reads carries a
+# different version so a producer/consumer drift is visible instead of silent.
+SCHEMA_VERSION = 2
 
 
 @dataclass
@@ -55,29 +59,57 @@ def load_index(session_dir: Path) -> dict[str, Any]:
     if not index_path.exists():
         raise FileNotFoundError(f"index.json not found in session dir: {session_dir}")
     parsed: dict[str, Any] = json.loads(index_path.read_text())
+    # Surface a producer/consumer schema drift instead of silently misreading
+    # an index this aggregator doesn't understand. Warn (don't reject): a
+    # dev CLI should still attempt a best-effort merge, and the fields this
+    # aggregator reads have been stable across v1→v2.
+    found = parsed.get("schema_version")
+    if found != SCHEMA_VERSION:
+        print(
+            f"warning: index.json schema_version={found!r} differs from "
+            f"expected {SCHEMA_VERSION}; report may be incomplete",
+            file=sys.stderr,
+        )
     return parsed
 
 
 def load_shard_status(status_path: Path, shard_id: int) -> ShardSummary:
-    """Read one shard's status JSON; tolerate missing/malformed files."""
+    """Read one shard's status JSON; tolerate missing/malformed files.
+
+    "Malformed" includes more than just invalid JSON: a hand-edited status
+    file can hold non-numeric ``fixed``/``failed``/``remaining``/``shard_id``
+    values (ValueError/TypeError from ``int()``) or non-UTF-8 bytes
+    (UnicodeDecodeError from ``read_text()``). All of these degrade to a
+    ``ShardSummary`` carrying an ``error`` instead of escaping as a traceback,
+    honouring the documented tolerance contract.
+    """
     if not status_path.exists():
         return ShardSummary(shard_id=shard_id, error=f"status file missing: {status_path}")
     try:
-        data = json.loads(status_path.read_text())
+        raw = status_path.read_text()
+    except (UnicodeDecodeError, OSError) as exc:
+        return ShardSummary(shard_id=shard_id, error=f"status file unreadable: {exc}")
+    try:
+        data = json.loads(raw)
     except json.JSONDecodeError as exc:
         return ShardSummary(shard_id=shard_id, error=f"status file unparseable: {exc}")
     if not isinstance(data, dict):
         return ShardSummary(shard_id=shard_id, error="status file is not a JSON object")
-    return ShardSummary(
-        shard_id=int(data.get("shard_id", shard_id)),
-        fixed=int(data.get("fixed", 0)),
-        failed=int(data.get("failed", 0)),
-        remaining=int(data.get("remaining", 0)),
-        agent_exit_reason=str(data.get("agent_exit_reason", "unknown")),
-        started_at=str(data.get("started_at", "")),
-        finished_at=str(data.get("finished_at", "")),
-        per_file=list(data.get("per_file", [])) if isinstance(data.get("per_file"), list) else [],
-    )
+    try:
+        return ShardSummary(
+            shard_id=int(data.get("shard_id", shard_id)),
+            fixed=int(data.get("fixed", 0)),
+            failed=int(data.get("failed", 0)),
+            remaining=int(data.get("remaining", 0)),
+            agent_exit_reason=str(data.get("agent_exit_reason", "unknown")),
+            started_at=str(data.get("started_at", "")),
+            finished_at=str(data.get("finished_at", "")),
+            per_file=list(data.get("per_file", [])) if isinstance(data.get("per_file"), list) else [],
+        )
+    except (ValueError, TypeError) as exc:
+        # Non-numeric / non-coercible field (e.g. fixed="oops") — keep the
+        # known shard_id from the index, surface the reason.
+        return ShardSummary(shard_id=shard_id, error=f"status file has invalid field: {exc}")
 
 
 def resolve_main_root() -> Path:
@@ -194,7 +226,9 @@ def aggregate(session_dir: Path, report_path: Path | None = None) -> dict[str, A
         main_root = resolve_main_root()
         report_dir = main_root / "reports" / "plugin-fixer"
         report_dir.mkdir(parents=True, exist_ok=True)
-        ts = time.strftime("%Y%m%d_%H%M%S") + time.strftime("%z")
+        # Single strftime read so the date/time and GMT offset come from ONE
+        # clock sample — two reads can straddle a sub-second midnight.
+        ts = time.strftime("%Y%m%d_%H%M%S%z")
         plugin_basename = Path(index.get("plugin_path", "plugin")).name or "plugin"
         report_path = report_dir / f"{ts}-{plugin_basename}-batch.md"
     else:
