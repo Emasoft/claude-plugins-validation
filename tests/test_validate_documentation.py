@@ -70,12 +70,17 @@ class TestRule1ReadmeExists:
         assert not report.has_critical
         assert any(r.level == "PASSED" and "README.md" in r.message for r in report.results)
 
-    def test_readme_missing_critical(self, tmp_path: Path):
-        """When README.md is missing, should report CRITICAL."""
+    def test_readme_missing_warning(self, tmp_path: Path):
+        """When README.md is missing, should report WARNING (advisory, not blocking).
+
+        Per TRDD-021250b5: a missing README is a documentation-quality matter,
+        not runtime breakage or Anthropic-invalidity, so it is advisory — a
+        README-less plugin is VALID with a warning.
+        """
         report = DocumentationValidationReport(plugin_path=str(tmp_path))
         validate_readme_exists(tmp_path, report)
-        assert report.has_critical
-        assert any("README.md" in r.message and r.level == "CRITICAL" for r in report.results)
+        assert not report.has_critical
+        assert any("README.md" in r.message and r.level == "WARNING" for r in report.results)
 
 
 class TestRule2InstallationSection:
@@ -90,14 +95,15 @@ class TestRule2InstallationSection:
         assert not report.has_major
         assert any(r.level == "PASSED" and "installation" in r.message.lower() for r in report.results)
 
-    def test_installation_section_missing_major(self, tmp_path: Path):
-        """README without Installation section should report MAJOR."""
+    def test_installation_section_missing_warning(self, tmp_path: Path):
+        """README without Installation section should report WARNING (advisory, non-blocking)."""
         readme = tmp_path / "README.md"
         readme.write_text("# Plugin\nJust a description.")
         report = DocumentationValidationReport(plugin_path=str(tmp_path))
         validate_installation_section(tmp_path, report)
-        assert report.has_major
-        assert any("installation" in r.message.lower() and r.level == "MAJOR" for r in report.results)
+        assert not report.has_major
+        assert report.has_warning
+        assert any("installation" in r.message.lower() and r.level == "WARNING" for r in report.results)
 
     def test_installation_alternate_headings(self, tmp_path: Path):
         """README with 'Getting Started' or 'Setup' should also pass."""
@@ -119,13 +125,14 @@ class TestRule3UsageSection:
         validate_usage_section(tmp_path, report)
         assert not report.has_major
 
-    def test_usage_section_missing_major(self, tmp_path: Path):
-        """README without Usage section should report MAJOR."""
+    def test_usage_section_missing_warning(self, tmp_path: Path):
+        """README without Usage section should report WARNING (advisory, non-blocking)."""
         readme = tmp_path / "README.md"
         readme.write_text("# Plugin\nNo usage info here.")
         report = DocumentationValidationReport(plugin_path=str(tmp_path))
         validate_usage_section(tmp_path, report)
-        assert report.has_major
+        assert not report.has_major
+        assert report.has_warning
 
 
 class TestRule4DescriptionSection:
@@ -139,13 +146,14 @@ class TestRule4DescriptionSection:
         validate_description_section(tmp_path, report)
         assert not report.has_major
 
-    def test_description_missing_major(self, tmp_path: Path):
-        """README without description should report MAJOR."""
+    def test_description_missing_warning(self, tmp_path: Path):
+        """README without description should report WARNING (advisory, non-blocking)."""
         readme = tmp_path / "README.md"
         readme.write_text("# Plugin\n## Installation")
         report = DocumentationValidationReport(plugin_path=str(tmp_path))
         validate_description_section(tmp_path, report)
-        assert report.has_major
+        assert not report.has_major
+        assert report.has_warning
 
 
 class TestRule5MarkdownFormatting:
@@ -200,12 +208,13 @@ class TestRule7Changelog:
         validate_changelog_exists(tmp_path, report)
         assert any(r.level == "PASSED" and "CHANGELOG" in r.message for r in report.results)
 
-    def test_changelog_missing_minor(self, tmp_path: Path):
-        """When CHANGELOG.md is missing, should report MINOR."""
+    def test_changelog_missing_warning(self, tmp_path: Path):
+        """When CHANGELOG.md is missing, should report WARNING (advisory, non-blocking)."""
         report = DocumentationValidationReport(plugin_path=str(tmp_path))
         validate_changelog_exists(tmp_path, report)
-        assert report.has_minor
-        assert any("CHANGELOG" in r.message and r.level == "MINOR" for r in report.results)
+        assert not report.has_minor
+        assert report.has_warning
+        assert any("CHANGELOG" in r.message and r.level == "WARNING" for r in report.results)
 
 
 class TestRule8HeadingHierarchy:
@@ -219,13 +228,14 @@ class TestRule8HeadingHierarchy:
         validate_heading_hierarchy(tmp_path, report)
         assert not report.has_minor
 
-    def test_skipped_heading_minor(self, tmp_path: Path):
-        """Skipped heading level (h1 -> h3) should report MINOR."""
+    def test_skipped_heading_warning(self, tmp_path: Path):
+        """Skipped heading level (h1 -> h3) should report WARNING (advisory, non-blocking)."""
         readme = tmp_path / "README.md"
         readme.write_text("# Title\n### Subsection without h2")
         report = DocumentationValidationReport(plugin_path=str(tmp_path))
         validate_heading_hierarchy(tmp_path, report)
-        assert report.has_minor
+        assert not report.has_minor
+        assert report.has_warning
         assert any("heading" in r.message.lower() and "skip" in r.message.lower() for r in report.results)
 
 
@@ -261,13 +271,14 @@ class TestRule10CodeBlockLanguageTags:
         validate_code_block_language_tags(tmp_path, report)
         assert not report.has_minor
 
-    def test_untagged_code_block_minor(self, tmp_path: Path):
-        """Code block without language tag should report MINOR."""
+    def test_untagged_code_block_warning(self, tmp_path: Path):
+        """Code block without language tag should report WARNING (advisory, non-blocking)."""
         readme = tmp_path / "README.md"
         readme.write_text("# Code\n```\nprint('hi')\n```")
         report = DocumentationValidationReport(plugin_path=str(tmp_path))
         validate_code_block_language_tags(tmp_path, report)
-        assert report.has_minor
+        assert not report.has_minor
+        assert report.has_warning
         assert any("language" in r.message.lower() for r in report.results)
 
 
@@ -282,13 +293,14 @@ class TestRule11ListFormatting:
         validate_list_formatting(tmp_path, report)
         assert not report.has_minor
 
-    def test_inconsistent_list_markers_minor(self, tmp_path: Path):
-        """Inconsistent list markers should report MINOR."""
+    def test_inconsistent_list_markers_warning(self, tmp_path: Path):
+        """Inconsistent list markers should report WARNING (advisory, non-blocking)."""
         readme = tmp_path / "README.md"
         readme.write_text("# List\n- Item 1\n* Item 2\n+ Item 3")
         report = DocumentationValidationReport(plugin_path=str(tmp_path))
         validate_list_formatting(tmp_path, report)
-        assert report.has_minor
+        assert not report.has_minor
+        assert report.has_warning
 
 
 class TestRule12TableStructure:
@@ -302,13 +314,14 @@ class TestRule12TableStructure:
         validate_table_structure(tmp_path, report)
         assert not report.has_minor
 
-    def test_malformed_table_minor(self, tmp_path: Path):
-        """Malformed table (mismatched columns) should report MINOR."""
+    def test_malformed_table_warning(self, tmp_path: Path):
+        """Malformed table (mismatched columns) should report WARNING (advisory, non-blocking)."""
         readme = tmp_path / "README.md"
         readme.write_text("# Table\n| Col1 | Col2 |\n|------|\n| A | B | C |")
         report = DocumentationValidationReport(plugin_path=str(tmp_path))
         validate_table_structure(tmp_path, report)
-        assert report.has_minor
+        assert not report.has_minor
+        assert report.has_warning
 
 
 class TestRule13ImageReferences:
@@ -375,15 +388,20 @@ my_plugin.run()
         assert not report.has_major
 
     def test_reports_multiple_issues(self, tmp_path: Path):
-        """Should accumulate all issues found."""
+        """Should accumulate all issues found across blocking and advisory severities."""
         # Minimal README with multiple issues
         readme = tmp_path / "README.md"
         readme.write_text("# Plugin\n### Skipped h2\n```\nno lang tag\n")  # unclosed block
 
         report = validate_documentation(tmp_path)
 
-        # Should have multiple issues
-        assert len([r for r in report.results if r.level in ("CRITICAL", "MAJOR", "MINOR")]) >= 3
+        # Multiple advisory checks (missing installation/usage/changelog, skipped
+        # heading, untagged code block) were recalibrated to WARNING in
+        # TRDD-021250b5, so the accumulated issues now span both severities.
+        accumulated = [r for r in report.results if r.level in ("CRITICAL", "MAJOR", "MINOR", "WARNING")]
+        assert len(accumulated) >= 3
+        # The unclosed code block stays a blocking MAJOR finding.
+        assert report.has_major
 
 
 class TestCLI:

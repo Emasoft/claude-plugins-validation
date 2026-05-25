@@ -200,14 +200,16 @@ class TestValidateExampleBlocks:
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert len(major_msgs) == 0
 
-    def test_no_examples_reports_major(self):
-        """validate_example_blocks reports MAJOR when body has zero example blocks."""
+    def test_no_examples_reports_warning(self):
+        """validate_example_blocks reports WARNING (not MAJOR) when body has zero
+        example blocks — Anthropic recommends but does not require examples
+        (TRDD-021250b5)."""
         content = "---\nname: bare-agent\ndescription: No examples\n---\n\nYou are a test agent.\n"
         report = AgentValidationReport()
         validate_example_blocks(content, "bare-agent.md", report)
 
-        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("No <example> blocks found" in m for m in major_msgs)
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("No <example> blocks found" in m for m in warning_msgs)
 
 
 class TestValidateAgent:
@@ -329,14 +331,16 @@ class TestValidateDescriptionField:
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("cannot be empty" in m for m in major_msgs)
 
-    def test_angle_brackets_in_description_reports_major(self):
-        """validate_description_field reports MAJOR when description has < or > characters."""
+    def test_angle_brackets_in_description_allowed(self):
+        """validate_description_field allows < or > in a description — Anthropic's
+        subagent pattern puts raw <example>...</example> blocks IN the description,
+        so angle brackets produce NO finding about angle brackets (TRDD-021250b5)."""
         report = AgentValidationReport()
         validate_description_field(
             {"description": "Use when <user> asks for help doing something complex"}, "agent.md", report
         )
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("angle brackets" in m for m in major_msgs)
+        assert not any("angle bracket" in m for m in major_msgs)
 
     def test_proactive_description_gets_passed(self):
         """validate_description_field records PASSED when description has 'proactively' hint."""
@@ -784,13 +788,14 @@ class TestValidateBodyContent:
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("no content" in m for m in major_msgs)
 
-    def test_body_without_you_are_reports_minor(self):
-        """validate_body_content reports MINOR when body lacks role definition."""
+    def test_body_without_you_are_reports_warning(self):
+        """validate_body_content reports WARNING (not MINOR) when body lacks a
+        'You are...' role definition — recommended but not required (TRDD-021250b5)."""
         content = "---\nname: no-role\n---\n\n" + ("This agent handles code reviews. " * 20) + "\n"
         report = AgentValidationReport()
         validate_body_content(content, "no-role.md", report)
-        minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
-        assert any("role definition" in m for m in minor_msgs)
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("role definition" in m for m in warning_msgs)
 
     def test_body_with_sections_records_passed(self):
         """validate_body_content records PASSED for recognized sections like Capabilities and Workflow."""
@@ -1617,17 +1622,18 @@ class TestV223Gap79PluginShippedAllowedFields:
             f"{[r.message for r in report.results if r.level == 'MINOR']}"
         )
 
-    def test_plugin_agent_with_skills_emits_minor(self, tmp_path):
-        """Plugin-shipped agent with `skills` → MINOR (not in plugin allow-list)."""
+    def test_plugin_agent_with_skills_allowed(self, tmp_path):
+        """Plugin-shipped agent with `skills` → NO MINOR. `skills` is a real
+        subagent field, now in the plugin-shipped allowed set (TRDD-021250b5)."""
         content = "---\nname: b\ndescription: An agent.\nskills:\n  - helper\n---\n\n# B\n\nBody.\n"
         agent_path = _make_plugin_agent(tmp_path, content, "b")
         report = validate_agent(agent_path)
-        minors = [
+        skills_minors = [
             r.message
             for r in report.results
             if r.level == "MINOR" and "'skills'" in r.message and "plugin-shipped" in r.message
         ]
-        assert minors, f"Expected MINOR for `skills`; got MINORs: {minors}"
+        assert not skills_minors, f"`skills` is now allowed; unexpected MINORs: {skills_minors}"
 
     def test_plugin_agent_with_only_allowed_fields_no_minor(self, tmp_path):
         """Plugin-shipped agent with only the 11 allowed fields → no plugin-shipped MINOR."""

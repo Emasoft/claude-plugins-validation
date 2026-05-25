@@ -304,18 +304,39 @@ class TestValidateDescriptionField:
         validate_description_field({"description": "   "}, "empty.md", report)
         assert any(r.level == "MAJOR" and "cannot be empty" in r.message for r in report.results)
 
-    def test_description_exceeding_250_chars_reports_major(self):
-        """A description longer than 250 characters should produce MAJOR."""
-        long_desc = "A" * 251
+    def test_description_under_token_limit_passes(self):
+        """A ~250-char description is only ~55-65 tokens (well under the 200-token limit) so it must NOT report a length MAJOR.
+
+        The old 250-CHARACTER cap was replaced by a 200-TOKEN cap
+        (DESCRIPTION_TOKEN_LIMIT) in TRDD-021250b5, so character count alone
+        no longer triggers a finding.
+        """
+        # ~250 chars of distinct English words -> ~55-65 tokens, under the 200-token limit.
+        desc = " ".join(f"word{i}" for i in range(36))
+        assert 230 <= len(desc) <= 270  # confirm the fixture stays in the ~250-char range
+        report = CommandValidationReport()
+        validate_description_field({"description": desc}, "under.md", report)
+        assert not any(
+            r.level == "MAJOR" and ("tokens" in r.message or "exceeds" in r.message) for r in report.results
+        ), f"Unexpected length MAJOR: {[r.message for r in report.results if r.level == 'MAJOR']}"
+
+    def test_description_exceeding_token_limit_reports_major(self):
+        """A description that genuinely exceeds the 200-token limit must report a MAJOR about the token budget."""
+        # ~400 distinct words -> ~1000+ tokens, well over the 200-token DESCRIPTION_TOKEN_LIMIT.
+        long_desc = " ".join(f"word{i}" for i in range(400))
         report = CommandValidationReport()
         validate_description_field({"description": long_desc}, "long.md", report)
-        assert any(r.level == "MAJOR" and "exceeds" in r.message for r in report.results)
+        assert any(r.level == "MAJOR" and "tokens" in r.message and "limit 200" in r.message for r in report.results)
 
-    def test_description_with_angle_brackets_reports_major(self):
-        """A description containing < or > should produce MAJOR about angle brackets (line 261)."""
+    def test_description_with_angle_brackets_allowed(self):
+        """A description containing < or > is VALID (inline-code refs / placeholders) and must NOT report an angle-bracket MAJOR.
+
+        The blanket angle-bracket check was removed in TRDD-021250b5: commands
+        are skills, and `<context>` / <plugin> style placeholders are legitimate.
+        """
         report = CommandValidationReport()
         validate_description_field({"description": "Deploy <app> to server"}, "angle.md", report)
-        assert any(r.level == "MAJOR" and "angle brackets" in r.message for r in report.results)
+        assert not any(r.level == "MAJOR" and "angle bracket" in r.message.lower() for r in report.results)
 
     def test_very_short_description_reports_minor(self):
         """A description shorter than 10 characters should produce MINOR (line 268)."""

@@ -1358,25 +1358,42 @@ class TestTokenBudgetBranches:
         validate_token_budget(content, body, report)
         assert any("lines" in r.message and r.level == "MAJOR" for r in report.results)
 
-    def test_excessive_char_count_is_major(self):
-        """Content exceeding 5000 characters should be major."""
+    def test_excessive_body_tokens_is_major(self):
+        """A body over SKILL_BODY_TOKEN_LIMIT (5000) tokens is a MAJOR.
+
+        The char/word caps were removed in TRDD-021250b5 in favour of a
+        token-based body budget. The body is kept on ONE long line (~30k
+        tokens, 1 line) so it stays well under MAX_SKILL_LINES (500) and
+        isolates the body-token MAJOR from the line-count MAJOR.
+        """
+        from cpv_token_estimate import estimate_tokens
+        from validate_skill_comprehensive import SKILL_BODY_TOKEN_LIMIT, validate_token_budget
+
+        body = " ".join(f"token{i}" for i in range(8000))
+        # Sanity-pin the fixture: clearly over the token limit, clearly under the line limit.
+        assert estimate_tokens(body).tokens > SKILL_BODY_TOKEN_LIMIT
+        assert body.count("\n") + 1 < 500
+        content = "---\nname: test\n---\n" + body
+        report = ValidationReport(skill_path="test")
+        validate_token_budget(content, body, report)
+        body_major = [
+            r for r in report.results if r.level == "MAJOR" and "SKILL.md body" in r.message and "tokens" in r.message
+        ]
+        assert body_major, "body-token MAJOR did not fire for a ~30k-token body"
+
+    def test_body_under_token_limit_passes(self):
+        """A small body (well under 5000 tokens) emits NO body-token MAJOR.
+
+        Two-sided companion to test_excessive_body_tokens_is_major: proves the
+        gate is discriminating, not blanket.
+        """
         from validate_skill_comprehensive import validate_token_budget
 
-        report = ValidationReport(skill_path="test")
-        body = "x" * 5500
+        body = " ".join(["word"] * 50)  # ~65 tokens, 1 line
         content = "---\nname: test\n---\n" + body
-        validate_token_budget(content, body, report)
-        assert any("characters" in r.message and r.level == "MAJOR" for r in report.results)
-
-    def test_excessive_word_count_is_major(self):
-        """Content exceeding MAX_WORD_COUNT_ERROR should be major."""
-        from validate_skill_comprehensive import validate_token_budget
-
         report = ValidationReport(skill_path="test")
-        body = " ".join(["word"] * 5500)
-        content = "---\nname: test\n---\n" + body
         validate_token_budget(content, body, report)
-        assert any("words" in r.message and r.level == "MAJOR" for r in report.results)
+        assert not any("SKILL.md body" in r.message and r.level == "MAJOR" for r in report.results)
 
 
 class TestRequiredSectionsStrictMode:
@@ -2011,27 +2028,14 @@ class TestPass2SkillFixes:
     """Pass-2 audit fixes for validate_skill_comprehensive.py.
 
     Covers:
-      - CPV-P2-n1: fix false spec citation on MAX_DESCRIPTION_WARN comment
       - CPV-P2-m6: `disableSkillShellExecution` misuse in frontmatter
       - GAP-53: self-pointing `skills: ["./"]` detection helper
-    """
 
-    def test_max_description_warn_comment_not_falsely_citing_spec(self):
-        """CPV-P2-n1: the comment next to MAX_DESCRIPTION_WARN must NOT
-        falsely cite a 250-char rule in skills.md — there is no such rule.
-        """
-        src = Path(__file__).parent.parent / "scripts" / "validate_skill_comprehensive.py"
-        text = src.read_text(encoding="utf-8")
-        # The wrong comment claimed "Official Claude Code spec: descriptions
-        # truncated at 250 chars in skill listing" — verify it's gone.
-        assert "descriptions truncated at 250 chars in skill listing" not in text, (
-            "stale false-citation comment still present on MAX_DESCRIPTION_WARN"
-        )
-        # And the corrected comment (CPV-internal heuristic) is present.
-        assert "CPV-internal readability heuristic" in text, (
-            "CPV-P2-n1 fix not applied: MAX_DESCRIPTION_WARN comment should "
-            "now state 'CPV-internal readability heuristic — NOT a skills.md rule.'"
-        )
+    (The former CPV-P2-n1 test inspected a source comment about
+    MAX_DESCRIPTION_WARN; that constant and its comment were removed in
+    TRDD-021250b5 when skill sizing moved to token-based budgets, so the
+    test was removed too.)
+    """
 
     def test_disable_skill_shell_execution_in_frontmatter_emits_minor(self, tmp_path):
         """CPV-P2-m6 / skills.md L414: `disableSkillShellExecution` is a
