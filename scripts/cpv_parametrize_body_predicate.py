@@ -37,9 +37,15 @@ context is a `pytest.mark` decorator chain — including:
         ids=lambda v: v[0],
     )
 
-Caching: line-set is computed once per content-id and reused across
-calls. Use `clear_cache()` to drop the cache between unrelated runs
-(tests, batch operations).
+Caching: line-set is computed once per content VALUE (keyed on a hash
+of the content, NOT on `id()`) and reused across calls. A content-value
+key is mandatory for correctness: CPython recycles object addresses
+after garbage collection, so an `id()`-keyed cache could return file A's
+parametrize-body set for an unrelated file B whose freshly-allocated
+content happened to land at A's freed address. Hash collisions are
+guarded by storing the content snapshot alongside the result and
+re-verifying equality on a cache hit. Use `clear_cache()` to drop the
+cache between unrelated runs (tests, batch operations).
 """
 
 from __future__ import annotations
@@ -58,11 +64,14 @@ _PARAMETRIZE_DECORATOR_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
-# Module-level cache keyed by id(content_lines_tuple) — reset whenever a
-# fresh tuple is supplied. Using a `WeakValueDictionary` would require
-# the values to be weakrefable; plain `dict` plus the explicit
-# `clear_cache()` is simpler and avoids the `frozenset` weakref issue.
-_LINE_SET_CACHE: dict[int, frozenset[int]] = {}
+# Module-level cache keyed by hash(normalized content) — NOT by id().
+# Each entry stores (content_snapshot, body_lines) so a hash collision is
+# caught by re-verifying the snapshot equals the live content before the
+# cached set is returned. Keying on the content VALUE (not its transient
+# memory address) is what prevents the post-GC address-reuse staleness
+# bug: a different file whose content reuses a freed address now produces
+# a different hash and never collides into the wrong entry.
+_LINE_SET_CACHE: dict[int, tuple[tuple[str, ...], frozenset[int]]] = {}
 
 
 def clear_cache() -> None:
@@ -275,14 +284,26 @@ def is_parametrize_body_line(
     """Return True iff `line_no` (1-based) lies inside the body of a
     `@pytest.mark.parametrize(` decorator.
 
-    Caches the per-content body-line set keyed on `id(content)` so
-    callers iterating over a single file pay the cost ONCE.
+    Caches the per-content body-line set keyed on a HASH of the content
+    (not `id(content)`), so callers iterating over a single file pay the
+    cost ONCE while a different file can never collide into a stale entry
+    via post-GC address reuse. A hash collision is caught by comparing
+    the stored content snapshot against the live content.
     """
     if line_no < 1:
         return False
-    cache_key = id(content)
-    body_lines = _LINE_SET_CACHE.get(cache_key)
-    if body_lines is None:
-        body_lines = compute_parametrize_body_lines(content)
-        _LINE_SET_CACHE[cache_key] = body_lines
+    # Normalize to an immutable, hashable tuple of lines. A `list[str]`
+    # is unhashable; a `str` is hashable but we still tuple-split it so
+    # the snapshot stored for collision-checking is comparable regardless
+    # of whether the caller passed a str or a pre-split list of the same
+    # logical content.
+    snapshot = tuple(_split_lines(content))
+    cache_key = hash(snapshot)
+    cached = _LINE_SET_CACHE.get(cache_key)
+    if cached is not None and cached[0] == snapshot:
+        return line_no in cached[1]
+    # Cache miss, or a (rare) hash collision with different content —
+    # recompute and overwrite with the snapshot that actually applies.
+    body_lines = compute_parametrize_body_lines(content)
+    _LINE_SET_CACHE[cache_key] = (snapshot, body_lines)
     return line_no in body_lines
