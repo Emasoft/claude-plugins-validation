@@ -83,8 +83,8 @@ A fully configured plugin repository with:
   > Standard Plugin Files · Standard CI/CD Workflows · Git Hooks · Release Pipeline (`scripts/publish.py`) · Marketplace Standard · Language-Specific Additions
 - [Pipeline Rules](references/pipeline-rules.md) — mandatory rules for all plugin operations
   > Pre-Push Hook: The Quality Gate · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run · Post-Push CI Verification · Mega-Linter Configuration · Common Fixes Reference
-- [Pipeline Standards (current)](references/pipeline-standards.md) — three guarantees every newly-scaffolded plugin ships with
-  > Overview · Whole-repo lint via cpv_lint_engine · Idempotent publish.py · validate_pipeline_script_refs rule · Migrating a legacy plugin
+- [Pipeline Standards (current)](references/pipeline-standards.md) — the standards every newly-scaffolded plugin ships with
+  > Overview · Whole-repo lint via cpv_lint_engine · Idempotent publish.py · validate_pipeline_script_refs rule · Cross-platform scripts — no bash, no jq/sed/awk · Input sanitization — every script parameter · Hooks MUST persist state in CLAUDE_PLUGIN_DATA, never CLAUDE_PLUGIN_ROOT · Hook commands MUST be cross-platform (Python-delegated) · PEP 723 scripts MUST be invoked via uv run · Migrating a legacy plugin
 - [v2.1.80+ Plugin Features](references/v2-1-80-features.md)
   > Monitor tool · userConfig (plugin.json) · channels (plugin.json) · CLAUDE_PLUGIN_OPTION_<KEY> env vars · Inline marketplace (settings.json) · managed-settings.d/ drop-in directory · Plugin skill `name` field (v2.1.98)
 - [Parallel scanning (v2.103.0+)](references/parallelism.md) — every CPV validator runs file scans in parallel by default; scaffolded plugins inherit ~11.6× speedup automatically via `uvx --from git+...` remote-mode

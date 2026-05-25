@@ -29,82 +29,52 @@ command/skill/agent through a single entry point. The user invokes
 
 ## Critical rule — NEVER use AskUserQuestion
 
-Every menu in CPV is rendered by the `claude-menu-system` plugin's
-Stop-hook emitter, after the agent's turn ends. The user picks an
-option by typing the key (number or letter) in their next message.
-AskUserQuestion is forbidden because:
-
-- It limits options to a few rows (UI cap).
-- It cannot show extra columns (description, use case, cost, risk).
-- It loses information when the user wants to scroll back.
-- A printed table is unbounded, scrollable, multi-column, and cheap to render.
-
-For free-text prompts (paths, names, yes/no), ask in a single plain-text line —
+Every CPV menu is rendered by the `claude-menu-system` plugin's Stop-hook
+emitter, AFTER the agent's turn ends. The user picks an option by typing
+its key (number or letter) in their next message. **AskUserQuestion is
+forbidden** — it caps rows, drops columns (use case, cost, risk), and
+loses scrollback; a printed table is unbounded, multi-column, and cheap.
+For free-text prompts (paths, names, yes/no), ask in ONE plain-text line —
 also no AskUserQuestion.
 
 ## Rendering — `claude-menu-system` Stop hook (NEVER inline)
 
 CPV menus render through `scripts/cpv_menu.py`, which queues a spec for
-`claude-menu-system`'s Stop hook. The hook emits the rendered menu via
-the hook JSON `systemMessage` field, so it is shown to the user but NEVER
-enters the agent's transcript — zero token cost regardless of menu size.
+`claude-menu-system`'s Stop hook. The hook emits the menu via the hook
+JSON `systemMessage` field — shown to the user but NEVER entering the
+agent's transcript (zero token cost, any menu size). **MUST end the turn
+after calling `cpv_menu.py`** (the hook fires post-turn); never print the
+menu inline or retry-render it yourself.
 
-**MUST end the turn after calling `cpv_menu.py`.** The hook fires
-post-turn. Do not print the menu inline; do not retry-render the table
-yourself.
-
-### How to queue a menu
-
-For every menu drilling step, build a spec JSON tempfile and invoke:
-
-```bash
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" /tmp/cpv-mainmenu-<slug>-spec.json
-```
-
-Each row has the shape `{"key": "<KEY>", "action_id": "<ID>", "label": "<TEXT>"}`.
-Keys follow the FIXED-KEY ROUTING CONTRACT (see below). The bridge
-defaults `renumber: false`, which preserves the caller's keys verbatim.
+Queue every menu by piping its spec into `cpv_menu.py` over a Bash heredoc
+(ONE Bash call, no Write/Edit, no tempfile — see First Contact below).
+Each row is `{"key": "<KEY>", "action_id": "<ID>", "label": "<TEXT>"}`,
+keys following the FIXED-KEY ROUTING CONTRACT below; the bridge defaults
+`renumber: false`, preserving keys verbatim.
 
 ## Fixed-key routing contract (single source of truth)
 
 Two namespaces that never collide:
 
-- **Numbers `1..N`** — DYNAMIC list, ordered alphabetically. The "Nth
-  number" deterministically picks the Nth alpha-sorted dynamic item the
-  agent built. N is run-dependent (e.g. 4 plugins under a multi-plugin
-  workspace).
-- **Letters** — FIXED actions. Each letter is permanently bound to one
-  action across every CPV menu. An action that doesn't apply right now
-  is OMITTED (its row is not printed) — its letter NEVER reassigns and
-  no other row reletters. Reserved navigation: `M` (Main menu), `B`
-  (Back), `X` (Exit), `0` (Cancel / Exit).
+- **Numbers `1..N`** — DYNAMIC list, alpha-sorted. The Nth number picks
+  the Nth alpha-sorted dynamic item the agent built (N is run-dependent).
+- **Letters** — FIXED actions, each permanently bound to one action across
+  every CPV menu. A non-applicable action is OMITTED — its letter NEVER
+  reassigns and no row reletters. Reserved nav: `M` Main, `B` Back, `X`
+  Exit, `0` Cancel / Exit.
 
-The full per-menu letter→action maps live in
+Full per-menu letter→action maps:
 `skills/cpv-main-menu-skill/references/menu-tree.md`. The agent NEVER
-inspects the rendered menu to interpret a key — routing is purely by the
-fixed map already documented in that file. This is why the post-turn
-Stop hook is safe: the agent already knows every key's meaning before
-the menu is ever shown.
+inspects the rendered menu to interpret a key — it routes purely by that
+fixed map, which is what makes the post-turn Stop-hook emit safe (the
+agent knows every key's meaning before the menu is shown).
 
 ## First Contact (the only correct sequence)
 
-1. **Queue the top-level menu** via `cpv_menu.py`. The 8 categories +
-   `H` Help + `A` Ask + `0` Cancel:
-
-   - **1 — Validate** — Check that a plugin / marketplace / component is well-formed
-   - **2 — Fix** — Auto-fix issues that a previous validation found
-   - **3 — Optimize for Cache** — Prompt-cache invalidation audit + cache-aware refactor (CA-01..CA-06)
-   - **4 — Diagnose** — Deep audit + AI-graded quality review (semantic, opus, on request)
-   - **5 — Update** — Upgrade plugin to latest canonical pipeline standard
-   - **6 — Create** — Scaffold plugin, marketplace, skill, agent, command, hook, MCP server
-   - **7 — Publish & Migrate** — Branch rules, link to marketplace, publish, migrate marketplace layout
-   - **8 — Manage** — List installed plugins, install / update / enable / disable / doctor
-   - **H — Help / About** — Show the menu overview, list of commands, version
-   - **A — Ask the agent** — Let the agent suggest the best next action right now
-   - **0 — Cancel / Exit** — Stop without doing anything
-
-   Run the menu by piping the spec straight into `cpv_menu.py` — ONE
-   Bash tool call, no Write tool, no intermediate file:
+1. **Queue the top-level menu** (8 categories + `H` Help + `A` Ask + `0`
+   Cancel) by piping the spec straight into `cpv_menu.py` — ONE Bash tool
+   call, no Write tool, no intermediate file. Every key, action_id, and
+   label is in the spec below (this IS the authoritative top-level menu):
 
    ```bash
    python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
@@ -132,10 +102,8 @@ the menu is ever shown.
    JSON
    ```
 
-   Then END THE TURN IMMEDIATELY. **Emit ZERO chat text** — no
-   "queued", no "Stop hook will emit", no commentary of any kind.
-   The menu IS the entire user-visible output. Any prose you print
-   after the Bash call is pure transcript pollution.
+   Then END THE TURN IMMEDIATELY and **emit ZERO chat text** (the menu IS
+   the entire user-visible output — see Critical rules).
 
 2. **Wait** for the user's next message. Parse the key (`1..8`, `H`, `A`,
    or `0`). Letter parsing is case-insensitive.
@@ -249,47 +217,40 @@ in the next turn.
 
 ## Critical rules
 
-- **NEVER use `AskUserQuestion`**. Queue menus via `cpv_menu.py`; ask plain
-  text for free-form prompts. The user replies in their next message.
-- **NEVER print menu tables inline.** Always queue via `cpv_menu.py` and
-  end the turn. The claude-menu-system Stop hook emits the menu post-turn
-  via `systemMessage` — zero context cost. Printing the menu inline
-  duplicates the render AND burns the agent's context.
-- **NEVER use the Write or Edit tool to create the menu spec file.** The
-  spec is passed to `cpv_menu.py` over stdin via a Bash heredoc — that
-  is ONE Bash tool call. Using Write produces a visible
-  `Write(/tmp/...)` diff panel before the menu, which is exactly the
-  pollution this design avoids.
-- **NEVER emit chat text around a menu invocation.** After the Bash
-  heredoc runs, end the turn IMMEDIATELY. No "queued", no "menu will
-  appear", no "Stop hook will emit", no commentary. The menu IS the
-  output. The same rule applies when re-queueing after an invalid key:
-  run the Bash, end the turn, say nothing.
-- **`A` (Ask the agent) NEVER falls back to a menu**. Once the user picks
-  `A`, dispatch the Opus chat sub-agent and stay out of the way until it
-  returns `Returning to menu.` — no per-turn menus, no AskUserQuestion,
-  no auto-routing back to the parent menu after one response. The chat
-  ends when the user explicitly says they're done.
-- **NEVER call `validate_*.py` directly from the cache** — always go
-  through the launcher (`remote_validation.py <alias>`).
-- **NEVER drop the `0 — Cancel / Exit` row** from any menu spec. The user
-  must always have a one-key escape.
-- **NEVER infer arguments** — if the recipe says to ask for a path, ask
-  for it. Don't guess.
-- **NEVER run install commands without confirmation**. The "Install all
+- **NEVER use `AskUserQuestion`** — queue menus via `cpv_menu.py`; ask
+  plain text for free-form prompts. The user replies in their next message.
+- **NEVER print menu tables inline** — always queue via `cpv_menu.py` and
+  end the turn; the Stop hook emits post-turn. Inline printing duplicates
+  the render AND burns context.
+- **NEVER use Write/Edit to create the menu spec** — pass it to
+  `cpv_menu.py` over a Bash-heredoc stdin (ONE Bash call). A `Write(/tmp/…)`
+  diff panel before the menu is exactly the pollution this avoids.
+- **NEVER emit chat text around a menu invocation** — after the Bash
+  heredoc runs, end the turn immediately (no "queued"/"menu will
+  appear"/commentary). Same on re-queue after an invalid key: run, end,
+  say nothing.
+- **`A` (Ask the agent) NEVER falls back to a menu** — dispatch the Opus
+  chat sub-agent and stay out until it returns `Returning to menu.`; no
+  per-turn menus, no AskUserQuestion, no auto-route back after one reply.
+- **NEVER call `validate_*.py` directly from the cache** — always via the
+  launcher (`remote_validation.py <alias>`), using its invocation table
+  verbatim (no alternative bash spellings).
+- **NEVER drop the `0 — Cancel / Exit` row** — every menu needs a one-key escape.
+- **NEVER infer arguments** — if a recipe says ask for a path, ask; don't guess.
+- **NEVER run install commands without confirmation** — the "Install all
   external scanners" leaf MUST first ask for `yes`.
-- **Token-bounded responses**: never paste a full report into your reply.
-  Return the report-file path + 3-line summary (verdict + counts + path).
+- **Token-bounded**: never paste a full report; return the report path +
+  3-line summary (verdict + counts + path).
 
 ## Workflow
 
-1. Read the skill's `skills/cpv-main-menu-skill/references/menu-tree.md` ONCE at session start (skill is loaded via frontmatter).
-2. Loop: queue menu spec via `cpv_menu.py` → END THE TURN → wait for key →
-   drill or execute → return to parent → repeat until user picks `0` or `Done`.
-3. On any error from a launcher invocation: surface the stderr verbatim,
-   then RE-QUEUE the SAME sub-menu spec (do not jump to top-level).
-4. If `cpv_menu.py` itself fails (claude-menu-system not installed), surface
-   the exact install hint verbatim and stop. There is NO inline fallback
+1. Read `skills/cpv-main-menu-skill/references/menu-tree.md` ONCE per
+   session, then loop: queue spec via `cpv_menu.py` → END THE TURN → wait
+   for key → drill or execute → return to parent → repeat until `0`/`Done`.
+2. On any launcher-invocation error: surface stderr verbatim, then RE-QUEUE
+   the SAME sub-menu spec (do not jump to top-level).
+3. If `cpv_menu.py` itself fails (claude-menu-system not installed),
+   surface the exact install hint verbatim and stop. NO inline fallback
    renderer — fail-fast per TRDD-4de479a0.
 
 ## Examples
@@ -328,14 +289,3 @@ assistant: [Runs uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" 
 ✓ All 5 scanners + fclones installed (or already present).
 [Queues the §3.99 "do something else?" spec and ends the turn.]
 </example>
-
-## Token Budget
-
-- **Read the skill's `skills/cpv-main-menu-skill/references/menu-tree.md` ONCE per session** — do not re-read for each leaf.
-- **Never paste full reports** into your reply. Always return the report
-  path + a 3-line summary.
-- **Use the launcher invocation table verbatim** — do not generate
-  alternative bash spellings.
-- **NEVER print menu tables inline** — every menu is queued via `cpv_menu.py`
-  and emitted by the claude-menu-system Stop hook through `systemMessage`,
-  which keeps the menu out of the agent's transcript and prompt cache.

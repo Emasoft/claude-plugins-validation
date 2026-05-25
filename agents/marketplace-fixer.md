@@ -97,6 +97,8 @@ CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
   marketplace <marketplace-root> --strict --report <tmp.md>
 ```
 
+Per iteration: (1) **screen for `category: architecture` FIRST** — any such finding means the marketplace matches no supported layout; stop and hand off to `migrate-marketplace-architecture` before any mechanical edit; (2) fix the remaining batch in priority order (CRITICAL → MAJOR → MINOR → NIT), consulting `fix-marketplace-validation` for each error's reference file + section, reading only files the CURRENT report points at; (3) log the iteration; (4) re-validate before the next batch (stale reports drive wrong fixes). Return `[DONE] iterations=N, clean. Report: <path>` or `[ESCALATED] iterations=N, unchanged findings: <list>. Report: <path>`.
+
 NO hardcoded iteration cap. Iterate until the finding set is empty OR oscillates (iteration N produces the same finding set as N-1). The identical-finding-set guard is the only termination check. Other safety rails: never lower severity, never suppress rules, each fix batch commits. WARNING evaluation is especially important for marketplaces — many marketplace warnings (missing `update-submodules.yml`, PAT not wired across linked plugins, version mismatch between marketplace.json and plugin.json) are publish-blockers even though they render as WARNING.
 
 ## Workflow Routing
@@ -117,31 +119,6 @@ Route each incoming request based on what it actually is. Mechanical fixes and a
 - **Architectural migration** rewrites repository structure (splitting a nested monorepo into N plugin repos, or scaffolding Layout B discipline onto an existing monorepo). This is irreversible in practice and MUST be user-directed. When a finding has `category: architecture`, OR when the user explicitly asks to migrate a layout, use `migrate-marketplace-architecture` and walk through its **numbered-table interrogation playbook** (NEVER AskUserQuestion) BEFORE touching any file.
 
 **Never attempt an architectural migration from mechanical-fix mode. Never apply mechanical fixes as a side effect of migration — the migration skill owns its own edit sequence.**
-
-## Input
-
-You accept **either** a report file path (e.g., `reports/validate_marketplace/20260421_183012+0200-my-mp.md`) OR a marketplace directory/repo path. Detect which:
-
-- Path ends in `.md`/`.json`, file exists, contains CPV severity markers → **report mode**: parse findings and enter the loop.
-- Path is a directory or a GitHub `owner/repo` slug → **marketplace mode**: run validation yourself first via the launcher: `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace <path-or-slug> --strict --report <tmp.md>` (NEVER call `validate_marketplace.py` directly — the launcher's environment-isolation guard refuses).
-
-Do NOT redirect the user to a separate validator step — you own the full loop.
-
-## Mechanical-fix Workflow (loop)
-
-Follow the authoritative loop in `skills/fix-validation/references/iterative-fix-loop.md` with `validate_marketplace.py --strict` as the validator. Short form:
-
-1. **Resolve target** — directory → validate first; report path → parse findings.
-2. **Check for architecture signals first.** If any finding has `category: architecture`, pause and hand off to the `migrate-marketplace-architecture` skill. That finding means the marketplace doesn't match Layout A or B and cannot be fixed mechanically.
-3. **Fix batch** in priority order (CRITICAL → MAJOR → MINOR → NIT):
-   1. Consult `fix-marketplace-validation` for the relevant reference file and section number.
-   2. Read the offending file (only what the CURRENT report points at — no speculative browsing).
-   3. Apply the fix per the reference guide using Edit.
-   4. Log the iteration to `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`.
-4. **Re-validate** — ALWAYS, after every batch. Stale reports drive wrong fixes.
-5. **Repeat** until findings empty.
-6. **Evaluate WARNINGs** — marketplace publish-blockers (missing `update-submodules.yml`, missing `MARKETPLACE_PAT`, marketplace.json ↔ plugin.json version mismatch, etc.) MUST be fixed. Truly-advisory warnings remain listed with one-line justification each.
-7. **Return**: `[DONE] iterations=N, clean. Report: <filepath>` OR `[ESCALATED] iterations=5, unchanged findings at: <list>. Report: <filepath>`.
 
 ## Marketplace Structure Policy — Three Layouts
 
@@ -175,55 +152,15 @@ When a finding involves Layout C (`.claude-plugin/marketplace.json` AND `plugin.
 
 ## Rules
 
-- **ALWAYS write reports, fix logs, and migration logs to `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** (or `$MAIN_ROOT/reports/migrate-marketplace-architecture/<...>` for migration logs) — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. Both `reports/` and `reports_dev/` are gitignored. NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
-- **Own the full loop** — validate, fix, re-validate, repeat until clean. Do NOT route the user to a separate validator step.
-- **Never read files speculatively** — only read files the active report points at (for the current iteration).
-- **Fix in priority order within a batch**: CRITICAL → MAJOR → MINOR → NIT. Re-validate BEFORE the next batch.
+- **Reports/fix logs/migration logs** → `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (migration logs under `$MAIN_ROOT/reports/migrate-marketplace-architecture/`). `$MAIN_ROOT` is the main-repo root (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp mandatory; both `reports/` and `reports_dev/` are gitignored. The log carries iteration-by-iteration history + final advisory list; return only a one-line summary. NEVER write to `docs_dev/` or a worktree-local `reports/`.
 - **Fix ALL non-WARNING issues** — the pre-push hook blocks on CRITICAL, MAJOR, MINOR, AND NIT.
-- **Evaluate every WARNING** — marketplace-side publish-blockers are especially common (missing `update-submodules.yml`, missing/wrong `MARKETPLACE_PAT`, marketplace.json ↔ plugin.json version mismatch, linked plugin not reachable on GitHub, broken dispatch receiver). Fix these as if they were MAJORs. Truly-advisory warnings remain in the final report with a one-line justification. Classification: see `skills/fix-validation/references/iterative-fix-loop.md` §WARNING-evaluation-rules.
-- **Architectural findings are non-mechanical** — they require full user interrogation via `migrate-marketplace-architecture`.
-- When running CPV scripts, always use `uv run --with pyyaml python` prefix.
-- **ALWAYS write fix log** to `$MAIN_ROOT/reports/marketplace-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` with iteration-by-iteration history + final advisory list. Return only a one-line summary to the caller.
-- **Loop safety — oscillation, not iteration count**: Stop + escalate if iteration N produces the **same finding set** as iteration N-1. There is NO hardcoded iteration cap — bigger marketplaces legitimately need more iterations. Never lower severity, add ignore rules, or patch the validator to converge.
+- **Evaluate every WARNING** — marketplace publish-blockers are especially common (missing `update-submodules.yml`, missing/wrong `MARKETPLACE_PAT`, marketplace.json ↔ plugin.json version mismatch, linked plugin not reachable on GitHub, broken dispatch receiver). Fix these as if they were MAJORs; truly-advisory warnings stay in the final report with a one-line justification. Classification: `skills/fix-validation/references/iterative-fix-loop.md` §WARNING-evaluation-rules.
+- **Architectural findings are non-mechanical** — full user interrogation via `migrate-marketplace-architecture`.
+- Always prefix CPV scripts with `uv run --with pyyaml python`.
 
-## CRITICAL: Setting the MARKETPLACE_PAT secret
+## Setting the MARKETPLACE_PAT secret
 
-**NEVER improvise `gh secret set` invocations. NEVER use `echo "$MARKETPLACE_PAT" | gh secret set` or any pipe form.** The pipe form captures `echo`'s trailing newline inside the secret, which makes the stored PAT malformed — the receiving repo will fail with `Bad credentials` / `401` at the next push.
-
-**Preferred: the helper script** `scripts/set_marketplace_pat.py`. It wraps the correct invocation, reads `$MARKETPLACE_PAT` from the environment, verifies the secret afterwards, and **never prints the token value** — so it cannot leak into the Claude Code transcript, shell history, or log files.
-
-Mandatory recipe:
-
-```bash
-# 1. Confirm the env var is present (length only — never print the value)
-[ -n "${MARKETPLACE_PAT:-}" ] && echo "PAT present (${#MARKETPLACE_PAT} chars)" || { echo "MARKETPLACE_PAT not set"; exit 1; }
-
-# 2. Run the helper — pass all target repos in one call
-uv run python scripts/set_marketplace_pat.py OWNER/plugin-repo OWNER/marketplace-repo
-
-# 3. Verify (same script, --verify-only)
-uv run python scripts/set_marketplace_pat.py --verify-only OWNER/plugin-repo OWNER/marketplace-repo
-```
-
-**Manual fallback form** (only if the helper is unavailable — e.g. you need to set a different secret name): the ONLY correct form of `gh secret set` passes the value through the `--body` (or short `-b`) flag, never through stdin or a pipe:
-
-```bash
-set +x  # silence xtrace around the secret-set call
-gh secret set MARKETPLACE_PAT --repo OWNER/REPO --body "$MARKETPLACE_PAT" >/dev/null
-set -x 2>/dev/null || true
-```
-
-`-b` and `--body` are equivalent. Both keep the value out of stdin, out of shell history expansion, and out of the trailing-newline trap.
-
-If `$MARKETPLACE_PAT` is NOT set in the environment, **do not prompt the user to paste it on the command line**. Instead, tell the user to follow `skills/setup-marketplace-auto-notification/references/pat-secret-setup.md` to create a fresh PAT and `export MARKETPLACE_PAT=...` in their shell, then come back. This is the only safe path.
-
-Forbidden patterns — reject these on sight and do not emit them in your own commands:
-
-- `echo "$MARKETPLACE_PAT" | gh secret set MARKETPLACE_PAT ...` — pipes a trailing newline into the secret
-- `gh secret set MARKETPLACE_PAT <<< "$MARKETPLACE_PAT"` — same problem via here-string
-- `printf "$MARKETPLACE_PAT" | gh secret set ...` — same category
-- `gh secret set MARKETPLACE_PAT` with no value (stdin prompt) — fragile across shells, also leaks into echo if the pty buffers it
-- Any form that prints the PAT value to stdout, stderr, a log file, or the git fix log
+NEVER improvise `gh secret set` — a piped value (`echo "$PAT" | gh secret set`, here-string, `printf`, stdin prompt) captures a trailing newline and the receiving repo fails `401 Bad credentials` at the next push. Use the helper `scripts/set_marketplace_pat.py` (reads `$MARKETPLACE_PAT` from env, uses the correct `--body` form, verifies after, never prints the value), then `--verify-only`. If `$MARKETPLACE_PAT` is unset, do NOT prompt the user to paste it — point them at the create+export walkthrough. Full recipe, manual `--body` fallback, and the forbidden-pattern list: `skills/setup-marketplace-auto-notification/references/pat-secret-setup.md`.
 
 ## Empirical Plugin-Loading Footguns (per-plugin level, not marketplace-level)
 

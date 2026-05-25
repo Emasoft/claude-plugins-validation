@@ -77,6 +77,8 @@ Re-run `/cpv-batch-fix` to retry the residual — the planner re-validates and r
 
 - [json-schemas](references/json-schemas.md) — full schema reference
   > 1. Top-level index (`index.json`) · 2. Per-shard manifest (`shard-K.json`) · 3. Per-shard status (`shard-K.status.json`) · Schema version bumps
+- [agent-modes](references/agent-modes.md) — plugin-fixer per-mode workflow + the two agent-side status shapes (`batch_per_plugin`, `batch_same_turn`)
+  > 1. Batch-shard mode (`mode: batch_shard`, TRDD-71e68ab5) · 2. Batch-per-plugin mode (`mode: batch_per_plugin`, TRDD-3dcbb37c) · 3. Batch same-turn modes (`batch_same_turn_validate_fix` / `batch_same_turn_full`, TRDD-3dcbb37c §3)
 - TRDD-71e68ab5 — design (`design/tasks/`)
 - `scripts/cpv_batch_planner.py` — planner source
 - `scripts/cpv_batch_aggregator.py` — aggregator source
