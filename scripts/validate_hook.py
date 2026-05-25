@@ -1901,17 +1901,26 @@ def lint_js_script(script_path: Path, report: ValidationReport) -> None:
         report.minor(f"eslint error: {e}")
 
 
-def validate_script(script_path: Path, report: ValidationReport) -> None:
-    """Validate and lint a script file."""
+def validate_script(script_path: Path, report: ValidationReport, invocation_mode: str = "direct") -> None:
+    """Validate and lint a script file.
+
+    ``invocation_mode`` controls the executable-bit check. Only a ``direct``
+    invocation (``./foo.py`` / ``${CLAUDE_PLUGIN_ROOT}/foo.sh`` relying on the
+    shebang + the +x bit) needs the file to be executable. A script run THROUGH
+    an interpreter (``python3 foo.py``, ``uv run … foo.py``, a venv python,
+    ``bash foo.sh``) is READ by the interpreter and does NOT need +x — flagging
+    it ``Script not executable`` was a blocking false positive. (audit MAJOR lsp #3)
+    """
     if not script_path.exists():
         report.major(f"Script not found: {script_path}")
         return
 
-    # Check executable permission
-    if not os.access(script_path, os.X_OK):
-        report.major(f"Script not executable: {script_path.name}")
-    else:
-        report.passed(f"Script executable: {script_path.name}")
+    # Executable permission is ONLY required for direct (shebang) invocation.
+    if invocation_mode == "direct":
+        if not os.access(script_path, os.X_OK):
+            report.major(f"Script not executable: {script_path.name}")
+        else:
+            report.passed(f"Script executable: {script_path.name}")
 
     # Lint based on extension
     suffix = script_path.suffix.lower()
@@ -2410,7 +2419,9 @@ def validate_command_hook(
                 # truly broken paths. Don't surface noise here.
                 pass
         if script_path.exists():
-            validate_script(script_path, report)
+            # Pass the invocation mode so the +x check fires only for `direct`
+            # (shebang) invocation — interpreter/uv/venv runs don't need it.
+            validate_script(script_path, report, ref.invocation_mode)
             # Python-only: reconcile script third-party imports against the hook's
             # declared resolution path. Covered modes:
             #   - interpreter-python  (python3 foo.py)
@@ -2458,12 +2469,17 @@ def validate_command_hook(
             # used a resolvable root (${CLAUDE_PLUGIN_ROOT}) or an absolute path.
             # Paths using ${CLAUDE_PROJECT_DIR} or ${CLAUDE_PLUGIN_DATA} are
             # resolved at runtime and may legitimately not exist during validation.
+            # Use .get() + the args list: the args-only exec form
+            # ({"type":"command","args":[...]}) has NO "command" key, so a direct
+            # hook["command"] crashed with KeyError, and a runtime-resolved env var
+            # may live in args rather than command. (audit MAJOR lsp #2)
+            invocation = hook.get("command", "") + " " + " ".join(str(a) for a in hook.get("args", []))
             if (
                 plugin_root
-                and "${CLAUDE_PLUGIN_ROOT}" not in hook["command"]
-                and "${CLAUDE_PLUGIN_DATA}" not in hook["command"]
-                and "$CLAUDE_PROJECT_DIR" not in hook["command"]
-                and "${CLAUDE_PROJECT_DIR}" not in hook["command"]
+                and "${CLAUDE_PLUGIN_ROOT}" not in invocation
+                and "${CLAUDE_PLUGIN_DATA}" not in invocation
+                and "$CLAUDE_PROJECT_DIR" not in invocation
+                and "${CLAUDE_PROJECT_DIR}" not in invocation
             ):
                 report.major(f"Script not found: {script_path}")
 

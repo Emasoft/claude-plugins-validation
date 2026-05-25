@@ -164,11 +164,15 @@ PLUGIN_SHIPPED_HAZARD_ENV_VARS: frozenset[str] = frozenset(
 )
 
 # Files checked for env blocks inside a plugin root.
+# ``.mcp.json`` is included because OTEL exfil vars shipped in
+# ``mcpServers[name].env`` there were never scanned otherwise — the recursive
+# ``_extract_env_blocks`` walker already handles that nesting (audit MAJOR doc #1).
 _PLUGIN_ENV_CANDIDATES: tuple[tuple[str, ...], ...] = (
     (".claude-plugin", "plugin.json"),
     ("hooks", "hooks.json"),
     (".claude-plugin", "settings.json"),
     ("settings.json",),
+    (".mcp.json",),
 )
 
 # Placeholder patterns — values that look like ${VAR} or {{VAR}} are

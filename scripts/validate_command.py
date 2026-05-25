@@ -38,6 +38,7 @@ from cpv_validation_common import (
     EXIT_OK,
     SECRET_PATTERNS,
     USER_PATH_PATTERNS,
+    VALID_EFFORT_VALUES,
     VALID_TOOLS,
     WHEN_TO_USE_TOKEN_LIMIT,
     ValidationReport,
@@ -448,6 +449,59 @@ def validate_argument_hint_field(frontmatter: dict[str, Any], filename: str, rep
     report.passed(f"'argument-hint' field valid: {hint}", filename)
 
 
+def validate_skill_shared_fields(frontmatter: dict[str, Any], filename: str, report: CommandValidationReport) -> None:
+    """Value-validate the skill-shared command fields.
+
+    These fields are accepted in ``KNOWN_FRONTMATTER_FIELDS`` (commands-as-skills)
+    but were previously never value-checked, so an invalid value passed silently
+    (audit MAJOR agent #2). Only fields with an unambiguous spec are checked here,
+    mirroring the agent/skill validators, to avoid blocking valid commands. The
+    less-specified ``arguments`` / ``shell`` fields are intentionally left to a
+    future spec-confirmed check rather than guessing a type.
+    """
+    # Boolean fields.
+    for bool_field in ("user-invocable", "disable-model-invocation"):
+        if bool_field in frontmatter:
+            val = frontmatter[bool_field]
+            if not isinstance(val, bool):
+                report.major(
+                    f"'{bool_field}' must be a boolean (true/false), got {type(val).__name__}: {val!r}",
+                    filename,
+                )
+            else:
+                report.passed(f"Valid '{bool_field}': {val}", filename)
+
+    # effort enum (shared VALID_EFFORT_VALUES — same as agent/skill).
+    if "effort" in frontmatter:
+        effort_val = frontmatter["effort"]
+        if not isinstance(effort_val, str):
+            report.major(f"'effort' must be a string, got {type(effort_val).__name__}", filename)
+        elif effort_val.lower() not in VALID_EFFORT_VALUES:
+            report.major(
+                f"Invalid 'effort' value: '{effort_val}'. Must be one of: {sorted(VALID_EFFORT_VALUES)}",
+                filename,
+            )
+        else:
+            report.passed(f"Valid effort: {effort_val}", filename)
+
+    # String fields (must be a non-empty string when present).
+    for str_field in ("agent", "context", "when_to_use"):
+        if str_field in frontmatter:
+            val = frontmatter[str_field]
+            if not isinstance(val, str):
+                report.major(f"'{str_field}' must be a string, got {type(val).__name__}", filename)
+            elif not val.strip():
+                report.major(f"'{str_field}' cannot be empty", filename)
+
+    # Object field.
+    if "hooks" in frontmatter and not isinstance(frontmatter["hooks"], dict):
+        report.major(f"'hooks' must be an object, got {type(frontmatter['hooks']).__name__}", filename)
+
+    # Array field.
+    if "paths" in frontmatter and not isinstance(frontmatter["paths"], list):
+        report.major(f"'paths' must be an array, got {type(frontmatter['paths']).__name__}", filename)
+
+
 def validate_body_content(content: str, filename: str, report: CommandValidationReport) -> None:
     """Validate command body content (after frontmatter)."""
     _, body, _ = parse_frontmatter(content)
@@ -571,6 +625,8 @@ def validate_command(command_path: Path) -> CommandValidationReport:
         )
         validate_model_field(frontmatter, filename, report)
         validate_argument_hint_field(frontmatter, filename, report)
+        # Value-validate the remaining skill-shared fields (audit MAJOR agent #2).
+        validate_skill_shared_fields(frontmatter, filename, report)
 
     # Validate body content
     validate_body_content(content, filename, report)
