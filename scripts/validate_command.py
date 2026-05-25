@@ -255,12 +255,10 @@ def validate_description_field(frontmatter: dict[str, Any], filename: str, repor
         "Tighten to a focused sentence — move detail into the command body.",
     )
 
-    # Angle brackets check (breaks XML in prompts)
-    if "<" in desc or ">" in desc:
-        report.major(
-            "Description contains angle brackets (< or >) - can break prompts",
-            filename,
-        )
+    # NOTE: no angle-bracket check. Commands are skills; angle brackets in a
+    # description are VALID (inline-code refs like `<context>`, placeholders like
+    # <project>). The old blanket "< or > -> MAJOR" rejected valid descriptions.
+    # Removed in TRDD-021250b5.
 
     # Check for actionable description
     if len(desc) < 10:

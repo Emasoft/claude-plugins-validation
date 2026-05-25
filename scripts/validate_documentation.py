@@ -40,11 +40,158 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from cpv_validation_common import COLORS, ValidationReport, save_report_and_print_summary
+from cpv_validation_common import (
+    COLORS,
+    ValidationReport,
+    get_gitignore_filter,
+    save_report_and_print_summary,
+)
 
 # =============================================================================
 # Documentation Validation Report
 # =============================================================================
+
+# Dev-scratch / build / artifact directory names that are gitignored by
+# convention across Emasoft plugins. The link / image checkers skip any path
+# whose relative form starts with one of these segments. The gitignore-aware
+# walk (GitignoreFilter) already prunes anything listed in the plugin's own
+# .gitignore; this hardcoded set is a belt-and-suspenders fallback for plugins
+# whose .gitignore happens NOT to list a conventional dev dir, so we never
+# emit MAJOR "broken link" findings against unshipped scratch content.
+_DEV_SCRATCH_DIRS: frozenset[str] = frozenset(
+    {
+        "docs_dev",
+        "reports",
+        "reports_dev",
+        "scripts_dev",
+        "samples_dev",
+        "examples_dev",
+        "tests_dev",
+        "downloads_dev",
+        "libs_dev",
+        "builds_dev",
+        ".trashcan",
+        ".git",
+        "node_modules",
+        ".venv",
+    }
+)
+
+# `templates/` ships in the package but its files contain INTENTIONAL
+# placeholders (e.g. `<!-- https://... -->`, `owner/repo`, `<plugin-name>`)
+# that are not real links. The LINK / IMAGE checkers skip it specifically;
+# other checkers (which are README-only) are unaffected.
+_LINK_CHECK_SKIP_DIRS: frozenset[str] = _DEV_SCRATCH_DIRS | {"templates"}
+
+# Link targets that are NOT local relative files and must never be resolved
+# against the filesystem.
+_NON_LOCAL_LINK_PREFIXES: tuple[str, ...] = (
+    "http://",
+    "https://",
+    "mailto:",
+    "tel:",
+    "ftp://",
+    "//",  # protocol-relative URL (e.g. //cdn.example.com/x.png)
+    "/",  # absolute path / doc-site route (e.g. /en/sub-agents) — not a local file
+    "#",  # pure in-page anchor
+    "data:",  # inline data URI (images)
+)
+
+
+# Placeholder / glob / regex link targets that are documentation examples,
+# NOT real file paths. Mirrors the convention used by the backtick-path checker
+# in cpv_validation_common (`_is_template_or_example_path`) so link/image
+# targets are judged the same way: template vars ({var}, <placeholder>, $VAR,
+# YYYY…, my-plugin/your-… tokens), glob patterns (*.md), and regex/meta chars.
+_PLACEHOLDER_TARGET_RE = re.compile(
+    r"[{}<>]|\$\w|YYYY|placeholder|my-plugin|my-agent|my-skill|your-",
+    re.IGNORECASE,
+)
+_REGEX_META_TARGET_RE = re.compile(r"[?!\\^|+\[\]]")
+
+
+def _is_placeholder_target(target: str) -> bool:
+    """Return True if a link/image target is a doc placeholder, not a real path.
+
+    Such targets (e.g. ``{link_target}``, ``<owner>/<repo>``, ``references/*.md``,
+    ``["']([a-z0-9_-]+)``) can never resolve to a file on disk and would be
+    false-positive "broken link" findings. We treat them as intentional
+    documentation examples and skip them — same policy CPV's backtick-path
+    checker already applies.
+    """
+    if _PLACEHOLDER_TARGET_RE.search(target):
+        return True
+    if "*" in target:  # glob: *.md, **/*.py
+        return True
+    return bool(_REGEX_META_TARGET_RE.search(target))
+
+
+def _is_under_skip_dir(rel_path: Path, skip_dirs: frozenset[str]) -> bool:
+    """Return True if any path segment of `rel_path` is in `skip_dirs`.
+
+    Matching on every segment (not just the first) means a nested scratch dir
+    like `plugin/foo/reports_dev/x.md` is skipped too, mirroring how gitignore
+    dir rules apply at any depth.
+    """
+    return any(part in skip_dirs for part in rel_path.parts)
+
+
+def _strip_code_regions(content: str) -> str:
+    """Blank out fenced code blocks and inline code spans for link extraction.
+
+    TRDDs and design docs embed regex / code snippets such as
+    ``["']([a-z0-9_-]+)`` or ``[text](target)`` inside ``` fences or `inline`
+    spans. Those are NOT markdown links. Replacing every code region with
+    same-length blanks (newlines preserved) keeps line numbers stable while
+    ensuring the link/image regex can never match text inside code.
+
+    Returns a copy of `content` where:
+      * fenced blocks (``` or ~~~ ... closing fence) are blanked, and
+      * inline code spans (`...`, ``...``) on non-fence lines are blanked.
+    """
+    out_lines: list[str] = []
+    in_fence = False
+    fence_marker = ""  # the exact opening run, e.g. "```" or "~~~~"
+
+    for line in content.split("\n"):
+        stripped = line.lstrip()
+        # A fence line is one whose first non-space run is >=3 backticks or
+        # tildes. The closing fence must use the same character and be at
+        # least as long as the opener (CommonMark rule).
+        fence_char = ""
+        if stripped.startswith("```"):
+            fence_char = "`"
+        elif stripped.startswith("~~~"):
+            fence_char = "~"
+
+        if fence_char:
+            run_len = len(stripped) - len(stripped.lstrip(fence_char))
+            if not in_fence:
+                in_fence = True
+                fence_marker = fence_char * run_len
+                out_lines.append("")  # blank the opening fence line
+                continue
+            # Inside a fence: only a same-char run >= opener length closes it.
+            if (
+                fence_char == fence_marker[0]
+                and run_len >= len(fence_marker)
+                and stripped.rstrip(fence_char) == ""
+            ):
+                in_fence = False
+                fence_marker = ""
+            out_lines.append("")  # blank every line inside / closing a fence
+            continue
+
+        if in_fence:
+            out_lines.append("")  # blank all content lines inside a fence
+            continue
+
+        # Outside fences: blank inline code spans so backticked snippets that
+        # look like links don't match. Replace each `...` span (1+ backticks)
+        # with spaces of equal length to preserve column positions.
+        out_lines.append(re.sub(r"`+[^`]*`+", lambda m: " " * len(m.group(0)), line))
+
+    return "\n".join(out_lines)
 
 
 @dataclass
@@ -124,7 +271,7 @@ def validate_installation_section(plugin_path: Path, report: DocumentationValida
             report.passed("README contains installation instructions", "README.md")
             return
 
-    report.major(
+    report.warning(
         "README missing installation section (## Installation, ## Getting Started, ## Setup, or ## Quick Start)",
         "README.md",
     )
@@ -161,7 +308,7 @@ def validate_usage_section(plugin_path: Path, report: DocumentationValidationRep
             report.passed("README contains usage section", "README.md")
             return
 
-    report.major(
+    report.warning(
         "README missing usage section (## Usage, ## Examples, or ## How to Use)",
         "README.md",
     )
@@ -213,7 +360,7 @@ def validate_description_section(plugin_path: Path, report: DocumentationValidat
     if len(description_content) >= 20:
         report.passed("README contains description section", "README.md")
     else:
-        report.major(
+        report.warning(
             "README missing description section after title (add content between # Title and first ## section)",
             "README.md",
         )
@@ -231,53 +378,72 @@ def validate_description_section(plugin_path: Path, report: DocumentationValidat
 
 
 def validate_broken_links(plugin_path: Path, report: DocumentationValidationReport) -> None:
-    """Validate that all internal links point to existing files.
+    """Validate that LOCAL relative file links point to existing files.
 
-    Checks markdown links [text](path) where path is a local file reference.
-    External URLs (http://, https://, mailto:) are skipped.
-    Anchor links (#section) are skipped.
+    Only SHIPPED documentation is examined and only GENUINELY broken local
+    relative links are flagged:
+
+    * Gitignored / dev-scratch trees (docs_dev/, reports/, *_dev/, .git/,
+      node_modules/, .venv/, .trashcan/, …) and templates/ are skipped — the
+      former are never shipped, the latter contains intentional placeholders.
+    * Link targets inside fenced code blocks or inline code spans are ignored
+      (they are code/regex snippets, not links).
+    * External / non-file targets are skipped: http(s)://, mailto:, tel:,
+      ftp://, protocol-relative //, absolute paths (e.g. /en/sub-agents are
+      doc-site routes, not local files), and pure #anchors. Any #anchor and
+      ?query is stripped before resolving a relative path.
 
     Args:
         plugin_path: Path to the plugin directory
         report: Validation report to add results to
     """
-    # Find all markdown files in the plugin
-    md_files = list(plugin_path.rglob("*.md"))
+    gi = get_gitignore_filter(plugin_path)
+    plugin_root_resolved = plugin_path.resolve()
 
-    for md_file in md_files:
+    for md_file in gi.rglob("*.md"):
+        rel_md = md_file.relative_to(plugin_root_resolved)
+        # Belt-and-suspenders: skip conventional dev/template dirs even if the
+        # plugin's .gitignore does not list them.
+        if _is_under_skip_dir(rel_md, _LINK_CHECK_SKIP_DIRS):
+            continue
+
         try:
             content = md_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
 
-        # Find all markdown links: [text](target)
-        links = re.findall(r"\[([^\]]*)\]\(([^)]+)\)", content)
+        # Find all markdown links: [text](target), ignoring code regions.
+        # The negative lookbehind `(?<!!)` excludes image syntax `![alt](src)`
+        # — those are handled by validate_image_references, and without it the
+        # link regex would double-report every image as a broken link too.
+        scrubbed = _strip_code_regions(content)
+        links = re.findall(r"(?<!!)\[([^\]]*)\]\(([^)]+)\)", scrubbed)
 
         for link_text, link_target in links:
-            # Skip external URLs
-            if link_target.startswith(("http://", "https://", "mailto:")):
+            target = link_target.strip()
+            # Skip external URLs, absolute/doc-site paths, anchors, empty.
+            if not target or target.startswith(_NON_LOCAL_LINK_PREFIXES):
                 continue
 
-            # Skip anchor links
-            if link_target.startswith("#"):
+            # Skip documentation placeholders / globs / regex examples.
+            if _is_placeholder_target(target):
                 continue
 
-            # Handle links with anchors (file.md#section)
-            target_path = link_target.split("#")[0]
+            # Strip #anchor and ?query before resolving a relative file path.
+            target_path = target.split("#", 1)[0].split("?", 1)[0]
             if not target_path:
                 continue
 
-            # Resolve relative to the markdown file's directory
-            resolved = md_file.parent / target_path
-            if not resolved.exists():
-                # Also try relative to plugin root
-                resolved = plugin_path / target_path
-                if not resolved.exists():
-                    rel_md = md_file.relative_to(plugin_path)
-                    report.major(
-                        f"Broken internal link: [{link_text}]({link_target})",
-                        str(rel_md),
-                    )
+            # Resolve relative to the markdown file's directory, then root.
+            if (md_file.parent / target_path).exists():
+                continue
+            if (plugin_root_resolved / target_path).exists():
+                continue
+
+            report.major(
+                f"Broken internal link: [{link_text}]({link_target})",
+                str(rel_md),
+            )
 
 
 # =============================================================================
@@ -303,7 +469,7 @@ def validate_changelog_exists(plugin_path: Path, report: DocumentationValidation
             report.passed(f"Changelog found ({variant})", variant)
             return
 
-    report.minor(
+    report.warning(
         "CHANGELOG.md is recommended for tracking version history",
         "CHANGELOG.md",
     )
@@ -340,7 +506,7 @@ def validate_heading_hierarchy(plugin_path: Path, report: DocumentationValidatio
 
             # Check if we skipped a level
             if current_level > 0 and level > current_level + 1:
-                report.minor(
+                report.warning(
                     f"Heading hierarchy skip: level {current_level} to level {level} (line {i + 1})",
                     "README.md",
                     i + 1,
@@ -434,7 +600,7 @@ def validate_code_block_language_tags(plugin_path: Path, report: DocumentationVa
                 # Extract what comes after ```
                 lang_part = stripped[3:].strip()
                 if not lang_part:
-                    report.minor(
+                    report.warning(
                         f"Code block at line {i + 1} missing language tag",
                         "README.md",
                         i + 1,
@@ -490,7 +656,7 @@ def validate_list_formatting(plugin_path: Path, report: DocumentationValidationR
 
     if len(markers_used) > 1:
         markers = ", ".join(sorted(markers_used))
-        report.minor(
+        report.warning(
             f"Inconsistent list markers used: {markers} (prefer using one consistently)",
             "README.md",
         )
@@ -503,12 +669,40 @@ def validate_list_formatting(plugin_path: Path, report: DocumentationValidationR
 # =============================================================================
 
 
+def _count_table_columns(row: str) -> int:
+    """Count the number of columns in a markdown table row.
+
+    Correctly handles:
+    - Empty leading/trailing cells (``| | A | B |`` has 3 columns)
+    - Pipes inside inline code spans (`` `a|b` `` does not split)
+    - Escaped pipes (``\\|`` does not split)
+
+    Args:
+        row: A stripped table row string beginning and ending with ``|``.
+
+    Returns:
+        Number of cells in the row.
+    """
+    # Replace pipes inside inline code spans with a placeholder so they don't
+    # act as column delimiters.  We match the shortest possible backtick span.
+    sanitised = re.sub(r"`[^`]*`", lambda m: m.group(0).replace("|", "\x00"), row)
+    # Replace escaped pipes with placeholder so they don't split.
+    sanitised = sanitised.replace(r"\|", "\x00")
+    # The row starts and ends with |; strip those boundary pipes then split.
+    inner = sanitised[1:-1]  # remove leading and trailing |
+    return len(inner.split("|"))
+
+
 def validate_table_structure(plugin_path: Path, report: DocumentationValidationReport) -> None:
     """Validate that markdown tables have consistent structure.
 
     Checks that:
     - Separator row has correct number of columns
     - Data rows have same number of columns as header
+
+    Demoted to advisory (report.warning) because column-count mismatches are
+    a style/quality opinion; valid tables with empty leading cells or pipes
+    inside inline code were previously false-flagged.
 
     Args:
         plugin_path: Path to the plugin directory
@@ -539,17 +733,17 @@ def validate_table_structure(plugin_path: Path, report: DocumentationValidationR
 
         # Check for table row
         if stripped.startswith("|") and stripped.endswith("|"):
-            cols = len([c for c in stripped.split("|") if c.strip()])
+            cols = _count_table_columns(stripped)
 
             if not in_table:
                 # Header row
                 in_table = True
                 header_cols = cols
             elif re.match(r"^\|[\s\-:|]+\|$", stripped):
-                # Separator row
-                sep_cols = len([c for c in stripped.split("|") if c.strip()])
+                # Separator row — use same accurate counter
+                sep_cols = _count_table_columns(stripped)
                 if sep_cols != header_cols:
-                    report.minor(
+                    report.warning(
                         f"Table separator row has {sep_cols} columns, header has {header_cols} (line {i + 1})",
                         "README.md",
                         i + 1,
@@ -558,7 +752,7 @@ def validate_table_structure(plugin_path: Path, report: DocumentationValidationR
             else:
                 # Data row
                 if cols != header_cols:
-                    report.minor(
+                    report.warning(
                         f"Table row has {cols} columns, header has {header_cols} (line {i + 1})",
                         "README.md",
                         i + 1,
@@ -579,43 +773,59 @@ def validate_table_structure(plugin_path: Path, report: DocumentationValidationR
 
 
 def validate_image_references(plugin_path: Path, report: DocumentationValidationReport) -> None:
-    """Validate that image references point to existing files.
+    """Validate that LOCAL relative image references point to existing files.
 
-    Checks markdown images ![alt](path) where path is a local file.
-    External URLs are skipped.
+    Same scoping/filtering rules as :func:`validate_broken_links`: only shipped
+    docs are scanned (gitignored / dev-scratch / templates dirs skipped), image
+    references inside code regions are ignored, and only local relative targets
+    are resolved (http(s)://, data:, protocol-relative //, absolute paths, and
+    pure #anchors are skipped; #anchor / ?query stripped before resolving).
 
     Args:
         plugin_path: Path to the plugin directory
         report: Validation report to add results to
     """
-    # Find all markdown files
-    md_files = list(plugin_path.rglob("*.md"))
+    gi = get_gitignore_filter(plugin_path)
+    plugin_root_resolved = plugin_path.resolve()
 
-    for md_file in md_files:
+    for md_file in gi.rglob("*.md"):
+        rel_md = md_file.relative_to(plugin_root_resolved)
+        if _is_under_skip_dir(rel_md, _LINK_CHECK_SKIP_DIRS):
+            continue
+
         try:
             content = md_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
 
-        # Find all image references: ![alt](path)
-        images = re.findall(r"!\[([^\]]*)\]\(([^)]+)\)", content)
+        # Find all image references: ![alt](path), ignoring code regions.
+        scrubbed = _strip_code_regions(content)
+        images = re.findall(r"!\[([^\]]*)\]\(([^)]+)\)", scrubbed)
 
         for alt_text, img_path in images:
-            # Skip external URLs
-            if img_path.startswith(("http://", "https://", "data:")):
+            target = img_path.strip()
+            # Skip external / non-file targets (includes data:, //, absolute).
+            if not target or target.startswith(_NON_LOCAL_LINK_PREFIXES):
                 continue
 
-            # Resolve relative to the markdown file's directory
-            resolved = md_file.parent / img_path
-            if not resolved.exists():
-                # Also try relative to plugin root
-                resolved = plugin_path / img_path
-                if not resolved.exists():
-                    rel_md = md_file.relative_to(plugin_path)
-                    report.major(
-                        f"Missing image: ![{alt_text}]({img_path})",
-                        str(rel_md),
-                    )
+            # Skip documentation placeholders / globs / regex examples.
+            if _is_placeholder_target(target):
+                continue
+
+            # Strip #anchor and ?query before resolving a relative file path.
+            target_path = target.split("#", 1)[0].split("?", 1)[0]
+            if not target_path:
+                continue
+
+            if (md_file.parent / target_path).exists():
+                continue
+            if (plugin_root_resolved / target_path).exists():
+                continue
+
+            report.major(
+                f"Missing image: ![{alt_text}]({img_path})",
+                str(rel_md),
+            )
 
 
 # =============================================================================
