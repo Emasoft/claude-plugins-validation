@@ -283,12 +283,12 @@ def validate_description_field(frontmatter: dict[str, Any], filename: str, repor
         "Tighten it to a focused trigger sentence — agents have no separate when_to_use.",
     )
 
-    # Angle brackets check (breaks XML in prompts)
-    if "<" in desc or ">" in desc:
-        report.major(
-            "Description contains angle brackets (< or >) - can break agent prompts",
-            filename,
-        )
+    # NOTE: no angle-bracket check. Angle brackets in a description are VALID and
+    # even recommended — Anthropic's own subagent pattern puts raw
+    # <example>...</example> blocks IN the description field, and inline-code refs
+    # like `<context>` / placeholders like <path> are common. The old blanket
+    # "< or > -> MAJOR" rejected Anthropic-valid descriptions (and contradicted
+    # validate_example_blocks, which WANTS <example> blocks). Removed in TRDD-021250b5.
 
     # Check for actionable description (should indicate WHEN to use)
     action_words = ["use when", "invoke", "call", "trigger", "run", "execute", "specialized in", "expert in"]
@@ -1204,16 +1204,22 @@ def validate_example_blocks(content: str, filename: str, report: AgentValidation
 
     example_count = len(examples)
 
+    # Anthropic RECOMMENDS <example> blocks for trigger quality but does NOT
+    # require them — an agent without examples is valid (e.g. agents dispatched
+    # by name rather than auto-triggered). WARNING (advisory), not MAJOR, so CPV
+    # never calls a valid agent invalid (TRDD-021250b5).
     if example_count == 0:
-        report.major(
-            f"No <example> blocks found (need at least {MIN_EXAMPLE_BLOCKS})",
+        report.warning(
+            f"No <example> blocks found (recommended: at least {MIN_EXAMPLE_BLOCKS} "
+            "for trigger quality; not required)",
             filename,
         )
         return
 
     if example_count < MIN_EXAMPLE_BLOCKS:
-        report.major(
-            f"Only {example_count} <example> block(s) found (need at least {MIN_EXAMPLE_BLOCKS})",
+        report.warning(
+            f"Only {example_count} <example> block(s) found "
+            f"(recommended: at least {MIN_EXAMPLE_BLOCKS}; not required)",
             filename,
         )
     else:
@@ -1261,17 +1267,17 @@ def validate_body_content(content: str, filename: str, report: AgentValidationRe
             filename,
         )
 
-    # Word count check
+    # Word count check — advisory only; Anthropic imposes no body-length limit
     word_count = len(body_text.split())
     if word_count > MAX_BODY_WORDS:
-        report.minor(
+        report.warning(
             f"Agent body is very long ({word_count} words, recommended: <{MAX_BODY_WORDS})",
             filename,
         )
 
-    # Role definition check (should have "You are" statement)
+    # Role definition check — advisory only; Anthropic does not require a role line
     if "you are" not in body_text.lower():
-        report.minor(
+        report.warning(
             "Agent body should include a role definition ('You are...' statement)",
             filename,
         )
