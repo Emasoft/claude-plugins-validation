@@ -581,6 +581,11 @@ def setup_marketplace_automation(
     src_workflow = template_dir / "github-workflows" / "update-submodules.yml"
     dst_workflow = workflows_dir / "update-submodules.yml"
 
+    # Track whether every REQUIRED template was found+copied. A missing required
+    # template means the setup is INCOMPLETE — we must NOT report success.
+    # (audit MAJOR publish #5)
+    setup_ok = True
+
     if src_workflow.exists():
         if verbose:
             status = "[EXISTS]" if dst_workflow.exists() else "[CREATE]"
@@ -588,7 +593,8 @@ def setup_marketplace_automation(
         if not dry_run:
             shutil.copy2(src_workflow, dst_workflow)
     else:
-        print("  [SKIP] update-submodules.yml template not found", file=sys.stderr)
+        print("  [ERROR] update-submodules.yml template not found — setup incomplete", file=sys.stderr)
+        setup_ok = False
 
     # 3. Set up scripts directory
     scripts_dir = marketplace_dir / "scripts"
@@ -608,7 +614,8 @@ def setup_marketplace_automation(
             # Make executable
             dst_script.chmod(dst_script.stat().st_mode | 0o111)
     else:
-        print("  [SKIP] sync_marketplace_versions.py template not found", file=sys.stderr)
+        print("  [ERROR] sync_marketplace_versions.py template not found — setup incomplete", file=sys.stderr)
+        setup_ok = False
 
     # 5. Copy notify-marketplace.yml template (for reference)
     src_notify = template_dir / "github-workflows" / "notify-marketplace.yml"
@@ -621,6 +628,18 @@ def setup_marketplace_automation(
             print("         (Copy to each plugin repo's .github/workflows/ and configure)")
         if not dry_run:
             shutil.copy2(src_notify, dst_notify)
+
+    if not setup_ok:
+        # A required template was missing — the marketplace automation is NOT
+        # functional. Report failure so the caller (and CI) does not assume a
+        # working setup. (audit MAJOR publish #5)
+        print(
+            "ERROR: marketplace automation setup is INCOMPLETE — one or more required "
+            "templates were missing (see [ERROR] lines above). Reinstall CPV so the "
+            "templates are present, then re-run.",
+            file=sys.stderr,
+        )
+        return False
 
     if verbose:
         print("\n" + "=" * 60)

@@ -66,10 +66,13 @@ release can never ship without the cross-check.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
+import socket
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -254,9 +257,63 @@ def _write_cached(
 # ────────────────────────────────────────────────────────────────────────────
 
 
+_ALLOWED_URL_SCHEMES: frozenset[str] = frozenset({"http", "https"})
+
+
+def _url_is_safe_to_fetch(url: str) -> bool:
+    """True iff ``url`` is an http(s) URL whose host does NOT resolve to a
+    loopback / link-local / private / reserved / multicast / unspecified
+    address.
+
+    Blocks SSRF and arbitrary-local-file reads on an untrusted ``url``-type
+    marketplace source (audit MAJOR mgmt #1): ``file://`` / ``gopher://`` are
+    rejected by the scheme allow-list; ``http://169.254.169.254/...`` (cloud
+    IMDS), ``http://localhost``, internal-IP and private-range hosts are rejected
+    by resolving every address and refusing any non-public one. (DNS-rebind
+    between this check and urlopen is a residual; the documented vectors —
+    non-http schemes and direct internal hosts — are covered.)
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme.lower() not in _ALLOWED_URL_SCHEMES:
+        return False
+    host = parsed.hostname
+    if not host:
+        return False
+    port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, OSError, UnicodeError):
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            return False
+    return True
+
+
 def _fetch_via_url(url: str) -> dict[str, Any] | None:
-    """HTTP GET → parse JSON. Returns None on any failure."""
+    """HTTP GET → parse JSON. Returns None on any failure.
+
+    The URL is SSRF-checked first (scheme + resolved-host allow-list) so an
+    untrusted marketplace source cannot reach ``file://`` or internal/metadata
+    endpoints. (audit MAJOR mgmt #1)
+    """
     if _truthy_env(os.environ.get("CPV_TEST_FORCE_UPSTREAM_UNREACHABLE")):
+        return None
+    if not _url_is_safe_to_fetch(url):
         return None
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})

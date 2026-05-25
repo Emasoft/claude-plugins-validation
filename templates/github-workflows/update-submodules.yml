@@ -42,6 +42,7 @@ permissions:
 jobs:
   update-submodules:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout marketplace
@@ -53,13 +54,22 @@ jobs:
           # This PAT must belong to a repo admin and branch protection must allow admin bypass
           token: ${{ secrets.MARKETPLACE_PAT }}
 
+      # SECURITY: client_payload.* is attacker-controlled (anyone who can fire the
+      # repository_dispatch). It is passed through `env:` and referenced as a
+      # quoted shell variable — NEVER interpolated with ${{ }} directly into a
+      # `run:` block, which would allow shell-command injection.
       - name: Show trigger info
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PAYLOAD_PLUGIN: ${{ github.event.client_payload.plugin }}
+          PAYLOAD_REF: ${{ github.event.client_payload.ref }}
+          PAYLOAD_ACTOR: ${{ github.event.client_payload.triggered_by }}
         run: |
-          echo "Triggered by: ${{ github.event_name }}"
-          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            echo "Plugin: ${{ github.event.client_payload.plugin }}"
-            echo "Ref: ${{ github.event.client_payload.ref }}"
-            echo "Actor: ${{ github.event.client_payload.triggered_by }}"
+          echo "Triggered by: $EVENT_NAME"
+          if [ "$EVENT_NAME" = "repository_dispatch" ]; then
+            echo "Plugin: $PAYLOAD_PLUGIN"
+            echo "Ref: $PAYLOAD_REF"
+            echo "Actor: $PAYLOAD_ACTOR"
           fi
 
       - name: Configure git
@@ -68,8 +78,12 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Update submodules
+        env:
+          PAYLOAD_PLUGIN: ${{ github.event.client_payload.plugin }}
+          INPUT_PLUGIN: ${{ inputs.plugin }}
         run: |
-          PLUGIN="${{ github.event.client_payload.plugin || inputs.plugin }}"
+          # Quoted env vars (no ${{ }} in the shell) — injection-safe.
+          PLUGIN="${PAYLOAD_PLUGIN:-$INPUT_PLUGIN}"
 
           if [ -n "$PLUGIN" ] && [ -d "$PLUGIN" ]; then
             echo "Updating specific plugin: $PLUGIN"
@@ -121,11 +135,14 @@ jobs:
 
       - name: Commit and push
         if: steps.changes.outputs.has_changes == 'true'
+        env:
+          PAYLOAD_PLUGIN: ${{ github.event.client_payload.plugin }}
+          INPUT_PLUGIN: ${{ inputs.plugin }}
         run: |
           git add .
 
-          # Build commit message
-          PLUGIN="${{ github.event.client_payload.plugin || inputs.plugin || 'all' }}"
+          # Build commit message — quoted env vars (no ${{ }} in the shell).
+          PLUGIN="${PAYLOAD_PLUGIN:-${INPUT_PLUGIN:-all}}"
 
           if [ "$PLUGIN" != "all" ] && [ -d "$PLUGIN" ]; then
             NEW_VERSION=$(cat "$PLUGIN/.claude-plugin/plugin.json" 2>/dev/null | python -c "import sys,json; print(json.load(sys.stdin).get('version','unknown'))" 2>/dev/null || echo "unknown")

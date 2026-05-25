@@ -268,18 +268,27 @@ def _expand_marketplace(
     if not isinstance(plugins_raw, list):
         raise InputResolutionError(f"{market_root}: marketplace.json `plugins` field is not a list")
 
-    # Reference-counted cleanup: invoke parent_cleanup only when the
-    # last per-plugin consumer's cleanup_callback is called. Use a
+    # GitHub plugins referenced by the marketplace are cloned into a TEMP dir,
+    # NOT `market_root.parent / "plugin-clones"`. For a LOCAL marketplace that
+    # sibling lives next to the user's own files and `parent_cleanup` is None, so
+    # the clones leaked permanently. A tempdir is always cleaned up (below).
+    # (audit MAJOR mgmt #2)
+    clones_dir = Path(tempfile.mkdtemp(prefix="cpv-plugin-clones-"))
+
+    def _cleanup_clones() -> None:
+        shutil.rmtree(clones_dir, ignore_errors=True)
+
+    # Reference-counted cleanup: invoke the temp-clones cleanup AND parent_cleanup
+    # only when the last per-plugin consumer's cleanup_callback is called. Use a
     # dict to hold the counter so it survives closure capture.
     counter = {"remaining": 0}
 
     def _decrement_and_maybe_cleanup() -> None:
         counter["remaining"] -= 1
-        if counter["remaining"] <= 0 and parent_cleanup is not None:
-            parent_cleanup()
-
-    clones_dir = market_root.parent / "plugin-clones"
-    clones_dir.mkdir(exist_ok=True)
+        if counter["remaining"] <= 0:
+            _cleanup_clones()
+            if parent_cleanup is not None:
+                parent_cleanup()
 
     resolved: list[ResolvedInput] = []
     for entry in plugins_raw:
@@ -362,6 +371,13 @@ def _expand_marketplace(
                 metadata={"marketplace_root": str(market_root), "plugin_version": version},
             )
         )
+    # No consumers registered (empty / all-unresolvable marketplace) → no
+    # cleanup_callback will ever fire, so clean the temp clones dir (and the
+    # parent) now rather than leak it. (audit MAJOR mgmt #2)
+    if counter["remaining"] == 0:
+        _cleanup_clones()
+        if parent_cleanup is not None:
+            parent_cleanup()
     return resolved
 
 

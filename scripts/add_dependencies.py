@@ -294,23 +294,40 @@ def main(argv: list[str] | None = None) -> int:
         return 4
 
     if not args.no_validate:
-        # Re-validate. Roll back on any new CRITICAL/MAJOR.
+        # Re-validate. Roll back on any new CRITICAL/MAJOR — FAIL-CLOSED: if we
+        # cannot obtain a clean validation report (timeout, crash, non-JSON
+        # output), we do NOT know the edit is safe, so we roll back rather than
+        # silently accept it. (audit MAJOR publish #4)
         validator = Path(__file__).resolve().parent / "validate_plugin.py"
         if validator.is_file():
-            result = subprocess.run(
-                [sys.executable, str(validator), str(target), "--strict", "--json"],
-                capture_output=True,
-                text=True,
-                timeout=600,
-            )
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(validator), str(target), "--strict", "--json"],
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                )
+            except subprocess.TimeoutExpired:
+                print(
+                    "ERROR: validation timed out; cannot confirm the merged dependencies are safe — rolling back.",
+                    file=sys.stderr,
+                )
+                _restore(pj, bak)
+                return 3
             try:
                 report = json.loads(result.stdout)
             except json.JSONDecodeError:
                 report = None
-            new_blocking = 0
-            if isinstance(report, dict):
-                summary = report.get("summary", {})
-                new_blocking = int(summary.get("CRITICAL", 0)) + int(summary.get("MAJOR", 0))
+            if not isinstance(report, dict):
+                print(
+                    f"ERROR: validation produced no parseable report (exit code {result.returncode}); "
+                    "cannot confirm safety — rolling back.",
+                    file=sys.stderr,
+                )
+                _restore(pj, bak)
+                return 3
+            summary = report.get("summary", {})
+            new_blocking = int(summary.get("CRITICAL", 0)) + int(summary.get("MAJOR", 0))
             if new_blocking > 0:
                 print(
                     "ERROR: merged dependencies introduced CRITICAL/MAJOR findings; rolling back.",
