@@ -34,7 +34,10 @@ from validate_plugin import (  # noqa: E402
     validate_agents,
     validate_commands,
     validate_encoding,
+    validate_hooks,
     validate_lsp,
+    validate_manifest,
+    validate_readme,
 )
 
 
@@ -186,4 +189,80 @@ class TestLspInlineDelegation:
         majors = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("'args' must be an array" in m for m in majors), (
             f"expected an inline-lspServers args MAJOR; got: {majors}"
+        )
+
+    def test_inline_lsp_not_double_reported_by_manifest(self, tmp_path):
+        """validate_manifest emits NO LSP findings (no double-report regression).
+
+        Phase 3 moved inline lspServers validation out of validate_manifest into
+        validate_lsp. Both run in the whole-plugin scan, so if validate_manifest
+        still validated lspServers the scan would double-count every LSP fault.
+        This guards that validate_manifest stays out of the LSP business.
+        """
+        root = tmp_path / "p"
+        (root / ".claude-plugin").mkdir(parents=True)
+        (root / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "p",
+                    "version": "1.0.0",
+                    "description": "x",
+                    "lspServers": {"pyright": {"command": "x", "args": "bad"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        report = ValidationReport()
+        validate_manifest(root, report)
+        lsp_findings = [
+            r.message
+            for r in report.results
+            if r.level in ("CRITICAL", "MAJOR", "MINOR") and "'args'" in r.message
+        ]
+        assert not lsp_findings, f"validate_manifest should not validate LSP; got: {lsp_findings}"
+
+
+class TestHookDelegation:
+    """validate_hooks delegates to the comprehensive hooks.json validator."""
+
+    def test_malformed_hooks_json_is_caught(self, tmp_path):
+        """A structurally-invalid hooks.json is flagged.
+
+        The whole-plugin path delegates to the comprehensive hook validator,
+        which checks the hooks.json schema (the inline path never did a deep
+        structural check). A finding here proves the comprehensive validator runs.
+        """
+        root = _make_plugin(tmp_path)
+        (root / "hooks").mkdir()
+        # Missing the required top-level "hooks" wrapper object.
+        (root / "hooks" / "hooks.json").write_text(
+            json.dumps({"NotARealEvent": [{"matcher": "*", "hooks": [{"type": "command"}]}]}),
+            encoding="utf-8",
+        )
+        report = ValidationReport()
+        validate_hooks(root, report)
+        blocking = [r.message for r in report.results if r.level in ("CRITICAL", "MAJOR")]
+        assert blocking, "expected the comprehensive hook validator to flag a malformed hooks.json"
+
+
+class TestDocumentationDelegation:
+    """validate_readme delegates to the comprehensive documentation validator."""
+
+    def test_broken_internal_link_is_caught(self, tmp_path):
+        """A broken internal link in the README is flagged MAJOR.
+
+        The thin inline validate_readme only checked README EXISTENCE; broken-
+        link scanning is comprehensive-only, so a MAJOR here proves the
+        whole-plugin path now runs the comprehensive documentation validator.
+        """
+        root = _make_plugin(tmp_path)
+        (root / "README.md").write_text(
+            "# P\n\nDesc.\n\n## Usage\n\nSee [the guide](docs/does-not-exist.md).\n",
+            encoding="utf-8",
+        )
+        report = ValidationReport()
+        validate_readme(root, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("Broken internal link" in m for m in majors), (
+            f"expected a broken-internal-link MAJOR from the doc validator; got: {majors}"
         )
