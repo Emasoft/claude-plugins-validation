@@ -45,22 +45,26 @@ import yaml
 from cpv_validation_common import (
     BUILTIN_AGENT_TYPES,
     COLORS,
+    DESCRIPTION_TOKEN_LIMIT,
     EXIT_CRITICAL,
     EXIT_MAJOR,
     EXIT_MINOR,
     EXIT_OK,
+    SKILL_BODY_TOKEN_LIMIT,
     SKILL_FRONTMATTER_FIELDS,
     VALID_CONTEXT_VALUES,
     VALID_EFFORT_VALUES,
     VALID_HOOK_EVENTS,
     VALID_PLUGIN_ENV_VARS,
     VALID_TOOLS,
+    WHEN_TO_USE_TOKEN_LIMIT,
     Level,
-    description_has_trigger_phrases,
+    check_token_limit,
     has_numbered_prose_steps,
     is_orchestrator_skill,
     is_valid_plugin_env_var,
     load_cpv_config,
+    removed_cpv_size_keys_present,
     save_report_and_print_summary,
     validate_component_name,
     validate_toc_embedding,
@@ -83,17 +87,12 @@ Score = Literal[0, 1, 2, 3]
 
 # --- AgentSkills OpenSpec Constants ---
 MAX_SKILL_NAME_LENGTH = 64  # Aligned with MAX_NAME_LENGTH in cpv_validation_common (official spec limit)
-# Per skills.md L192-193 (Claude Code v2.1.98+): the 1,536-char cap applies to
-# ``description + when_to_use`` COMBINED, not to ``description`` alone. Earlier
-# CPV used 1024 against ``description`` only, which (a) rejected legit skills
-# whose description fit the old 1024 budget but together with when_to_use
-# exceeded the real 1536, and (b) false-positive-flagged skills whose
-# description alone was between 1025 and 1536 — both of which the current
-# Claude Code runtime accepts.
-MAX_DESCRIPTION_COMBINED_LENGTH = 1536
-# Kept as a legacy alias so existing imports/tests continue to resolve while
-# the semantics change. New call sites should reference the combined cap.
-MAX_DESCRIPTION_LENGTH = MAX_DESCRIPTION_COMBINED_LENGTH
+# Skill ``description`` / ``when_to_use`` size is now token-based (TRDD-021250b5)
+# via DESCRIPTION_TOKEN_LIMIT / WHEN_TO_USE_TOKEN_LIMIT from cpv_validation_common.
+# The old char-based caps (MAX_DESCRIPTION_COMBINED_LENGTH / the readability
+# MAX_DESCRIPTION_WARN heuristic / the MAX_DESCRIPTION_LENGTH alias) were removed:
+# characters are a poor proxy for what Claude Code actually truncates, and the
+# token gate is non-negotiable (no per-plugin override).
 MAX_COMPATIBILITY_LENGTH = 500
 
 # AgentSkills OpenSpec allowed fields (strict whitelist)
@@ -126,12 +125,12 @@ ALL_KNOWN_FIELDS = (
 )
 
 # --- Token Budget Constants ---
+# Body / description / when_to_use size is token-based (TRDD-021250b5) — the
+# char/word caps (MAX_CHAR_COUNT_*, MAX_WORD_COUNT_*, MAX_DESCRIPTION_WARN) were
+# removed in favour of SKILL_BODY_TOKEN_LIMIT / DESCRIPTION_TOKEN_LIMIT /
+# WHEN_TO_USE_TOKEN_LIMIT (single source of truth in cpv_validation_common).
+# MAX_SKILL_LINES stays as a structural progressive-disclosure guard.
 MAX_SKILL_LINES = 500  # Hard limit — MAJOR if exceeded
-MAX_CHAR_COUNT_WARN = 5000  # Character warning threshold
-MAX_CHAR_COUNT_ERROR = 5000  # Character error threshold (hard limit)
-MAX_WORD_COUNT_WARN = 3500
-MAX_WORD_COUNT_ERROR = 5000
-MAX_DESCRIPTION_WARN = 250  # CPV-internal readability heuristic — NOT a skills.md rule.
 MAX_FRONTMATTER_CHARS_WARN = 12000
 MAX_FRONTMATTER_CHARS_ERROR = 15000
 
@@ -747,48 +746,28 @@ def validate_description_field(
     if len(desc) < 20:
         report.minor("Description is very short (< 20 chars)", "SKILL.md", category="Description Quality")
 
-    # skills.md L192-193: the authoritative cap is on ``description +
-    # when_to_use`` COMBINED, not description alone. Claude Code truncates
-    # the combined text at 1,536 chars in the skill listing — anything above
-    # that is silently dropped and the skill's triggering intent is lost.
-    when_to_use = frontmatter.get("when_to_use") or ""
-    if not isinstance(when_to_use, str):
-        when_to_use = ""
-    combined_len = len(desc) + len(when_to_use)
-    if combined_len > MAX_DESCRIPTION_COMBINED_LENGTH:
-        report.major(
-            f"Combined length of 'description' ({len(desc)} chars) + 'when_to_use' "
-            f"({len(when_to_use)} chars) is {combined_len} chars — exceeds the "
-            f"{MAX_DESCRIPTION_COMBINED_LENGTH}-char cap. Claude Code truncates the "
-            "listing at this point, so the trailing portion of the skill's trigger "
-            "guidance is silently dropped. Tighten one or both fields.",
+    # Size is token-based (TRDD-021250b5), not char-based — characters are a poor
+    # proxy for what Claude Code actually truncates in the skill listing.
+    # ``description`` and ``when_to_use`` are gated independently against the
+    # shared token limits (single source of truth in cpv_validation_common).
+    check_token_limit(
+        desc,
+        DESCRIPTION_TOKEN_LIMIT,
+        report,
+        "SKILL.md",
+        "'description'",
+        "Tighten to a focused sentence — move trigger detail into the skill body.",
+    )
+    wtu = frontmatter.get("when_to_use") or ""
+    if isinstance(wtu, str):
+        check_token_limit(
+            wtu,
+            WHEN_TO_USE_TOKEN_LIMIT,
+            report,
             "SKILL.md",
-            category="Description Quality",
+            "'when_to_use'",
+            "Tighten it.",
         )
-    elif len(desc) > MAX_DESCRIPTION_WARN:
-        # Issue #16 category E: when the description packs explicit
-        # trigger phrases ("use when …", "trigger with …", "include
-        # keywords …", etc.) the readability heuristic should raise the
-        # cap. Triggerable descriptions earn the longer length — they
-        # carry the dispatcher info Claude needs at skill-selection time.
-        if description_has_trigger_phrases(desc):
-            extended_cap = max(MAX_DESCRIPTION_WARN * 2, 500)
-            if len(desc) > extended_cap:
-                report.minor(
-                    f"Description is long ({len(desc)} chars), even after the "
-                    f"trigger-phrase exemption (cap raised to {extended_cap}). "
-                    "Consider tightening — the trailing trigger guidance may "
-                    "still be readable but loses signal.",
-                    "SKILL.md",
-                    category="Description Quality",
-                )
-            # else: long but acceptable because of trigger phrases.
-        else:
-            report.minor(
-                f"Description is long ({len(desc)} chars), consider shortening to < {MAX_DESCRIPTION_WARN}",
-                "SKILL.md",
-                category="Description Quality",
-            )
 
     # Determine if this skill is user-invocable (default True per spec)
     is_user_invocable = frontmatter.get("user-invocable", True)
@@ -1544,91 +1523,54 @@ def validate_token_budget(
     report: ValidationReport,
     skill_path: Path | None = None,
 ) -> None:
-    """Validate token budget (line count, character count, word count).
+    """Validate skill size (line count + token-based body budget).
 
-    Default hard limits: 500 lines and 5000 characters. Both enforced.
-
-    Issue #16 category B: maintainers can override per-plugin via
-    `cpv.max_chars` / `cpv.max_lines` in plugin.json. They can also
-    downgrade the severity to WARNING via `cpv.skill_size_severity`
-    when the deep-domain skill genuinely requires the larger budget
-    (e.g. amw-mermaid-render covers 9 grammar types × multiple themes).
+    Size limits are token-based and non-negotiable (TRDD-021250b5): the old
+    char/word caps and the per-plugin ``cpv.max_chars`` / ``cpv.max_lines`` /
+    ``cpv.skill_size_severity`` overrides were removed. A validator must not be
+    configurable into passing a plugin the runtime will silently truncate, so
+    findings are always MAJOR. ``MAX_SKILL_LINES`` stays as a structural
+    progressive-disclosure guard (line count is layout, not token cost).
     """
     total_lines = content.count("\n") + 1
-    char_count = len(content)
-    word_count = len(body.split())
 
-    max_lines = MAX_SKILL_LINES
-    max_chars = MAX_CHAR_COUNT_ERROR
-    severity = "major"
+    # Line count check — structural progressive-disclosure guard.
+    if total_lines > MAX_SKILL_LINES:
+        report.major(
+            f"SKILL.md has {total_lines} lines (max {MAX_SKILL_LINES}). Use progressive "
+            "disclosure — move content to reference files, or split into smaller focused skills.",
+            "SKILL.md",
+        )
+    else:
+        report.passed(f"SKILL.md line count OK ({total_lines} lines)", "SKILL.md", category="Token Budget")
+
+    # Body token check — the runtime keeps only ~5000 tokens of body after
+    # auto-compaction, so anything above that is silently dropped.
+    if not check_token_limit(
+        body,
+        SKILL_BODY_TOKEN_LIMIT,
+        report,
+        "SKILL.md",
+        "SKILL.md body",
+        "Split into smaller, more focused skills — move detail to reference files "
+        "(the body is kept only to ~5000 tokens after auto-compaction).",
+    ):
+        report.passed("SKILL.md body within token budget", "SKILL.md", category="Token Budget")
+
+    # Fail-loud deprecation WARNING: a plugin that still declares the removed
+    # cpv.* size-override keys learns the override stopped working.
     if skill_path is not None:
         # skill_path is something like .../skills/<name>/SKILL.md — the
         # plugin root is two directories up.
         plugin_root = skill_path.parent.parent.parent
         cpv_cfg = load_cpv_config(plugin_root)
-        cfg_max_lines = cpv_cfg.get("max_lines")
-        cfg_max_chars = cpv_cfg.get("max_chars")
-        cfg_severity = cpv_cfg.get("skill_size_severity")
-        if isinstance(cfg_max_lines, int) and cfg_max_lines > 0:
-            max_lines = cfg_max_lines
-        if isinstance(cfg_max_chars, int) and cfg_max_chars > 0:
-            max_chars = cfg_max_chars
-        if isinstance(cfg_severity, str) and cfg_severity.lower() in {"warning", "minor", "major"}:
-            severity = cfg_severity.lower()
-
-    def _emit(message: str) -> None:
-        if severity == "warning":
-            report.warning(message, "SKILL.md", category="Token Budget")
-        elif severity == "minor":
-            report.minor(message, "SKILL.md", category="Token Budget")
-        else:
-            report.major(message, "SKILL.md", category="Token Budget")
-
-    # Line count check
-    if total_lines > max_lines:
-        _emit(
-            f"SKILL.md has {total_lines} lines (max {max_lines}). "
-            "Must use progressive disclosure — move content to reference files. "
-            "(Override via cpv.max_lines / cpv.skill_size_severity in plugin.json.)"
-        )
-    else:
-        report.passed(f"SKILL.md line count OK ({total_lines} lines)", "SKILL.md", category="Token Budget")
-
-    # Character count check
-    if char_count > max_chars:
-        _emit(
-            f"SKILL.md has {char_count} characters (max {max_chars}). "
-            "Must use progressive disclosure — move content to reference files. "
-            "(Override via cpv.max_chars / cpv.skill_size_severity in plugin.json.)"
-        )
-    elif char_count > MAX_CHAR_COUNT_WARN:
-        report.minor(
-            f"SKILL.md has {char_count} characters (recommended: under {MAX_CHAR_COUNT_WARN}). "
-            "Consider moving detailed content to supporting files.",
-            "SKILL.md",
-            category="Token Budget",
-        )
-    else:
-        report.passed(f"SKILL.md character count OK ({char_count} chars)", "SKILL.md", category="Token Budget")
-
-    # Word count check
-    if word_count > MAX_WORD_COUNT_ERROR:
-        report.major(
-            f"Content exceeds {MAX_WORD_COUNT_ERROR} words ({word_count})",
-            "SKILL.md",
-            category="Token Budget",
-        )
-    elif word_count > MAX_WORD_COUNT_WARN:
-        report.minor(
-            f"Content is lengthy ({word_count} words)",
-            "SKILL.md",
-            category="Token Budget",
-        )
-    # NOTE: A duplicate MINOR line-count check used to live here — it re-used
-    # the same 500-line threshold as the MAJOR check above (MAX_SKILL_LINES),
-    # so it could never add information: if you exceeded 500 lines, you already
-    # got the MAJOR; if you were under 500, the MINOR branch was unreachable.
-    # Removed to avoid double-reporting the same threshold at two severities.
+        leftover = removed_cpv_size_keys_present(cpv_cfg)
+        if leftover:
+            report.warning(
+                "plugin.json cpv." + ", cpv.".join(leftover) + " no longer supported — "
+                "skill size limits are token-based and non-negotiable (TRDD-021250b5).",
+                "SKILL.md",
+            )
 
 
 def validate_required_sections(body: str, report: ValidationReport, strict_mode: bool = False) -> None:
