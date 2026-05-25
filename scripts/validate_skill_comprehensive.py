@@ -1521,7 +1521,6 @@ def validate_token_budget(
     content: str,
     body: str,
     report: ValidationReport,
-    skill_path: Path | None = None,
 ) -> None:
     """Validate skill size (line count + token-based body budget).
 
@@ -1531,6 +1530,10 @@ def validate_token_budget(
     configurable into passing a plugin the runtime will silently truncate, so
     findings are always MAJOR. ``MAX_SKILL_LINES`` stays as a structural
     progressive-disclosure guard (line count is layout, not token cost).
+
+    The removed-override deprecation WARNING is emitted ONCE elsewhere (in
+    validate_plugin.validate_manifest for whole-plugin runs, in this module's
+    main() for standalone runs) — never per-skill here.
     """
     total_lines = content.count("\n") + 1
 
@@ -1557,20 +1560,12 @@ def validate_token_budget(
     ):
         report.passed("SKILL.md body within token budget", "SKILL.md", category="Token Budget")
 
-    # Fail-loud deprecation WARNING: a plugin that still declares the removed
-    # cpv.* size-override keys learns the override stopped working.
-    if skill_path is not None:
-        # skill_path is something like .../skills/<name>/SKILL.md — the
-        # plugin root is two directories up.
-        plugin_root = skill_path.parent.parent.parent
-        cpv_cfg = load_cpv_config(plugin_root)
-        leftover = removed_cpv_size_keys_present(cpv_cfg)
-        if leftover:
-            report.warning(
-                "plugin.json cpv." + ", cpv.".join(leftover) + " no longer supported — "
-                "skill size limits are token-based and non-negotiable (TRDD-021250b5).",
-                "SKILL.md",
-            )
+    # NOTE: the cpv.* size-override deprecation WARNING is NOT emitted here.
+    # It concerns a PLUGIN-level key (plugin.json), so emitting it per-skill made
+    # validate_plugin fire one identical warning per skill (44× on CPV itself).
+    # It now fires ONCE: in validate_plugin.validate_manifest for whole-plugin
+    # runs, and in this module's main() for standalone single-skill runs
+    # (TRDD-021250b5).
 
 
 def validate_required_sections(body: str, report: ValidationReport, strict_mode: bool = False) -> None:
@@ -2776,10 +2771,8 @@ def validate_skill(
         if frontmatter.get("context") == "fork":
             _check_context_fork_self_recursion(skill_path, frontmatter, body, report)
 
-    # Validate token budget — pass the SKILL.md path so the override
-    # config in plugin.json can be discovered (issue #16 category B).
-    skill_md_for_budget = find_skill_md(skill_path)
-    validate_token_budget(content, body, report, skill_path=skill_md_for_budget)
+    # Validate token budget (line count + token-based body limit).
+    validate_token_budget(content, body, report)
 
     # Validate required sections (Nixtla strict mode)
     validate_required_sections(body, report, strict_mode)
@@ -3066,6 +3059,21 @@ def main() -> int:
         strict_openspec=args.openspec,
         validate_pillars_flag=args.pillars,
     )
+
+    # Fail-loud deprecation (TRDD-021250b5): warn ONCE per standalone run if the
+    # parent plugin.json still declares the removed cpv.* size-override keys.
+    # Whole-plugin runs get this from validate_plugin.validate_manifest instead;
+    # it is deliberately NOT emitted per-skill (that duplicated it N times).
+    # skill_path is the skill DIRECTORY here (skills/<name>), so the plugin root
+    # is two levels up. Outside a plugin, load_cpv_config returns {} → no warning.
+    _removed_size_keys = removed_cpv_size_keys_present(load_cpv_config(skill_path.parent.parent))
+    if _removed_size_keys:
+        report.warning(
+            "plugin.json cpv." + ", cpv.".join(_removed_size_keys) + " no longer "
+            "supported — skill size limits are token-based and non-negotiable "
+            "(TRDD-021250b5).",
+            "SKILL.md",
+        )
 
     if args.json:
         print_json(report)
