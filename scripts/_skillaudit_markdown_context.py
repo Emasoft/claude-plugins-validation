@@ -322,6 +322,23 @@ _PAYLOAD_SINK_RE: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE,
 )
 
+# An exec-call head immediately preceding a quoted argument, anchored to the
+# END of the substring before the match (so the quoted match IS the executed
+# command string, e.g. ``os.system("rm -rf /")`` → match ``rm -rf /``). This is
+# the call-ARGUMENT case the inert-token guard must NOT certify as a benign
+# doc mention — distinct from the call-HEAD case (``token(``) already handled.
+_EXEC_CALL_ARG_HEAD_RE: Final[re.Pattern[str]] = re.compile(
+    r"""(?:
+        os\.system | os\.popen |
+        subprocess\.(?:run|call|check_output|check_call|Popen|getoutput|getstatusoutput) |
+        \beval | \bexec |
+        child_process\.(?:exec|execSync|spawn|spawnSync|execFile|execFileSync|fork) |
+        \.exec(?:Sync)? | \.spawn(?:Sync)? |
+        \bpopen | \bsystem
+    )\s*\(\s*['"]?\s*$""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
 _MNEMONIC_RE: Final[re.Pattern[str]] = re.compile(r"mnemonic", re.IGNORECASE)
 
 # "mnemonic" adjacent to a crypto-wallet qualifier on the SAME line —
@@ -396,11 +413,16 @@ def _is_inert_token_in_string(line: str, match: str) -> bool:
         return False
     if not _match_inside_quoted_string(line, match):
         return False
-    # An actual call shape (``os.system(``) stays suspect even if the
-    # name somehow sits inside quotes.
+    # An actual call shape stays suspect even if the token sits inside quotes:
+    #   - call HEAD  (``os.system(``)         → match is the callable name
+    #   - call ARG   (``os.system("rm -rf /")``) → match is the quoted command
+    # The ARG case is the dangerous one the original guard missed: a destructive
+    # command passed to an exec call is NOT a doc mention.
     idx = line.find(match)
     while idx != -1:
         if line[idx + len(match) :].lstrip().startswith("("):
+            return False
+        if _EXEC_CALL_ARG_HEAD_RE.search(line[:idx]):
             return False
         idx = line.find(match, idx + 1)
     return True

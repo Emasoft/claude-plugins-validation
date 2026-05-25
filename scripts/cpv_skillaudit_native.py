@@ -777,6 +777,18 @@ _INTENT_SOFT_SIGNAL_RULES: frozenset[str] = frozenset(
 # safe-doc-keeping. The split above adds finer-grained control.
 _INTENT_CLASS_RULES: frozenset[str] = _INTENT_HARD_SIGNAL_RULES | _INTENT_SOFT_SIGNAL_RULES
 
+# Rules whose threat is delivered THROUGH a JSON/YAML metadata field — the
+# `description` / `title` of an MCP tool or plugin manifest is itself an
+# LLM-READ attack surface (the model reads tool descriptions when deciding to
+# call them). A `safe_schema` classifier verdict means "the match sits in a
+# SAFE_KEY metadata field"; for EXECUTION-class rules that genuinely makes it
+# inert (a JSON string can't reach a shell), but for THESE rules the metadata
+# field is exactly the target — so they must NEVER be hard-suppressed there.
+# DEMOTE (stay visible at NIT, agent triages) instead. (audit CRITICAL #1)
+_SCHEMA_FIELD_THREAT_RULES: frozenset[str] = _INTENT_HARD_SIGNAL_RULES | frozenset(
+    {"MCP_SCHEMA_POISON", "TOOL_POISONING"}
+)
+
 
 # Path basenames that are ALWAYS instruction-loadable — content there
 # IS read by Claude Code as agent instructions, so prompt-injection /
@@ -946,11 +958,17 @@ def _context_classifier_verdict(
     if classifier_verdict == "safe_literal":
         return "suppress"
 
-    # safe_schema — JSON description / title / keyword / homepage field.
-    # These are UI metadata; never executed, never read by LLMs in
-    # typical workflows. Issue #33 explicitly requested they not match.
-    # Suppress regardless of rule.
+    # safe_schema — JSON/YAML description / title / keyword / homepage field.
+    # For EXECUTION-class rules these are inert UI metadata (a JSON string
+    # cannot reach a shell) — suppress (issue #33). BUT a metadata `description`
+    # is itself an LLM-READ attack surface: MCP tool/schema descriptions are
+    # read by the model when it decides whether to call a tool, so prompt-
+    # injection / data-exfil / schema-poisoning rules target EXACTLY this field.
+    # DEMOTE those (stay visible at NIT, agent triages) — never hard-suppress
+    # (audit CRITICAL #1; mirrors the safe_doc INTENT carve-out below).
     if classifier_verdict == "safe_schema":
+        if rule_id in _SCHEMA_FIELD_THREAT_RULES:
+            return "demote"
         return "suppress"
 
     # safe_doc — markdown prose, Python docstring, full-line comment.
