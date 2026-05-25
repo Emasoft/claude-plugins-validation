@@ -375,6 +375,27 @@ def _is_benign_env_read(line: str, match: str) -> bool:
 # static string literal (no ``${…}`` interpolation, no ``+`` concatenation
 # with a variable) has a fixed author-time destination and is, by
 # definition, not attacker-controlled — provably not SSRF.
+# SSRF_PATTERN targets DANGEROUS FIXED hosts. Cloud-metadata endpoints,
+# file://, gopher://, and the 169.254.0.0/16 link-local range are NEVER benign —
+# they are dangerous PRECISELY because they are hardcoded internal targets, so
+# "it's a static literal" does not make them safe (it makes them the exact
+# threat: e.g. fetch("http://169.254.169.254/latest/meta-data/iam/…") steals
+# IAM creds). Such a URL must NOT be certified a benign static literal. NOTE:
+# plain localhost / 127.0.0.1 are intentionally NOT here — those are common
+# benign dev-config defaults and stay suppressible when static (audit CRITICAL #2).
+_SSRF_NEVER_BENIGN_HOST_RE = re.compile(
+    r"169\.254\."  # link-local (AWS/Azure/GCP IMDS)
+    r"|metadata\.google\.internal"
+    r"|/latest/meta-data"  # AWS IMDS path
+    r"|/computeMetadata"  # GCP metadata path
+    r"|metadata\.azure\.com"
+    r"|file://"  # local file read
+    r"|gopher://"  # gopher SSRF
+    r"|fd00:ec2",  # AWS IPv6 IMDS
+    re.IGNORECASE,
+)
+
+
 def _ssrf_url_is_static_literal(line: str, match: str) -> bool:
     """True iff the matched URL substring sits inside a string literal whose
     value is fully static (no interpolation, no concatenation).
@@ -382,7 +403,12 @@ def _ssrf_url_is_static_literal(line: str, match: str) -> bool:
     ``defaultUrl: "http://localhost:1234"``        → static  (safe)
     ``fetch("http://localhost:" + req.query.port)``→ concat  (keep)
     ``fetch(`http://localhost:${port}`)``          → interp  (keep)
+
+    A never-benign host (cloud-metadata / file:// / gopher:// / link-local) is
+    NEVER a safe static literal — see ``_SSRF_NEVER_BENIGN_HOST_RE`` (CRITICAL #2).
     """
+    if _SSRF_NEVER_BENIGN_HOST_RE.search(match):
+        return False
     idx = line.find(match)
     if idx < 0:
         return False
