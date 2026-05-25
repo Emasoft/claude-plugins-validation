@@ -1116,10 +1116,14 @@ def _load_cpv_config_cached(plugin_root_str: str) -> dict[str, object]:
 
       {"cpv": {"exclude_paths":         ["external/", "vendor/"],
                "allow_root_dirs":       ["external", "SKILLS-TO-INTEGRATE"],
-               "allow_orchestrator_traversal": "skills/amw-design-principles",
-               "skill_size_severity":   "warning",
-               "max_chars":             12000,
-               "max_lines":             800}}
+               "allow_orchestrator_traversal": "skills/amw-design-principles"}}
+
+    REMOVED (TRDD-021250b5): the skill-size overrides ``max_chars`` /
+    ``max_lines`` / ``skill_size_severity``. Skill/agent/command size limits are
+    token-based and non-negotiable — a validator must not be configurable into
+    passing a plugin the runtime will silently truncate. A plugin that still
+    declares any of them gets a fail-loud WARNING (see
+    ``removed_cpv_size_keys_present``).
     """
     manifest = Path(plugin_root_str) / ".claude-plugin" / "plugin.json"
     if not manifest.is_file():
@@ -4691,6 +4695,24 @@ MAX_DESCRIPTION_LENGTH = 1024
 MIN_BODY_CHARS = 100
 MAX_BODY_WORDS = 2000
 
+# --- Token-based size limits (TRDD-021250b5) ---
+# The real Claude Code size limits are TOKEN-based, not character-based:
+#   * a skill body beyond ~5,000 tokens loses its tail to auto-compaction
+#     (skills.md "Skill content lifecycle": "keeping the first 5,000 tokens of
+#     each" invoked skill);
+#   * the combined ``description`` + ``when_to_use`` is truncated to ~300 tokens
+#     in the skill listing under context pressure (Anthropic engineer guidance;
+#     the docs only hint at it under skills.md "Skill descriptions are cut short").
+# Characters are a poor proxy because chars-per-token swings ~4x by language
+# (English ~3.5-4, CJK ~1). We count real tokens via scripts/cpv_token_estimate.py
+# (conservative, language-aware, vendored o200k port + Claude-correction).
+# These are HARD limits with NO per-plugin override — a validator must not be
+# configurable into passing a plugin the runtime will silently truncate.
+SKILL_BODY_TOKEN_LIMIT = 5000
+DESCRIPTION_TOKEN_LIMIT = 200        # skill + command ``description``
+WHEN_TO_USE_TOKEN_LIMIT = 100        # skill + command ``when_to_use``
+AGENT_DESCRIPTION_TOKEN_LIMIT = 300  # agent ``description`` (no separate when_to_use)
+
 # =============================================================================
 # Shared Naming Validation
 # =============================================================================
@@ -5162,6 +5184,55 @@ class ValidationReport:
                 stats["failed"] += 1
 
         return stats
+
+
+# =============================================================================
+# Token-based size gate (TRDD-021250b5) — single source of truth
+# =============================================================================
+_REMOVED_CPV_SIZE_KEYS: tuple[str, ...] = ("max_chars", "max_lines", "skill_size_severity")
+
+
+def removed_cpv_size_keys_present(cpv_cfg: dict[str, object]) -> list[str]:
+    """Return any retired ``cpv.*`` size-override keys still declared in plugin.json.
+
+    The ``max_chars`` / ``max_lines`` / ``skill_size_severity`` overrides were
+    removed (TRDD-021250b5): skill/agent/command size limits are token-based and
+    non-negotiable — a validator must not be configurable into passing a plugin
+    the runtime will silently truncate. Callers emit a fail-loud WARNING when this
+    returns a non-empty list so maintainers learn their override stopped working.
+    """
+    return [k for k in _REMOVED_CPV_SIZE_KEYS if k in cpv_cfg]
+
+
+def check_token_limit(
+    text: str,
+    max_tokens: int,
+    report: ValidationReport,
+    file: str,
+    field_label: str,
+    advice: str,
+) -> bool:
+    """Emit a MAJOR finding if ``text`` exceeds ``max_tokens`` estimated Claude tokens.
+
+    Single source of truth for every token-based size gate (skill body /
+    ``description`` / ``when_to_use`` / agent ``description``). Uses the
+    conservative estimator in :mod:`cpv_token_estimate`, which never under-counts
+    (so the gate errs strict, never lax). There is NO per-plugin override — these
+    limits are non-negotiable. Returns ``True`` iff a finding was emitted.
+    """
+    if not text:
+        return False
+    from cpv_token_estimate import estimate_tokens  # lazy: keep common.py import-light
+
+    est = estimate_tokens(text)
+    if est.tokens > max_tokens:
+        report.major(
+            f"{field_label} is ~{est.tokens} tokens (limit {max_tokens}; "
+            f"{est.method} estimate). {advice}",
+            file,
+        )
+        return True
+    return False
 
 
 @dataclass
