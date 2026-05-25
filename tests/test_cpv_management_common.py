@@ -375,8 +375,9 @@ class TestSaveJsonSafe:
                 with pytest.raises(OSError, match="disk full"):
                     save_json_safe(f, {"data": True})
 
-        # The .tmp file should not remain
-        assert not (tmp_path / "fail.tmp").exists()
+        # No .tmp staging file should remain (per-process-unique name, cleaned
+        # up on error — assert on the suffix, not a fixed name).
+        assert not any(p.name.endswith(".tmp") for p in tmp_path.iterdir())
 
 
 # ── _validate_safe_name tests ──────────────────────────────

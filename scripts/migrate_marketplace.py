@@ -29,6 +29,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cpv_management_common import unique_tmp_path  # noqa: E402
 from cpv_network_resilience import gh_with_retry  # noqa: E402
 
 
@@ -175,8 +176,10 @@ def migrate_marketplace(
                 print(line)
         return 1
 
-    # Atomic write: tmp + rename so a crash mid-write doesn't corrupt the file.
-    tmp = mkt.with_suffix(".json.tmp")
+    # Atomic write: per-process-unique tmp + rename so a crash mid-write
+    # doesn't corrupt the file and two concurrent writers can't collide on the
+    # same staging file.
+    tmp = unique_tmp_path(mkt)
     tmp.write_text(new_text, encoding="utf-8")
     tmp.replace(mkt)
     print(f"  [migrate] {mkt}: applied {len(changes)} migration(s):")
