@@ -212,6 +212,11 @@ def filter_findings(results: list[dict[str, Any]], min_severity: str) -> list[Fi
     floor = SEVERITY_ORDER.get(min_severity.upper(), SEVERITY_ORDER["MINOR"])
     findings: list[Finding] = []
     for r in results:
+        # Guard the item itself before calling .get() — a hand-edited /
+        # malformed report can carry a non-dict element (e.g. a bare
+        # string), and ``"str".get(...)`` would raise AttributeError.
+        if not isinstance(r, dict):
+            continue
         level = r.get("level")
         if not isinstance(level, str):
             continue
@@ -240,8 +245,17 @@ def derive_scope(file_path: str) -> tuple[str, str]:
     freely (split a too-big SKILL.md, externalise content to
     ``references/``, create new sibling skills with prefix-matched names).
     Every other path is a ``file`` scope: only that file may be edited.
+
+    Path shape is normalised first (Windows backslashes converted to ``/``
+    and a leading ``./`` stripped) so a skill ref is detected the same way
+    regardless of which validator emitted it; otherwise a backslash-separated
+    or ``./``-prefixed skill reference would silently degrade to a narrower
+    ``file`` scope and lose the documented refactor latitude.
     """
-    parts = file_path.split("/")
+    normalised = file_path.replace("\\", "/")
+    if normalised.startswith("./"):
+        normalised = normalised[2:]
+    parts = normalised.split("/")
     if len(parts) >= 2 and parts[0] == "skills" and parts[1]:
         return (f"skills/{parts[1]}/", SCOPE_KIND_SKILL_DIR)
     return (file_path, SCOPE_KIND_FILE)
@@ -316,7 +330,10 @@ def make_session_dir(explicit: Path | None) -> Path:
     if explicit is not None:
         session_dir = explicit
     else:
-        ts = time.strftime("%Y%m%d_%H%M%S") + time.strftime("%z")
+        # Single strftime call so the date/time and the GMT offset come from
+        # ONE clock read — two reads can straddle a sub-second midnight and
+        # emit a mismatched date+offset pair.
+        ts = time.strftime("%Y%m%d_%H%M%S%z")
         tmp_root = Path(os.environ.get("TMPDIR", "/tmp")).resolve()
         session_dir = tmp_root / "cpv-batch" / ts
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -381,7 +398,8 @@ def write_index(
     index_path = session_dir / "index.json"
     payload = {
         "schema_version": SCHEMA_VERSION,
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S") + time.strftime("%z"),
+        # One strftime read so date-time and offset can't straddle midnight.
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "plugin_path": str(plugin_path.resolve()),
         "report_source": report_source,
         "shard_count": len(shards),
@@ -516,7 +534,15 @@ def main(argv: list[str] | None = None) -> int:
             session_dir=args.session_dir,
             report_path=args.report,
         )
-    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+    except subprocess.TimeoutExpired as exc:
+        # run_validate_plugin uses timeout=600; a hung validate_plugin.py
+        # would otherwise escape as a raw traceback. Fail fast, cleanly.
+        print(f"error: validate_plugin.py timed out after {exc.timeout}s", file=sys.stderr)
+        return 1
+    except (FileNotFoundError, ValueError, RuntimeError, OSError) as exc:
+        # OSError covers PermissionError and other mkdir/write failures from
+        # make_session_dir / write_shard_manifest / write_index.
+        # FileNotFoundError is a subclass of OSError but kept explicit for clarity.
         print(f"error: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(out, indent=2))

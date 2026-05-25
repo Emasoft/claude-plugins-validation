@@ -226,7 +226,10 @@ def _new_session_dir(agent_type: str, base: Path | None = None) -> Path:
         import tempfile
 
         base = Path(tempfile.gettempdir()) / "cpv-batch"
-    ts = time.strftime("%Y%m%d_%H%M%S")
+    # Include the GMT offset (%z) per the report-location timestamp rule so
+    # the session dir name is unambiguous across machines / timezones, and
+    # use a single strftime read so date-time and offset can't straddle midnight.
+    ts = time.strftime("%Y%m%d_%H%M%S%z")
     sd = base / f"{ts}-{agent_type}"
     sd.mkdir(parents=True, exist_ok=True)
     return sd

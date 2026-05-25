@@ -27,7 +27,10 @@ def _write_index(session_dir: Path, n_shards: int, plugin_path: str = "/tmp/plug
     """Write a minimal index.json + n shard placeholders."""
     session_dir.mkdir(parents=True, exist_ok=True)
     index = {
-        "schema_version": 1,
+        # Match the producer (cpv_batch_planner.SCHEMA_VERSION). load_index now
+        # warns on a mismatch, so the fixture tracks the real schema version to
+        # stay warning-free for the existing aggregate/render tests.
+        "schema_version": aggregator.SCHEMA_VERSION,
         "created_at": "2026-05-19T11:50:00+0200",
         "plugin_path": plugin_path,
         "report_source": "test",
