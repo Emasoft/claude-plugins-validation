@@ -46,7 +46,7 @@ Enforced both at publish-time (`validate_plugin.py`) AND at strip-time:
 Each strip operation writes `.cpv-strip-state.json` at the plugin root after each major transition. A crashed run can resume from the last successful state:
 
 ```text
-INIT -> REPO_VERIFIED -> REPO_CREATED -> CONTENT_PUSHED ->
+INIT -> REPO_VERIFIED -> CONTENT_PUSHED ->
         SUBMODULE_ADDED -> COMMITTED -> DONE
 ```
 

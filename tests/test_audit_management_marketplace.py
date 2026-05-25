@@ -291,3 +291,30 @@ class TestFindActiveVersionsSurfacesCorruptSettings:
             import shutil
 
             shutil.rmtree(work, ignore_errors=True)
+
+    def test_structurally_malformed_settings_warns_not_crashes(self, monkeypatch, capsys):
+        """Recheck-MINOR: valid JSON but WRONG SHAPE (enabledPlugins is a list,
+        so `.items()` raises AttributeError) must warn + degrade, NOT crash.
+
+        The earlier except-narrowing to (OSError, ValueError) let this
+        AttributeError escape; the catch now also covers AttributeError/TypeError.
+        """
+        import manage_doctor
+
+        work = Path(tempfile.mkdtemp())
+        try:
+            bad = work / "settings.json"
+            # Well-formed JSON, but enabledPlugins is a LIST not a dict -> .items() raises.
+            bad.write_text(json.dumps({"enabledPlugins": ["a", "b"]}), encoding="utf-8")
+            monkeypatch.setattr(manage_doctor, "SETTINGS_FILE", bad)
+            empty_cache = work / "cache"
+            empty_cache.mkdir()
+            # Must NOT raise.
+            result = manage_doctor.find_active_versions(cache_root=empty_cache)
+            assert isinstance(result, dict)
+            out = capsys.readouterr().out
+            assert "enabled-plugin enumeration" in out
+        finally:
+            import shutil
+
+            shutil.rmtree(work, ignore_errors=True)
