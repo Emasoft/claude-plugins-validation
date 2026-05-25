@@ -55,7 +55,12 @@ from cpv_scanner_cache import (
     sha256_of_args,
     tree_merkle,
 )
-from cpv_validation_common import ValidationReport, ValidationResult, resolve_tool_command
+from cpv_validation_common import (
+    ValidationReport,
+    ValidationResult,
+    normalize_level,
+    resolve_tool_command,
+)
 from gitignore_filter import GitignoreFilter
 
 # markdownlint-cli2 finding shape: "<path>.md:<line>[:<col>] <severity> MD<NNN>".
@@ -1235,14 +1240,18 @@ def _replay_results_into_report(
         message = entry.get("message")
         if not isinstance(level, str) or not isinstance(message, str):
             continue
-        # ValidationResult takes ``Level`` (a Literal alias). The
-        # cache may have come from a different CPV release so we
-        # defensively coerce by string-equality against the known
-        # set inside ValidationReport.add() — invalid levels would
-        # raise there, but every level we ever emit is in the
-        # standard set, so passing the string through is fine.
+        # ``Level`` is a Literal alias erased at runtime, so neither
+        # ValidationResult.__init__ nor ValidationReport.add() does ANY
+        # runtime validation of the level string. A cross-release or
+        # corrupted cache could carry a typo, a stray trailing space
+        # ("CRITICAL "), or a foreign value, and the exit-code logic
+        # uses exact string equality — an unknown level would be
+        # silently mis-bucketed as non-blocking. Route every cached
+        # level through normalize_level(): valid levels pass through
+        # unchanged ("MAJOR" -> "MAJOR"); anything else collapses to
+        # the safe default "INFO".
         result = ValidationResult(
-            level=level,  # type: ignore[arg-type]
+            level=normalize_level(level),
             message=message,
             file=entry.get("file"),
             line=entry.get("line"),
