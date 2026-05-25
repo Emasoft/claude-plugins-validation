@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
 """SQLite-backed content-hash result cache for the CPV security scanner.
 
-This is a *triple-keyed* cache: a single entry is keyed by
+This is a *quadruple-keyed* cache: a single entry is keyed by
 
-  (content_hash, catalog_hash, scanner_version)
+  (content_hash, catalog_hash, scanner_version, file_ext)
 
-so any drift in the scanned content, the rule catalog, or the scanner
-binary itself fully invalidates the entry. A cache MISS is always safe
-(the caller is expected to fall back to a full rescan).
+so any drift in the scanned content, the rule catalog, the scanner
+binary itself, OR the file extension fully invalidates the entry. A
+cache MISS is always safe (the caller is expected to fall back to a
+full rescan).
+
+``file_ext`` is load-bearing because the skillaudit scanner picks its
+context classifier from the file SUFFIX (``.py``/``.json``/``.md``/
+``.yml``/``.ts``), so the SAME bytes produce DIFFERENT verdicts under
+different extensions. Without the extension in the key, the first
+extension scanned would poison every other extension's lookup with its
+own classifier's verdict (cross-extension collision → FP or FN).
+Callers that don't care about extension-sensitivity (or scan
+extensionless content) pass ``file_ext=""`` and share one bucket.
 
 Storage location is resolved by walking a 5-step priority chain (first
 writable wins); see :func:`_resolve_cache_path`. When NO candidate is
@@ -20,9 +30,10 @@ console on every scan).
 
 * Cache file mode ``0o600`` (and parent dir ``0o700``) so cached
   findings cannot be read by other users on shared boxes.
-* Triple-key invalidation — ANY of (content, catalog, scanner_version)
-  changing invalidates the entry. The PRIMARY KEY enforces this at the
-  SQL level; ``get`` only matches when ALL three keys are identical.
+* Quadruple-key invalidation — ANY of (content, catalog,
+  scanner_version, file_ext) changing invalidates the entry. The
+  PRIMARY KEY enforces this at the SQL level; ``get`` only matches when
+  ALL four keys are identical.
 * Corruption recovery — if the SQLite file is unreadable / not a valid
   database, the next ``get``/``put`` wipes and recreates it. The module
   never serves stale or partially-decoded findings.
@@ -66,7 +77,21 @@ from typing import Any
 
 # Filename for the SQLite database. Constant across every resolution
 # candidate so users can grep / inspect predictably.
-_CACHE_FILENAME = "scan-cache.sqlite"
+#
+# The ``-v2`` stem is a SCHEMA version, not a product version: it was
+# introduced when ``file_ext`` joined the PRIMARY KEY (quadruple-key
+# cache). Bumping the filename retires every old 3-key ``scan-cache.sqlite``
+# cleanly — a fresh file is created and the stale DB is simply ignored
+# (a cache MISS is always safe). This avoids relying on the
+# corruption-recovery path to migrate an incompatible older schema.
+_CACHE_FILENAME = "scan-cache-v2.sqlite"
+
+# Same database under the GitHub Actions ephemeral runner ($RUNNER_TEMP).
+# Kept in lockstep with ``_CACHE_FILENAME`` so the schema-version bump
+# applies everywhere. The runner temp is recreated per CI run, so this
+# location never actually carries a stale schema across runs — but
+# matching the version keeps the two names from drifting.
+_CACHE_FILENAME_GHA = "cpv-scan-cache-v2.sqlite"
 
 # Default prune thresholds — tunable per call.
 _DEFAULT_MAX_AGE_DAYS = 180
@@ -162,7 +187,7 @@ def _candidate_paths() -> list[Path]:
     if os.environ.get("GITHUB_ACTIONS") == "true":
         runner_tmp = os.environ.get("RUNNER_TEMP")
         if runner_tmp:
-            candidates.append(Path(runner_tmp).expanduser() / "cpv-scan-cache.sqlite")
+            candidates.append(Path(runner_tmp).expanduser() / _CACHE_FILENAME_GHA)
 
     return candidates
 
@@ -230,9 +255,10 @@ CREATE TABLE IF NOT EXISTS scan_cache (
   content_hash TEXT NOT NULL,
   catalog_hash TEXT NOT NULL,
   scanner_version TEXT NOT NULL,
+  file_ext TEXT NOT NULL DEFAULT '',
   findings_json TEXT NOT NULL,
   cached_at INTEGER NOT NULL,
-  PRIMARY KEY (content_hash, catalog_hash, scanner_version)
+  PRIMARY KEY (content_hash, catalog_hash, scanner_version, file_ext)
 );
 CREATE INDEX IF NOT EXISTS idx_cached_at ON scan_cache (cached_at);
 """
@@ -342,6 +368,8 @@ def get_cached_findings(
     content_hash: str,
     catalog_hash: str,
     scanner_version: str,
+    *,
+    file_ext: str = "",
 ) -> list[dict[str, Any]] | None:
     """Return cached findings, or ``None`` on miss / disable / corruption.
 
@@ -349,8 +377,16 @@ def get_cached_findings(
       - ``CPV_SCAN_CACHE=0`` → always ``None`` (cache off).
       - ``CPV_SCAN_CACHE_DEEP=1`` → always ``None`` (force rescan).
       - No writable cache path → ``None`` (logged once).
-      - Triple-key mismatch → ``None``.
+      - Quadruple-key mismatch → ``None``.
       - Corruption (bad JSON, broken sqlite file) → wipe + return ``None``.
+
+    ``file_ext`` is the lowercased file extension (e.g. ``".py"``,
+    ``".md"``) and is part of the key because the scanner's verdict
+    depends on the classifier selected by the extension. It is
+    keyword-only with a ``""`` default so extension-agnostic callers
+    keep the old 3-argument call shape. Lookup matches the SAME bucket
+    the entry was PUT into — same bytes under a different extension is a
+    deliberate MISS (different classifier ran), not a collision.
 
     The findings list is JSON-decoded; the caller is responsible for
     treating it as untrusted (it came from disk that another process
@@ -375,8 +411,9 @@ def get_cached_findings(
             "SELECT findings_json FROM scan_cache "
             "WHERE content_hash = ? "
             "AND catalog_hash = ? "
-            "AND scanner_version = ?",
-            (content_hash, catalog_hash, scanner_version),
+            "AND scanner_version = ? "
+            "AND file_ext = ?",
+            (content_hash, catalog_hash, scanner_version, file_ext),
         )
         row = cur.fetchone()
     except sqlite3.DatabaseError:
@@ -407,8 +444,9 @@ def get_cached_findings(
                 "DELETE FROM scan_cache "
                 "WHERE content_hash = ? "
                 "AND catalog_hash = ? "
-                "AND scanner_version = ?",
-                (content_hash, catalog_hash, scanner_version),
+                "AND scanner_version = ? "
+                "AND file_ext = ?",
+                (content_hash, catalog_hash, scanner_version, file_ext),
             )
             conn2.close()
         except sqlite3.Error:
@@ -429,8 +467,16 @@ def put_cached_findings(
     catalog_hash: str,
     scanner_version: str,
     findings: list[dict[str, Any]],
+    *,
+    file_ext: str = "",
 ) -> None:
     """Idempotent write. Silent on every failure (cache is best-effort).
+
+    ``file_ext`` is the lowercased file extension and is part of the
+    PRIMARY KEY (see :func:`get_cached_findings`). It is keyword-only
+    with a ``""`` default so extension-agnostic callers keep the old
+    4-argument call shape. Two PUTs with identical content but different
+    extensions land in DIFFERENT rows (no overwrite).
 
     The cache is a performance optimisation, NOT a correctness primitive.
     A failed put means the next scan won't be cached — that's fine, the
@@ -481,9 +527,9 @@ def put_cached_findings(
         # atomic.
         conn.execute(
             "INSERT OR REPLACE INTO scan_cache "
-            "(content_hash, catalog_hash, scanner_version, findings_json, cached_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (content_hash, catalog_hash, scanner_version, findings_json, now),
+            "(content_hash, catalog_hash, scanner_version, file_ext, findings_json, cached_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (content_hash, catalog_hash, scanner_version, file_ext, findings_json, now),
         )
     except sqlite3.DatabaseError:
         # Could be "database is locked" under contention — that's OK,
