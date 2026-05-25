@@ -317,6 +317,14 @@ def validate_lsp_server(
         if not isinstance(val, bool):
             report.major(f"Server '{server_name}' 'restartOnCrash' must be a boolean")
 
+    # Validate workspaceFolder (type only — parity with the old inline check
+    # removed from validate_plugin in TRDD-021250b5 Phase 3, so the comprehensive
+    # validator remains the single source of truth with no coverage loss).
+    if "workspaceFolder" in config:
+        val = config["workspaceFolder"]
+        if not isinstance(val, str):
+            report.major(f"Server '{server_name}' 'workspaceFolder' must be a string")
+
     report.passed(f"Server {server_name} configuration validated")
 
 
@@ -573,9 +581,31 @@ def validate_plugin_lsp(
             if isinstance(manifest, dict):
                 lsp_servers = manifest.get("lspServers")
                 if isinstance(lsp_servers, dict) and lsp_servers:
-                    # Inline definition: keys are server names directly
+                    # Inline definition: keys are server names, values are configs.
                     found_any = True
                     sources["plugin.json:lspServers"] = list(lsp_servers.keys())
+                    # Validate each inline server config's fields (command, args,
+                    # env, settings, initializationOptions, workspaceFolder, …).
+                    # TRDD-021250b5 Phase 3: the old per-field type-checks in
+                    # validate_plugin.validate_manifest were removed so this
+                    # comprehensive validator is the single source of truth — the
+                    # field validation MUST run here too, or inline lspServers
+                    # entries escape ALL field-type checks (the regression that
+                    # surfaced when delegation replaced the inline block).
+                    for inline_name, inline_config in lsp_servers.items():
+                        if isinstance(inline_config, dict):
+                            validate_lsp_server(
+                                inline_name,
+                                inline_config,
+                                report,
+                                plugin_root,
+                                file_context="plugin.json:lspServers",
+                            )
+                        else:
+                            report.major(
+                                f"Server '{inline_name}' config must be an object "
+                                "in plugin.json:lspServers"
+                            )
                 elif isinstance(lsp_servers, str):
                     # Path-string reference to external LSP config file
                     ref_path = lsp_servers
