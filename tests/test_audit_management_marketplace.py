@@ -15,6 +15,9 @@ report 20260525_101538+0200-management-marketplace.md:
             (the module's clean-error contract) instead of RecursionError.
 #11 NIT   — find_active_versions surfaces a warn() on a corrupt settings
             file instead of silently swallowing it.
+#12 NIT   — atomic writes use a PER-PROCESS-UNIQUE tmp name (PID + random
+            token) so two processes writing the SAME target can no longer
+            collide on one staging file and promote a corrupt mix.
 """
 
 from __future__ import annotations
@@ -206,6 +209,40 @@ class TestCyclicListFileIsCleanError:
             assert len(out) == 1
             # Compare resolved forms (macOS /var -> /private/var symlink).
             assert out[0].abs_path.resolve() == plug.resolve()
+        finally:
+            import shutil
+
+            shutil.rmtree(work, ignore_errors=True)
+
+
+class TestUniqueTmpPath:
+    """#12 - the shared atomic-write tmp name is per-process unique."""
+
+    def test_tmp_name_is_unique_and_sibling(self):
+        from cpv_management_common import unique_tmp_path
+
+        target = Path("/some/dir/marketplace.json")
+        a = unique_tmp_path(target)
+        b = unique_tmp_path(target)
+        # Different on each call (random token) — no fixed collision point.
+        assert a != b
+        # Still a sibling in the same directory (so os.replace stays atomic).
+        assert a.parent == target.parent
+        # Still ends in .tmp (cleanup globs / "no .tmp leftover" assertions hold).
+        assert a.name.endswith(".tmp")
+        # Carries the PID so concurrent processes never share a staging file.
+        assert str(__import__("os").getpid()) in a.name
+
+    def test_save_json_safe_leaves_no_tmp(self):
+        """Two-sided: a successful atomic write leaves zero .tmp siblings."""
+        from cpv_management_common import save_json_safe
+
+        work = Path(tempfile.mkdtemp())
+        try:
+            target = work / "data.json"
+            save_json_safe(target, {"ok": True})
+            assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
+            assert not any(p.name.endswith(".tmp") for p in work.iterdir())
         finally:
             import shutil
 

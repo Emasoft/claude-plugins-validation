@@ -17,6 +17,7 @@ import platform
 import shutil
 import sys
 import tarfile
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -278,6 +279,21 @@ def load_json_safe(path: Path) -> dict:
         return {}
 
 
+def unique_tmp_path(path: Path) -> Path:
+    """Return a per-process-unique sibling temp path for an atomic write.
+
+    A FIXED tmp name (``path.with_suffix(".tmp")``) lets two processes writing
+    the SAME target file collide on the SAME tmp file — their writes interleave
+    and the os.replace then promotes a corrupt mix to the target. Suffixing the
+    tmp name with the PID and a random token gives every writer its own staging
+    file, so concurrent writers of one target can no longer corrupt each other;
+    os.replace stays atomic because the tmp is a sibling (same directory ->
+    same filesystem). The name still ends in ``.tmp`` so existing cleanup globs
+    and "no .tmp leftover" assertions keep working.
+    """
+    return path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+
+
 def save_json_safe(path: Path, data: dict, dry_run: bool = False):
     """Atomically write JSON with backup. Cross-platform."""
     if dry_run:
@@ -286,7 +302,7 @@ def save_json_safe(path: Path, data: dict, dry_run: bool = False):
     backup_file(path)
 
     content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-    tmp = path.with_suffix(".tmp")
+    tmp = unique_tmp_path(path)
     try:
         tmp.write_text(content, encoding="utf-8")
         # os.replace() (called by Path.replace()) is atomic on all platforms including Windows

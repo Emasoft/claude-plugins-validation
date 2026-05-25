@@ -74,6 +74,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -236,8 +237,16 @@ def _write_cached(
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
         data_path, meta_path = _cache_paths(cache_dir, key)
-        data_tmp = data_path.with_suffix(data_path.suffix + ".tmp")
-        meta_tmp = meta_path.with_suffix(meta_path.suffix + ".tmp")
+        # Per-process-unique tmp names: two processes validating the SAME
+        # marketplace source compute the SAME cache key -> same data/meta path,
+        # so a FIXED ".tmp" suffix would let them collide on one staging file
+        # and promote a corrupt mix via os.replace. PID+random token gives each
+        # writer its own staging file (kept a sibling so os.replace stays atomic).
+        # (Standalone module — mirrors cpv_management_common.unique_tmp_path by
+        # design; this fetcher stays stdlib-only for publish gate 0 robustness.)
+        _tok = f"{os.getpid()}.{uuid.uuid4().hex[:8]}"
+        data_tmp = data_path.with_suffix(f"{data_path.suffix}.{_tok}.tmp")
+        meta_tmp = meta_path.with_suffix(f"{meta_path.suffix}.{_tok}.tmp")
         data_tmp.write_text(json.dumps(data), encoding="utf-8")
         data_tmp.replace(data_path)
         meta = {

@@ -165,4 +165,7 @@ def test_migrate_atomic_write(tmp_path):
     )
     rc = m.migrate_marketplace(root, check_only=False, probe=False)
     assert rc == 0
-    assert not (root / ".claude-plugin" / "marketplace.json.tmp").exists()
+    # No .tmp staging file should remain (per-process-unique name — assert on
+    # the suffix, not a fixed name).
+    cp = root / ".claude-plugin"
+    assert not any(p.name.endswith(".tmp") for p in cp.iterdir())
