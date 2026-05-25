@@ -300,7 +300,16 @@ def mcp_usage_allowed(usage: str, patterns: list[str]) -> bool:
             return True
         if ("*" in pattern or "?" in pattern or "[" in pattern) and fnmatch.fnmatchcase(usage, pattern):
             return True
-        if usage.startswith(pattern + "__"):
+        # Bare server-prefix grant (``mcp__github`` → every ``mcp__github__<tool>``)
+        # ONLY applies to the 2-segment bare-server form. A specific 3-segment
+        # tool (``mcp__github__create_issue``) must NOT also grant a 4-segment
+        # ``mcp__github__create_issue__sub`` — that is not a valid CC tool name
+        # and would be an over-grant. (audit NIT #16)
+        if (
+            pattern.startswith("mcp__")
+            and "__" not in pattern[len("mcp__") :]
+            and usage.startswith(pattern + "__")
+        ):
             return True
     return False
 

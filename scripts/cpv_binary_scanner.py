@@ -75,6 +75,7 @@ from __future__ import annotations
 import base64
 import binascii
 import gzip
+import io
 import logging
 import os
 import re
@@ -123,7 +124,16 @@ _PER_FILE_MEMORY_CAP = 1024 * 1024 * 1024  # 1 GB
 # Hard cap on the size of any single decode output. A zlib / gzip bomb is
 # typically a tiny input that expands to gigabytes — this cap turns the
 # bomb into a visible WARNING finding instead of an OOM.
-_DECODE_OUTPUT_CAP = 100 * 1024 * 1024  # 100 MB
+_DECODE_OUTPUT_CAP = 100 * 1024 * 1024  # 100 MB — per-decoder output cap
+
+# decode_chain work bounds (audit MAJOR #6). The chain no longer drops expanding
+# decodes (gzip/zlib ALWAYS expand), so termination relies on the `visited`
+# digest set + `max_depth` + these two bounds: a cumulative-decoded-bytes budget
+# across the whole recursive chain, and a hard cap on how many text variants we
+# surface. (The old code reused _DECODE_OUTPUT_CAP — a BYTE cap — as the
+# results-LIST length cap, which was effectively unbounded.)
+_TOTAL_DECODE_BUDGET = 4 * _DECODE_OUTPUT_CAP  # 400 MB cumulative across the chain
+_DECODE_MAX_RESULTS = 1000  # max surfaced text variants
 
 # Minimum bytes a payload must have to be worth trying to decode. Below
 # this we don't bother (a 3-byte "base64" string isn't a base64 payload,
@@ -370,15 +380,23 @@ def _try_decode_hex(data: bytes) -> bytes | None:
 
 
 def _try_decode_gzip(data: bytes) -> bytes | None:
-    """Return gzip-decompressed bytes if ``data`` starts with the gzip magic."""
+    """Return gzip-decompressed bytes (bounded) if ``data`` starts with the gzip magic.
+
+    Reads at most ``_DECODE_OUTPUT_CAP`` bytes from the decompression stream via
+    ``GzipFile.read(cap)`` — it decompresses incrementally and stops at the cap,
+    so a gzip BOMB (tiny input, enormous output) cannot materialize its full
+    output and OOM the scanner. ``gzip.decompress(data)`` would expand the whole
+    stream BEFORE any post-hoc slice. Mirrors the bounded ``_try_decode_zlib``
+    below; the ``_PER_FILE_MEMORY_CAP`` bounds the input read from disk, NOT this
+    decompressed output. (audit MAJOR #5)
+    """
     if not data.startswith(_GZIP_MAGIC):
         return None
     try:
-        # ``gzip.decompress`` reads ALL members but doesn't enforce a
-        # max-output cap. We cap manually after the fact — a real bomb
-        # will exceed _PER_FILE_MEMORY_CAP first and trip the outer
-        # guard before this returns.
-        decoded = gzip.decompress(data)
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as gz:
+            # read cap+1 so we can detect (and truncate) an over-cap stream
+            # without ever holding more than cap+1 bytes.
+            decoded = gz.read(_DECODE_OUTPUT_CAP + 1)
     except (OSError, EOFError, zlib.error, ValueError):
         return None
     if len(decoded) > _DECODE_OUTPUT_CAP:
@@ -408,14 +426,18 @@ def decode_chain(data: bytes, max_depth: int = 3) -> list[str]:
 
     * Start with ``data`` at depth 0.
     * At each depth, attempt every decoder. For each that returns bytes:
-        - If the result is the same length or longer than the input
-          (bomb / self-similar), drop it.
         - If the result is printable text (UTF-8 decodable AND mostly
           printable), add it to the output strings list.
         - Recurse into the result at depth+1, unless we've hit
           ``max_depth``.
-    * Cumulative output is capped at ``_DECODE_OUTPUT_CAP`` strings so a
-      pathological input doesn't return a billion variants.
+    * Loop safety: a ``visited`` digest set breaks self-similar cycles, and
+      each decoder caps its own output at ``_DECODE_OUTPUT_CAP``. Total work is
+      bounded by ``_TOTAL_DECODE_BUDGET`` (cumulative decoded bytes) and the
+      surfaced-variant count by ``_DECODE_MAX_RESULTS``.
+
+    Note: decodes are NOT dropped for being the same length or larger than their
+    input — gzip/zlib decompression ALWAYS expands, so that gate (removed in
+    audit MAJOR #6) made every compressed payload unscannable.
 
     Returns the textual decode results as a list of ``str``. Non-text
     decodes (bytes that don't look like text after decoding) are still
@@ -432,8 +454,10 @@ def decode_chain(data: bytes, max_depth: int = 3) -> list[str]:
     # routine). Hash on a digest, not the full bytes, to keep the set
     # bounded for large inputs.
     visited: set[bytes] = set()
+    total_decoded = 0  # cumulative decoded bytes across the chain — work budget
 
     def _walk(payload: bytes, depth: int) -> None:
+        nonlocal total_decoded
         if depth > max_depth:
             return
         # Self-similar / loop guard.
@@ -459,15 +483,19 @@ def decode_chain(data: bytes, max_depth: int = 3) -> list[str]:
                 continue
             if decoded is None:
                 continue
-            if len(decoded) >= len(payload):
-                # Either a bomb or a self-similar no-op. Drop.
-                continue
+            # Do NOT drop expanding decodes — gzip/zlib ALWAYS expand. (audit
+            # MAJOR #6) Loop safety is the `visited` set; work is bounded below.
             # If decoded looks like text, surface it for catalog matching.
             text = _decoded_to_text(decoded)
             if text is not None:
                 results.append(text)
-                if len(results) >= _DECODE_OUTPUT_CAP:
+                if len(results) >= _DECODE_MAX_RESULTS:
                     return
+            total_decoded += len(decoded)
+            if total_decoded > _TOTAL_DECODE_BUDGET:
+                # Work budget exhausted — stop the chain (bomb / pathological
+                # nesting). The findings collected so far are still returned.
+                return
             # Recurse regardless — a base64-of-gzip is real.
             _walk(decoded, depth + 1)
 

@@ -449,6 +449,7 @@ class TestInvariants:
             "binascii",
             "gzip",
             "hashlib",
+            "io",  # bounded gzip decode via GzipFile (audit MAJOR #5) — stdlib
             "logging",
             "os",
             "re",

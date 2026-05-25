@@ -21,9 +21,12 @@ Coverage: Python only. JS/TS taint requires a real parser.
 from __future__ import annotations
 
 import ast
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
+
+_LOG = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------------------
 # Source / sink / sanitizer vocabulary
@@ -92,6 +95,58 @@ SANITIZERS_BARE: frozenset[str] = frozenset(
         "int",
         "float",
         "bool",
+    }
+)
+
+# STRUCTURED-DATA parsers: a subset of SANITIZERS_QUALIFIED whose output can be
+# a RAW attacker string (``json.loads('"rm -rf /"')`` → ``"rm -rf /"``). They
+# neutralize INJECTION sinks (the common pattern accesses sub-fields) but NOT
+# code-EXEC sinks — ``exec(json.loads(untrusted))`` runs attacker code. So when
+# one of these sanitizes a tainted value we retain an exec-only taint instead of
+# fully clearing. The escaper/coercer sanitizers (shlex.*, re.escape, html.escape,
+# urllib.quote*, int/float/bool) genuinely neutralize and DO fully clear. (audit MAJOR #10)
+SANITIZERS_STRUCTURED_PARSER: frozenset[tuple[str, ...]] = frozenset(
+    {
+        ("json", "loads"),
+        ("yaml", "safe_load"),
+        ("ast", "literal_eval"),
+    }
+)
+
+# EXEC-class sinks execute / deserialize their argument as code, so a value
+# that was only sanitized-for-injection (SANITIZERS_STRUCTURED_PARSER) is still
+# dangerous here. (audit MAJOR #10)
+TAINT_SINKS_EXEC_QUALIFIED: frozenset[tuple[str, ...]] = frozenset(
+    {
+        ("pickle", "loads"),
+        ("marshal", "loads"),
+        ("yaml", "load"),
+    }
+)
+
+# str methods that PRESERVE taint (a tainted string stays tainted through them).
+# Used to extract tainted Names from non-Name sink args without descending into
+# arbitrary (possibly-sanitizing) function calls. (audit MINOR #11c)
+_STR_PASSTHROUGH_METHODS: frozenset[str] = frozenset(
+    {
+        "strip",
+        "lstrip",
+        "rstrip",
+        "lower",
+        "upper",
+        "title",
+        "capitalize",
+        "swapcase",
+        "format",
+        "format_map",
+        "join",
+        "replace",
+        "encode",
+        "decode",
+        "expandtabs",
+        "removeprefix",
+        "removesuffix",
+        "zfill",
     }
 )
 
@@ -180,6 +235,81 @@ def _is_sanitizer_call(call: ast.Call) -> bool:
     return False
 
 
+def _is_structured_parser_sanitizer(call: ast.Call) -> bool:
+    """True iff ``call`` is json.loads / yaml.safe_load / ast.literal_eval —
+    a sanitizer whose output can still be exec'd. (audit MAJOR #10)"""
+    chain = _attribute_chain(call.func)
+    return chain is not None and chain in SANITIZERS_STRUCTURED_PARSER
+
+
+def _tainted_arg_source(call: ast.Call, state: _TaintState) -> tuple[str, int] | None:
+    """If any positional arg of ``call`` is a tainted Name or a direct taint
+    source, return its ``(source_desc, hops)``. Used to carry taint THROUGH a
+    structured-data parser as exec-risk. (audit MAJOR #10)"""
+    for arg in call.args:
+        if isinstance(arg, ast.Name):
+            t = state.lookup(arg.id)
+            if t:
+                return t
+        elif isinstance(arg, ast.Call):
+            s = _is_source_call(arg)
+            if s:
+                return (s, 1)
+        elif isinstance(arg, ast.Subscript):
+            s = _is_source_subscript(arg)
+            if s:
+                return (s, 1)
+        elif isinstance(arg, ast.Attribute):
+            chain = _attribute_chain(arg)
+            if chain and chain in TAINT_SOURCES:
+                return (".".join(chain), 1)
+    return None
+
+
+def _is_exec_class_sink(call: ast.Call) -> bool:
+    """True iff ``call`` executes/deserializes its argument as code — exec/eval/
+    compile (bare) or pickle.loads / marshal.loads / yaml.load. (audit MAJOR #10)"""
+    if isinstance(call.func, ast.Name) and call.func.id in TAINT_SINKS_DIRECT:
+        return True
+    chain = _attribute_chain(call.func)
+    return chain is not None and chain in TAINT_SINKS_EXEC_QUALIFIED
+
+
+def _passthrough_tainted_names(arg: ast.expr) -> list[str]:
+    """Names reachable from ``arg`` through TAINT-PRESERVING shapes only —
+    attribute access, subscript, string concat (BinOp), f-strings, and the str
+    passthrough methods in ``_STR_PASSTHROUGH_METHODS`` (``user.strip()``).
+
+    Deliberately does NOT descend into arbitrary function calls — those may
+    sanitize, and the taint findings are blocking (RC-73=MAJOR / RC-74=MINOR),
+    so guessing through unknown calls would create blocking false positives.
+    (audit MINOR #11c; the unsound #11a path is intentionally not taken.)
+    """
+    found: list[str] = []
+
+    def _walk(node: ast.AST) -> None:
+        if isinstance(node, ast.Name):
+            found.append(node.id)
+        elif isinstance(node, ast.Attribute):
+            _walk(node.value)
+        elif isinstance(node, ast.Subscript):
+            _walk(node.value)
+        elif isinstance(node, ast.BinOp):
+            _walk(node.left)
+            _walk(node.right)
+        elif isinstance(node, ast.JoinedStr):  # f-string
+            for part in node.values:
+                if isinstance(part, ast.FormattedValue):
+                    _walk(part.value)
+        elif isinstance(node, ast.Call):
+            # ONLY str passthrough methods (x.strip()); never arbitrary calls.
+            if isinstance(node.func, ast.Attribute) and node.func.attr in _STR_PASSTHROUGH_METHODS:
+                _walk(node.func.value)
+
+    _walk(arg)
+    return found
+
+
 # -----------------------------------------------------------------------------
 # Main analyzer
 # -----------------------------------------------------------------------------
@@ -187,18 +317,35 @@ def _is_sanitizer_call(call: ast.Call) -> bool:
 
 @dataclass
 class _TaintState:
-    """Per-scope mapping of variable name → (source_desc, hop_count)."""
+    """Per-scope mapping of variable name → (source_desc, hop_count).
+
+    ``tainted`` holds FULL taint (dangerous for any sink). ``exec_risk`` holds
+    values that were sanitized-for-injection by a structured-data parser but are
+    still dangerous if EXEC'd (audit MAJOR #10) — they trigger ONLY exec-class
+    sinks. A name lives in at most one of the two dicts.
+    """
 
     tainted: dict[str, tuple[str, int]] = field(default_factory=dict)
+    exec_risk: dict[str, tuple[str, int]] = field(default_factory=dict)
 
     def mark(self, name: str, source: str, hops: int) -> None:
         self.tainted[name] = (source, hops)
+        self.exec_risk.pop(name, None)  # full taint supersedes exec-only
 
     def clear(self, name: str) -> None:
         self.tainted.pop(name, None)
+        self.exec_risk.pop(name, None)
 
     def lookup(self, name: str) -> tuple[str, int] | None:
         return self.tainted.get(name)
+
+    def mark_exec_risk(self, name: str, source: str, hops: int) -> None:
+        """Injection taint cleared, but the value can still be exec'd."""
+        self.exec_risk[name] = (source, hops)
+        self.tainted.pop(name, None)
+
+    def lookup_exec_risk(self, name: str) -> tuple[str, int] | None:
+        return self.exec_risk.get(name)
 
 
 def analyze_module(tree: ast.Module) -> list[TaintFinding]:
@@ -253,7 +400,10 @@ def _analyze_stmt(
         for target in stmt.targets:
             _process_assignment(target, stmt.value, state)
     elif isinstance(stmt, ast.AugAssign):
-        _process_assignment(stmt.target, stmt.value, state)
+        # ``target OP= value`` is ``target = target OP value`` — taint is the
+        # UNION. Never CLEAR the target (it keeps its own prior taint); only ADD
+        # any taint the value contributes. (audit MINOR #11b)
+        _process_augassign(stmt.target, stmt.value, state)
     elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
         _process_assignment(stmt.target, stmt.value, state)
 
@@ -275,10 +425,18 @@ def _process_assignment(
     if not target_names:
         return
 
-    # Sanitizer call → clears taint
+    # Sanitizer call → clears taint, EXCEPT a structured-data parser whose input
+    # traces to a taint source: its result can be a raw attacker string that is
+    # still dangerous if EXEC'd, so retain an exec-only taint. (audit MAJOR #10)
     if isinstance(value, ast.Call) and _is_sanitizer_call(value):
-        for name in target_names:
-            state.clear(name)
+        src_hops = _tainted_arg_source(value, state)
+        if _is_structured_parser_sanitizer(value) and src_hops is not None:
+            src, hops = src_hops
+            for name in target_names:
+                state.mark_exec_risk(name, src, hops)
+        else:
+            for name in target_names:
+                state.clear(name)
         return
 
     # Source call → marks taint with hop count = 1
@@ -323,6 +481,44 @@ def _process_assignment(
         state.clear(name)
 
 
+def _process_augassign(target: ast.expr, value: ast.expr, state: _TaintState) -> None:
+    """Handle ``target OP= value`` as ``target = target OP value``.
+
+    Taint is the UNION: the target KEEPS its own prior taint and additionally
+    gains any taint the value contributes. The plain-assignment path would
+    instead overwrite (and CLEAR the target when value is untainted), which lost
+    taint on ``s += untrusted_part`` and on ``cmd += x``. (audit MINOR #11b)
+    """
+    target_names = _assigned_names(target)
+    if not target_names:
+        return
+
+    # Taint contributed by ``value`` (Name passthrough +1 hop, or a direct source).
+    contributed: tuple[str, int] | None = None
+    if isinstance(value, ast.Name):
+        up = state.lookup(value.id)
+        if up:
+            contributed = (up[0], up[1] + 1)
+    elif isinstance(value, ast.Call):
+        s = _is_source_call(value)
+        if s:
+            contributed = (s, 1)
+    elif isinstance(value, ast.Subscript):
+        s = _is_source_subscript(value)
+        if s:
+            contributed = (s, 1)
+
+    if contributed is None:
+        return  # value adds no taint — preserve the target's existing taint
+    for name in target_names:
+        existing = state.lookup(name)
+        # Keep whichever taint is "closer" (lower hop count) — a direct source on
+        # either side wins over a multi-hop one.
+        if existing is not None and existing[1] <= contributed[1]:
+            continue
+        state.mark(name, contributed[0], contributed[1])
+
+
 def _assigned_names(target: ast.expr) -> list[str]:
     """Extract bound names from an assignment target."""
     if isinstance(target, ast.Name):
@@ -342,11 +538,25 @@ def _check_sink_args(
     state: _TaintState,
     findings: list[TaintFinding],
 ) -> None:
-    """For each argument to a sink call, see if it's a tainted variable."""
+    """For each argument to a sink call, see if it carries a tainted variable.
+
+    Inspects not just bare ``ast.Name`` args but tainted Names reachable through
+    taint-preserving shapes (``exec(user.strip())``, ``os.system(a + b)``,
+    f-strings) via ``_passthrough_tainted_names`` (audit MINOR #11c). For
+    EXEC-class sinks, also flags values that were sanitized-for-injection but
+    remain exec-dangerous (audit MAJOR #10).
+    """
+    exec_sink = _is_exec_class_sink(call)
+    seen: set[str] = set()
     for arg in list(call.args) + [kw.value for kw in call.keywords]:
-        if isinstance(arg, ast.Name):
-            taint = state.lookup(arg.id)
+        for name in _passthrough_tainted_names(arg):
+            if name in seen:
+                continue
+            taint = state.lookup(name)
+            if taint is None and exec_sink:
+                taint = state.lookup_exec_risk(name)
             if taint:
+                seen.add(name)
                 src, hops = taint
                 rule = "RC-73" if hops == 1 else "RC-74"
                 findings.append(
@@ -354,7 +564,7 @@ def _check_sink_args(
                         rule_id=rule,
                         source=src,
                         sink=sink_desc,
-                        var_name=arg.id,
+                        var_name=name,
                         hop_count=hops,
                         line=call.lineno,
                     )
@@ -367,14 +577,22 @@ def _check_sink_args(
 
 
 def analyze_file(file_path: Path) -> list[TaintFinding]:
-    """Parse and analyze a single .py file. Returns [] on syntax errors."""
+    """Parse and analyze a single .py file. Returns [] on read/parse errors.
+
+    A read or parse failure is NOT silent: it is logged (audit MINOR #12) so a
+    file that evades the taint layer leaves a trace. The empty-list return is the
+    safe direction — the regex catalog still text-scans the file — but the log
+    lets an operator see that this file's taint pass was skipped.
+    """
     try:
         text = file_path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
+    except OSError as exc:
+        _LOG.info("taint_engine: cannot read %s (%s) — taint pass skipped", file_path, exc)
         return []
     try:
         tree = ast.parse(text)
-    except SyntaxError:
+    except SyntaxError as exc:
+        _LOG.info("taint_engine: cannot parse %s (%s) — taint pass skipped", file_path, exc)
         return []
     return analyze_module(tree)
 
