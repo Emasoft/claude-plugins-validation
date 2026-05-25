@@ -35,6 +35,11 @@ on:
       - 'skills/**'
       - 'scripts/**'
 
+# This workflow authenticates exclusively with the MARKETPLACE_PAT secret to
+# dispatch into the marketplace repo — it never needs the per-repo GITHUB_TOKEN,
+# so the least-privilege scope is the empty set.
+permissions: {}
+
 env:
   # ⚠️ REQUIRED: Update these values to point to your marketplace repository
   # Example: If your marketplace is at https://github.com/johndoe/my-claude-plugins
@@ -46,6 +51,7 @@ env:
 jobs:
   notify:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Get plugin info
         id: plugin
@@ -54,7 +60,8 @@ jobs:
           echo "ref=${{ github.sha }}" >> $GITHUB_OUTPUT
 
       - name: Trigger marketplace update
-        uses: peter-evans/repository-dispatch@v4
+        # Third-party action pinned to a full commit SHA (gh-actions rule).
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
         with:
           token: ${{ secrets.MARKETPLACE_PAT }}
           repository: ${{ env.MARKETPLACE_OWNER }}/${{ env.MARKETPLACE_REPO }}

@@ -257,18 +257,31 @@ class BypassActor:
 
 
 def _fetch_all_rulesets(owner: str, repo: str) -> list[dict]:
-    """Return every ruleset on the repo (list view — no rules array)."""
+    """Return every ruleset on the repo (list view — no rules array).
+
+    On a gh-API or JSON-decode failure this returns ``[]`` BUT first logs the
+    underlying error to stderr — a silent empty list would be indistinguishable
+    from "this repo genuinely has no rulesets", which on first-run setup would
+    silently skip adopting existing bypass actors and weaken branch protection.
+    """
     result = run(
         ["gh", "api", f"repos/{owner}/{repo}/rulesets", "--paginate"],
         check=False,
     )
     if result.returncode != 0:
+        print(
+            f"warning: could not list rulesets for {owner}/{repo} "
+            f"(gh exit {result.returncode}): {result.stderr.strip()}",
+            file=sys.stderr,
+        )
         return []
     try:
         rulesets = json.loads(result.stdout)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        print(f"warning: rulesets response for {owner}/{repo} was not valid JSON: {exc}", file=sys.stderr)
         return []
     if not isinstance(rulesets, list):
+        print(f"warning: rulesets response for {owner}/{repo} was not a JSON list", file=sys.stderr)
         return []
     return rulesets
 
@@ -280,8 +293,19 @@ def _fetch_full_ruleset(owner: str, repo: str, ruleset_id: int) -> dict | None:
         check=False,
     )
     if result.returncode != 0:
+        print(
+            f"warning: could not fetch ruleset {ruleset_id} for {owner}/{repo} "
+            f"(gh exit {result.returncode}): {result.stderr.strip()}",
+            file=sys.stderr,
+        )
         return None
-    parsed = json.loads(result.stdout)
+    try:
+        parsed = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        # Was previously unguarded — a malformed response crashed the whole
+        # setup with a raw traceback instead of degrading to "ruleset unknown".
+        print(f"warning: ruleset {ruleset_id} response was not valid JSON: {exc}", file=sys.stderr)
+        return None
     if isinstance(parsed, dict):
         return parsed
     return None

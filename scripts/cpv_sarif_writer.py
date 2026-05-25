@@ -137,11 +137,20 @@ def results_to_sarif(
     tool_name: str = "claude-plugins-validation",
     tool_version: str = "0.0.0",
     information_uri: str = "https://github.com/Emasoft/claude-plugins-validation",
+    src_root_uri: str | None = None,
 ) -> dict[str, Any]:
     """Convert an iterable of ValidationResult (or .to_dict()'d shapes) into SARIF.
 
     Accepts either ValidationResult objects (anything with .to_dict()) or
     plain dicts. Returns a complete SARIF 2.1.0 log dict.
+
+    By default the ``%SRCROOT%`` base carries NO ``uri`` — embedding
+    ``plugin_root.resolve().as_uri()`` leaks the runner's absolute filesystem
+    layout (including the username) into a SARIF whose whole purpose is to be
+    uploaded/shared. Every artifact location is already RELATIVE to
+    ``%SRCROOT%`` (see ``_result_to_sarif``), so a consumer (GitHub code
+    scanning, etc.) resolves them against ITS OWN checkout root. Callers that
+    genuinely need an absolute/explicit base may pass ``src_root_uri``.
     """
     sarif_results: list[dict[str, Any]] = []
     for item in results:
@@ -161,6 +170,20 @@ def results_to_sarif(
 
     rules = _collect_rule_descriptors(sarif_results)
 
+    # Privacy-preserving SRCROOT base: no absolute host path unless the caller
+    # explicitly opts in via src_root_uri. The description tells a human reader
+    # what relative artifact URIs are anchored to without leaking the layout.
+    src_root_base: dict[str, Any] = {
+        "description": {
+            "text": (
+                "Root of the validated plugin source tree. Artifact URIs are "
+                "relative to this base; resolve them against your checkout root."
+            )
+        }
+    }
+    if src_root_uri is not None:
+        src_root_base["uri"] = src_root_uri
+
     return {
         "$schema": SARIF_SCHEMA_URI,
         "version": SARIF_VERSION,
@@ -174,7 +197,7 @@ def results_to_sarif(
                         "rules": rules,
                     }
                 },
-                "originalUriBaseIds": {"%SRCROOT%": {"uri": plugin_root.resolve().as_uri() + "/"}},
+                "originalUriBaseIds": {"%SRCROOT%": src_root_base},
                 "results": sarif_results,
             }
         ],
@@ -188,6 +211,7 @@ def write_sarif(
     tool_name: str = "claude-plugins-validation",
     tool_version: str = "0.0.0",
     information_uri: str = "https://github.com/Emasoft/claude-plugins-validation",
+    src_root_uri: str | None = None,
 ) -> Path:
     """Serialize results to a SARIF file. Returns the resolved output path."""
     sarif = results_to_sarif(
@@ -196,6 +220,7 @@ def write_sarif(
         tool_name=tool_name,
         tool_version=tool_version,
         information_uri=information_uri,
+        src_root_uri=src_root_uri,
     )
     output_path = output_path.expanduser()
     output_path.parent.mkdir(parents=True, exist_ok=True)
