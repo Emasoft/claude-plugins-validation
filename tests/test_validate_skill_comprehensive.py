@@ -1395,6 +1395,31 @@ class TestTokenBudgetBranches:
         validate_token_budget(content, body, report)
         assert not any("SKILL.md body" in r.message and r.level == "MAJOR" for r in report.results)
 
+    def test_cjk_body_over_token_limit_is_major(self):
+        """A CJK body over 5000 tokens is flagged MAJOR — the gate is language-independent.
+
+        This is the whole point of switching from a CHARACTER cap to a TOKEN cap:
+        CJK packs far more meaning per character than English, so a char cap
+        under- or over-counts wildly by language. The fixture is sanity-pinned
+        with the real estimator so it stays correct regardless of the exact
+        chars-per-token ratio, and kept under MAX_SKILL_LINES to isolate the
+        body-token MAJOR (TRDD-021250b5).
+        """
+        from cpv_token_estimate import estimate_tokens
+        from validate_skill_comprehensive import SKILL_BODY_TOKEN_LIMIT, validate_token_budget
+
+        # Chinese prose repeated until clearly over the token budget, on one line.
+        body = "这是一个用于测试令牌预算的中文段落。" * 2000
+        assert estimate_tokens(body).tokens > SKILL_BODY_TOKEN_LIMIT
+        assert body.count("\n") + 1 < 500
+        content = "---\nname: test\n---\n" + body
+        report = ValidationReport(skill_path="test")
+        validate_token_budget(content, body, report)
+        assert any(
+            "SKILL.md body" in r.message and "tokens" in r.message and r.level == "MAJOR"
+            for r in report.results
+        ), "body-token MAJOR did not fire for an over-limit CJK body"
+
 
 class TestRequiredSectionsStrictMode:
     """Tests for validate_required_sections in strict mode (lines 1210, 1216-1227)."""
