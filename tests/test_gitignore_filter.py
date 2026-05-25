@@ -243,6 +243,43 @@ def test_rglob_filters_gitignored(tmp_path: Path) -> None:
     assert "generated.py" not in result_names
 
 
+def test_rglob_finds_content_dot_dirs_but_skips_vcs(tmp_path: Path) -> None:
+    """Audit #2 — rglob must surface files under content dot-dirs (.github/,
+    .claude-plugin/) so the lint + documentation validators see them, while
+    still pruning VCS/cache dot-dirs (.git/) and gitignored dot-dirs.
+
+    Before the fix rglob blanket-skipped EVERY dot-directory, so a malformed
+    .github/workflows/*.yml or .github/*.md was silently un-linted/un-validated.
+    """
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text(".secret-dev/\n", encoding="utf-8")
+    gi = GitignoreFilter(tmp_path)
+
+    # Content dot-dirs — MUST be surfaced.
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "ci.yml").touch()
+    (tmp_path / ".github" / "CONTRIBUTING.md").touch()
+    (tmp_path / ".claude-plugin").mkdir()
+    (tmp_path / ".claude-plugin" / "marketplace.json").touch()
+
+    # VCS dot-dir — MUST stay pruned.
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config.yml").touch()
+    # Gitignored dot-dir — MUST stay pruned.
+    (tmp_path / ".secret-dev").mkdir()
+    (tmp_path / ".secret-dev" / "leak.md").touch()
+
+    yml = {p.name for p in gi.rglob("*.yml")}
+    md = {p.name for p in gi.rglob("*.md")}
+    js = {p.name for p in gi.rglob("*.json")}
+
+    assert "ci.yml" in yml  # .github content surfaced
+    assert "CONTRIBUTING.md" in md
+    assert "marketplace.json" in js
+    assert "config.yml" not in yml  # .git pruned
+    assert "leak.md" not in md  # gitignored dot-dir pruned
+
+
 def test_rglob_does_not_descend_into_gitignored_subtree_issue19(tmp_path: Path) -> None:
     """Regression test for issue #19 — rglob must NOT walk into gitignored
     directories before filtering matches.
