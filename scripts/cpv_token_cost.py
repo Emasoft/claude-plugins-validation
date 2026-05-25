@@ -39,10 +39,17 @@ def get_pricing(model_name: str) -> dict[str, float]:
         return DEFAULT_PRICING
     if model_name in MODEL_PRICING:
         return MODEL_PRICING[model_name]
-    # Try prefix/substring match
-    for key, pricing in MODEL_PRICING.items():
+    # Try prefix/substring match, longest key first. A short key like
+    # ``claude-opus-4`` is a substring of every ``claude-opus-4-X`` id, so
+    # iterating in dict-insertion order would let the base key shadow the more
+    # specific dated point-release (e.g. ``claude-opus-4-1-20250805`` would
+    # resolve to base ``claude-opus-4`` pricing). Matching longest-key-first
+    # makes the most specific key win regardless of dict order, so a future
+    # point-release with different pricing is not silently mispriced.
+    # (audit MINOR token #3)
+    for key in sorted(MODEL_PRICING, key=len, reverse=True):
         if key in model_name or model_name.startswith(key):
-            return pricing
+            return MODEL_PRICING[key]
     # Fuzzy family match
     ml = model_name.lower()
     if "opus" in ml and ("4-6" in ml or "4.6" in ml):

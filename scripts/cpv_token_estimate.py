@@ -32,8 +32,12 @@ strategy follows ``gpt-tokenizer`` by niieani (MIT License,
 https://github.com/niieani/gpt-tokenizer). The pre-tokenizer, which ``tiktoken``
 expresses with Unicode property escapes (``\\p{L}`` etc.) that Python's stdlib
 ``re`` does not support, is re-implemented here as a hand-written scanner driven
-by :func:`unicodedata.category`, validated to byte-exact token-id parity against
-``tiktoken`` on tens of thousands of multilingual strings.
+by :func:`unicodedata.category`. It is byte-exact against ``tiktoken`` on all
+tested realistic content (English, code, JSON, and the named scripts; tens of
+thousands of fuzzed strings); on pathological combining-mark-heavy strings the
+raw o200k count may differ by ±1 token, which the ×1.3 Claude-correction absorbs
+so the final estimate stays conservative. Pre-tokenization boundaries match
+``tiktoken`` exactly even on those rare cases.
 """
 
 from __future__ import annotations
@@ -41,6 +45,7 @@ from __future__ import annotations
 import base64
 import binascii
 import gzip
+import heapq
 import math
 import os
 import unicodedata
@@ -403,28 +408,89 @@ def _bpe(piece: bytes, ranks: dict[bytes, int]) -> int:
     repeatedly merge the adjacent pair with the lowest rank until no mergeable
     pair remains. We only need the COUNT, so we track segment boundaries rather
     than materializing the token bytes.
+
+    Implemented with a min-heap over candidate merges plus a doubly-linked list
+    of segments, so each merge is O(log n) instead of O(n). The original
+    quadratic version re-scanned every adjacent pair on every merge, going
+    O(n^2 * m) and hitting seconds on a long run of one repeated character in a
+    single pre-token (audit NIT token #4). This refactor is byte-for-byte
+    output-identical: it preserves the same tie-break (lowest rank, leftmost on a
+    tie) by ordering the heap on ``(rank, left_position)`` and validating each
+    popped candidate against the live segment boundaries before merging — so a
+    stale candidate (whose neighbour was already consumed by an earlier merge) is
+    discarded exactly as the rescan would have skipped it.
     """
     direct = ranks.get(piece)
     if direct is not None:
         return 1
-    if len(piece) <= 1:
+    n = len(piece)
+    if n <= 1:
         # A single byte that is not in the vocab cannot happen for o200k_base
         # (all 256 bytes are present), but count it as one token to stay safe.
         return 1
-    # ``parts`` holds the current byte segments.
-    parts: list[bytes] = [piece[k : k + 1] for k in range(len(piece))]
-    while len(parts) > 1:
-        min_rank: int | None = None
-        min_idx = -1
-        for k in range(len(parts) - 1):
-            rank = ranks.get(parts[k] + parts[k + 1])
-            if rank is not None and (min_rank is None or rank < min_rank):
-                min_rank = rank
-                min_idx = k
-        if min_idx < 0:
-            break
-        parts[min_idx : min_idx + 2] = [parts[min_idx] + parts[min_idx + 1]]
-    return len(parts)
+
+    # Doubly-linked list over the n single-byte segments, addressed by their
+    # ORIGINAL start index (0..n-1). ``seg_end[i]`` is the exclusive end of the
+    # segment that currently starts at ``i`` (it grows as ``i`` absorbs its
+    # right neighbour). ``nxt``/``prv`` thread the live segments; ``-1`` is the
+    # sentinel for "no neighbour". ``alive[i]`` marks a segment that has not been
+    # swallowed by a merge to its left.
+    seg_end = list(range(1, n + 1))
+    nxt = list(range(1, n + 1))  # nxt[n-1] == n acts as the right sentinel
+    nxt[n - 1] = -1
+    prv = list(range(-1, n - 1))  # prv[0] == -1 is the left sentinel
+    alive = [True] * n
+
+    # Heap of (rank, left_start) for every adjacent mergeable pair. ``left_start``
+    # is the original index where the left segment begins; ordering on it makes
+    # the heap break rank ties leftmost, exactly as the strict ``rank < min_rank``
+    # rescan did.
+    heap: list[tuple[int, int]] = []
+
+    def _pair_rank(left: int) -> int | None:
+        right = nxt[left]
+        if right == -1:
+            return None
+        return ranks.get(piece[left : seg_end[right]])
+
+    for i in range(n - 1):
+        rank = _pair_rank(i)
+        if rank is not None:
+            heap.append((rank, i))
+    heapq.heapify(heap)
+
+    segments = n
+    while heap:
+        rank, left = heapq.heappop(heap)
+        # Skip stale entries: the left segment may have been merged away, or its
+        # right neighbour / pair-bytes may have changed since this entry was
+        # pushed. Re-derive the live pair and confirm it still matches.
+        if not alive[left]:
+            continue
+        right = nxt[left]
+        if right == -1:
+            continue
+        if ranks.get(piece[left : seg_end[right]]) != rank:
+            continue
+        # Merge ``right`` into ``left``: extend left's end, unlink right.
+        seg_end[left] = seg_end[right]
+        alive[right] = False
+        after = nxt[right]
+        nxt[left] = after
+        if after != -1:
+            prv[after] = left
+        segments -= 1
+        # Only the pair to the left of ``left`` and the new pair starting at
+        # ``left`` can have changed; push their refreshed ranks.
+        new_rank = _pair_rank(left)
+        if new_rank is not None:
+            heapq.heappush(heap, (new_rank, left))
+        before = prv[left]
+        if before != -1:
+            before_rank = _pair_rank(before)
+            if before_rank is not None:
+                heapq.heappush(heap, (before_rank, before))
+    return segments
 
 
 def _count_o200k(text: str, ranks: dict[bytes, int]) -> int:
