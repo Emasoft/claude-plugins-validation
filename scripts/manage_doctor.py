@@ -731,10 +731,12 @@ def find_active_versions(cache_root: Path | None = None) -> dict[tuple[str, str]
                 for key, on in (data.get("enabledPlugins") or {}).items():
                     if on and isinstance(key, str):
                         enabled_keys.add(key)
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, AttributeError, TypeError) as exc:
             # A corrupt ~/.claude.json must not silently degrade the enabled-plugin
             # enumeration — surface it so the user knows the active-version map may
-            # be incomplete (ValueError covers json.JSONDecodeError).
+            # be incomplete. ValueError covers json.JSONDecodeError; AttributeError/
+            # TypeError cover a STRUCTURALLY-malformed file where e.g. `projects` is
+            # a list (so `.values()` fails) — those must warn, not crash the doctor.
             warn(f"Could not read {claude_json} for enabled-plugin enumeration: {exc}")
 
     # Source 2: ~/.claude/settings.json (user-scope)
@@ -745,7 +747,9 @@ def find_active_versions(cache_root: Path | None = None) -> dict[tuple[str, str]
                 for key, on in (settings.get("enabledPlugins") or {}).items():
                     if on and isinstance(key, str):
                         enabled_keys.add(key)
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, AttributeError, TypeError) as exc:
+            # See Source 1 — AttributeError/TypeError cover a structurally-malformed
+            # settings file (e.g. enabledPlugins is a list, not a dict).
             warn(f"Could not read {SETTINGS_FILE} for enabled-plugin enumeration: {exc}")
 
     # Each enabled key looks like "plugin@marketplace" — we don't get the

@@ -128,8 +128,8 @@ _IDENTITY_TARGET_NAMES: Final[frozenset[str]] = frozenset(
 # (md5/sha1) a value destined for one of these is the exact INSECURE_CRYPTO
 # threat, never benign "identity usage" — so it must stay visible regardless of
 # .hexdigest()/slice shape. Substring match: ``user_password``, ``access_token``,
-# ``secret_hash`` all qualify. (audit MAJOR #8) Plain tuple (not a compiled
-# regex) because ``re`` is deferred-imported further down this module.
+# ``secret_hash`` all qualify. (audit MAJOR #8) A plain tuple of stems (not a
+# compiled regex) is all that's needed here.
 _SECURITY_TARGET_STEMS: Final[tuple[str, ...]] = (
     "password",
     "passwd",
@@ -1277,11 +1277,6 @@ def _weak_hash_is_identity_usage(source: str, line_idx: int) -> bool:
                         if isinstance(parent.target, ast.Name) and parent.target.id in _IDENTITY_TARGET_NAMES:
                             return True
     return False
-
-
-# Need `re` for the slice-regex check above. Top-of-module import would
-# be cleaner; deferred until needed to keep cold-import time low.
-import re  # noqa: E402
 
 
 def _line_is_safe_internal_assignment(tree: ast.AST, line: int, line_text: str) -> bool:

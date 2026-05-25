@@ -257,7 +257,11 @@ def update_marketplace_json(
     try:
         save_json_safe(marketplace_path, marketplace_data)
         return True, f"Updated marketplace.json with version {new_entry['version']}", True
-    except OSError as e:
+    except (OSError, TypeError, ValueError) as e:
+        # OSError = disk/permission; TypeError/ValueError = non-serializable
+        # marketplace_data (json.dumps inside save_json_safe). The old bare
+        # open()+json.dump was wrapped in `except Exception`, so keep the
+        # serialization errors handled too rather than letting them escape.
         return False, f"Error writing marketplace.json: {e}", False
 
 
