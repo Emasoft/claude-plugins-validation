@@ -234,7 +234,12 @@ def validate_readme_exists(plugin_path: Path, report: DocumentationValidationRep
             )
             return True
 
-        report.critical("README.md is missing at plugin root", "README.md")
+        # A missing README is a documentation-quality matter, NOT runtime
+        # breakage and NOT Anthropic-invalidity (README is not required for a
+        # plugin to load). Per the TRDD-021250b5 severity principle it is
+        # advisory (WARNING) — a README-less plugin is VALID-with-a-warning,
+        # consistent with the README content-section checks above.
+        report.warning("README.md is missing at plugin root", "README.md")
         return False
 
 
@@ -930,8 +935,11 @@ def print_results(report: DocumentationValidationReport, verbose: bool = False) 
     # ANSI colors
     colors = COLORS
 
-    # Count by level
-    counts = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "INFO": 0, "PASSED": 0}
+    # Count by level. Must list EVERY level the shared ValidationReport can
+    # emit — after the TRDD-021250b5 recalibration this validator emits WARNING
+    # (and may emit NIT), and an absent key here KeyError-crashes the CLI on the
+    # first such finding. A genuinely unknown level still raises (fail-fast).
+    counts = {"CRITICAL": 0, "MAJOR": 0, "MINOR": 0, "NIT": 0, "WARNING": 0, "INFO": 0, "PASSED": 0}
     for r in report.results:
         counts[r.level] += 1
 
@@ -945,6 +953,7 @@ def print_results(report: DocumentationValidationReport, verbose: bool = False) 
     print(f"  {colors['CRITICAL']}CRITICAL: {counts['CRITICAL']}{colors['RESET']}")
     print(f"  {colors['MAJOR']}MAJOR:    {counts['MAJOR']}{colors['RESET']}")
     print(f"  {colors['MINOR']}MINOR:    {counts['MINOR']}{colors['RESET']}")
+    print(f"  {colors['WARNING']}WARNING:  {counts['WARNING']}{colors['RESET']}")
     if verbose:
         print(f"  {colors['INFO']}INFO:     {counts['INFO']}{colors['RESET']}")
         print(f"  {colors['PASSED']}PASSED:   {counts['PASSED']}{colors['RESET']}")
