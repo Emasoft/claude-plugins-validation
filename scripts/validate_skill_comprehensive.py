@@ -1724,7 +1724,9 @@ def validate_mcp_tool_references(body: str, report: ValidationReport) -> None:
         if match:
             tool_name = match.group(3)
             if tool_name in mcp_tool_patterns or "_" in tool_name:
-                report.minor(
+                # Advisory quality-opinion (heuristic), not Anthropic-invalidity →
+                # WARNING, not blocking MINOR. (audit WARNING agent #7)
+                report.warning(
                     f"Line {i}: MCP tool reference may need qualification (ServerName:tool_name): '{tool_name}'",
                     "SKILL.md",
                     line=i,
@@ -1751,9 +1753,11 @@ def validate_time_sensitive_info(body: str, report: ValidationReport) -> None:
             time_sensitive_found.append((i, match.group(0)))
 
     if time_sensitive_found:
+        # Advisory quality-opinion (skills MAY legitimately cite versions/dates) →
+        # WARNING, not blocking MINOR. (audit WARNING agent #7)
         # Report first 3 occurrences
         for line_num, text in time_sensitive_found[:3]:
-            report.minor(
+            report.warning(
                 f"Line {line_num}: Time-sensitive information may become stale: '{text}'",
                 "SKILL.md",
                 line=line_num,
@@ -1761,7 +1765,7 @@ def validate_time_sensitive_info(body: str, report: ValidationReport) -> None:
             )
 
         if len(time_sensitive_found) > 3:
-            report.minor(
+            report.warning(
                 f"Found {len(time_sensitive_found)} time-sensitive references total (showing first 3)",
                 "SKILL.md",
                 category="Content Quality",
@@ -2008,7 +2012,9 @@ def validate_content_patterns(body: str, report: ValidationReport, strict_mode: 
             category="Content Patterns",
         )
     else:
-        report.minor(
+        # Advisory quality-opinion (many valid skills have no checklist) →
+        # WARNING, not blocking MINOR. (audit WARNING agent #7)
+        report.warning(
             "No checklist or numbered-prose step list found — without one, "
             "neither the skill nor any consumer can detect when the skill's "
             "goal has been accomplished. Add either '- [ ]' checkboxes OR "
@@ -2070,8 +2076,9 @@ def validate_content_patterns(body: str, report: ValidationReport, strict_mode: 
             category="Content Patterns",
         )
     elif has_checklist and not has_copy_phrase and len(workflow_matches) >= 3:
-        # Complex workflow with checklist but missing the copy phrase
-        report.minor(
+        # Complex workflow with checklist but missing the copy phrase — advisory
+        # quality-opinion → WARNING, not blocking MINOR. (audit WARNING agent #7)
+        report.warning(
             "Checklist found but missing 'Copy this checklist and track your progress' phrase "
             "(best practice for complex workflows)",
             "SKILL.md",
@@ -2269,8 +2276,11 @@ def _check_context_fork_self_recursion(
     Matched invocation patterns (in body):
     - ``Skill({skill: "<name>"})`` (bare name)
     - ``Skill({skill: "<plugin>:<name>"})`` (fully-qualified)
-    - ``/<name>`` slash-command form (a self-recursive command would
-      route back through the same skill).
+
+    NOTE: the ``/<name>`` slash-command form is intentionally NOT matched — a
+    bare ``/<name>`` regex would false-fire on ordinary prose paths and option
+    lists. Only the explicit ``skill: "<name>"`` invocation is detected.
+    (audit NIT agent #11 — docstring now matches the implementation.)
     """
     skill_name = frontmatter.get("name") or skill_path.name
     if not isinstance(skill_name, str) or not skill_name:
@@ -2992,6 +3002,11 @@ def print_json(report: ValidationReport) -> None:
             "critical": sum(1 for r in report.results if r.level == "CRITICAL"),
             "major": sum(1 for r in report.results if r.level == "MAJOR"),
             "minor": sum(1 for r in report.results if r.level == "MINOR"),
+            # WARNING + NIT were omitted — this validator now emits both heavily
+            # (agent #7 recalibration), so JSON consumers saw an incomplete
+            # count, inconsistent with print_results. (audit MINOR agent #9)
+            "warning": sum(1 for r in report.results if r.level == "WARNING"),
+            "nit": sum(1 for r in report.results if r.level == "NIT"),
             "info": sum(1 for r in report.results if r.level == "INFO"),
             "passed": sum(1 for r in report.results if r.level == "PASSED"),
         },

@@ -148,3 +148,99 @@ class TestTelemetryScansMcpJson:
         )
         report = scan_plugin_for_telemetry(tmp_path)
         assert not any("OTEL_" in r.message for r in report.results if r.level in ("CRITICAL", "MAJOR"))
+
+
+class TestLspPathTraversal:
+    """lsp #6 — LSP path values are checked for plugin-root traversal (MCP parity)."""
+
+    def test_traversal_path_flagged_major(self, tmp_path):
+        from validate_lsp import validate_path_value
+
+        report = ValidationReport()
+        validate_path_value("${CLAUDE_PLUGIN_ROOT}/../escape/evil", report, "server:command", plugin_root=tmp_path)
+        assert any("traverses outside plugin root" in r.message for r in report.results if r.level == "MAJOR")
+
+    def test_in_root_path_not_flagged(self, tmp_path):
+        """Two-sided: a path that stays inside plugin_root is not a traversal."""
+        from validate_lsp import validate_path_value
+
+        (tmp_path / "bin").mkdir()
+        (tmp_path / "bin" / "ls-server").write_text("#!/bin/sh\n", encoding="utf-8")
+        report = ValidationReport()
+        validate_path_value("${CLAUDE_PLUGIN_ROOT}/bin/ls-server", report, "server:command", plugin_root=tmp_path)
+        assert not any("traverses outside" in r.message for r in report.results)
+
+
+class TestEncodingCrlfLoneCrMix:
+    """lsp #9 — has_mixed detects a CRLF + lone-CR mix, not only CRLF + lone-LF."""
+
+    def _has_mixed_finding(self, content: bytes, tmp_path: Path) -> bool:
+        from validate_encoding import EncodingValidationReport, check_line_endings
+
+        report = EncodingValidationReport()
+        # .py is a LF-required source file (mixed → MINOR, reachable after the reorder).
+        check_line_endings(content, "src.py", ".py", report)
+        return any("mixed" in r.message.lower() for r in report.results)
+
+    def test_crlf_plus_lone_cr_is_mixed(self, tmp_path):
+        # CRLF line + a lone CR (old-Mac) line — previously missed.
+        assert self._has_mixed_finding(b"line1\r\nline2\rline3\r\n", tmp_path) is True
+
+    def test_pure_crlf_not_mixed(self, tmp_path):
+        """Two-sided: uniform CRLF is not a mix."""
+        assert self._has_mixed_finding(b"line1\r\nline2\r\n", tmp_path) is False
+
+
+class TestRulesFrontmatterNoBodyFp:
+    """doc #2 — a rules file with a leading `---` and no closing fence is body,
+    not 'frontmatter with no content body'."""
+
+    def _has_no_body_minor(self, content: str, tmp_path: Path) -> bool:
+        from validate_rules import validate_rule_file
+
+        f = tmp_path / "rule.md"
+        f.write_text(content, encoding="utf-8")
+        report = ValidationReport()
+        validate_rule_file(f, report, "rule.md")
+        return any("no content body" in r.message for r in report.results)
+
+    def test_leading_hr_no_closing_fence_not_flagged(self, tmp_path):
+        # Leading `---` is a horizontal rule; real content follows, no closing fence.
+        assert self._has_no_body_minor("---\nThis is the actual rule body content here.\n", tmp_path) is False
+
+    def test_real_frontmatter_empty_body_still_flagged(self, tmp_path):
+        """Two-sided: a real frontmatter block with a genuinely empty body IS flagged."""
+        assert self._has_no_body_minor("---\nname: r\ndescription: x\n---\n\n   \n", tmp_path) is True
+
+
+class TestDocLinkBalancedParens:
+    """doc #5 — a link target with balanced parens is not truncated."""
+
+    def test_link_with_parens_not_broken(self, tmp_path):
+        from validate_documentation import DocumentationValidationReport, validate_broken_links
+
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"name": "p"}', encoding="utf-8")
+        # A real file whose name contains parens, linked with the full name.
+        (tmp_path / "file(1).md").write_text("# x\n", encoding="utf-8")
+        (tmp_path / "README.md").write_text("See [the doc](file(1).md) for details.\n", encoding="utf-8")
+        rep = DocumentationValidationReport()
+        validate_broken_links(tmp_path, rep)
+        assert not any("file(1" in r.message and "Broken" in r.message for r in rep.results), [
+            r.message for r in rep.results
+        ]
+
+
+class TestSkillProseQualityWarnings:
+    """agent #7 — heuristic prose quality-opinions are advisory WARNING, not MINOR."""
+
+    def test_time_sensitive_info_is_warning_not_minor(self):
+        from validate_skill_comprehensive import ComprehensiveSkillReport, validate_time_sensitive_info
+
+        # Production passes the comprehensive report subclass (its warning()/minor()
+        # accept the `category` kwarg these checks use).
+        report = ComprehensiveSkillReport()
+        # RE_TIME_SENSITIVE needs a temporal keyword + month/year/vN.N.
+        validate_time_sensitive_info("This works as of 2026 and is supported until v3.0 of the tool.\n", report)
+        assert any("stale" in r.message for r in report.results if r.level == "WARNING")
+        assert not any("stale" in r.message for r in report.results if r.level == "MINOR")

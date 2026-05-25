@@ -193,20 +193,34 @@ def validate_rule_file(rule_path: Path, report: ValidationReport, rel_path: str)
         report.minor("Rule file is empty", rel_path)
         return ""
 
-    # Frontmatter validation (optional for rules)
-    if content.startswith("---"):
-        parts = content.split("---", 2)
-        if len(parts) >= 3 and parts[1].strip():
-            try:
-                frontmatter = yaml.safe_load(parts[1])
-                if isinstance(frontmatter, dict):
-                    _validate_frontmatter(frontmatter, report, rel_path)
-                else:
-                    report.minor("Frontmatter is not a YAML mapping", rel_path)
-            except yaml.YAMLError as e:
-                report.major(f"Invalid YAML frontmatter: {e}", rel_path)
-        # Body is the part after frontmatter
-        body = parts[2] if len(parts) >= 3 else ""
+    # Frontmatter validation (optional for rules). A real frontmatter block is
+    # `---` on its own line, content, then a closing `---` on its own line. A
+    # bare leading `---` with NO closing fence is a horizontal rule / ordinary
+    # body — the old `content.split("---", 2)` mis-parsed that, read the empty
+    # parts[2] as the body, and falsely reported "frontmatter but no content
+    # body" even though the content lived in parts[1]. (audit MINOR doc #2)
+    lines = content.split("\n")
+    if lines and lines[0].strip() == "---":
+        closing_idx = None
+        for idx in range(1, len(lines)):
+            if lines[idx].strip() == "---":
+                closing_idx = idx
+                break
+        if closing_idx is not None:
+            fm_text = "\n".join(lines[1:closing_idx])
+            body = "\n".join(lines[closing_idx + 1 :])
+            if fm_text.strip():
+                try:
+                    frontmatter = yaml.safe_load(fm_text)
+                    if isinstance(frontmatter, dict):
+                        _validate_frontmatter(frontmatter, report, rel_path)
+                    else:
+                        report.minor("Frontmatter is not a YAML mapping", rel_path)
+                except yaml.YAMLError as e:
+                    report.major(f"Invalid YAML frontmatter: {e}", rel_path)
+        else:
+            # Leading `---` but no closing fence → not frontmatter; all body.
+            body = content
     else:
         body = content
 

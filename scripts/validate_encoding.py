@@ -316,7 +316,11 @@ def check_line_endings(content: bytes, file_path: str, suffix: str, report: Enco
     has_crlf = b"\r\n" in content
     _has_lf = b"\n" in content and not has_crlf
     has_cr_only = b"\r" in content and b"\n" not in content
-    has_mixed = has_crlf and (content.replace(b"\r\n", b"").count(b"\n") > 0)
+    # After stripping CRLF pairs, ANY surviving bare \n (lone LF) OR bare \r
+    # (lone CR) means the file mixes CRLF with another ending. The old check
+    # counted only lone \n and missed a CRLF + lone-CR mix. (audit NIT lsp #9)
+    _stripped = content.replace(b"\r\n", b"")
+    has_mixed = has_crlf and (_stripped.count(b"\n") > 0 or _stripped.count(b"\r") > 0)
 
     # Rule 7: Batch scripts can use CRLF
     if suffix in BATCH_EXTENSIONS:
@@ -343,18 +347,23 @@ def check_line_endings(content: bytes, file_path: str, suffix: str, report: Enco
             return False
         return True
 
-    # Rule 5: Source files should use LF
+    # Rule 5: Source files should use LF.
+    # Check the MIXED case first: it's the more precise diagnostic and shares the
+    # MINOR severity, so surfacing "mixed" before the generic "CRLF" loses
+    # nothing (and the has_mixed branch was otherwise unreachable, since
+    # has_mixed requires has_crlf which returned first). Shell keeps CRLF→CRITICAL
+    # precedence below (a mixed shell file is still broken). (audit NIT lsp #9)
     if suffix in LF_REQUIRED_EXTENSIONS:
+        if has_mixed:
+            report.minor(f"Source file has mixed line endings: {file_path}")
+            report.stats["line_ending_issues"] += 1
+            return False
         if has_crlf:
             report.minor(f"Source file has CRLF line endings (should use LF): {file_path}")
             report.stats["line_ending_issues"] += 1
             return False
         if has_cr_only:
             report.minor(f"Source file has old Mac-style CR line endings: {file_path}")
-            report.stats["line_ending_issues"] += 1
-            return False
-        if has_mixed:
-            report.minor(f"Source file has mixed line endings: {file_path}")
             report.stats["line_ending_issues"] += 1
             return False
 
