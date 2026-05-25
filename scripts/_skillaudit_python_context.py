@@ -1510,17 +1510,28 @@ def _path_chain_has_home_anchor_and_safe_basename(node: ast.AST) -> bool:
     elements (``Path.home() / ".claude" / ".credentials.json"``). We
     walk the BinOp tree looking for: at least one Path.home() / cwd /
     expanduser anchor AND at least one Constant whose value is in
-    the safe basename set.
+    the safe basename set, AND no anchor-resetting component.
+
+    A component RESETS the pathlib anchor (so the path escapes home) when it is
+    an absolute Constant (``Path.home() / "/etc" / ".credentials.json"`` ==
+    ``/etc/.credentials.json``) OR a non-Constant variable (``Path.home() /
+    user_dir / ".credentials.json"`` where ``user_dir`` may be absolute). If any
+    such component is present we do NOT certify the path safe — the finding stays
+    visible for the agent to triage. (audit MINOR #14)
     """
     has_home_anchor = False
     has_safe_basename = False
+    has_unsafe_component = False
 
     def visit(n: ast.AST) -> None:
-        nonlocal has_home_anchor, has_safe_basename
+        nonlocal has_home_anchor, has_safe_basename, has_unsafe_component
         if isinstance(n, ast.Constant) and isinstance(n.value, str):
             base = n.value.rsplit("/", 1)[-1]
             if base in _SELF_CREDENTIAL_BASENAMES:
                 has_safe_basename = True
+            # An absolute-path Constant resets the anchor → escapes home.
+            if n.value.startswith("/"):
+                has_unsafe_component = True
             return
         if isinstance(n, ast.Call):
             f = n.func
@@ -1528,17 +1539,25 @@ def _path_chain_has_home_anchor_and_safe_basename(node: ast.AST) -> bool:
             if isinstance(f, ast.Attribute) and f.attr in {"home", "cwd"}:
                 if isinstance(f.value, ast.Name) and f.value.id == "Path":
                     has_home_anchor = True
+                else:
+                    has_unsafe_component = True
             # os.path.expanduser(...) / Path(...).expanduser()
             elif isinstance(f, ast.Attribute) and f.attr == "expanduser":
                 has_home_anchor = True
+            else:
+                # Any other call returns an unknown (possibly absolute) value.
+                has_unsafe_component = True
             return
         if isinstance(n, ast.BinOp):
             visit(n.left)
             visit(n.right)
             return
+        # Name / Subscript / Attribute / etc.: a variable component that may
+        # resolve to an absolute path and reset the anchor, escaping home.
+        has_unsafe_component = True
 
     visit(node)
-    return has_home_anchor and has_safe_basename
+    return has_home_anchor and has_safe_basename and not has_unsafe_component
 
 
 def _match_inside_module_data_literal(

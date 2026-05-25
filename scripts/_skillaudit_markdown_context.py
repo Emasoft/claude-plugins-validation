@@ -604,6 +604,18 @@ def classify(
 # allowlist used by ``_is_official_install_pipe`` — every entry is
 # the canonical install surface for a widely-used tool, not a
 # free-for-all download mirror.
+#
+# DELIBERATE TRADEOFF re: GitHub raw hosts (audit MINOR #15). These serve
+# arbitrary user content, so demoting EVERY `curl raw.githubusercontent.com/… |
+# bash` is over-broad in theory. BUT they are kept here on purpose: shipped
+# issue #39 (and its user-facing acceptance test
+# TestEndToEndLlmExternalizerScanZeroCriticals) requires a plugin documenting
+# its OWN GitHub-hosted installer to NOT be flagged CRITICAL — countless legit
+# plugin READMEs pipe a github-raw installer to bash. The matcher cannot tell
+# the plugin's own repo from an attacker's repo (the path shape is identical),
+# and the demote keeps the finding VISIBLE at NIT (iron-rule-compliant — the
+# agent still triages it). Dropping these would reintroduce issue #39's FP and
+# block legit plugins, so the demote is the correct accuracy tradeoff.
 _OFFICIAL_INSTALL_HOSTS: Final[frozenset[str]] = frozenset(
     {
         "raw.githubusercontent.com",  # github raw — vast majority of OSS installers

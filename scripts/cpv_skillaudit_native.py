@@ -646,16 +646,19 @@ def _is_in_line_comment(line: str, file_path: str) -> bool:
     if not stripped:
         return False
     suffix = file_path.lower()
-    # Python / shell / YAML / TOML / make
+    # Python / shell / YAML / TOML / make / Ruby — `#` line comments
     if (
-        suffix.endswith((".py", ".sh", ".bash", ".zsh", ".fish", ".yml", ".yaml", ".toml", ".ini", ".conf"))
+        suffix.endswith(
+            (".py", ".sh", ".bash", ".zsh", ".fish", ".yml", ".yaml", ".toml", ".ini", ".conf", ".rb")
+        )
         or suffix == "makefile"
     ):
         return stripped.startswith("#")
-    # JS / TS / Java / Go / C / C++ / Rust
-    if suffix.endswith(
-        (".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".java", ".go", ".c", ".cpp", ".cc", ".rs", ".rb", ".php")
-    ):
+    # PHP supports BOTH `#` and C-style `//` `/* */` comments. (audit NIT #17)
+    if suffix.endswith(".php"):
+        return stripped.startswith(("#", "//", "/*", "*"))
+    # JS / TS / Java / Go / C / C++ / Rust — C-style comments
+    if suffix.endswith((".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".java", ".go", ".c", ".cpp", ".cc", ".rs")):
         return stripped.startswith(("//", "/*", "*"))
     return False
 
