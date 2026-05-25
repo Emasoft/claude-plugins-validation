@@ -39,9 +39,8 @@ import sys
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-import yaml
 from cpv_validation_common import (
     BUILTIN_AGENT_TYPES,
     COLORS,
@@ -50,6 +49,7 @@ from cpv_validation_common import (
     EXIT_MAJOR,
     EXIT_MINOR,
     EXIT_OK,
+    MIN_DESCRIPTION_CHARS,
     SKILL_BODY_TOKEN_LIMIT,
     SKILL_FRONTMATTER_FIELDS,
     VALID_CONTEXT_VALUES,
@@ -62,6 +62,7 @@ from cpv_validation_common import (
     check_token_limit,
     has_numbered_prose_steps,
     is_orchestrator_skill,
+    is_valid_model,
     is_valid_plugin_env_var,
     load_cpv_config,
     removed_cpv_size_keys_present,
@@ -75,6 +76,9 @@ from cpv_validation_common import (
 from cpv_validation_common import (
     ValidationResult as BaseValidationResult,
 )
+from cpv_validation_common import (
+    parse_frontmatter as _shared_parse_frontmatter,
+)
 
 # =============================================================================
 # Constants from Multiple Validation Sources
@@ -82,11 +86,7 @@ from cpv_validation_common import (
 
 # Level type imported from cpv_validation_common
 
-# Multi-scale scoring (0-3) from agent-validator
-Score = Literal[0, 1, 2, 3]
-
 # --- AgentSkills OpenSpec Constants ---
-MAX_SKILL_NAME_LENGTH = 64  # Aligned with MAX_NAME_LENGTH in cpv_validation_common (official spec limit)
 # Skill ``description`` / ``when_to_use`` size is now token-based (TRDD-021250b5)
 # via DESCRIPTION_TOKEN_LIMIT / WHEN_TO_USE_TOKEN_LIMIT from cpv_validation_common.
 # The old char-based caps (MAX_DESCRIPTION_COMBINED_LENGTH / the readability
@@ -136,10 +136,8 @@ MAX_FRONTMATTER_CHARS_ERROR = 15000
 
 # --- Valid Values ---
 # VALID_CONTEXT_VALUES and BUILTIN_AGENT_TYPES imported from cpv_validation_common
-VALID_MODEL_VALUES = {"sonnet", "opus", "haiku", "inherit"}
-
-# v2.1.74+: full model IDs also accepted (claude-opus-4-6, claude-sonnet-4-6, etc.)
-_FULL_MODEL_ID_RE = re.compile(r"^claude-(?:opus|sonnet|haiku)-\d[\w.-]*$")
+# Model validity is delegated to the shared is_valid_model (single source of
+# truth) — the local set + regex were removed (audit CRITICAL C1 / MAJOR M1).
 
 # VALID_TOOLS imported from cpv_validation_common
 
@@ -276,9 +274,10 @@ RE_BRACED_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_.]*)\}")  # Matches ${ANY_
 # --- Dynamic Context Injection Pattern (skills.md: !`command`) ---
 RE_DYNAMIC_CONTEXT = re.compile(r"!\s*`[^`]+`")  # Correct: !`command`
 
-# Broken dynamic context patterns — missing backticks
-# Matches lines like "ERRORS = !ruff check" (no backticks at all) — but NOT inside code fences
-RE_BANG_NO_BACKTICKS = re.compile(r"(?<!=\s)!\s*(?!`)([a-zA-Z][\w. /-]+)(?<!`)")
+# Broken dynamic context pattern — exactly one backtick (the "no backticks at
+# all" case is covered inline by the shell_command_words scan in
+# validate_dynamic_context, so a separate RE_BANG_NO_BACKTICKS regex was dead
+# code and was removed — audit MINOR m2).
 # Matches "!`command" (missing closing backtick) or "!command`" (missing opening backtick)
 RE_BANG_ONE_BACKTICK = re.compile(r"!`[^`\n]+$|!(?!`)[^`\n]+`", re.MULTILINE)
 
@@ -351,14 +350,15 @@ REPL_CENTRIC_LANGUAGES = {"clojure", "elixir", "erlang", "haskell", "fsharp", "f
 
 @dataclass
 class ComprehensiveValidationResult(BaseValidationResult):
-    """Extended validation result with category and scoring.
+    """Validation result for the comprehensive skill validator.
 
-    Extends the canonical ValidationResult (which has level, message, file, line,
-    phase, fixable, fix_id, category, suggestion) with multi-scale scoring.
-    `category` is inherited from the base class (default "").
+    Identical to the canonical ValidationResult (level, message, file, line,
+    phase, fixable, fix_id, category, suggestion); `category` is inherited from
+    the base class (default ""). The former per-result ``score`` field was dead
+    data — written but never read, and never serialised by to_dict(); the grade
+    is derived purely from level counts in calculate_overall_score(). Removed
+    along with the unused ``Score`` Literal type. (audit NIT n7)
     """
-
-    score: int = 0  # 0-3 multi-scale score (0=missing, 1=inadequate, 2=adequate, 3=excellent)
 
 
 @dataclass
@@ -396,9 +396,15 @@ class ComprehensiveSkillReport(BaseValidationReport):
         fix_id: str | None = None,
         *,
         category: str | None = None,
-        score: int = 0,
+        suggestion: str | None = None,
     ) -> None:
-        """Add a validation result with optional category and score."""
+        """Add a validation result with an optional category tag.
+
+        ``suggestion`` is accepted (and forwarded) so this override stays
+        Liskov-compatible with the widened base ``ValidationReport.add``
+        (audit m9). The comprehensive validator does not set it itself, but the
+        signature must match the base so a base-typed caller can pass it.
+        """
         result = ComprehensiveValidationResult(
             level=level,
             message=message,
@@ -408,13 +414,13 @@ class ComprehensiveSkillReport(BaseValidationReport):
             fixable=fixable,
             fix_id=fix_id,
             category=category or "",
-            score=score,
+            suggestion=suggestion,
         )
         self.results.append(result)
 
     def passed(self, message: str, file: str | None = None, category: str | None = None) -> None:
         """Add a passed check with optional category."""
-        self.add("PASSED", message, file, category=category, score=3)
+        self.add("PASSED", message, file, category=category)
 
     def info(self, message: str, file: str | None = None, line: int | None = None, category: str | None = None) -> None:
         """Add an info message with optional category.
@@ -426,10 +432,18 @@ class ComprehensiveSkillReport(BaseValidationReport):
         the value is forwarded to ``self.add`` and stored on the result
         for any consumer that wants it.
         """
-        self.add("INFO", message, file, line, category=category, score=2)
+        self.add("INFO", message, file, line, category=category)
 
     def nit(self, message: str, file: str | None = None, line: int | None = None, category: str | None = None) -> None:
-        """Add a nit issue -- blocks only in --strict mode."""
+        """Add a NIT issue (category-tagged override of ValidationReport.nit).
+
+        NOTE: this comprehensive validator's main() returns plain
+        ``report.exit_code`` and its ``--strict`` flag means *Nixtla strict
+        mode*, NOT the NIT-blocking strict of ``exit_code_strict()``. So a NIT
+        emitted here never blocks the run. The override exists for Liskov
+        compatibility (the base ``nit`` doesn't accept ``category``); it is kept
+        for parity even though no current code path calls it. (audit NIT n6)
+        """
         self.add("NIT", message, file, line, category=category)
 
     def warning(
@@ -442,19 +456,19 @@ class ComprehensiveSkillReport(BaseValidationReport):
         self, message: str, file: str | None = None, line: int | None = None, category: str | None = None
     ) -> None:
         """Add a minor issue with optional category."""
-        self.add("MINOR", message, file, line, category=category, score=1)
+        self.add("MINOR", message, file, line, category=category)
 
     def major(
         self, message: str, file: str | None = None, line: int | None = None, category: str | None = None
     ) -> None:
         """Add a major issue with optional category."""
-        self.add("MAJOR", message, file, line, category=category, score=0)
+        self.add("MAJOR", message, file, line, category=category)
 
     def critical(
         self, message: str, file: str | None = None, line: int | None = None, category: str | None = None
     ) -> None:
         """Add a critical issue with optional category."""
-        self.add("CRITICAL", message, file, line, category=category, score=0)
+        self.add("CRITICAL", message, file, line, category=category)
 
     @property
     def exit_code(self) -> int:
@@ -501,39 +515,16 @@ ValidationReport = ComprehensiveSkillReport
 def parse_frontmatter(content: str) -> tuple[dict[str, Any] | None, str, int]:
     """Parse YAML frontmatter from skill content.
 
-    Returns:
-        Tuple of (frontmatter_dict, body_content, frontmatter_end_line)
-        Returns (None, content, 0) if no frontmatter found
+    Thin wrapper over the shared ``cpv_validation_common.parse_frontmatter``
+    (single source of truth — BOM strip + delimiter-LINE closer, audit m5/m6).
+    Uses the shared default pyyaml backend, matching the previous inline
+    ``yaml.safe_load`` behavior exactly. The returned ``frontmatter_end_line``
+    feeds the M2 body-line offsets.
+
+    Returns ``(frontmatter_dict, body_content, frontmatter_end_line)`` and
+    ``(None, content, 0)`` when no frontmatter is found.
     """
-    if not content.startswith("---"):
-        return None, content, 0
-
-    # Split on the closing `---` DELIMITER LINE — never a bare `---` substring.
-    # `content.split("---", 2)` corrupts valid frontmatter whose VALUE contains
-    # `---` (e.g. `description: "use --- as a separator"`), truncating the YAML
-    # and producing a false "Malformed frontmatter". Opener and closer must each
-    # be `---` alone on their own line.
-    lines = content.split("\n")
-    if lines[0].strip() != "---":
-        return None, content, 0
-    closing_idx = None
-    for idx in range(1, len(lines)):
-        if lines[idx].strip() == "---":
-            closing_idx = idx
-            break
-    if closing_idx is None:
-        return None, content, 0
-
-    fm_text = "\n".join(lines[1:closing_idx])
-    body = "\n".join(lines[closing_idx + 1 :])
-    try:
-        frontmatter = yaml.safe_load(fm_text)
-        if frontmatter is None:
-            frontmatter = {}
-        fm_end_line = closing_idx + 1
-        return frontmatter, body, fm_end_line
-    except yaml.YAMLError:
-        return None, content, 0
+    return _shared_parse_frontmatter(content)
 
 
 def find_skill_md(skill_dir: Path) -> Path | None:
@@ -596,6 +587,11 @@ def validate_skill_md_exists(skill_path: Path, report: ValidationReport) -> bool
 
 def validate_frontmatter_structure(content: str, report: ValidationReport) -> dict[str, Any] | None:
     """Validate YAML frontmatter structure."""
+    # Strip a leading UTF-8 BOM so the `startswith("---")` + `_fm_lines[0]`
+    # checks below agree with parse_frontmatter (which strips it too). Without
+    # this a BOM-prefixed file would be mislabelled "No YAML frontmatter found".
+    # (audit MINOR m6)
+    content = content.lstrip("﻿")
     if not content.startswith("---"):
         report.info("No YAML frontmatter found (optional but recommended)", "SKILL.md", category="Frontmatter")
         return None
@@ -764,9 +760,15 @@ def validate_description_field(
             category="Description Quality",
         )
 
-    # Length checks
-    if len(desc) < 20:
-        report.minor("Description is very short (< 20 chars)", "SKILL.md", category="Description Quality")
+    # Length checks. Threshold aligned to 10 chars to match validate_skill.py
+    # and validate_command.py — the three validators previously disagreed
+    # (10 / 10 / 20) on what "very short" means for the same field. The ideal
+    # single source of truth is a shared MIN_DESCRIPTION_CHARS constant in
+    # cpv_validation_common (follow-up). (audit MINOR m4)
+    if len(desc) < MIN_DESCRIPTION_CHARS:
+        report.minor(
+            f"Description is very short (< {MIN_DESCRIPTION_CHARS} chars)", "SKILL.md", category="Description Quality"
+        )
 
     # Size is token-based (TRDD-021250b5), not char-based — characters are a poor
     # proxy for what Claude Code actually truncates in the skill listing.
@@ -1245,15 +1247,23 @@ def validate_model_field(
         )
         return
 
-    # v2.1.74+: accept short names AND full model IDs (claude-opus-4-6)
-    if model not in VALID_MODEL_VALUES and not _FULL_MODEL_ID_RE.match(model):
+    # Validity gate routes through the SHARED is_valid_model (single source of
+    # truth) — the same gate validate_command + validate_skill use. The old
+    # local VALID_MODEL_VALUES set + regex rejected documented, in-use aliases
+    # (`opus[1m]`, `default`, `opusplan`, `sonnet[1m]`, `claude-opus-4-6[1m]`),
+    # emitting a FALSE blocking MAJOR — CPV contradicting its own model gate.
+    # (audit CRITICAL C1 / MAJOR M1)
+    if not is_valid_model(model):
         report.major(
-            f"Invalid 'model' value: '{model}'. Valid: {sorted(VALID_MODEL_VALUES)} or full ID like claude-opus-4-6",
+            f"Invalid 'model' value: '{model}'. Valid: sonnet, opus, haiku, inherit, "
+            "default, opusplan (optionally with [1m]), or full ID like claude-opus-4-6",
             "SKILL.md",
             category="Frontmatter",
         )
-    elif model == "haiku" or (model.startswith("claude-haiku") and _FULL_MODEL_ID_RE.match(model)):
-        # Haiku penalty: haiku is less reliable for complex skills.
+    elif model.lower() in {"haiku", "haiku[1m]"} or model.lower().startswith("claude-haiku"):
+        # Haiku penalty: haiku is less reliable for complex skills. Applied
+        # AFTER the validity gate, covering the short alias (`haiku`/`haiku[1m]`)
+        # and full `claude-haiku-*` IDs.
         # Exemption: context-fork skills opt into haiku INTENTIONALLY — that's
         # the whole reason context: fork exists (fresh subagent, no inherited
         # opus-scale context, so haiku actually takes effect). Skipping the
@@ -1630,19 +1640,25 @@ def validate_required_sections(body: str, report: ValidationReport, strict_mode:
             )
 
 
-def validate_path_formats(body: str, report: ValidationReport, skip_platform_checks: list[str] | None = None) -> None:
+def validate_path_formats(
+    body: str, report: ValidationReport, skip_platform_checks: list[str] | None = None, line_offset: int = 0
+) -> None:
     """Validate path formats (no absolute paths, forward slashes only).
 
     Args:
-        body: The SKILL.md body content
+        body: The SKILL.md body content (text AFTER the frontmatter)
         report: ValidationReport to add results to
         skip_platform_checks: List of platforms to skip checks for (e.g., ['windows'])
+        line_offset: Number of frontmatter lines preceding ``body`` in the real
+            file. Body line ``i`` maps to file line ``i + line_offset`` so the
+            reported coordinate points at the actual SKILL.md line. (audit MAJOR M2)
     """
     skip_windows = skip_platform_checks is not None and "windows" in skip_platform_checks
 
     lines = body.split("\n")
     in_code_block = False
     for i, line in enumerate(lines, 1):
+        display_line = i + line_offset
         # Track fenced code blocks (``` or ~~~)
         stripped_line = line.strip()
         if stripped_line.startswith("```") or stripped_line.startswith("~~~"):
@@ -1657,9 +1673,9 @@ def validate_path_formats(body: str, report: ValidationReport, skip_platform_che
         for pattern, desc in ABSOLUTE_PATH_PATTERNS:
             if pattern.search(line):
                 report.major(
-                    f"Line {i}: contains absolute/OS-specific path ({desc}) - use '{{baseDir}}/...'",
+                    f"Line {display_line}: contains absolute/OS-specific path ({desc}) - use '{{baseDir}}/...'",
                     "SKILL.md",
-                    line=i,
+                    line=display_line,
                     category="Path Format",
                 )
 
@@ -1670,9 +1686,9 @@ def validate_path_formats(body: str, report: ValidationReport, skip_platform_che
         # Check for backslashes (Windows-style paths - Anthropic docs require forward slashes)
         if "\\scripts\\" in line or "\\references\\" in line:
             report.major(
-                f"Line {i}: uses backslashes in path - use forward slashes",
+                f"Line {display_line}: uses backslashes in path - use forward slashes",
                 "SKILL.md",
-                line=i,
+                line=display_line,
                 category="Path Format",
             )
         # Generic Windows backslash detection (any backslash followed by letter)
@@ -1690,18 +1706,21 @@ def validate_path_formats(body: str, report: ValidationReport, skip_platform_che
                 and not has_escape_sequences
             ):
                 report.minor(
-                    f"Line {i}: possible Windows-style path (backslash) - use forward slashes for portability",
+                    f"Line {display_line}: possible Windows-style path (backslash) - use forward slashes for portability",
                     "SKILL.md",
-                    line=i,
+                    line=display_line,
                     category="Path Format",
                 )
 
 
-def validate_mcp_tool_references(body: str, report: ValidationReport) -> None:
+def validate_mcp_tool_references(body: str, report: ValidationReport, line_offset: int = 0) -> None:
     """Validate MCP tool references use qualified format (Anthropic docs requirement).
 
     MCP tools should be referenced with ServerName:tool_name format,
     not just tool_name (e.g., "serena:read_file" not "read_file").
+
+    ``line_offset`` maps body-relative line ``i`` to the real SKILL.md line
+    ``i + line_offset`` (frontmatter precedes the body). (audit MAJOR M2)
     """
     # Common MCP tool patterns that should be qualified
     mcp_tool_patterns = [
@@ -1723,22 +1742,32 @@ def validate_mcp_tool_references(body: str, report: ValidationReport) -> None:
         match = RE_MCP_TOOL_UNQUALIFIED.search(line)
         if match:
             tool_name = match.group(3)
-            if tool_name in mcp_tool_patterns or "_" in tool_name:
+            # Flag only a CURATED known MCP tool, or a strongly MCP-shaped name
+            # (>= 2 underscores → >= 3 snake_case segments like
+            # `get_symbols_overview`). The old `or "_" in tool_name` clause
+            # fired on ANY single-underscore identifier in prose (e.g. "run the
+            # `build_step` function"), producing noise. (audit NIT n3)
+            if tool_name in mcp_tool_patterns or tool_name.count("_") >= 2:
+                display_line = i + line_offset
                 # Advisory quality-opinion (heuristic), not Anthropic-invalidity →
                 # WARNING, not blocking MINOR. (audit WARNING agent #7)
                 report.warning(
-                    f"Line {i}: MCP tool reference may need qualification (ServerName:tool_name): '{tool_name}'",
+                    f"Line {display_line}: MCP tool reference may need qualification "
+                    f"(ServerName:tool_name): '{tool_name}'",
                     "SKILL.md",
-                    line=i,
+                    line=display_line,
                     category="MCP Tools",
                 )
 
 
-def validate_time_sensitive_info(body: str, report: ValidationReport) -> None:
+def validate_time_sensitive_info(body: str, report: ValidationReport, line_offset: int = 0) -> None:
     """Detect time-sensitive information that may become stale (Anthropic docs).
 
     Skills should avoid dates, version numbers, and temporal references
     that will become outdated over time.
+
+    ``line_offset`` maps body-relative line ``i`` to the real SKILL.md line
+    ``i + line_offset`` (frontmatter precedes the body). (audit MAJOR M2)
     """
     lines = body.split("\n")
     time_sensitive_found = []
@@ -1757,10 +1786,11 @@ def validate_time_sensitive_info(body: str, report: ValidationReport) -> None:
         # WARNING, not blocking MINOR. (audit WARNING agent #7)
         # Report first 3 occurrences
         for line_num, text in time_sensitive_found[:3]:
+            display_line = line_num + line_offset
             report.warning(
-                f"Line {line_num}: Time-sensitive information may become stale: '{text}'",
+                f"Line {display_line}: Time-sensitive information may become stale: '{text}'",
                 "SKILL.md",
-                line=line_num,
+                line=display_line,
                 category="Content Quality",
             )
 
@@ -2258,6 +2288,7 @@ def _check_context_fork_self_recursion(
     frontmatter: dict[str, Any],
     body: str,
     report: ValidationReport,
+    line_offset: int = 0,
 ) -> None:
     """v2.1.145: detect a `context: fork` skill that invokes itself via Skill().
 
@@ -2317,7 +2348,8 @@ def _check_context_fork_self_recursion(
     for matcher in matchers:
         m = matcher.search(body_no_fences)
         if m:
-            line_no = body_no_fences.count("\n", 0, m.start()) + 1
+            # body-relative line + frontmatter offset → real SKILL.md line. (audit MAJOR M2)
+            line_no = body_no_fences.count("\n", 0, m.start()) + 1 + line_offset
             report.minor(
                 f"Skill {skill_name!r} has 'context: fork' AND invokes itself via "
                 f"Skill() (pattern: {m.group(0)!r}). CC v2.1.145 fixed an infinite-loop "
@@ -2429,9 +2461,14 @@ def validate_scripts_directory(skill_path: Path, report: ValidationReport) -> No
                                 f"scripts/{script.name}",
                                 category="Scripts",
                             )
-            except Exception:
+            except (OSError, UnicodeDecodeError) as exc:
+                # Narrow the catch and surface the real cause — a bare
+                # `except Exception` collapsed a binary file (UnicodeDecodeError)
+                # or a permission error (OSError) into a context-free MINOR, and
+                # silently swallowed genuine bugs. Unexpected exceptions now
+                # propagate (fail-fast). (audit NIT n4)
                 report.minor(
-                    f"Could not read script: scripts/{script.name}",
+                    f"Could not read script scripts/{script.name}: {exc}",
                     f"scripts/{script.name}",
                     category="Scripts",
                 )
@@ -2517,9 +2554,11 @@ def validate_reference_files(skill_path: Path, report: ValidationReport) -> None
                     f"references/{ref_file.name}",
                     category="Reference Files",
                 )
-        except Exception:
+        except (OSError, UnicodeDecodeError) as exc:
+            # Narrow the catch and surface the real cause (see validate_scripts_directory).
+            # Unexpected exceptions propagate (fail-fast). (audit NIT n4)
             report.minor(
-                f"Could not read reference file: references/{ref_file.name}",
+                f"Could not read reference file references/{ref_file.name}: {exc}",
                 f"references/{ref_file.name}",
                 category="Reference Files",
             )
@@ -2701,7 +2740,11 @@ def validate_skill(
 
     # Parse frontmatter
     frontmatter = validate_frontmatter_structure(content, report)
-    _, body, _ = parse_frontmatter(content)
+    # Capture fm_end_line: body-scoped scanners count lines from the body (which
+    # starts AFTER the closing `---`), so they must add this offset to report a
+    # FILE-relative SKILL.md line. body line 1 == file line (fm_end_line + 1), so
+    # display_line = body_line + fm_end_line. (audit MAJOR M2)
+    _, body, fm_end_line = parse_frontmatter(content)
 
     if frontmatter is not None:
         # Validate field whitelist
@@ -2801,7 +2844,7 @@ def validate_skill(
         # recursion under a forked context is almost always unintentional
         # — flag it as MINOR so authors restructure into helpers.
         if frontmatter.get("context") == "fork":
-            _check_context_fork_self_recursion(skill_path, frontmatter, body, report)
+            _check_context_fork_self_recursion(skill_path, frontmatter, body, report, line_offset=fm_end_line)
 
     # Validate token budget (line count + token-based body limit).
     validate_token_budget(content, body, report)
@@ -2810,13 +2853,13 @@ def validate_skill(
     validate_required_sections(body, report, strict_mode)
 
     # Validate path formats
-    validate_path_formats(body, report, skip_platform_checks)
+    validate_path_formats(body, report, skip_platform_checks, line_offset=fm_end_line)
 
     # Validate MCP tool references (Anthropic docs: use qualified format)
-    validate_mcp_tool_references(body, report)
+    validate_mcp_tool_references(body, report, line_offset=fm_end_line)
 
     # Validate time-sensitive information (Anthropic docs: avoid stale dates/versions)
-    validate_time_sensitive_info(body, report)
+    validate_time_sensitive_info(body, report, line_offset=fm_end_line)
 
     # Validate string substitutions (skills.md: $ARGUMENTS, $N, ${CLAUDE_SESSION_ID})
     validate_string_substitutions(body, report)
@@ -2943,6 +2986,15 @@ def print_results(report: ValidationReport, verbose: bool = False) -> None:
     print(f"  {colors['CRITICAL']}CRITICAL: {counts['CRITICAL']}{colors['RESET']}")
     print(f"  {colors['MAJOR']}MAJOR:    {counts['MAJOR']}{colors['RESET']}")
     print(f"  {colors['MINOR']}MINOR:    {counts['MINOR']}{colors['RESET']}")
+    # Surface WARNING/NIT counts whenever present so the Score/grade signal isn't
+    # misleading: this validator emits many non-blocking WARNINGs, and the grade
+    # (derived only from CRITICAL/MAJOR/MINOR/PASSED) can read "A" while the
+    # report carries dozens of WARNINGs. Shown only when nonzero to keep a clean
+    # skill's summary tidy. (audit NIT n5)
+    if counts["WARNING"]:
+        print(f"  {colors['WARNING']}WARNING:  {counts['WARNING']}{colors['RESET']}")
+    if counts["NIT"]:
+        print(f"  {colors['NIT']}NIT:      {counts['NIT']}{colors['RESET']}")
     if verbose:
         print(f"  {colors['INFO']}INFO:     {counts['INFO']}{colors['RESET']}")
         print(f"  {colors['PASSED']}PASSED:   {counts['PASSED']}{colors['RESET']}")

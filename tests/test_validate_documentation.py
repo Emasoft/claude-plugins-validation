@@ -324,6 +324,102 @@ class TestRule12TableStructure:
         assert report.has_warning
 
 
+class TestTildeFencesAndLonePipe:
+    """m6/n6 regression: structural rules 9-12 must honor ~~~ fences and not
+    treat a lone '|' as a table row."""
+
+    def test_tilde_fence_closed_no_false_unclosed(self, tmp_path: Path):
+        """m6: a properly closed ~~~ fence must NOT report 'unclosed code block'.
+
+        Before the fix the code-block-closed rule tracked only ``` via
+        startswith, so the closing ~~~ was seen as body text and the block
+        looked unterminated → false MAJOR (which can mark a plugin INVALID).
+        """
+        readme = tmp_path / "README.md"
+        readme.write_text("# Doc\n\n~~~python\nprint('hi')\n~~~\n\nAfter.\n")
+        report = DocumentationValidationReport(plugin_path=str(tmp_path))
+        validate_code_block_closed(tmp_path, report)
+        assert not report.has_major, [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("properly closed" in r.message for r in report.results if r.level == "PASSED")
+
+    def test_genuinely_unclosed_tilde_fence_still_major(self, tmp_path: Path):
+        """m6 two-sided: a genuinely unterminated ~~~ fence is still a MAJOR."""
+        readme = tmp_path / "README.md"
+        readme.write_text("# Doc\n\n~~~python\nprint('hi')\nno closing fence here\n")
+        report = DocumentationValidationReport(plugin_path=str(tmp_path))
+        validate_code_block_closed(tmp_path, report)
+        assert report.has_major
+        assert any("Unclosed code block" in r.message for r in report.results if r.level == "MAJOR")
+
+    def test_tagged_tilde_fence_no_language_warning(self, tmp_path: Path):
+        """m6: a ~~~ fence WITH a language tag must not warn about a missing tag."""
+        readme = tmp_path / "README.md"
+        readme.write_text("# Doc\n\n~~~python\nprint('hi')\n~~~\n")
+        report = DocumentationValidationReport(plugin_path=str(tmp_path))
+        validate_code_block_language_tags(tmp_path, report)
+        assert not report.has_warning, [r.message for r in report.results if r.level == "WARNING"]
+
+    def test_untagged_tilde_fence_warns(self, tmp_path: Path):
+        """m6 two-sided: a ~~~ fence WITHOUT a language tag still warns."""
+        readme = tmp_path / "README.md"
+        readme.write_text("# Doc\n\n~~~\nprint('hi')\n~~~\n")
+        report = DocumentationValidationReport(plugin_path=str(tmp_path))
+        validate_code_block_language_tags(tmp_path, report)
+        assert report.has_warning
+        assert any("language" in r.message.lower() for r in report.results)
+
+    def test_list_markers_inside_tilde_fence_ignored(self, tmp_path: Path):
+        """m6: list-like lines inside a ~~~ fence must NOT be scanned as list
+        markers (so mixed markers inside code don't trigger a false warning)."""
+        readme = tmp_path / "README.md"
+        # Outside fence: only '-' markers. Inside fence: '*' and '+' — must be ignored.
+        readme.write_text("# Doc\n\n- real item\n- another\n\n~~~text\n* fake\n+ fake\n~~~\n")
+        report = DocumentationValidationReport(plugin_path=str(tmp_path))
+        validate_list_formatting(tmp_path, report)
+        assert not report.has_warning, [r.message for r in report.results if r.level == "WARNING"]
+
+    def test_table_rows_inside_tilde_fence_ignored(self, tmp_path: Path):
+        """m6: table-like lines inside a ~~~ fence must NOT be scanned as a table
+        (so a deliberately ragged ASCII table in code doesn't false-warn)."""
+        readme = tmp_path / "README.md"
+        readme.write_text("# Doc\n\n~~~text\n| a | b |\n| c |\n~~~\n\nProse.\n")
+        report = DocumentationValidationReport(plugin_path=str(tmp_path))
+        validate_table_structure(tmp_path, report)
+        assert not report.has_warning, [r.message for r in report.results if r.level == "WARNING"]
+
+    def test_lone_pipe_line_not_treated_as_table(self, tmp_path: Path):
+        """n6: a line that is exactly '|' must not open a 1-column table context.
+
+        Uses a lone '|' as the final character (no trailing newline) so no
+        following line resets the table state — that is the shape that, before
+        the fix, made the lone '|' a 1-column 'table' and emitted a false
+        'Table structure is valid' PASSED.
+        """
+        readme = tmp_path / "README.md"
+        readme.write_text("# Doc\n\nsome prose\n\n|")  # lone '|' as last char, no newline
+        report = DocumentationValidationReport(plugin_path=str(tmp_path))
+        validate_table_structure(tmp_path, report)
+        assert not report.has_warning
+        assert not any("Table structure is valid" in r.message for r in report.results if r.level == "PASSED"), (
+            "lone '|' was wrongly treated as a valid 1-column table"
+        )
+
+    def test_real_single_column_table_still_recognized(self, tmp_path: Path):
+        """n6 two-sided: a legitimate single-column table ('| value |') must be
+        recognized — the len>=2 guard drops only the degenerate lone '|', not
+        real 1-col rows. Table is at EOF (no trailing newline) so the table
+        state survives to emit the PASSED line, proving the rows parsed."""
+        readme = tmp_path / "README.md"
+        readme.write_text("# Doc\n\n| Header |\n|--------|\n| value |")  # at EOF, no newline
+        report = DocumentationValidationReport(plugin_path=str(tmp_path))
+        validate_table_structure(tmp_path, report)
+        # No column-mismatch warning — all rows have 1 column.
+        assert not report.has_warning, [r.message for r in report.results if r.level == "WARNING"]
+        # The table WAS recognized (PASSED emitted), proving the len>=2 guard
+        # did not drop the real 1-column rows.
+        assert any("Table structure is valid" in r.message for r in report.results if r.level == "PASSED")
+
+
 class TestRule13ImageReferences:
     """Tests for Rule 13: Image references should be valid."""
 

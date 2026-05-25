@@ -183,6 +183,15 @@ _split_lines_last_value: list[str] = []
 # step in `validate_security()` — wrapping it in a class would force every
 # existing caller through a refactor for no extra benefit. Process-local;
 # `_reset_scan_step_log()` clears it for each new top-level call.
+#
+# Re-entrancy invariant (audit n5): this global assumes ONE in-flight
+# top-level `validate_security()` per process. The marketplace path calls
+# it SERIALLY in a loop (snapshotting the table after each), which is safe.
+# The four external scanners DO run in a ThreadPoolExecutor, but their
+# `_record_step` rows are appended by the MAIN thread AFTER `fut.result()`
+# — the worker `scanner_fn`s never call `_record_step` themselves. If a
+# future scanner_fn is changed to record steps from a worker thread, this
+# bare-list append would race; convert to a thread-local or a lock first.
 
 _scan_step_log: list[dict[str, Any]] = []
 
@@ -1086,6 +1095,15 @@ def is_cpv_self_scan(plugin_path: Path) -> bool:
 # Per-file scanners read this to apply CPV-only exclusions without
 # threading the flag through every signature.
 _CPV_SELF_SCAN_ACTIVE: bool = False
+# True ONLY when the self-scan target IS the running validator instance
+# (target_root == running_cpv_root). The unconditional Tier-0 dev-scratch
+# skip in `cpv_self_scan_skip` is gated on THIS, not on the broader
+# `_CPV_SELF_SCAN_ACTIVE` — a plugin can flip `_CPV_SELF_SCAN_ACTIVE` on a
+# tree it controls merely by NAMING itself `claude-plugins-validation` or
+# shipping the two CPV signature files, and would otherwise get its own
+# `docs_dev/` / `reports/` / `design/tasks/` skipped with no hash check.
+# (audit w3)
+_CPV_IS_RUNNING_CPV: bool = False
 _CPV_SELF_HASH_MANIFEST: dict[str, str] = {}
 _CPV_SELF_PLUGIN_ROOT: Path | None = None
 _CPV_SELF_HASH_REPORTED_MISSING: set[str] = set()
@@ -1253,10 +1271,11 @@ def _set_cpv_self_scan(
        version. If GitHub fetch fails → refuse self-scan (scan everything).
     """
     global _CPV_SELF_SCAN_ACTIVE, _CPV_SELF_HASH_MANIFEST, _CPV_SELF_PLUGIN_ROOT
-    global _CPV_SELF_HASH_NOTICE_REPORT
+    global _CPV_SELF_HASH_NOTICE_REPORT, _CPV_IS_RUNNING_CPV
     _CPV_SELF_SCAN_ACTIVE = active
     _CPV_SELF_PLUGIN_ROOT = plugin_root.resolve() if active and plugin_root else None
     _CPV_SELF_HASH_MANIFEST = {}
+    _CPV_IS_RUNNING_CPV = False  # recomputed below; reset on every call
     _CPV_SELF_HASH_REPORTED_MISSING.clear()
     _CPV_SELF_HASH_REPORTED_MODIFIED.clear()
     _CPV_SELF_HASH_NOTICE_REPORT = notice_report if active else None
@@ -1267,6 +1286,9 @@ def _set_cpv_self_scan(
     target_root = plugin_root.resolve()
     running_cpv_root = Path(__file__).resolve().parent.parent
     is_running_cpv = target_root == running_cpv_root
+    # Publish to the module global so the unconditional Tier-0 dev-scratch
+    # skip can require the target to be the running validator. (audit w3)
+    _CPV_IS_RUNNING_CPV = is_running_cpv
 
     if is_running_cpv:
         # Trust the local manifest — running CPV's integrity was already
@@ -1621,16 +1643,22 @@ def cpv_self_scan_skip(file_path: str) -> bool:
     Stages 2+3 defend against name-spoofing: a malicious plugin that
     names a file `cpv_taint_engine.py` cannot evade the security scan by
     relying on the name match — the hash check fails and the file is
-    scanned. Stage 1 cannot be spoofed in a CPV self-scan: the only way
-    for an attacker to land a file in `docs_dev/` is to already have
-    write access to the validator's own source tree, in which case they
-    don't need to spoof anything.
+    scanned. Stage 1's "land a file in docs_dev/ requires write access to
+    the validator's own tree" argument only holds when the self-scan
+    target IS the running validator. `_CPV_SELF_SCAN_ACTIVE` can be flipped
+    on a tree the attacker controls (a plugin that names itself
+    `claude-plugins-validation` OR ships the two CPV signature files), and
+    that tree's `docs_dev/` IS attacker-controlled. So Tier-0 is gated on
+    `_CPV_IS_RUNNING_CPV` (target root == running validator root); a
+    spoofed-but-not-running CPV tree gets its dev-scratch SCANNED, falling
+    through to the hash-gated stages 2+3. (audit w3)
     """
     if not _CPV_SELF_SCAN_ACTIVE:
         return False
 
-    # Tier 0 — dev-scratch directories: skip unconditionally.
-    if _is_dev_scratch_path(file_path):
+    # Tier 0 — dev-scratch directories: skip unconditionally, but ONLY
+    # when the target is the running validator instance (see docstring).
+    if _CPV_IS_RUNNING_CPV and _is_dev_scratch_path(file_path):
         return True
 
     if not _is_self_scan_eligible(file_path):
@@ -1913,10 +1941,13 @@ def is_security_fix_reference(file_path: str) -> bool:
     - Specific `*-fixes.md` filenames anywhere (legacy direct match)
     """
     file_normalized = file_path.lower().replace("\\", "/")
+    # Quick exit — references are markdown (.md or .mdx). The previous
+    # form nested an inner `.md`-only check that made the `.mdx` arm of
+    # the tuple inconsistent: a future "simplify to one return" would
+    # silently stop recognising `.mdx` references. One flat guard honours
+    # both extensions identically. (audit M3)
     if not file_normalized.endswith((".md", ".mdx")):
-        # Quick exit — references are markdown.
-        if not file_normalized.endswith(".md"):
-            return False
+        return False
 
     # Any markdown under a skill's references/ folder is documentation that
     # may quote patterns. (Was narrow to fix-validation only; broadened
@@ -3501,6 +3532,52 @@ def _surrounding_lines(content_lines: list[str], idx: int, window: int = 4) -> l
     return content_lines[lo:idx] + content_lines[idx + 1 : hi]
 
 
+def _python_docstring_line_set(lines: list[str], *, one_based: bool) -> set[int]:
+    """Return the set of line indices that fall inside a Python docstring.
+
+    Multi-line `\"\"\"…\"\"\"` / `'''…'''` blocks are line-bounded contexts
+    where pattern text is documentation, not runtime code. Sweep the file
+    once to mark which lines are inside such a block so per-line scanners
+    can suppress matches there.
+
+    ``one_based=False`` returns 0-based indices (for scanners enumerating
+    ``range(len(lines))``); ``one_based=True`` returns 1-based indices (for
+    scanners enumerating ``enumerate(lines, start=1)``).
+
+    Extracted from two byte-identical copies (path-traversal + Phase-3) so
+    a fix to one — e.g. handling escaped triple-quotes — reaches both.
+    (audit n2)
+    """
+    docstring_lines: set[int] = set()
+    in_doc = False
+    delim: str | None = None
+    for i, ln in enumerate(lines):
+        j = 0
+        while j < len(ln):
+            if not in_doc:
+                if ln.startswith('"""', j):
+                    in_doc = True
+                    delim = '"""'
+                    j += 3
+                    continue
+                if ln.startswith("'''", j):
+                    in_doc = True
+                    delim = "'''"
+                    j += 3
+                    continue
+                j += 1
+            else:
+                if delim is not None and ln.startswith(delim, j):
+                    in_doc = False
+                    delim = None
+                    j += 3
+                    continue
+                j += 1
+        if in_doc:
+            docstring_lines.add(i + 1 if one_based else i)
+    return docstring_lines
+
+
 _CLIPBOARD_DOMAIN_HINTS = (
     "clipboard",
     "pasteboard",
@@ -4075,37 +4152,11 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
     js_regex_literal_re = re.compile(r"/[^/\n]+/[gimsuy]*")
 
     # Python docstring tracking — multi-line strings are line-bounded
-    # contexts where path text is documentation, not file ops. Sweep the
-    # file once to mark which line indices fall inside `"""…"""` /
-    # `'''…'''` blocks, so the per-line check can suppress matches there.
-    py_docstring_lines: set[int] = set()
-    if is_python_src:
-        in_doc = False
-        delim = None
-        for i, ln in enumerate(lines):
-            j = 0
-            while j < len(ln):
-                if not in_doc:
-                    if ln.startswith('"""', j):
-                        in_doc = True
-                        delim = '"""'
-                        j += 3
-                        continue
-                    if ln.startswith("'''", j):
-                        in_doc = True
-                        delim = "'''"
-                        j += 3
-                        continue
-                    j += 1
-                else:
-                    if delim is not None and ln.startswith(delim, j):
-                        in_doc = False
-                        delim = None
-                        j += 3
-                        continue
-                    j += 1
-            if in_doc:
-                py_docstring_lines.add(i)
+    # contexts where path text is documentation, not file ops. 0-based
+    # indices because the per-line loop below enumerates `range(len(lines))`.
+    py_docstring_lines: set[int] = (
+        _python_docstring_line_set(lines, one_based=False) if is_python_src else set()
+    )
 
     # v2.44 — for AI-facing markdown (skills, agents, commands), pre-compute
     # the spans of markdown links `[label](path)` and inline-code spans
@@ -4370,7 +4421,22 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
                             "usr" + _slash + "local" + _slash + "bin",
                         )
                     )
-                    if any(safe in matched_text or safe in line for safe in KNOWN_SAFE_PATHS):
+                    # Suppress ONLY when the safe POSIX path begins AT the
+                    # match position. The RC-112 regex matches just the
+                    # short prefix (`/usr/`, `/bin/`, `/etc/`), so a plain
+                    # `safe in matched_text` can never see the longer
+                    # allowlist entries (`/usr/local/bin`, `/bin/sh`) — the
+                    # original code relied on `safe in line` for that, but
+                    # `in line` matched the safe substring ANYWHERE on the
+                    # line, so `y = "/etc/shadow"; x = "/usr/local/bin"`
+                    # had its genuine `/etc/` hit suppressed merely because
+                    # an unrelated safe path sat elsewhere. Anchoring the
+                    # check to `line[match.start():]` confirms the matched
+                    # prefix is the START of a known-safe path (suppress)
+                    # rather than just co-occurring with one (flag).
+                    # (audit m7)
+                    line_from_match = line[match.start() :]
+                    if any(line_from_match.startswith(safe) for safe in KNOWN_SAFE_PATHS):
                         continue
 
                 # GENERAL — Windows-drive-letter regex `[A-Za-z]:\` collides
@@ -5478,7 +5544,14 @@ def check_hook_abuse(plugin_path: Path, report: ValidationReport) -> int:
                             )
                             issues_found += 1
 
-                    # Command hooks with suspicious commands
+                    # Command hooks with suspicious commands.
+                    # Deliberate severity asymmetry (audit w1): the SAME
+                    # DATA_EXFILTRATION_PATTERNS surface at WARNING in
+                    # `scan_for_data_exfiltration` (curl/fetch in a script
+                    # has many legit uses) but at CRITICAL here — a hook
+                    # command runs AUTOMATICALLY on a tool event with no
+                    # user in the loop, so an exfil pattern in it is
+                    # high-confidence malicious, not a footgun.
                     if cmd:
                         for sc_pattern, sc_msg in SUPPLY_CHAIN_PATTERNS + DATA_EXFILTRATION_PATTERNS:
                             if sc_pattern.search(cmd):
@@ -5496,8 +5569,19 @@ def check_hook_abuse(plugin_path: Path, report: ValidationReport) -> int:
                         )
                         issues_found += 1
 
-    except (ValueError, OSError):
-        pass
+    except (ValueError, OSError) as exc:
+        # Fail-fast: a PRESENT-but-unparseable hooks.json must NOT be
+        # silently reported as "no hook abuse detected". We can't verify
+        # the hook commands, so surface an advisory WARNING (structure
+        # validation owns the blocking "malformed JSON" finding; here it
+        # only flags the coverage gap). Returning >0 also suppresses the
+        # orchestrator's "No hook abuse patterns detected" passed-line.
+        # (audit m6)
+        report.warning(
+            f"hooks/hooks.json present but unparseable ({type(exc).__name__}) — hook-abuse check skipped",
+            "hooks/hooks.json",
+        )
+        issues_found += 1
     return issues_found
 
 
@@ -5566,8 +5650,18 @@ def check_mcp_abuse(plugin_path: Path, report: ValidationReport) -> int:
                     report.critical(f"MCP server '{name}': {sc_msg}", ".mcp.json")
                     issues_found += 1
 
-    except (ValueError, OSError):
-        pass
+    except (ValueError, OSError) as exc:
+        # Fail-fast: a PRESENT-but-unparseable .mcp.json must NOT be
+        # silently reported as "no MCP abuse detected". Surface an
+        # advisory WARNING for the coverage gap (structure validation
+        # owns the blocking "malformed JSON" finding). Returning >0 also
+        # suppresses the orchestrator's "No MCP server abuse detected"
+        # passed-line. (audit m6)
+        report.warning(
+            f".mcp.json present but unparseable ({type(exc).__name__}) — MCP-abuse check skipped",
+            ".mcp.json",
+        )
+        issues_found += 1
     return issues_found
 
 
@@ -6311,19 +6405,26 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
     with tempfile.NamedTemporaryFile(suffix=".json", prefix="cc-audit-", delete=False, mode="w") as tmp:
         tmp_path = tmp.name
 
-    # Auto-generate .cc-audit.yaml if not present (cc-audit requires it)
+    # `config_file` / `created_config` are defined BEFORE the try so the
+    # `finally` (which references both) can never hit a NameError. The
+    # `init` subprocess that may CREATE the temp/config files lives INSIDE
+    # the try — if it raises (e.g. a transient OSError; FileNotFoundError
+    # can't occur, `shutil.which`/npx-launch already resolved the
+    # launcher), the `finally` still unlinks the temp file. (audit w4)
     config_file = plugin_path / ".cc-audit.yaml"
     created_config = False
-    if not config_file.exists():
-        subprocess.run(
-            launcher + ["init", str(plugin_path)],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        created_config = config_file.exists()
 
     try:
+        # Auto-generate .cc-audit.yaml if not present (cc-audit requires it)
+        if not config_file.exists():
+            subprocess.run(
+                launcher + ["init", str(plugin_path)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            created_config = config_file.exists()
+
         result = subprocess.run(
             launcher
             + [
@@ -6980,7 +7081,16 @@ def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -
                     # 15 missed real-world cross-compile builders that
                     # set DOCKER env vars between copy and run. 30
                     # lines is enough to cover the longest prep blocks.
-                    surrounding_classifier = _surrounding_lines(content_lines, line_no - 1, window=4)
+                    # Both the classifier path AND the legacy binary-guard
+                    # path need the SAME wide (30-line) window: the
+                    # classifier's `classify_rc21` calls `has_sink_nearby`
+                    # over `surrounding_lines` to suppress the benign
+                    # `env = os.environ.copy()` … `subprocess.run(env=env)`
+                    # idiom, where the subprocess sink sits 10-25 lines
+                    # AFTER the copy. A 4-line window hides that sink, so
+                    # the classifier saw LIKELY_FP and RC-21 fired as a
+                    # FALSE MAJOR on exactly the pattern the 30-line
+                    # widening was built to suppress. (audit M4)
                     surrounding_subproc = _surrounding_lines(content_lines, line_no - 1, window=30)
                     # v2.42 — opt-in classifier path (TRDD-fe006962). When
                     # active, the per-rule classifier subsumes the v2.41
@@ -6991,7 +7101,7 @@ def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -
                             "RC-21",
                             "major",
                             line,
-                            surrounding_classifier,
+                            surrounding_subproc,
                             _file_role_from_path(rel_path),
                             rel_path,
                         )
@@ -7111,12 +7221,27 @@ def check_phase1_mcp_rules(plugin_path: Path, report: ValidationReport) -> int:
         in the manifest.
     """
     issues = 0
-    for mcp_path in plugin_path.rglob(".mcp.json"):
+    # Use the gitignore-aware walk (prunes gitignored 600MB trees at
+    # descent time, per issue #19) instead of `Path.rglob` which descends
+    # into every dir first. `gi.rglob` does NOT prune non-gitignored
+    # vendored dirs (node_modules/, vendor/, dist/, …) — a transitive dep
+    # that ships its own `.mcp.json` isn't the plugin author's to fix — so
+    # also skip `_is_vendored_dep_path`. (audit m3)
+    #
+    # `gi.rglob` yields paths under `gi.root` (the RESOLVED plugin root,
+    # which on macOS differs from an unresolved `plugin_path` by the
+    # `/private` symlink prefix). Compute the relative path against
+    # `gi.root`, NOT `plugin_path` — using `plugin_path` here would raise
+    # ValueError on every file and silently skip the whole scan.
+    gi = get_gitignore_filter(plugin_path)
+    for mcp_path in gi.rglob(".mcp.json"):
+        rel_path = str(mcp_path.relative_to(gi.root))
+        if _is_vendored_dep_path(rel_path):
+            continue
         try:
             data = json.loads(mcp_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        rel_path = str(mcp_path.relative_to(plugin_path))
         servers = data.get("mcpServers", {})
         if not isinstance(servers, dict):
             continue
@@ -7700,12 +7825,12 @@ def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
                 # README is project narrative, never live config.
                 # Demote one extra tier on top of the generic doc
                 # demotion already applied by `effective_severity`.
-                # `demote_severity` doesn't know about NIT (nit isn't
-                # in SEVERITY_TIERS), so do the mapping inline:
-                # major→minor→nit→info; warning is already as
-                # demoted as `effective_severity` can take it, so
-                # demote to nit explicitly to differentiate
-                # narrative-doc findings from real warnings.
+                # We do this mapping inline (minor→nit, and warning→nit
+                # to differentiate narrative-doc findings from real
+                # warnings) rather than calling `demote_severity`, because
+                # this is a SECOND, history-doc-specific demotion with its
+                # own warning→nit rule that the generic ladder doesn't
+                # apply.
                 if rule_id == "RC-87" and _rc87_is_history_doc(rel_path):
                     if level == "minor":
                         level = "nit"
@@ -7748,34 +7873,12 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
         # documentation, NOT runtime code. Phase 3 rules
         # (RC-02/03/63) fire on prose patterns that are intentionally
         # quoted in docstrings explaining how a CLI flag behaves.
-        py_docstring_lines: set[int] = set()
-        if rel_path.lower().endswith(".py"):
-            in_doc = False
-            delim: str | None = None
-            for i, ln in enumerate(content_lines):
-                j = 0
-                while j < len(ln):
-                    if not in_doc:
-                        if ln.startswith('"""', j):
-                            in_doc = True
-                            delim = '"""'
-                            j += 3
-                            continue
-                        if ln.startswith("'''", j):
-                            in_doc = True
-                            delim = "'''"
-                            j += 3
-                            continue
-                        j += 1
-                    else:
-                        if delim is not None and ln.startswith(delim, j):
-                            in_doc = False
-                            delim = None
-                            j += 3
-                            continue
-                        j += 1
-                if in_doc:
-                    py_docstring_lines.add(i + 1)  # 1-based
+        # 1-based because the per-line loop below enumerates start=1.
+        py_docstring_lines: set[int] = (
+            _python_docstring_line_set(content_lines, one_based=True)
+            if rel_path.lower().endswith(".py")
+            else set()
+        )
         for line_no, line in enumerate(content_lines, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
@@ -8006,44 +8109,33 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                 # Keep going — multiple Phase 3 rules can match a single line
 
     # RC-30 typosquatting + RC-33 compromised packages from manifests.
-    # `rglob` walks the entire tree including dependency / build / cache
-    # directories that the plugin doesn't own — `node_modules/` is the
-    # dominant FP source because every transitive dep ships its own
-    # package.json, none of which represent the PLUGIN's declared
-    # deps. Same for Python virtualenvs, vendored deps, and pnpm/yarn
-    # stores. Filter those paths out so RC-30/RC-33 only ever look at
-    # manifests the plugin author actually maintains.
-    _RC30_SKIP_DIR_PARTS = {
-        "node_modules",
-        ".venv",
-        "venv",
-        "env",
-        ".env",
-        "site-packages",
-        "__pycache__",
-        ".pnpm-store",
-        ".yarn",
-        "vendor",
-        "dist",
-        "build",
-        ".tox",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        ".git",
-    }
-    for manifest_path in list(plugin_path.rglob("package.json")) + list(plugin_path.rglob("requirements*.txt")):
-        try:
-            rel_parts = manifest_path.relative_to(plugin_path).parts
-        except ValueError:
-            continue
-        if any(part in _RC30_SKIP_DIR_PARTS for part in rel_parts):
+    # Walk via the gitignore-aware filter: bare `Path.rglob` enumerates
+    # the WHOLE tree (materialised by `list(...)`) BEFORE the skip-dir
+    # filter runs, so a gitignored multi-GB tree full of `package.json`
+    # is fully walked then discarded — the exact issue #19 anti-pattern.
+    # `gi.rglob` prunes gitignored / VCS-cache dirs at descent time.
+    # It does NOT prune non-gitignored vendored dirs (node_modules/,
+    # vendor/, dist/, …), so the per-part skip below still applies — but
+    # against the CANONICAL `_VENDORED_DEP_DIR_PARTS` set (the former
+    # hardcoded `_RC30_SKIP_DIR_PARTS` was a drift-prone duplicate of it
+    # minus a few entries). Filtering these out means RC-30/RC-33 only
+    # ever look at manifests the plugin author actually maintains.
+    # (audit m4)
+    # `gi.rglob` yields paths under `gi.root` (the RESOLVED plugin root —
+    # on macOS the `/private` symlink prefix makes it differ from an
+    # unresolved `plugin_path`). Compute relatives against `gi.root`, NOT
+    # `plugin_path`, or every `relative_to` raises ValueError and the
+    # whole RC-30/RC-33 scan silently skips.
+    gi = get_gitignore_filter(plugin_path)
+    for manifest_path in list(gi.rglob("package.json")) + list(gi.rglob("requirements*.txt")):
+        rel_parts = manifest_path.relative_to(gi.root).parts
+        if any(part in _VENDORED_DEP_DIR_PARTS for part in rel_parts):
             continue
         try:
             text = manifest_path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        rel = str(manifest_path.relative_to(plugin_path))
+        rel = str(manifest_path.relative_to(gi.root))
         ecosystem = "npm" if manifest_path.name == "package.json" else "pypi"
 
         # Extract dep names — different shapes per ecosystem
@@ -8808,6 +8900,19 @@ def validate_security(
         single ``validate_security`` invocation. The merkle stays
         valid for the duration of the call because the scanners are
         read-only.
+
+        Best-effort cache key: the merkle is computed over the
+        gitignore-FILTERED file set, whereas the external scanners
+        (trufflehog / semgrep / cc-audit / tirith) run against the raw
+        tree with their OWN ignore logic. The two file sets can diverge
+        for a file the plugin gitignores but a scanner still reads, so a
+        within-window content change to such a file would replay a stale
+        "clean" result. Two backstops bound this: (1) a cache MISS is the
+        SAFE direction — it re-runs the scanner — and (2) the scanner
+        cache enforces a 30-day TTL (cpv_scanner_cache.DEFAULT_TTL_DAYS),
+        so no stale entry survives indefinitely. Modelling each scanner's
+        exact (differing) ignore semantics here would be high-complexity
+        for marginal benefit. (audit M2 / w2)
         """
         if "merkle" in _tree_merkle_cache:
             return _tree_merkle_cache["merkle"]
@@ -8820,7 +8925,22 @@ def validate_security(
                 # Skip cache files themselves (.cc-audit.yaml is
                 # auto-generated per scan; including it in the
                 # merkle would break the cache on every run).
-                if fp.name.startswith(".cc-audit") or fp.name == ".cpv-self-hashes.json":
+                #
+                # The integrity manifest must ALSO be excluded: it is
+                # regenerated on every release (it carries the SHA256 of
+                # every shipped file), and tree_merkle hashes file
+                # CONTENT — so including it would change the merkle on
+                # every release / every tracked-file touch, defeating the
+                # cache exactly as the .cc-audit exclusion above prevents.
+                # Exclude BOTH the canonical name AND the legacy alias via
+                # the constants — a hardcoded literal previously named only
+                # the DEAD legacy `.cpv-self-hashes.json`, never the LIVE
+                # canonical `.plugin-self-hashes.json`, so the cache was
+                # cold on every real CPV checkout. (audit M1)
+                if fp.name.startswith(".cc-audit") or fp.name in (
+                    PLUGIN_SELF_HASH_MANIFEST_NAME,
+                    PLUGIN_SELF_HASH_MANIFEST_NAME_LEGACY,
+                ):
                     continue
                 files.append(fp)
         merkle = tree_merkle(files, base=plugin_path)
@@ -9368,6 +9488,28 @@ def _read_plugin_version(plugin_path: Path) -> str:
         return "0.0.0"
 
 
+def _marketplace_version_sort_key(version_dir: Path) -> tuple[int, object, float]:
+    """Sort key ordering plugin-cache version subdirs newest-LAST.
+
+    Parses the dotted-numeric version name into an int tuple so `2.10.0`
+    sorts ABOVE `2.9.0` (plain lexicographic put `"2.9.0"` last because
+    `"9" > "1"` — it picked the OLDER version as "latest"). Non-numeric
+    names fall back to a lexicographic tie-breaker and sort AFTER all
+    numeric versions so a stray dir never crashes resolution and never
+    masquerades as the latest semver. `st_mtime` is the final tiebreaker
+    (same version present twice → most-recently-written wins). (audit w5)
+    """
+    parts = version_dir.name.split(".")
+    try:
+        mtime = version_dir.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    try:
+        return (0, tuple(int(p) for p in parts), mtime)
+    except ValueError:
+        return (1, version_dir.name, mtime)
+
+
 def _resolve_marketplace_plugins(spec: str) -> tuple[str, list[Path], list[str]]:
     """Resolve a `--marketplace` spec to a list of plugin directories.
 
@@ -9432,11 +9574,11 @@ def _resolve_marketplace_plugins(spec: str) -> tuple[str, list[Path], list[str]]
             if not plugin_cache.is_dir():
                 skipped.append(f"{name}: not in local cache ({plugin_cache})")
                 continue
-            # Pick the latest version subdir (lexicographic on semver works
-            # well-enough for this use case; ties broken by mtime).
+            # Pick the latest version subdir. Numeric-aware sort so
+            # `2.10.0` beats `2.9.0`; ties broken by mtime. (audit w5)
             versions = sorted(
                 [v for v in plugin_cache.iterdir() if v.is_dir()],
-                key=lambda p: (p.name, p.stat().st_mtime),
+                key=_marketplace_version_sort_key,
             )
             if not versions:
                 skipped.append(f"{name}: cache dir has no version subdirs")
@@ -9471,9 +9613,10 @@ def _resolve_marketplace_plugins(spec: str) -> tuple[str, list[Path], list[str]]
 
     # No marketplace.json — assume plugins-cache layout (`<plugin>/<version>/`)
     for plugin_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        # Numeric-aware sort so `2.10.0` beats `2.9.0`. (audit w5)
         versions = sorted(
             [v for v in plugin_dir.iterdir() if v.is_dir()],
-            key=lambda p: (p.name, p.stat().st_mtime),
+            key=_marketplace_version_sort_key,
         )
         if not versions:
             skipped.append(f"{plugin_dir.name}: no version subdirs")

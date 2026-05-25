@@ -194,6 +194,93 @@ def _strip_code_regions(content: str) -> str:
     return "\n".join(out_lines)
 
 
+def _iter_lines_with_fence_state(content: str) -> "list[tuple[int, str, str, bool, str]]":
+    """Yield one tuple per line: ``(index, raw_line, stripped, in_fence, opener_info)``.
+
+    Shared CommonMark-aware fence tracker for the structural rules (9-12).
+    ``in_fence`` is True for every line that is INSIDE a fenced block AND for
+    the opening / closing fence lines themselves — callers decide how to treat
+    each. ``opener_info`` is the text after the opening fence run on an OPENING
+    fence line (e.g. ``"python"`` for `````python``), else "".
+
+    Honors BOTH ``````` and ``~~~`` fences and the CommonMark
+    rules that the closing fence must use the same character and be at least as
+    long as the opener. The four structural rules previously tracked only
+    ``````` via ``startswith``, so a legal ``~~~``-fenced README
+    produced spurious 'unclosed code block' MAJORs, skipped language-tag checks,
+    and ran list/table scans inside code (audit m6). Mirrors the fence logic in
+    :func:`_strip_code_regions` so both paths agree.
+    """
+    out: list[tuple[int, str, str, bool, str]] = []
+    in_fence = False
+    fence_marker = ""  # the exact opening run, e.g. "```" or "~~~~"
+
+    for i, line in enumerate(content.split("\n")):
+        stripped = line.lstrip()
+        fence_char = ""
+        if stripped.startswith("```"):
+            fence_char = "`"
+        elif stripped.startswith("~~~"):
+            fence_char = "~"
+
+        if fence_char:
+            run_len = len(stripped) - len(stripped.lstrip(fence_char))
+            if not in_fence:
+                # Opening fence: capture the text after the run (language tag).
+                in_fence = True
+                fence_marker = fence_char * run_len
+                opener_info = stripped[run_len:].strip()
+                out.append((i, line, stripped, True, opener_info))
+                continue
+            # Inside a fence: only a same-char run >= opener length, with
+            # nothing but the fence char on the line, closes it.
+            if (
+                fence_char == fence_marker[0]
+                and run_len >= len(fence_marker)
+                and stripped.rstrip(fence_char) == ""
+            ):
+                in_fence = False
+                fence_marker = ""
+                out.append((i, line, stripped, True, ""))
+                continue
+            # A fence-looking line inside a fence that does NOT close it is
+            # just content (still in_fence).
+            out.append((i, line, stripped, True, ""))
+            continue
+
+        out.append((i, line, stripped, in_fence, ""))
+
+    return out
+
+
+def _content_has_unclosed_fence(content: str) -> tuple[bool, int]:
+    """Return (unclosed, opening_line_1based) for the LAST still-open fence.
+
+    Used by the code-block-closed rule. Recognizes both ``` and ~~~ openers.
+    """
+    in_fence = False
+    fence_marker = ""
+    open_line = 0
+    for i, line in enumerate(content.split("\n")):
+        stripped = line.lstrip()
+        fence_char = ""
+        if stripped.startswith("```"):
+            fence_char = "`"
+        elif stripped.startswith("~~~"):
+            fence_char = "~"
+        if not fence_char:
+            continue
+        run_len = len(stripped) - len(stripped.lstrip(fence_char))
+        if not in_fence:
+            in_fence = True
+            fence_marker = fence_char * run_len
+            open_line = i + 1
+        elif fence_char == fence_marker[0] and run_len >= len(fence_marker) and stripped.rstrip(fence_char) == "":
+            in_fence = False
+            fence_marker = ""
+    return in_fence, open_line
+
+
 @dataclass
 class DocumentationValidationReport(ValidationReport):
     """Validation report for documentation files.
@@ -546,31 +633,19 @@ def validate_code_block_closed(plugin_path: Path, report: DocumentationValidatio
         return
 
     content = readme.read_text(encoding="utf-8")
-    lines = content.split("\n")
 
-    # Track code fence state
-    in_code_block = False
-    open_line = 0
-    issues_found = False
+    # CommonMark-aware fence tracking (``` and ~~~). A ~~~-fenced README is
+    # legal Markdown; the old ``` -only startswith toggle could see its closing
+    # ~~~ as body and emit a spurious 'unclosed code block' MAJOR (audit m6).
+    unclosed, open_line = _content_has_unclosed_fence(content)
 
-    for i, line in enumerate(lines):
-        # Check for code fence (``` with optional language)
-        if line.strip().startswith("```"):
-            if not in_code_block:
-                in_code_block = True
-                open_line = i + 1
-            else:
-                in_code_block = False
-
-    if in_code_block:
+    if unclosed:
         report.major(
             f"Unclosed code block starting at line {open_line}",
             "README.md",
             open_line,
         )
-        issues_found = True
-
-    if not issues_found:
+    else:
         report.passed("All code blocks are properly closed", "README.md")
 
 
@@ -593,29 +668,22 @@ def validate_code_block_language_tags(plugin_path: Path, report: DocumentationVa
         return
 
     content = readme.read_text(encoding="utf-8")
-    lines = content.split("\n")
 
-    in_code_block = False
     issues_found = False
-
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-
-        if stripped.startswith("```"):
-            if not in_code_block:
-                # Opening fence - check for language tag
-                in_code_block = True
-                # Extract what comes after ```
-                lang_part = stripped[3:].strip()
-                if not lang_part:
-                    report.warning(
-                        f"Code block at line {i + 1} missing language tag",
-                        "README.md",
-                        i + 1,
-                    )
-                    issues_found = True
-            else:
-                in_code_block = False
+    prev_in_fence = False
+    # Walk logical lines with shared CommonMark fence state (``` and ~~~). An
+    # OPENING fence is a line where in_fence flips False->True; its opener_info
+    # is the language tag. (audit m6 — the old toggle ignored ~~~.)
+    for i, _line, _stripped, in_fence, opener_info in _iter_lines_with_fence_state(content):
+        is_opening = in_fence and not prev_in_fence
+        if is_opening and not opener_info:
+            report.warning(
+                f"Code block at line {i + 1} missing language tag",
+                "README.md",
+                i + 1,
+            )
+            issues_found = True
+        prev_in_fence = in_fence
 
     if not issues_found:
         report.passed("All code blocks have language tags", "README.md")
@@ -640,21 +708,14 @@ def validate_list_formatting(plugin_path: Path, report: DocumentationValidationR
         return
 
     content = readme.read_text(encoding="utf-8")
-    lines = content.split("\n")
 
-    # Track list markers used
+    # Track list markers used. Skip lines inside fenced code (``` AND ~~~) via
+    # the shared CommonMark tracker so list scans never run inside a code block
+    # (audit m6).
     markers_used: set[str] = set()
-    in_code_block = False
 
-    for line in lines:
-        stripped = line.strip()
-
-        # Skip code blocks
-        if stripped.startswith("```"):
-            in_code_block = not in_code_block
-            continue
-
-        if in_code_block:
+    for _i, _line, stripped, in_fence, _opener in _iter_lines_with_fence_state(content):
+        if in_fence:
             continue
 
         # Check for unordered list items
@@ -721,26 +782,22 @@ def validate_table_structure(plugin_path: Path, report: DocumentationValidationR
         return
 
     content = readme.read_text(encoding="utf-8")
-    lines = content.split("\n")
 
     in_table = False
     header_cols = 0
     issues_found = False
-    in_code_block = False
 
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-
-        # Skip code blocks
-        if stripped.startswith("```"):
-            in_code_block = not in_code_block
+    # Skip lines inside fenced code (``` AND ~~~) via the shared CommonMark
+    # tracker so table scans never run inside a code block (audit m6).
+    for i, _line, stripped, in_fence, _opener in _iter_lines_with_fence_state(content):
+        if in_fence:
             continue
 
-        if in_code_block:
-            continue
-
-        # Check for table row
-        if stripped.startswith("|") and stripped.endswith("|"):
+        # Check for table row. Require length >= 2: a lone "|" satisfies
+        # startswith("|") AND endswith("|") on the SAME single char and would
+        # open a spurious 1-column table context (audit n6). A valid 1-column
+        # row like "| a |" is length >= 2 and still recognized.
+        if len(stripped) >= 2 and stripped.startswith("|") and stripped.endswith("|"):
             cols = _count_table_columns(stripped)
 
             if not in_table:
@@ -958,6 +1015,10 @@ def print_results(report: DocumentationValidationReport, verbose: bool = False) 
     print(f"  {colors['CRITICAL']}CRITICAL: {counts['CRITICAL']}{colors['RESET']}")
     print(f"  {colors['MAJOR']}MAJOR:    {counts['MAJOR']}{colors['RESET']}")
     print(f"  {colors['MINOR']}MINOR:    {counts['MINOR']}{colors['RESET']}")
+    # NIT must appear: this validator runs under --strict (L1102) where NIT
+    # blocks (exit 4). Omitting it left a --strict user staring at exit 4 with
+    # no NIT total in the summary (audit m7; matches validate_rules.py).
+    print(f"  {colors['NIT']}NIT:      {counts['NIT']}{colors['RESET']}")
     print(f"  {colors['WARNING']}WARNING:  {counts['WARNING']}{colors['RESET']}")
     if verbose:
         print(f"  {colors['INFO']}INFO:     {counts['INFO']}{colors['RESET']}")

@@ -237,6 +237,19 @@ def detect_precedence_conflicts(
       * a uniform group (all inline hooks share one decision) — no finding.
 
     The caller decides severity based on ``inline_decisions`` size.
+
+    Reachability note: ``extract_inline_permission_decision`` returns a non-None
+    decision ONLY when a hook entry in hooks.json *literally declares* a
+    ``permissionDecision`` (via ``hookSpecificOutput.permissionDecision`` or the
+    top-level shorthand). Conforming ``command``/``http``/``mcp_tool``/``prompt``
+    hooks never carry that field statically — they produce their decision at
+    RUNTIME — so for a spec-conforming hooks.json every hook is "unknown" and
+    only the INFO (all-unknown / mixed) paths fire. The conflict path
+    (>=2 distinct inline decisions => MINOR) is therefore reachable only when a
+    hooks.json embeds the non-standard static field (which ``validate_single_hook``
+    independently flags as an unknown field). This detector is intentionally
+    forward-compatible with a future spec where decisions may be declared
+    statically; today its conflict branch is a guard for that non-standard shape.
     """
     findings: list[PrecedenceFinding] = []
 

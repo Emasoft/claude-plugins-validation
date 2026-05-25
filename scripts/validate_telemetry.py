@@ -129,11 +129,15 @@ OTEL_ALL_ENV_VARS: frozenset[str] = frozenset(
         "CLAUDE_CODE_OTEL_HEADERS_HELPER_DEBOUNCE_MS",
         # v2.1.121 — beta tracing opt-ins. Plugin-shipped values are
         # high-risk: ENABLE_BETA_TRACING_DETAILED forces verbose tracing
-        # (allowlist-gated for users), and BETA_TRACING_ENDPOINT routes
-        # detailed-beta tracing to a separate endpoint that bypasses
-        # OTEL_EXPORTER_OTLP_ENDPOINT — a covert exfil channel if external.
+        # (allowlist-gated for users).
+        # NOTE: BETA_TRACING_ENDPOINT is intentionally NOT listed here. It is a
+        # PLUGIN_SHIPPED_HAZARD_ENV_VAR (covert-exfil endpoint that bypasses
+        # OTEL_EXPORTER_OTLP_ENDPOINT) and `_validate_env_block` handles it in
+        # the hazard branch, which `continue`s BEFORE the `OTEL_ALL_ENV_VARS`
+        # gate is ever consulted. Listing it in both frozensets was dead
+        # redundancy (the hazard branch always wins) and a maintenance hazard
+        # (audit NIT #12) — single source of truth is the hazard set.
         "ENABLE_BETA_TRACING_DETAILED",
-        "BETA_TRACING_ENDPOINT",
         "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",
         "ENABLE_ENHANCED_TELEMETRY_BETA",  # alias for above
     }
@@ -276,7 +280,16 @@ def _extract_env_blocks(data: dict[str, Any]) -> list[dict[str, Any]]:
             env = node.get("env")
             if isinstance(env, dict):
                 found.append(env)
-            for value in node.values():
+            for key, value in node.items():
+                # Do NOT recurse INTO the captured `env` mapping: an env block
+                # holds variable→value pairs (the values are strings), not nested
+                # config structure. Recursing into it re-scanned a pathological
+                # `{"env": {"env": {…}}}` twice — appending the inner block a
+                # second time (audit advisory #13). Every other key still
+                # recurses so `mcpServers[name].env`, `hooks[*].env`, etc. are
+                # captured exactly once.
+                if key == "env" and isinstance(value, dict):
+                    continue
                 _walk(value)
         elif isinstance(node, list):
             for item in node:
@@ -512,6 +525,17 @@ def scan_settings_for_telemetry(
     if plugin_shipped is None:
         plugin_shipped = not _is_managed_settings_path(settings_path)
 
+    # Snapshot the result count so the per-file PASSED below reflects whether
+    # THIS file was clean — not whether the (possibly SHARED) report is empty.
+    # `scan_plugin_for_telemetry` passes one report across many candidate files;
+    # checking `not report.results` made the per-file PASSED fire only for the
+    # FIRST candidate (every later file saw a non-empty shared report). Comparing
+    # against the entry-point count makes it correct for both the standalone
+    # (fresh report) and the plugin-loop (shared report) callers (audit
+    # advisory #14). Includes PASSED results, so a clean file always gets exactly
+    # one per-file PASSED regardless of position in the loop.
+    results_at_entry = len(report.results)
+
     # --- otelHeadersHelper check --------------------------------------
     if "otelHeadersHelper" in data:
         helper = data.get("otelHeadersHelper")
@@ -537,7 +561,9 @@ def scan_settings_for_telemetry(
         if plugin_shipped:
             _validate_env_block(env, report, source)
 
-    if not report.results:
+    # Emit the per-file PASSED only when THIS file added no findings of its own
+    # (compare against the entry snapshot, NOT the whole shared report).
+    if len(report.results) == results_at_entry:
         report.passed(
             "No telemetry supply-chain risks detected in settings.",
             source,

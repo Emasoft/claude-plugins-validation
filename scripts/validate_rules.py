@@ -501,9 +501,11 @@ def validate_rules_directory(
             continue
 
         # sr.findings is the tuple (content, list_of_results) returned by
-        # the worker. Replay each result onto the master report,
-        # preserving level + message + file + line so the parallel path's
-        # output sequence matches the serial loop exactly.
+        # the worker. Replay each result onto the master report, preserving
+        # every field (level/message/file/line/phase/fixable/fix_id and now
+        # category/suggestion — audit m9) so the parallel path's output is a
+        # byte-for-byte match for the serial loop, including any sub-category
+        # tag and remediation hint a rule attached.
         content, results = sr.findings
         for r in results:
             report.add(
@@ -514,6 +516,8 @@ def validate_rules_directory(
                 phase=r.phase,
                 fixable=r.fixable,
                 fix_id=r.fix_id,
+                category=r.category,
+                suggestion=r.suggestion,
             )
         all_content.append(content)
 

@@ -28,7 +28,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
 from cpv_parallel_runner import ScanResult, parallel_scan
 from cpv_validation_common import (
     COLORS,
@@ -36,6 +35,8 @@ from cpv_validation_common import (
     EXIT_CRITICAL,
     EXIT_MAJOR,
     EXIT_OK,
+    KNOWN_EXAMPLE_SECRETS,
+    MIN_DESCRIPTION_CHARS,
     SECRET_PATTERNS,
     USER_PATH_PATTERNS,
     VALID_EFFORT_VALUES,
@@ -44,10 +45,12 @@ from cpv_validation_common import (
     ValidationReport,
     check_token_limit,
     check_utf8_encoding,
+    is_placeholder_secret,
     is_valid_model,
     save_report_and_print_summary,
     validate_component_name,
 )
+from cpv_validation_common import parse_frontmatter as _shared_parse_frontmatter
 
 # =============================================================================
 # Command-Specific Constants
@@ -107,39 +110,15 @@ class CommandValidationReport(ValidationReport):
 def parse_frontmatter(content: str) -> tuple[dict[str, Any] | None, str, int]:
     """Parse YAML frontmatter from command content.
 
-    Returns:
-        Tuple of (frontmatter_dict, body_content, frontmatter_end_line)
-        Returns (None, content, 0) if no frontmatter found
+    Thin wrapper over the shared ``cpv_validation_common.parse_frontmatter``
+    (single source of truth — BOM strip + delimiter-LINE closer, audit m5/m6).
+    Uses the shared default pyyaml backend, matching the previous inline
+    ``yaml.safe_load`` behavior exactly.
+
+    Returns ``(frontmatter_dict, body_content, frontmatter_end_line)`` and
+    ``(None, content, 0)`` when no frontmatter is found.
     """
-    if not content.startswith("---"):
-        return None, content, 0
-
-    # Split on the closing `---` DELIMITER LINE — never a bare `---` substring.
-    # `content.split("---", 2)` corrupts valid frontmatter whose VALUE contains
-    # `---` (e.g. `description: "use --- as a separator"`), truncating the YAML
-    # and producing a false "Malformed frontmatter". Opener and closer must each
-    # be `---` alone on their own line.
-    lines = content.split("\n")
-    if lines[0].strip() != "---":
-        return None, content, 0
-    closing_idx = None
-    for idx in range(1, len(lines)):
-        if lines[idx].strip() == "---":
-            closing_idx = idx
-            break
-    if closing_idx is None:
-        return None, content, 0
-
-    fm_text = "\n".join(lines[1:closing_idx])
-    body = "\n".join(lines[closing_idx + 1 :])
-    try:
-        frontmatter = yaml.safe_load(fm_text)
-        if frontmatter is None:
-            frontmatter = {}
-        fm_end_line = closing_idx + 1
-        return frontmatter, body, fm_end_line
-    except yaml.YAMLError:
-        return None, content, 0
+    return _shared_parse_frontmatter(content)
 
 
 def count_frontmatter_markers(content: str) -> int:
@@ -273,7 +252,7 @@ def validate_description_field(frontmatter: dict[str, Any], filename: str, repor
     # Removed in TRDD-021250b5.
 
     # Check for actionable description
-    if len(desc) < 10:
+    if len(desc) < MIN_DESCRIPTION_CHARS:
         report.minor(
             f"Description is very short ({len(desc)} chars) - may not help users understand the command",
             filename,
@@ -521,10 +500,16 @@ def validate_body_content(content: str, filename: str, report: CommandValidation
     else:
         report.passed(f"Command body has adequate content ({len(body_text)} chars)", filename)
 
-    # Check for common command body patterns
-    has_instructions = any(
-        keyword in body_text.lower()
-        for keyword in ["you", "will", "should", "must", "when", "if", "task", "do", "perform", "execute"]
+    # Check for common command body patterns. Match on WORD BOUNDARIES — a bare
+    # substring scan let "if" match "specific" and "do" match "window", so
+    # non-instructional prose was wrongly treated as instructional and the
+    # advisory was suppressed. (audit NIT n1)
+    has_instructions = bool(
+        re.search(
+            r"\b(?:you|will|should|must|when|if|task|do|perform|execute)\b",
+            body_text,
+            re.IGNORECASE,
+        )
     )
     if not has_instructions:
         report.info(
@@ -533,12 +518,43 @@ def validate_body_content(content: str, filename: str, report: CommandValidation
         )
 
 
+def _secret_hit_is_placeholder(matched_text: str, line: str) -> bool:
+    """True when a SECRET_PATTERNS hit is a documentation example, not a real secret.
+
+    Mirrors the whole-plugin scanner (validate_security.py) so the per-command
+    verdict matches the per-plugin verdict (audit MAJOR M3). Three signals,
+    all sourced from the shared cpv_validation_common helpers so there is no
+    second source of truth:
+
+    1. The exact matched token is in the curated KNOWN_EXAMPLE_SECRETS bank
+       (e.g. AWS's canonical `AKIAIOSFODNN7EXAMPLE`).
+    2. The matched token itself looks like a placeholder (`<your-key>`,
+       `${VAR}`, `xxx...`, `redacted`, `...`) per is_placeholder_secret.
+    3. The surrounding LINE carries placeholder context (`your-key-here`,
+       `<api-key>`, an `${ENV}`/`<…>` template) per is_placeholder_secret —
+       the line, not just the token, because real fixtures put the marker
+       beside the value (`API_KEY="your-api-key-here"`).
+    """
+    return (
+        matched_text in KNOWN_EXAMPLE_SECRETS
+        or is_placeholder_secret(matched_text)
+        or is_placeholder_secret(line)
+    )
+
+
 def validate_security(content: str, filename: str, report: CommandValidationReport) -> None:
     """Check for security issues in command content."""
-    # Check for hardcoded secrets
-    for pattern, description in SECRET_PATTERNS:
-        if pattern.search(content):
-            report.critical(f"SECURITY: Contains {description}", filename)
+    # Check for hardcoded secrets — scan LINE-BY-LINE so each hit has its line
+    # context for placeholder suppression and so the finding can report a line
+    # number. Previously this scanned the whole content with NO suppression, so
+    # a command that merely DOCUMENTS an example secret (e.g. AWS's own
+    # `AKIAIOSFODNN7EXAMPLE`) got a FALSE blocking CRITICAL — a verdict the
+    # whole-plugin scanner does not produce. (audit MAJOR M3)
+    for line_num, line in enumerate(content.split("\n"), 1):
+        for pattern, description in SECRET_PATTERNS:
+            match = pattern.search(line)
+            if match and not _secret_hit_is_placeholder(match.group(0), line):
+                report.critical(f"SECURITY: Contains {description}", filename, line=line_num)
 
     # Check for hardcoded user paths
     for pattern in USER_PATH_PATTERNS:
@@ -602,6 +618,13 @@ def validate_command(command_path: Path) -> CommandValidationReport:
     report.passed("File is valid UTF-8", filename)
 
     content = content_bytes.decode("utf-8")
+    # Strip a leading UTF-8 BOM (U+FEFF) once, here, so EVERY downstream check
+    # (file-format marker count, frontmatter-exists, body, security) sees the
+    # same BOM-free content. A BOM is valid UTF-8 (check_utf8_encoding above
+    # accepts it) but prefixes the opening `---`; without this strip a
+    # BOM-prefixed command would get a FALSE "No YAML frontmatter found"
+    # CRITICAL. (audit MINOR m6 — single source of truth for BOM handling.)
+    content = content.lstrip("﻿")
 
     # Validate file format (two --- markers)
     if not validate_file_format(content, report, filename):

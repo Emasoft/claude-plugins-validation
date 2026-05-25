@@ -357,6 +357,45 @@ def _shell_kwarg_is_true(call: ast.Call) -> bool:
     return False
 
 
+def _shell_kwarg_is_possibly_true(call: ast.Call) -> bool:
+    """True iff a ``shell=`` kwarg is present whose value is NOT a literal
+    ``False``/falsey constant — i.e. it could be truthy at runtime.
+
+    The "Python guarantees no shell" reasoning only holds when the call
+    provably does NOT route through a shell. A literal ``shell=True``
+    obviously routes through one; but so can ``shell=use_shell`` where
+    ``use_shell`` is a variable/attribute/call that evaluates to a truthy
+    value at runtime. Static analysis can't prove such an indirection is
+    falsey, so we must NOT take the safe branch for it. (audit MAJOR #2)
+
+    Returns False only when:
+      * there is no ``shell=`` kwarg at all, OR
+      * ``shell=`` is bound to a literal constant that is falsey
+        (``False``, ``0``, ``None``, ``""``).
+
+    Returns True for every other ``shell=`` value (``True``, a ``Name``,
+    an ``Attribute``, a ``Call``, an f-string, etc.).
+
+    ``**kwargs`` splat: a bare ``**opts`` keyword (``kw.arg is None``)
+    could itself carry ``shell=True`` at runtime, so it is treated as a
+    possibly-true shell kwarg too — fail-safe over fail-open.
+    """
+    for kw in call.keywords:
+        if kw.arg is None:
+            # ``**opts`` — could expand to shell=True; do not certify safe.
+            return True
+        if kw.arg != "shell":
+            continue
+        val = kw.value
+        if isinstance(val, ast.Constant):
+            # Literal constant — safe ONLY if it is falsey.
+            return bool(val.value)
+        # Non-literal expression (Name / Attribute / Call / BinOp / …):
+        # cannot prove it is falsey → treat as possibly-true.
+        return True
+    return False
+
+
 def _is_inside_string_literal(tree: ast.AST, line: int) -> bool:
     """True iff the 1-based line falls inside any string-Constant node
     (docstring, multiline string, raw string used as data, etc.).
@@ -1118,25 +1157,39 @@ def _classify_call(call: ast.Call, qualname: str) -> ContextVerdict | None:
         #                 False.
         #   safe_literal: first arg is a single literal string (e.g.
         #                 os.system("clear")), AND shell= is absent or
-        #                 False. These get coerced to argv with no
-        #                 expansion, so they're safe too.
+        #                 a literal False. These get coerced to argv with
+        #                 no expansion, so they're safe too.
         #   suspect:      first arg is exploit-shaped (f-string, BinOp
-        #                 concat, .format/.join Call) OR shell=True with
-        #                 non-literal arg.
+        #                 concat, .format/.join Call) OR shell= is
+        #                 possibly-true (literal True, a non-literal value
+        #                 like ``shell=use_shell``, or a ``**opts`` splat)
+        #                 with a non-pure-literal first arg. (audit MAJOR #2)
         if not call.args:
             # Unusual: subprocess.run() with no positional arg. Suspect.
             return "suspect"
 
         first = call.args[0]
 
-        if _shell_kwarg_is_true(call):
-            # shell=True is the dangerous case. Only safe if first arg
-            # is a pure literal string.
+        if _shell_kwarg_is_possibly_true(call):
+            # shell=True (or a non-literal shell= that could be truthy at
+            # runtime, e.g. ``shell=use_shell``, or a ``**opts`` splat) is
+            # the dangerous case: the args ARE routed through a shell, so
+            # metacharacter interpretation applies. Only safe if the first
+            # arg is a pure literal string (no attacker-controlled bytes
+            # reach the shell). Any other first-arg shape stays suspect.
+            #
+            # CRITICAL (audit MAJOR #2): a bare ``shell=use_shell`` where
+            # ``use_shell`` is truthy must NOT fall through to the "Python
+            # guarantees no shell" branch below — static analysis cannot
+            # prove the indirection is falsey, so we conservatively treat
+            # it as a real shell call. ``_shell_kwarg_is_possibly_true``
+            # returns False ONLY for an absent kwarg or a literal-falsey
+            # ``shell=False``/``shell=0``/``shell=None``/``shell=""``.
             if _arg_is_pure_literal(first):
                 return "safe_literal"
             return "suspect"
 
-        # shell= absent / False — Python guarantee: subprocess.run /
+        # shell= absent / literal-False — Python guarantee: subprocess.run /
         # subprocess.Popen / subprocess.call WITHOUT shell=True passes
         # the args to ``execve``-family syscalls, NOT to a shell. There
         # is no shell metachar interpretation; semicolons, pipes,

@@ -100,16 +100,24 @@ _PREFIX_FILE_PATTERNS = (
     re.compile(r"\.claude-plugin/marketplace\.json"),
 )
 
-# Shell write operators against a target path (>>, >, tee -a, sed -i)
+# Shell write operators against a target path (>>, >, tee -a, sed -i).
+#
+# The redirect alternatives use a `(?<![0-9&])` negative lookbehind and a
+# `(?!/dev/(?:null|stderr|stdout)\b)(?!&)` negative lookahead so that an FD
+# redirect / discard (`2>/dev/null`, `1>&2`, `2>&1`, `> /dev/null`) does NOT
+# count as a file write. Without this, a line like
+# `foo 2>/dev/null && echo CLAUDE.md is fine` matched the bare `>` op and, with
+# the same-line CLAUDE.md mention, produced a false CA-02 WARNING (audit NIT #7).
+# A genuine `> CLAUDE.md` / `>> file` / `echo x > out` still matches.
 _FILE_WRITE_OPS = re.compile(
     r"(?:"
     r"\btee(?:\s+-a|\s+--append)?\s+\S+"  # tee / tee -a FILE
-    r"|>>\s*\S+"  # >> FILE
-    r"|>\s*\S+"  # > FILE
+    r"|(?<![0-9&])>>\s*(?!/dev/(?:null|stderr|stdout)\b)(?!&)\S+"  # >> FILE (not FD dup / discard)
+    r"|(?<![0-9&])>\s*(?!/dev/(?:null|stderr|stdout)\b)(?!&)\S+"  # > FILE (not FD redirect / discard)
     r"|\bsed\s+-i\s+\S+\s+\S+"  # sed -i ... FILE
     r"|\bcp\s+\S+\s+\S+"  # cp src dst
     r"|\bmv\s+\S+\s+\S+"  # mv src dst
-    r"|\becho\s+\S+\s*>>?"  # echo X >> / >
+    r"|\becho\s+\S+\s*(?<![0-9&])>>?(?!&)"  # echo X >> / > (not echo X 2>… FD redirect)
     r")"
 )
 
@@ -279,6 +287,11 @@ def _collect_static_prefix(file_path: Path, plugin_root: Path) -> list[Validatio
     except OSError:
         return out
     rel = str(file_path.relative_to(plugin_root)) if file_path.is_relative_to(plugin_root) else str(file_path)
+
+    # Normalize CRLF → LF so fence-stripping (which splits on "\n") sees clean
+    # lines and the CA-01 regexes scan the same text whether the prefix file was
+    # authored with LF or CRLF endings (audit MINOR #5).
+    content = content.replace("\r\n", "\n")
 
     # Strip option placeholders (CLAUDE_PLUGIN_OPTION_*) before any scan —
     # those resolve once per session install and are stable.
@@ -453,6 +466,11 @@ def _collect_component_for_model_override(
         content = md_file.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return out
+    # Normalize CRLF → LF: `_FRONTMATTER_RE` is `^---\n...\n---`, so a
+    # CRLF-authored component ("---\r\nmodel: opus\r\n---") would NOT match and
+    # silently escape CA-04. Claude Code accepts CRLF line endings, so such files
+    # are real and shippable (audit MINOR #5).
+    content = content.replace("\r\n", "\n")
     fm = _FRONTMATTER_RE.match(content)
     if not fm:
         return out
@@ -528,6 +546,10 @@ def _collect_component_for_context_fork(
         content = md_file.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return out
+    # Normalize CRLF → LF so `_FRONTMATTER_RE` (`^---\n...\n---`) matches a
+    # CRLF-authored component; otherwise `context: fork` silently escapes CA-07
+    # (audit MINOR #5).
+    content = content.replace("\r\n", "\n")
     fm = _FRONTMATTER_RE.match(content)
     if not fm:
         return out
@@ -605,6 +627,16 @@ def _collect_hook_for_unbounded_output(
     for line_num, line in enumerate(content.split("\n"), start=1):
         stripped = line.strip()
         if stripped.startswith("#") and not stripped.startswith("#!"):
+            continue
+        # CA-05 only cares about output DUMPED to stdout (which bloats the cached
+        # prefix). When the command's output is redirected to a FILE on the same
+        # line (e.g. `cat x > CLAUDE.md`, `find . -name y > out.txt`,
+        # `ls -laR > listing`), stdout is captured to disk and cannot inflate the
+        # prefix, so the unbounded-output patterns (`cat \S+`, `find …`,
+        # `ls -[laR]+`) were firing on plain WRITES and producing noise. Skip such
+        # lines (audit NIT #8). `_FILE_WRITE_OPS` is already FD-redirect-aware, so
+        # a `2>/dev/null` on a genuine dump line does NOT suppress the finding.
+        if _FILE_WRITE_OPS.search(line):
             continue
         for unbounded_pat, label, guard_pat in _UNBOUNDED_PATTERNS:
             if unbounded_pat.search(line) and not guard_pat.search(line):

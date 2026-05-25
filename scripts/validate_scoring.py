@@ -44,32 +44,24 @@ from cpv_validation_common import (
     ValidationResult,
 )
 
-# Import all validators
+# Import all validators.
+# The dedicated per-element validators are imported under their own names
+# (validate_agent / validate_command / validate_hooks / validate_plugin_mcp /
+# validate_skill) and own all per-element findings. The plugin "bundle" unit
+# runs ONLY the plugin-LEVEL checks below (manifest / structure / scripts /
+# readme / license) — it deliberately does NOT re-import validate_plugin's
+# per-element wrappers, which would double-count every agent/skill/command/
+# hook/mcp finding (see scan_one_scoring_unit's kind=="plugin" branch).
 from validate_agent import validate_agent
 from validate_command import validate_command
 from validate_hook import validate_hooks
 from validate_mcp import validate_plugin_mcp
-from validate_plugin import (
-    validate_agents as plugin_validate_agents,
-)
-from validate_plugin import (
-    validate_commands as plugin_validate_commands,
-)
-from validate_plugin import (
-    validate_hooks as plugin_validate_hooks,
-)
 from validate_plugin import (
     validate_license,
     validate_manifest,
     validate_readme,
     validate_scripts,
     validate_structure,
-)
-from validate_plugin import (
-    validate_mcp as plugin_validate_mcp,
-)
-from validate_plugin import (
-    validate_skills as plugin_validate_skills,
 )
 from validate_security import validate_security
 from validate_skill import validate_skill
@@ -506,17 +498,21 @@ def scan_one_scoring_unit(
 
     try:
         if unit.kind == "plugin":
-            # All 9 validate_plugin.* calls share one report; keep them
-            # together so the resulting plugin_report is bit-identical to
-            # the legacy serial sequence.
+            # Plugin-LEVEL checks only — manifest / structure / scripts /
+            # readme / license. validate_plugin's per-element wrappers
+            # (validate_agents / validate_skills / validate_commands /
+            # validate_hooks / validate_mcp) are NOT run here: they delegate to
+            # the SAME comprehensive validators (validate_agent / validate_skill
+            # / validate_command / validate_hooks / validate_plugin_mcp) that the
+            # dedicated agent/skill/command/hooks/mcp work-units already invoke.
+            # Running both would land every per-element finding in BOTH
+            # reports["plugin"] and reports["agents"|"skills"|...], so
+            # categorize_results would deduct each issue twice. Keep this set the
+            # single source of truth for plugin-level findings; the per-element
+            # units own the rest.
             _ = validate_manifest(plugin_root, report)
             validate_structure(plugin_root, report)
-            plugin_validate_commands(plugin_root, report)
-            plugin_validate_agents(plugin_root, report)
-            plugin_validate_hooks(plugin_root, report)
-            plugin_validate_mcp(plugin_root, report)
             validate_scripts(plugin_root, report)
-            plugin_validate_skills(plugin_root, report)
             validate_readme(plugin_root, report)
             validate_license(plugin_root, report)
             return [(unit.target_key, report)]
@@ -757,15 +753,14 @@ def _run_all_validators_serial(plugin_path: Path) -> dict[str, ValidationReport]
     # Uses multiple functions from validate_plugin.py
     # Note: validate_plugin uses its own ValidationReport class with compatible interface
     try:
+        # Plugin-LEVEL checks only (see scan_one_scoring_unit's kind=="plugin"
+        # branch). The per-element validators are intentionally NOT called here
+        # — the dedicated agent/skill/command/hooks/mcp work-units below own
+        # those findings. Running both double-counted every per-element issue.
         plugin_report = ValidationReport()
         _ = validate_manifest(plugin_path, plugin_report)
         validate_structure(plugin_path, plugin_report)
-        plugin_validate_commands(plugin_path, plugin_report)
-        plugin_validate_agents(plugin_path, plugin_report)
-        plugin_validate_hooks(plugin_path, plugin_report)
-        plugin_validate_mcp(plugin_path, plugin_report)
         validate_scripts(plugin_path, plugin_report)
-        plugin_validate_skills(plugin_path, plugin_report)
         validate_readme(plugin_path, plugin_report)
         validate_license(plugin_path, plugin_report)
         reports["plugin"] = plugin_report
@@ -1158,7 +1153,12 @@ Rating scale (0-10 per category):
         action="store_true",
         help="Output results as JSON instead of formatted text",
     )
-    parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
+    # NOTE: no --strict flag. Scoring's CategoryScore model tracks only
+    # CRITICAL/MAJOR/MINOR (NIT/WARNING are not part of the score), so there is
+    # no NIT-blocking concept to gate on. Advertising --strict here would be a
+    # broken CLI contract — a CI gate running `validate_scoring.py --strict`
+    # expecting NIT to block would be silently wrong. The other validators
+    # (encoding/rules/xref/documentation/scope) DO have NIT and honor --strict.
     parser.add_argument(
         "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
     )

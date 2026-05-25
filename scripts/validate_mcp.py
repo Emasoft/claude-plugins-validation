@@ -27,7 +27,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -37,13 +36,22 @@ from typing import Any
 from cpv_parallel_runner import parallel_scan
 from cpv_validation_common import (
     COLORS,
+    ENV_VAR_PATTERN,
     VALID_PLUGIN_ENV_VARS,
     ValidationReport,
     ValidationResult,
-    is_valid_plugin_env_var,
+    is_absolute_path,
     save_report_and_print_summary,
     validate_component_name,
+    validate_env_var_syntax,
 )
+
+# ENV_VAR_PATTERN / is_absolute_path / validate_env_var_syntax are imported from
+# cpv_validation_common (single source of truth) and stay importable from this
+# module (`from validate_mcp import is_absolute_path`) because an imported name
+# is a module attribute. They used to be defined locally and drifted from the
+# LSP copies (audit DRY-DRIFT #3); importing them makes drift impossible.
+# validate_path_value stays local — the MCP and LSP variants differ on purpose.
 
 # Valid transport types
 VALID_TRANSPORTS = {"stdio", "sse", "http"}
@@ -71,54 +79,17 @@ KNOWN_SERVER_FIELDS = {
     "alwaysLoad",  # v2.1.121 — when true, all tools skip tool-search deferral
 }
 
-# Environment variable pattern: ${VAR} or ${VAR:-default}
-ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
-
 # Plugin-specific environment variables
 PLUGIN_ENV_VARS = VALID_PLUGIN_ENV_VARS
-
-# Absolute path patterns (platform-independent)
-ABSOLUTE_PATH_PATTERNS = [
-    re.compile(r"^/[^$]"),  # Unix absolute path (not starting with ${)
-    re.compile(r"^[A-Za-z]:\\"),  # Windows absolute path
-]
-
-
-def is_absolute_path(path: str) -> bool:
-    """Check if a path appears to be an absolute path (without env var substitution)."""
-    for pattern in ABSOLUTE_PATH_PATTERNS:
-        if pattern.match(path):
-            return True
-    return False
 
 
 def extract_env_vars(value: str) -> list[tuple[str, str | None]]:
     """Extract environment variable references from a string.
 
-    Returns list of (var_name, default_value) tuples.
+    Returns list of (var_name, default_value) tuples. Uses the shared
+    ``ENV_VAR_PATTERN`` imported from cpv_validation_common.
     """
     return ENV_VAR_PATTERN.findall(value)
-
-
-def validate_env_var_syntax(value: str, report: ValidationReport, context: str) -> None:
-    """Validate environment variable syntax in a string value."""
-    # Check for malformed env var references
-    if "${" in value:
-        # Look for unclosed braces
-        open_count = value.count("${")
-        close_count = value.count("}")
-        if open_count != close_count:
-            report.major(f"Malformed env var syntax (unclosed braces) in {context}")
-            return
-
-        # Extract and validate each reference
-        for match in ENV_VAR_PATTERN.finditer(value):
-            var_name = match.group(1)
-            default = match.group(2)
-
-            # Warn about required env vars without defaults (excluding plugin vars)
-            if default is None and not is_valid_plugin_env_var(var_name):
-                report.info(f"Env var ${{{var_name}}} has no default value in {context} - config will fail if not set")
 
 
 def validate_path_value(value: str, report: ValidationReport, context: str, plugin_root: Path | None = None) -> None:
@@ -191,11 +162,14 @@ def validate_mcp_server(
     # by Claude Code at load time. The plugin still reports as installed but
     # produces no tools. Surface this as MAJOR so authors rename before publish.
     if server_name in RESERVED_MCP_SERVER_NAMES:
+        # Note: pass NO `file=` arg. `ctx` ("mcp-config:server") is a context
+        # label, not a file path — every other direct report.* call in this file
+        # carries the server context inside the message (which already names the
+        # server) rather than mis-filling the file column (audit NIT #9).
         report.major(
             f"MCP server name '{server_name}' is reserved by Claude Code (v2.1.128) — "
             "this server will be silently skipped at load time. Rename it (for example "
-            f"'{server_name}-tools' or '{server_name}-bridge').",
-            ctx,
+            f"'{server_name}-tools' or '{server_name}-bridge')."
         )
 
     # Check for unknown fields
@@ -214,6 +188,18 @@ def validate_mcp_server(
         # stdio servers require 'command'
         if "command" not in config:
             report.critical(f"Server {server_name} missing required 'command' field")
+        elif not isinstance(config["command"], str):
+            # Non-string command (e.g. `"command": 123` or `["x"]`) is legal JSON
+            # but illegal schema. Without this guard `validate_path_value` →
+            # `is_absolute_path(value)` → `value.startswith(...)` raises
+            # AttributeError, which the parallel worker swallows into a vague
+            # WARNING — silently downgrading a hard schema error and flipping the
+            # verdict from INVALID to valid. Mirror validate_lsp's CRITICAL so the
+            # author sees the precise cause and the verdict stays blocking
+            # (audit MAJOR #2). Fail-fast: skip all the str-dependent checks below.
+            report.critical(
+                f"Server {server_name} 'command' must be a string, got {type(config['command']).__name__}"
+            )
         else:
             command = config["command"]
             validate_path_value(command, report, f"{ctx}:command", plugin_root)
@@ -243,8 +229,11 @@ def validate_mcp_server(
                         f"Server {server_name} uses {command} to execute remote package '{pkg_name}' — this downloads and runs code from a registry. Verify the package is trusted and consider pinning a version."
                     )
 
-        # Warn about url field ignored for stdio transport
-        if "url" in config and transport == "stdio":
+        # Warn about url field ignored for stdio transport. The enclosing branch
+        # already guarantees transport == "stdio", so the old `and transport ==
+        # 'stdio'` conjunct was always True — dead sub-expression removed
+        # (audit NIT #10).
+        if "url" in config:
             report.info(f"Server {server_name} has 'url' but transport is stdio - url will be ignored")
 
     elif transport in ("http", "sse"):
@@ -313,6 +302,12 @@ def validate_mcp_server(
             report.major(f"Server {server_name} 'env' must be an object")
         else:
             for key, value in env.items():
+                # Defensive: keys from a `json.loads` object are always `str`, but
+                # `validate_mcp_server` is documented public API (see module
+                # docstring) and external callers may pass a hand-built dict with a
+                # non-str key. Keep the guard so those callers get a clean MAJOR
+                # rather than a malformed message (audit NIT #11 — kept by design,
+                # not dead weight, because the entry point is not JSON-only).
                 if not isinstance(key, str):
                     report.major(f"Server {server_name} env key must be a string")
                 if not isinstance(value, str):
@@ -346,6 +341,32 @@ def validate_mcp_server(
                             report.major(
                                 f"Server {server_name} has hardcoded credential in headers[{key}] - use environment variables"
                             )
+
+    # Validate headersHelper (v2.1.85) — a script Claude Code EXECUTES (roughly
+    # every refresh interval) to emit auth headers, same risk class as the
+    # telemetry validator's CRITICAL `otelHeadersHelper`. Previously its value got
+    # ZERO validation: no type check, no path-traversal, no portability check —
+    # so `"headersHelper": "${CLAUDE_PLUGIN_ROOT}/../../../tmp/x"` or a
+    # non-portable absolute path passed silently, inconsistent with the `command`
+    # scrutiny next to it (audit MAJOR #4). Validate it like `command`.
+    if "headersHelper" in config:
+        headers_helper = config["headersHelper"]
+        if not isinstance(headers_helper, str):
+            report.major(
+                f"Server {server_name} 'headersHelper' must be a string, got {type(headers_helper).__name__}"
+            )
+        else:
+            validate_path_value(headers_helper, report, f"{ctx}:headersHelper", plugin_root)
+            # Probe executability when it resolves under the plugin root — a
+            # non-executable helper would fail at runtime, same as `command`.
+            if plugin_root and "${CLAUDE_PLUGIN_ROOT}" in headers_helper:
+                resolved = headers_helper.replace("${CLAUDE_PLUGIN_ROOT}", str(plugin_root))
+                resolved_path = Path(resolved)
+                if resolved_path.exists():
+                    if not os.access(resolved_path, os.X_OK):
+                        report.major(f"Server {server_name} headersHelper not executable: {resolved}")
+                    else:
+                        report.passed(f"Server {server_name} headersHelper is executable")
 
     # Validate timeout field
     if "timeout" in config:

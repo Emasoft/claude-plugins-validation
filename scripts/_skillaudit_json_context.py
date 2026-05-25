@@ -269,7 +269,11 @@ def _strip_jsonc_comments(source: str) -> str:
                 in_string = False
             i += 1
             continue
-        if ch in ('"', "'"):
+        # JSON / JSONC permit ONLY double-quoted strings. Tracking single
+        # quotes as string openers can only DESYNC ``in_string`` on a
+        # stray apostrophe outside strings/comments (e.g. in a JSON5-ish
+        # file) — never help. (audit NIT #10)
+        if ch == '"':
             in_string = True
             string_quote = ch
             out.append(ch)

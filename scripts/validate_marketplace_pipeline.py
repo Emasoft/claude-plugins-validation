@@ -33,6 +33,7 @@ import argparse
 import ast
 import configparser
 import json
+import os
 import re
 import subprocess
 import sys
@@ -333,22 +334,49 @@ def parse_gitmodules(gitmodules_path: Path) -> dict[str, dict[str, str]]:
                     "url": config.get(section, "url", fallback=""),
                 }
     except Exception:
-        # Fallback to regex parsing if configparser fails
+        # Fallback to regex parsing if configparser fails (e.g. a duplicated
+        # [submodule "x"] section raises DuplicateSectionError after a bad merge).
+        # This path runs ONLY on malformed input, exactly where correctness
+        # matters most, so it must be order-independent and whitespace-safe:
+        #   * `url` may legally appear BEFORE `path` — the old hardcoded
+        #     path-then-url pattern dropped `path` in that case (M2).
+        #   * trailing whitespace must not leak into the captured value
+        #     (`path = plugins/baz ` → `plugins/baz`), so we capture `\S+`.
+        # We first slice each submodule section's body, then extract `path` and
+        # `url` independently within it.
         content = gitmodules_path.read_text(encoding="utf-8")
-        submodule_pattern = re.compile(
-            r'\[submodule\s+"([^"]+)"\]\s*'
-            r"(?:path\s*=\s*([^\n]+)\s*)?"
-            r"(?:url\s*=\s*([^\n]+)\s*)?",
-            re.MULTILINE,
-        )
-        for match in submodule_pattern.finditer(content):
-            name = match.group(1)
+        section_header_re = re.compile(r'\[submodule\s+"([^"]+)"\]', re.MULTILINE)
+        path_re = re.compile(r"^\s*path\s*=\s*(\S+)", re.MULTILINE)
+        url_re = re.compile(r"^\s*url\s*=\s*(\S+)", re.MULTILINE)
+        headers = list(section_header_re.finditer(content))
+        for i, header in enumerate(headers):
+            name = header.group(1)
+            body_start = header.end()
+            body_end = headers[i + 1].start() if i + 1 < len(headers) else len(content)
+            body = content[body_start:body_end]
+            path_match = path_re.search(body)
+            url_match = url_re.search(body)
             submodules[name] = {
-                "path": match.group(2).strip() if match.group(2) else "",
-                "url": match.group(3).strip() if match.group(3) else "",
+                "path": path_match.group(1) if path_match else "",
+                "url": url_match.group(1) if url_match else "",
             }
 
     return submodules
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write ``content`` to ``path`` atomically (m9).
+
+    Writes to a sibling ``.tmp`` file then ``os.replace()`` into place — an
+    atomic rename on the same filesystem. A plain ``write_text`` leaves a
+    truncated/partial report on disk if the process is interrupted mid-write;
+    the report is consumed by CI and the orchestrator, which would then parse
+    garbage.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    os.replace(tmp_path, path)
 
 
 def load_yaml_file(file_path: Path) -> dict[str, Any] | None:
@@ -611,7 +639,18 @@ def validate_marketplace_structure(
                 "Plugin versions in marketplace.json match plugin.json files",
                 3.0,
             )
+    elif marketplace_data is None:
+        # marketplace.json is invalid (already flagged CRITICAL above). A broken
+        # marketplace must NOT bank 3.0 PASSED points for a check that could not
+        # possibly have run — that inflated the grade of fundamentally broken
+        # input (m4). Emit an INFO with 0 possible points instead.
+        report.info(
+            category,
+            "Version consistency check skipped (marketplace.json invalid)",
+        )
     else:
+        # Valid JSON but no plugins declare a version — nothing to compare, so a
+        # full pass is legitimate here.
         report.passed(
             category,
             "Version consistency check skipped (no plugins with versions)",
@@ -1487,6 +1526,9 @@ def format_text_report(report: PipelineValidationReport, verbose: bool = False) 
     lines.append("CATEGORY BREAKDOWN:")
     lines.append("")
     for name, cat in report.categories.items():
+        # n9 — per-category icon thresholds intentionally mirror the report-level
+        # grade bands so the two scales agree at a glance: [OK] = A-band (>=90),
+        # [!!] = failing-band (<70, i.e. D/F), [!] = the B/C middle band [70,90).
         status_icon = "[OK]" if cat.percentage >= 90 else "[!!]" if cat.percentage < 70 else "[!]"
         lines.append(
             f"  {status_icon} {name.replace('_', ' ').title()}: "
@@ -1576,7 +1618,16 @@ Exit Codes:
         action="store_true",
         help="Output results as JSON",
     )
-    parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "Accepted for compatibility with the generated marketplace CI, which passes --strict to "
+            "every CPV validator uniformly. This validator uses a score-band model (A/B/C/D/F → exit "
+            "code) with no NIT tier and emits no NIT findings, so there is nothing for strict mode to "
+            "gate on — the flag is a no-op here. Gating is already done by the score bands."
+        ),
+    )
     parser.add_argument(
         "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
     )
@@ -1609,6 +1660,11 @@ Exit Codes:
         )
         return EXIT_MINOR
 
+    # --strict is a no-op for this validator (score-band model has no NIT tier;
+    # see the flag's help text). Reference it explicitly so the intent is clear
+    # and it is not mistaken for an accidentally-unwired flag (M1).
+    _ = args.strict
+
     # Run validation
     report = validate_marketplace_pipeline(marketplace_path, _verbose=args.verbose)
 
@@ -1616,8 +1672,7 @@ Exit Codes:
     if args.json:
         print(json.dumps(report.to_dict(), indent=2))
     elif args.report:
-        Path(args.report).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.report).write_text(format_text_report(report, verbose=args.verbose))
+        _atomic_write_text(Path(args.report), format_text_report(report, verbose=args.verbose))
         # Inline compact summary (PipelineValidationReport is not a ValidationReport)
         grade = report.grade
         score = report.total_score

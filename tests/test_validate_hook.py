@@ -102,7 +102,7 @@ def test_validate_prompt_hook_valid_and_invalid():
 
 
 def test_validate_single_hook_type_errors(tmp_path: Path):
-    """Non-dict hook, invalid type, and prompt on command-only event should each produce CRITICAL."""
+    """Non-dict hook and invalid type produce CRITICAL; prompt-on-SessionStart (tier-3) and prompt-on-Notification (tier-2) are BOTH CRITICAL — Claude Code rejects prompt/agent hooks on those events at load (v2.1.142)."""
     # Non-dict
     r1 = HookValidationReport()
     assert validate_single_hook("not a dict", "PreToolUse", tmp_path, r1) is False
@@ -111,17 +111,19 @@ def test_validate_single_hook_type_errors(tmp_path: Path):
     r2 = HookValidationReport()
     assert validate_single_hook({"type": "webhook", "command": "curl x"}, "PreToolUse", tmp_path, r2) is False
     assert any("Invalid hook type" in r.message for r in r2.results if r.level == "CRITICAL")
-    # SessionStart is command+mcp_tool only (hooks.md v2.1.121) — prompt is rejected.
+    # SessionStart is command+mcp_tool only (tier-3) — a prompt hook there is
+    # genuinely invalid → CRITICAL.
     r3 = HookValidationReport()
     validate_single_hook({"type": "prompt", "prompt": "Do something"}, "SessionStart", tmp_path, r3)
     assert any("only supports 'command' and 'mcp_tool' hooks" in r.message for r in r3.results if r.level == "CRITICAL")
-    # Prompt on a command-or-http event (Notification) — still CRITICAL with
-    # the updated message wording (now also mentions mcp_tool).
+    # Prompt on a tier-2 event (Notification): hooks.md lists Notification as
+    # command/http/mcp_tool-only (no prompt/agent), and CC rejects the config at
+    # load (v2.1.142) — so this is CRITICAL, not a nudge.
     r4 = HookValidationReport()
     validate_single_hook({"type": "prompt", "prompt": "Do something"}, "Notification", tmp_path, r4)
     assert any(
-        "only supports 'command', 'http', and 'mcp_tool'" in r.message for r in r4.results if r.level == "CRITICAL"
-    )
+        r.level == "CRITICAL" and "only supports" in r.message for r in r4.results
+    ), "prompt on Notification must be CRITICAL (tier-2: CC rejects prompt/agent at load)"
     # v2.22.2 GAP-P2-C2 (refined for v2.1.121): SessionStart now accepts both
     # command AND mcp_tool. http remains rejected.
     r5 = HookValidationReport()
@@ -129,6 +131,11 @@ def test_validate_single_hook_type_errors(tmp_path: Path):
     assert any(
         "only supports 'command' and 'mcp_tool' hooks" in r.message for r in r5.results if r.level == "CRITICAL"
     ), "expected CRITICAL: SessionStart rejects http hooks"
+    # Two-sided: a TIER-1 event (SubagentStop) legitimately ACCEPTS prompt/agent
+    # (hooks.md lists it in the all-five group) — must NOT be CRITICAL.
+    r6 = HookValidationReport()
+    validate_single_hook({"type": "prompt", "prompt": "Do something"}, "SubagentStop", tmp_path, r6)
+    assert not any(r.level == "CRITICAL" for r in r6.results), "prompt on SubagentStop (tier-1) must NOT be CRITICAL"
 
 
 def test_validate_hooks_valid_end_to_end(tmp_path: Path):
@@ -370,14 +377,21 @@ def test_validate_single_hook_agent_type(tmp_path: Path):
 
 
 def test_validate_single_hook_async_on_non_command(tmp_path: Path):
-    """Setting async:true on a prompt hook should produce MAJOR about async only on command hooks."""
+    """Setting async:true on a prompt hook produces exactly ONE MAJOR — async is command-only."""
     report = HookValidationReport()
     validate_single_hook({"type": "prompt", "prompt": "Review this", "async": True}, "Stop", tmp_path, report)
-    assert any(
-        "'async: true' is only supported on 'command' or 'http'" in r.message
-        for r in report.results
-        if r.level == "MAJOR"
-    )
+    async_majors = [
+        r for r in report.results if r.level == "MAJOR" and "async" in r.message and "command" in r.message
+    ]
+    # Exactly one finding — the previously-duplicated MAJOR+MINOR pair is now
+    # collapsed into a single command-only MAJOR (no contradictory second
+    # finding from the old standalone async check).
+    assert len(async_majors) == 1, f"expected exactly one async MAJOR, got {[r.message for r in async_majors]}"
+    assert "'async' is only supported on 'command' hooks" in async_majors[0].message
+    # And there must be NO MINOR restating the same thing (de-dup).
+    assert not any(
+        r.level == "MINOR" and "async" in r.message and "command hooks" in r.message for r in report.results
+    ), "async misuse must not also emit a duplicate MINOR"
 
 
 def test_validate_single_hook_status_message_and_once(tmp_path: Path):
@@ -655,21 +669,25 @@ def test_http_hook_no_unknown_field_warnings(tmp_path: Path):
     assert len(unknown_warnings) == 0, f"Unexpected unknown-field warnings: {unknown_warnings}"
 
 
-def test_postcompact_command_only(tmp_path: Path):
-    """PostCompact rejects prompt and agent type hooks with CRITICAL.
+def test_postcompact_prompt_agent_is_critical(tmp_path: Path):
+    """PostCompact (a tier-2 event) REJECTS prompt/agent hooks → CRITICAL.
 
-    v2.1.118+ added `mcp_tool` to PostCompact's allowed set, so the message
-    enumerates command/http/mcp_tool — but prompt/agent are still rejected.
+    hooks.md "Prompt-based hooks" lists PostCompact in the command/http/mcp_tool
+    group (NO prompt/agent), and the v2.1.142 changelog confirms Claude Code
+    rejects a prompt/agent hook on these events at LOAD time. A config the
+    runtime refuses to load is invalid → CRITICAL (not a non-blocking nudge).
     """
     for bad_type, extra in [("prompt", {"prompt": "Summarise"}), ("agent", {"prompt": "Analyse"})]:
         hook = {"type": bad_type, **extra}
         r = HookValidationReport()
         validate_single_hook(hook, "PostCompact", tmp_path, r)
         assert any(
-            "only supports 'command', 'http', and 'mcp_tool'" in res.message
-            for res in r.results
-            if res.level == "CRITICAL"
-        ), f"PostCompact should reject '{bad_type}' hooks"
+            r2.level == "CRITICAL" and "only supports" in r2.message for r2 in r.results
+        ), f"PostCompact must REJECT '{bad_type}' hooks as CRITICAL (tier-2: CC rejects at load)"
+    # Two-sided: a command hook on PostCompact is fine (no CRITICAL).
+    r_ok = HookValidationReport()
+    validate_single_hook({"type": "command", "command": "echo hi"}, "PostCompact", tmp_path, r_ok)
+    assert not any(r2.level == "CRITICAL" for r2 in r_ok.results), "command hook on PostCompact must be accepted"
 
 
 def test_async_rewake_is_recognised(tmp_path: Path):
@@ -3003,3 +3021,238 @@ class TestPhase12HookTypeMatrix:
 
         allowed = hook_types_allowed_for_event("UserPromptExpansion")
         assert allowed == frozenset({"command", "http", "mcp_tool", "prompt", "agent"})
+
+    def test_permission_denied_and_teammate_idle_are_tier1_full_5_set(self) -> None:
+        """Two-sided: PermissionDenied / TeammateIdle are tier-1 — full 5-type set.
+
+        Regression guard for the dedup that removed the diverging copy: the
+        shared matrix MUST agree with validate_hook's tier-1 set (and with
+        test_prompt_on_tier1_event_is_accepted). An earlier copy wrongly placed
+        these two in the no-prompt/agent set, so this asserts they now accept
+        prompt AND agent, while a genuine tier-2 event (Notification) still
+        excludes them.
+        """
+        from cpv_validation_common import hook_types_allowed_for_event
+
+        full = frozenset({"command", "http", "mcp_tool", "prompt", "agent"})
+        for event in ("PermissionDenied", "TeammateIdle"):
+            allowed = hook_types_allowed_for_event(event)
+            assert allowed == full, event
+            assert "prompt" in allowed and "agent" in allowed, event
+        # Two-sided: a real tier-2 event must STILL exclude prompt/agent.
+        tier2 = hook_types_allowed_for_event("Notification")
+        assert "prompt" not in tier2 and "agent" not in tier2
+
+    def test_validate_hook_imports_shared_matrix_sets(self) -> None:
+        """The dedup: validate_hook must REUSE the shared sets, not redefine them."""
+        import cpv_validation_common as common
+        import validate_hook
+
+        # Identity (same frozenset object), proving single source of truth.
+        assert validate_hook.COMMAND_STRICT_EVENTS is common.HOOK_EVENTS_COMMAND_ONLY
+        assert validate_hook.COMMAND_ONLY_EVENTS is common.HOOK_EVENTS_NO_PROMPT_OR_AGENT
+        # And the corrected membership: the two tier-1 events are in neither set.
+        for event in ("PermissionDenied", "TeammateIdle"):
+            assert event not in validate_hook.COMMAND_STRICT_EVENTS
+            assert event not in validate_hook.COMMAND_ONLY_EVENTS
+
+
+# ---------------------------------------------------------------------------
+# Deep-audit fix regression tests (two-sided: corrected behavior AND the
+# behavior that must NOT regress). Each maps to a finding in the hook-validator
+# soundness audit (reports/audit2/...-validate-hook.md). The hooks spec is the
+# authority: https://code.claude.com/docs/en/hooks
+# ---------------------------------------------------------------------------
+
+
+def test_async_on_http_hook_is_rejected(tmp_path: Path) -> None:
+    """Finding 1: `async` is command-only, so `async: true` on an HTTP hook is MAJOR.
+
+    The pre-fix code wrongly allowed async on http (and then a separate check
+    contradicted it with a MINOR). The spec lists async/asyncRewake ONLY in the
+    command-hook fields table.
+    """
+    r = HookValidationReport()
+    validate_single_hook({"type": "http", "url": "https://example.com", "async": True}, "PreToolUse", tmp_path, r)
+    async_majors = [res for res in r.results if res.level == "MAJOR" and "async" in res.message]
+    assert len(async_majors) == 1, f"expected one async MAJOR for http, got {[m.message for m in async_majors]}"
+    assert "only supported on 'command'" in async_majors[0].message
+    # No contradictory MINOR restating the same thing.
+    assert not any(res.level == "MINOR" and "async" in res.message and "command hooks" in res.message for res in r.results)
+
+
+def test_async_on_command_hook_is_allowed(tmp_path: Path) -> None:
+    """Finding 1 (must-not-regress): `async: true` on a COMMAND hook is valid — no async finding."""
+    r = HookValidationReport()
+    validate_single_hook({"type": "command", "command": "echo hi", "async": True}, "PreToolUse", tmp_path, r)
+    assert not any(
+        ("async" in res.message and res.level in {"MAJOR", "MINOR"}) for res in r.results
+    ), "async on a command hook must not be flagged"
+
+
+def test_async_rewake_on_non_command_is_rejected(tmp_path: Path) -> None:
+    """Finding 1: `asyncRewake` is command-only — on an http hook it is MAJOR."""
+    r = HookValidationReport()
+    validate_single_hook(
+        {"type": "http", "url": "https://example.com", "asyncRewake": True}, "PreToolUse", tmp_path, r
+    )
+    assert any(
+        res.level == "MAJOR" and "asyncRewake" in res.message and "command" in res.message for res in r.results
+    ), "asyncRewake on a non-command hook must be MAJOR"
+
+
+def test_async_rewake_on_command_with_async_false_is_minor(tmp_path: Path) -> None:
+    """Finding 1 (must-not-regress): the asyncRewake-implies-async contradiction MINOR still fires on command hooks."""
+    r = HookValidationReport()
+    validate_single_hook(
+        {"type": "command", "command": "echo hi", "asyncRewake": True, "async": False}, "PreToolUse", tmp_path, r
+    )
+    assert any(
+        res.level == "MINOR" and "asyncRewake" in res.message and "contradicts" in res.message for res in r.results
+    )
+    # And it must NOT also raise the command-only MAJOR (it IS a command hook).
+    assert not any(res.level == "MAJOR" and "asyncRewake" in res.message for res in r.results)
+
+
+def test_prompt_on_tier2_event_is_critical(tmp_path: Path) -> None:
+    """prompt/agent on a TIER-2 event is CRITICAL — CC rejects it at load (v2.1.142).
+
+    hooks.md "Prompt-based hooks" lists these events as command/http/mcp_tool-only
+    (no prompt/agent). An earlier change wrongly downgraded them to WARNING on the
+    false premise that only SessionStart/Setup restrict types; this pins the
+    spec-correct CRITICAL.
+    """
+    for event in ("Notification", "PreCompact", "PostCompact", "SessionEnd", "FileChanged", "StopFailure", "ConfigChange"):
+        for bad_type in ("prompt", "agent"):
+            r = HookValidationReport()
+            validate_single_hook({"type": bad_type, "prompt": "do x"}, event, tmp_path, r)
+            assert any(
+                res.level == "CRITICAL" and "only supports" in res.message for res in r.results
+            ), f"{event}/{bad_type}: must be CRITICAL (tier-2: CC rejects prompt/agent at load)"
+
+
+def test_prompt_on_tier1_event_is_accepted(tmp_path: Path) -> None:
+    """Two-sided: prompt/agent on a TIER-1 event (all five types allowed) is NOT rejected.
+
+    hooks.md lists Stop, SubagentStop, PermissionDenied, TeammateIdle, TaskCreated,
+    UserPromptSubmit (etc.) as supporting prompt/agent — so no CRITICAL there.
+    Guards against over-restriction (false-INVALID on a valid plugin).
+    """
+    for event in ("Stop", "SubagentStop", "PermissionDenied", "TeammateIdle", "TaskCreated", "UserPromptSubmit"):
+        for ok_type in ("prompt", "agent"):
+            r = HookValidationReport()
+            validate_single_hook({"type": ok_type, "prompt": "do x"}, event, tmp_path, r)
+            assert not any(
+                res.level == "CRITICAL" and "only supports" in res.message for res in r.results
+            ), f"{event}/{ok_type}: tier-1 event must ACCEPT prompt/agent (no type-restriction CRITICAL)"
+
+
+def test_prompt_on_session_start_and_setup_still_critical(tmp_path: Path) -> None:
+    """Finding 7 (must-not-regress): SessionStart/Setup ARE spec-restricted → prompt/agent stays CRITICAL."""
+    for event in ("SessionStart", "Setup"):
+        for bad_type in ("prompt", "agent"):
+            r = HookValidationReport()
+            validate_single_hook({"type": bad_type, "prompt": "do x"}, event, tmp_path, r)
+            assert any(
+                res.level == "CRITICAL" and "only supports 'command' and 'mcp_tool'" in res.message
+                for res in r.results
+            ), f"{event}/{bad_type}: must remain CRITICAL (spec restricts these two events)"
+
+
+def test_post_tool_batch_matcher_is_ignored_info() -> None:
+    """Finding 3: PostToolBatch does not support matchers → a matcher yields the 'ignored' INFO."""
+    report = ValidationReport()
+    assert validate_matcher("Bash", "PostToolBatch", report) is True
+    assert any("matchers are ignored" in r.message for r in report.results if r.level == "INFO")
+
+
+def test_user_prompt_expansion_matcher_is_supported_no_ignored_info() -> None:
+    """Finding 3 (two-sided): UserPromptExpansion DOES support matchers (command_name) — no 'ignored' INFO."""
+    report = ValidationReport()
+    assert validate_matcher("my-skill", "UserPromptExpansion", report) is True
+    assert not any(
+        "matchers are ignored" in r.message for r in report.results if r.level == "INFO"
+    ), "UserPromptExpansion supports matchers; the 'ignored' INFO must NOT fire"
+
+
+def test_non_string_matcher_on_no_matcher_event_is_major() -> None:
+    """Finding 4: a non-string matcher is MAJOR even on a no-matcher event (uniform type check)."""
+    report = ValidationReport()
+    assert validate_matcher({"bad": "shape"}, "Stop", report) is False
+    assert any(res.level == "MAJOR" and "must be a string" in res.message for res in report.results)
+
+
+def test_non_string_matcher_on_with_matcher_event_is_major() -> None:
+    """Finding 4 (must-not-regress): a non-string matcher on a with-matcher event is still MAJOR."""
+    report = ValidationReport()
+    assert validate_matcher(123, "PreToolUse", report) is False
+    assert any(res.level == "MAJOR" and "must be a string" in res.message for res in report.results)
+
+
+def test_string_matcher_on_no_matcher_event_still_only_info() -> None:
+    """Finding 4 (must-not-regress): a *string* matcher on a no-matcher event stays an INFO, not a MAJOR."""
+    report = ValidationReport()
+    assert validate_matcher("Bash", "Stop", report) is True
+    assert not any(res.level == "MAJOR" for res in report.results)
+    assert any("matchers are ignored" in r.message for r in report.results if r.level == "INFO")
+
+
+def test_prompt_hook_with_bad_model_emits_no_passed_line(tmp_path: Path) -> None:
+    """Finding 9: a prompt hook that fails the model check must NOT also emit a green PASSED line."""
+    r = HookValidationReport()
+    validate_prompt_hook({"type": "prompt", "prompt": "review", "model": ""}, "Stop", r)
+    assert any(res.level == "MAJOR" and "model" in res.message for res in r.results)
+    assert not any(
+        res.level == "PASSED" and res.message.startswith("Prompt:") for res in r.results
+    ), "a prompt hook with a MAJOR must not show a contradictory PASSED line"
+
+
+def test_prompt_hook_valid_emits_passed_line(tmp_path: Path) -> None:
+    """Finding 9 (must-not-regress): a fully-valid prompt hook still emits the PASSED line."""
+    r = HookValidationReport()
+    validate_prompt_hook({"type": "prompt", "prompt": "review this code"}, "Stop", r)
+    assert any(res.level == "PASSED" and res.message.startswith("Prompt:") for res in r.results)
+    assert not any(res.level == "MAJOR" for res in r.results)
+
+
+def test_linter_subprocess_oserror_is_soft_minor(tmp_path: Path, monkeypatch) -> None:
+    """Finding 10: subprocess/OS flakiness in a linter stays a soft MINOR (not a crash)."""
+    import validate_hook as vh
+
+    script = tmp_path / "x.py"
+    script.write_text("print('hi')\n")
+    # Force the linter resolver to a real-looking command, then make the
+    # subprocess boundary raise an OSError (spawn failure) — this is the
+    # external-flakiness path the narrowed `except` is meant to absorb.
+    monkeypatch.setattr(vh, "resolve_tool_command", lambda name: [name])
+
+    def _raise_oserror(*_a, **_k):
+        raise OSError("simulated spawn failure")
+
+    monkeypatch.setattr(vh.subprocess, "run", _raise_oserror)
+    r = ValidationReport()
+    vh.lint_python_script(script, r)
+    assert any(res.level == "MINOR" and "error" in res.message for res in r.results)
+
+
+def test_linter_internal_bug_propagates(tmp_path: Path, monkeypatch) -> None:
+    """Finding 10 (fail-fast): a genuine programming error in a linter helper is NOT swallowed as MINOR.
+
+    A TypeError (the shape of a real CPV bug) must propagate, not be downgraded
+    to a benign "tool error" MINOR.
+    """
+    import validate_hook as vh
+
+    script = tmp_path / "x.py"
+    script.write_text("print('hi')\n")
+    monkeypatch.setattr(vh, "resolve_tool_command", lambda name: [name])
+
+    def _raise_typeerror(*_a, **_k):
+        raise TypeError("simulated CPV-internal bug")
+
+    monkeypatch.setattr(vh.subprocess, "run", _raise_typeerror)
+    r = ValidationReport()
+    import pytest
+
+    with pytest.raises(TypeError):
+        vh.lint_python_script(script, r)

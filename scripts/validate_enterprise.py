@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -222,6 +223,18 @@ class EnterpriseComplianceReport(ValidationReport):
 # =============================================================================
 
 
+# Frontmatter delimiter: opening `---` line, content, then a CLOSING `---` that
+# is itself on its own line (only optional trailing whitespace). The closing
+# content + its newline are an optional group so an empty block (`---\n---`)
+# still parses as present-but-empty (`{}`). The earlier `content.split("---", 2)`
+# split on the FIRST `---` SUBSTRING anywhere — so a frontmatter VALUE containing
+# `---` (e.g. a `description:` with a horizontal rule) truncated the YAML block
+# and made the whole frontmatter unparseable (audit advisory #16). Matching a
+# delimiter LINE instead of a bare substring fixes that; `\r?\n` makes it
+# CRLF-tolerant too.
+_FM_RE = re.compile(r"\A---[ \t]*\r?\n(?:(.*?)\r?\n)?---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
+
+
 def parse_frontmatter(content: str) -> tuple[dict[str, Any] | None, str]:
     """Parse YAML frontmatter from markdown content.
 
@@ -232,16 +245,15 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any] | None, str]:
     if not content.startswith("---"):
         return None, content
 
-    # Find closing ---
-    parts = content.split("---", 2)
-    if len(parts) < 3:
+    m = _FM_RE.match(content)
+    if not m:
         return None, content
 
     try:
-        frontmatter = yaml.safe_load(parts[1])
+        frontmatter = yaml.safe_load(m.group(1) or "")
         if frontmatter is None:
             frontmatter = {}
-        body = parts[2]
+        body = content[m.end() :]
         return frontmatter, body
     except yaml.YAMLError:
         return None, content
@@ -382,7 +394,15 @@ def validate_author_field(
 ) -> None:
     """Rule 5: Validate author field (REQUIRED for enterprise compliance)."""
     if "author" not in frontmatter:
-        level: Level = "CRITICAL" if report.strict_mode else "MAJOR"
+        # `author` is NOT part of the Claude Code skill/agent schema (only `name`
+        # + `description` are). A skill omitting `author` is perfectly loadable —
+        # it is an enterprise-QUALITY gap, not a CC-VALIDITY breakage. Emitting a
+        # blocking MAJOR by default mis-tiered conformant plugins as INVALID
+        # (audit MINOR #6), contradicting this project's own severity principle
+        # (TRDD-021250b5: enterprise-quality standards must not block validity).
+        # Default to MINOR; the explicit enterprise/strict gate still escalates
+        # to CRITICAL for authors who opt into hard enterprise compliance.
+        level: Level = "CRITICAL" if report.strict_mode else "MINOR"
         report.add(level, "Missing required field: 'author' (enterprise compliance requirement)", location)
         result.missing_required.append("author")
         return
@@ -424,7 +444,12 @@ def validate_license_field(
 ) -> None:
     """Rule 6: Validate license field (REQUIRED for enterprise, SPDX identifier)."""
     if "license" not in frontmatter:
-        level: Level = "CRITICAL" if report.strict_mode else "MAJOR"
+        # `license` is NOT part of the Claude Code skill/agent schema. As with
+        # `author` (above), absence is an enterprise-QUALITY gap, not a
+        # CC-VALIDITY breakage — a blocking MAJOR by default mis-tiered
+        # conformant plugins as INVALID (audit MINOR #6 / TRDD-021250b5). Default
+        # to MINOR; strict/enterprise mode still escalates to CRITICAL.
+        level: Level = "CRITICAL" if report.strict_mode else "MINOR"
         report.add(level, "Missing required field: 'license' (enterprise compliance requirement)", location)
         result.missing_required.append("license")
         return

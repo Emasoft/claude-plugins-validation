@@ -96,6 +96,44 @@ class TestValidateMarketplaceStructure:
         critical_results = [r for r in cat.results if r.level == "CRITICAL"]
         assert any("invalid JSON" in r.message for r in critical_results)
 
+    def test_invalid_json_does_not_bank_version_consistency_points(self, tmp_path):
+        """Check 6 must NOT award PASSED points for version consistency on invalid JSON (m4).
+
+        A fundamentally broken marketplace previously banked 3.0 PASSED points
+        for a check that could not possibly have run, inflating its grade.
+        """
+        mp = _make_marketplace(tmp_path)
+        (mp / "marketplace.json").write_text("{invalid json content!!", encoding="utf-8")
+        report = PipelineValidationReport(marketplace_path=mp)
+        validate_marketplace_structure(mp, report)
+        cat = report.categories["marketplace_structure"]
+        # The "version consistency" line must be an INFO (0 points), not a PASSED 3.0.
+        version_lines = [r for r in cat.results if "Version consistency check skipped" in r.message]
+        assert version_lines, "expected a version-consistency skip line"
+        assert all(r.level == "INFO" for r in version_lines)
+        assert all(r.points_possible == 0.0 and r.points_earned == 0.0 for r in version_lines)
+        assert all("invalid" in r.message for r in version_lines)
+
+    def test_valid_json_no_plugins_still_passes_version_consistency(self, tmp_path):
+        """With valid JSON but an empty plugins list, the version check legitimately PASSES 3.0 (m4, benign side).
+
+        The bottom `else` (legitimate skip) fires only when marketplace_data is
+        valid AND no plugins were found — distinct from the invalid-JSON case
+        which must NOT award points.
+        """
+        mp = _make_marketplace(
+            tmp_path,
+            marketplace_json={"name": "ok-mp", "version": "1.0.0", "plugins": []},
+        )
+        report = PipelineValidationReport(marketplace_path=mp)
+        validate_marketplace_structure(mp, report)
+        cat = report.categories["marketplace_structure"]
+        version_lines = [r for r in cat.results if "Version consistency check skipped" in r.message]
+        assert version_lines, "expected a version-consistency skip line"
+        assert all(r.level == "PASSED" for r in version_lines)
+        assert all(r.points_earned == 3.0 for r in version_lines)
+        assert all("no plugins with versions" in r.message for r in version_lines)
+
     def test_missing_required_fields(self, tmp_path):
         """validate_marketplace_structure reports CRITICAL when required fields (name, version, plugins) are missing."""
         mp = _make_marketplace(tmp_path, marketplace_json={"description": "incomplete"})
@@ -473,6 +511,44 @@ class TestParseGitmodules:
         assert result["beta"]["path"] == "beta"
         assert result["beta"]["url"] == "https://github.com/org/beta.git"
 
+    def test_regex_fallback_handles_url_before_path(self, tmp_path):
+        """Regex fallback must capture `path` even when `url` is written first (M2).
+
+        url-before-path is perfectly legal git config. The old hardcoded
+        path-then-url pattern returned path=None in this ordering, corrupting the
+        submodule map and producing false 'missing submodule directory' findings.
+        """
+        gitmodules_path = tmp_path / ".gitmodules"
+        # Leading NUL forces configparser to fail → exercises the regex fallback.
+        gitmodules_path.write_bytes(
+            b'\x00[submodule "beta"]\nurl = https://github.com/org/beta.git\npath = plugins/beta\n'
+        )
+        result = parse_gitmodules(gitmodules_path)
+        assert "beta" in result
+        assert result["beta"]["path"] == "plugins/beta"
+        assert result["beta"]["url"] == "https://github.com/org/beta.git"
+
+    def test_regex_fallback_strips_trailing_whitespace(self, tmp_path):
+        """Regex fallback must not leak trailing whitespace into captured values (M2)."""
+        gitmodules_path = tmp_path / ".gitmodules"
+        gitmodules_path.write_bytes(
+            b'\x00[submodule "baz"]\npath = plugins/baz   \nurl = https://github.com/org/baz.git  \n'
+        )
+        result = parse_gitmodules(gitmodules_path)
+        assert result["baz"]["path"] == "plugins/baz"
+        assert result["baz"]["url"] == "https://github.com/org/baz.git"
+
+    def test_regex_fallback_handles_two_submodules(self, tmp_path):
+        """Regex fallback must isolate each submodule's body so fields don't bleed across sections (M2)."""
+        gitmodules_path = tmp_path / ".gitmodules"
+        gitmodules_path.write_bytes(
+            b'\x00[submodule "a"]\n\tpath = plugins/a\n\turl = https://github.com/org/a.git\n'
+            b'[submodule "b"]\n\turl = https://github.com/org/b.git\n\tpath = plugins/b\n'
+        )
+        result = parse_gitmodules(gitmodules_path)
+        assert result["a"] == {"path": "plugins/a", "url": "https://github.com/org/a.git"}
+        assert result["b"] == {"path": "plugins/b", "url": "https://github.com/org/b.git"}
+
 
 class TestLoadYamlFile:
     """Tests for load_yaml_file helper function."""
@@ -699,6 +775,27 @@ class TestMainCLI:
         assert exit_code == 3  # EXIT_MINOR
         captured = capsys.readouterr()
         assert "does not exist" in captured.err
+
+    def test_strict_flag_accepted_and_is_a_noop(self, tmp_path):
+        """main() must accept --strict (generated CI passes it) and treat it as a no-op (M1).
+
+        The score-band model has no NIT tier, so --strict must not error AND must
+        produce the same exit code as a plain run — proving it is a coherent
+        no-op rather than a silently-broken flag.
+        """
+        mp = tmp_path / "marketplace"
+        mp.mkdir()
+        (mp / "marketplace.json").write_text(
+            json.dumps({"name": "strict-test", "version": "1.0.0", "plugins": []}), encoding="utf-8"
+        )
+        (mp / ".gitmodules").write_text("# empty\n", encoding="utf-8")
+
+        with patch("sys.argv", ["validate_marketplace_pipeline.py", str(mp)]):
+            plain_exit = main()
+        with patch("sys.argv", ["validate_marketplace_pipeline.py", str(mp), "--strict"]):
+            strict_exit = main()
+        assert strict_exit == plain_exit
+        assert strict_exit in (0, 1, 2, 3)
 
 
 class TestMarketplaceStructureVersionMismatch:

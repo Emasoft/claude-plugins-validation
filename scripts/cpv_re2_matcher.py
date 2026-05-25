@@ -75,6 +75,58 @@ _LOG_ONCE_LOCK = threading.Lock()
 _LOG_ONCE_FIRED: set[str] = set()
 
 
+# Matches a leading inline-flag group, capturing its flag letters, e.g.
+# ``(?i)`` → ``i``, ``(?ims)`` → ``ims``. Used to make ``_blob_scan_flags``
+# idempotent: we only ADD the ``i`` / ``m`` flags that are missing rather
+# than blindly prepending a second flag group (which Python ``re`` rejects
+# when a global flag group already exists mid-pattern).
+_LEADING_FLAG_GROUP_RE: Final = re.compile(r"^\(\?([aiLmsux]+)\)")
+
+
+def _blob_scan_flags(pattern: str) -> str:
+    """Return ``pattern`` forced to case-insensitive + MULTILINE matching.
+
+    The live per-line scan path (``cpv_skillaudit_native.scan_content``)
+    runs ``re.compile(pat, re.IGNORECASE).search(line)`` over EACH line
+    independently. This matcher scans the WHOLE file blob in one pass, so
+    to reproduce that behaviour EXACTLY it must:
+
+    * be case-INSENSITIVE — the per-line loop uses ``re.IGNORECASE``;
+      without it the pre-filter would miss case-variant threats
+      (``EVAL(``, ``Curl``, ``BASE64``, …) → false negatives
+      (audit WARNING #15).
+    * be MULTILINE — per-line ``search`` anchors ``^``/``$`` at every
+      line boundary. On a joined blob, only ``(?m)`` makes ``^foo`` /
+      ``bar$`` patterns match at interior line starts/ends. WITHOUT
+      MULTILINE, ``re2`` (and Python ``re``) treat ``^`` as string-start
+      only, so an anchored catalog rule would be wrongly skipped by the
+      pre-filter → false negative (verified empirically: ``^foobar`` on a
+      multi-line blob matches per-line but NOT a default whole-blob scan).
+
+    DOTALL is deliberately NOT added: the per-line loop's ``.`` never
+    crosses a ``\n`` (there are none within a single line), and on the
+    blob ``(?m)`` without DOTALL keeps ``.`` from spanning lines — so the
+    two stay equivalent.
+
+    Both ``google-re2`` and Python ``re`` accept inline flags at the START
+    of a pattern, the portable way to request these for the RE2 ``Set``
+    (whose ``Add`` takes no flags). Idempotent: only the missing flag
+    letters are added.
+    """
+    needed = {"i", "m"}
+    lead = _LEADING_FLAG_GROUP_RE.match(pattern)
+    if lead:
+        present = set(lead.group(1))
+        missing = needed - present
+        if not missing:
+            return pattern
+        # Merge missing flags into the existing leading group so we never
+        # emit two flag groups (which Python ``re`` rejects).
+        merged = "".join(sorted(present | needed))
+        return f"(?{merged})" + pattern[lead.end() :]
+    return "(?im)" + pattern
+
+
 def _log_once(level: int, msg: str) -> None:
     """Emit ``msg`` at ``level`` exactly once across the process lifetime."""
     with _LOG_ONCE_LOCK:
@@ -263,10 +315,22 @@ class HybridMatcher:
 
         for rule_id, pattern in self._patterns.items():
             try:
-                index = re2_set.Add(pattern)
+                # Force case-insensitive to match the live IGNORECASE
+                # per-line scan path (audit WARNING #15).
+                index = re2_set.Add(_blob_scan_flags(pattern))
             except Exception as exc:  # noqa: BLE001 — RE2 raises plain Exception
-                # RE2 refused the pattern — route to fallback.
-                logger.warning(
+                # RE2 refused the pattern (lookaround / backref / \u / \R
+                # syntax it deems incompatible) — route to the Python re
+                # fallback, where it matches identically. This is BENIGN
+                # routing, not an error: ~9 catalog patterns use lookahead
+                # and legitimately live in the fallback layer. Logged at
+                # DEBUG (not WARNING) so the now-wired-in matcher does not
+                # spam a warning per fallback pattern on every fresh
+                # process; the aggregate count is emitted once at INFO by
+                # ``_emit_routing_log``. (the native google-re2 absl
+                # stderr line is emitted by the C++ layer and cannot be
+                # suppressed from Python.)
+                logger.debug(
                     "Pattern %r rejected by RE2 (%s); using Python re fallback",
                     rule_id,
                     str(exc)[:120],
@@ -275,8 +339,9 @@ class HybridMatcher:
                 continue
 
             if index is None or index < 0:
-                # Some RE2 builds return -1 instead of raising.
-                logger.warning(
+                # Some RE2 builds return -1 instead of raising. Same benign
+                # fallback routing as above — DEBUG, not WARNING.
+                logger.debug(
                     "Pattern %r rejected by RE2 (index=%r); using Python re fallback",
                     rule_id,
                     index,
@@ -313,7 +378,9 @@ class HybridMatcher:
             # not spans.
             for rule_id in accepted_rule_ids:
                 try:
-                    self._re2_compiled_individual[rule_id] = _re2_module.compile(self._patterns[rule_id])
+                    self._re2_compiled_individual[rule_id] = _re2_module.compile(
+                        _blob_scan_flags(self._patterns[rule_id])
+                    )
                 except Exception as exc:  # noqa: BLE001
                     # Defensive: if Add() succeeded but compile() fails,
                     # demote to fallback. This should be vanishingly rare
@@ -349,7 +416,11 @@ class HybridMatcher:
         ``InvalidPattern`` instead — never silently drop.
         """
         try:
-            compiled = re.compile(pattern)
+            # Force case-insensitive to match the live IGNORECASE per-line
+            # scan path (audit WARNING #15). Use inline ``(?i)`` rather
+            # than the ``re.I`` flag so RE2 and the fallback agree on the
+            # exact compiled semantics.
+            compiled = re.compile(_blob_scan_flags(pattern))
         except re.error as exc:
             self._invalid.append(
                 InvalidPattern(

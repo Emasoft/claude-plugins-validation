@@ -80,9 +80,14 @@ SKILL_REF_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Pattern to extract version from files
+# Pattern to extract version from files.
+# The ``(?![\d.])`` boundary after the captured triple stops a 4+-segment
+# version (``1.2.3.4``) from being truncated to ``1.2.3`` — without it,
+# README "1.2.3.4" and plugin.json "1.2.3" would be recorded as equal and
+# validate_version_sync would falsely report agreement. Matches the
+# quote-anchored pyproject extractor below.
 VERSION_PATTERN = re.compile(
-    r'(?:version|VERSION)\s*[=:]\s*["\']?(\d+\.\d+\.\d+)["\']?',
+    r'(?:version|VERSION)\s*[=:]\s*["\']?(\d+\.\d+\.\d+)(?![\d.])',
     re.IGNORECASE,
 )
 
@@ -223,8 +228,12 @@ def _strip_noise(content: str) -> str:
     # body stay correct — the old code collapsed the whole block to one line of
     # spaces, contradicting this function's own newline-preserving contract.
     # (audit NIT doc #7)
-    if content.startswith("---\n"):
-        m = re.match(r"^---\n.*?\n---\n", content, re.DOTALL)
+    # CRLF-tolerant: a Windows-authored file starts with "---\r\n", so gating
+    # on the literal "---\n" (LF only) would skip the strip and scan
+    # subagent_type:/skills:... metadata as if it were body. \r is blanked to a
+    # space by the [^\n] substitution, so the \n stays and line counts hold.
+    if re.match(r"^---\r?\n", content):
+        m = re.match(r"^---\r?\n.*?\r?\n---\r?\n", content, re.DOTALL)
         if m:
             content = re.sub(r"[^\n]", " ", m.group(0)) + content[m.end() :]
 
@@ -654,15 +663,27 @@ def parse_yaml_frontmatter(content: str) -> dict[str, Any] | None:
     Returns:
         Parsed frontmatter dict or None if not found/invalid
     """
-    if not content.startswith("---"):
+    # Line-based opener/closer scan (same approach validate_rules.py adopted).
+    # The old content.split("---", 2) split on the FIRST two "---" anywhere,
+    # corrupting frontmatter whose VALUE contains "---" (e.g.
+    # `description: "use --- here"`) — it would treat the value's "---" as the
+    # closing fence (audit n7). Matching whole "---" lines (CRLF-tolerant via
+    # .strip()) avoids that.
+    lines = content.split("\n")
+    if not lines or lines[0].strip() != "---":
         return None
 
-    parts = content.split("---", 2)
-    if len(parts) < 3:
+    closing_idx = None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            closing_idx = idx
+            break
+    if closing_idx is None:
         return None
 
+    fm_text = "\n".join(lines[1:closing_idx])
     try:
-        frontmatter = yaml.safe_load(parts[1])
+        frontmatter = yaml.safe_load(fm_text)
         return frontmatter if isinstance(frontmatter, dict) else None
     except yaml.YAMLError:
         return None
@@ -949,7 +970,10 @@ def validate_version_sync(
             manifest = json.loads(plugin_json.read_text(encoding="utf-8"))
             if "version" in manifest:
                 versions_found["plugin.json"] = manifest["version"]
-        except (json.JSONDecodeError, Exception):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError, KeyError, TypeError):
+            # Narrow, fail-fast except: a genuine programming error (e.g. an
+            # AttributeError introduced by a refactor) propagates instead of
+            # silently degrading to "version source absent".
             pass
 
     # Check README.md for version mentions
@@ -961,7 +985,7 @@ def validate_version_sync(
             match = VERSION_PATTERN.search(content)
             if match:
                 versions_found["README.md"] = match.group(1)
-        except Exception:
+        except (OSError, UnicodeDecodeError):
             pass
 
     # Check marketplace.json in parent directory (if plugin is in a marketplace)
@@ -976,7 +1000,9 @@ def validate_version_sync(
                     if "version" in plugin_entry:
                         versions_found["marketplace.json"] = plugin_entry["version"]
                     break
-        except (json.JSONDecodeError, Exception):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError, KeyError, TypeError, AttributeError):
+            # AttributeError tolerated here: marketplace entries are arbitrary
+            # JSON, so plugin_entry may legitimately not be a dict (.get fails).
             pass
 
     # Check pyproject.toml for version (Python plugins)
@@ -987,7 +1013,7 @@ def validate_version_sync(
             match = re.search(r'version\s*=\s*["\'](\d+\.\d+\.\d+)["\']', content)
             if match:
                 versions_found["pyproject.toml"] = match.group(1)
-        except Exception:
+        except (OSError, UnicodeDecodeError):
             pass
 
     # Check SKILL.md files for version in frontmatter
@@ -1011,7 +1037,7 @@ def validate_version_sync(
                                 ver = line.split(":", 1)[1].strip().strip("'\"")
                                 if ver:
                                     versions_found[f"skills/{skill_subdir.name}/SKILL.md"] = ver
-            except Exception:
+            except (OSError, UnicodeDecodeError):
                 pass
 
     report.version_sources = versions_found
@@ -1210,6 +1236,13 @@ def validate_skill_refs(
         report: Validation report to add results to
         available_skills: Set of available skill names
     """
+    # Compare case-insensitively on BOTH sides. The reference is lowercased
+    # below (skill_name.lower()); available_skills is built from raw directory
+    # names, so a skill dir "MySkill" would never match a lowercased ref and
+    # produce a false "non-existent skill" MAJOR. Lowercasing the lookup set
+    # closes that asymmetry. (Skill dirs are conventionally kebab-case-lower,
+    # so this rarely bites — but the asymmetry was a real soundness gap.)
+    available_skills_lower = {s.lower() for s in available_skills}
     # Scope (TRDD-25b9be90 Phase 5): top-level executable bodies only —
     # agent bodies, command bodies, and skill BODIES (skills/<name>/SKILL.md).
     # Excludes references/ subdirs because those are documentation containing
@@ -1271,7 +1304,7 @@ def validate_skill_refs(
 
         for skill_name in set(filtered_matches):
             skill_name_lower = skill_name.lower()
-            if skill_name_lower not in available_skills:
+            if skill_name_lower not in available_skills_lower:
                 report.major(
                     f"Reference to non-existent skill '{skill_name}'",
                     rel_path,
@@ -1316,11 +1349,14 @@ def validate_hook_script_refs(
             if "hooks" in manifest:
                 hooks_val = manifest["hooks"]
                 if isinstance(hooks_val, str):
-                    # Path to hooks file
-                    hooks_path = plugin_root / hooks_val.lstrip("./")
+                    # Path to hooks file. Strip a single optional "./" PREFIX
+                    # only — str.lstrip("./") would treat "./" as a char set and
+                    # mangle hidden-dir targets (".config/run.sh" -> "config/run.sh").
+                    hooks_rel = hooks_val[2:] if hooks_val.startswith("./") else hooks_val
+                    hooks_path = plugin_root / hooks_rel
                     if hooks_path.exists() and hooks_path not in hooks_files:
                         hooks_files.append(hooks_path)
-        except (json.JSONDecodeError, Exception):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             pass
 
     if not hooks_files:
@@ -1331,8 +1367,8 @@ def validate_hook_script_refs(
         try:
             hooks_content = hooks_file.read_text(encoding="utf-8")
             hooks_config = json.loads(hooks_content)
-        except (json.JSONDecodeError, Exception) as e:
-            report.minor(f"Could not parse hooks file: {e}", str(hooks_file.relative_to(plugin_root)))
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            report.minor(f"Could not parse hooks file: {type(e).__name__}", str(hooks_file.relative_to(plugin_root)))
             continue
 
         rel_hooks_path = str(hooks_file.relative_to(plugin_root))
@@ -1342,9 +1378,13 @@ def validate_hook_script_refs(
         report.hook_script_refs.extend(script_paths)
 
         for script_path in script_paths:
-            # Resolve the path relative to plugin root
-            # Scripts use ${CLAUDE_PLUGIN_ROOT} which maps to plugin_root
-            resolved_path = plugin_root / script_path.lstrip("./")
+            # Resolve the path relative to plugin root.
+            # Scripts use ${CLAUDE_PLUGIN_ROOT} which maps to plugin_root.
+            # Strip a single optional "./" PREFIX only — str.lstrip("./")
+            # treats "./" as a char set and would mangle hidden-dir targets
+            # (".config/run.sh" -> "config/run.sh") into a false CRITICAL.
+            script_rel = script_path[2:] if script_path.startswith("./") else script_path
+            resolved_path = plugin_root / script_rel
 
             if not resolved_path.exists():
                 report.critical(
@@ -1405,7 +1445,11 @@ def extract_script_paths_from_hooks(hooks_config: dict[str, Any]) -> list[str]:
                 extract_from_value(item)
 
     extract_from_value(hooks_config)
-    return list(set(script_paths))
+    # Order-preserving de-dup: list(set(...)) randomized finding order run-to-run
+    # (a missing-script CRITICAL could appear at a nondeterministic position).
+    # dict.fromkeys keeps first-seen order while still collapsing duplicates
+    # (audit n5).
+    return list(dict.fromkeys(script_paths))
 
 
 # =============================================================================

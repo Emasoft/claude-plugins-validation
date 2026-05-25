@@ -101,7 +101,15 @@ class TestRe2IndexAlignmentAfterCompileFailure:
                 return getattr(self._real, name)
 
             def compile(self, pattern, *args, **kwargs):
-                if pattern == self._bad:
+                # Match by SUBSTRING, not equality: v2.106.0 wires the RE2
+                # matcher in as the live scan pre-filter and compiles every
+                # pattern with a leading ``(?im)`` flag group
+                # (``_blob_scan_flags``) to mirror the per-line IGNORECASE
+                # MULTILINE scan semantics. So the pattern handed to
+                # ``compile`` is ``"(?im)beta_bbb"``, not the raw
+                # ``"beta_bbb"`` — a substring check still pins the right
+                # rule's individual compile to fail. (audit MAJOR #1 / #15)
+                if self._bad in pattern:
                     raise RuntimeError("simulated individual-compile failure")
                 return self._real.compile(pattern, *args, **kwargs)
 

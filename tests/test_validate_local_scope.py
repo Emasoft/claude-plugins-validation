@@ -143,6 +143,51 @@ class TestSettingsLocalMajorRules:
 # =============================================================================
 
 
+class TestSettingsLocalManagedNestedKeys:
+    """M1 regression: managed-only nested kill-switches in a local settings file."""
+
+    def test_managed_nested_disable_auto_mode_is_major(self, project: Path) -> None:
+        """permissions.disableAutoMode has no effect in a regular settings file — MAJOR."""
+        _commit(project, ".gitignore", ".claude/settings.local.json\n")
+        _write_untracked(
+            project,
+            ".claude/settings.local.json",
+            '{"permissions": {"disableAutoMode": "disable"}}\n',
+        )
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        assert any("disableAutoMode" in m for m in _messages(report, "MAJOR"))
+
+    def test_managed_nested_disable_auto_mode_null_is_still_major(self, project: Path) -> None:
+        """M1 regression: the managed-only nested key present as null is STILL flagged.
+
+        Presence of the key (not its value) is what places it in the wrong
+        scope; a null value must not slip past the walker.
+        """
+        _commit(project, ".gitignore", ".claude/settings.local.json\n")
+        _write_untracked(
+            project,
+            ".claude/settings.local.json",
+            '{"permissions": {"disableAutoMode": null}}\n',
+        )
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        assert any("disableAutoMode" in m for m in _messages(report, "MAJOR"))
+
+    def test_permissions_without_managed_nested_key_is_clean(self, project: Path) -> None:
+        """M1 two-sided: a permissions block without the managed nested key must
+        NOT emit a false MAJOR for it."""
+        _commit(project, ".gitignore", ".claude/settings.local.json\n")
+        _write_untracked(
+            project,
+            ".claude/settings.local.json",
+            '{"permissions": {"defaultMode": "default"}}\n',
+        )
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        assert not any("disableAutoMode" in m for m in _messages(report, "MAJOR"))
+
+
 class TestSettingsLocalMinorSuggestions:
     """MINOR hints for keys typically shared with the team."""
 
@@ -838,3 +883,48 @@ class TestV221ClaudeMdImports:
             if "example.com" in r.message and ("import" in r.message.lower() or "@" in r.message)
         ]
         assert import_findings == [], f"Email address must not be treated as import; got: {import_findings}"
+
+
+class TestMergeSubreportForwardsMetadata:
+    """audit m9 — _merge_subreport must preserve category + suggestion.
+
+    Two-sided: a finding carrying category/suggestion keeps them after the
+    merge (the m9 fix), AND a finding that carries neither still merges with
+    the canonical defaults (no spurious metadata invented).
+    """
+
+    def test_merge_preserves_category_and_suggestion(self) -> None:
+        from validate_local_scope import _merge_subreport
+
+        sub = ValidationReport()
+        sub.add(
+            "MINOR",
+            "sub finding",
+            "x.json",
+            4,
+            phase="structure",
+            fixable=True,
+            fix_id="FX-9",
+            category="architecture",
+            suggestion="use the canonical layout",
+        )
+        parent = ValidationReport()
+        _merge_subreport(sub, parent, "[skill foo]")
+        merged = parent.results[-1]
+        assert merged.message == "[skill foo] sub finding"
+        # m9: category + suggestion survive (previously dropped by the merge).
+        assert merged.category == "architecture"
+        assert merged.suggestion == "use the canonical layout"
+        # m2 (must-not-regress): phase/fixable/fix_id still forwarded too.
+        assert (merged.phase, merged.fixable, merged.fix_id) == ("structure", True, "FX-9")
+
+    def test_merge_keeps_defaults_when_absent(self) -> None:
+        from validate_local_scope import _merge_subreport
+
+        sub = ValidationReport()
+        sub.add("MAJOR", "plain finding", "y.json", 2)
+        parent = ValidationReport()
+        _merge_subreport(sub, parent, "[mcp]")
+        merged = parent.results[-1]
+        assert merged.category == ""
+        assert merged.suggestion is None

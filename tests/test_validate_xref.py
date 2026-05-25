@@ -199,6 +199,50 @@ class TestValidateHookScriptRefs:
         critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
         assert any("missing-script.sh" in m for m in critical_msgs)
 
+    def test_hook_script_in_hidden_dir_no_false_critical(self, tmp_path: Path):
+        """M4 regression: a hook target inside a hidden dir (leading-dot segment)
+        must resolve correctly and NOT produce a false CRITICAL.
+
+        ``str.lstrip("./")`` strips a char SET, so ".config/run.sh" was mangled
+        into "config/run.sh" — a path that doesn't exist — yielding a false
+        'non-existent script' CRITICAL. The fix strips only a single optional
+        "./" PREFIX.
+        """
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        hidden = tmp_path / ".config"
+        hidden.mkdir()
+        (hidden / "run.sh").write_text("#!/usr/bin/env bash\necho run\n")
+        hooks_config = {"PreToolUse": [{"command": "${CLAUDE_PLUGIN_ROOT}/.config/run.sh"}]}
+        (hooks_dir / "hooks.json").write_text(json.dumps(hooks_config))
+
+        report = CrossReferenceValidationReport()
+        validate_hook_script_refs(tmp_path, report)
+
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert not any(".config/run.sh" in m for m in critical_msgs), (
+            f"hidden-dir hook target mangled into a false CRITICAL: {critical_msgs}"
+        )
+
+    def test_hook_script_dot_slash_prefix_still_resolves(self, tmp_path: Path):
+        """M4 two-sided: a legitimate leading './' prefix is still stripped and
+        the script resolves (the fix must keep handling the common './' case)."""
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        scripts_subdir = tmp_path / "scripts"
+        scripts_subdir.mkdir()
+        (scripts_subdir / "go.sh").write_text("#!/usr/bin/env bash\necho go\n")
+        hooks_config = {"PreToolUse": [{"command": "${CLAUDE_PLUGIN_ROOT}/./scripts/go.sh"}]}
+        (hooks_dir / "hooks.json").write_text(json.dumps(hooks_config))
+
+        report = CrossReferenceValidationReport()
+        validate_hook_script_refs(tmp_path, report)
+
+        critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert not any("go.sh" in m for m in critical_msgs), (
+            f"'./'-prefixed hook target failed to resolve: {critical_msgs}"
+        )
+
 
 class TestValidateCrossReferences:
     """Tests for the main validate_cross_references entry point."""
@@ -418,6 +462,44 @@ class TestValidateVersionSync:
         passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
         assert any("agree" in m for m in passed_msgs)
 
+    def test_readme_four_segment_version_not_truncated(self, tmp_path: Path):
+        """m3 regression: a 4-segment README version must NOT be truncated to a
+        3-segment match that falsely agrees with plugin.json.
+
+        Before the fix, VERSION_PATTERN matched '1.2.3' out of 'Version: 1.2.3.4',
+        so README '1.2.3.4' + plugin.json '1.2.3' were recorded equal and the
+        sync check falsely passed. The boundary now rejects the 4-segment form,
+        so the README source is simply not captured (it doesn't masquerade as
+        '1.2.3').
+        """
+        cp_dir = tmp_path / ".claude-plugin"
+        cp_dir.mkdir()
+        (cp_dir / "plugin.json").write_text(json.dumps({"name": "test", "version": "1.2.3"}))
+        (tmp_path / "README.md").write_text("# Test Plugin\n\nVersion: 1.2.3.4\n")
+
+        report = CrossReferenceValidationReport()
+        validate_version_sync(tmp_path, report)
+
+        # The README's 4-segment version must NOT be recorded as the truncated
+        # '1.2.3' (which would be a false agreement with plugin.json).
+        assert report.version_sources.get("README.md") != "1.2.3", (
+            "VERSION_PATTERN truncated a 4-segment version into a false match"
+        )
+
+    def test_readme_three_segment_version_still_captured(self, tmp_path: Path):
+        """m3 two-sided: a normal 3-segment README version is still captured and
+        compared (the boundary fix must not break the common case)."""
+        cp_dir = tmp_path / ".claude-plugin"
+        cp_dir.mkdir()
+        (cp_dir / "plugin.json").write_text(json.dumps({"name": "test", "version": "2.5.0"}))
+        (tmp_path / "README.md").write_text("# Test Plugin\n\nVersion: 2.5.0\n")
+
+        report = CrossReferenceValidationReport()
+        validate_version_sync(tmp_path, report)
+
+        assert report.version_sources.get("README.md") == "2.5.0"
+        assert not report.has_major
+
     def test_single_version_source_skips_sync_check(self, tmp_path: Path):
         """When only one version source is found, sync check is skipped with INFO."""
         # Covers lines 361-362 (< 2 sources branch)
@@ -505,6 +587,81 @@ class TestValidateSkillRefs:
         assert report.has_major
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("ghost-skill" in m for m in major_msgs)
+
+    def test_mixed_case_skill_ref_resolves_no_false_major(self, tmp_path: Path):
+        """m5 regression: a ref to a mixed-case skill dir must resolve.
+
+        The reference name is lowercased before lookup; before the fix the
+        available-skills set kept raw directory names, so 'MySkill' (dir) vs
+        'myskill' (lowercased ref) never matched and produced a false
+        'non-existent skill' MAJOR. The lookup set is now lowercased on both
+        sides.
+        """
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "host.md").write_text("---\nname: host\n---\n# Host\n\nUses skills/MySkill here.\n")
+
+        report = CrossReferenceValidationReport()
+        validate_skill_refs(tmp_path, report, {"MySkill"})  # raw dir name, mixed case
+
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("MySkill" in m for m in major_msgs), (
+            f"mixed-case skill dir produced a false 'non-existent skill': {major_msgs}"
+        )
+
+    def test_truly_missing_skill_still_major_under_case_fold(self, tmp_path: Path):
+        """m5 two-sided: case-insensitive lookup must NOT mask a genuinely
+        absent skill — a ref with no matching dir (any case) is still MAJOR."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "host.md").write_text("---\nname: host\n---\n# Host\n\nUses skills/Absent here.\n")
+
+        report = CrossReferenceValidationReport()
+        validate_skill_refs(tmp_path, report, {"present"})  # 'Absent' is not present in any case
+
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("Absent" in m for m in major_msgs)
+
+
+class TestStripNoiseCRLF:
+    """m4 regression: _strip_noise must blank CRLF-authored frontmatter.
+
+    Tested at the unit level because _strip_noise is the function with the
+    defect — the literal '---\\n' (LF) gate skipped CRLF frontmatter, leaving
+    metadata tokens (subagent_type:, skills/...) in the content the dispatch /
+    skill-ref workers subsequently scan.
+    """
+
+    def test_crlf_frontmatter_is_blanked(self):
+        """CRLF frontmatter content must be blanked out (not scanned as body)."""
+        from validate_xref import _strip_noise
+
+        crlf = '---\r\nname: caller\r\nsubagent_type: "ghost"\r\nskills/secret-skill\r\n---\r\n# Body\r\n\r\nrealcontent\r\n'
+        out = _strip_noise(crlf)
+        frontmatter_region = out.split("# Body")[0]
+        assert "ghost" not in frontmatter_region, "CRLF frontmatter subagent_type was not stripped"
+        assert "secret-skill" not in frontmatter_region, "CRLF frontmatter skills ref was not stripped"
+
+    def test_crlf_strip_preserves_body_and_line_count(self):
+        """m4 two-sided: the body after CRLF frontmatter is preserved, and line
+        count is unchanged so downstream line numbers stay correct (\\r is
+        blanked to a space, \\n is kept)."""
+        from validate_xref import _strip_noise
+
+        crlf = '---\r\nname: caller\r\nsubagent_type: "ghost"\r\n---\r\n# Body\r\n\r\nrealcontent\r\n'
+        out = _strip_noise(crlf)
+        assert "realcontent" in out, "body content was lost by the CRLF frontmatter strip"
+        assert crlf.count("\n") == out.count("\n"), "line count changed — downstream line numbers would drift"
+
+    def test_lf_frontmatter_still_blanked(self):
+        """m4 two-sided: the original LF case must still be stripped (the fix
+        broadens the match, it must not narrow it)."""
+        from validate_xref import _strip_noise
+
+        lf = '---\nname: caller\nsubagent_type: "ghost"\n---\n# Body\n\nrealcontent\n'
+        out = _strip_noise(lf)
+        assert "ghost" not in out.split("# Body")[0]
+        assert "realcontent" in out
 
 
 class TestValidateHookScriptRefsExtended:

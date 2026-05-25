@@ -2130,3 +2130,338 @@ class TestPass2SkillFixes:
         assert is_self_pointing_skill_path("") is False
         assert is_self_pointing_skill_path(None) is False  # type: ignore[arg-type]
         assert is_self_pointing_skill_path(42) is False  # type: ignore[arg-type]
+
+
+# =============================================================================
+# audit C1 / M1 — comprehensive model gate must use the shared is_valid_model
+# THE CRITICAL: the local set+regex emitted a FALSE blocking MAJOR on documented
+# in-use aliases (opus[1m], default, opusplan, ...). Especially-thorough two-sided.
+# =============================================================================
+
+
+class TestComprehensiveModelGateSharedSourceOfTruth:
+    """audit C1: comprehensive must accept exactly what command/skill accept."""
+
+    def _report(self):
+        return ValidationReport(skill_path="test")
+
+    # ---- POSITIVE side: every documented valid value must NOT MAJOR ----
+
+    def test_opus_1m_alias_not_rejected(self):
+        """`opus[1m]` (semantic-validator's own config) must NOT be a blocking MAJOR."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = self._report()
+        validate_model_field({"model": "opus[1m]"}, report)
+        assert not report.has_major
+        assert any(r.level == "PASSED" and "model" in r.message for r in report.results)
+
+    def test_sonnet_1m_alias_not_rejected(self):
+        """`sonnet[1m]` must NOT be a blocking MAJOR."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = self._report()
+        validate_model_field({"model": "sonnet[1m]"}, report)
+        assert not report.has_major
+
+    def test_default_alias_not_rejected(self):
+        """`default` must NOT be a blocking MAJOR."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = self._report()
+        validate_model_field({"model": "default"}, report)
+        assert not report.has_major
+
+    def test_opusplan_alias_not_rejected(self):
+        """`opusplan` must NOT be a blocking MAJOR."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = self._report()
+        validate_model_field({"model": "opusplan"}, report)
+        assert not report.has_major
+
+    def test_full_id_with_1m_suffix_not_rejected(self):
+        """A full ID with the [1m] suffix (claude-opus-4-6[1m]) must NOT MAJOR."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = self._report()
+        validate_model_field({"model": "claude-opus-4-6[1m]"}, report)
+        assert not report.has_major
+
+    def test_inherit_and_plain_full_id_not_rejected(self):
+        """`inherit` and a plain full ID must NOT MAJOR."""
+        from validate_skill_comprehensive import validate_model_field
+
+        for value in ("inherit", "opus", "sonnet", "claude-sonnet-4-5-20251001"):
+            report = self._report()
+            validate_model_field({"model": value}, report)
+            assert not report.has_major, f"{value} should be accepted"
+
+    # ---- NEGATIVE side: genuinely invalid values must still MAJOR ----
+
+    def test_garbage_model_still_major(self):
+        """A non-Claude model (`gpt-4`) must still be a blocking MAJOR."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = self._report()
+        validate_model_field({"model": "gpt-4"}, report)
+        assert any(r.level == "MAJOR" and "Invalid 'model' value" in r.message for r in report.results)
+
+    def test_other_garbage_model_still_major(self):
+        """Another bogus value (`turbo`) must still MAJOR."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = self._report()
+        validate_model_field({"model": "turbo"}, report)
+        assert report.has_major
+
+    def test_non_string_model_still_major(self):
+        """A non-string model stays MAJOR."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = self._report()
+        validate_model_field({"model": 99}, report)
+        assert any(r.level == "MAJOR" and "must be a string" in r.message for r in report.results)
+
+    # ---- haiku penalty preserved (and its context:fork exemption) ----
+
+    def test_bare_haiku_still_minor_penalty(self):
+        """Bare `haiku` must still get the MINOR reliability penalty (preserved)."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = self._report()
+        validate_model_field({"model": "haiku"}, report)
+        assert any(r.level == "MINOR" and "haiku" in r.message for r in report.results)
+        assert not report.has_major  # valid value — penalty is MINOR, not MAJOR
+
+    def test_haiku_with_context_fork_exempted(self):
+        """`haiku` + context:fork is exempt from the penalty (PASSED, no MINOR)."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = self._report()
+        validate_model_field({"model": "haiku", "context": "fork"}, report)
+        assert not report.has_minor
+        assert any(r.level == "PASSED" and "fork" in r.message for r in report.results)
+
+    def test_full_haiku_id_still_minor_penalty(self):
+        """A full claude-haiku-* ID still triggers the MINOR penalty."""
+        from validate_skill_comprehensive import validate_model_field
+
+        report = self._report()
+        validate_model_field({"model": "claude-haiku-4-5"}, report)
+        assert report.has_minor
+        assert not report.has_major
+
+    # ---- END-TO-END: the actual user-visible C1 bug ----
+
+    def test_end_to_end_opus_1m_skill_not_invalid(self, tmp_path):
+        """A real skill with `model: opus[1m]` must NOT be marked INVALID (C1)."""
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: my-skill\n"
+            "description: Do a focused thing well. Use when the user needs the thing.\n"
+            "model: opus[1m]\n"
+            "---\n"
+            "# My Skill\n\nBody content here.\n"
+        )
+        report = validate_skill(skill_dir)
+        # opus[1m] must not produce a blocking finding (CRITICAL or MAJOR).
+        model_findings = [r for r in report.results if "model" in r.message.lower() and r.level in ("CRITICAL", "MAJOR")]
+        assert not model_findings, f"opus[1m] wrongly flagged: {model_findings}"
+
+
+# =============================================================================
+# audit M2 — body-scoped findings must report FILE-relative line numbers
+# =============================================================================
+
+
+class TestBodyLineOffsetReporting:
+    """audit M2: a SKILL.md finding's line must point at the real file line."""
+
+    def test_path_format_line_is_file_relative(self, tmp_path):
+        """An absolute path on body line 1 reports its FILE line (after frontmatter)."""
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        # 4 frontmatter lines (---, name, description, ---). The offending path is
+        # on the FIRST body line, which is file line 6 (line 5 is "# Title").
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"  # file line 1
+            "name: my-skill\n"  # 2
+            "description: A skill that does a thing. Use when needed for the thing.\n"  # 3
+            "---\n"  # 4
+            "# Title\n"  # 5 (body line 1)
+            "See /Users/alice/secret for details\n"  # 6 (body line 2) <- offender
+        )
+        report = validate_skill(skill_dir)
+        path_findings = [r for r in report.results if r.category == "Path Format" and r.line is not None]
+        assert path_findings, "expected an absolute-path finding"
+        # File line must be 6, NOT the body-relative 2.
+        assert any(r.line == 6 for r in path_findings), [r.line for r in path_findings]
+
+    def test_path_format_line_offset_param_direct(self):
+        """validate_path_formats applies line_offset to the reported line + message."""
+        from validate_skill_comprehensive import validate_path_formats
+
+        report = ValidationReport(skill_path="test")
+        body = "intro\n/Users/bob/data\n"  # body line 2 is the offender
+        validate_path_formats(body, report, None, line_offset=4)
+        findings = [r for r in report.results if r.category == "Path Format"]
+        assert findings
+        # body line 2 + offset 4 = file line 6
+        assert findings[0].line == 6
+        assert "Line 6:" in findings[0].message
+
+    def test_time_sensitive_line_offset_applied(self):
+        """validate_time_sensitive_info applies the offset to the reported line."""
+        from validate_skill_comprehensive import validate_time_sensitive_info
+
+        report = ValidationReport(skill_path="test")
+        body = "intro\nReleased after January 2024 here.\n"  # body line 2
+        validate_time_sensitive_info(body, report, line_offset=10)
+        warns = [r for r in report.results if "Time-sensitive" in r.message]
+        assert warns
+        assert warns[0].line == 12  # body line 2 + 10
+
+    def test_default_offset_zero_is_body_relative(self):
+        """With no offset (default 0), line numbers remain body-relative (back-compat)."""
+        from validate_skill_comprehensive import validate_path_formats
+
+        report = ValidationReport(skill_path="test")
+        body = "/Users/x/y\n"  # body line 1
+        validate_path_formats(body, report)
+        findings = [r for r in report.results if r.category == "Path Format"]
+        assert findings and findings[0].line == 1
+
+
+# =============================================================================
+# audit n3 — MCP-unqualified heuristic must not fire on generic snake_case prose
+# =============================================================================
+
+
+class TestMcpUnqualifiedHeuristicTightened:
+    """audit n3: drop the over-broad `or '_' in tool_name` clause."""
+
+    def test_single_underscore_prose_not_flagged(self):
+        """`run the build_step function` (1 underscore, not a known tool) is NOT flagged."""
+        from validate_skill_comprehensive import validate_mcp_tool_references
+
+        report = ValidationReport(skill_path="test")
+        validate_mcp_tool_references("Then run the build_step function to proceed.", report)
+        assert not any("MCP tool reference" in r.message for r in report.results)
+
+    def test_curated_known_tool_still_flagged(self):
+        """A curated known MCP tool (`read_file`) is still flagged."""
+        from validate_skill_comprehensive import validate_mcp_tool_references
+
+        report = ValidationReport(skill_path="test")
+        validate_mcp_tool_references("Use the read_file tool here.", report)
+        assert any("MCP tool reference" in r.message for r in report.results)
+
+    def test_multi_segment_snake_case_still_flagged(self):
+        """A 3-segment snake_case name (>=2 underscores) is still flagged."""
+        from validate_skill_comprehensive import validate_mcp_tool_references
+
+        report = ValidationReport(skill_path="test")
+        validate_mcp_tool_references("Call the get_active_session tool now.", report)
+        assert any("MCP tool reference" in r.message for r in report.results)
+
+
+# =============================================================================
+# audit m4 — description "very short" threshold aligned to 10 across validators
+# =============================================================================
+
+
+class TestDescriptionShortThresholdAligned:
+    """audit m4: comprehensive now uses <10 like skill.py/command.py."""
+
+    def test_15_char_description_not_very_short(self):
+        """A 15-char description is no longer "very short" (was <20, now <10)."""
+        from validate_skill_comprehensive import validate_description_field
+
+        report = ValidationReport(skill_path="test")
+        validate_description_field({"description": "Fifteen chars!!"}, "", report)  # 15 chars
+        assert not any("very short" in r.message for r in report.results)
+
+    def test_under_10_char_description_still_very_short(self):
+        """A <10-char description is still flagged "very short"."""
+        from validate_skill_comprehensive import validate_description_field
+
+        report = ValidationReport(skill_path="test")
+        validate_description_field({"description": "Tiny"}, "", report)  # 4 chars
+        assert any(r.level == "MINOR" and "very short" in r.message for r in report.results)
+
+
+# =============================================================================
+# audit n5 — print_results surfaces WARNING/NIT counts when present
+# =============================================================================
+
+
+class TestPrintResultsSurfacesWarnings:
+    """audit n5: a non-verbose summary shows WARNING/NIT so grade isn't misleading."""
+
+    def test_warning_count_shown_in_summary(self, capsys):
+        """A report with WARNINGs prints a WARNING count line (non-verbose)."""
+        from validate_skill_comprehensive import calculate_overall_score, print_results
+
+        report = ValidationReport(skill_path="test")
+        report.passed("ok", "SKILL.md")
+        report.warning("a non-blocking advisory", "SKILL.md")
+        calculate_overall_score(report)
+        print_results(report, verbose=False)
+        out = capsys.readouterr().out
+        assert "WARNING:" in out
+
+    def test_no_warning_line_when_zero(self, capsys):
+        """A clean report (no WARNING) does NOT print a WARNING line."""
+        from validate_skill_comprehensive import calculate_overall_score, print_results
+
+        report = ValidationReport(skill_path="test")
+        report.passed("ok", "SKILL.md")
+        calculate_overall_score(report)
+        print_results(report, verbose=False)
+        out = capsys.readouterr().out
+        assert "WARNING:" not in out
+
+
+# =============================================================================
+# audit m6 — leading UTF-8 BOM must not hide comprehensive-validator frontmatter
+# =============================================================================
+
+
+class TestComprehensiveBomFrontmatterHandling:
+    """audit m6: a BOM-prefixed SKILL.md must still parse its frontmatter."""
+
+    def test_parse_frontmatter_strips_bom(self):
+        """parse_frontmatter recognises frontmatter after a leading BOM."""
+        from validate_skill_comprehensive import parse_frontmatter
+
+        content = "﻿---\nname: my-skill\ndescription: Do a thing well\n---\nBody.\n"
+        frontmatter, body, fm_end_line = parse_frontmatter(content)
+        assert frontmatter is not None
+        assert frontmatter["name"] == "my-skill"
+        assert body.strip() == "Body."
+        assert fm_end_line == 4  # ---, name, description, --- => closing on line 4
+
+    def test_validate_frontmatter_structure_not_treated_absent(self):
+        """validate_frontmatter_structure must NOT report 'No YAML frontmatter found' on BOM."""
+        from validate_skill_comprehensive import validate_frontmatter_structure
+
+        content = "﻿---\nname: my-skill\ndescription: Do a thing well\n---\nBody.\n"
+        report = ValidationReport(skill_path="test")
+        result = validate_frontmatter_structure(content, report)
+        assert result is not None
+        assert not any("No YAML frontmatter found" in r.message for r in report.results)
+
+    def test_bom_prefixed_skill_end_to_end_not_invalid(self, tmp_path):
+        """A BOM-prefixed skill must not be marked INVALID for missing frontmatter."""
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "﻿---\nname: my-skill\ndescription: Do a focused thing well. Use when needed.\n---\n# T\n\nBody.\n",
+            encoding="utf-8",
+        )
+        report = validate_skill(skill_dir)
+        assert not any("No YAML frontmatter found" in r.message for r in report.results)
+        assert not any("Malformed YAML frontmatter" in r.message for r in report.results)

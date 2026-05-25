@@ -282,17 +282,9 @@ def check_escape_sequences(content: str, file_path: str, report: EncodingValidat
         report.stats["escape_issues"] += 1
         issues_found = True
 
-    # For JSON files, check for unescaped characters that should be escaped
-    if file_path.lower().endswith(".json"):
-        # Detect bare newlines inside string values (should be \n)
-        # This is a heuristic - proper parsing would require JSON parsing
-        lines = content.split("\n")
-        for _line_num, line in enumerate(lines, 1):
-            # Check for tabs that might need escaping in JSON strings
-            if "\t" in line and '"' in line:
-                # Very rough heuristic: tab between quotes might need escaping
-                # Only report if it looks like unescaped tab in string
-                pass  # JSON parser handles this - skip false positives
+    # (Removed: an empty JSON tab-heuristic loop whose every branch was `pass`
+    # — dead code that scanned the file for nothing. JSON string escaping is the
+    # JSON validator's concern; per "delete before you build", it's gone. audit n2.)
 
     return not issues_found
 
@@ -461,8 +453,10 @@ def validate_encoding(plugin_path: Path) -> EncodingValidationReport:
                 report.stats["files_skipped"] += 1
                 continue
 
-            # Only check text files
-            if is_text_file(file_path) or file_path.suffix.lower() in TEXT_EXTENSIONS:
+            # Only check text files. is_text_file already returns True for
+            # TEXT_EXTENSIONS suffixes, so the old `or ... in TEXT_EXTENSIONS`
+            # clause was always redundant (audit n3).
+            if is_text_file(file_path):
                 validate_file(file_path, plugin_path, report)
             else:
                 report.stats["files_skipped"] += 1

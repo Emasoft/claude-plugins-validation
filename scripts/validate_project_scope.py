@@ -217,12 +217,17 @@ def _flag_rejected_nested_keys(data: dict[str, Any], report: ValidationReport, f
     """Flag nested keys Claude Code silently drops from project settings."""
     for path_tuple in sorted(PROJECT_REJECTED_NESTED_KEYS):
         cursor: Any = data
+        # Track key PRESENCE, not value: Claude Code keys on the key existing,
+        # not on its value. A repo shipping the key as explicit null
+        # (``{"permissions": {"skipDangerousModePermissionPrompt": null}}``)
+        # must still be flagged — testing ``cursor is not None`` would miss it.
+        found = True
         for segment in path_tuple:
             if not isinstance(cursor, dict) or segment not in cursor:
-                cursor = None
+                found = False
                 break
             cursor = cursor[segment]
-        if cursor is not None:
+        if found:
             dotted = ".".join(path_tuple)
             report.critical(
                 (
@@ -271,12 +276,15 @@ def _flag_managed_only_nested_keys(data: dict[str, Any], report: ValidationRepor
     """
     for path_tuple in sorted(MANAGED_ONLY_NESTED_KEYS):
         cursor: Any = data
+        # Flag on key PRESENCE, not value — a managed-only key present as null
+        # is still placed in the wrong scope (see _flag_rejected_nested_keys).
+        found = True
         for segment in path_tuple:
             if not isinstance(cursor, dict) or segment not in cursor:
-                cursor = None
+                found = False
                 break
             cursor = cursor[segment]
-        if cursor is not None:
+        if found:
             dotted = ".".join(path_tuple)
             report.major(
                 (
@@ -506,6 +514,10 @@ def validate_settings_json_project_scope(settings_path: Path, report: Validation
     when the file fails to parse or the root is not a JSON object.
     """
     file_label = ".claude/settings.json"
+    # Snapshot so the PASSED gate reflects THIS file only (audit m1). Currently
+    # settings.json is step 1 so the whole-report check happened to be correct,
+    # but the slice makes the gate order-independent and matches .mcp.json.
+    start_idx = len(report.results)
     data = _load_json_or_report(settings_path, MAX_SETTINGS_JSON_BYTES, report, file_label)
     if data is None:
         return None
@@ -527,7 +539,8 @@ def validate_settings_json_project_scope(settings_path: Path, report: Validation
     _flag_claude_md_excludes(data, report, file_label)
     _flag_missing_schema(data, report, file_label)
 
-    if not report.has_critical and not report.has_major and not report.has_minor:
+    own_levels = {r.level for r in report.results[start_idx:]}
+    if not own_levels & {"CRITICAL", "MAJOR", "MINOR"}:
         report.passed("settings.json project-scope rules OK", file_label)
     return data
 
@@ -540,6 +553,12 @@ def validate_settings_json_project_scope(settings_path: Path, report: Validation
 def validate_mcp_json_project_scope(mcp_path: Path, report: ValidationReport) -> None:
     """Apply project-scope rules to a ``.mcp.json`` at the repo root."""
     file_label = ".mcp.json"
+    # Snapshot the result count so the PASSED gate below reflects THIS file's
+    # findings only. The shared report already holds settings.json findings
+    # (step 1); using whole-report has_critical/has_major/has_minor would
+    # suppress .mcp.json's PASSED line whenever settings.json had any MINOR+,
+    # even when .mcp.json itself is clean (audit m1).
+    start_idx = len(report.results)
     data = _load_json_or_report(mcp_path, MAX_MCP_JSON_BYTES, report, file_label)
     if data is None:
         return
@@ -578,7 +597,8 @@ def validate_mcp_json_project_scope(mcp_path: Path, report: ValidationReport) ->
                 file_label,
             )
 
-    if not report.has_critical and not report.has_major and not report.has_minor:
+    own_levels = {r.level for r in report.results[start_idx:]}
+    if not own_levels & {"CRITICAL", "MAJOR", "MINOR"}:
         report.passed(".mcp.json project-scope rules OK", file_label)
 
 
@@ -951,13 +971,26 @@ def validate_loop_md_project(loop_path: Path, repo_root: Path, report: Validatio
 
 
 def _merge_subreport_project(subreport: ValidationReport, parent: ValidationReport, label_prefix: str) -> None:
-    """Copy findings from a sub-validator into the main report with a prefix."""
+    """Copy findings from a sub-validator into the main report with a prefix.
+
+    Forwards ``phase``/``fixable``/``fix_id`` so an auto-fixable finding stays
+    auto-fixable when surfaced through scope validation (TRDD-f4e2d385: scope
+    validation must give the same remediation coverage as the plugin pipeline),
+    plus ``category``/``suggestion`` so the sub-validator's sub-category tag and
+    remediation hint survive the merge (audit m9 — closed by widening
+    ``ValidationReport.add`` in cpv_validation_common.py).
+    """
     for r in subreport.results:
         parent.add(
             r.level,
             f"{label_prefix} {r.message}",
             r.file,
             r.line,
+            phase=r.phase,
+            fixable=r.fixable,
+            fix_id=r.fix_id,
+            category=r.category,
+            suggestion=r.suggestion,
         )
 
 
@@ -1128,7 +1161,20 @@ def validate_project_rules_deep(rules_dir: Path, repo_root: Path, project_root: 
             # least one tracked rule file exists.
             if resolved is not None and resolved not in tracked:
                 continue
-        report.add(r.level, f"[rules] {r.message}", r.file, r.line)
+        # Forward phase/fixable/fix_id so rules findings stay auto-fixable when
+        # surfaced through scope validation (audit m2), plus category/suggestion
+        # now that ValidationReport.add accepts them (audit m9).
+        report.add(
+            r.level,
+            f"[rules] {r.message}",
+            r.file,
+            r.line,
+            phase=r.phase,
+            fixable=r.fixable,
+            fix_id=r.fix_id,
+            category=r.category,
+            suggestion=r.suggestion,
+        )
 
 
 def _validate_mcp_json_file_deep_project(mcp_path: Path, report: ValidationReport) -> None:

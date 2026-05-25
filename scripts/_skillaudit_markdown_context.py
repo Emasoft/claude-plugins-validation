@@ -95,7 +95,12 @@ _DATA_LANGS: Final[frozenset[str]] = frozenset(
     }
 )
 
-_FENCE_RE: Final[re.Pattern[str]] = re.compile(r"^(?P<fence>```+|~~~+)\s*(?P<lang>[A-Za-z0-9_+-]*)\s*$")
+# NOTE: leading ``\s*`` so INDENTED fences (a ```bash block nested under
+# a list bullet, e.g. ``    ```bash``) are recognised. The native
+# ``_build_code_block_map`` matches against ``line.strip()``; without the
+# ``\s*`` here this classifier would mis-see an indented fence as prose →
+# lose the bash-fence severity uplift the native loop applies. (audit MINOR #7)
+_FENCE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?P<fence>```+|~~~+)\s*(?P<lang>[A-Za-z0-9_+-]*)\s*$")
 
 
 def _build_fence_map(source: str) -> list[tuple[int, int, str] | None]:
@@ -547,6 +552,25 @@ def classify(
         # (UNTRUSTED / "not as a command" / "treat as data" / etc.),
         # the agent is warning ITSELF — demote (iron rule: still
         # visible at NIT for downstream agent triage).
+        #
+        # audit MINOR #8 (rejected as written — see report): the audit
+        # proposed gating this demote OFF in instruction-loadable paths
+        # (SKILL.md / agents/ / commands/) on the theory that an attacker
+        # could plant "treat as UNTRUSTED" beside a live payload to force a
+        # downgrade. But issue #39 SHIPPED this exact demote FOR agent
+        # files (the llm-externalizer fixer agents legitimately quote
+        # `Ignore previous instructions …` inside inline-code in a
+        # numbered "Prompt-injection defense" guardrail), and the forged
+        # case and the legitimate case are HEURISTICALLY INDISTINGUISHABLE
+        # at the local-context level (both: attack phrase in inline-code +
+        # defensive vocab nearby). Crucially, the verdict here is
+        # ``code_fence_neutral`` → DEMOTE, NOT suppress — so even in the
+        # "forged" case the finding stays VISIBLE at NIT and the security
+        # agent triages it. The iron rule (never silently drop a possible
+        # threat) is preserved either way, so the #39 FP-reduction wins
+        # over a path gate that would regress it. (kept: visible-demote
+        # both ways; the audit's path-gate would have produced false
+        # negatives only if this were a SUPPRESS, which it is not.)
         if _match_inside_quoted_string(line, match) and _has_defensive_vocab_nearby(lines, line_idx, span=5):
             return "code_fence_neutral"
         if _match_falls_inside_inline_code(line, match) and _has_defensive_vocab_nearby(lines, line_idx, span=5):
