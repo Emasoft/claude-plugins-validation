@@ -152,3 +152,28 @@ Change 2:
     separate "fix" turn — re-reading the same file in a follow-up call
     doubles the token expense for no benefit. If you can read it, you
     can fix it; do both before returning.
+
+## Examples
+
+<example>
+user: Spark — clear the advisory WARNING in `README.md` (code block at line
+413 missing a language tag). You own README.md only. Verify with the docs
+validator, return the report path.
+assistant: Bounded single-file fix — exactly cpv-spark's lane.
+[Reads README.md around line 413; inspects the block — slash-command syntax]
+[Adds the `text` language tag to the opening fence, same turn]
+[Re-runs validate_documentation.py: the WARNING is gone, no new finding]
+[DONE] fix-readme-langtag — 1 warning cleared. Report: reports/cpv-spark/output-20260525_142210+0200.md
+</example>
+
+<example>
+user: Batch fix shard 3 of 5 — you own these 4 files, fix the one MINOR
+finding (broken backtick path) in each. The orchestrator passes the exact
+file paths in the dispatch. Do not touch any other file.
+assistant: Four bounded edits, one file each — I'll fan through them in order
+without re-reading.
+[For each path the orchestrator listed: reads the file, locates the dead
+backtick ref, repoints or removes it in the same turn, then lints]
+[Re-validates the 4 files: 0 findings remain]
+[DONE] batch-shard-3 — 4 MINOR findings cleared across 4 files. Report: reports/cpv-spark/output-20260525_144705+0200.md
+</example>

@@ -161,7 +161,7 @@ See [Part 1](#part-1-standalone-validation-via-uvx) for terminal/CI use and
 You need [uv](https://docs.astral.sh/uv/getting-started/installation/) installed. Then:
 
 ```bash
-# Validate a plugin (runs all 20 checks + linting)
+## Validate a plugin (runs all 20 checks + linting)
 uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
     cpv-remote-validate validate_plugin /path/to/your-plugin
 ```
@@ -175,27 +175,27 @@ The `--with pyyaml` flag ensures the YAML parser dependency is available.
 `cpv-remote-validate` is the recommended way to validate external plugins. It wraps any CPV script with environment isolation so that the target plugin's local files (`pyproject.toml`, `.mypy.ini`, stale module copies) cannot interfere with validation.
 
 ```bash
-# Full plugin validation (short alias)
+## Full plugin validation (short alias)
 uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
     cpv-remote-validate plugin /path/to/plugin
 
-# Save a report to a file
+## Save a report to a file
 uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
     cpv-remote-validate plugin /path/to/plugin -o report.md
 
-# Validate a single skill with strict mode
+## Validate a single skill with strict mode
 uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
     cpv-remote-validate skill /path/to/skill --strict
 
-# Security scan
+## Security scan
 uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
     cpv-remote-validate security /path/to/plugin
 
-# Show help and all available commands
+## Show help and all available commands
 uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
     cpv-remote-validate --help
 
-# From the CPV plugin cache (inside Claude Code):
+## From the CPV plugin cache (inside Claude Code):
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin /path/to/plugin
 ```
 
@@ -292,34 +292,34 @@ For the full CLI commands reference, see the [official Anthropic docs](https://c
 CPV depends on **`claude-menu-system >= 0.1.5`** (same `emasoft-plugins` marketplace). It provides the post-turn Stop/SubagentStop hook that renders every CPV menu at zero token cost (see [Menu Architecture](#menu-architecture) below). `claude plugin install` auto-resolves this dependency — no manual step needed. If CMS is missing at runtime, CPV's `cpv_menu` helper fails fast with an actionable install hint (fail-fast, no silent fallback).
 
 ```bash
-# Add the Emasoft marketplace (first time only)
+## Add the Emasoft marketplace (first time only)
 claude plugin marketplace add emasoft-plugins --url https://github.com/Emasoft/emasoft-plugins
 
-# Install CPV (--scope user = available in all your projects, recommended)
+## Install CPV (--scope user = available in all your projects, recommended)
 claude plugin install claude-plugins-validation@emasoft-plugins --scope user
 
-# OR install for this project only (--scope local, gitignored)
+## OR install for this project only (--scope local, gitignored)
 claude plugin install claude-plugins-validation@emasoft-plugins --scope local
 
-# IMPORTANT: Restart Claude Code after installing, or run /reload-plugins
+## IMPORTANT: Restart Claude Code after installing, or run /reload-plugins
 ```
 
 ### Managing the Plugin
 
 ```bash
-# Update to the latest version
+## Update to the latest version
 claude plugin update claude-plugins-validation@emasoft-plugins --scope user
 
-# Disable without removing
+## Disable without removing
 claude plugin disable claude-plugins-validation@emasoft-plugins --scope user
 
-# Re-enable
+## Re-enable
 claude plugin enable claude-plugins-validation@emasoft-plugins --scope user
 
-# Uninstall completely
+## Uninstall completely
 claude plugin uninstall claude-plugins-validation@emasoft-plugins --scope user
 
-# Uninstall but keep persistent data
+## Uninstall but keep persistent data
 claude plugin uninstall claude-plugins-validation@emasoft-plugins --scope user --keep-data
 ```
 
@@ -410,7 +410,7 @@ For the canonical menu spec catalogue (every menu tree CPV emits, in one place),
 
 **v2.90.0 — one entry point + v2.101.0 batch family.** The canonical entry is still `/cpv-main-menu`. Type it; pick a number; navigate the entire plugin from a single coherent menu tree. v2.101.0 adds 10 user-invocable batch slash commands (`/cpv-batch-*`) for fleet-scale operations across many plugins in parallel — these are also reachable from the main menu (row 1 → row 7 "Batch / fleet"), and `/cpv-pre-install-scan` is the standalone pre-install security gate.
 
-```
+```text
 /cpv-main-menu                   # interactive — entry point for everything
 /cpv-batch-validate <input>      # fleet validate
 /cpv-batch-full-scan-and-fix <input>   # validate + security + cache + fix in one pass
