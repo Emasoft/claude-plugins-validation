@@ -358,15 +358,25 @@ on:
   pull_request:
     branches: [main, master]
 
+# Least-privilege token + cancel-in-progress, matching generate_plugin_repo.py.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        # SHA-pinned (matches generate_plugin_repo.py) per CPV's gh-actions rule.
+        uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
 
       - name: Set up Python
         run: uv python install 3.12
@@ -480,6 +490,7 @@ concurrency:
 jobs:
   update-readme:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
