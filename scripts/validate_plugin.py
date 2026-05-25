@@ -61,15 +61,20 @@ from cpv_validation_common import (
     validate_md_file_paths,
     validate_md_urls,
     validate_no_absolute_paths,
-    validate_plugin_shipped_restrictions,
     validate_toc_embedding,
 )
 from detect_language import detect_languages
 from detect_lockfiles import detect_lockfiles
 from gitignore_filter import GitignoreFilter
+from validate_agent import validate_agent as validate_agent_full
+from validate_command import validate_command as validate_command_full
+from validate_documentation import validate_documentation as validate_documentation_full
+from validate_encoding import validate_encoding as validate_encoding_full
 from validate_hook import (
     validate_hooks as validate_hook_file,
 )
+from validate_hook_precedence import validate_hook_precedence as validate_hook_precedence_file
+from validate_lsp import validate_plugin_lsp
 from validate_mcp import validate_plugin_mcp
 from validate_rules import validate_rules_directory
 
@@ -1456,101 +1461,13 @@ def validate_manifest(
             if ch:
                 report.passed(f"'channels' schema valid: {len(ch)} channel(s)", ".claude-plugin/plugin.json")
 
-    # Validate lspServers required fields (command + extensionToLanguage) plus
-    # optional-field type checks. GAP-65/66/67/68 (v2.22.3) tighten type-checks
-    # for `settings`/`initializationOptions`/`workspaceFolder`/`restartOnCrash`/
-    # `args`/`env` on the inline `lspServers` block so malformed values are
-    # flagged here as MINOR without needing to invoke the full `validate_lsp`
-    # helper (which operates on external `.lsp.json` files).
-    if "lspServers" in manifest and isinstance(manifest["lspServers"], dict):
-        for name, config in manifest["lspServers"].items():
-            if isinstance(config, dict):
-                if "command" not in config:
-                    report.major(f"LSP server '{name}' missing required 'command' field", ".claude-plugin/plugin.json")
-                if "extensionToLanguage" not in config:
-                    report.major(
-                        f"LSP server '{name}' missing required 'extensionToLanguage' field",
-                        ".claude-plugin/plugin.json",
-                    )
-                elif isinstance(config["extensionToLanguage"], dict):
-                    for ext in config["extensionToLanguage"]:
-                        if not ext.startswith("."):
-                            report.minor(
-                                f"LSP server '{name}' extensionToLanguage key '{ext}' should start with '.'",
-                                ".claude-plugin/plugin.json",
-                            )
-                # GAP-67 (v2.22.3): `args` must be a list of strings per
-                # plugins-reference.md:243.
-                if "args" in config:
-                    args_val = config["args"]
-                    if not isinstance(args_val, list):
-                        report.minor(
-                            f"LSP server '{name}' 'args' must be an array, got {type(args_val).__name__} "
-                            "(plugins-reference.md:243)",
-                            ".claude-plugin/plugin.json",
-                        )
-                    else:
-                        for ai, arg in enumerate(args_val):
-                            if not isinstance(arg, str):
-                                report.minor(
-                                    f"LSP server '{name}' args[{ai}] must be a string, got {type(arg).__name__}",
-                                    ".claude-plugin/plugin.json",
-                                )
-                # GAP-68 (v2.22.3): `env` must be a dict with string values per
-                # plugins-reference.md:245.
-                if "env" in config:
-                    env_val = config["env"]
-                    if not isinstance(env_val, dict):
-                        report.minor(
-                            f"LSP server '{name}' 'env' must be an object, got {type(env_val).__name__} "
-                            "(plugins-reference.md:245)",
-                            ".claude-plugin/plugin.json",
-                        )
-                    else:
-                        for env_key, env_value in env_val.items():
-                            if not isinstance(env_value, str):
-                                report.minor(
-                                    f"LSP server '{name}' env[{env_key!r}] must be a string, "
-                                    f"got {type(env_value).__name__}",
-                                    ".claude-plugin/plugin.json",
-                                )
-                # GAP-65 (v2.22.3): `initializationOptions` must be an object.
-                if "initializationOptions" in config:
-                    init_val = config["initializationOptions"]
-                    if not isinstance(init_val, dict):
-                        report.minor(
-                            f"LSP server '{name}' 'initializationOptions' must be an object, "
-                            f"got {type(init_val).__name__} (plugins-reference.md:241-252)",
-                            ".claude-plugin/plugin.json",
-                        )
-                # GAP-65 (v2.22.3): `settings` must be an object.
-                if "settings" in config:
-                    settings_val = config["settings"]
-                    if not isinstance(settings_val, dict):
-                        report.minor(
-                            f"LSP server '{name}' 'settings' must be an object, "
-                            f"got {type(settings_val).__name__} (plugins-reference.md:241-252)",
-                            ".claude-plugin/plugin.json",
-                        )
-                # GAP-65 (v2.22.3): `workspaceFolder` must be a string.
-                if "workspaceFolder" in config:
-                    wf_val = config["workspaceFolder"]
-                    if not isinstance(wf_val, str):
-                        report.minor(
-                            f"LSP server '{name}' 'workspaceFolder' must be a string, "
-                            f"got {type(wf_val).__name__} (plugins-reference.md:241-252)",
-                            ".claude-plugin/plugin.json",
-                        )
-                # GAP-66 (v2.22.3): `restartOnCrash` must be a boolean per
-                # plugins-reference.md:251.
-                if "restartOnCrash" in config:
-                    roc_val = config["restartOnCrash"]
-                    if not isinstance(roc_val, bool):
-                        report.minor(
-                            f"LSP server '{name}' 'restartOnCrash' must be a boolean, "
-                            f"got {type(roc_val).__name__} (plugins-reference.md:251)",
-                            ".claude-plugin/plugin.json",
-                        )
+    # Inline `lspServers` validation was removed here (TRDD-021250b5 Phase 3):
+    # the comprehensive `validate_plugin_lsp()` is now the single source of truth
+    # and is wired into parallel_tasks via the `validate_lsp` wrapper. It reads
+    # plugin.json:lspServers itself (plus the external .lsp.json / lsp.json /
+    # lsp-config.json / .vscode/settings.json files the inline block never
+    # covered) and emits the correct severities, fixing the 8 severity
+    # discrepancies the old inline block carried.
 
     # Claude Code auto-discovers standard directories at the plugin root.
     # Empirically verified 2026-04-18:
@@ -2199,45 +2116,16 @@ def validate_commands(plugin_root: Path, report: ValidationReport) -> None:
 
 
 def validate_command_file(cmd_path: Path, report: ValidationReport) -> None:
-    """Validate a single command file."""
+    """Validate a single command file by delegating to the comprehensive validator.
+
+    `validate_command` (validate_command.py) is the single source of truth: it
+    owns the frontmatter, name==filename, and description checks (plus the wider
+    command suite) that used to be duplicated inline here. No TOC embedding check
+    applies to commands.
+    """
     rel_path = f"commands/{cmd_path.name}"
-    content = cmd_path.read_text(encoding="utf-8")
-
-    # Check frontmatter
-    if not content.startswith("---"):
-        report.critical("No frontmatter in command file", rel_path)
-        return
-
-    try:
-        parts = content.split("---", 2)
-        if len(parts) < 3:
-            report.critical("Malformed frontmatter (missing closing ---)", rel_path)
-            return
-
-        frontmatter = yaml.safe_load(parts[1])
-    except yaml.YAMLError as e:
-        report.critical(f"Invalid YAML frontmatter: {e}", rel_path)
-        return
-
-    if not frontmatter:
-        report.critical("Empty frontmatter", rel_path)
-        return
-
-    report.passed("Valid YAML frontmatter", rel_path)
-
-    # Required fields
-    if "name" not in frontmatter:
-        report.critical("Missing 'name' in frontmatter", rel_path)
-    else:
-        expected_name = cmd_path.stem
-        if frontmatter["name"] != expected_name:
-            report.major(
-                f"Command name '{frontmatter['name']}' doesn't match filename '{expected_name}'",
-                rel_path,
-            )
-
-    if "description" not in frontmatter:
-        report.major("Missing 'description' in frontmatter", rel_path)
+    for result in validate_command_full(cmd_path).results:
+        report.add(result.level, result.message, rel_path, result.line)
 
 
 def validate_agents(plugin_root: Path, report: ValidationReport) -> None:
@@ -2261,46 +2149,22 @@ def validate_agents(plugin_root: Path, report: ValidationReport) -> None:
 
 
 def validate_agent_file(agent_path: Path, report: ValidationReport) -> None:
-    """Validate a single agent file."""
+    """Validate a single agent file by delegating to the comprehensive validator.
+
+    `validate_agent` (validate_agent.py) is the single source of truth: it
+    auto-detects plugin-shipped context via is_plugin_shipped_agent() and runs
+    the forbidden/allowed-field restriction checks, frontmatter/name/description
+    checks, and the agent security suite. The previously-inline frontmatter,
+    name, and plugin-shipped-restriction checks here were thin duplicates and
+    are now removed.
+    """
     rel_path = f"agents/{agent_path.name}"
-    content = agent_path.read_text(encoding="utf-8")
+    for result in validate_agent_full(agent_path).results:
+        report.add(result.level, result.message, rel_path, result.line)
 
-    # Check frontmatter
-    if not content.startswith("---"):
-        report.critical("No frontmatter in agent file", rel_path)
-        return
-
-    try:
-        parts = content.split("---", 2)
-        if len(parts) < 3:
-            report.critical("Malformed frontmatter (missing closing ---)", rel_path)
-            return
-
-        frontmatter = yaml.safe_load(parts[1])
-    except yaml.YAMLError as e:
-        report.critical(f"Invalid YAML frontmatter: {e}", rel_path)
-        return
-
-    if not frontmatter:
-        report.critical("Empty frontmatter", rel_path)
-        return
-
-    report.passed("Valid YAML frontmatter", rel_path)
-
-    # Required fields for agents
-    if "name" not in frontmatter:
-        report.critical("Missing 'name' in frontmatter", rel_path)
-
-    if "description" not in frontmatter:
-        report.major("Missing 'description' in frontmatter", rel_path)
-
-    # Plugin agents do NOT support hooks, mcpServers, or permissionMode (per official spec).
-    # These are security restrictions — only project agents (.claude/agents/) can use them.
-    # Uses the shared helper from cpv_validation_common so validate_agent.py and this
-    # orchestrator call path emit identical messages.
-    validate_plugin_shipped_restrictions(frontmatter, rel_path, report, is_plugin_shipped=True)
-
-    # Validate TOC embedding — agent files must embed TOCs from referenced .md files
+    # validate_agent does NOT do the orchestrator's cross-file TOC-embedding
+    # check (agent files must embed TOCs from referenced .md files), so re-add it.
+    content = agent_path.read_text(encoding="utf-8", errors="replace")
     validate_toc_embedding(content, agent_path, agent_path.parent, report)
 
 
@@ -2341,6 +2205,47 @@ def validate_mcp(plugin_root: Path, report: ValidationReport) -> None:
 
     # Transfer all results to main report
     for result in mcp_report.results:
+        report.add(result.level, result.message, result.file, result.line)
+
+
+def validate_lsp(plugin_root: Path, report: ValidationReport) -> None:
+    """Validate all LSP configurations — delegates to validate_plugin_lsp().
+
+    Single source of truth (TRDD-021250b5 Phase 3): covers plugin.json:lspServers
+    AND the external .lsp.json / lsp.json / lsp-config.json / .vscode/settings.json
+    files, cross-source name collisions, and the full per-field type/severity
+    checks the old inline block (removed from validate_manifest) never did.
+    """
+    lsp_report = validate_plugin_lsp(plugin_root)
+    for result in lsp_report.results:
+        report.add(result.level, result.message, result.file, result.line)
+
+
+def validate_hook_precedence_all(plugin_root: Path, report: ValidationReport) -> None:
+    """Validate cross-hook precedence conflicts for all hooks.json files."""
+    hooks_dir = plugin_root / "hooks"
+    if not hooks_dir.is_dir():
+        return  # No hooks/ dir — nothing to check; validate_hooks already covers this
+    hooks_json = hooks_dir / "hooks.json"
+    if not hooks_json.exists():
+        return  # No hooks.json — nothing to check
+    prec_report = validate_hook_precedence_file(hooks_json)
+    for result in prec_report.results:
+        file_path = result.file or "hooks/hooks.json"
+        if file_path and file_path.startswith(str(plugin_root)):
+            file_path = file_path[len(str(plugin_root)) + 1 :]
+        report.add(result.level, result.message, file_path, result.line)
+
+
+def validate_encoding(plugin_root: Path, report: ValidationReport) -> None:
+    """Validate file encodings — delegates to validate_encoding (validate_encoding.py).
+
+    Confirmed coverage gap (TRDD-021250b5 Phase 3): the whole-plugin path never
+    ran the encoding validator. Catches non-UTF-8 files, BOM markers, CRLF/mixed
+    line endings, and invisible/control characters across the plugin tree.
+    """
+    enc_report = validate_encoding_full(plugin_root)
+    for result in enc_report.results:
         report.add(result.level, result.message, result.file, result.line)
 
 
@@ -3256,12 +3161,21 @@ def validate_output_styles(plugin_root: Path, report: ValidationReport) -> None:
 
 
 def validate_readme(plugin_root: Path, report: ValidationReport) -> None:
-    """Validate README.md exists and has recommended markers."""
+    """Validate README and all documentation — delegates to validate_documentation().
+
+    `validate_documentation` (validate_documentation.py) is the single source of
+    truth for the 13 documentation rules (README existence at CRITICAL,
+    installation/usage/description sections, broken links, image refs, CHANGELOG,
+    heading hierarchy, code-fence closure + language tags, list/table structure).
+    It OWNS the README-existence finding, so the old inline MINOR existence check
+    is removed. The badge-marker check below is NOT part of validate_documentation
+    and is preserved here.
+    """
+    doc_report = validate_documentation_full(plugin_root)
+    for result in doc_report.results:
+        report.add(result.level, result.message, result.file, result.line)
+
     readme = plugin_root / "README.md"
-    if readme.exists():
-        report.passed("README.md found")
-    else:
-        report.minor("README.md not found")
 
     # Badge markers for automated badge updates (v2.26.0 — narrowed).
     #
@@ -6047,7 +5961,10 @@ def main() -> int:
         ("validate_commands", validate_commands, ((), {})),
         ("validate_agents", validate_agents, ((), {})),
         ("validate_hooks", validate_hooks, ((), {})),
+        ("validate_hook_precedence_all", validate_hook_precedence_all, ((), {})),
         ("validate_mcp", validate_mcp, ((), {})),
+        ("validate_lsp", validate_lsp, ((), {})),
+        ("validate_encoding", validate_encoding, ((), {})),
         # TRDD-e3e74f69 telemetry hookup — OTEL supply-chain audit on every plugin
         ("validate_telemetry", validate_telemetry, ((), {})),
         ("validate_scripts", validate_scripts, ((), {})),

@@ -217,6 +217,17 @@ def validate_name_field(frontmatter: dict[str, Any], filename: str, report: Comm
     # Uniform naming validation via shared function
     validate_component_name(name, "command", report)
 
+    # The command name must match the filename stem — the file IS the invocation
+    # identity (`/<stem>`); a divergent frontmatter name is misleading. (Preserved
+    # from the pre-delegation orchestrator check so the whole-plugin path keeps it.)
+    expected_stem = Path(filename).stem
+    if name != expected_stem:
+        report.major(
+            f"Command name '{name}' doesn't match filename '{expected_stem}' "
+            f"(the command is invoked as /{expected_stem}).",
+            filename,
+        )
+
 
 def validate_description_field(frontmatter: dict[str, Any], filename: str, report: CommandValidationReport) -> None:
     """Validate the 'description' frontmatter field (token-based: description <=200 tok, when_to_use <=100 tok)."""
