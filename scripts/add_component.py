@@ -127,11 +127,16 @@ def _register_in_the_skills_menu(plugin: Path, new_skill_name: str, description:
     if new_skill_name in ("the-skills-menu", "the-skills-menu-create"):
         return False
     content = catalog.read_text(encoding="utf-8")
-    # Already listed (case-insensitive substring match on the skill name)
-    # → idempotent no-op.
-    if new_skill_name.lower() in content.lower():
+    # Already listed → idempotent no-op. Match the BACKTICK-WRAPPED name as it
+    # appears in a catalog row (`name`), not a bare substring — a bare substring
+    # match falsely skips a new skill whose name is a substring of an existing
+    # entry (e.g. "fix" when "fix-validation" is already listed).
+    if f"`{new_skill_name}`".lower() in content.lower():
         return False
-    short_desc = description.strip().splitlines()[0][:80] if description.strip() else "(describe the skill)"
+    raw_desc = description.strip().splitlines()[0][:80] if description.strip() else "(describe the skill)"
+    # Escape '|' so a description containing a pipe can't break out of the
+    # Markdown table cell and corrupt the catalog table.
+    short_desc = raw_desc.replace("|", "\\|")
     new_row = f"| _ | _ | `{new_skill_name}` — {short_desc} |\n"
     # Find the "## Plugin Skills" section and insert at the end of its
     # first markdown table (or just after the section heading if no
@@ -165,7 +170,27 @@ def _register_in_the_skills_menu(plugin: Path, new_skill_name: str, description:
     return True
 
 
+# Component names become path segments (skills/<name>/, agents/<name>.md,
+# commands/<name>.md), so they must be a bare kebab-case slug — no path
+# separators, no "..". Mirrors cpv_pack_components._validate_name so the two
+# authoring tools agree.
+_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+
+
+def _validate_name(name: str, kind: str) -> None:
+    """Reject names that would escape the plugin root or build an unsafe path.
+
+    Without this a ``--name ../../foo`` writes the component file OUTSIDE the
+    plugin (after which ``relative_to(plugin)`` raises). Self-injection only
+    (the user supplies their own --name), but a footgun the sibling packer
+    already guards against — so we match it here.
+    """
+    if not _NAME_RE.match(name):
+        raise SystemExit(f"{kind} name must match {_NAME_RE.pattern} (kebab-case, no '/' or '..'); got {name!r}")
+
+
 def add_skill(plugin: Path, name: str, description: str, *, force: bool) -> int:
+    _validate_name(name, "skill")
     skill_dir = plugin / "skills" / name
     skill_md = skill_dir / "SKILL.md"
     if skill_md.is_file() and not force:
@@ -182,6 +207,7 @@ def add_skill(plugin: Path, name: str, description: str, *, force: bool) -> int:
 
 
 def add_agent(plugin: Path, name: str, description: str, tools: str, *, force: bool) -> int:
+    _validate_name(name, "agent")
     agents_dir = plugin / "agents"
     agent_md = agents_dir / f"{name}.md"
     if agent_md.is_file() and not force:
@@ -194,6 +220,7 @@ def add_agent(plugin: Path, name: str, description: str, tools: str, *, force: b
 
 
 def add_command(plugin: Path, name: str, description: str, allowed_tools: str, *, force: bool) -> int:
+    _validate_name(name, "command")
     cmd_dir = plugin / "commands"
     cmd_md = cmd_dir / f"{name}.md"
     if cmd_md.is_file() and not force:

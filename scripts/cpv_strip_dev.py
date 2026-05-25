@@ -26,7 +26,7 @@ Security model is documented in:
 
 Idempotent state machine (per TRDD-793ac32a §2.5):
 
-    INIT → REPO_VERIFIED → REPO_CREATED → CONTENT_PUSHED →
+    INIT → REPO_VERIFIED → CONTENT_PUSHED →
     SUBMODULE_ADDED → COMMITTED → DONE
 
 State checkpointed at `<plugin_root>/.cpv-strip-state.json` so a
@@ -88,7 +88,6 @@ class StripState(str, Enum):
 
     INIT = "INIT"
     REPO_VERIFIED = "REPO_VERIFIED"
-    REPO_CREATED = "REPO_CREATED"
     CONTENT_PUSHED = "CONTENT_PUSHED"
     SUBMODULE_ADDED = "SUBMODULE_ADDED"
     COMMITTED = "COMMITTED"
@@ -96,10 +95,12 @@ class StripState(str, Enum):
 
 
 # Ordered transitions; index in this tuple = "progress score".
+# (Repo verification and creation happen together in the REPO_VERIFIED step —
+# there is no separate REPO_CREATED state; it was declared but never set, so it
+# was removed rather than left as a dead, misleading enum member.)
 _STATE_ORDER: tuple[StripState, ...] = (
     StripState.INIT,
     StripState.REPO_VERIFIED,
-    StripState.REPO_CREATED,
     StripState.CONTENT_PUSHED,
     StripState.SUBMODULE_ADDED,
     StripState.COMMITTED,
@@ -156,11 +157,17 @@ class StripPlan:
 # ── Path-traversal defense (STRIP-E001..E006) ─────────────────────────────────
 
 
-def validate_src_path(src: str, plugin_root: Path) -> Path:
+def validate_src_path(src: str, plugin_root: Path, *, must_exist: bool = True) -> Path:
     """Validate an extract-source path. Raises `StripError` on rejection.
 
     Returns the resolved Path on success. Per TRDD-793ac32a §2.3, ALL
     of these checks must succeed before any write/move happens.
+
+    ``must_exist`` (default True) applies the existence + is-directory checks,
+    correct for an EXTRACT SOURCE (which must already be in the working tree).
+    Pass ``must_exist=False`` for a DESTINATION path (e.g. a submodule mount
+    point that does not exist yet): the name / reserved-set / subpath /
+    ancestor-symlink guards still run, but the path is not required to exist.
     """
     if not src:
         raise StripError("STRIP-E003", "src path is empty")
@@ -214,10 +221,11 @@ def validate_src_path(src: str, plugin_root: Path) -> Path:
             break
         cursor = cursor.parent
 
-    if not candidate.exists():
-        raise StripError("STRIP-E004", f"src '{src}' does not exist in plugin")
-    if not candidate.is_dir():
-        raise StripError("STRIP-E005", f"src '{src}' is not a directory")
+    if must_exist:
+        if not candidate.exists():
+            raise StripError("STRIP-E004", f"src '{src}' does not exist in plugin")
+        if not candidate.is_dir():
+            raise StripError("STRIP-E005", f"src '{src}' is not a directory")
     return candidate
 
 
@@ -503,6 +511,14 @@ def build_plan(
     # Validate every src path before returning.
     for t in targets:
         validate_src_path(t.src, plugin_root)
+        # submodule_path is where the extracted content gets re-mounted as a
+        # git submodule — validate it the SAME way as src (name / reserved-set /
+        # subpath / ancestor-symlink), but with must_exist=False because the
+        # mount point does not exist yet. git itself refuses an OUT-of-tree
+        # submodule path, but the IN-tree reserved-dir case (e.g. a crafted
+        # plugin.json mounting a submodule over scripts/ or .claude-plugin/)
+        # was previously unguarded because only t.src ran through this.
+        validate_src_path(t.submodule_path, plugin_root, must_exist=False)
 
     keep_in_main = strip.get("keep_in_main", [])
     if not isinstance(keep_in_main, list):
@@ -786,7 +802,15 @@ def _replace_with_submodule(target: ExtractTarget, plugin_root: Path) -> None:
     sub_path = target.submodule_path.rstrip("/")
     print(f"  [git rm] {target.src}")
     subprocess.run(
-        ["git", "-C", str(plugin_root), "rm", "-rf", target.src],
+        # --ignore-unmatch makes the rm idempotent: this step is only
+        # checkpointed (CONTENT_PUSHED -> SUBMODULE_ADDED) AFTER the whole
+        # function returns, so a crash BETWEEN this rm and the submodule-add
+        # below leaves the run in CONTENT_PUSHED. A resume re-enters here and
+        # re-runs the rm on an already-removed path — without --ignore-unmatch
+        # `git rm` would exit non-zero ("pathspec did not match") and check=True
+        # would abort the plan mid-surgery. Content is already safe in the
+        # submodule repo (pushed in the prior step), so a no-op rm is correct.
+        ["git", "-C", str(plugin_root), "rm", "-rf", "--ignore-unmatch", target.src],
         check=True,
         capture_output=True,
         timeout=60,

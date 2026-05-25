@@ -204,9 +204,9 @@ def test_check_working_tree_safe_rejects_detached_head(tmp_path):
 
 def test_save_and_load_state_round_trip(tmp_path):
     plugin = _make_plugin(tmp_path)
-    csd.save_state(plugin, {"state": "REPO_CREATED", "targets": ["tests"]})
+    csd.save_state(plugin, {"state": "CONTENT_PUSHED", "targets": ["tests"]})
     loaded = csd.load_state(plugin)
-    assert loaded["state"] == "REPO_CREATED"
+    assert loaded["state"] == "CONTENT_PUSHED"
     assert loaded["targets"] == ["tests"]
 
 
@@ -233,8 +233,13 @@ def test_clear_state_removes_file(tmp_path):
 def test_state_progress_recognises_states(tmp_path):
     assert csd.state_progress({}) == 0
     assert csd.state_progress({"state": "INIT"}) == 0
-    assert csd.state_progress({"state": "REPO_CREATED"}) == 2
-    assert csd.state_progress({"state": "DONE"}) == 6
+    # New _STATE_ORDER (REPO_CREATED removed): INIT=0, REPO_VERIFIED=1,
+    # CONTENT_PUSHED=2, SUBMODULE_ADDED=3, COMMITTED=4, DONE=5.
+    assert csd.state_progress({"state": "REPO_VERIFIED"}) == 1
+    assert csd.state_progress({"state": "CONTENT_PUSHED"}) == 2
+    assert csd.state_progress({"state": "DONE"}) == 5
+    # The removed dead state is now unknown → 0 (treated as fresh start).
+    assert csd.state_progress({"state": "REPO_CREATED"}) == 0
     # Unknown state → 0 (treated as fresh start).
     assert csd.state_progress({"state": "BOGUS"}) == 0
 

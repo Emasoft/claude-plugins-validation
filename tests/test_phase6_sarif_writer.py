@@ -116,8 +116,20 @@ class TestSarifShape:
         sarif = results_to_sarif([], plugin)
         bases = sarif["runs"][0]["originalUriBaseIds"]
         assert "%SRCROOT%" in bases
-        assert bases["%SRCROOT%"]["uri"].startswith("file://")
-        assert bases["%SRCROOT%"]["uri"].endswith("/")
+        # Privacy (audit #16): the default base must NOT embed the absolute host
+        # path — no 'uri' key, just a human-readable description. Artifact URIs
+        # are relative, so consumers resolve against their own checkout.
+        assert "uri" not in bases["%SRCROOT%"]
+        assert "description" in bases["%SRCROOT%"]
+        # The absolute plugin path / username must not leak anywhere in the base.
+        assert str(plugin.resolve()) not in json.dumps(bases)
+
+    def test_src_root_uri_opt_in(self, tmp_path: Path) -> None:
+        """Two-sided: a caller can still opt in to an explicit SRCROOT uri."""
+        plugin = _make_plugin(tmp_path)
+        sarif = results_to_sarif([], plugin, src_root_uri="srcroot:/")
+        bases = sarif["runs"][0]["originalUriBaseIds"]
+        assert bases["%SRCROOT%"]["uri"] == "srcroot:/"
 
 
 # -----------------------------------------------------------------------------

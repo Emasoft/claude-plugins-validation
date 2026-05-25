@@ -134,7 +134,10 @@ def _read_deps_from_git_url(url: str) -> list:
     with tempfile.TemporaryDirectory(prefix="cpv-add-deps-") as tmp:
         try:
             subprocess.run(
-                ["git", "clone", "--depth", "1", "--filter=blob:none", url, tmp],
+                # `--` ends option parsing so a `--from` value like
+                # `--upload-pack=…` can't be parsed by git as an option (a known
+                # clone RCE primitive). Self-injection only here, but cheap to close.
+                ["git", "clone", "--depth", "1", "--filter=blob:none", "--", url, tmp],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -142,6 +145,13 @@ def _read_deps_from_git_url(url: str) -> list:
             )
         except subprocess.CalledProcessError as exc:
             raise RuntimeError(f"--from {url}: git clone failed: {exc.stderr.strip() or exc}") from exc
+        except subprocess.TimeoutExpired as exc:
+            # main()'s --from loop only catches RuntimeError; without this a 60s
+            # clone timeout would escape as a raw traceback instead of the clean
+            # ERROR path.
+            raise RuntimeError(f"--from {url}: git clone timed out after 60s") from exc
+        except OSError as exc:
+            raise RuntimeError(f"--from {url}: git clone could not start: {exc}") from exc
         return _read_dependencies_from_source(tmp)
 
 

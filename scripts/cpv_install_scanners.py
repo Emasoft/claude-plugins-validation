@@ -37,6 +37,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
+from typing import IO
 
 __all__ = [
     "ensure_fclones",
@@ -272,12 +273,48 @@ def _download_fclones_github_release() -> bool:
     return extracted
 
 
+def _atomic_install_binary(src: IO[bytes], target: Path) -> bool:
+    """Stream ``src`` into ``target`` ATOMICALLY (tmp in same dir + chmod + replace).
+
+    A direct write to ``target`` leaves a partial, executable-bit-set binary at
+    the final path if the copy is interrupted (crash, disk-full, SIGINT) — a
+    later ``shutil.which()`` would then resolve a TRUNCATED executable. Writing
+    a sibling ``.part`` file, chmod-ing it, then ``os.replace``-ing it over the
+    target means the final path only ever appears as a complete binary.
+    """
+    try:
+        # mkstemp is inside the try so a missing/unwritable dest dir fails
+        # cleanly (return False) instead of raising FileNotFoundError.
+        fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), prefix=f".{target.name}.", suffix=".part")
+    except OSError:
+        return False
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        os.chmod(tmp_path, 0o755)
+        os.replace(tmp_path, target)  # atomic on same filesystem
+    except OSError:
+        tmp_path.unlink(missing_ok=True)
+        return False
+    return target.exists()
+
+
 def _extract_fclones_binary(archive_path: Path, dest_dir: Path) -> bool:
     """Extract ``fclones[.exe]`` from the archive into ``dest_dir``.
 
     Handles both ``.zip`` and ``.tar.gz`` variants. Picks the first member
     whose basename starts with ``fclones`` to be tolerant of release-folder
-    layouts like ``fclones-0.x.y/fclones.exe``.
+    layouts like ``fclones-0.x.y/fclones.exe``. The binary is installed
+    atomically (see ``_atomic_install_binary``) so an interrupted extraction
+    never leaves a truncated executable on PATH.
+
+    NOTE on checksum verification: the archive is fetched over HTTPS from the
+    official fclones GitHub releases (TLS gives transport integrity +
+    github.com authenticity). A per-release-per-platform SHA256 pin would add
+    defence against a compromised release asset, but it is high-maintenance
+    (breaks every fclones release until the table is updated) for a
+    low-probability threat, so it is intentionally NOT done here.
     """
     suffix = archive_path.suffix.lower()
     try:
@@ -286,24 +323,17 @@ def _extract_fclones_binary(archive_path: Path, dest_dir: Path) -> bool:
                 for zip_name in zf.namelist():
                     base = Path(zip_name).name
                     if base.lower().startswith("fclones"):
-                        target = dest_dir / base
-                        with zf.open(zip_name) as zsrc, open(target, "wb") as dst:
-                            shutil.copyfileobj(zsrc, dst)
-                        target.chmod(0o755)
-                        return target.exists()
+                        with zf.open(zip_name) as zsrc:
+                            return _atomic_install_binary(zsrc, dest_dir / base)
         else:  # .tar.gz / .tgz
             with tarfile.open(archive_path, "r:gz") as tf:
                 for tar_member in tf.getmembers():
                     base = Path(tar_member.name).name
                     if base.lower().startswith("fclones") and tar_member.isfile():
-                        target = dest_dir / base
                         tsrc = tf.extractfile(tar_member)
                         if tsrc is None:
                             continue
-                        with open(target, "wb") as dst:
-                            shutil.copyfileobj(tsrc, dst)
-                        target.chmod(0o755)
-                        return target.exists()
+                        return _atomic_install_binary(tsrc, dest_dir / base)
     except (zipfile.BadZipFile, tarfile.TarError, OSError):
         return False
     return False
