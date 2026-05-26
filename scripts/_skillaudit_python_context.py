@@ -723,6 +723,69 @@ def _ssrf_url_is_static_literal_py(line: str, match: str) -> bool:
     return True
 
 
+# ── Issue #41 — SSRF loopback-host discriminator (Python, follow-up) ──
+# Even when the URL string IS f-string interpolated, a loopback HOST
+# literal cannot redirect outside the local machine, so the URL is not
+# server-side-request-forgery regardless of the interpolated port / path.
+# The dynamic-host case ``f"http://{host}:{port}"`` (host is not a literal)
+# stays flagged. Concrete affected shapes from issue #41 follow-up on
+# ai-maestro-webdesign:
+#     url = f"http://localhost:{args.port}"
+#     return server, f"http://127.0.0.1:{port}"
+_LOOPBACK_HOSTS_PY: Final[frozenset[str]] = frozenset(
+    {"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"}
+)
+
+
+def _ssrf_url_is_loopback_with_literal_host_py(line: str, match: str) -> bool:
+    """Return True iff the URL containing ``match`` has a literal loopback
+    HOST, even if other URL components (port, path, query) are f-string
+    interpolated. The host literal cannot escape the local machine, so the
+    request is not server-side-request-forgery."""
+    idx = line.find(match)
+    if idx < 0:
+        return False
+    # Find the enclosing string literal: nearest matching quote on each side.
+    open_pos = max(line.rfind('"', 0, idx), line.rfind("'", 0, idx))
+    if open_pos < 0:
+        return False
+    quote = line[open_pos]
+    close_pos = line.find(quote, idx + len(match))
+    if close_pos < 0:
+        return False
+    literal_body = line[open_pos + 1 : close_pos]
+    scheme_idx = literal_body.find("://")
+    if scheme_idx < 0:
+        return False
+    # Authority = everything from after `://` to the first '/', '?', '#'
+    # or end of literal. RFC 3986 says path/query/fragment all delimit it.
+    tail = literal_body[scheme_idx + 3 :]
+    end_in_tail = len(tail)
+    for delim in "/?#":
+        i = tail.find(delim)
+        if 0 <= i < end_in_tail:
+            end_in_tail = i
+    authority = tail[:end_in_tail]
+    # Strip userinfo (``user:pass@host``) — host is to the right of '@'.
+    if "@" in authority:
+        authority = authority.rsplit("@", 1)[-1]
+    # Separate host from port: IPv6 hosts are bracketed (``[::1]:8080``);
+    # IPv4 / hostnames split on the last ':' (if any).
+    if authority.startswith("["):
+        end_bracket = authority.find("]")
+        host = authority[: end_bracket + 1] if end_bracket > 0 else authority
+    elif ":" in authority:
+        host = authority.rsplit(":", 1)[0]
+    else:
+        host = authority
+    # Host MUST be a fully literal token — any f-string ``{...}`` placeholder
+    # in the host portion means the host itself is dynamic, which can resolve
+    # to any external destination → genuine SSRF risk.
+    if "{" in host or "}" in host:
+        return False
+    return host in _LOOPBACK_HOSTS_PY
+
+
 # ── Issue #41 — TOOL_SHADOW monkeypatch-in-test discriminator (Python) ──
 # pytest's ``monkeypatch`` fixture is standard test scaffolding; the
 # TOOL_SHADOW rule fires on the substring ``monkey?patch``. In a test file
@@ -1079,8 +1142,14 @@ def classify(
     # Issue #41 — SSRF_PATTERN FP: static localhost/metadata literal (e.g. a
     # test assertion ``== "http://localhost:1234/v1"`` or a config default).
     # Static destination → not attacker-controlled → not SSRF. Dynamic
-    # (f-string / concatenation) stays visible.
-    if rule_id == "SSRF_PATTERN" and _ssrf_url_is_static_literal_py(line_text, match):
+    # (f-string / concatenation) stays visible — UNLESS the dynamic
+    # interpolation only affects port/path on a loopback HOST literal
+    # (issue #41 follow-up: a loopback host can't reach an external
+    # destination regardless of how the port/path is computed).
+    if rule_id == "SSRF_PATTERN" and (
+        _ssrf_url_is_static_literal_py(line_text, match)
+        or _ssrf_url_is_loopback_with_literal_host_py(line_text, match)
+    ):
         return "safe_literal"
 
     # Issue #41 — TOOL_SHADOW FP: pytest ``monkeypatch`` fixture in a test

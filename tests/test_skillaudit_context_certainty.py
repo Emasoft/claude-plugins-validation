@@ -109,9 +109,32 @@ class TestSsrfStaticLiteral:
         src = 'ap.add_argument("--url", help="API base, e.g. http://localhost:11434/v1")'
         assert _py(src, "http://localhost", "SSRF_PATTERN") == "safe_literal"
 
-    def test_python_fstring_localhost_still_flags(self) -> None:
+    def test_python_fstring_localhost_loopback_host_now_suppressed(self) -> None:
+        """v2.107.x (issue #41 follow-up): a LITERAL loopback HOST with an
+        interpolated port/path is suppressed, because a loopback host
+        cannot reach an external destination regardless of how the port
+        is computed. The v2.105.0 behaviour was overly strict — every
+        f-string flagged — which forced authors to obfuscate accurate
+        ``f"http://localhost:{args.port}"`` dev-server URLs.
+
+        Discriminator: only the HOST portion needs to be a literal in the
+        loopback allowlist (``localhost`` / ``127.0.0.1`` / ``::1`` /
+        ``0.0.0.0``). See ``test_python_fstring_dynamic_host_still_flags``
+        below for the negative side proving the security gate intact."""
         src = 'r = requests.get(f"http://localhost:{port}/v1")'
-        assert _py(src, "http://localhost", "SSRF_PATTERN") == "unknown"
+        assert _py(src, "http://localhost", "SSRF_PATTERN") == "safe_literal"
+
+    def test_python_fstring_dynamic_host_still_flags(self) -> None:
+        """Security gate (negative side): a DYNAMIC host f-string still
+        flags — the host can resolve to ANY external destination, so SSRF
+        risk is real. Only the loopback-literal-host case is suppressed."""
+        src = 'r = requests.get(f"http://{host}:{port}/v1")'
+        assert _py(src, "http://", "SSRF_PATTERN") == "unknown"
+
+    def test_python_fstring_external_host_still_flags(self) -> None:
+        """External host (non-loopback) f-string still flags."""
+        src = 'r = requests.get(f"http://example.com:{port}/v1")'
+        assert _py(src, "http://example.com", "SSRF_PATTERN") == "unknown"
 
 
 # ──────────────────────────────────────────────────────────────────────────
