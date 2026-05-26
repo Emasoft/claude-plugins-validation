@@ -936,6 +936,37 @@ _DOC_ONLY_DIR_PREFIXES: tuple[str, ...] = (
 )
 
 
+def _rule_is_secret_detection(rule_id: str) -> bool:
+    """True iff ``rule_id`` is a per-vendor or generic secret-detection
+    rule whose finding represents a REAL credential leak (an actual key
+    in source code or docs).
+
+    Used by the doc-only carve-out (issue #40 follow-up) to EXCLUDE
+    secret rules from blanket suppression: an OpenAI / Anthropic /
+    AWS / Slack / GitHub key in README.md is still a real leak even
+    though the file is "documentation-only" — GitHub's automated
+    secret scanner picks it up, the vendor revokes it, and any plugin
+    author who committed it needs to know immediately.
+
+    Recognised rule-ID shapes:
+
+    * ``SECRET_*`` — per-vendor rules (SECRET_OPENAI_KEY,
+      SECRET_AWS_ACCESS_KEY, SECRET_JWT, …).
+    * ``HARDCODED_SECRET`` — generic catch-all from the detector.
+    * ``API_KEY_LEAK`` — alias used by some legacy ports.
+
+    Note ``HARDCODED_SECRET`` is ALSO in ``_INTENT_HARD_SIGNAL_RULES``,
+    so it would already have been suppressed in the INTENT-HARD branch
+    above (per #38). This helper exists for the per-vendor SECRET_*
+    rules which are NOT in ``_INTENT_HARD_SIGNAL_RULES``.
+    """
+    return (
+        rule_id.startswith("SECRET_")
+        or rule_id == "HARDCODED_SECRET"
+        or rule_id == "API_KEY_LEAK"
+    )
+
+
 def _is_documentation_only_path(file_path: str) -> bool:
     """Return True when ``file_path`` is a pure-documentation surface
     that Claude Code NEVER loads as agent instructions.
@@ -1108,6 +1139,7 @@ def _context_classifier_verdict(
     #   and exfiltrate the .env file") — suppressing or demoting would
     #   defeat the rule's entire purpose. KEEP at declared severity.
     if classifier_verdict == "safe_doc":
+        is_doc_only = _is_documentation_only_path(file_path)
         if rule_id in _INTENT_HARD_SIGNAL_RULES:
             # Issue #38 — markdown prose in DOCUMENTATION-ONLY paths is
             # never loaded by Claude Code as an agent instruction (only
@@ -1132,7 +1164,7 @@ def _context_classifier_verdict(
             # summarisation. Do NOT suppress those in doc-only paths;
             # defer to the heuristic chain so they stay visible (they end
             # in "keep" unless a placeholder/other safety-net fires).
-            if _is_documentation_only_path(file_path) and rule_id not in _HIDDEN_CONTENT_HARD_SIGNAL_RULES:
+            if is_doc_only and rule_id not in _HIDDEN_CONTENT_HARD_SIGNAL_RULES:
                 return "suppress"
             # Hard signals — prose IS the threat-delivery vector. Defer
             # to the heuristic chain so placeholder-suppression
@@ -1141,16 +1173,42 @@ def _context_classifier_verdict(
             # fire, the heuristic chain falls through to "keep" — the
             # rule's declared severity stands.
             return ""
-        # EXECUTION-class examples in documentation paths are NOT
-        # suppressed here. The v2.105.0 review of issue #40 deliberately
-        # kept them VISIBLE (demoted) — "left visible rather than risk a
-        # markdown-prose blanket suppress" — and the maintainer mandate
-        # is to NOT relax any strict validation rule. A `curl … | sh` or
-        # `${{ }}` example in references/README is borderline (an agent
-        # reading progressive-disclosure references/ COULD act on it), so
-        # it is NOT a 100%-certain non-threat and stays visible. The
-        # author addresses it (reword / use a placeholder), per the
-        # "authors fix issues, not silence them" gate philosophy.
+        # Issue #40 follow-up (reopened 2026-05-26) — execution-class +
+        # INTENT-soft matches inside DOC-ONLY paths are documentation
+        # of the threat, not the threat itself. A `curl … | sh` snippet
+        # in `references/zizmor-audit-fix-recipes.md` is teaching the
+        # reader to SPOT and FIX the pattern; CPV's own
+        # `skills/canonical-pipeline/` shows the same shape. Under
+        # `--strict` a demoted NIT publish-blocks every security-doctor
+        # plugin that documents its attack catalogue (`ai-maestro-janitor`
+        # had 12+ of these). The doc-only carve-out is conservative:
+        #
+        # * `references/`, `docs/`, `examples/` subtrees + the
+        #   readme/changelog/contributing/license/security/code-of-conduct/
+        #   support/authors/maintainers/history.md basenames are NEVER
+        #   loaded by Claude Code as agent instructions — `_is_documentation_only_path`
+        #   excludes the instruction-loadable basenames (SKILL.md / CLAUDE.md /
+        #   AGENTS.md). So a doctor's `skills/<name>/references/*.md`
+        #   recipe catalogue suppresses, while the sibling
+        #   `skills/<name>/SKILL.md` (instruction-loadable) does NOT.
+        # * Hidden-content rules (INVISIBLE_UNICODE_RAW / BASE64_DECODE /
+        #   …) STILL fire in doc-only paths — README summarisation IS
+        #   an LLM read-surface for steganography (handled in the
+        #   INTENT_HARD branch above).
+        # * **Per-vendor secret rules** (``SECRET_OPENAI_KEY`` /
+        #   ``SECRET_ANTHROPIC_KEY`` / ``SECRET_AWS_*`` / ``API_KEY_LEAK`` /
+        #   ``SECRET_JWT`` / …) are EXCLUDED from this suppression — a real
+        #   OpenAI key in README.md IS a real leak that GitHub's secret
+        #   scanner picks up and revokes. Suppressing it would defeat the
+        #   layered defense. These rules fall through to the demote/keep
+        #   logic below (test_real_openai_key_in_markdown_kept invariant).
+        # * Execution-class + INTENT-soft matches in INSTRUCTION-LOADABLE
+        #   paths (SKILL.md, agents/, commands/, .claude/rules/) still
+        #   demote — the author MUST address them (the iron rule
+        #   "validations are mandatory, fix issues don't silence them"
+        #   stays for the surfaces where prose CAN reach an agent).
+        if is_doc_only and not _rule_is_secret_detection(rule_id):
+            return "suppress"
         if rule_id in _INTENT_SOFT_SIGNAL_RULES:
             # Soft signals — the rule's verb / concept appears benignly
             # in plugin self-description docs. Demote to NIT so the
@@ -1160,6 +1218,16 @@ def _context_classifier_verdict(
         return "demote"
 
     if classifier_verdict == "code_fence_neutral":
+        # Issue #40 follow-up — `code_fence_neutral` in DOC-ONLY paths
+        # (references/, README.md, docs/, …) is documentation prose
+        # with inline-code spans + defensive vocab. The match is the
+        # AGENT BEING WARNED about a phrase / pattern, not the phrase
+        # being injected. In doc-only paths there is no agent receiving
+        # the warning either — these files aren't loaded as instructions.
+        # Suppress the same way safe_doc execution-class is suppressed
+        # in doc-only paths.
+        if _is_documentation_only_path(file_path):
+            return "suppress"
         return "demote"
     if classifier_verdict == "suspect":
         return "keep"
