@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-26T13:01:23+00:00",
+  "computed_at": "2026-05-26T13:31:38+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
@@ -167,7 +167,7 @@
     "scripts/cpv_validation_common.py": "sha256:e616dd2f3fa9995f825058c36069d91e01872f28064cf7a69a73a7c0276cc43b",
     "scripts/detect_lockfiles.py": "sha256:17c03bd5d381395f6348a7a2b8c2d4df99422cabdd600b98fe7be0b01ebb6971",
     "scripts/generate_marketplace_repo.py": "sha256:1bdd8e273546f6bec33b3c7df1c9ed53564e82f2bbe886068ef729dab8586bbb",
-    "scripts/generate_plugin_repo.py": "sha256:e65dbebcf80f26f045943a823c77c65513ed33bdf653ec2517ed907daa85121e",
+    "scripts/generate_plugin_repo.py": "sha256:95c873a6ca3b7655fbb0858fdfbb4a2b9d7474dd7eac527cfea910fcf3af3f11",
     "scripts/manage_doctor.py": "sha256:f214d7b3f170845bfecb4ad1130f91514b0be00f4b825309b009f250d8fafe8f",
     "scripts/manage_github_validate.py": "sha256:5425e92e1d90c2223e5c1cdf054714cd2dd0672364e9fad146367a05b8af9a0e",
     "scripts/manage_marketplace.py": "sha256:4ac998ff10df59c370107936845b5c71fa9b877293305fd10581aa9e2910e468",
@@ -377,7 +377,7 @@
     "skills/the-skills-menu/SKILL.md": "sha256:a2985305454a5747b26a15d9910bcfdd3c8ffdade2ce798ecfd559508c64f62e",
     "skills/the-skills-menu/references/skills-catalog.md": "sha256:16bf9103bf3fa9df17c82f015b734c4625ee5416f232a39d174ff067d2202fa0",
     "templates/README-marketplace.md": "sha256:0d4a8d4d4979b2a01f172d8a5f6fa591d19e233398da7227b7c1ce85b6d9d663",
-    "templates/github-workflows/notify-marketplace.yml": "sha256:0210e6a4a81dc37a2d498438618e32da2c3757c6c574339a81bd4fc22ed71266",
+    "templates/github-workflows/notify-marketplace.yml": "sha256:f252e6363453a8263d4712cf32f4ae2188325a9c33463612da4e425d9fa92ca4",
     "templates/github-workflows/update-submodules.yml": "sha256:651ed8fd531c81e013fa0135ae8c3f38a52919df3e0009c595ff6fe4b4c27804",
     "templates/github-workflows/validate-marketplace.yml": "sha256:587a75b21749f547abd3818fae9776d73adb3c6f8d73457ce5b1c1401b44ab5d",
     "templates/scripts/sync_marketplace_versions.py": "sha256:73e4b1da1047a91c3d722a37c5c5dd72632afa4148ce41de56c2b18d8b5baebd",
@@ -454,6 +454,7 @@
     "tests/test_batch_fix_v291.py": "sha256:a426867aed77269c1c3b73edab8ea4c145f4d708ea9a91b5386d96f3bfc8ea9d",
     "tests/test_body_tool_consistency.py": "sha256:6085a83fd1c2673b8e7abd8476c87dadc72239e2b6e89438bfbc2b146411343a",
     "tests/test_bump_version.py": "sha256:c7e27e3841e120bd6dc866a40e9edf60b0183c95692b65af71000526e8b0bc4f",
+    "tests/test_canon_repository_dispatch_sha_pin.py": "sha256:7851fc92832fd3ac21ed8b9c3649692e6066b9caa9d6f4a7263b9f988beeaec5",
     "tests/test_canonical_pipeline_drift.py": "sha256:492d17e345bee91547d3d9cf13bbc1f590ff8e6802f4b9901e342901153afc3f",
     "tests/test_cc_scope_rules.py": "sha256:5cd3535ccf1e9195f2c7cfa6bf6ce623e1298197a9d9ad6c225a5bb113735872",
     "tests/test_changelog_v2_1_113_to_132.py": "sha256:8bc76648d1fcc44ab60af65ac7125f8cf4d877b059f3d59330e5797b504bda76",

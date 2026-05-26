@@ -61,7 +61,15 @@ jobs:
 
       - name: Trigger marketplace update
         # Third-party action pinned to a full commit SHA (gh-actions rule).
-        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
+        # Defensive "second-latest" pin: v4.0.0 (not v4.0.1). The latest
+        # v4.0.1 SHA is healthy, but during GitHub Actions incident
+        # gnftqj9htp0g (2026-05-26 auth outage) it surfaced as
+        # "Failed to download archive ... 'codeload.github.com/.../<sha>'"
+        # alongside dozens of other recently-bumped pins. Bleeding-edge
+        # pins concentrate that risk; staying one tag behind costs
+        # nothing for this use case. A future pinact bump back to
+        # v4.0.1 must also drop tests/test_canon_repository_dispatch_sha_pin.py.
+        uses: peter-evans/repository-dispatch@5fc4efd1a4797ddb68ffd0714a238564e4cc0e6f # v4.0.0
         with:
           token: ${{ secrets.MARKETPLACE_PAT }}
           repository: ${{ env.MARKETPLACE_OWNER }}/${{ env.MARKETPLACE_REPO }}
