@@ -75,8 +75,21 @@ AGENT_SPAWN_PATTERN = re.compile(
 #   [a-z]                          — first char must be a letter
 #   (?:[a-z0-9-]*[a-z0-9])?        — optional tail ending in non-hyphen
 # Single-letter names like ``a`` still match (per the optional group).
+# Issue #44: the `(?<![A-Za-z0-9~]/)` lookbehind rejects matches where
+# ``skills/`` sits inside an absolute path or URL segment — concretely,
+# ``<alphanumeric-or-tilde>/skills/<name>`` is a path component (e.g.
+# ``/mnt/skills/user/``, ``~/.pi/agent/skills/vercel-deploy/``,
+# ``https://example.com/skills/foo``), not an intra-plugin reference, so
+# ``user`` / ``vercel-deploy`` / ``foo`` MUST NOT be looked up as skill
+# names. Intra-plugin shapes remain matched: bare ``skills/foo``, relative
+# ``./skills/foo`` and ``../skills/foo``, bracketed ``(skills/foo)``,
+# variable-expanded ``${CLAUDE_PLUGIN_ROOT}/skills/foo`` (closing ``}``
+# isn't alphanumeric), and ``[label](skills/foo/SKILL.md)`` (opening
+# paren isn't alphanumeric). The lookbehind needs two characters of
+# context to fire, so it never strips an in-bounds match when the file
+# starts on ``skills/...``.
 SKILL_REF_PATTERN = re.compile(
-    r"(?:skill|skills)/([a-z](?:[a-z0-9-]*[a-z0-9])?)",
+    r"(?<![A-Za-z0-9~]/)(?:skill|skills)/([a-z](?:[a-z0-9-]*[a-z0-9])?)",
     re.IGNORECASE,
 )
 

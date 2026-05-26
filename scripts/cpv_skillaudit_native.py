@@ -1046,6 +1046,16 @@ def _context_classifier_verdict(
         except ImportError:
             return ""
         classifier_verdict = _yaml_classify(file_path, content, line_idx, match, rule_id)
+    elif fp_lower.endswith((".sh", ".bash", ".zsh", ".fish")):
+        # Issue #41 follow-up — shell classifier for the printed-heredoc
+        # supply-chain FP (install hint inside ``cat >&2 <<EOF`` is user-
+        # facing help text, not an exec). Currently detects exactly that
+        # one shape; everything else falls through to the heuristic chain.
+        try:
+            from _skillaudit_shell_context import classify as _sh_classify  # type: ignore[import-not-found]
+        except ImportError:
+            return ""
+        classifier_verdict = _sh_classify(file_path, content, line_idx, match, rule_id)
     elif fp_lower.endswith((".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")):
         # Issue #39 — TS/JS classifier for CRED_ENV_READ, TOKEN_STEAL,
         # SECRET_* and SQL_INJECTION FP shapes documented in issue #39
@@ -2224,6 +2234,114 @@ _SKIP_DIRS: frozenset[str] = frozenset(
 )
 
 
+# Issue #42: hash-anchored skip for plugins that ship byte-identical copies
+# of CPV's own scanner artifacts (e.g., an offline auditor packaging).
+# Without this, the scanner self-matches its own ~490 detection patterns
+# against the shipped pattern catalog and emits 262+ FPs per file (catalog
+# literally CONTAINS sensitive-system-path tokens, code-execution
+# primitives, and pipe-into-shell install hints AS PATTERN DESCRIPTIONS of
+# malicious code — not malicious code itself).
+#
+# SECURITY: this is NOT a basename skip — a malicious plugin could exploit
+# that by naming a payload ``skillaudit_patterns.json``. We require the file
+# to be BYTE-IDENTICAL to the installed CPV artifact (SHA256 match against
+# CPV's own ``.plugin-self-hashes.json``). A modified copy (even by one
+# byte) falls through and is scanned normally.
+_SELF_ARTIFACT_BASENAMES: frozenset[str] = frozenset(
+    {
+        "skillaudit_patterns.json",
+        "re2_compatibility.json",
+        "cpv_skillaudit_native.py",
+        "_skillaudit_python_context.py",
+        "_skillaudit_json_context.py",
+        "_skillaudit_yaml_context.py",
+        "_skillaudit_markdown_context.py",
+        "_skillaudit_typescript_context.py",
+        "_skillaudit_shell_context.py",
+    }
+)
+
+# Lazy-loaded {basename: sha256} map pulled from CPV's installed integrity
+# manifest, filtered to the self-artifact basename allowlist. Sentinel
+# ``None`` = not yet attempted; empty dict = tried and nothing usable
+# (so we don't retry every file).
+_CPV_INSTALL_ARTIFACT_HASHES: dict[str, str] | None = None
+
+
+def _load_cpv_install_artifact_hashes() -> dict[str, str]:
+    """Build a ``{basename: sha256}`` map from CPV's installed integrity
+    manifest, restricted to the ``_SELF_ARTIFACT_BASENAMES`` allowlist.
+
+    The CPV install root sits one level above this module (``scripts/``'s
+    parent). Returns an empty dict on any failure — caller treats that
+    as "no skips available" and scans everything (safe fallback).
+    """
+    global _CPV_INSTALL_ARTIFACT_HASHES
+    if _CPV_INSTALL_ARTIFACT_HASHES is not None:
+        return _CPV_INSTALL_ARTIFACT_HASHES
+    out: dict[str, str] = {}
+    install_root = Path(__file__).resolve().parent.parent
+    for manifest_name in (".plugin-self-hashes.json", ".cpv-self-hashes.json"):
+        manifest_path = install_root / manifest_name
+        if not manifest_path.is_file():
+            continue
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        files = data.get("files") if isinstance(data, dict) else None
+        if not isinstance(files, dict):
+            continue
+        for rel_path, h in files.items():
+            if not isinstance(rel_path, str) or not isinstance(h, str):
+                continue
+            basename = rel_path.replace("\\", "/").rsplit("/", 1)[-1]
+            if basename not in _SELF_ARTIFACT_BASENAMES:
+                continue
+            # Strip the `sha256:` algorithm prefix the manifest stores —
+            # `_is_self_artifact_copy` compares against the bare hex output
+            # of `hashlib.sha256().hexdigest()`. Unknown-algorithm prefixes
+            # are dropped on the floor (no entry recorded → file is scanned).
+            if ":" in h:
+                algo, _, hex_part = h.partition(":")
+                if algo.lower() != "sha256":
+                    continue
+                out.setdefault(basename, hex_part)
+            else:
+                out.setdefault(basename, h)
+        if out:
+            break  # First manifest with usable entries wins.
+    _CPV_INSTALL_ARTIFACT_HASHES = out
+    return out
+
+
+def _is_self_artifact_copy(p: Path) -> bool:
+    """Return True iff ``p`` is byte-identical to a CPV-installed scanner
+    artifact of the same basename — i.e., the plugin is bundling an
+    unmodified copy of CPV's catalog or context classifier for offline use,
+    and scanning it would just produce self-matches against its own
+    pattern descriptions.
+
+    Security gate: requires an exact SHA256 match against CPV's installed
+    ``.plugin-self-hashes.json`` entry for that basename. A spoofed file
+    (different bytes, same name) is NOT skipped — it falls through and is
+    scanned normally (closes the obvious basename-spoofing evasion).
+    """
+    if p.name not in _SELF_ARTIFACT_BASENAMES:
+        return False
+    expected = _load_cpv_install_artifact_hashes().get(p.name)
+    if not expected:
+        return False  # No canonical hash to compare against → scan it.
+    try:
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest() == expected
+    except OSError:
+        return False
+
+
 def _iter_scannable_files(plugin_root: Path) -> Iterable[Path]:
     """Yield candidate files under plugin_root, skipping vendored / build dirs
     AND any path the plugin's `.gitignore` would exclude (issue #37).
@@ -2254,6 +2372,11 @@ def _iter_scannable_files(plugin_root: Path) -> Iterable[Path]:
         if any(part in _SKIP_DIRS for part in p.parts):
             continue
         if p.suffix.lower() not in _SCAN_EXTENSIONS:
+            continue
+        # Issue #42 — hash-anchored skip for plugins that bundle byte-identical
+        # copies of CPV's scanner catalog / context classifiers (an offline
+        # auditor packaging). Spoofed basenames (different bytes) fall through.
+        if _is_self_artifact_copy(p):
             continue
         # Issue #37 — skip anything the plugin's .gitignore excludes.
         # Applied AFTER _SKIP_DIRS / extension filters because most
