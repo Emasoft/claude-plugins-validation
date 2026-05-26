@@ -62,9 +62,46 @@ class TestShellKwargNonLiteral:
         verdict = self._classify("subprocess.run(cmd, shell=should_use_shell())")
         assert verdict == "suspect"
 
-    def test_kwargs_splat_not_suppressed(self):
-        """**opts could carry shell=True → suspect for a non-literal arg."""
+    def test_kwargs_splat_with_argv_name_is_now_suppressed(self):
+        """Issue #45 (v2.107.3): ``subprocess.run(cmd, **opts)`` — a bare
+        Name first arg is by Python convention a ``list[str]``, and when
+        the ONLY shell-possibly-true signal is the ``**opts`` splat (no
+        explicit ``shell=`` keyword), Bandit B603 / ruff S603 / Semgrep
+        all leave it unflagged. CPV now matches that convention — the
+        pre-#45 ``suspect`` verdict was the FP this issue closed.
+
+        The security gate stays intact: an EXPLICIT ``shell=True`` /
+        ``shell=<non-literal>`` still produces ``suspect`` regardless of
+        first-arg shape (see ``test_kwargs_splat_with_string_first_arg_*``
+        and ``test_shell_true_literal_still_suspect_for_var_arg`` below)."""
         verdict = self._classify("subprocess.run(cmd, **opts)")
+        assert verdict == "safe_literal"
+
+    def test_kwargs_splat_with_list_argv_is_suppressed(self):
+        """Issue #45: inline list-form argv with ``**kw`` and no
+        explicit shell= → safe (the user's exact docker-wrapper shape)."""
+        verdict = self._classify('subprocess.run(["docker", *args], **kw)')
+        assert verdict == "safe_literal"
+
+    def test_kwargs_splat_with_concat_first_arg_still_suspect(self):
+        """Security gate (issue #45 negative side): string-concat first
+        arg with ``**kw`` could be ``"rm -rf " + user`` — not an
+        argv-safe shape, cannot rule out shell injection if ``**kw``
+        carries ``shell=True``. Stays flagged."""
+        verdict = self._classify('subprocess.run("rm -rf " + user, **kw)')
+        assert verdict == "suspect"
+
+    def test_kwargs_splat_with_fstring_first_arg_still_suspect(self):
+        """Security gate: f-string first arg + ``**kw`` is the canonical
+        injection vehicle if ``**kw`` carries ``shell=True``."""
+        verdict = self._classify('subprocess.run(f"rm -rf {user}", **kw)')
+        assert verdict == "suspect"
+
+    def test_kwargs_splat_with_concat_list_element_still_suspect(self):
+        """Security gate: ``["docker " + user]`` — list element is an
+        exploit shape; the argv-safe-shape gate rejects this case
+        even with only a ``**kw`` signal."""
+        verdict = self._classify('subprocess.run(["docker " + user], **kw)')
         assert verdict == "suspect"
 
     def test_shell_variable_pure_literal_arg_still_safe(self):
