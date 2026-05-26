@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-26T10:25:20+00:00",
+  "computed_at": "2026-05-26T12:35:17+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
@@ -111,7 +111,7 @@
     "scripts/_plugin_verify_hashes.py": "sha256:a5540ec44c612076b97e824e054272077195d2bd1631a6f45198853d54c697ce",
     "scripts/_skillaudit_json_context.py": "sha256:3342b7daee17b2b4ee1feef084c71f819f4e095820cba290dcf9ad22ed89c4d3",
     "scripts/_skillaudit_markdown_context.py": "sha256:aea0739a4a4f793a207d86aca363e28ea569a1119b9feebe47f46d71b5113f61",
-    "scripts/_skillaudit_python_context.py": "sha256:7280ab24de18a20d71c50faae0655e22bdbc292bb65eb0ee52432e4007fabe51",
+    "scripts/_skillaudit_python_context.py": "sha256:294db93ec472b19d75f02c155a122235a0afd188a0cf02152ff2add2c35fca75",
     "scripts/_skillaudit_shell_context.py": "sha256:79d21aec876ba7d298bd1bbe8373db3b23a1f84dd1531f8c49c6338a98c40ba0",
     "scripts/_skillaudit_typescript_context.py": "sha256:a8e00961c307113f6623fd0a5ebc92609743765686c1fdbbbcda400b2955b4b1",
     "scripts/_skillaudit_yaml_context.py": "sha256:a84b45903b365b402562f1882ca06b276ace91ea2b54b82771c331ee87f68b8b",
@@ -436,7 +436,7 @@
     "tests/test_audit_common_caches_findings.py": "sha256:d70132b93aaf8f0d797008a5e5c98ef480ad8436cc0e8420edc21ef92b273e63",
     "tests/test_audit_critical_recalibration.py": "sha256:073d75cb7b206f4825c5a0fcb6a0c9d5ccbd12a8fb4e1f424109f93885676ccb",
     "tests/test_audit_dedup_findings.py": "sha256:31cb4f78a8fc953b2659713b31ca330a57fe5826c3b7315139d62cf9b48a9550",
-    "tests/test_audit_fixes_engines.py": "sha256:4596e13d6ea78b967f822dce33614c3ca19cdb73c213409635a8033a7fd1574b",
+    "tests/test_audit_fixes_engines.py": "sha256:634b20458a2a8563ce8be47a4d87c4923211344f923fd69ccc011a8f542ec043",
     "tests/test_audit_fp_recalibration.py": "sha256:a4324c44c837c229c25657079bdc7b6ee288a084515795b8a9a0bdef8cc9dfec",
     "tests/test_audit_infrastructure.py": "sha256:4d14ad2ec998834549d6c8e820920a071c3bcc77778372103dd3b122169c0a70",
     "tests/test_audit_integrity_nits.py": "sha256:d8cac85db4506022a3e39174db2c31d7a9dae05138ad5ab7b997112be744aa92",
@@ -524,6 +524,7 @@
     "tests/test_issue_42_self_artifact_skip.py": "sha256:bbc87ec79b4ba7a50ff9adb5f80f9b9988b825dc5f8b2518a23818d1f3d94162",
     "tests/test_issue_43_no_5000_char_minor.py": "sha256:adb6a3d19c7936e0e3692ec0e59f5632f33726cbc152b9e03587733cd4725797",
     "tests/test_issue_44_skills_path_segment.py": "sha256:794c0fdcf5df3fb5ca50f859ad0ffc49a6ea362a32aebbb7a55aa9ba77f5eca0",
+    "tests/test_issue_45_subprocess_kwargs_splat.py": "sha256:e6255a6d84500fe70d9133bb93509f1363bd674cbf3086209c415614db5d0d6c",
     "tests/test_issues_27_28_29.py": "sha256:a9f177017d51f32d2946089abec0d0cea3a598bd0d40fb92876714cedf910518",
     "tests/test_issues_30_31_batch_thresholds.py": "sha256:cf02ce59a767d0695119adc781f2978995a018f05c3753d46c874fe27aa2b5dd",
     "tests/test_issues_40_42_skillaudit_fp.py": "sha256:ab39533d9fc18f7486f0e3b14392d14d6de9b638e5890e40afd8d517dba45296",

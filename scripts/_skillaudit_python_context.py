@@ -378,7 +378,11 @@ def _shell_kwarg_is_possibly_true(call: ast.Call) -> bool:
 
     ``**kwargs`` splat: a bare ``**opts`` keyword (``kw.arg is None``)
     could itself carry ``shell=True`` at runtime, so it is treated as a
-    possibly-true shell kwarg too — fail-safe over fail-open.
+    possibly-true shell kwarg too — fail-safe over fail-open. The
+    splat-only case is handled separately by ``_shell_signal_only_via_splat``
+    (issue #45) so the dispatcher can apply the same convention other
+    linters use (Bandit B603 / ruff S603): a list/Name first arg with
+    only a ``**kwargs`` signal is not flagged.
     """
     for kw in call.keywords:
         if kw.arg is None:
@@ -392,6 +396,69 @@ def _shell_kwarg_is_possibly_true(call: ast.Call) -> bool:
             return bool(val.value)
         # Non-literal expression (Name / Attribute / Call / BinOp / …):
         # cannot prove it is falsey → treat as possibly-true.
+        return True
+    return False
+
+
+def _shell_signal_only_via_splat(call: ast.Call) -> bool:
+    """True iff the call's ONLY ``shell=possibly-true`` signal is a
+    ``**kwargs`` splat — there is no explicit ``shell=`` keyword.
+
+    Used by ``_classify_call`` (issue #45) to distinguish the routine
+    ``subprocess.run(cmd, **kw)`` shape (bandit B603 / ruff S603 don't
+    flag this — the analyser can't prove ``**kw`` carries ``shell=True``
+    so blanket-flagging produces noise) from the genuinely dangerous
+    explicit ``shell=True`` / ``shell=use_shell`` shapes (which DO
+    deserve the SHELL_EXEC / CMD_INJECTION finding regardless of
+    first-arg shape).
+    """
+    has_splat = False
+    for kw in call.keywords:
+        if kw.arg is None:
+            has_splat = True
+            continue
+        if kw.arg == "shell":
+            # Explicit shell= — this branch is handled by
+            # _shell_kwarg_is_possibly_true; never claim "only via splat".
+            return False
+    return has_splat
+
+
+def _first_arg_is_argv_safe_shape_py(arg: ast.expr) -> bool:
+    """True iff ``arg`` matches a conventional argv-list shape — the
+    routine pattern that other linters (Bandit / ruff / Semgrep) do NOT
+    flag because, by Python convention, the value is a ``list[str]`` not
+    a shell-injectable string.
+
+    Safe shapes:
+      * ``Name`` — bare variable. Convention: holds a list of strings
+        (e.g. ``cmd``, ``argv``, ``args``). Bandit B603 does not flag.
+      * ``Subscript`` — ``d["cmd"]`` / ``argv[1:]``. Same convention.
+      * ``Attribute`` — ``self.cmd`` / ``config.argv``. Same convention.
+      * ``List`` / ``Tuple`` literal whose elements are ALL known-safe
+        (Constant, Starred Name, Name, Subscript, Attribute, safe Call)
+        AND no element is an exploit shape (f-string, str-concat).
+
+    Unsafe shapes that fall through (the dispatcher then evaluates the
+    rest of the chain — e.g. ``_arg_is_pure_literal`` for string-form,
+    ``_arg_is_exploit_shape`` for injection-vehicle detection):
+      * ``Constant`` (string-form ``subprocess.run("rm -rf /tmp", …)``).
+      * ``BinOp`` (string concatenation).
+      * ``JoinedStr`` (f-string).
+      * ``Call`` to ``.format`` / ``.join`` (string-building chain).
+    """
+    if isinstance(arg, (ast.Name, ast.Subscript, ast.Attribute)):
+        return True
+    if isinstance(arg, (ast.List, ast.Tuple)):
+        if not arg.elts:
+            return False
+        for elt in arg.elts:
+            if isinstance(elt, ast.JoinedStr):
+                return False
+            if _arg_is_exploit_shape(elt):
+                return False
+            if not _arg_is_known_safe(elt):
+                return False
         return True
     return False
 
@@ -1255,6 +1322,20 @@ def _classify_call(call: ast.Call, qualname: str) -> ContextVerdict | None:
             # returns False ONLY for an absent kwarg or a literal-falsey
             # ``shell=False``/``shell=0``/``shell=None``/``shell=""``.
             if _arg_is_pure_literal(first):
+                return "safe_literal"
+            # Issue #45 — when the ONLY shell-possibly-true signal is a
+            # ``**kwargs`` splat (no explicit ``shell=`` keyword) AND the
+            # first arg is a conventional argv shape (List/Tuple of
+            # safe-shaped elements, or a bare Name/Subscript/Attribute
+            # holding a list-of-strings by Python convention), suppress.
+            # This matches Bandit B603 / ruff S603 behaviour: they don't
+            # flag ``subprocess.run(cmd, **kwargs)`` either, because the
+            # analyser cannot prove ``**kwargs`` carries ``shell=True``
+            # AND a list-form argv with literal-or-safe elements cannot
+            # carry shell metacharacters even if it did. Explicit
+            # ``shell=True`` / ``shell=use_shell`` stays in the suspect
+            # branch above.
+            if _shell_signal_only_via_splat(call) and _first_arg_is_argv_safe_shape_py(first):
                 return "safe_literal"
             return "suspect"
 
