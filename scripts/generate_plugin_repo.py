@@ -3538,7 +3538,7 @@ jobs:
           printf 'ref=%s\\n'  "$REF_SHA"   >> "$GITHUB_OUTPUT"
 
       - name: Trigger marketplace update
-        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
+        uses: peter-evans/repository-dispatch@5fc4efd1a4797ddb68ffd0714a238564e4cc0e6f # v4.0.0
         with:
           token: ${{{{ secrets.MARKETPLACE_PAT }}}}
           repository: ${{{{ env.MARKETPLACE_OWNER }}}}/${{{{ env.MARKETPLACE_REPO }}}}
