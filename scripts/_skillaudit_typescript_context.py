@@ -538,6 +538,50 @@ def _is_generic_env_assignment(line: str, match: str) -> bool:
     return bool(_GENERIC_ENV_ASSIGN_RE.search(line) or _GENERIC_ENV_ASSIGN_RE.search(match))
 
 
+_IMPORT_LINE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\s*(?:"
+    r"import\b.*\bfrom\b\s*['\"`]"  # ES module import
+    r"|"
+    r"(?:const|let|var)\s*(?:\{[^}]*\}|[A-Za-z_$][\w$]*)\s*=\s*require\s*\("  # CommonJS require
+    r"|"
+    r"import\s+['\"`]"  # side-effect-only import
+    r"|"
+    r"export\s+\{?[^}]*\}?\s+from\s+['\"`]"  # re-export
+    r")"
+)
+
+
+def _line_is_import_or_require(source_line: str) -> bool:
+    """True iff ``source_line`` is a Python-style import or JS/TS
+    ``import .. from ..`` / ``const X = require(..)`` line.
+
+    SHELL_EXEC patterns like ``child_process``, ``execSync``, ``spawn``
+    fire on the import line itself (``const { execSync } = require(
+    'child_process');``). The import binds the function but does NOT
+    invoke it — actual calls fire on separate lines and are scanned
+    normally.
+    """
+    return bool(_IMPORT_LINE_RE.match(source_line))
+
+
+_STATIC_EXEC_CALL_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:execSync|exec|spawn|spawnSync|execFile|execFileSync|fork)\s*\(\s*['\"]"
+    r"[^'\"]*['\"]\s*(?:,|\))"
+)
+
+
+def _line_is_static_exec_call(source_line: str) -> bool:
+    """True iff ``source_line`` contains an ``execSync('static-string', ...)``
+    / ``spawn("git", ["status"])`` etc. call whose FIRST arg is a pure
+    string literal (no template literal, no variable, no concatenation).
+
+    A static-string exec invocation is the same shape as
+    ``subprocess.run(["git", "status"])`` in Python — argv is fixed by
+    the author, no injection surface.
+    """
+    return bool(_STATIC_EXEC_CALL_RE.search(source_line))
+
+
 def classify(
     file_path: str,
     source: str,
@@ -556,6 +600,22 @@ def classify(
         return "unknown"
     line = source.splitlines()[line_idx]
     is_test = _is_test_file(file_path)
+
+    # r04 obra FP iter1 (2026-05-27) — SHELL_EXEC pattern matched on
+    # an import / require line. The import only BINDS the function —
+    # invocation happens elsewhere where the rule fires again with
+    # the actual call shape.
+    if rule_id == "SHELL_EXEC" and _line_is_import_or_require(line):
+        return "safe_literal"
+
+    # r04 obra FP iter1 (2026-05-27) — SHELL_EXEC pattern matched on a
+    # static-string exec call like ``execSync('dot -Tsvg', {...})``.
+    # The argv is fixed at author-time; no dynamic input reaches the
+    # shell. Iron-rule preserved: ``execSync(`dot ${userInput}`)`` /
+    # ``execSync('dot -T' + format)`` / etc. still fire because the
+    # static-string check rejects template literals and concatenation.
+    if rule_id == "SHELL_EXEC" and _line_is_static_exec_call(line):
+        return "safe_literal"
 
     # ── CRED_ENV_READ — "MCP server reading its own API key" FP. ──
     # The matched substring is a `process.env.<KNOWN_KEY>` read. If

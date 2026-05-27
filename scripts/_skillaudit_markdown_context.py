@@ -450,6 +450,28 @@ _DOC_ONLY_BASENAMES_MD: Final[frozenset[str]] = frozenset(
         "authors.md",
         "maintainers.md",
         "history.md",
+        # r04 obra FP iter1 (kept in sync with cpv_skillaudit_native._DOC_ONLY_BASENAMES)
+        "release-notes.md",
+        "releasenotes.md",
+        "release_notes.md",
+        "examples.md",
+        "example.md",
+        "usage.md",
+        "commandline-usage.md",
+        "commandline_usage.md",
+        "cli-usage.md",
+        "todo.md",
+        "todos.md",
+        "roadmap.md",
+        "notes.md",
+        "faq.md",
+        "design.md",
+        "architecture.md",
+        "internals.md",
+        "advanced.md",
+        "migration.md",
+        "upgrade.md",
+        "troubleshooting.md",
     }
 )
 _DOC_ONLY_DIR_PREFIXES_MD: Final[tuple[str, ...]] = (
