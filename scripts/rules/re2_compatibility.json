@@ -1,8 +1,8 @@
 {
   "_schema_version": 1,
-  "_generated_at": "2026-05-27T18:51:55Z",
+  "_generated_at": "2026-05-27T19:53:49Z",
   "_source": "scripts/rules/skillaudit_patterns.json",
-  "_source_sha256": "a82e855e1055f33b0aeba96edc6545fac8d17018d7320d075485567190711cd8",
+  "_source_sha256": "972e4b86c2897940a321747566f2b50a4341b5e4ec601f65d5c112dd711869ea",
   "_re2_version": "1.1.20251105",
   "_audit_mode": "re2_compile_plus_syntactic",
   "_summary": {

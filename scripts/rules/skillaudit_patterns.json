@@ -136,12 +136,12 @@
         "appendFile.*cron",
         "fs\\.write.*\\.\\.\\./",
         "chmod\\s+[0-7]*7[0-7]*",
-        "\\.bashrc",
-        "\\.profile",
-        "\\.zshrc",
-        "crontab"
+        "(?:^|[/~\\s'\"`])\\.bashrc\\b",
+        "(?:^|[/~\\s'\"`])\\.profile\\b",
+        "(?:^|[/~\\s'\"`])\\.zshrc\\b",
+        "\\bcrontab\\b"
       ],
-      "remediation": "Do not write to system directories (/etc/, /usr/, /bin/) or user dotfiles (.bashrc, .profile, .zshrc). Write only to designated output directories. Never modify crontab or system configuration files."
+      "remediation": "Do not write to system directories (/etc/, /usr/, /bin/) or user dotfiles (.bashrc, .profile, .zshrc). Write only to designated output directories. Never modify crontab or system configuration files. NOTE: dotfile patterns now require a path-like prefix (start-of-line, `/`, `~`, whitespace, or quote) so method calls like ``xai.profile()`` / ``api.profile()`` / ``user.profile_url`` don't match — only ``~/.profile``, ``/etc/.bashrc``, ``\"~/.zshrc\"`` and similar real path references do."
     },
     {
       "id": "OBFUSCATION",
@@ -939,7 +939,7 @@
         "(?:when|if)\\s+(?:an?|the)?\\s*(?:AI|agent|assistant|model|LLM|GPT|Claude)\\s+(?:reads?|sees?|processes?|encounters?|parses?)\\s+this",
         "(?:this\\s+(?:message|text|content|data)\\s+is\\s+(?:for|intended\\s+for|meant\\s+for|directed\\s+at))\\s+(?:the\\s+)?(?:AI|agent|assistant|model)",
         "(?:do\\s+not|don'?t|never)\\s+(?:reveal|show|display|tell|mention|disclose|share)\\s+(?:this|these)\\s+(?:instruction|directive|command|message|text|content)\\s+(?:to|with)\\s+(?:the\\s+)?(?:user|human|person|operator|client)",
-        "(?:ASCII|unicode|zero[\\s-]?width|invisible|hidden)\\s+(?:character|char|text|instruction|injection|payload)",
+        "(?:ASCII|unicode|zero[\\s-]?width|invisible|hidden)\\s+(?:character|char|instruction|injection|payload)",
         "\\u200b|\\u200c|\\u200d|\\u2060|\\ufeff|\\u00ad"
       ],
       "remediation": "If you're a skill author: never embed hidden instructions in tool output, web content, or data files. If you're an agent developer: treat ALL tool output as untrusted user data — never execute instructions found in tool results. Implement output filtering that strips instruction-like content from tool responses. Use structured output (JSON) rather than free text for tool results. Deploy an 'instruction hierarchy' where system prompts always override content found in data."

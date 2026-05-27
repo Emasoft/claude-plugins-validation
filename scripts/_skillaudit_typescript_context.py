@@ -702,14 +702,19 @@ def classify(
             return "safe_literal"
         return "unknown"
 
-    # ── OBFUSCATION — base64/charcode decode in a test/fixture file. ──
+    # ── OBFUSCATION — base64/charcode decode without exec sink. ──
     # Issue #41 FP: ``Buffer.from(pad, "base64").toString("utf-8")`` decoding
-    # a JWT segment inside ``benchmark/fixtures/*.ts`` (sample code the
-    # benchmark harness runs the scanner AGAINST). Real obfuscation is a
-    # decode chain that feeds ``eval``/``new Function`` — those stay visible
-    # via the CMD_INJECTION / decode-threat rules. In a test/fixture file a
-    # standalone decode is sample data, not an attack.
-    if rule_id == "OBFUSCATION" and is_test and not _line_has_exec_sink(line):
+    # a JWT segment inside ``benchmark/fixtures/*.ts``.
+    # r03 trailofbits FP iter1 extension (2026-05-27): also applies to
+    # NON-test files like ``openai-develop-web-game/scripts/*.js``
+    # decoding a canvas screenshot via ``Buffer.from(base64, "base64")``.
+    # Real obfuscation is a decode chain that FEEDS exec sinks
+    # (``eval(Buffer.from(payload, "base64").toString())`` etc.) — those
+    # stay visible via the CMD_INJECTION / decode-threat rules with the
+    # exec sink on the same line. A standalone decode (no exec sink) is
+    # transformation of binary data (image / fixture / token / config),
+    # not an attack.
+    if rule_id == "OBFUSCATION" and not _line_has_exec_sink(line):
         return "safe_literal"
 
     return "unknown"
