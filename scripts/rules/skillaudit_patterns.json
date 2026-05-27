@@ -498,7 +498,7 @@
         "conversation_history|message_history|chat_history",
         "context_window|full_context",
         "system_prompt|system_message",
-        "get.*(?:all|previous|recent).*(?:messages?|responses?|outputs?)"
+        "\\bget(?:All|Previous|Recent|_all|_previous|_recent)\\w*(?:Messages?|Responses?|Outputs?|messages?|responses?|outputs?)"
       ],
       "remediation": "Do not access other tools' data, conversation history, or system prompts. Each skill should operate within its own declared scope. Use only the inputs provided through the tool's declared parameters."
     },
@@ -549,11 +549,11 @@
       "name": "A2A task hijacking / redirection",
       "description": "Skill intercepts, redirects, or modifies tasks intended for other agents — hijacking the A2A task delegation flow",
       "patterns": [
-        "(?:intercept|hijack|redirect|reroute).*(?:task|request|message).*(?:agent|a2a)",
+        "(?:\\bintercept\\b|\\bhijack\\b|\\bredirect\\b|\\breroute\\b).*\\b(?:task|request|message)\\b.*\\b(?:agent|a2a)\\b",
         "task[_-]?(?:redirect|forward|reroute).*(?:to|towards)\\s+(?:http|https|ws)",
-        "(?:modify|alter|change|tamper).*(?:task|request).*(?:before|after).*(?:forward|send|deliver)",
-        "(?:man[_-]?in[_-]?the[_-]?middle|mitm).*agent",
-        "(?:drop|block|suppress|swallow).*(?:task|response|result).*(?:from|to)\\s+(?:agent|a2a)",
+        "(?:\\bmodify\\b|\\balter\\b|\\bchange\\b|\\btamper\\b).*\\b(?:task|request)\\b.*\\b(?:before|after)\\b.*\\b(?:forward|send|deliver)\\b",
+        "(?:\\bman[_-]?in[_-]?the[_-]?middle\\b|\\bmitm\\b).*\\bagent\\b",
+        "(?:\\bdrop\\b|\\bblock\\b|\\bsuppress\\b|\\bswallow\\b).*\\b(?:task|response|result)\\b.*\\b(?:from|to)\\b\\s+\\b(?:agent|a2a)\\b",
         "task\\.(?:id|status|result).*(?:overwrite|replace|forge)"
       ],
       "remediation": "Do not intercept, redirect, or modify tasks intended for other agents. Each agent should only process tasks explicitly delegated to it. Remove all MITM and task interception code."
@@ -585,7 +585,7 @@
         "(?:artifact|message|metadata).*(?:attach|append|embed).*(?:env|credential|secret|token|key|config|password)",
         "(?:forward|relay|send|transmit).*(?:context|memory|history|conversation).*(?:to|via).*(?:agent|a2a|task)",
         "(?:steganograph|hidden\\s+channel|covert\\s+channel|side\\s+channel).*(?:agent|a2a|artifact)",
-        "(?:exfiltrat|leak|extract).*(?:via|through|using).*(?:a2a|agent|task|artifact)"
+        "(?:exfiltrat|leak|extract).*\\b(?:via|through|using)\\b.*(?:a2a|agent|task|artifact)"
       ],
       "remediation": "Do not embed sensitive data in A2A artifacts or metadata. Use encrypted, authenticated channels for sensitive data exchange. Never include credentials, env vars, or conversation history in inter-agent messages."
     },
@@ -675,16 +675,16 @@
       "name": "Advanced SSRF / request smuggling",
       "description": "Skill uses advanced SSRF techniques including URL parser differentials, IPv6 bypasses, or cloud metadata access via alternate encodings",
       "patterns": [
-        "(?:fetch|axios|http\\.get|request)\\(.*(?:req|input|param|user|query)",
+        "(?:\\bfetch\\b|\\baxios\\b|\\bhttp\\.get\\b|\\brequest)\\(.*(?:req\\.|\\binput\\b|\\bparam\\b|\\bquery\\b|userInput|userData|userQuery|userId|userBody|userParam|userToken|userProvided|user_input|user_data|user_query)",
         "(?:0177\\.0\\.0\\.1|0x7f\\.0\\.0\\.1|2130706433|017700000001)",
         "http://\\[0:0:0:0:0:(?:ffff|0):(?:127|7f)]",
-        "(?:url|uri|endpoint|target|redirect)\\s*=.*(?:req\\.(?:body|query|params)|input|user)",
+        "(?:\\burl\\b|\\buri\\b|\\bendpoint\\b|\\btarget\\b|\\bredirect\\b)\\s*=[^=].*(?:req\\.(?:body|query|params)|\\binput\\b|userInput|userData|userId|user_input|user_data)",
         "http://(?:metadata|instance-data|169\\.254)",
         "curl\\s+.*\\$(?:\\{|\\()",
         "(?:wget|curl|fetch|axios|got|request|http\\.get).*(?:redirect|follow|location).*(?:true|yes|manual)",
-        "(?:new\\s+URL|url\\.parse)\\(.*(?:req|input|param|user)"
+        "(?:new\\s+URL|url\\.parse)\\(.*(?:req\\.|\\binput\\b|\\bparam\\b|userInput|userData|userId|user_input|user_data)"
       ],
-      "remediation": "Validate all user-supplied URLs against a strict allowlist of domains. Block internal IP ranges (10.x, 172.16-31.x, 192.168.x, 127.x). Parse URLs server-side and reject schemes other than https://. Disable automatic redirects. NOTE: patterns 1 and 8 require NO whitespace between the function name and the opening paren (real JS/Python code is `fetch(req)` not `fetch (req)`); English prose like `pull request (a) is closed` no longer matches."
+      "remediation": "Validate all user-supplied URLs against a strict allowlist of domains. Block internal IP ranges (10.x, 172.16-31.x, 192.168.x, 127.x). Parse URLs server-side and reject schemes other than https://. Disable automatic redirects. NOTE: r05 ananddtyagi FP iter1 (2026-05-27) — patterns 1, 4, 8 now require user-input identifiers to be word-bounded (`\\binput\\b`, `\\bparam\\b`, `\\bquery\\b`) or to be standard camelCase/snake_case user-input var names (`userInput`, `userId`, `user_input`); bare `user` was too generic and fired on `fetch('/api/users')` and `HTMLInputElement`. `\\brequest\\(` no longer matches inside `handleRequest(` or `process_user_request(` function definitions. `req` requires a property access shape (`req.url`, `req.body`)."
     },
     {
       "id": "REGEX_DOS",
@@ -793,8 +793,8 @@
       "name": "Environment variable injection / poisoning",
       "description": "Skill modifies environment variables to poison other processes, hijack library loading, alter PATH, or inject credentials into the runtime — differs from env reading (reconnaissance) by actively modifying the environment",
       "patterns": [
-        "process\\.env\\.[A-Z_]+\\s*=",
-        "os\\.environ\\[.*\\]\\s*=",
+        "process\\.env\\.[A-Z_]+\\s*=[^=]",
+        "os\\.environ\\[.*\\]\\s*=[^=]",
         "os\\.putenv\\s*\\(",
         "os\\.setenv\\s*\\(",
         "(?:export|setx?|set)\\s+(?:PATH|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_|NODE_OPTIONS|PYTHONPATH|RUBYLIB|PERL5LIB|CLASSPATH)\\s*=",
@@ -973,7 +973,7 @@
       "patterns": [
         "(?:while\\s*\\(\\s*(?:true|1|!0)\\s*\\)|for\\s*\\(\\s*;\\s*;\\s*\\)|loop\\s*(?:do|\\{)|repeat\\s*(?:forever|indefinitely))(?:\\s*\\{)?\\s*(?:fetch|request|http|axios|curl|exec|spawn|eval)",
         "(?:call\\s+(?:this|itself|the\\s+same)\\s+(?:tool|function|endpoint)\\s+(?:again|repeatedly|in\\s+a\\s+loop|recursively|forever))",
-        "(?:generate|create|produce|output|write|return)\\s+(?:a\\s+)?(?:very\\s+)?(?:large|huge|massive|enormous|gigantic|unlimited|infinite)\\s+(?:amount|number|quantity|volume|file|output|response|text|data|string)",
+        "(?:\\bgenerate\\b|\\bcreate\\b|\\bproduce\\b|\\boutput\\b|\\bwrite\\b|\\breturn\\b)\\s+(?:a\\s+)?(?:very\\s+)?(?:\\blarge\\b|\\bhuge\\b|\\bmassive\\b|\\benormous\\b|\\bgigantic\\b|\\bunlimited\\b|\\binfinite\\b)\\s+(?:\\bamount\\b|\\bnumber\\b|\\bquantity\\b|\\bvolume\\b|\\bfile\\b|\\boutput\\b|\\bresponse\\b|\\btext\\b|\\bdata\\b|\\bstring\\b)",
         "(?:repeat|duplicate|copy)\\s+(?:this|that|the\\s+(?:above|previous|same))\\s+(?:\\d{4,}|(?:million|billion|thousand|hundred\\s+thousand)\\s+times)",
         "(?:exhaust|drain|consume|use\\s+up|deplete|max\\s+out)\\s+(?:the\\s+)?(?:API|token|rate|quota|credit|budget|limit|balance|allowance|resource)",
         "'A'\\s*(?:\\*|\\.repeat)\\s*\\(?\\s*(?:\\d{6,}|0x|1e\\d)",

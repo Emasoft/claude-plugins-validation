@@ -959,6 +959,19 @@ _DOC_ONLY_DIR_PREFIXES: tuple[str, ...] = (
     "examples/",
     "example/",
     "changelog/",
+    # r05 ananddtyagi FP iter1 (2026-05-27): kept in sync with
+    # _skillaudit_markdown_context._DOC_ONLY_DIR_PREFIXES_MD.
+    # Standards/guides/tutorials/wiki/specs documentation directories.
+    "standards/",
+    "standard/",
+    "guides/",
+    "guide/",
+    "tutorials/",
+    "tutorial/",
+    "wiki/",
+    "specs/",
+    "spec/",
+    "specifications/",
 )
 
 

@@ -81,6 +81,43 @@ _RETRIEVAL_GRAB_RE_SHELL: Final[re.Pattern[str]] = re.compile(
 )
 
 
+_REGEX_TOOL_CALL_RE_SHELL: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:grep|egrep|fgrep|awk|sed|ripgrep|rg|ack|pcregrep)\b"
+    r"\s+(?:--?[A-Za-z]+\s+)*"  # optional flags
+    r"(?:--?[A-Za-z]+=\S+\s+)*"  # =value flags
+    r"['\"](?P<regex>[^'\"]+)['\"]"
+)
+
+
+def _match_inside_regex_arg_shell(line: str, match: str) -> bool:
+    """True iff ``match`` (a CMD_INJECTION-style ``|binary`` substring)
+    appears INSIDE a quoted regex argument to grep/awk/sed/etc.
+
+    The CMD_INJECTION pattern
+    ``(?:;|\\||&&)\\s*\\b(?:curl|wget|nc|bash|sh|python|perl|ruby|php)\\b``
+    matches regex-alternation substrings like ``|python`` or ``|php``
+    inside grep regex arguments. These are NOT shell pipes — they're
+    regex alternation operators inside a quoted string passed to grep.
+
+    Example FPs from r05:
+      ``grep -qE "(npx serve|python.*http\\.server)"`` — ``|python`` is
+        inside grep's regex parameter
+      ``grep -E "(node|python|java)"`` — ``|python`` is in the regex
+
+    Real shell pipe ``cmd | python script.py`` stays visible because
+    the binary name appears OUTSIDE any quoted regex on the line.
+    """
+    # Find all grep/awk/sed regex argument spans on the line
+    for m in _REGEX_TOOL_CALL_RE_SHELL.finditer(line):
+        regex_start = m.start("regex")
+        regex_end = m.end("regex")
+        # Find the position of `match` in the original line
+        match_pos = line.find(match)
+        if match_pos != -1 and regex_start <= match_pos <= regex_end:
+            return True
+    return False
+
+
 def _is_api_field_name_match_shell(line: str, match: str) -> bool:
     """True iff a CROSS_TOOL_ACCESS match in a shell script is an
     LLM-API field NAME (used as a bash variable / env var / arg name),
@@ -141,6 +178,20 @@ def classify(
     # CROSS_TOOL_ACCESS field-name pre-check (cheap, no per-line scan).
     line_text = lines[line_idx]
     if rule_id == "CROSS_TOOL_ACCESS" and _is_api_field_name_match_shell(line_text, match):
+        return "safe_literal"
+
+    # r05 ananddtyagi FP iter1 (2026-05-27) — CMD_INJECTION pattern
+    # ``(?:;|\\||&&)\\s*\\b(?:curl|wget|nc|bash|sh|python|perl|ruby|php)\\b``
+    # fires on ``|python``/``|php`` substrings that appear inside REGEX
+    # ARGUMENTS of grep/awk/sed/etc., e.g.:
+    #   ``grep -qE "(npx serve|python.*http\\.server)"``
+    #   ``grep -E "(node|python|java)"``
+    # The ``|python`` is regex ALTERNATION, not shell pipe — the binary
+    # name appears inside a quoted regex pattern, no actual shell pipe
+    # is constructed. Real shell-pipe injection (``... | python ...``
+    # unquoted, OR ``foo | curl $URL`` with var) stays visible because
+    # the match is OUTSIDE any quoted regex on the line.
+    if rule_id == "CMD_INJECTION" and _match_inside_regex_arg_shell(line_text, match):
         return "safe_literal"
 
     if line_idx == 0:
