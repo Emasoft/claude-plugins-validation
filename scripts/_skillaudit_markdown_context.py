@@ -482,6 +482,20 @@ _DOC_ONLY_DIR_PREFIXES_MD: Final[tuple[str, ...]] = (
     "examples/",
     "example/",
     "changelog/",
+    # r05 ananddtyagi FP iter1 (2026-05-27): development standards docs
+    # (MAINTENANCE_STANDARDS.md, FEATURE_DEVELOPMENT_STANDARDS.md, etc.)
+    # in a `standards/` directory are informational guidelines for
+    # contributors, NOT instructions loaded by Claude Code at runtime.
+    "standards/",
+    "standard/",
+    "guides/",
+    "guide/",
+    "tutorials/",
+    "tutorial/",
+    "wiki/",
+    "specs/",
+    "spec/",
+    "specifications/",
 )
 _INSTRUCTION_LOADABLE_BASENAMES_MD: Final[frozenset[str]] = frozenset(
     {"skill.md", "claude.md", "agents.md"}
@@ -689,6 +703,118 @@ def _is_sudo_in_prose_mention(line: str, match: str) -> bool:
     return bool(_SUDO_PROSE_MENTION_RE.search(line))
 
 
+# r05 ananddtyagi FP iter1 (2026-05-27) — CMD_INJECTION false positives
+# on shell command substitution ``$(cat <literal-path>)`` in documentation
+# code fences. When the path is a static literal (no ``$``-interpolation,
+# no concatenation), the substitution is just a file read with no
+# attacker-controlled input.
+_STATIC_LITERAL_PATH_CMDSUB_RE: Final[re.Pattern[str]] = re.compile(
+    r"\$\((?:cat|ls|whoami|id|uname|head|tail|less|more|file|stat|wc)\s+"
+    r"(?P<path>[^\s)\$`'\"]+)"
+    r"\s*\)"
+)
+
+
+def _is_static_literal_path_cmdsub(line: str) -> bool:
+    """True iff ``line`` contains a shell command substitution
+    ``$(cmd <static-literal-path>)`` where the path is a STATIC LITERAL
+    (no ``${var}``, no ``$VAR``, no backticks, no concat).
+
+    The catalog CMD_INJECTION pattern ``\\$\\((?:cat|ls|...)\\s+\\S``
+    matches only a SHORT prefix of the cmdsub (e.g. ``$(cat .``), so we
+    re-scan the FULL line to find a complete ``$(...)`` that spans the
+    match position and verify the inside is a literal path.
+
+    Examples (suppress):
+      * ``kill $(cat .sugar/sugar.pid)``
+      * ``CURRENT=$(cat ./baseline-errors.txt)``
+      * ``echo $(ls /tmp/build)``
+
+    Examples (NOT a literal path — keep visible):
+      * ``$(cat $FILE)``                — $-interpolation
+      * ``$(cat ${USER_INPUT})``        — variable
+      * ``$(cat "$1")``                 — positional arg
+      * ``$(cat /tmp/$session.log)``    — concatenation
+    """
+    for m in _STATIC_LITERAL_PATH_CMDSUB_RE.finditer(line):
+        path = m.group("path")
+        # Path must not contain shell metacharacters that could enable
+        # injection through the path itself.
+        if any(c in path for c in ("$", "`", "*", "?", "[", "]", "{", "}", "&")):
+            continue
+        return True
+    return False
+
+
+# r05 ananddtyagi FP iter1 (2026-05-27) — TOKEN_STEAL false positives on
+# ``Authorization: Bearer <placeholder>`` in markdown documentation. The
+# token value is a placeholder string like ``token``, ``YOUR_TOKEN``,
+# ``<token>``, ``...``, ``$TOKEN``, ``YOUR_API_KEY`` — documentation, not
+# actual token theft.
+_BEARER_PLACEHOLDER_VALUES: Final[frozenset[str]] = frozenset(
+    {
+        "token",
+        "your-token",
+        "your_token",
+        "your-api-key",
+        "your_api_key",
+        "your-api-token",
+        "<token>",
+        "<your-token>",
+        "<your_token>",
+        "<your-api-key>",
+        "...",
+        "xxx",
+        "xxxxxxxxx",
+        "redacted",
+        "example",
+        "placeholder",
+        "api-key",
+        "api_key",
+        "apikey",
+        "secret",
+        "$token",
+        "$api_key",
+        "$bearer_token",
+        "${token}",
+        "${api_key}",
+        "${bearer_token}",
+        "...your-token...",
+        "your-bearer-token",
+    }
+)
+_BEARER_TOKEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"Authorization:\s*Bearer\s+([^\s\"'`]+)",
+    re.IGNORECASE,
+)
+
+
+def _is_bearer_token_placeholder(line: str, match: str) -> bool:
+    """True iff ``Authorization: Bearer <X>`` where X is a documented
+    placeholder value (``token``, ``YOUR_TOKEN``, ``$TOKEN``, etc.).
+
+    Real Bearer tokens are 32+ chars of base64-like data; placeholders
+    are short English words / shell vars / angle-bracket markers.
+    """
+    if "Authorization" not in match and "Bearer" not in match:
+        return False
+    m = _BEARER_TOKEN_RE.search(line)
+    if m is None:
+        return False
+    value = m.group(1).strip().lower()
+    if value in _BEARER_PLACEHOLDER_VALUES:
+        return True
+    # Heuristic: short uppercase identifier like YOUR_API_KEY, MY_TOKEN
+    if len(value) < 32 and re.match(r"^[<\${]*[A-Z][A-Z0-9_]+[>\}]*$", value.strip("<>${}")):
+        return True
+    # Heuristic: contains placeholder keywords like "your", "example",
+    # "placeholder", "token" as a substring, AND is not a real JWT/key shape
+    if any(kw in value for kw in ("your", "example", "placeholder", "redacted", "..."))\
+            and not re.match(r"^[A-Za-z0-9+/=._-]{32,}$", value):
+        return True
+    return False
+
+
 def _certain_benign_literal(
     line: str,
     lines: list[str],
@@ -821,6 +947,28 @@ def _certain_benign_literal(
     #     CMD_INJECTION's pipe pattern, with or without CRED_ENV_READ
     #     also firing on the path mention.
     if rule_id in {"CRED_ENV_SAFE", "CRED_ENV_READ"}:
+        return True
+
+    # (9) r05 ananddtyagi FP iter1 (2026-05-27) — CMD_INJECTION
+    #     ``$(cat <static-literal-path>)`` shell substitution. The
+    #     catalog pattern ``\\$\\((?:cat|ls|whoami|id|uname)\\s+\\S``
+    #     fires on every shell sub. When the path is a STATIC LITERAL
+    #     (no ``${var}``, no ``$VAR``, no concat) and the surrounding
+    #     window has no network sink, the substitution is just a
+    #     file-read — no injection surface. Iron rule preserved:
+    #     ``$(cat $USER_INPUT)`` / ``$(cat /tmp/$1)`` stays visible.
+    if rule_id == "CMD_INJECTION" and _is_static_literal_path_cmdsub(line) and not _context_has_network_sink(lines, line_idx, span=3):
+        return True
+
+    # (10) r05 ananddtyagi FP iter1 (2026-05-27) — TOKEN_STEAL
+    #     ``Authorization: Bearer <placeholder>`` in markdown docs.
+    #     curl / fetch examples that show how to pass a Bearer token
+    #     use placeholder values (``token``, ``YOUR_TOKEN``, ``<token>``,
+    #     ``...``, ``$TOKEN``, ``YOUR_API_KEY``) — these are
+    #     documentation, not actual token theft. Iron rule preserved:
+    #     real per-vendor SECRET_* / HARDCODED_SECRET rules still fire
+    #     on actual key payloads (sk-..., ak_..., AIza..., etc.).
+    if rule_id == "TOKEN_STEAL" and _is_bearer_token_placeholder(line, match):
         return True
 
     # NOTE: CMD_INJECTION / SHELL_EXEC matched INSIDE markdown inline

@@ -1,10 +1,10 @@
 {
   "_schema_version": 1,
-  "_generated_at": "2026-05-27T20:06:46Z",
+  "_generated_at": "2026-05-27T20:33:55.267837Z",
   "_source": "scripts/rules/skillaudit_patterns.json",
-  "_source_sha256": "972e4b86c2897940a321747566f2b50a4341b5e4ec601f65d5c112dd711869ea",
-  "_re2_version": "1.1.20251105",
-  "_audit_mode": "re2_compile_plus_syntactic",
+  "_source_sha256": "bbe74b6b8470a27242d070693eab6990e8cc2583c4521d8a139b593d06f21cad",
+  "_re2_version": "unknown",
+  "_audit_mode": "re2_available",
   "_summary": {
     "total": 486,
     "compatible": 478,
@@ -162,10 +162,10 @@
         {
           "index": 5,
           "pattern": "npm install\\s+(?!--|@)\\S+.*&&",
-          "reason": "invalid perl operator: (?! [syntactic: negative lookahead (?!...)]"
+          "reason": "invalid perl operator: (?!"
         }
       ],
-      "reason": "1 of 12 patterns incompatible with google-re2"
+      "reason": "1 pattern(s) incompatible: invalid perl operator: (?!"
     },
     "EXFIL_COVERT": {
       "compatible": true,
@@ -199,7 +199,7 @@
           "reason": "invalid escape sequence: \\\\R"
         }
       ],
-      "reason": "1 of 15 patterns incompatible with google-re2"
+      "reason": "1 pattern(s) incompatible: invalid escape sequence: \\\\R"
     },
     "CROSS_TOOL_ACCESS": {
       "compatible": true,
@@ -293,15 +293,15 @@
         {
           "index": 1,
           "pattern": "yaml\\.(?:unsafe_load|full_load|load)\\s*\\((?!.*Loader\\s*=\\s*(?:yaml\\.)?SafeLoader)",
-          "reason": "invalid perl operator: (?! [syntactic: negative lookahead (?!...)]"
+          "reason": "invalid perl operator: (?!"
         },
         {
           "index": 10,
           "pattern": "torch\\.load\\s*\\((?!.*weights_only)",
-          "reason": "invalid perl operator: (?! [syntactic: negative lookahead (?!...)]"
+          "reason": "invalid perl operator: (?!"
         }
       ],
-      "reason": "2 of 12 patterns incompatible with google-re2"
+      "reason": "2 pattern(s) incompatible: invalid perl operator: (?!"
     },
     "SSTI": {
       "compatible": true,
@@ -346,15 +346,15 @@
         {
           "index": 2,
           "pattern": "jwt\\.decode\\s*\\((?!.*verify)",
-          "reason": "invalid perl operator: (?! [syntactic: negative lookahead (?!...)]"
+          "reason": "invalid perl operator: (?!"
         },
         {
           "index": 4,
           "pattern": "jose\\.(?:decode|parse)\\s*\\((?!.*verify)",
-          "reason": "invalid perl operator: (?! [syntactic: negative lookahead (?!...)]"
+          "reason": "invalid perl operator: (?!"
         }
       ],
-      "reason": "2 of 14 patterns incompatible with google-re2"
+      "reason": "2 pattern(s) incompatible: invalid perl operator: (?!"
     },
     "INSECURE_CRYPTO": {
       "compatible": true,
@@ -371,10 +371,10 @@
         {
           "index": 6,
           "pattern": "cursor\\.execute\\s*\\(\\s*['\"].*%s.*['\"]\\s*%\\s*(?!\\()",
-          "reason": "invalid perl operator: (?! [syntactic: negative lookahead (?!...)]"
+          "reason": "invalid perl operator: (?!"
         }
       ],
-      "reason": "1 of 14 patterns incompatible with google-re2"
+      "reason": "1 pattern(s) incompatible: invalid perl operator: (?!"
     },
     "XSS_INJECTION": {
       "compatible": true,
@@ -394,7 +394,7 @@
           "reason": "invalid escape sequence: \\\\u"
         }
       ],
-      "reason": "1 of 12 patterns incompatible with google-re2"
+      "reason": "1 pattern(s) incompatible: invalid escape sequence: \\\\u"
     },
     "TOOL_CONFUSION": {
       "compatible": true,

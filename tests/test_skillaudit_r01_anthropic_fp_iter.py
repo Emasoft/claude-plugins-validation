@@ -156,9 +156,15 @@ class TestSsrfAdvancedRequestProse:
         data = json.loads(RULES_PATH.read_text(encoding="utf-8"))
         ssrf = next(r for r in data["rules"] if r["id"] == "SSRF_ADVANCED")
         # Patterns 1 and 8 are the call-shape patterns we tightened.
+        # r05 ananddtyagi FP iter1 (2026-05-27): pattern 1 reshaped to use
+        # `\bfetch\b|\baxios\b|\bhttp\.get\b|\brequest` (word-bounded function
+        # names) so the filter must match both the original `(?:fetch|axios|http`
+        # AND the new `(?:\bfetch\b|\baxios\b|\bhttp` shape.
         return [
             p for p in ssrf["patterns"]
-            if "(?:fetch|axios|http" in p or "(?:new\\s+URL|url\\.parse)" in p
+            if "(?:fetch|axios|http" in p
+            or "(?:\\bfetch\\b|\\baxios\\b|\\bhttp" in p
+            or "(?:new\\s+URL|url\\.parse)" in p
         ]
 
     def test_prose_with_request_paren_does_not_match(self, ssrf_adv_call_patterns: list[str]) -> None:

@@ -1390,6 +1390,26 @@ def _line_has_quoted_string(source_line: str) -> bool:
     return bool(re.search(r"[\"']", source_line))
 
 
+_PYTHON_DEF_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\s*(?:async\s+)?def\s+[A-Za-z_][\w]*\s*\("
+)
+
+
+def _line_is_python_function_def(source_line: str) -> bool:
+    """True iff ``source_line`` starts with a Python ``def`` / ``async def``
+    statement (a function definition, not a call).
+
+    r05 ananddtyagi FP iter1 (2026-05-27): SSRF_ADVANCED pattern fires on
+    ``def process_user_request(request):`` because the catalog regex
+    matches ``\\brequest\\(`` on the parameter name. A `def` line is the
+    OPPOSITE of an outbound network call — flag it as safe_literal so the
+    rule's intent (outbound HTTP with user input) isn't degraded by
+    matching function definitions whose param name happens to be
+    `request`.
+    """
+    return bool(_PYTHON_DEF_RE.match(source_line))
+
+
 def _line_is_re_module_call(source_line: str) -> bool:
     """True iff ``source_line`` contains a Python ``re.<func>(...)`` call
     (re.compile / re.search / re.match / re.fullmatch / re.split / re.sub
@@ -1466,6 +1486,64 @@ def _match_inside_re_pattern_literal(tree: ast.AST, line: int, source: str, matc
             args = node.args  # type: ignore[attr-defined]
             if args and any(sub is target for sub in ast.walk(args[0])):
                 return True
+
+    # r05 ananddtyagi FP iter1 (2026-05-27) — Shape 3: target is an
+    # element of a List/Tuple/Set literal assigned to a variable, and
+    # that variable is later passed as the FIRST positional arg to a
+    # ``re.<func>(...)`` call. Idiomatic Python regex-pattern-list shape:
+    #   ``file_patterns = [r'...', r'...']``
+    #   ``for p in file_patterns: re.findall(p, content)``
+    # The List elements are inert pattern data fed to the regex engine.
+    target_variable_names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        # Only consider plain ``var = [...]`` / ``var = (...)`` / ``var = {...}``
+        if not isinstance(node.value, (ast.List, ast.Tuple, ast.Set)):
+            continue
+        # Is `target` an element of this list/tuple/set?
+        if not any(elt is target or any(sub is target for sub in ast.walk(elt)) for elt in node.value.elts):
+            continue
+        # Grab the variable names this list is assigned to
+        for tgt in node.targets:
+            if isinstance(tgt, ast.Name):
+                target_variable_names.add(tgt.id)
+            elif isinstance(tgt, ast.Tuple):
+                for sub in tgt.elts:
+                    if isinstance(sub, ast.Name):
+                        target_variable_names.add(sub.id)
+    if target_variable_names:
+        # Search the same tree for ``re.<func>(var, ...)`` where ``var`` is
+        # in target_variable_names. Also accept ``for p in var: re.<func>(p)``.
+        for node in ast.walk(tree):
+            if not _is_re_module_pattern_call(node):
+                continue
+            args = node.args  # type: ignore[attr-defined]
+            if not args:
+                continue
+            first = args[0]
+            # Direct: re.findall(var, ...)
+            if isinstance(first, ast.Name) and first.id in target_variable_names:
+                return True
+            # Iteration: ``re.findall(p, ...)`` where `p` is the loop var
+            # over our variable. Walk For statements to find p ← var.
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.For):
+                continue
+            if not isinstance(node.iter, ast.Name) or node.iter.id not in target_variable_names:
+                continue
+            loop_var: str | None = None
+            if isinstance(node.target, ast.Name):
+                loop_var = node.target.id
+            if loop_var is None:
+                continue
+            # Inside the loop body, look for re.<func>(loop_var, ...)
+            for body_node in ast.walk(node):
+                if not _is_re_module_pattern_call(body_node):
+                    continue
+                body_args = body_node.args  # type: ignore[attr-defined]
+                if body_args and isinstance(body_args[0], ast.Name) and body_args[0].id == loop_var:
+                    return True
 
     # Shape 2 — target in the pure-literal iter of a comprehension whose
     # elt compiles a regex.
@@ -1791,6 +1869,13 @@ def classify(
     # sanitiser / extractor, not a SSRF surface.
     if rule_id == "SSRF_ADVANCED":
         if _line_is_safe_internal_assignment(tree, line, source.splitlines()[line_idx]):
+            return "safe_literal"
+        # r05 ananddtyagi FP iter1 (2026-05-27) — SSRF_ADVANCED fires on
+        # ``def process_user_request(request):`` — a function DEFINITION,
+        # not a call. The catalog pattern ``\brequest\(`` matches the
+        # parameter name ``request)`` after ``def …_request(``. A function
+        # def is the OPPOSITE of an outbound network call.
+        if _line_is_python_function_def(source.splitlines()[line_idx]):
             return "safe_literal"
 
     line_text = lines[line_idx] if 0 <= line_idx < len(lines) else ""

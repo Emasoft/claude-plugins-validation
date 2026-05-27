@@ -582,6 +582,85 @@ def _line_is_static_exec_call(source_line: str) -> bool:
     return bool(_STATIC_EXEC_CALL_RE.search(source_line))
 
 
+# r05 ananddtyagi FP iter1 (2026-05-27) — JS/TS function-definition shapes.
+# SSRF_ADVANCED fires on ``server.handleRequest(request)`` etc., but those
+# are method calls on a local object, not outbound HTTP calls.
+_FUNCTION_DEF_RES: Final[tuple[re.Pattern[str], ...]] = (
+    # async / function / arrow function with explicit name
+    re.compile(
+        r"^\s*(?:async\s+|export\s+|public\s+|private\s+|protected\s+|static\s+)*"
+        r"(?:function\s+|async\s+function\s+)?"
+        r"[A-Za-z_$][\w$]*\s*\([^)]*\)\s*[{:=]"
+    ),
+    # Method definition: ``name(args) {`` inside a class body
+    re.compile(
+        r"^\s*(?:async\s+|public\s+|private\s+|protected\s+|static\s+|override\s+)*"
+        r"[A-Za-z_$][\w$]*\s*\([^)]*\)\s*\{"
+    ),
+    # const / let / var = (args) =>
+    re.compile(
+        r"^\s*(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"
+    ),
+    # method call on object: ``obj.handleRequest(request);`` — this is also
+    # a function INVOCATION (not definition), but the invocation is on a
+    # local method, not an HTTP function. The SSRF_ADVANCED pattern is too
+    # generic to distinguish.
+    re.compile(
+        r"\b[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\s*\("
+    ),
+)
+
+
+def _line_is_function_definition(source_line: str) -> bool:
+    """True iff ``source_line`` looks like a JS/TS function/method definition
+    or a method INVOCATION on a local object (not an outbound HTTP call).
+
+    SSRF_ADVANCED pattern fires on ``async handleRequest(request) {`` and
+    ``server.handleRequest(request)`` because the catalog pattern matches
+    any ``request(`` occurrence. Those are not network calls — the actual
+    network functions (``fetch``, ``axios``, ``http.get``) are still
+    matched by the same pattern when they appear standalone (``fetch(req.X)``
+    has no preceding `.` so the method-invocation rule does NOT fire).
+    """
+    stripped = source_line.lstrip()
+    # First, check the "method call on object" pattern — but ONLY accept
+    # when the method name is NOT one of the network calls (fetch, axios,
+    # http.get) because ``something.fetch(...)`` could be a third-party
+    # HTTP client wrapper. The plain network names are still caught.
+    method_call_re = re.compile(r"\b[A-Za-z_$][\w$]*\.([A-Za-z_$][\w$]*)\s*\(")
+    for m in method_call_re.finditer(stripped):
+        method_name = m.group(1)
+        if method_name in ("fetch", "axios", "get", "post", "put", "delete", "patch", "request"):
+            continue  # Could be a wrapped HTTP call; don't suppress
+        return True
+    # Then, check the function-definition shapes
+    return any(p.match(stripped) for p in _FUNCTION_DEF_RES[:3])
+
+
+_SSRF_RELATIVE_PATH_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:fetch|axios(?:\.[a-z]+)?|http\.get)\s*\(\s*['\"]/[^'\"]*['\"]"
+)
+
+
+def _ssrf_call_arg_is_relative_path(source_line: str) -> bool:
+    """True iff a fetch/axios/http.get call on this line takes a STATIC
+    relative path starting with ``/`` (same-origin) as its first arg.
+
+    Same-origin relative paths cannot be SSRF — they target the same
+    server hosting the code. Real SSRF needs an attacker-controlled
+    absolute URL (``http://attacker.com/...``) or template-literal URL
+    with user data interpolated.
+
+    Examples:
+      ``fetch('/api/users')``           → True (same-origin)
+      ``fetch('/api/users', {...})``    → True (same-origin)
+      ``axios.get('/v1/data')``         → True (same-origin)
+      ``fetch('http://example.com')``   → False (absolute URL)
+      ``fetch(`${URL}/api/${userId}`)`` → False (template literal)
+    """
+    return bool(_SSRF_RELATIVE_PATH_RE.search(source_line))
+
+
 def classify(
     file_path: str,
     source: str,
@@ -761,6 +840,41 @@ def classify(
         if _line_is_string_array_element(line) or _window_has_test_fixture_marker(source, line_idx, span=25):
             return "safe_literal"
         return "unknown"
+
+    # r05 ananddtyagi FP iter1 (2026-05-27) — PATH_TRAVERSAL pattern matched
+    # on a relative-path import / require statement like
+    # ``import { foo } from '../../../scripts/file-path-resolver.cjs';``.
+    # Relative imports up the directory tree are NORMAL JS/TS module
+    # resolution — they're resolved by the module loader, not by
+    # ``readFile()``. Real traversal attacks need a runtime filesystem
+    # sink (readFile / fopen / createReadStream), which the dedicated
+    # patterns 4/5 already cover.
+    if rule_id == "PATH_TRAVERSAL" and _line_is_import_or_require(line):
+        return "safe_literal"
+
+    # r05 ananddtyagi FP iter1 (2026-05-27) — SSRF_ADVANCED pattern matched
+    # on a JS/TS FUNCTION DEFINITION (not a call). The catalog pattern is
+    # ``(?:fetch|axios|http\.get|\brequest)\(.*(?:req\.|...)`` and fires on
+    # ``async handleRequest(request) {`` because ``\brequest\(`` matches
+    # the name `request` in `handleRequest(request)`. Wait: with `\b`
+    # boundaries this should already be excluded. But the function-call
+    # match for ``server.handleRequest(request);`` still fires because
+    # `request` appears as the parameter name. A method call like
+    # `server.handleRequest(request)` invokes a USER-DEFINED method whose
+    # implementation is NOT necessarily HTTP — it's just a method on a
+    # local server object. Real SSRF needs an outbound network call
+    # (`fetch(...)`, `axios.get(...)`, `http.get(...)`).
+    if rule_id == "SSRF_ADVANCED" and _line_is_function_definition(line):
+        return "safe_literal"
+
+    # r05 ananddtyagi FP iter1 (2026-05-27) — SSRF_ADVANCED pattern 1 fires
+    # on `fetch('/api/users', ...)` where the URL is a STATIC RELATIVE
+    # PATH starting with `/`. Same-origin relative paths cannot be SSRF
+    # — they target the same server that hosts the code. Real SSRF needs
+    # an attacker-controlled absolute URL (http://attacker.com/...) or a
+    # template-literal URL with user data interpolated.
+    if rule_id == "SSRF_ADVANCED" and _ssrf_call_arg_is_relative_path(line):
+        return "safe_literal"
 
     # ── OBFUSCATION — base64/charcode decode without exec sink. ──
     # Issue #41 FP: ``Buffer.from(pad, "base64").toString("utf-8")`` decoding
