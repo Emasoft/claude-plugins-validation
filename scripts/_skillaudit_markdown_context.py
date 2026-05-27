@@ -714,33 +714,62 @@ _STATIC_LITERAL_PATH_CMDSUB_RE: Final[re.Pattern[str]] = re.compile(
     r"\s*\)"
 )
 
+# r06 ccplugins FP iter1 (2026-05-27) — backtick-quoted static-literal
+# shell command (Claude Code's ``!`cmd args`` syntax for inline shell
+# execution in command docs). The catalog CMD_INJECTION pattern
+# ``\\\`\\s*\\b(?:curl|wget|cat|ls|whoami|id|uname)\\b(?:\\s+[^\\\`]*)?\\\``
+# matches every backtick + bare cmd. When the command is a static
+# literal with no user input, it's intentional/documented invocation
+# with zero injection surface.
+_STATIC_LITERAL_BACKTICK_CMD_RE: Final[re.Pattern[str]] = re.compile(
+    r"`(?:cat|ls|whoami|id|uname|head|tail|less|more|file|stat|wc|pwd|date|hostname|echo|"
+    r"npm|yarn|pnpm|git|node|python|python3|pip|pip3|brew|apt|apt-get|gh|"
+    r"docker|kubectl|terraform|helm|aws|az|gcloud|"
+    r"jq|grep|awk|sed|sort|uniq|cut|tr|find|xargs|tee|cmake|make)"
+    r"(?P<args>[^`$]*)?`"
+)
+
 
 def _is_static_literal_path_cmdsub(line: str) -> bool:
-    """True iff ``line`` contains a shell command substitution
-    ``$(cmd <static-literal-path>)`` where the path is a STATIC LITERAL
-    (no ``${var}``, no ``$VAR``, no backticks, no concat).
+    r"""True iff ``line`` contains a shell command substitution
+    ``$(cmd <static-literal-path>)`` OR a backtick-quoted
+    `` `cmd <static-literal-args>` `` where the args are STATIC
+    LITERALS (no ``${var}``, no ``$VAR``, no concat, no second backtick).
 
-    The catalog CMD_INJECTION pattern ``\\$\\((?:cat|ls|...)\\s+\\S``
-    matches only a SHORT prefix of the cmdsub (e.g. ``$(cat .``), so we
-    re-scan the FULL line to find a complete ``$(...)`` that spans the
-    match position and verify the inside is a literal path.
+    The catalog CMD_INJECTION patterns
+    ``\$\((?:cat|ls|...)\s+\S`` and
+    ``\`\s*\b(?:curl|wget|cat|ls|...)\b(?:\s+[^\`]*)?\``
+    match only a SHORT prefix of the cmdsub (e.g. ``$(cat .``) or the
+    whole backtick span, so we re-scan the FULL line to find a complete
+    ``$(...)`` / `` `...` `` that spans the match position and verify the
+    inside is a literal command.
 
     Examples (suppress):
       * ``kill $(cat .sugar/sugar.pid)``
       * ``CURRENT=$(cat ./baseline-errors.txt)``
       * ``echo $(ls /tmp/build)``
+      * ``- Package-lock.json exists: !`ls package-lock.json 2>/dev/null || echo "Not found"```
+      * ``- Yarn.lock exists: !`ls yarn.lock 2>/dev/null || echo "Not found"```
 
-    Examples (NOT a literal path — keep visible):
+    Examples (NOT a literal — keep visible):
       * ``$(cat $FILE)``                — $-interpolation
       * ``$(cat ${USER_INPUT})``        — variable
       * ``$(cat "$1")``                 — positional arg
       * ``$(cat /tmp/$session.log)``    — concatenation
+      * `` `curl ${EVIL_URL}` ``       — interpolation inside backtick
     """
+    # $(cmd ...) shape
     for m in _STATIC_LITERAL_PATH_CMDSUB_RE.finditer(line):
         path = m.group("path")
-        # Path must not contain shell metacharacters that could enable
-        # injection through the path itself.
         if any(c in path for c in ("$", "`", "*", "?", "[", "]", "{", "}", "&")):
+            continue
+        return True
+    # `cmd ...` backtick shape
+    for m in _STATIC_LITERAL_BACKTICK_CMD_RE.finditer(line):
+        args = m.group("args") or ""
+        # Reject if args contain $-interpolation, concat, or stray
+        # shell metacharacters that could carry attacker input.
+        if "$" in args or "`" in args:
             continue
         return True
     return False
