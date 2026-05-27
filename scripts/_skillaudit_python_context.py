@@ -665,6 +665,76 @@ def _line_is_full_comment(source_line: str) -> bool:
     return source_line.lstrip().startswith("#")
 
 
+def _python_comment_start_pos(source_line: str) -> int:
+    """Return the column index of the first ``#`` that starts a comment on
+    ``source_line``, ignoring ``#`` characters inside string literals.
+
+    Returns ``-1`` if the line has no inline comment.
+
+    Simple state machine — handles single-line single- and double-quoted
+    strings (with backslash escapes). Triple-quoted strings spanning
+    multiple lines are NOT tracked here (a separate AST pass handles
+    matches inside multi-line strings via ``_is_inside_multiline_string_literal``).
+    """
+    in_string = False
+    quote_char: str | None = None
+    i = 0
+    n = len(source_line)
+    while i < n:
+        c = source_line[i]
+        if in_string:
+            if c == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if c == quote_char:
+                in_string = False
+                quote_char = None
+        else:
+            if c == "#":
+                return i
+            if c == '"' or c == "'":
+                in_string = True
+                quote_char = c
+        i += 1
+    return -1
+
+
+def _match_in_python_inline_comment(source_line: str, match: str) -> bool:
+    """True iff ``match`` (as a literal substring) appears INSIDE the
+    inline-comment portion of ``source_line``.
+
+    Used to certify execution-class rule matches inside a Python ``#``
+    inline-comment as safe_literal: a comment is provably non-executable,
+    so a CMD_INJECTION / REGEX_DOS / TOOL_SHADOW / etc. match in the
+    comment text is documentation, not code.
+
+    Iron-rule preserved: prose-vector rules (PROMPT_INJECT, DATA_EXFIL,
+    HARDCODED_SECRET, INVISIBLE_UNICODE_RAW, etc.) stay flagged even in
+    a comment — the caller checks ``_rule_is_prose_vector`` separately.
+    """
+    if not match or not source_line:
+        return False
+    comment_start = _python_comment_start_pos(source_line)
+    if comment_start < 0:
+        return False
+    # Find the match in the line; the FIRST occurrence within the
+    # comment portion qualifies. (A rare match that ALSO happens to
+    # appear in the code portion stays flagged via that occurrence.)
+    occurrence = source_line.find(match)
+    while occurrence >= 0:
+        if occurrence >= comment_start:
+            # This occurrence is inside the comment.
+            return True
+        if occurrence < comment_start:
+            # This occurrence is in CODE — caller should not suppress.
+            # Continue searching in case a LATER occurrence is in
+            # comment, but a same-line code-side match means the rule
+            # would have fired regardless. Return False to be safe.
+            return False
+        occurrence = source_line.find(match, occurrence + 1)
+    return False
+
+
 # ── Issue #40 — execution-class vs prose-vector split for comment/docstring ──
 # A Python ``#`` comment and a docstring are NEVER executed. So a rule that
 # REQUIRES code execution to be a threat (CMD_INJECTION, PATH_TRAVERSAL, …)
@@ -749,8 +819,20 @@ _RETRIEVAL_GRAB_RE_PY: Final[re.Pattern[str]] = re.compile(
 
 def _is_api_field_name_match_py(line: str, match: str) -> bool:
     """True iff a CROSS_TOOL_ACCESS match is an LLM-API field NAME (domain
-    vocabulary) and the line carries no hard runtime data-grab indicator."""
-    if not any(name in match or name in line for name in _API_FIELD_NAMES_PY):
+    vocabulary) and the line carries no hard runtime data-grab indicator.
+
+    Comparison is CASE-INSENSITIVE so ALL-CAPS module constants like
+    ``SYSTEM_PROMPT`` / ``CLAUDE_CODE_SYSTEM_PROMPT`` (the standard Python
+    shape for top-level config strings — e.g. the Anthropic OAuth-token
+    helper's required `system` field literal) match the same vocabulary
+    list as snake-case API params and dict keys. The OPPOSITE-direction
+    test — a real runtime data-grab pattern like ``get_tools()`` or
+    ``tool_results[i]`` — stays case-sensitive because those are
+    fixed-identifier APIs, not domain vocabulary.
+    """
+    match_lower = match.lower()
+    line_lower = line.lower()
+    if not any(name in match_lower or name in line_lower for name in _API_FIELD_NAMES_PY):
         return False
     if _RETRIEVAL_GRAB_RE_PY.search(line):
         return False
@@ -929,6 +1011,240 @@ def _re_literal_feeds_exec_sink(tree: ast.AST, target: ast.Constant) -> bool:
     return False
 
 
+# LLM prompt-template constant detection (r01 anthropics FP iter1, 2026-05-27).
+# Security-tool plugins routinely declare module-level constants like
+# ``SECURITY_REVIEW_PROMPT = """..."""`` or ``CLAUDE_CODE_SYSTEM_PROMPT =
+# """..."""`` that contain LLM prompts describing vulnerability categories.
+# Those prompts MENTION exploit patterns by name (e.g. "Look for `os.system`
+# calls with user input"), and the skillaudit regex catches the mention.
+#
+# The naming convention is what makes this iron-rule-safe: a malicious
+# author hiding an exploit in ``EXPLOIT_PAYLOAD = """..."""`` is not
+# matching this allowlist (no _PROMPT/_TEMPLATE/_INSTRUCTIONS/etc. suffix).
+# Real exec sinks that consume these strings (os.system(EXPLOIT_PAYLOAD))
+# are flagged by separate, still-visible rules.
+_LLM_PROMPT_CONSTANT_SUFFIXES: Final[tuple[str, ...]] = (
+    "_PROMPT",
+    "_PROMPTS",
+    "_TEMPLATE",
+    "_TEMPLATES",
+    "_INSTRUCTIONS",
+    "_INSTRUCTION",
+    "_MESSAGE",
+    "_MESSAGES",
+    "_GUIDANCE",
+    "_REVIEW_PROMPT",
+    "_SYSTEM_PROMPT",
+    "_USER_PROMPT",
+    "_ASSISTANT_PROMPT",
+    "_RUBRIC",
+    "_CHECKLIST",
+    # r01 anthropic FP iter1: security-tool reminder strings — assigned
+    # to module-level constants like ``_UNSAFE_YAML_LOAD_REMINDER =
+    # """⚠️ Security Warning: yaml.load() ... use yaml.safe_load() ..."""``
+    # that the security-guidance plugin shows to the user. The string
+    # CONTAINS the dangerous patterns (because it's documenting them)
+    # — the scanner re-fires on the documented patterns. Same iron-rule
+    # logic as prompt templates: inert data displayed to the user, not
+    # executable code.
+    "_REMINDER",
+    "_REMINDERS",
+    "_WARNING",
+    "_WARNINGS",
+    "_NOTICE",
+    "_NOTICES",
+    "_NOTE",
+    "_NOTES",
+    "_HINT",
+    "_HINTS",
+    "_DESCRIPTION",
+    "_DOCSTRING",
+    "_HELP",
+    "_HELP_TEXT",
+    "_USAGE",
+    "_BANNER",
+    "_BODY",
+    "_TEXT",
+    "_CONTENT",
+    "_CONTEXT",
+    "_DETAILS",
+    # NOTE: ``_EXAMPLE`` / ``_EXAMPLES`` deliberately NOT included —
+    # ``EXAMPLE = """..."""`` is too generic. A var named ``EXAMPLE``
+    # holding a triple-quoted string could be an exploit string the
+    # author plans to use later (test fixture for a vuln scanner, etc.).
+    # Iron-rule preserved: data strings stay at safe_doc → demote.
+    # r01 anthropic FP iter1: LLM agent system / user / assistant
+    # message variants. Common shapes:
+    #   AGENTIC_INVESTIGATE_SYSTEM = """..."""
+    #   SECURITY_REVIEW_TASK = """..."""
+    #   AUDIT_QUERY = """..."""
+    # The string contents describe vulnerability categories to look
+    # for — they MENTION dangerous code patterns as examples, which
+    # the scanner re-fires on.
+    "_SYSTEM",
+    "_USER",
+    "_ASSISTANT",
+    "_QUERY",
+    "_TASK",
+    "_TASKS",
+    "_REVIEW",
+    "_AUDIT",
+    "_INVESTIGATE",
+    "_INVESTIGATION",
+    "_ANALYSIS",
+    "_ANALYZE",
+    "_CHECK",
+    "_CHECKS",
+)
+
+
+def _is_inside_llm_prompt_template_constant(tree: ast.AST, line: int) -> bool:
+    """True iff ``line`` falls inside a string-Constant value of an
+    ``<id> = <multi-line-string>`` assignment whose target identifier
+    matches a known LLM prompt-template naming convention (``*_PROMPT``,
+    ``*_TEMPLATE``, ``*_INSTRUCTIONS``, ``*_RUBRIC``, etc.) — both
+    module-level (``ALL_CAPS``) and local (``snake_case``).
+
+    The naming-suffix gate is what makes this iron-rule-safe: an attacker
+    hiding exploit code in a string would not match
+    ``EXPLOIT_PAYLOAD = (triple-quote)..(triple-quote)`` against any of
+    the suffixes; the exec sink that consumes the string is flagged
+    separately.
+
+    Detection walks every Assign / AnnAssign anywhere in the tree (not
+    just module-level) — security-guidance plugins routinely build
+    prompts inside helper functions (e.g. ``analyze_code_security``
+    declares ``diff_instruction = (triple-quote)..(triple-quote)``
+    locally before splicing it into the API call). Case-insensitive
+    suffix matching catches both module-level CAPS constants and
+    function-local snake_case variables.
+    """
+
+    def _is_prompt_name(name: str) -> bool:
+        if not name:
+            return False
+        if not name.replace("_", "").isalnum():
+            return False
+        upper = name.upper()
+        # Match either the explicit suffix (``XXX_PROMPT``,
+        # ``XXX_INSTRUCTION``) OR the bare word (``prompt``,
+        # ``instructions``) — a function-local variable named exactly
+        # ``prompt = """..."""`` is the most common security-tool
+        # shape and would be missed by suffix-only matching.
+        for suf in _LLM_PROMPT_CONSTANT_SUFFIXES:
+            if upper.endswith(suf):
+                return True
+            if upper == suf.lstrip("_"):
+                return True
+        return False
+
+    def _value_spans_line(value: ast.expr | None) -> bool:
+        if value is None:
+            return False
+        start = getattr(value, "lineno", None)
+        end = getattr(value, "end_lineno", None)
+        if start is None or end is None:
+            return False
+        return bool(start <= line <= end)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            if not any(
+                isinstance(t, ast.Name) and _is_prompt_name(t.id) for t in node.targets
+            ):
+                continue
+            if _value_spans_line(node.value):
+                return True
+        elif isinstance(node, ast.AnnAssign):
+            target = node.target
+            if not (isinstance(target, ast.Name) and _is_prompt_name(target.id)):
+                continue
+            if _value_spans_line(node.value):
+                return True
+    return False
+
+
+# Pattern-catalog detection (r01 anthropics FP iteration, 2026-05-27).
+# Security-tool plugins ship rule-detection dictionaries — each dict entry
+# describes a vulnerability category and contains the regex/substrings that
+# DETECT it. The skillaudit scanner reads those strings and re-fires its own
+# rules on them. To suppress those self-references safely, we require the
+# enclosing Dict to carry at least one CATALOG-SHAPE key — a key that ONLY
+# appears in detection catalogs, not in general configuration dicts.
+_PATTERN_CATALOG_REQUIRED_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "regex",
+        "regexes",
+        "pattern",
+        "patterns",
+        "substrings",
+        "matches",
+        "match_pattern",
+        "match_patterns",
+        "rule",
+        "rules",
+        "signature",
+        "signatures",
+        "trigger",
+        "triggers",
+    }
+)
+
+
+def _match_inside_pattern_catalog(tree: ast.AST, line: int, match: str) -> bool:
+    """True iff ``line`` sits inside a Dict literal whose key set proves
+    it is a SECURITY DETECTION CATALOG.
+
+    Detection logic:
+
+    * Walk the AST for Dict nodes covering ``line``.
+    * A Dict qualifies as a pattern catalog when it has AT LEAST ONE key
+      in ``_PATTERN_CATALOG_REQUIRED_KEYS`` (regex / patterns / substrings /
+      etc.) — generic keys like ``name`` / ``description`` are too common
+      to qualify alone.
+    * If the line falls anywhere inside such a Dict → True. The matched
+      substring can span multiple Constants (e.g. a RESOURCE_ABUSE
+      match like ``child_process.exec", "execSync(`` that crosses two
+      adjacent list elements is still detection data, not exec code).
+
+    A security-detection-catalog dict is INERT DATA — the strings are
+    fed to a regex engine for MATCHING, never executed or rendered as
+    instructions. Real exploit code lives outside the catalog (in the
+    scanner that consumes it), where it is still scanned normally.
+
+    NOTE: this is a sibling of ``_match_inside_re_pattern_literal`` —
+    that one catches ``re.compile(r"…")`` lone-literal calls; this one
+    catches ``[{"regex": "…", "name": "…"}, ...]`` dict-of-dicts shape
+    that's idiomatic for security-pattern registries (skillaudit's own
+    catalog, the security-guidance plugin's ``SECURITY_PATTERNS``, etc.).
+    """
+    del match  # match-span is allowed to cross multiple constants; only line position matters
+
+    def _dict_keys_str(d: ast.Dict) -> set[str]:
+        out: set[str] = set()
+        for k in d.keys:
+            if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                out.add(k.value)
+        return out
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", None)
+        if start is None or end is None or not (start <= line <= end):
+            continue
+        keys = _dict_keys_str(node)
+        if not (keys & _PATTERN_CATALOG_REQUIRED_KEYS):
+            continue
+        # The Dict is a pattern-catalog entry. Any content on a line
+        # inside it is detection metadata (string literal value, the
+        # `:` separator, the `,` separator, even the `"` quotation
+        # marks). The match is inert.
+        return True
+    return False
+
+
 def _match_inside_re_pattern_literal(tree: ast.AST, line: int, source: str, match: str) -> bool:
     """True iff ``match`` sits inside a string Constant that is a regex
     PATTERN literal (issue #42).
@@ -1039,6 +1355,39 @@ def classify(
     if 0 <= line_idx < len(lines) and _line_is_full_comment(lines[line_idx]):
         return "safe_doc" if _rule_is_prose_vector(rule_id) else "safe_literal"
 
+    # r01 anthropic FP iter1 (2026-05-27): extend the comment carve-out to
+    # INLINE comments — when the match position falls AFTER the ``#`` of an
+    # inline comment, the match is in the comment text (not the code
+    # before it). Same iron-rule split as the full-line case: execution
+    # rules suppress, prose-vector rules stay visible.
+    #
+    # Catches FPs like:
+    #   re.compile(r"\\(.*\\)+"),  # nested quantifier: (a+)*  (a*b)*
+    #     ^^^^ code (the actual pattern)   ^^^^^^^ inline comment (doc)
+    # where the REGEX_DOS rule fires on ``(a+)*`` from the COMMENT, not
+    # from the re.compile() pattern argument.
+    #
+    # IMPORTANT split between rule classes:
+    #
+    # * Execution-class rules (CMD_INJECTION, REGEX_DOS, TOOL_SHADOW,
+    #   PATH_TRAVERSAL, …) inside an inline comment → safe_literal
+    #   (a comment is provably non-executable).
+    # * Prose-vector rules (PROMPT_INJECT / DATA_EXFIL /
+    #   INVISIBLE_UNICODE_RAW / …) → DEFER (fall through to existing
+    #   heuristic chain). These have OTHER more specific safe-literal
+    #   heuristics downstream (e.g. synthetic-secret detection for
+    #   ``"sk-" + "a" * 24`` in test files via SECRET_*-specific
+    #   logic) that must run first. Returning safe_doc here would
+    #   shadow those heuristics.
+    # * Per-vendor SECRET_* rules → DEFER (same reason — synthetic
+    #   secret detection in test files needs to run).
+    if (
+        0 <= line_idx < len(lines)
+        and not _rule_is_prose_vector(rule_id)
+        and _match_in_python_inline_comment(lines[line_idx], match)
+    ):
+        return "safe_literal"
+
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -1059,6 +1408,19 @@ def classify(
     # enclosing call is ``re.compile``, never a shell call, so this cannot
     # shadow a real ``os.system(...)`` / ``subprocess(... shell=True)``.
     if _match_inside_re_pattern_literal(tree, line, source, match):
+        return "safe_literal"
+
+    # r01 anthropic FP iteration (2026-05-27) — a match inside a security
+    # pattern-catalog Dict literal is detection data, not exploit code.
+    # The Dict must carry at least one catalog-shape key (regex / patterns
+    # / substrings / signature / ...). Same iron-rule logic as Issue #42:
+    # the strings in catalog dicts are inert data fed to a regex engine
+    # for MATCHING, never executed. Real exploit-shape code lives in the
+    # scanner that consumes the catalog, which is scanned separately.
+    # Applies to ALL rules — a string in a `"substrings": [...]` list
+    # cannot reach a shell whether it spells `exec(`, `rm -rf /`, or
+    # `Ignore previous instructions`.
+    if _match_inside_pattern_catalog(tree, line, match):
         return "safe_literal"
 
     # PRIMARY PATH: find the enclosing Call. A line that contains a
@@ -1259,6 +1621,42 @@ def classify(
         # at source instead of relying on hash-anchored manifest
         # suppression (which breaks on every line-shift edit).
         if rule_id in {"SHELL_EXEC", "CMD_INJECTION"} and _enclosing_function_is_template_generator(tree, line):
+            return "safe_literal"
+        # r01 anthropic FP iter1 (2026-05-27) — LLM prompt-template
+        # promotion: when the match is inside a multi-line string
+        # assigned to a module-level ALL-CAPS constant whose name
+        # follows the prompt-template naming convention
+        # (``*_PROMPT``, ``*_TEMPLATE``, ``*_INSTRUCTIONS``,
+        # ``*_MESSAGE``, ``*_GUIDANCE``, ``*_REVIEW_PROMPT``, etc.),
+        # the string is documentation prose fed to an LLM, not
+        # executable code. The shape is idiomatic for security-tool
+        # plugins (the security-guidance plugin's
+        # ``CLAUDE_CODE_SYSTEM_PROMPT`` / ``SECURITY_REVIEW_PROMPT``)
+        # that ship LLM prompts describing vulnerability categories
+        # with example patterns inside the prose.
+        #
+        # Iron rule preserved: prose-vector rules (PROMPT_INJECT,
+        # DATA_EXFIL, HARDCODED_SECRET, INVISIBLE_UNICODE_RAW,
+        # BASE64_DECODE_THREAT, ...) stay at safe_doc (visible NIT) —
+        # those rules detect threats whose delivery vector IS prose,
+        # so the string content matters even when it's a prompt.
+        # Generic data strings (lowercase identifiers, plain ALL-CAPS
+        # without _PROMPT suffix like ``CMD = """..."""``) also stay
+        # at safe_doc — they could be used elsewhere.
+        if rule_id not in {
+            "PROMPT_INJECT",
+            "INDIRECT_PROMPT_INJECT",
+            "DATA_EXFIL",
+            "DATA_EXFIL_TO_NETWORK",
+            "EXFIL_TO_CHAT",
+            "URL_SUSPICIOUS",
+            "HARDCODED_SECRET",
+            "INVISIBLE_UNICODE_RAW",
+            "BASE64_DECODE_THREAT",
+            "HEX_DECODE_THREAT",
+            "UNICODE_ESCAPE_DECODE_THREAT",
+            "CHARCODE_DECODE_THREAT",
+        } and _is_inside_llm_prompt_template_constant(tree, line):
             return "safe_literal"
         return "safe_doc"
 

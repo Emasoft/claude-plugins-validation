@@ -53,6 +53,56 @@ _PRINT_HEREDOC_OPEN_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+# r01 anthropic FP iter1 (2026-05-27) — CROSS_TOOL_ACCESS shell-script
+# field-name discriminator. Mirrors the Python classifier's
+# ``_is_api_field_name_match_py`` heuristic for shell scripts:
+# ``SYSTEM_PROMPT`` / ``CONTEXT_WINDOW`` / etc. as a bash variable
+# name (or env var, or `$VAR` expansion) is LLM-API domain vocabulary
+# being USED, not a runtime data-grab on another tool's output.
+_API_FIELD_NAMES_SHELL: Final[frozenset[str]] = frozenset(
+    {
+        "system_prompt",
+        "system_message",
+        "context_window",
+        "full_context",
+        "conversation_history",
+        "message_history",
+        "chat_history",
+    }
+)
+# Real runtime data-grab vocabulary that would override the field-name
+# heuristic: a shell script using these would be reading agent tool
+# outputs / messages at runtime, which IS suspicious.
+_RETRIEVAL_GRAB_RE_SHELL: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:get_tools|list_tools|available_tools|call_tool|invoke_tool|use_tool)\b"
+    r"|\bprevious_tool_output\b"
+    r"|\btool_results?\s*\[",
+    re.IGNORECASE,
+)
+
+
+def _is_api_field_name_match_shell(line: str, match: str) -> bool:
+    """True iff a CROSS_TOOL_ACCESS match in a shell script is an
+    LLM-API field NAME (used as a bash variable / env var / arg name),
+    AND the surrounding line carries no runtime data-grab indicator.
+
+    Idiomatic safe shapes:
+      * ``SYSTEM_PROMPT=$(awk ...)`` — extract value from input file
+      * ``$SYSTEM_PROMPT`` / ``"$SYSTEM_PROMPT"`` — use the extracted value
+      * ``--system-prompt "$value"`` — CLI flag for an LLM client
+      * ``export ANTHROPIC_SYSTEM_PROMPT=...`` — env var setup
+    All of these are LEGITIMATE uses of the domain vocabulary in
+    validation / setup / launcher scripts.
+    """
+    match_lower = match.lower()
+    line_lower = line.lower()
+    if not any(name in match_lower or name in line_lower for name in _API_FIELD_NAMES_SHELL):
+        return False
+    if _RETRIEVAL_GRAB_RE_SHELL.search(line):
+        return False
+    return True
+
+
 def classify(
     file_path: str,
     content: str,
@@ -69,6 +119,10 @@ def classify(
     heredoc pushes its delimiter; a line whose ``strip()`` equals the
     top-of-stack delimiter pops it. If the stack is non-empty after the
     scan, the match line is inside a printed heredoc → ``safe_doc``.
+
+    r01 anthropic FP iter1 (2026-05-27) — also returns ``"safe_literal"``
+    for CROSS_TOOL_ACCESS matches that are LLM-API field-name
+    vocabulary in a bash variable / env var / CLI-flag context.
     """
     if not file_path:
         return ""
@@ -81,7 +135,15 @@ def classify(
     ):
         return ""
     lines = content.split("\n")
-    if line_idx <= 0 or line_idx >= len(lines):
+    if line_idx < 0 or line_idx >= len(lines):
+        return ""
+
+    # CROSS_TOOL_ACCESS field-name pre-check (cheap, no per-line scan).
+    line_text = lines[line_idx]
+    if rule_id == "CROSS_TOOL_ACCESS" and _is_api_field_name_match_shell(line_text, match):
+        return "safe_literal"
+
+    if line_idx == 0:
         return ""
     # `_` underscores below used by intent — pylint-style noqa not needed.
     open_delimiters: list[str] = []
