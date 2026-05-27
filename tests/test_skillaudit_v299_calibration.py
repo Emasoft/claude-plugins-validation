@@ -348,21 +348,47 @@ class TestValidatePluginPipelineHookup:
 
 class TestCmdInjectionWordBoundaries:
     def test_backtick_pattern_uses_word_boundary(self) -> None:
+        """Backtick CMD_INJECTION patterns must have ``\\b`` word boundaries
+        around the shell-keyword alternation so they only match the bare
+        command, not when the keyword is a substring of a longer identifier.
+
+        Real backtick command substitution `` `whoami` `` IN A .sh FILE
+        IS execution and MUST stay flagged (iron rule). Markdown context
+        is handled separately by the markdown classifier's
+        ``_match_falls_inside_inline_code`` discriminator.
+
+        (r01 anthropic FP iter1 (2026-05-27): the earlier
+        ``\\s+\\S`` tightening was reverted because it lost real
+        backtick-substitution detection in `.sh` files — bare
+        `` `whoami` `` IS execution there. The `$(cat)` no-args FP is
+        handled by the SEPARATE `\\$\\(...\\)` patterns which DO require
+        ``\\s+\\S``.)
+        """
         data = json.loads(RULES_PATH.read_text(encoding="utf-8"))
         cmd_inj = next(r for r in data["rules"] if r["id"] == "CMD_INJECTION")
-        # The backtick-wrapped pattern must have \b around the shell-name alt.
         backtick_pat = next((p for p in cmd_inj["patterns"] if p.startswith("`")), None)
         assert backtick_pat is not None
         # Must contain \b around the shell-keyword alternation.
         assert r"\b(?:curl" in backtick_pat or r"\b(?:cat" in backtick_pat
         assert r")\b" in backtick_pat
 
-    def test_dollar_paren_pattern_uses_word_boundary(self) -> None:
+    def test_dollar_paren_pattern_requires_argument(self) -> None:
+        """``$(...)`` CMD_INJECTION patterns must require a non-empty argument
+        after the binary name. The Claude Code hook stdin idiom
+        ``input=$(cat)`` (no args) is NOT command injection — it's the
+        documented input pattern. Only ``$(cat $USER_INPUT)`` /
+        ``$(curl url)`` /  ``$(cat /tmp/$VAR)`` patterns are real.
+        """
         data = json.loads(RULES_PATH.read_text(encoding="utf-8"))
         cmd_inj = next(r for r in data["rules"] if r["id"] == "CMD_INJECTION")
-        dp_pat = next((p for p in cmd_inj["patterns"] if p.startswith(r"\$\(")), None)
-        assert dp_pat is not None
-        assert r"\b" in dp_pat
+        dp_pats = [p for p in cmd_inj["patterns"] if p.startswith(r"\$\(")]
+        assert dp_pats, "CMD_INJECTION must have at least one \\$\\( pattern"
+        for pat in dp_pats:
+            assert r"\s+\S" in pat, (
+                f"$(...) CMD_INJECTION pattern must require \\s+\\S after the "
+                f"binary name (got: {pat!r}). Bare $(cat) (Claude Code hook "
+                f"stdin idiom) is not injection."
+            )
 
 
 # ────────────────────────────────────────────────────────────────────────

@@ -1,13 +1,13 @@
 {
   "_schema_version": 1,
-  "_generated_at": "2026-05-24T18:18:18Z",
+  "_generated_at": "2026-05-27T18:51:55Z",
   "_source": "scripts/rules/skillaudit_patterns.json",
-  "_source_sha256": "c93aa1c8719b64df37cadbabf4e1bf50fdebaa36215ec6c137b93c517e40bc6d",
+  "_source_sha256": "a82e855e1055f33b0aeba96edc6545fac8d17018d7320d075485567190711cd8",
   "_re2_version": "1.1.20251105",
   "_audit_mode": "re2_compile_plus_syntactic",
   "_summary": {
-    "total": 490,
-    "compatible": 482,
+    "total": 486,
+    "compatible": 478,
     "incompatible": 8,
     "rules_total": 50,
     "rules_compatible": 44,
@@ -149,8 +149,8 @@
     },
     "SSRF_PATTERN": {
       "compatible": true,
-      "patterns_total": 14,
-      "patterns_compatible": 14,
+      "patterns_total": 10,
+      "patterns_compatible": 10,
       "patterns_incompatible": [],
       "reason": null
     },
@@ -259,8 +259,8 @@
     },
     "CMD_INJECTION": {
       "compatible": true,
-      "patterns_total": 12,
-      "patterns_compatible": 12,
+      "patterns_total": 13,
+      "patterns_compatible": 13,
       "patterns_incompatible": [],
       "reason": null
     },
@@ -326,8 +326,8 @@
     },
     "ENV_INJECTION": {
       "compatible": true,
-      "patterns_total": 12,
-      "patterns_compatible": 12,
+      "patterns_total": 11,
+      "patterns_compatible": 11,
       "patterns_incompatible": [],
       "reason": null
     },
