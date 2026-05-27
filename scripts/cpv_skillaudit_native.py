@@ -923,6 +923,32 @@ _DOC_ONLY_BASENAMES: frozenset[str] = frozenset(
         "authors.md",
         "maintainers.md",
         "history.md",
+        # r04 obra FP iter1 (2026-05-27): common doc-content basenames
+        # present in many real-world plugin trees. NONE of these are
+        # loaded by Claude Code as agent instructions — they exist for
+        # human readers (release notes / examples / changelog summaries
+        # / TODO lists / roadmaps).
+        "release-notes.md",
+        "releasenotes.md",
+        "release_notes.md",
+        "examples.md",
+        "example.md",
+        "usage.md",
+        "commandline-usage.md",
+        "commandline_usage.md",
+        "cli-usage.md",
+        "todo.md",
+        "todos.md",
+        "roadmap.md",
+        "notes.md",
+        "faq.md",
+        "design.md",
+        "architecture.md",
+        "internals.md",
+        "advanced.md",
+        "migration.md",
+        "upgrade.md",
+        "troubleshooting.md",
     }
 )
 _DOC_ONLY_DIR_PREFIXES: tuple[str, ...] = (
@@ -2298,6 +2324,21 @@ _SKIP_DIRS: frozenset[str] = frozenset(
         "builds_dev",
         "reports_dev",
         "reports",
+        # r04 obra FP iter1 (2026-05-27): per-user private storage that
+        # plugins sometimes leak into the repo by accident. These dirs
+        # are user-private content (journal entries, scratch notes, local
+        # work logs) — never agent-loaded instructions, never published.
+        # They are NOT in the standard `_dev` family but the same skip
+        # semantics apply.
+        ".private-journal",
+        ".scratch",
+        ".local",
+        ".cache_local",
+        ".history",
+        ".log",
+        ".logs",
+        ".tmp",
+        ".trash",
     }
 )
 
