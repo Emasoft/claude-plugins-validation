@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-27T19:03:09+00:00",
+  "computed_at": "2026-05-27T19:26:01+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
@@ -110,7 +110,7 @@
     "scripts/_plugin_compute_hashes.py": "sha256:5f03fb5fca6986605c76063824eeed2fcbbd04898e2f77448edd2d0e6be07655",
     "scripts/_plugin_verify_hashes.py": "sha256:a5540ec44c612076b97e824e054272077195d2bd1631a6f45198853d54c697ce",
     "scripts/_skillaudit_json_context.py": "sha256:3342b7daee17b2b4ee1feef084c71f819f4e095820cba290dcf9ad22ed89c4d3",
-    "scripts/_skillaudit_markdown_context.py": "sha256:98eb87b2a32e00d15b2dfccf64af7ff98d490607bdee9400b501ed0a7bae2fc3",
+    "scripts/_skillaudit_markdown_context.py": "sha256:11b0ae5e605a73afdfb9d534417ef4c4fa2667d001a14848c37f9bdd09529b72",
     "scripts/_skillaudit_python_context.py": "sha256:3205858cae6b012f2721cbebcf480e1c60bdaa13bdd4b3c06f5131f39fb54ee7",
     "scripts/_skillaudit_shell_context.py": "sha256:1f77e4866605d259c10ad4e0266bfadfb71bcb90d855da898ecc39fb7036a8b3",
     "scripts/_skillaudit_typescript_context.py": "sha256:a8e00961c307113f6623fd0a5ebc92609743765686c1fdbbbcda400b2955b4b1",
@@ -596,6 +596,7 @@
     "tests/test_skillaudit_native.py": "sha256:308979f9fc1fcc7f74b76a8d947d270c9586872342c2c96b6b6ff8bcc7a780f4",
     "tests/test_skillaudit_native_parallelism.py": "sha256:cbf043b35f875c53c387a9a49f728e9c83ba8b52e737c4db9212b24e8bf5ae64",
     "tests/test_skillaudit_python_context.py": "sha256:682162c4ca36ea38d2cd4607bd082766e13ac3c2d1795423f604a63ba1dd66d5",
+    "tests/test_skillaudit_r01_anthropic_fp_iter.py": "sha256:c627e7699aac75e51609ff11bcaff135629acbddd3af0884f7377d2738c35d4d",
     "tests/test_skillaudit_still_catches_evil.py": "sha256:1718b790202496d99d6e37086f8553f838ea2ee42d37e986be418997d92dd8de",
     "tests/test_skillaudit_template_generator.py": "sha256:62f717e346c2d805ff5e3bf07b297bdb8c4d7c3fdfa85fa04c7e13ed2c118f21",
     "tests/test_skillaudit_typescript_context.py": "sha256:64502222d382392363b8f8f7470b6b0080ea79082d9453a2fba7a240b2bfad16",
