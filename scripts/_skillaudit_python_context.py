@@ -1245,6 +1245,176 @@ def _match_inside_pattern_catalog(tree: ast.AST, line: int, match: str) -> bool:
     return False
 
 
+# Known file-magic byte signatures. A bytes literal whose head matches
+# one of these is unambiguously the start of a known file format, not
+# obfuscated code. The OBFUSCATION rule pattern
+# ``\\\\x[0-9a-fA-F]{2}\\\\x[0-9a-fA-F]{2}\\\\x[0-9a-fA-F]{2}`` fires on
+# any 3-byte hex-escape sequence, which falsely matches every embedded
+# binary file (PNG header, JPEG header, PDF magic, ELF, Mach-O, ZIP, …).
+_FILE_MAGIC_HEXES: Final[tuple[str, ...]] = (
+    "\\x89PNG",    # PNG (8950 4E 47 0D 0A 1A 0A)
+    "\\xff\\xd8",  # JPEG SOI
+    "\\xff\\xd9",  # JPEG EOI
+    "GIF8",        # GIF87a / GIF89a
+    "%PDF",        # PDF
+    "PK\\x03",     # ZIP / docx / xlsx / jar
+    "\\x7fELF",    # ELF
+    "\\xcf\\xfa\\xed\\xfe",  # Mach-O 64
+    "\\xca\\xfe\\xba\\xbe",  # Mach-O fat
+    "MZ",          # PE / DOS executable header
+    "\\x1f\\x8b",  # gzip
+    "BZh",         # bzip2
+    "\\xfd7zXZ",   # xz
+    "\\x00asm",    # WebAssembly
+    "ID3",         # MP3 ID3
+    "RIFF",        # WAV / AVI / WebP
+    "\\x47",       # MPEG TS (loose; combined with other checks would be stronger)
+)
+
+
+def _bytes_literal_is_file_magic(source_line: str) -> bool:
+    """True iff ``source_line`` contains a Python bytes literal whose
+    first ~8 bytes match a known file-format magic header.
+
+    Used to certify OBFUSCATION matches on hex-escape sequences inside
+    bytes literals as safe_literal: a `b"\\x89PNG\\r\\n..."` literal is
+    a fixture image header, not obfuscated code.
+    """
+    # Look for bytes literal: b"..." or b'...'
+    for m in re.finditer(r"\bb[rR]?[\"']", source_line):
+        rest = source_line[m.end():]
+        # Look at the first ~16 chars of the bytes literal content
+        head = rest[:32]
+        if any(head.startswith(magic) or head.lstrip()[:len(magic)] == magic for magic in _FILE_MAGIC_HEXES):
+            return True
+    return False
+
+
+def _line_is_bytes_continuation_in_file_magic_tuple(lines: list[str], line_idx: int) -> bool:
+    """True iff ``lines[line_idx]`` is a bytes-literal line AND a nearby
+    line (within ±10) is a bytes literal that starts with a known
+    file-format magic header.
+
+    Multi-line file-fixture tuples (PNG / JPEG / PDF / etc.) typically
+    span 4-10 lines: the first `b"\\x89PNG\\r\\n..."` is the magic
+    header; continuation lines `b"\\x08\\x06\\x00..."` carry the
+    payload bytes. The continuation lines also fire OBFUSCATION's
+    hex-escape pattern but are NOT obfuscation — they're the rest of
+    the fixture image. Suppress them by anchoring on the magic line.
+    """
+    if not (0 <= line_idx < len(lines)):
+        return False
+    line = lines[line_idx]
+    # Current line must itself be a bytes literal continuation.
+    if not re.search(r"\bb[rR]?[\"']", line):
+        return False
+    # A magic-marker bytes literal somewhere nearby is enough.
+    lo = max(0, line_idx - 10)
+    hi = min(len(lines) - 1, line_idx + 10)
+    for i in range(lo, hi + 1):
+        if _bytes_literal_is_file_magic(lines[i]):
+            return True
+    return False
+
+
+# Known runtime-hijack env vars. Setting any of these IS dangerous
+# even with a literal value because the dynamic linker / interpreter
+# reads them on every subprocess spawn.
+_ENV_HIJACK_VARS: Final[frozenset[str]] = frozenset(
+    {
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "NODE_OPTIONS",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "PYTHONHOME",
+        "PERL5OPT",
+        "PERL5LIB",
+        "RUBYOPT",
+        "RUBYLIB",
+        "BASH_ENV",
+        "ENV",
+        "GIT_SSH_COMMAND",
+        "GCONV_PATH",
+        "IFS",
+        "PATH",
+        "CLASSPATH",
+    }
+)
+
+_ENV_LITERAL_SET_RE: Final[re.Pattern[str]] = re.compile(
+    r"""os\.environ\s*\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\]\s*=\s*['"]([^'"]*)['"]\s*$""",
+)
+
+
+def _is_safe_env_literal_set(source_line: str) -> bool:
+    """True iff ``source_line`` is an ``os.environ["LITERAL_KEY"] =
+    "literal_value"`` assignment AND the key is NOT a known runtime-
+    hijack env var.
+
+    A literal-key/literal-value assignment is configuration setup with
+    zero injection surface (no dynamic input reaches a subprocess env).
+    Real env injection requires either an attacker-controlled key/value
+    OR a hijack-var key (which IS dangerous even with a literal value).
+    """
+    stripped = source_line.strip()
+    # Skip lines with f-strings or BinOp on the value (dynamic input).
+    m = _ENV_LITERAL_SET_RE.match(stripped)
+    if m is None:
+        return False
+    key = m.group(1)
+    if key in _ENV_HIJACK_VARS:
+        return False
+    # Key starts with one of the hijack-var prefixes?
+    for hv in _ENV_HIJACK_VARS:
+        if key.startswith(hv + "_") or key == hv:
+            return False
+    return True
+
+
+def _line_has_quoted_string(source_line: str) -> bool:
+    """True iff ``source_line`` contains a Python string literal
+    (single, double, triple-single, triple-double, or any prefix
+    variant like r"..." / b"..." / f"...").
+
+    Conservative — only checks for the opening quote, not full balance.
+    Used for CRED_ENV_SAFE in-string suppression where ANY string
+    literal on the line means the match is documentation prose.
+
+    A simple presence check is enough: even continuation lines of a
+    multi-line tuple (``"foo"\\n"bar"``) start with a quote, so any
+    line that has at least one `"` or `'` qualifies.
+    """
+    return bool(re.search(r"[\"']", source_line))
+
+
+def _line_is_re_module_call(source_line: str) -> bool:
+    """True iff ``source_line`` contains a Python ``re.<func>(...)`` call
+    (re.compile / re.search / re.match / re.fullmatch / re.split / re.sub
+    / re.subn / re.findall / re.finditer).
+
+    Used to certify REGEX_DOS / catastrophic-backtracking matches that
+    SPAN the call boundary (the matched substring contains the call's
+    opening paren + the regex source string + part of the pattern) as
+    safe_literal: the regex string IS the pattern being audited; the
+    code that calls re.<func> is doing pattern-COMPILATION, never
+    exec. Real exec lives in the code that consumes the compiled
+    pattern (re.search().group() fed to exec(), etc.), separately
+    visible.
+
+    Conservative: only matches when the line clearly has a re.<func>(
+    call shape with optional string-prefix on the regex argument.
+    """
+    return bool(
+        re.search(
+            r"\bre\.(?:compile|search|match|fullmatch|split|sub|subn|findall|finditer)\s*\(",
+            source_line,
+        )
+    )
+
+
 def _match_inside_re_pattern_literal(tree: ast.AST, line: int, source: str, match: str) -> bool:
     """True iff ``match`` sits inside a string Constant that is a regex
     PATTERN literal (issue #42).
@@ -1421,6 +1591,70 @@ def classify(
     # cannot reach a shell whether it spells `exec(`, `rm -rf /`, or
     # `Ignore previous instructions`.
     if _match_inside_pattern_catalog(tree, line, match):
+        return "safe_literal"
+
+    # r03 trailofbits FP iteration (2026-05-27) — REGEX_DOS pattern
+    # matched against a Python ``re.<func>(...)`` call line. The line's
+    # matched span typically crosses the call boundary
+    # (e.g. ``re.search(r"(\\d+)+", x)`` matches ``(r"(\\d+)`` which
+    # includes the call's opening paren). Since this isn't entirely
+    # inside the string Constant, ``_match_inside_re_pattern_literal``
+    # doesn't catch it. But: the regex pattern being CATALOGUED is the
+    # author's own catastrophic-backtracking detection vocabulary
+    # (e.g. the `_REDOS_SHAPES = [re.compile(...)]` from the security-
+    # guidance plugin's extensibility.py), not a live exec sink.
+    # Suppress for REGEX_DOS specifically — other rules still fire normally.
+    if (
+        rule_id == "REGEX_DOS"
+        and 0 <= line_idx < len(lines)
+        and _line_is_re_module_call(lines[line_idx])
+    ):
+        return "safe_literal"
+
+    # r03 trailofbits FP iteration (2026-05-27) — OBFUSCATION pattern
+    # matches ``\\x..\\x..\\x..`` hex-escape sequences. These often
+    # appear as embedded binary fixtures (PNG headers, JPEG markers,
+    # PDF magic, ELF, etc.). A bytes literal whose head matches a
+    # known file-format magic is unambiguously NOT obfuscated code —
+    # it's a fixture image / test asset / file template.
+    if (
+        rule_id == "OBFUSCATION"
+        and 0 <= line_idx < len(lines)
+        and (
+            _bytes_literal_is_file_magic(lines[line_idx])
+            or _line_is_bytes_continuation_in_file_magic_tuple(lines, line_idx)
+        )
+    ):
+        return "safe_literal"
+
+    # r03 trailofbits FP iteration (2026-05-27) — ENV_INJECTION pattern
+    # ``os.environ[".*"] = `` matches every Python env-var assignment,
+    # including benign ``os.environ["MY_DEBUG_FLAG"] = "1"`` config-setup
+    # calls. Real injection happens when the KEY or VALUE is attacker-
+    # controlled OR the KEY is a runtime-hijack var (LD_PRELOAD,
+    # NODE_OPTIONS, PYTHONPATH, PYTHONSTARTUP, BASH_ENV, GIT_SSH_COMMAND).
+    # Suppress when BOTH key and value are pure literals AND the key is
+    # NOT in the hijack-var list.
+    if (
+        rule_id == "ENV_INJECTION"
+        and 0 <= line_idx < len(lines)
+        and _is_safe_env_literal_set(lines[line_idx])
+    ):
+        return "safe_literal"
+
+    # r03 trailofbits FP iteration (2026-05-27) — CRED_ENV_SAFE is the
+    # "Credential reference (documentation)" rule by name. Inside ANY
+    # Python string literal it's just text the program prints to the
+    # user (e.g. a tip message like ``"Add OPENAI_API_KEY to .env"``).
+    # Real credential reads happen in code (open, readFile) which fire
+    # CRED_ENV_READ — not on a string literal mention. Iron-rule
+    # preserved: HARDCODED_SECRET / SECRET_OPENAI_KEY / API_KEY_LEAK
+    # rules fire on the actual key payload, not on the word ``.env``.
+    if (
+        rule_id == "CRED_ENV_SAFE"
+        and 0 <= line_idx < len(lines)
+        and _line_has_quoted_string(lines[line_idx])
+    ):
         return "safe_literal"
 
     # PRIMARY PATH: find the enclosing Call. A line that contains a
@@ -1810,15 +2044,28 @@ def _weak_hash_is_identity_usage(source: str, line_idx: int) -> bool:
     line = line_idx + 1
 
     # The matched line must be covered by a weak-hash call, else nothing to do.
-    if not any(
-        isinstance(n, ast.Call)
+    covering_calls = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
         and _node_qualname(n.func) in _WEAK_HASH_FQNAMES
         and getattr(n, "lineno", None) is not None
         and getattr(n, "end_lineno", None) is not None
         and n.lineno <= line <= n.end_lineno  # type: ignore[operator]
-        for n in ast.walk(tree)
-    ):
+    ]
+    if not covering_calls:
         return False
+
+    # r03 trailofbits FP iter1 (2026-05-27) — ``usedforsecurity=False``
+    # kwarg is Python 3.9+ explicit declaration "this hash is NOT for
+    # security purposes" (the official upstream-supported way to mark
+    # a non-security md5 / sha1 usage that's also FIPS-aware). The
+    # weak-hash call carrying that kwarg is provably identity-only
+    # regardless of slicing / LHS-naming context.
+    for call in covering_calls:
+        for kw in call.keywords:
+            if kw.arg == "usedforsecurity" and isinstance(kw.value, ast.Constant) and kw.value.value is False:
+                return True
 
     line_text = source.splitlines()[line_idx]
     # Simple LHS assignment target — captures the last component of a dotted

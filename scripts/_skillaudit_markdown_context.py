@@ -531,17 +531,18 @@ _WARNING_CONTEXT_RE: Final[re.Pattern[str]] = re.compile(
     r"anti[-\s]*pattern|bad\s+practice|wrong|incorrect|"
     r"example\s+of\s+what\s+not|catch(?:es)?\s+(?:the|this|that)\s+pattern)\b"
     r"|"
-    # r01 anthropic FP iter1: documentation markers indicating example
-    # patterns / rule definitions / regex pattern listings. ONLY count
-    # tightly-scoped prose conventions ("**Examples:**", "Matches:",
-    # "### Examples", "Pattern listing:" etc.) — bare standalone
-    # words like "example" or "pattern" are too common in URLs / prose
-    # / identifiers and would over-match.
-    r"\*\*\s*(?:example|examples|pattern|patterns|matches|rule|rules|regex|detection)\s*:?\s*\*\*"
+    # r01 anthropic + r03 trailofbits FP iters: documentation markers
+    # indicating example patterns / rule definitions / regex pattern
+    # listings. ONLY count tightly-scoped prose conventions
+    # ("**Examples:**", "Matches:", "### Examples", "Pattern listing:",
+    # "Traversal payloads:", "Target files:", etc.) — bare standalone
+    # words like "example", "pattern", "attacker", "exploit" are too
+    # common in URLs / prose / identifiers and would over-match.
+    r"\*\*\s*(?:example|examples|pattern|patterns|matches|rule|rules|regex|detection|payload|payloads|target|targets|vector|vectors|attack|attacks|exploit|exploits)\s*:?\s*\*\*"
     r"|"
-    r"#+\s+(?:example|examples|pattern|patterns|matches|rule|rules|regex|detection)\b"
+    r"#+\s+(?:example|examples|pattern|patterns|matches|rule|rules|regex|detection|payload|payloads|target|targets|vector|vectors|attack|attacks|exploit|exploits|vuln(?:erability|erabilities)?)\b"
     r"|"
-    r"\b(?:example|examples|pattern|patterns|matches|rule|rules|regex|detection)\s*:"
+    r"\b(?:examples?|patterns?|matches|rules?|regex|detection|payloads?|target\s+files?|attack\s+vectors?|exploit\s+(?:examples?|payloads?|patterns?)|vulnerable\s+(?:input|parameters?|patterns?))\s*:"
     r"|"
     r"\bcatch(?:es|ed|ing)?\s+(?:the|this|that)\s+pattern"
     r")",
@@ -550,16 +551,22 @@ _WARNING_CONTEXT_RE: Final[re.Pattern[str]] = re.compile(
 
 
 def _match_in_warning_context(line: str, lines: list[str], line_idx: int) -> bool:
-    """True iff the line itself OR the ±2 surrounding lines contain
-    warning-context vocabulary (don't / never / dangerous / risky / etc.).
+    """True iff the line itself OR the ±5 surrounding lines contain
+    warning-context vocabulary (don't / never / dangerous / risky / etc.,
+    or documentation-list headers like ``Examples:`` / ``Payloads:``).
 
     Used to certify ``chmod 777`` / ``rm -rf /`` / similar destructive
     patterns as DOCUMENTATION of the bad pattern, not exec instructions.
+
+    Span widened from ±2 (r01) to ±5 (r03) because security-education
+    plugins (wooyun-legacy, security-awareness) use `Traversal payloads:`
+    headers followed by 5-7 bullet lines of attack examples — the header
+    needs to influence the matches several lines below it.
     """
     if _WARNING_CONTEXT_RE.search(line):
         return True
-    lo = max(0, line_idx - 2)
-    hi = min(len(lines) - 1, line_idx + 2)
+    lo = max(0, line_idx - 5)
+    hi = min(len(lines) - 1, line_idx + 5)
     for i in range(lo, hi + 1):
         if i == line_idx:
             continue
@@ -724,7 +731,29 @@ def _certain_benign_literal(
     #     warning context (e.g. a real ``chmod 777`` in a real install
     #     script) still fire.
     if (
-        rule_id in {"FS_WRITE", "PRIVILEGE_ESC", "CMD_INJECTION", "SHELL_EXEC"}
+        rule_id
+        in {
+            "FS_WRITE",
+            "PRIVILEGE_ESC",
+            "CMD_INJECTION",
+            "SHELL_EXEC",
+            "PATH_TRAVERSAL",
+            "SSRF_PATTERN",
+            "SSRF_ADVANCED",
+            "XXE_INJECTION",
+            "DESERIALIZATION",
+            "REGEX_DOS",
+            "INSECURE_CRYPTO",
+            "REVERSE_SHELL",
+            "OBFUSCATION",
+            "CONTAINER_ESCAPE",
+            "ENV_INJECTION",
+            "SSTI",
+            "TOOL_SHADOW",
+            "URL_RAW_IP",
+            "NET_SUSPICIOUS",
+            "TIME_BOMB",
+        }
         and _match_in_warning_context(line, lines, line_idx)
     ):
         return True
