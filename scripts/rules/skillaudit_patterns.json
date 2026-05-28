@@ -350,7 +350,7 @@
         "activation[_-]?date",
         "trigger[_-]?(?:after|date|time)",
         "dormant.*(?:until|period|phase)",
-        "sleep\\s*\\(\\s*\\d{4,}"
+        "\\bsleep\\s*\\(\\s*\\d{4,}"
       ],
       "remediation": "Remove all time-based activation logic (date checks, delayed execution, dormant periods). Legitimate skills should function consistently regardless of when they're run. If scheduling is needed, use the agent's built-in scheduling capabilities. NOTE: pattern 5 now requires a LITERAL TIME DELTA (`\\d+ days?`, `\\d+ hours?`, `\\d+ minutes?`) and bounded `.{0,40}` spans, so it no longer matches rate-limiter bash code that uses identifier names like `current_minute` and `last_minute` with no actual numeric delta — those are per-minute rate-limit windows, not time bombs."
     },
