@@ -322,6 +322,21 @@ def _is_test_file(file_path: str) -> bool:
         return True
     if "mocks" in parts or "__mocks__" in parts:
         return True
+    # r10-final-blanket FP iter (2026-05-28) — basename prefix patterns
+    # (test-*, *-test.*, test_*) commonly used for standalone test scripts.
+    basename = parts[-1] if parts else fp
+    if basename.startswith("test-") or basename.startswith("test_"):
+        return True
+    if "-test." in basename or "_test." in basename:
+        return True
+    if basename.endswith("-test") or basename.endswith("_test"):
+        return True
+    # Test harness / fixture files in any directory
+    if "test-harness" in basename or "test-helper" in basename or "test-util" in basename:
+        return True
+    # Smoke tests / e2e
+    if basename.startswith("e2e-") or basename.startswith("e2e_") or basename.startswith("smoke-"):
+        return True
     return False
 
 
