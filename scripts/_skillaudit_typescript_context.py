@@ -1031,7 +1031,7 @@ def _line_is_node_path_resolve_from_dirname(source_line: str) -> bool:
       - ``require.resolve('../../module')``
 
     Examples (KEEP visible — attacker-controllable):
-      - ``path.resolve(userInput, '../../etc/passwd')``
+      - ``path.resolve(userInput, '../../<sensitive-path>')``
       - ``path.join(req.params.dir, '../../config')``
     """
     return bool(_NODE_PATH_RESOLVE_FROM_DIRNAME_RE.search(source_line))

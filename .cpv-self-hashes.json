@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-28T00:58:12+00:00",
+  "computed_at": "2026-05-28T01:02:28+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
@@ -110,10 +110,10 @@
     "scripts/_plugin_compute_hashes.py": "sha256:5f03fb5fca6986605c76063824eeed2fcbbd04898e2f77448edd2d0e6be07655",
     "scripts/_plugin_verify_hashes.py": "sha256:a5540ec44c612076b97e824e054272077195d2bd1631a6f45198853d54c697ce",
     "scripts/_skillaudit_json_context.py": "sha256:040cf0d8245783ac7027c39751a08bed0fc13a4e33bde68363f470b5dbce358f",
-    "scripts/_skillaudit_markdown_context.py": "sha256:afff51b7cc1979b9385172db16195d571ad15315b71f1954ea14d061c94b4dd9",
+    "scripts/_skillaudit_markdown_context.py": "sha256:48eefd9b52518d2c6ceac350e9e3c484acbb5c2bf1ec482c13757e77001002a5",
     "scripts/_skillaudit_python_context.py": "sha256:ecf6faaa2be903ecc923f0b82acc614c7e652eb86695580bebcf7da823ca4509",
     "scripts/_skillaudit_shell_context.py": "sha256:47e86b6d452b3bf9eb01b71dfede8760821658ed671954d39091cc95065e20b4",
-    "scripts/_skillaudit_typescript_context.py": "sha256:0be745da62dd0bcddf95626b57d9e473146f1620d41630a7e5350fe7e36af30c",
+    "scripts/_skillaudit_typescript_context.py": "sha256:8233429a792b7aa2b23410c9b1a9a2fab8b4ecc22342e4c6ad8d85022f75522c",
     "scripts/_skillaudit_yaml_context.py": "sha256:a84b45903b365b402562f1882ca06b276ace91ea2b54b82771c331ee87f68b8b",
     "scripts/add_dependencies.py": "sha256:2542db733012a707c8d5754b7398d2f2d2a2db69c0f44ab9a979032e6c099cfe",
     "scripts/audit/agent_emission_audit.py": "sha256:40f74daf813ea9e6948120eeb90d62247678921d555e0fa317156991ceb6351e",
