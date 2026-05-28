@@ -1134,6 +1134,59 @@ _MD_NEVER_BENIGN_HOST_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+# r01 FP iter (2026-05-28) — emoji ZWJ combiner detection. U+200D between
+# two emoji / pictographic codepoints is a valid emoji ZWJ SEQUENCE (e.g.
+# ``❤‍🔥`` = heart + ZWJ + fire, ``👨‍💻`` = man + ZWJ + laptop,
+# ``🤷‍♂`` = shrug + ZWJ + male sign), NOT hidden-instruction
+# steganography. Used by BOTH the markdown classifier (for the catalog
+# INDIRECT_PROMPT_INJECT raw-char pattern) AND the native
+# ``_detect_invisible_unicode`` (INVISIBLE_UNICODE_RAW), so they agree.
+def _is_emoji_codepoint(cp: int) -> bool:
+    """True iff ``cp`` is in an emoji / pictographic range (rough but
+    covers the standard ZWJ-sequence members)."""
+    return (
+        0x1F000 <= cp <= 0x1FAFF
+        or 0x2600 <= cp <= 0x27BF
+        or 0x2B00 <= cp <= 0x2BFF
+        or 0x2190 <= cp <= 0x21FF
+        or 0x2300 <= cp <= 0x23FF
+        or 0x25A0 <= cp <= 0x25FF
+        or 0x1F1E6 <= cp <= 0x1F1FF
+        or cp
+        in {
+            0xFE0F, 0xFE0E, 0x2640, 0x2642, 0x2695, 0x2696, 0x2708, 0x2764,
+            0x2122, 0x2139, 0x203C, 0x2049, 0x2934, 0x2935, 0x3030, 0x303D,
+            0x3297, 0x3299, 0x24C2, 0x261D, 0x270A, 0x270B, 0x270C, 0x270D,
+        }
+    )
+
+
+def _is_emoji_combiner_zwj(text: str, idx: int) -> bool:
+    """True iff ``text[idx]`` is a U+200D that joins two emoji codepoints
+    (an emoji ZWJ sequence), skipping an intervening variation selector."""
+    if not (0 <= idx < len(text)) or text[idx] != "‍":
+        return False
+    j = idx - 1
+    while j >= 0 and text[j] in ("️", "︎"):
+        j -= 1
+    k = idx + 1
+    while k < len(text) and text[k] in ("️", "︎"):
+        k += 1
+    if j < 0 or k >= len(text):
+        return False
+    return _is_emoji_codepoint(ord(text[j])) and _is_emoji_codepoint(ord(text[k]))
+
+
+def _match_is_emoji_combiner_zwj(line: str, match: str) -> bool:
+    """True iff a raw-char INDIRECT_PROMPT_INJECT match is a U+200D and
+    EVERY U+200D on the line is an emoji combiner (a benign emoji ZWJ
+    sequence, e.g. a Telegram reaction-emoji list)."""
+    if "‍" not in (match or ""):
+        return False
+    positions = [p for p, c in enumerate(line) if c == "‍"]
+    return bool(positions) and all(_is_emoji_combiner_zwj(line, p) for p in positions)
+
+
 def _certain_benign_literal(
     line: str,
     lines: list[str],
@@ -1325,6 +1378,14 @@ def _certain_benign_literal(
     #     visible (iron rule: real prompt-injection prose is the most
     #     dangerous category).
     if rule_id == "INDIRECT_PROMPT_INJECT" and _is_charset_detection_vocab(match):
+        return True
+
+    # (9f) r01 FP iter (2026-05-28) — INDIRECT_PROMPT_INJECT raw-char
+    #     pattern (‍) matched on an emoji ZWJ SEQUENCE (a Telegram
+    #     reaction-emoji list). U+200D between two emoji is a valid emoji
+    #     combiner, not hidden-instruction steganography. Bare ZWJ in
+    #     ordinary text stays visible (not an emoji combiner).
+    if rule_id == "INDIRECT_PROMPT_INJECT" and _match_is_emoji_combiner_zwj(line, match):
         return True
 
     # (9e) r* FP iter (2026-05-28) — NON-shell injection / recon-class rule

@@ -488,6 +488,14 @@ _PLACEHOLDER_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"your[_-]access",
         r"your[_-]jwt",
         r"xxx_replace",
+        # Canonical AWS DOCUMENTATION example credentials. AWS reserves the
+        # ``EXAMPLE`` suffix for its docs (``AKIAIOSFODNN7EXAMPLE`` and the
+        # secret ``wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`` appear in
+        # millions of tutorials). A real access-key-id ending in exactly
+        # ``EXAMPLE`` is astronomically improbable, so the suffix is a
+        # 100%-certain documentation-placeholder signal.
+        r"(?:AKIA|ASIA)[A-Z0-9]{8,}EXAMPLE\b",
+        r"wJalrXUtnFEMI",
     )
 )
 
@@ -1685,6 +1693,11 @@ _INVISIBLE_CHARS: tuple[tuple[str, str], ...] = (
 
 
 def _detect_invisible_unicode(lines: list[str]) -> list[dict[str, Any]]:
+    # r01 FP iter (2026-05-28) — U+200D between two emoji is a valid emoji
+    # ZWJ SEQUENCE (combiner), not steganography. Reuse the markdown
+    # classifier's combiner check so both detectors agree.
+    from _skillaudit_markdown_context import _is_emoji_combiner_zwj  # type: ignore[import-not-found]
+
     findings: list[dict[str, Any]] = []
     for i, line in enumerate(lines):
         for ch, name in _INVISIBLE_CHARS:
@@ -1693,6 +1706,16 @@ def _detect_invisible_unicode(lines: list[str]) -> list[dict[str, Any]]:
                 # BOM at line-0 / single occurrence is normal.
                 if ch == "﻿" and i == 0 and count == 1:
                     continue
+                # ZWJ that only appears as emoji combiners → benign sequence.
+                if ch == "‍":
+                    bare = [
+                        p
+                        for p, c in enumerate(line)
+                        if c == "‍" and not _is_emoji_combiner_zwj(line, p)
+                    ]
+                    if not bare:
+                        continue
+                    count = len(bare)
                 findings.append(
                     {
                         "ruleId": "INVISIBLE_UNICODE_RAW",

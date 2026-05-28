@@ -1646,6 +1646,18 @@ def classify(
     if rule_id == "PATH_TRAVERSAL" and _line_is_node_path_resolve_from_dirname(line):
         return "safe_literal"
 
+    # r01 FP iter (2026-05-28) — SSRF_ADVANCED ``new URL(req.url)`` is URL
+    # PARSING (constructing a URL object to inspect / route the incoming
+    # request), not an outbound network request. SSRF needs an egress sink
+    # (fetch / axios / http.get) whose destination is attacker-controlled;
+    # ``new URL(...)`` with no such sink on the line cannot reach anything.
+    if (
+        rule_id == "SSRF_ADVANCED"
+        and "new URL(" in line
+        and not re.search(r"\b(?:fetch|axios|got|http\.get|https\.get|request)\s*\(", line)
+    ):
+        return "safe_literal"
+
     # r05 ananddtyagi FP iter1 (2026-05-27) — SSRF_ADVANCED pattern matched
     # on a JS/TS FUNCTION DEFINITION (not a call). The catalog pattern is
     # ``(?:fetch|axios|http\.get|\brequest)\(.*(?:req\.|...)`` and fires on
