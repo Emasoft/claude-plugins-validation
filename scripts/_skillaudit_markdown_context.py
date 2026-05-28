@@ -40,6 +40,8 @@ from __future__ import annotations
 import re
 from typing import Final, Literal
 
+from _skillaudit_shell_context import _reads_sensitive_path  # type: ignore[import-not-found]
+
 ContextVerdict = Literal["safe_literal", "safe_doc", "code_fence_neutral", "unknown"]
 
 _EXECUTABLE_LANGS: Final[frozenset[str]] = frozenset(
@@ -742,14 +744,21 @@ _STATIC_LITERAL_PATH_CMDSUB_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 # r06 ccplugins FP iter1 (2026-05-27) — backtick-quoted static-literal
-# shell command (Claude Code's ``!`cmd args`` syntax for inline shell
-# execution in command docs). The catalog CMD_INJECTION pattern
-# ``\\\`\\s*\\b(?:curl|wget|cat|ls|whoami|id|uname)\\b(?:\\s+[^\\\`]*)?\\\``
-# matches every backtick + bare cmd. When the command is a static
-# literal with no user input, it's intentional/documented invocation
-# with zero injection surface.
+# shell command in Claude Code's ``!`cmd args`` command-EXECUTION syntax
+# (a command/skill markdown line where the ``!`` prefix makes Claude Code
+# actually RUN the backtick contents). Such an executed-but-static-literal
+# invocation has zero injection surface → suppress.
+#
+# The leading ``!`` is REQUIRED: it is what distinguishes an executed
+# command from plain inline-code DOCUMENTATION. A bare ``\`gh release\```
+# inside prose / a table cell is a documentation mention (Claude Code does
+# NOT execute it) and must fall through to the generic inline-code →
+# ``safe_doc`` path (which DEMOTES, not suppresses, in instruction-loadable
+# files per the iron rule). Without the ``!`` anchor this regex wrongly
+# fully-suppressed every backtick command mention (regression caught by
+# test_table_row_with_gh_release_backticks).
 _STATIC_LITERAL_BACKTICK_CMD_RE: Final[re.Pattern[str]] = re.compile(
-    r"`(?:cat|ls|whoami|id|uname|head|tail|less|more|file|stat|wc|pwd|date|hostname|echo|"
+    r"!`(?:cat|ls|whoami|id|uname|head|tail|less|more|file|stat|wc|pwd|date|hostname|echo|"
     r"npm|yarn|pnpm|git|node|python|python3|pip|pip3|brew|apt|apt-get|gh|"
     r"docker|kubectl|terraform|helm|aws|az|gcloud|"
     r"jq|grep|awk|sed|sort|uniq|cut|tr|find|xargs|tee|cmake|make)"
@@ -1140,7 +1149,16 @@ def _certain_benign_literal(
     #     window has no network sink, the substitution is just a
     #     file-read — no injection surface. Iron rule preserved:
     #     ``$(cat $USER_INPUT)`` / ``$(cat /tmp/$1)`` stays visible.
-    if rule_id == "CMD_INJECTION" and _is_static_literal_path_cmdsub(line) and not _context_has_network_sink(lines, line_idx, span=3):
+    #     Iron rule preserved (issue #38): a read of a SENSITIVE system
+    #     credential path (``cat /etc/passwd``, ``cat ~/.ssh/id_rsa``) is
+    #     reconnaissance and stays visible even though the path is a static
+    #     literal — the static-literal exemption is for INTERNAL files only.
+    if (
+        rule_id == "CMD_INJECTION"
+        and _is_static_literal_path_cmdsub(line)
+        and not _reads_sensitive_path(line)
+        and not _context_has_network_sink(lines, line_idx, span=3)
+    ):
         return True
 
     # (10e) r10-final-blanket FP iter (2026-05-28) — behavioral-pattern

@@ -28,6 +28,10 @@ import re
 from typing import Final, Literal
 
 from _skillaudit_json_context import _classify_key  # type: ignore[import-not-found]
+from _skillaudit_shell_context import (  # type: ignore[import-not-found]
+    _cmdsub_is_safe_data_command,
+    _pipe_to_text_processor,
+)
 
 ContextVerdict = Literal["safe_literal", "safe_doc", "safe_schema", "code_fence_neutral", "suspect", "unknown"]
 
@@ -83,9 +87,15 @@ def _line_is_in_run_block(lines: list[str], line_idx: int) -> bool:
             if indent < target_indent or (j == line_idx):
                 # Multi-line block-scalar run: the indent of subsequent
                 # lines must be greater than the run: line's indent.
-                if m_run.group("inline").strip():
-                    # Inline run: 'echo hi' — only the run: line itself
-                    # belongs.
+                inline_val = m_run.group("inline").strip()
+                if inline_val:
+                    # Block-scalar indicators (``|`` ``>`` ``|-`` ``>-``
+                    # ``|+`` ``>+``) mean the command body is on the
+                    # FOLLOWING lines — those body lines belong to this
+                    # run block. Only a GENUINE inline command
+                    # (``run: echo hi``) limits the block to its own line.
+                    if inline_val in ("|", ">", "|-", ">-", "|+", ">+"):
+                        return True
                     return j == line_idx
                 return True
         m_other = other_key_re.match(line)
@@ -234,6 +244,18 @@ def classify(
             # <bare packages>, no arbitrary-exec metacharacters) is a
             # 100%-certain non-threat → suppress.
             if _run_line_is_airtight_pkg_install(line):
+                return "safe_literal"
+            # r01/r02 FP iter (2026-05-28) — a ``run:`` shell line is shell
+            # code; reuse the shell classifier's safe command-substitution
+            # logic. ``code=$(curl ... -w '%{http_code}')`` (capture),
+            # ``$(ls -d plugins/*/ | wc -l)`` (count), ``$(cat "$CACHE_FILE")``
+            # (read) are data queries, not injection. Genuine exec shapes
+            # (``curl ... | bash``, ``eval "$(...)"``) stay visible via the
+            # guards inside the shell helpers.
+            if rule_id == "CMD_INJECTION" and (
+                _cmdsub_is_safe_data_command(line, match)
+                or _pipe_to_text_processor(line, match)
+            ):
                 return "safe_literal"
             if _has_known_safe_ci_pattern(line):
                 return "code_fence_neutral"
