@@ -54,12 +54,19 @@ class TestSafeDocInlineCode:
         assert verdict == "safe_doc"
 
     def test_line_is_only_inline_code_span(self) -> None:
-        """Line containing only a backtick span `echo hi` → safe_doc."""
+        """Benign command mention `echo hi` in inline code → safe_literal.
+
+        A backtick span headed by a benign allowlisted command with no
+        dangerous args is fully suppressed (zero-FP): it is a 100%-certain
+        non-threat, so it must not surface even as a NIT in
+        instruction-loadable files. Dangerous inline-code (``curl … | sh``,
+        ``cat /etc/passwd``) still stays visible — see the iron-rule tests.
+        """
         import _skillaudit_markdown_context as ctx
 
         src = "`echo hi`"
         verdict = ctx.classify("README.md", src, 0, "echo hi", "CMD_INJECTION")
-        assert verdict == "safe_doc"
+        assert verdict == "safe_literal"
 
     def test_sudo_apt_get_inside_backticks_on_prose_line(self) -> None:
         """`sudo apt-get install X` inside inline-code span on prose → safe_doc."""
@@ -102,12 +109,16 @@ class TestSafeDocProse:
         assert verdict == "safe_doc"
 
     def test_table_row_with_gh_release_backticks(self) -> None:
-        """Table row with `gh release` inline code → safe_doc."""
+        """Table row with benign `gh release` inline code → safe_literal.
+
+        Benign allowlisted command mention with no dangerous args → fully
+        suppressed (zero-FP), same as ``test_line_is_only_inline_code_span``.
+        """
         import _skillaudit_markdown_context as ctx
 
         src = "| Step | Run `gh release` |"
         verdict = ctx.classify("README.md", src, 0, "gh release", "CMD_INJECTION")
-        assert verdict == "safe_doc"
+        assert verdict == "safe_literal"
 
     def test_numbered_list_with_os_system_call(self) -> None:
         """Numbered list mentioning os.system → safe_doc."""

@@ -40,7 +40,12 @@ from __future__ import annotations
 import re
 from typing import Final, Literal
 
-from _skillaudit_shell_context import _reads_sensitive_path  # type: ignore[import-not-found]
+from _skillaudit_shell_context import (  # type: ignore[import-not-found]
+    _cmdsub_is_safe_data_command,
+    _match_inside_regex_arg_shell,
+    _pipe_to_text_processor,
+    _reads_sensitive_path,
+)
 
 ContextVerdict = Literal["safe_literal", "safe_doc", "code_fence_neutral", "unknown"]
 
@@ -118,7 +123,7 @@ def _build_fence_map(source: str) -> list[tuple[int, int, str] | None]:
     delimiter and length. The fence-open line and fence-close line
     themselves are marked as ``None`` (they're not content).
     """
-    lines = source.splitlines()
+    lines = source.split("\n")
     result: list[tuple[int, int, str] | None] = [None] * len(lines)
 
     i = 0
@@ -744,25 +749,38 @@ _STATIC_LITERAL_PATH_CMDSUB_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 # r06 ccplugins FP iter1 (2026-05-27) — backtick-quoted static-literal
-# shell command in Claude Code's ``!`cmd args`` command-EXECUTION syntax
-# (a command/skill markdown line where the ``!`` prefix makes Claude Code
-# actually RUN the backtick contents). Such an executed-but-static-literal
-# invocation has zero injection surface → suppress.
+# shell command. A backtick span headed by a BENIGN command from the
+# allowlist below (whether documentation ``\`ls\``` or Claude Code's
+# ``!`cmd`` command-execution syntax) is a benign command mention with no
+# injection surface → suppress. The command must be benign AND its args
+# must carry no DANGEROUS token (pipe-to-a-shell-interpreter, ``rm``,
+# ``eval``, ``sudo``, ``$(``, backtick, single ``&``); those keep the
+# finding visible — see ``_is_static_literal_path_cmdsub``.
 #
-# The leading ``!`` is REQUIRED: it is what distinguishes an executed
-# command from plain inline-code DOCUMENTATION. A bare ``\`gh release\```
-# inside prose / a table cell is a documentation mention (Claude Code does
-# NOT execute it) and must fall through to the generic inline-code →
-# ``safe_doc`` path (which DEMOTES, not suppresses, in instruction-loadable
-# files per the iron rule). Without the ``!`` anchor this regex wrongly
-# fully-suppressed every backtick command mention (regression caught by
-# test_table_row_with_gh_release_backticks).
+# NOTE: network-fetch commands (curl / wget / nc) are deliberately NOT in
+# this allowlist — a ``curl … | sh`` mention must stay visible regardless.
 _STATIC_LITERAL_BACKTICK_CMD_RE: Final[re.Pattern[str]] = re.compile(
-    r"!`(?:cat|ls|whoami|id|uname|head|tail|less|more|file|stat|wc|pwd|date|hostname|echo|"
+    r"`(?:cat|ls|ps|whoami|id|uname|head|tail|less|more|file|stat|wc|pwd|date|hostname|echo|"
     r"npm|yarn|pnpm|git|node|python|python3|pip|pip3|brew|apt|apt-get|gh|"
     r"docker|kubectl|terraform|helm|aws|az|gcloud|"
-    r"jq|grep|awk|sed|sort|uniq|cut|tr|find|xargs|tee|cmake|make)"
+    r"jq|grep|egrep|awk|sed|sort|uniq|cut|tr|find|xargs|tee|cmake|make)"
     r"(?P<args>[^`$]*)?`"
+)
+
+# Dangerous tokens that, if present in a backtick command's ARGUMENTS,
+# forfeit the benign certification (the first command is benign, but the
+# args could chain / pipe into something that is not). A pipe into a TEXT
+# processor (``| grep`` / ``| jq`` / ``| wc``) is fine; a pipe into a
+# shell interpreter (``| sh``), a second dangerous command, a nested
+# ``$(…)``, or a backgrounding single ``&`` is not. ``&&``-chaining of
+# benign commands is allowed (the chained command words are screened too).
+_BACKTICK_DANGEROUS_ARG_RE: Final[re.Pattern[str]] = re.compile(
+    r"\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash|ksh|fish|node|deno|python[0-9.]*|ruby|perl|php)\b"
+    r"|;"
+    r"|\$\("
+    r"|(?<!&)&(?!&)"
+    r"|\b(?:rm|eval|sudo|curl|wget|nc|ncat|telnet|dd|mkfs|chmod|chown|chattr|"
+    r"setcap|kill|shutdown|reboot|mkfifo|source)\b"
 )
 
 
@@ -806,6 +824,11 @@ def _is_static_literal_path_cmdsub(line: str) -> bool:
         # Reject if args contain $-interpolation, concat, or stray
         # shell metacharacters that could carry attacker input.
         if "$" in args or "`" in args:
+            continue
+        # Reject if args pipe into a shell interpreter or chain into a
+        # dangerous command — a benign FIRST command does not make
+        # ``ls | sh`` / ``cat x && rm -rf /`` benign.
+        if _BACKTICK_DANGEROUS_ARG_RE.search(args):
             continue
         return True
     return False
@@ -1007,6 +1030,73 @@ def _is_bearer_token_placeholder(line: str, match: str) -> bool:
     return False
 
 
+# r* FP iter (2026-05-28) — CLI option-enum pipe. ``argument-hint:
+# [--type next|vite|go|python|rust]`` uses ``|`` as an OR-separator
+# between bare-word choices, not a shell pipe to an interpreter. The
+# CMD_INJECTION ``|python`` / ``|php`` substring match is spurious here.
+_CLI_ENUM_BRACKET_RE: Final[re.Pattern[str]] = re.compile(r"\[([^\]]*\|[^\]]*)\]")
+_CLI_ENUM_BARE_WORDS_RE: Final[re.Pattern[str]] = re.compile(r"^[\w.\s|/=,><-]+$")
+
+
+def _is_cli_option_enum_pipe(line: str, match: str) -> bool:
+    """True iff a CMD_INJECTION ``|<word>`` match is an OR-separator inside
+    a CLI choice enumeration (``argument-hint:`` line, or a ``[a|b|c]``
+    bracket of bare words), not a shell pipe."""
+    if "|" not in (match or ""):
+        return False
+    if "argument-hint" in line.lower():
+        return True
+    needle = match.lstrip("|").strip()
+    for m in _CLI_ENUM_BRACKET_RE.finditer(line):
+        inner = m.group(1)
+        if _CLI_ENUM_BARE_WORDS_RE.match(inner) and needle and needle in inner:
+            return True
+    return False
+
+
+# r* FP iter (2026-05-28) — LLM-API field-name vocabulary in markdown
+# documentation (CLAUDE.md, README) referencing Claude Code's statusline /
+# request schema (``context_window``, ``system_prompt``, …). These are
+# field NAMES being documented, not runtime cross-tool data grabs. The
+# rule's dangerous shapes (``get_tools()``, ``tool_results[``) are not
+# here and stay visible.
+_MD_API_FIELD_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "context_window", "system_prompt", "system_message", "full_context",
+        "conversation_history", "message_history", "chat_history",
+        "current_usage", "context_window_size",
+    }
+)
+
+
+def _is_md_api_field_name(line: str, match: str) -> bool:
+    """True iff a CROSS_TOOL_ACCESS match is an LLM-API field name."""
+    hay = (match or "").lower() + " " + line.lower()
+    return any(name in hay for name in _MD_API_FIELD_NAMES)
+
+
+# r05 FP iter (2026-05-28) — the INDIRECT_PROMPT_INJECT charset-vocabulary
+# pattern ``(?:ascii|unicode|zero-width|invisible|hidden)\s+(?:character|
+# char|instruction|injection|payload)`` fires on benign technical prose
+# discussing CHARACTER ENCODING ("hidden characters can cause parsing
+# failures", "Check for Hidden Characters and Encoding"). The
+# CHARACTER / CHAR variants are encoding documentation; only the
+# INSTRUCTION / INJECTION / PAYLOAD variants are injection-related and
+# stay visible (iron rule).
+_CHARSET_DETECTION_VOCAB_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?:ascii|unicode|utf-?8|zero[\s-]?width|invisible|hidden|control|"
+    r"non-?printing|whitespace)\s+characters?$",
+    re.IGNORECASE,
+)
+
+
+def _is_charset_detection_vocab(match: str) -> bool:
+    """True iff an INDIRECT_PROMPT_INJECT match is charset-ENCODING
+    detection vocabulary (``hidden character(s)``, ``ASCII characters``) —
+    documentation about character encoding, not an injection directive."""
+    return bool(_CHARSET_DETECTION_VOCAB_RE.match((match or "").strip()))
+
+
 def _certain_benign_literal(
     line: str,
     lines: list[str],
@@ -1161,6 +1251,45 @@ def _certain_benign_literal(
     ):
         return True
 
+    # (9b) r* FP iter (2026-05-28) — markdown shell content (a bash fence,
+    #     a !`…` command-exec, or a $(…) substitution) reuses the shell
+    #     classifier's safe command-substitution logic: ``$(cat <<EOF)``,
+    #     ``$(ls "$VAR/*" | wc -l)``, ``echo "$x" | jq`` are data reads /
+    #     queries / text-processing, not injection. The shell helpers carry
+    #     their own guards (sensitive-path reads and pipe-to-a-shell stay
+    #     visible), and ``|python`` inside a grep regex alternation is an
+    #     OR, not a pipe.
+    if (
+        rule_id == "CMD_INJECTION"
+        and (_cmdsub_is_safe_data_command(line, match) or _pipe_to_text_processor(line, match))
+        and not _reads_sensitive_path(line)
+        and not _context_has_network_sink(lines, line_idx, span=3)
+    ):
+        return True
+    # ``|python`` inside a grep regex alternation, or a CLI option-enum
+    # ``[--type a|python|c]``, is an OR-separator — not a shell pipe — so
+    # it is benign regardless of any network sink elsewhere in context.
+    if rule_id == "CMD_INJECTION" and (
+        _match_inside_regex_arg_shell(line, match) or _is_cli_option_enum_pipe(line, match)
+    ):
+        return True
+
+    # (9c) r07 FP iter (2026-05-28) — CROSS_TOOL_ACCESS on an LLM-API field
+    #     name (``context_window`` / ``system_prompt`` / …) in markdown
+    #     documentation is a referenced schema field, not a runtime grab.
+    if rule_id == "CROSS_TOOL_ACCESS" and _is_md_api_field_name(line, match):
+        return True
+
+    # (9d) r05 FP iter (2026-05-28) — INDIRECT_PROMPT_INJECT charset-ENCODING
+    #     vocabulary (``hidden characters``, ``ASCII characters``) is
+    #     documentation about character encoding / parsing, not an injection
+    #     directive. The injection variants (``hidden instruction`` /
+    #     ``… injection`` / ``… payload``) are NOT matched here and stay
+    #     visible (iron rule: real prompt-injection prose is the most
+    #     dangerous category).
+    if rule_id == "INDIRECT_PROMPT_INJECT" and _is_charset_detection_vocab(match):
+        return True
+
     # (10e) r10-final-blanket FP iter (2026-05-28) — behavioral-pattern
     #     rules (TIME_BOMB, RESOURCE_ABUSE, TOOL_SHADOW, FS_WRITE,
     #     PATH_TRAVERSAL, ENV_INJECTION, etc.) matched inside markdown
@@ -1239,7 +1368,7 @@ def classify(
 
     See module docstring for the per-context verdict matrix.
     """
-    lines = source.splitlines()
+    lines = source.split("\n")
     if not (0 <= line_idx < len(lines)):
         return "unknown"
 

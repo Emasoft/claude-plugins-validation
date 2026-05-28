@@ -342,7 +342,7 @@ def _is_test_file(file_path: str) -> bool:
 
 def _line_window(source: str, line_idx: int, span: int = 5) -> list[str]:
     """Return the ±``span`` lines around ``line_idx``."""
-    lines = source.splitlines()
+    lines = source.split("\n")
     lo = max(0, line_idx - span)
     hi = min(len(lines), line_idx + span + 1)
     return lines[lo:hi]
@@ -836,7 +836,7 @@ def _is_test_unicode_assertion(source: str, line_idx: int, line: str) -> bool:
         return False
     # Surrounding ±10 lines must mention Unicode/bidi/zero-width vocab
     # (relaxed window since test fixtures span more lines)
-    lines = source.splitlines()
+    lines = source.split("\n")
     lo = max(0, line_idx - 10)
     hi = min(len(lines), line_idx + 10)
     window = "\n".join(lines[lo:hi])
@@ -931,7 +931,7 @@ def _is_test_unicode_fixture_array(source: str, line_idx: int, line: str) -> boo
     if "[" not in line and "]" not in line and "," not in line:
         return False
     # Check ±2 surrounding lines for test-fixture vocabulary
-    lines = source.splitlines()
+    lines = source.split("\n")
     lo = max(0, line_idx - 2)
     hi = min(len(lines), line_idx + 3)
     window = "\n".join(lines[lo:hi])
@@ -1172,6 +1172,146 @@ def _ssrf_call_arg_is_relative_path(source_line: str) -> bool:
     return bool(_SSRF_RELATIVE_PATH_RE.search(source_line))
 
 
+# r* FP iter (2026-05-28) — Node non-shell process spawners. spawn /
+# spawnSync / execFile / execFileSync / fork run the argv array DIRECTLY
+# with no shell — this is the RECOMMENDED way to AVOID shell injection.
+# The only injection surfaces are ``shell: true`` in the options or a
+# shell-interpreter first arg ('sh'/'bash'/'zsh' '-c'); both stay visible.
+_NONSHELL_SPAWN_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:spawn|spawnSync|execFile|execFileSync|fork)\s*\("
+)
+_SPAWN_SHELL_INTERP_FIRST_ARG_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:spawn|spawnSync|execFile|execFileSync|fork)\s*\(\s*"
+    r"['\"`](?:/(?:usr/)?bin/)?(?:sh|bash|zsh|dash|ksh|fish)['\"`]"
+)
+
+
+def _line_is_safe_nonshell_spawn(source: str, line_idx: int) -> bool:
+    """True iff a SHELL_EXEC match is a Node non-shell process spawn
+    (``spawn(cmd, argsArray, opts)``) with no ``shell: true`` and whose
+    first argument is not a shell interpreter. Array-form spawn runs argv
+    directly (no shell metacharacter interpretation), so it has no
+    shell-injection surface — it is the recommended safe alternative to
+    ``exec``. Keeps visible: ``shell:true`` and ``spawn('bash',['-c',…])``."""
+    lines = source.split("\n")
+    if not (0 <= line_idx < len(lines)):
+        return False
+    line = lines[line_idx]
+    if not _NONSHELL_SPAWN_RE.search(line):
+        return False
+    if _SPAWN_SHELL_INTERP_FIRST_ARG_RE.search(line):
+        return False
+    window = "\n".join(lines[line_idx : min(len(lines), line_idx + 5)])
+    return not re.search(r"shell\s*:\s*true", window)
+
+
+# r04 obra FP iter (2026-05-28) — RFC 6455 WebSocket Sec-WebSocket-Accept
+# computation. SHA-1 of (client key + the fixed WebSocket GUID) is MANDATED
+# by the protocol and is NOT used for integrity / authentication, so it is
+# not a crypto weakness. The GUID is the unambiguous signal.
+_WS_HANDSHAKE_RE: Final[re.Pattern[str]] = re.compile(
+    r"258EAFA5-E914-47DA-95CA-C5AB0DC85B11|WS_MAGIC|Sec-WebSocket|websocket",
+    re.IGNORECASE,
+)
+
+
+def _is_websocket_sha1_handshake(source: str, line_idx: int) -> bool:
+    """True iff an INSECURE_CRYPTO ``createHash('sha1')`` match is the
+    RFC 6455 WebSocket handshake accept-key computation (protocol-mandated
+    SHA-1, not a security control)."""
+    lines = source.split("\n")
+    if not (0 <= line_idx < len(lines)):
+        return False
+    lo = max(0, line_idx - 6)
+    hi = min(len(lines), line_idx + 6)
+    return bool(_WS_HANDSHAKE_RE.search("\n".join(lines[lo:hi])))
+
+
+# r07 jarrodwatts FP iter (2026-05-28) — escaped Unicode ESCAPE SEQUENCE
+# (``\uXXXX`` — visible ASCII in source, not a raw hidden byte) used in
+# CHARACTER HANDLING: a char-equality comparison or emoji/grapheme/width
+# logic that DETECTS / skips these codepoints. Raw invisible bytes are a
+# different rule (INVISIBLE_UNICODE_RAW) and are unaffected.
+_ESCAPED_UNICODE_CHAR_HANDLING_RE: Final[re.Pattern[str]] = re.compile(
+    r"===?\s*['\"]\\u[0-9A-Fa-f]{4}['\"]"
+    r"|['\"]\\u[0-9A-Fa-f]{4}['\"]\s*===?"
+    r"|\\u[0-9A-Fa-f]{4}[^\n]{0,48}(?:emoji|grapheme|combin|zero-?width|"
+    r"variation|joiner|\\p\{Mark\}|codepoint|char|width|fullwidth|halfwidth)"
+    r"|(?:emoji|grapheme|combin|zero-?width|variation|joiner|codepoint|"
+    r"char|width)[^\n]{0,48}\\u[0-9A-Fa-f]{4}",
+    re.IGNORECASE,
+)
+
+
+def _is_escaped_unicode_char_handling(line: str) -> bool:
+    """True iff an INVISIBLE_TEXT (escape-sequence) match is a ``\\uXXXX``
+    in a character comparison / emoji-width handler — visible, auditable
+    char-classification code, not hidden-instruction injection."""
+    return bool(_ESCAPED_UNICODE_CHAR_HANDLING_RE.search(line))
+
+
+# r04/r07 FP iter (2026-05-28) — JS/TS comment lines. A ``//`` line
+# comment, a ``*`` JSDoc continuation, or a ``/*`` block-comment opener is
+# documentation, never executed. TOOL_SHADOW (execution-class) is
+# suppressed; INDIRECT_PROMPT_INJECT is suppressed ONLY when the match is
+# unicode/charset DETECTION vocabulary ("ASCII character", "hidden
+# character") — a real "ignore previous instructions" directive in a
+# comment stays visible (iron rule).
+_JS_COMMENT_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?://|\*|/\*)")
+_UNICODE_VOCAB_CHAR_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:ascii|unicode|utf-?8|zero-?width|hidden|invisible|bidi|rtl|ltr|"
+    r"grapheme|codepoint|emoji|combining|variation|cjk|ideograph|wide)\b"
+    r"[^\n]{0,30}\bchar",
+    re.IGNORECASE,
+)
+
+
+def _is_js_comment_line(line: str) -> bool:
+    """True iff ``line`` is a JS/TS comment line (``//`` / JSDoc ``*`` /
+    ``/*``)."""
+    return bool(_JS_COMMENT_LINE_RE.match(line))
+
+
+def _is_unicode_charset_vocab(line: str) -> bool:
+    """True iff the line mentions unicode/charset DETECTION vocabulary
+    near the word "char" — a benign technical phrase, not an injection
+    directive."""
+    return bool(_UNICODE_VOCAB_CHAR_RE.search(line))
+
+
+def _is_versionish_regex_quantifier(match: str) -> bool:
+    """True iff a REGEX_DOS match is the anchored-iteration version-number
+    idiom ``(\\.\\d+)+`` / ``(?:\\.\\d+)+``. Each iteration begins with a
+    LITERAL ``.`` so there is no overlapping-quantifier backtracking —
+    linear time, not catastrophic. The classic semver-parsing regex."""
+    return "(\\.\\d+)+" in match or "(?:\\.\\d+)+" in match
+
+
+# r04 obra FP iter (2026-05-28) — the SUPPLY_CHAIN ``window[…]=`` /
+# ``globalThis[…]=`` pattern targets dynamic loading / injection of
+# EXTERNAL code. Assigning a LOCAL value (an arrow function, a callback,
+# a primitive) to a computed global property — e.g. a CDP page-binding
+# callback ``window[BINDING+'_resolve'] = (id,r)=>{…}`` — does not load
+# external code and is not a supply-chain vector.
+_BENIGN_GLOBAL_ASSIGN_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:window|globalThis|self|global)\s*\[[^\]]+\]\s*="
+)
+_EXTERNAL_CODE_LOAD_RE: Final[re.Pattern[str]] = re.compile(
+    r"\beval\s*\(|\bfetch\s*\(|\baxios\b|\brequire\s*\(|\bimport\s*\(|"
+    r"new\s+Function|\batob\s*\(|document\.write|\.innerHTML\b|https?://|"
+    r"fromCharCode|\bunescape\s*\(",
+    re.IGNORECASE,
+)
+
+
+def _is_benign_global_property_assignment(line: str) -> bool:
+    """True iff a SUPPLY_CHAIN ``window[…]=`` / ``globalThis[…]=`` match
+    assigns a LOCAL value (no external-code-load token on the line)."""
+    if not _BENIGN_GLOBAL_ASSIGN_RE.search(line):
+        return False
+    return not _EXTERNAL_CODE_LOAD_RE.search(line)
+
+
 def classify(
     file_path: str,
     source: str,
@@ -1186,9 +1326,9 @@ def classify(
     issue #39 FP set; other matches fall through to "unknown" so the
     existing heuristic chain runs.
     """
-    if not (0 <= line_idx < len(source.splitlines())):
+    if not (0 <= line_idx < len(source.split("\n"))):
         return "unknown"
-    line = source.splitlines()[line_idx]
+    line = source.split("\n")[line_idx]
     is_test = _is_test_file(file_path)
 
     # r04 obra FP iter1 (2026-05-27) — SHELL_EXEC pattern matched on
@@ -1196,6 +1336,46 @@ def classify(
     # invocation happens elsewhere where the rule fires again with
     # the actual call shape.
     if rule_id == "SHELL_EXEC" and _line_is_import_or_require(line):
+        return "safe_literal"
+
+    # r04/r05 FP iter (2026-05-28) — Node non-shell process spawn
+    # (``spawn(cmd, argsArray)`` / execFile / fork) with no shell:true is
+    # the safe, no-shell API — no shell-injection surface.
+    if rule_id == "SHELL_EXEC" and _line_is_safe_nonshell_spawn(source, line_idx):
+        return "safe_literal"
+
+    # r04 FP iter (2026-05-28) — SHA-1 in the RFC 6455 WebSocket handshake
+    # is protocol-mandated, not a crypto weakness.
+    if rule_id == "INSECURE_CRYPTO" and _is_websocket_sha1_handshake(source, line_idx):
+        return "safe_literal"
+
+    # r07 FP iter (2026-05-28) — INVISIBLE_TEXT (escape-sequence) match
+    # ``\uXXXX`` used in a char comparison / emoji-width handler is visible
+    # char-classification code, not hidden-instruction injection. (Raw
+    # invisible bytes → INVISIBLE_UNICODE_RAW, handled separately, unaffected.)
+    if rule_id == "INVISIBLE_TEXT" and _is_escaped_unicode_char_handling(line):
+        return "safe_literal"
+
+    # r04 FP iter (2026-05-28) — SUPPLY_CHAIN ``window[…]=`` assigning a
+    # LOCAL value (no external-code-load token) is not a supply-chain vector.
+    if rule_id == "SUPPLY_CHAIN" and _is_benign_global_property_assignment(line):
+        return "safe_literal"
+
+    # r07 FP iter (2026-05-28) — REGEX_DOS on the anchored-iteration
+    # version-number idiom ``(\.\d+)+`` / ``(?:\.\d+)+`` is linear-time,
+    # not catastrophic backtracking.
+    if rule_id == "REGEX_DOS" and _is_versionish_regex_quantifier(match):
+        return "safe_literal"
+
+    # r04/r07 FP iter (2026-05-28) — TOOL_SHADOW / INDIRECT_PROMPT_INJECT
+    # matched inside a JS/TS comment line. TOOL_SHADOW (execution-class) is
+    # documentation here; INDIRECT_PROMPT_INJECT is suppressed ONLY when the
+    # match is unicode/charset DETECTION vocabulary ("ASCII character",
+    # "intercepted Fetch") — a real "ignore previous instructions" directive
+    # in a comment still fires (iron rule).
+    if rule_id == "TOOL_SHADOW" and _is_js_comment_line(line):
+        return "safe_literal"
+    if rule_id == "INDIRECT_PROMPT_INJECT" and _is_js_comment_line(line) and _is_unicode_charset_vocab(line):
         return "safe_literal"
 
     # r07 jarrodwatts FP iter1 (2026-05-28) — TOOL_SHADOW pattern fires
