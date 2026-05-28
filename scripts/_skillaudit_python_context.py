@@ -27,7 +27,50 @@ import ast
 import re
 from typing import Final, Literal
 
+from _skillaudit_markdown_context import _is_charset_detection_vocab  # type: ignore[import-not-found]
+
 ContextVerdict = Literal["safe_literal", "safe_doc", "suspect", "unknown"]
+
+# r03 FP iter (2026-05-28) — env-var names whose presence as a string
+# literal in the surrounding scope means a dynamic ``os.environ[var] = …``
+# could be setting a runtime-hijack var → keep visible.
+_PY_ENV_HIJACK_LITERAL_RE: Final[re.Pattern[str]] = re.compile(
+    r"['\"](?:LD_PRELOAD|LD_LIBRARY_PATH|DYLD_INSERT_LIBRARIES|DYLD_LIBRARY_PATH|"
+    r"NODE_OPTIONS|PYTHONPATH|PYTHONSTARTUP|PYTHONHOME|PERL5OPT|PERL5LIB|RUBYOPT|"
+    r"RUBYLIB|BASH_ENV|GIT_SSH_COMMAND|GCONV_PATH|CLASSPATH|PATH|IFS)['\"]"
+)
+# A dynamic ``os.environ[<identifier>] =`` assignment (variable key, not a
+# string literal).
+_PY_ENV_DYNAMIC_KEY_RE: Final[re.Pattern[str]] = re.compile(
+    r"os\.environ\s*\[\s*[A-Za-z_]\w*\s*\]\s*="
+)
+_PY_ENV_READ_RE: Final[re.Pattern[str]] = re.compile(
+    r"os\.environ\.get\s*\(|os\.environ\s*\[\s*[A-Za-z_]"
+)
+
+
+def _is_env_read_modify_write(lines: list[str], line_idx: int) -> bool:
+    """True iff an ENV_INJECTION match is a READ-MODIFY-WRITE of an env var
+    via a DYNAMIC (variable) key — ``os.environ[var] = <transform of the
+    existing value>`` — with NO runtime-hijack-var name appearing as a
+    string literal anywhere in the ±8-line window.
+
+    This is the canonical benign shape (e.g. stripping a host from
+    ``NO_PROXY``): the value is derived from the env's own current value,
+    not attacker input, and the key is provably not a hijack var (none is
+    named nearby). A literal hijack-var key, or a hijack-var literal in
+    context, keeps the finding visible (iron rule)."""
+    if not (0 <= line_idx < len(lines)):
+        return False
+    if not _PY_ENV_DYNAMIC_KEY_RE.search(lines[line_idx]):
+        return False
+    lo = max(0, line_idx - 8)
+    hi = min(len(lines), line_idx + 8)
+    window = "\n".join(lines[lo:hi])
+    if _PY_ENV_HIJACK_LITERAL_RE.search(window):
+        return False
+    # Require a same-window env READ (the "read" half of read-modify-write).
+    return bool(_PY_ENV_READ_RE.search(window))
 
 # Modules + attributes whose calls reach a shell. Every plugin uses at
 # least one of these.
@@ -1593,13 +1636,24 @@ def classify(
             enclosing call, match outside any AST node). Caller falls
             through to the existing heuristic chain.
     """
+    # r03 FP iter (2026-05-28) — INDIRECT_PROMPT_INJECT charset-ENCODING
+    # vocabulary (``zero-width char``, ``unicode characters``, ``hidden
+    # character``) is documentation about character encoding, benign in a
+    # comment / docstring / code alike. Runs BEFORE the comment fast-path
+    # (which would only DEMOTE a prose-vector rule to safe_doc, keeping the
+    # FP visible). The injection variants (instruction / injection /
+    # payload) of the same catalog pattern are NOT matched here and stay
+    # visible (iron rule).
+    if rule_id == "INDIRECT_PROMPT_INJECT" and _is_charset_detection_vocab(match):
+        return "safe_literal"
+
     # Cheap fast-path: full-line comment detection without parse (parse is
     # ~50× slower). Issue #40: a Python ``#`` comment is NEVER executed, so
     # an execution-class rule matched inside one is a provable non-threat →
     # suppress (safe_literal). A prose-vector rule (prompt-injection / exfil
     # instruction / hardcoded secret / invisible unicode) stays VISIBLE
     # (safe_doc → demote) — a careless agent or grep-loader could surface it.
-    lines = source.splitlines()
+    lines = source.split("\n")
     if 0 <= line_idx < len(lines) and _line_is_full_comment(lines[line_idx]):
         return "safe_doc" if _rule_is_prose_vector(rule_id) else "safe_literal"
 
@@ -1717,6 +1771,17 @@ def classify(
         rule_id == "ENV_INJECTION"
         and 0 <= line_idx < len(lines)
         and _is_safe_env_literal_set(lines[line_idx])
+    ):
+        return "safe_literal"
+
+    # r01 FP iter (2026-05-28) — ENV_INJECTION read-modify-write of an env
+    # var via a dynamic key (``os.environ[var] = <transform of existing
+    # value>``) with no hijack-var literal nearby (e.g. stripping a host
+    # from NO_PROXY). The value is the env's own value, not attacker input.
+    if (
+        rule_id == "ENV_INJECTION"
+        and 0 <= line_idx < len(lines)
+        and _is_env_read_modify_write(lines, line_idx)
     ):
         return "safe_literal"
 

@@ -1085,15 +1085,19 @@ def _is_md_api_field_name(line: str, match: str) -> bool:
 # stay visible (iron rule).
 _CHARSET_DETECTION_VOCAB_RE: Final[re.Pattern[str]] = re.compile(
     r"^(?:ascii|unicode|utf-?8|zero[\s-]?width|invisible|hidden|control|"
-    r"non-?printing|whitespace)\s+characters?$",
+    r"non-?printing|whitespace|homoglyph|bidi(?:rectional)?)\s+"
+    r"(?:chars?|characters?)$",
     re.IGNORECASE,
 )
 
 
 def _is_charset_detection_vocab(match: str) -> bool:
     """True iff an INDIRECT_PROMPT_INJECT match is charset-ENCODING
-    detection vocabulary (``hidden character(s)``, ``ASCII characters``) —
-    documentation about character encoding, not an injection directive."""
+    detection vocabulary (``hidden character(s)``, ``ASCII characters``,
+    ``zero-width char``) — documentation about character encoding, not an
+    injection directive. The ``instruction`` / ``injection`` / ``payload``
+    variants of the same catalog pattern are NOT matched here and stay
+    visible (iron rule)."""
     return bool(_CHARSET_DETECTION_VOCAB_RE.match((match or "").strip()))
 
 

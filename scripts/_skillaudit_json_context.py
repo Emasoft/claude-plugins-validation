@@ -27,6 +27,7 @@ chain handles it. The classifier NEVER suppresses on doubt.
 from __future__ import annotations
 
 import json
+import re
 from typing import Final, Literal
 
 ContextVerdict = Literal["safe_literal", "safe_doc", "safe_schema", "suspect", "unknown"]
@@ -149,8 +150,6 @@ _DANGEROUS_KEY_SUFFIXES: Final[frozenset[str]] = frozenset(
 # INVOCATIONS — they're DECLARATIONS of which Bash/Read/Write/etc.
 # tool calls are allowed/denied. Matching them as REGEX_DOS, FS_WRITE,
 # PRIVILEGE_ESC, CMD_INJECTION is wholly false-positive.
-import re
-
 _CLAUDE_CODE_TOOL_GLOB_RE: Final[re.Pattern[str]] = re.compile(
     r"^(?:Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Task|Glob|Grep|"
     r"WebFetch|WebSearch|TodoWrite|TodoRead|Agent|Skill|Plan|ExitPlanMode|"
@@ -297,7 +296,30 @@ def classify(
     if isinstance(value_at_path, str) and _is_claude_code_permission_glob(best_path, value_at_path):
         return "safe_schema"
 
+    # r07 FP iter (2026-05-28) — CROSS_TOOL_ACCESS on an LLM-API field NAME
+    # (``context_window`` / ``system_prompt`` / …) inside a JSON value — a
+    # statusline / request-schema field referenced in an npm test-script
+    # fixture, not a runtime cross-tool data grab. The rule's dangerous
+    # shapes (``get_tools()``, ``tool_results[``) are not field names.
+    if rule_id == "CROSS_TOOL_ACCESS" and _is_api_field_name_json(match):
+        return "safe_schema"
+
     return _classify_key(best_path)
+
+
+_API_FIELD_NAMES_JSON: Final[frozenset[str]] = frozenset(
+    {
+        "context_window", "context_window_size", "current_usage",
+        "system_prompt", "system_message", "full_context",
+        "conversation_history", "message_history", "chat_history",
+    }
+)
+
+
+def _is_api_field_name_json(match: str) -> bool:
+    """True iff ``match`` is an LLM-API / statusline schema field name."""
+    m = (match or "").lower()
+    return any(name in m for name in _API_FIELD_NAMES_JSON)
 
 
 def _resolve_value(parsed: object, path: tuple[str, ...]) -> object:
