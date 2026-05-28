@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-28T13:19:53+00:00",
+  "computed_at": "2026-05-28T13:30:54+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
@@ -112,8 +112,8 @@
     "scripts/_skillaudit_json_context.py": "sha256:e450484d49a852eb6ac8af65d82df86481cf27f222ebdbc31520759632b25cfb",
     "scripts/_skillaudit_markdown_context.py": "sha256:066a4358ce86bf6bc765ce2429878ac1904d1df1c3b22c1bb9efb6ab5cf5aab9",
     "scripts/_skillaudit_python_context.py": "sha256:591f2d72910765e3453bca3a1d1cd1bfea7222f7782dc5830b9e0b4a640082af",
-    "scripts/_skillaudit_shell_context.py": "sha256:9953208631011911c2e8050ca10a3e087445092861b82972b574e6d1906f9970",
-    "scripts/_skillaudit_typescript_context.py": "sha256:03ec381acd3629f088471a8a8aead11de9a86d3275836fb7d93d1a55de251ed0",
+    "scripts/_skillaudit_shell_context.py": "sha256:898e26a94d521aed54f1c4ca1abdc93360b7db431149915bb6e82b4f1c0aa087",
+    "scripts/_skillaudit_typescript_context.py": "sha256:ce7427887d191cc8b0c6ccd8805766198e1b1b1db0e71da08a4b9fc43f9bcfac",
     "scripts/_skillaudit_yaml_context.py": "sha256:be871acaa3bb9ff0c03e13cf807a9c9fb8a09b71d166319612598bdb01189da4",
     "scripts/add_dependencies.py": "sha256:2542db733012a707c8d5754b7398d2f2d2a2db69c0f44ab9a979032e6c099cfe",
     "scripts/audit/agent_emission_audit.py": "sha256:40f74daf813ea9e6948120eeb90d62247678921d555e0fa317156991ceb6351e",
@@ -588,6 +588,7 @@
     "tests/test_setup_branch_rules.py": "sha256:fa4847ae56c99af5907a2d4a81e0f9ef330200e25c9accd88443ddc9e8a51208",
     "tests/test_setup_branch_rules_generic.py": "sha256:8823d2e1ca978a010a170ced88faa7834db7b7667dce2b2033909c5df3683b7e",
     "tests/test_skillaudit_context_certainty.py": "sha256:543531cd9ad7b423ebdab62d04483aa1f46159231291d06b9d209a4d9e987ab0",
+    "tests/test_skillaudit_fp_elimination_2026_05_28.py": "sha256:bb40011341cc01c11abd65120a4875529302d53d8b405fcd15e247df08c35051",
     "tests/test_skillaudit_integration_v2_104.py": "sha256:32d93905818b98ba4f14a0e1bf5f668b0623c28c1e85cbd5a3e5658232641606",
     "tests/test_skillaudit_issue_39.py": "sha256:b61410a6f6fc4d7f3f6e7c2c2bb70ca9c13e7b4dfee0cf5116264d4cadbf6516",
     "tests/test_skillaudit_json_context.py": "sha256:07ca323e0a6a138e84d41fa367367cfbac26e61df64c5609c09c259f0ab8398e",
