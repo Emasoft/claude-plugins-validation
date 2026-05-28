@@ -764,7 +764,7 @@ _STATIC_LITERAL_BACKTICK_CMD_RE: Final[re.Pattern[str]] = re.compile(
     r"npm|yarn|pnpm|git|node|python|python3|pip|pip3|brew|apt|apt-get|gh|"
     r"docker|kubectl|terraform|helm|aws|az|gcloud|"
     r"jq|grep|egrep|awk|sed|sort|uniq|cut|tr|find|xargs|tee|cmake|make)"
-    r"(?P<args>[^`$]*)?`"
+    r"(?P<args>[^`]*)?`"  # args may contain $VAR / ${VAR}; $( and dangerous tokens screened below
 )
 
 # Dangerous tokens that, if present in a backtick command's ARGUMENTS,
@@ -821,9 +821,11 @@ def _is_static_literal_path_cmdsub(line: str) -> bool:
     # `cmd ...` backtick shape
     for m in _STATIC_LITERAL_BACKTICK_CMD_RE.finditer(line):
         args = m.group("args") or ""
-        # Reject if args contain $-interpolation, concat, or stray
-        # shell metacharacters that could carry attacker input.
-        if "$" in args or "`" in args:
+        # A nested command substitution ``$(…)`` could carry attacker
+        # input → reject. A plain ``$VAR`` / ``${VAR}`` as an ARGUMENT to a
+        # benign command (e.g. ``ls "${CLAUDE_CONFIG_DIR}"/…``) is just a
+        # path parameter and is allowed.
+        if "$(" in args:
             continue
         # Reject if args pipe into a shell interpreter or chain into a
         # dangerous command — a benign FIRST command does not make
@@ -1138,6 +1140,69 @@ _MD_NEVER_BENIGN_HOST_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+def _is_versionish_regex_quantifier(match: str) -> bool:
+    r"""True iff a REGEX_DOS match is the anchored-iteration version-number
+    idiom ``(\.\d+)+`` / ``(?:\.\d+)+`` — each iteration begins with a
+    literal ``.`` so there is no overlapping-quantifier backtracking
+    (linear time, the classic semver-parsing regex)."""
+    return "(\\.\\d+)+" in match or "(?:\\.\\d+)+" in match
+
+
+# SHELL_EXEC call-symbol names. A bare mention (not immediately followed by
+# ``(``) is a documentation reference to the API, not an invocation.
+_SHELL_EXEC_SYMBOL_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(execSync|execFileSync|exec|spawnSync|spawn|fork|child_process|"
+    r"os\.system|subprocess\.\w+|popen|system|shell_exec|passthru|proc_open)\b"
+)
+
+
+def _is_shell_exec_symbol_mention(line: str, match: str) -> bool:
+    r"""True iff a SHELL_EXEC match is a bare API-symbol MENTION — the symbol
+    is NOT immediately glued to ``(`` on the line, so it is being named in
+    prose / inline-code (``\`execSync\``` for scripts, ``팀원 spawn
+    (SendMessage)``), not invoked. A real call ``execSync(\`…\`)`` /
+    ``os.system(f"…")`` keeps the symbol glued to ``(`` and stays visible."""
+    sym = match.strip().rstrip("(").strip()
+    if not sym or not _SHELL_EXEC_SYMBOL_RE.fullmatch(sym):
+        return False
+    # A real call glues the symbol directly to "(" (no whitespace gap).
+    return not re.search(re.escape(sym) + r"\(", line)
+
+
+# Known JS CDN hosts whose ESM ``import x from 'https://cdn/…'`` is a
+# pinned dependency from a reputable mirror, not dependency-confusion /
+# dynamic remote-code loading. (The SUPPLY_CHAIN rule's RE2 pattern cannot
+# carry a negative-lookahead host allowlist, so it is applied here.)
+_KNOWN_CDN_HOST_RE: Final[re.Pattern[str]] = re.compile(
+    r"https?://(?:cdn\.)?(?:jsdelivr\.net|unpkg\.com|esm\.sh|cdnjs\.cloudflare\.com|"
+    r"skypack\.dev|jspm\.(?:dev|io)|ga\.jspm\.io|esm\.run|cdn\.skypack\.dev)/",
+    re.IGNORECASE,
+)
+
+
+def _is_known_cdn_import(line: str, match: str) -> bool:
+    """True iff a SUPPLY_CHAIN match is an ESM ``import … from
+    'https://<known-cdn>/…'`` from a reputable CDN host."""
+    return bool(re.search(r"\bimport\b", line) and _KNOWN_CDN_HOST_RE.search(line))
+
+
+# Data-sanitization verbs: "remove file PATHS / patterns / entries /
+# references" filters STRINGS out of data, it does not DELETE files.
+_DATA_SANITIZE_INTENT_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bremove\b[^.\n]*\b(?:paths?|patterns?|entries|entry|references?|names?|"
+    r"strings?|fields?|keys?|values?|lines?|prefix(?:es)?|suffix(?:es)?|"
+    r"whitespace|duplicates?|comments?)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_data_sanitization_intent(line: str, match: str) -> bool:
+    """True iff an INTENT_DESTRUCTIVE_INTENT ``remove file`` match is
+    data sanitization (``Remove file paths (keep only patterns)``) — it
+    strips path STRINGS from data, not files from disk."""
+    return bool(_DATA_SANITIZE_INTENT_RE.search(line))
+
+
 # r01 FP iter (2026-05-28) — emoji ZWJ combiner detection. U+200D between
 # two emoji / pictographic codepoints is a valid emoji ZWJ SEQUENCE (e.g.
 # ``❤‍🔥`` = heart + ZWJ + fire, ``👨‍💻`` = man + ZWJ + laptop,
@@ -1390,6 +1455,35 @@ def _certain_benign_literal(
     #     combiner, not hidden-instruction steganography. Bare ZWJ in
     #     ordinary text stays visible (not an emoji combiner).
     if rule_id == "INDIRECT_PROMPT_INJECT" and _match_is_emoji_combiner_zwj(line, match):
+        return True
+
+    # (9g) r07 FP iter (2026-05-28) — REGEX_DOS on the anchored-iteration
+    #     semver idiom ``(\.\d+)+`` is linear-time, not catastrophic.
+    if rule_id == "REGEX_DOS" and _is_versionish_regex_quantifier(match):
+        return True
+
+    # (9h) r08 FP iter (2026-05-28) — SHELL_EXEC on a bare API-symbol
+    #     MENTION in inline-code / prose (``\`execSync\```, ``spawn
+    #     (SendMessage)``), not an invocation. Payload construction
+    #     (``echo "os.system" > evil.py``) and exfil sinks keep it visible.
+    if (
+        rule_id == "SHELL_EXEC"
+        and _is_shell_exec_symbol_mention(line, match)
+        and not _context_has_payload_sink(lines, line_idx, span=2)
+        and not _context_has_network_sink(lines, line_idx, span=2)
+    ):
+        return True
+
+    # (9i) r01 FP iter (2026-05-28) — SUPPLY_CHAIN ESM ``import … from
+    #     'https://<known-cdn>/…'`` is a pinned dependency from a reputable
+    #     CDN mirror, not dependency-confusion / dynamic remote-code load.
+    if rule_id == "SUPPLY_CHAIN" and _is_known_cdn_import(line, match):
+        return True
+
+    # (9j) r08 FP iter (2026-05-28) — INTENT_DESTRUCTIVE_INTENT ``remove
+    #     file paths`` is DATA sanitization (stripping path strings from
+    #     output), not file deletion.
+    if rule_id == "INTENT_DESTRUCTIVE_INTENT" and _is_data_sanitization_intent(line, match):
         return True
 
     # (9e) r* FP iter (2026-05-28) — NON-shell injection / recon-class rule
