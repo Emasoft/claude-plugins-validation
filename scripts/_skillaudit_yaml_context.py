@@ -191,7 +191,7 @@ def _walk_yaml_keys_naive(source: str) -> list[tuple[tuple[str, ...], int]]:
     stack: list[tuple[int, str]] = []  # (indent_level, key)
     list_counters: dict[int, int] = {}
 
-    for lineno, raw in enumerate(source.splitlines(), 1):
+    for lineno, raw in enumerate(source.split("\n"), 1):
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         m = key_re.match(raw)
@@ -229,7 +229,7 @@ def classify(
 
     See module docstring for the per-context verdict matrix.
     """
-    lines = source.splitlines()
+    lines = source.split("\n")
     if not (0 <= line_idx < len(lines)):
         return "unknown"
 

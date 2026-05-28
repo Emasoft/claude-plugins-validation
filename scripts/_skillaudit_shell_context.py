@@ -361,6 +361,22 @@ def _reads_sensitive_path(line: str) -> bool:
     return bool(_SENSITIVE_READ_PATH_RE.search(line))
 
 
+# Exfiltration sinks: a data command's output piped INTO a network tool
+# (``| curl`` / ``| nc`` …) or redirected to a raw socket (``/dev/tcp/`` /
+# ``/dev/udp/``) leaves the machine. ``$(curl …)`` (curl as the CAPTURED
+# command) is NOT this shape — only a pipe/redirect INTO a net tool is.
+_EXFIL_SINK_RE: Final[re.Pattern[str]] = re.compile(
+    r"\|\s*(?:sudo\s+)?(?:curl|wget|nc|ncat|netcat|telnet|socat|mail|sendmail|ssh|ftp)\b"
+    r"|/dev/(?:tcp|udp)/"
+    r"|>\s*/dev/(?:tcp|udp)"
+)
+
+
+def _line_has_exfil_sink(line: str) -> bool:
+    """True iff ``line`` pipes/redirects data INTO a network egress sink."""
+    return bool(_EXFIL_SINK_RE.search(line))
+
+
 def _cmdsub_is_safe_data_command(line: str, match: str) -> bool:
     """True iff a CMD_INJECTION ``$(...)`` match is a command substitution
     headed by a fixed data/query command whose result is neither piped to
@@ -372,6 +388,9 @@ def _cmdsub_is_safe_data_command(line: str, match: str) -> bool:
         return False
     # Reconnaissance read of a sensitive credential path → keep visible.
     if _reads_sensitive_path(line):
+        return False
+    # Output piped/redirected into a network egress sink → keep visible.
+    if _line_has_exfil_sink(line):
         return False
     # Genuine execution surface anywhere on the line → keep visible.
     if _CMDSUB_EXEC_WRAP_RE.search(line):
@@ -397,6 +416,8 @@ def _pipe_to_text_processor(line: str, match: str) -> bool:
     if "|" not in line:
         return False
     if _reads_sensitive_path(line):
+        return False
+    if _line_has_exfil_sink(line):
         return False
     if _CMDSUB_EXEC_WRAP_RE.search(line):
         return False
