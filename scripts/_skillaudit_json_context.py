@@ -140,6 +140,50 @@ _DANGEROUS_KEY_SUFFIXES: Final[frozenset[str]] = frozenset(
 )
 
 
+# r08 sangrokjung FP iter1 (2026-05-28) — Claude Code permission glob
+# pattern recognition. Strings inside `permissions.allow[]` /
+# `permissions.ask[]` / `permissions.deny[]` arrays in settings.json /
+# settings.local.json / settings.local.template.json are tool-permission
+# glob patterns matched by Claude Code's permission engine. They are
+# NOT regex compiled by a vulnerable engine, NOT chmod/crontab/rm
+# INVOCATIONS — they're DECLARATIONS of which Bash/Read/Write/etc.
+# tool calls are allowed/denied. Matching them as REGEX_DOS, FS_WRITE,
+# PRIVILEGE_ESC, CMD_INJECTION is wholly false-positive.
+import re
+
+_CLAUDE_CODE_TOOL_GLOB_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?:Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Task|Glob|Grep|"
+    r"WebFetch|WebSearch|TodoWrite|TodoRead|Agent|Skill|Plan|ExitPlanMode|"
+    r"EnterPlanMode|EnterWorktree|ExitWorktree|TaskCreate|TaskList|"
+    r"TaskGet|TaskOutput|TaskUpdate|TaskStop|TeamCreate|TeamDelete|"
+    r"CronCreate|CronList|CronDelete|ScheduleWakeup|ReadMcpResourceTool|"
+    r"ListMcpResourcesTool|SendMessage|LSP|Wait|Sleep|Find|"
+    r"Mkdir|Cp|Mv|Rm|Touch|Tee|Cat|Echo|Ls)"
+    r"\([^)]*\)\*?$"
+)
+
+
+def _is_claude_code_permission_glob(path_segments: tuple[str, ...], value: str) -> bool:
+    """True iff a JSON string value is a Claude Code tool-permission glob
+    pattern (in ``settings.json`` etc.).
+
+    Recognized shape: path includes ``permissions.{allow|ask|deny}[N]``
+    AND value matches ``^(Bash|Read|Write|Edit|...)\\([^)]*\\)\\*?$``.
+
+    Example permission strings (all suppressed when matched):
+      - ``"Bash(rm -rf *)*"`` — deny-list glob for rm -rf
+      - ``"Read(<sensitive-path>)"`` — deny-list glob for reading sensitive files
+      - ``"Write(*>~/.bashrc)*"`` — deny-list glob for shell-rc writes
+      - ``"Bash(python3 -c *import os*)*"`` — deny-list glob
+    """
+    named = [seg for seg in path_segments if not seg.startswith("[")]
+    # Find 'permissions' followed by allow/ask/deny in the path
+    for i in range(len(named) - 1):
+        if named[i] == "permissions" and named[i + 1] in ("allow", "ask", "deny"):
+            return bool(_CLAUDE_CODE_TOOL_GLOB_RE.match(value.strip()))
+    return False
+
+
 def _classify_key(path_segments: tuple[str, ...]) -> Literal["safe_schema", "suspect", "unknown"]:
     """Map a JSON path (sequence of key names) to a verdict.
 
@@ -242,7 +286,40 @@ def classify(
     if not best_path:
         return "unknown"
 
+    # r08 sangrokjung FP iter1 (2026-05-28) — Claude Code permission glob
+    # check. settings.json's permissions.allow/ask/deny arrays contain
+    # glob-pattern strings (Bash(rm -rf *), Read(<sensitive-path>), etc.)
+    # that are DECLARATIONS of which tool calls are allowed/denied, NOT
+    # invocations. Scanning them as REGEX_DOS/FS_WRITE/PRIVILEGE_ESC/
+    # CMD_INJECTION is provably false. Walk the parsed structure to find
+    # the value at best_path and check shape.
+    value_at_path = _resolve_value(parsed, best_path)
+    if isinstance(value_at_path, str) and _is_claude_code_permission_glob(best_path, value_at_path):
+        return "safe_schema"
+
     return _classify_key(best_path)
+
+
+def _resolve_value(parsed: object, path: tuple[str, ...]) -> object:
+    """Walk ``parsed`` following ``path`` segments. ``"[N]"`` segments
+    index into lists, named segments index into dicts. Returns the value
+    at the path, or ``None`` if any step fails.
+    """
+    cur: object = parsed
+    for seg in path:
+        if seg.startswith("[") and seg.endswith("]"):
+            try:
+                idx = int(seg[1:-1])
+            except ValueError:
+                return None
+            if not isinstance(cur, list) or idx >= len(cur):
+                return None
+            cur = cur[idx]
+        else:
+            if not isinstance(cur, dict) or seg not in cur:
+                return None
+            cur = cur[seg]
+    return cur
 
 
 def _strip_jsonc_comments(source: str) -> str:
