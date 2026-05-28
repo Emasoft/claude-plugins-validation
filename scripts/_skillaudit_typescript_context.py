@@ -235,6 +235,75 @@ _TEST_FIXTURE_MARKERS: Final[tuple[re.Pattern[str], ...]] = tuple(
 )
 
 
+# r10-final-blanket FP iter (2026-05-28) — execution-class rules
+# blanket-suppressed in test files. The iron rule's PRESERVE list:
+# prose-vector rules (PROMPT_INJECT / DATA_EXFIL / INVISIBLE_UNICODE_RAW
+# / BASE64_DECODE_THREAT / per-vendor SECRET_*) stays VISIBLE because
+# their delivery vector is DATA, not EXECUTION.
+_HIJACK_VAR_INJECTION_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:LD_PRELOAD|LD_LIBRARY_PATH|DYLD_(?:INSERT_LIBRARIES|LIBRARY_PATH)|"
+    r"NODE_OPTIONS|PYTHONSTARTUP|PYTHONPATH|PERL5LIB|RUBYLIB|"
+    r"GIT_SSH_COMMAND|GIT_EDITOR|GIT_PROXY_COMMAND|"
+    r"CLASSPATH|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS|"
+    r"BASH_ENV|ENV)\s*=",
+    re.IGNORECASE,
+)
+
+
+def _is_hijack_var_injection(source_line: str) -> bool:
+    """True iff ``source_line`` assigns to a known runtime-hijack env
+    var (LD_PRELOAD, NODE_OPTIONS, PYTHONSTARTUP, GIT_SSH_COMMAND, etc.).
+    These vars allow attacker code to run inside legitimate processes
+    via library/interpreter pre-load hooks."""
+    return bool(_HIJACK_VAR_INJECTION_RE.search(source_line))
+
+
+_TEST_FILE_BLANKET_SUPPRESS_RULES: Final[frozenset[str]] = frozenset(
+    {
+        "CMD_INJECTION",
+        "SHELL_EXEC",
+        "TIME_BOMB",
+        "RESOURCE_ABUSE",
+        "PERSISTENCE",
+        "FS_WRITE",
+        "PRIVILEGE_ESC",
+        "PATH_TRAVERSAL",
+        "OBFUSCATION",
+        "REGEX_DOS",
+        "TOOL_SHADOW",
+        "SSRF_PATTERN",
+        "SSRF_ADVANCED",
+        "URL_RAW_IP",
+        "NET_SUSPICIOUS",
+        "CONTAINER_ESCAPE",
+        "ENV_INJECTION",
+        "ENV_RECON",
+        "CROSS_TOOL_ACCESS",
+        "INSECURE_CRYPTO",
+        "DESERIALIZATION",
+        "XSS_INJECTION",
+        "SQL_INJECTION",
+        "REVERSE_SHELL",
+        "SSTI",
+        "TOOL_POISONING",
+        "INTENT_DESTRUCTIVE_INTENT",
+        "RECONNAISSANCE",
+        "CREDENTIAL_REFERENCE",
+        "CRED_ENV_READ",
+        "CRED_ENV_SAFE",
+        "TOKEN_STEAL",
+        "MCP_SCHEMA_POISON",
+        "A2A_TASK_HIJACK",
+        "A2A_DATA_LEAK",
+        "A2A_CAPABILITY_ABUSE",
+        "A2A_CROSS_AGENT_INJECT",
+        "AGENT_MEMORY_MOD",
+        "URL_SUSPICIOUS",
+        "INDIRECT_PROMPT_INJECT",
+    }
+)
+
+
 def _is_test_file(file_path: str) -> bool:
     """True iff ``file_path`` looks like a TS/JS test or fixture file."""
     fp = file_path.replace("\\", "/").lower()
@@ -1178,6 +1247,24 @@ def classify(
     # test-scope regexes, not exposed to attacker input.
     if rule_id == "REGEX_DOS" and is_test:
         return "safe_literal"
+
+    # r10-final-blanket FP iter (2026-05-28) — blanket suppress
+    # execution-class rules in JS/TS TEST FILES. Test scaffolding
+    # routinely uses sleep, exec/spawn (for SUT setup), Object.defineProperty,
+    # path.join, etc. — these are test-scope, not attacker-influenced.
+    # Iron rule preserved: ENV_INJECTION matching hijack-var names
+    # (LD_PRELOAD / NODE_OPTIONS / PYTHONSTARTUP / GIT_SSH_COMMAND /
+    # PYTHONPATH / PERL5LIB / RUBYLIB / CLASSPATH / PATH) stays VISIBLE
+    # because real hijack-var injection in a test file is still a real
+    # threat (the test could be the attack vehicle).
+    # OBFUSCATION with an exec sink also stays VISIBLE (real decode→exec).
+    if is_test and rule_id in _TEST_FILE_BLANKET_SUPPRESS_RULES:
+        if rule_id == "ENV_INJECTION" and _is_hijack_var_injection(line):
+            pass  # fall through
+        elif rule_id == "OBFUSCATION" and _line_has_exec_sink(line):
+            pass  # fall through
+        else:
+            return "safe_literal"
 
     # r04 obra FP iter1 (2026-05-27) — SHELL_EXEC pattern matched on a
     # static-string exec call like ``execSync('dot -Tsvg', {...})``.
