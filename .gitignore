@@ -118,3 +118,5 @@ rck-*-merge-pending.md
 # so its captured output can't trip the encoding control-character check on itself.
 /validation-report.txt
 /changelog.txt
+/reports/
+/reports_dev/
