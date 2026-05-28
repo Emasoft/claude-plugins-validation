@@ -270,6 +270,33 @@ _EXECUTION_CLASS_RULES_MD: Final[frozenset[str]] = frozenset(
     }
 )
 
+# r10-final-blanket (2026-05-28) — rules whose matches inside markdown
+# backtick inline-code are documentation prose, not invocation.
+_DOC_INLINE_CODE_SUPPRESSED_RULES: Final[frozenset[str]] = frozenset(
+    {
+        "TIME_BOMB",
+        "RESOURCE_ABUSE",
+        "TOOL_SHADOW",
+        "FS_WRITE",
+        "PATH_TRAVERSAL",
+        "ENV_INJECTION",
+        "SSTI",
+        "TOOL_POISONING",
+        "REGEX_DOS",
+        "INSECURE_CRYPTO",
+        "CONTAINER_ESCAPE",
+        "ENV_RECON",
+        "URL_RAW_IP",
+        "NET_SUSPICIOUS",
+        "CROSS_TOOL_ACCESS",
+        "INTENT_DESTRUCTIVE_INTENT",
+        "RECONNAISSANCE",
+        "CREDENTIAL_REFERENCE",
+        "XSS_INJECTION",
+        "SQL_INJECTION",
+    }
+)
+
 # Pure-reconnaissance commands: read-only, no side effects. Their
 # output cannot harm anything UNLESS it reaches a network egress sink
 # (see ``_context_has_network_sink``).
@@ -1114,6 +1141,15 @@ def _certain_benign_literal(
     #     file-read — no injection surface. Iron rule preserved:
     #     ``$(cat $USER_INPUT)`` / ``$(cat /tmp/$1)`` stays visible.
     if rule_id == "CMD_INJECTION" and _is_static_literal_path_cmdsub(line) and not _context_has_network_sink(lines, line_idx, span=3):
+        return True
+
+    # (10e) r10-final-blanket FP iter (2026-05-28) — behavioral-pattern
+    #     rules (TIME_BOMB, RESOURCE_ABUSE, TOOL_SHADOW, FS_WRITE,
+    #     PATH_TRAVERSAL, ENV_INJECTION, etc.) matched inside markdown
+    #     BACKTICK INLINE CODE in DISCUSSION PROSE. The matched
+    #     pattern is being quoted in documentation (e.g. ``await sleep
+    #     (1000)`` in a debug-tutorial markdown), not invoked.
+    if rule_id in _DOC_INLINE_CODE_SUPPRESSED_RULES and _match_falls_inside_inline_code(line, match):
         return True
 
     # (10d) r10-final-blanket FP iter (2026-05-28) — security-review
