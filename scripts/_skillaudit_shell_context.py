@@ -150,6 +150,63 @@ _SHELL_EXECUTION_CLASS_RULES: Final[frozenset[str]] = frozenset(
 _SHELL_COMMENT_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*#(?!!)")  # `#` but not `#!` shebang
 
 
+# r10-final FP iter (2026-05-28) — Shell test-file detection.
+_SHELL_TEST_FILE_PATTERNS: Final[tuple[str, ...]] = (
+    "/tests/", "/test/", "/__tests__/", "/specs/", "/spec/",
+    "test-", "test_", "/test.", "_test.", ".test.", ".spec.",
+    "/fixtures/", "/__fixtures__/", "/mocks/", "/__mocks__/",
+)
+
+
+# r10-final FP iter (2026-05-28) — shell loopback / RFC1918 private
+# IP detection. Mirror of _line_has_loopback_or_private_ip in TS
+# classifier.
+_LOOPBACK_PRIVATE_IP_RE_SHELL: Final[re.Pattern[str]] = re.compile(
+    r"(?:"
+    r"127\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|0\.0\.0\.0"
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|192\.168\.\d{1,3}\.\d{1,3}"
+    r"|172\.(?:1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3}"
+    r"|::1\b|\[::1\]"
+    r"|fc[0-9a-f]{2}:|fd[0-9a-f]{2}:"
+    r"|fe80::"
+    r"|localhost\b"
+    r")",
+    re.IGNORECASE,
+)
+_CLOUD_METADATA_RE_SHELL: Final[re.Pattern[str]] = re.compile(
+    r"169\.254\.169\.254|metadata\.google|metadata\.azure|fd00:ec2::254",
+    re.IGNORECASE,
+)
+
+
+def _line_has_loopback_or_private_ip_shell(line: str) -> bool:
+    """True iff ``line`` contains a loopback / RFC1918 private /
+    link-local IP, EXCLUDING cloud-metadata endpoints."""
+    if _CLOUD_METADATA_RE_SHELL.search(line):
+        return False
+    return bool(_LOOPBACK_PRIVATE_IP_RE_SHELL.search(line))
+
+
+def _is_shell_test_file(file_path: str) -> bool:
+    """True iff ``file_path`` looks like a shell test or fixture script.
+
+    Patterns recognized:
+      - Path contains ``/tests/`` / ``/test/`` / ``__tests__/`` / etc.
+      - Basename starts with ``test-`` / ``test_`` (e.g. ``test-foo.sh``)
+      - Basename contains ``.test.`` / ``.spec.`` / ``_test.``
+      - Path contains ``/fixtures/`` / ``/mocks/``
+
+    Used to suppress TIME_BOMB / PERSISTENCE / RESOURCE_ABUSE in test
+    scaffolding (sleep, tmux/screen, etc.).
+    """
+    fp = file_path.replace("\\", "/").lower()
+    if not fp:
+        return False
+    return any(p in fp for p in _SHELL_TEST_FILE_PATTERNS)
+
+
 def _is_shell_comment_line(line: str) -> bool:
     """True iff ``line`` is a full-line shell ``#`` comment (not a
     ``#!`` shebang on line 1, not inline ``cmd  # comment``).
@@ -221,6 +278,83 @@ _WRITE_INTENT_RE: Final[re.Pattern[str]] = re.compile(
     r"chmod\s+(?:[ugoa]?[+\-=][rwxst]+|\d{3,4})|"
     r"chown\b|chgrp\b)"
 )
+
+
+# r10-final FP iter (2026-05-28) — Nerd Font / Powerline icon byte
+# sequences. ``printf '\\xNN\\xNN\\xNN'`` with a nearby ``# U+XXXX``
+# Unicode codepoint comment is a statusline rendering primitive.
+_NERD_FONT_PRINTF_RE: Final[re.Pattern[str]] = re.compile(
+    r"printf\s+['\"]?\\x[0-9A-Fa-f]{2}\\x[0-9A-Fa-f]{2}"
+)
+_UNICODE_CODEPOINT_COMMENT_RE: Final[re.Pattern[str]] = re.compile(
+    r"#\s*U\+[0-9A-Fa-f]{4,6}\b",
+    re.IGNORECASE,
+)
+
+
+# r10-final FP iter (2026-05-28) — execution-class match inside a
+# shell echo/printf/cat string. ``echo "Install with: sudo apt..."``
+# is display text, not invocation.
+_SHELL_ECHO_STRING_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:echo|printf|cat|builtin\s+echo)\b"
+    r"(?:\s+-[A-Za-z]+)*"  # flags
+    r"\s+(?P<quote>['\"])(?P<body>[^'\"]*)(?P=quote)"
+)
+
+
+def _match_inside_shell_echo_string(line: str, match: str) -> bool:
+    """True iff ``match`` falls inside a quoted string argument to
+    ``echo``/``printf``/``cat`` on the same line.
+
+    Strings passed to these display commands are inert text shown to
+    the user; they do NOT execute. The matched ``sudo``/``chmod``/etc.
+    inside such a string is display content, not invocation.
+
+    Examples (suppress):
+      - ``echo "Install with: sudo apt install $pkg"``
+      - ``echo "Run: curl https://... | sudo -E bash -"``
+      - ``printf "Skipping ${file} (use chmod 777)\n"``
+
+    Examples (KEEP visible — actual command):
+      - ``sudo apt install $pkg``
+      - ``echo "foo" && sudo apt install bar``  (sudo OUTSIDE echo arg)
+    """
+    if not match:
+        return False
+    for m in _SHELL_ECHO_STRING_RE.finditer(line):
+        body = m.group("body")
+        # Use simple substring check — the matched text should appear in the body
+        if match in body:
+            return True
+        # Try first chars of match (catalog matches are often truncated)
+        # If the first ~8 chars of match are in body, count it as inside
+        if len(match) > 4 and match[:8] in body:
+            return True
+    return False
+
+
+def _is_nerd_font_icon_byte_sequence(lines: list[str], line_idx: int) -> bool:
+    """True iff ``lines[line_idx]`` is a Nerd Font / Powerline icon
+    ``printf '\\xNN\\xNN\\xNN'`` AND a ``# U+XXXX`` Unicode codepoint
+    comment appears within ±3 lines.
+
+    Legitimate icon definitions always carry the ``# U+XXXX`` comment
+    as documentation of which codepoint the bytes encode. Real
+    obfuscation never carries this comment (the point of obfuscation
+    is to HIDE the codepoint, not document it).
+    """
+    if not (0 <= line_idx < len(lines)):
+        return False
+    target = lines[line_idx]
+    if not _NERD_FONT_PRINTF_RE.search(target):
+        return False
+    # Check ±3 surrounding lines for the U+XXXX comment
+    lo = max(0, line_idx - 3)
+    hi = min(len(lines), line_idx + 4)
+    for i in range(lo, hi):
+        if _UNICODE_CODEPOINT_COMMENT_RE.search(lines[i]):
+            return True
+    return False
 
 
 def _shell_match_lacks_write_intent(line: str, match: str) -> bool:
@@ -339,6 +473,14 @@ def classify(
     if _is_shell_comment_line(line_text) and rule_id in _SHELL_EXECUTION_CLASS_RULES:
         return "safe_literal"
 
+    # r10-final FP iter (2026-05-28) — Execution-class rule matched
+    # INSIDE a quoted string passed to ``echo``/``printf``/``cat``.
+    # ``echo "Install with: sudo apt install $pkg"`` is display text,
+    # not invocation. The display string is shown to the user; no
+    # actual ``sudo`` runs.
+    if rule_id in _SHELL_EXECUTION_CLASS_RULES and _match_inside_shell_echo_string(line_text, match):
+        return "safe_literal"
+
     # r08 sangrokjung FP iter1 (2026-05-28) — FS_WRITE pattern bare-suffix
     # match (``.zshrc``, ``.bashrc``, ``.profile``) fires on READ checks
     # ``[ -f "$HOME/.zshrc" ]``, variable assignments ``shell_rc="$HOME/.zshrc"``,
@@ -346,6 +488,31 @@ def classify(
     # Real writes need an explicit write-intent token (``>``, ``>>``,
     # ``tee``, ``cp`` …) within proximity.
     if rule_id == "FS_WRITE" and _shell_match_lacks_write_intent(line_text, match):
+        return "safe_literal"
+
+    # r10-final FP iter (2026-05-28) — OBFUSCATION pattern fires on
+    # Nerd Font / Powerline icon byte sequences like
+    # ``printf '\xee\x82\xb6'`` followed by ``# U+XXXX <icon-name>``
+    # comment. These are statusline rendering primitives, not
+    # obfuscation. The ``# U+`` codepoint comment is the unambiguous
+    # disambiguator: legitimate icon definitions always carry it.
+    if rule_id == "OBFUSCATION" and _is_nerd_font_icon_byte_sequence(lines, line_idx):
+        return "safe_literal"
+
+    # r10-final FP iter (2026-05-28) — TIME_BOMB / PERSISTENCE / etc.
+    # in test scripts (test-*.sh, *.test.sh, in tests/ directory). Test
+    # scaffolding routinely uses sleep, tmux/screen sessions, and time
+    # delays — these are test setup, not bombs/persistence.
+    if _is_shell_test_file(file_path) and rule_id in ("TIME_BOMB", "PERSISTENCE", "RESOURCE_ABUSE"):
+        return "safe_literal"
+
+    # r10-final FP iter (2026-05-28) — NET_SUSPICIOUS / CMD_INJECTION
+    # / SUPPLY_CHAIN / URL_RAW_IP on loopback / RFC1918 private IP
+    # literals (127.0.0.1:9222 Chrome DevTools, 192.168.x.x home
+    # network, etc.). Loopback / private IPs cannot reach the public
+    # internet. Iron rule preserved: cloud metadata endpoint
+    # 169.254.169.254 stays visible (attacker-reachable from cloud VMs).
+    if rule_id in ("NET_SUSPICIOUS", "CMD_INJECTION", "SUPPLY_CHAIN", "URL_RAW_IP", "SSRF_PATTERN") and _line_has_loopback_or_private_ip_shell(line_text):
         return "safe_literal"
 
     if line_idx == 0:
