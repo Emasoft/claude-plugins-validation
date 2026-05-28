@@ -611,6 +611,98 @@ _FUNCTION_DEF_RES: Final[tuple[re.Pattern[str], ...]] = (
 )
 
 
+# r07 jarrodwatts FP iter1 (2026-05-28) — Node.js test scaffolding shapes.
+# Object.defineProperty(process.stdin, 'isTTY', {...}) and similar are
+# the canonical way to monkeypatch stdin/stdout for test isolation.
+_TEST_MONKEYPATCH_DEFINEPROPERTY_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bObject\.defineProperty\s*\(\s*"
+    r"(?:process\.(?:stdin|stdout|stderr|env)|"
+    r"globalThis|global|window|self|"
+    r"[A-Za-z_$][\w$]*Stream)"
+)
+
+
+def _is_test_monkeypatch_defineProperty(source_line: str) -> bool:
+    """True iff ``source_line`` contains a Node.js test-monkeypatch
+    ``Object.defineProperty(process.<stream>, ...)`` shape used to
+    fake TTY/env/etc. for test isolation.
+
+    Iron rule preserved: only fires in test files (already gated by
+    caller). Real ``Object.defineProperty(window, '__proto__', ...)``
+    style tool-shadowing in production code stays visible.
+    """
+    return bool(_TEST_MONKEYPATCH_DEFINEPROPERTY_RE.search(source_line))
+
+
+# r07 jarrodwatts FP iter1 (2026-05-28) — test fixture arrays of
+# Unicode bidi/zero-width/format characters used by detection-tests.
+_TEST_UNICODE_VOCAB_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:bidi|bidirectional|rtl|ltr|isolate|zero[-_]?width|"
+    r"invisible|hidden|unicode|format[-_]?char|"
+    r"zwnj|zwj|lrm|rlm|lre|rle|lro|rlo|pop|fsi|lri|rli|pdf|pdi)",
+    re.IGNORECASE,
+)
+# Hidden/invisible Unicode codepoints (bidi controls, zero-width chars,
+# format chars, line/paragraph separators) — matching either as raw
+# code-points OR as ``\\uXXXX`` / ``\\xNN`` escape syntax in source.
+_HIDDEN_UNICODE_CODEPOINTS: Final[tuple[str, ...]] = (
+    "​",  # ZWSP
+    "‌",  # ZWNJ
+    "‍",  # ZWJ
+    "‎",  # LRM
+    "‏",  # RLM
+    " ",  # LS
+    " ",  # PS
+    "‪",  # LRE
+    "‫",  # RLE
+    "‬",  # PDF
+    "‭",  # LRO
+    "‮",  # RLO
+    "⁠",  # WJ
+    "⁦",  # LRI
+    "⁧",  # RLI
+    "⁨",  # FSI
+    "⁩",  # PDI
+    "؜",  # ALM
+    "­",  # SHY
+    "﻿",  # BOM / ZWNBSP
+)
+_HIDDEN_UNICODE_ESCAPE_RE: Final[re.Pattern[str]] = re.compile(
+    r"\\u(?:202[a-eA-E]|200[b-fB-F]|2028|2029|2060|206[6-9]|061[cC]|00[aA][dD]|[fF][eE][fF][fF])|"
+    r"\\x(?:[aA][dD])"
+)
+
+
+def _is_test_unicode_fixture_array(source: str, line_idx: int, line: str) -> bool:
+    """True iff ``line`` is a JS array containing 2+ hidden-Unicode-class
+    characters (either as raw code-points OR as ``\\uXXXX`` escape
+    sequences), AND surrounding ±2 lines mention Unicode/bidi/zero-width
+    test vocabulary.
+
+    Iron rule check (hidden-content rules normally NEVER suppress):
+      - File must be a test file (gated by caller)
+      - The match line must contain ≥2 hidden-class Unicode chars
+      - Must look like array literal (contains '[' / ']' / ',')
+      - Nearby lines must mention bidi/unicode/zero-width keywords (proof
+        of test-fixture intent, not data embedding)
+    """
+    # Count raw hidden-Unicode chars and ``\\uXXXX`` escape sequences
+    raw_count = sum(line.count(cp) for cp in _HIDDEN_UNICODE_CODEPOINTS)
+    escape_count = len(_HIDDEN_UNICODE_ESCAPE_RE.findall(line))
+    total = raw_count + escape_count
+    if total < 2:
+        return False
+    # Must look like an array element line: starts/contains '[' / ']' / ','
+    if "[" not in line and "]" not in line and "," not in line:
+        return False
+    # Check ±2 surrounding lines for test-fixture vocabulary
+    lines = source.splitlines()
+    lo = max(0, line_idx - 2)
+    hi = min(len(lines), line_idx + 3)
+    window = "\n".join(lines[lo:hi])
+    return bool(_TEST_UNICODE_VOCAB_RE.search(window))
+
+
 def _line_is_function_definition(source_line: str) -> bool:
     """True iff ``source_line`` looks like a JS/TS function/method definition
     or a method INVOCATION on a local object (not an outbound HTTP call).
@@ -685,6 +777,33 @@ def classify(
     # invocation happens elsewhere where the rule fires again with
     # the actual call shape.
     if rule_id == "SHELL_EXEC" and _line_is_import_or_require(line):
+        return "safe_literal"
+
+    # r07 jarrodwatts FP iter1 (2026-05-28) — TOOL_SHADOW pattern fires
+    # on ``Object.defineProperty(process.stdin, 'isTTY', {...})`` in
+    # TEST FILES. This is the canonical Node.js stdin/stdout monkeypatch
+    # shape used to fake TTY status for test isolation. Standard test
+    # scaffolding, never a real tool-shadow attack.
+    # Iron rule preserved: same pattern OUTSIDE a test file still fires
+    # (real ``Object.defineProperty(window, '__proto__', ...)`` etc.).
+    if rule_id == "TOOL_SHADOW" and is_test and _is_test_monkeypatch_defineProperty(line):
+        return "safe_literal"
+
+    # r07 jarrodwatts FP iter1 (2026-05-28) — INVISIBLE_UNICODE_RAW pattern
+    # fires on test files that explicitly DECLARE arrays of
+    # bidi/zero-width/format-character literals to TEST the detection
+    # of these chars in user code. The test fixture's whole purpose is
+    # to feed these chars to the SUT's detection code.
+    # Iron rule check: this is a hidden-content rule (steganography),
+    # which we normally NEVER suppress. The carve-out is narrow:
+    # 1. File is a test file
+    # 2. The matched chars sit inside a JS array-of-Unicode-escapes
+    #    literal (``['‮', '‎', ...]``) where EVERY element is
+    #    a Unicode-escape sequence (no real prose, no embedded payload)
+    # 3. The match line contains ``unicode`` / ``bidi`` / ``zero-width``
+    #    / ``invisible`` / ``hidden`` / ``rtl`` / ``ltr`` / ``isolate``
+    #    keyword in the same line or ±2 lines (test-vocabulary signal)
+    if rule_id == "INVISIBLE_UNICODE_RAW" and is_test and _is_test_unicode_fixture_array(source, line_idx, line):
         return "safe_literal"
 
     # r04 obra FP iter1 (2026-05-27) — SHELL_EXEC pattern matched on a

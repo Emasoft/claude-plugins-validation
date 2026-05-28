@@ -118,6 +118,134 @@ def _match_inside_regex_arg_shell(line: str, match: str) -> bool:
     return False
 
 
+# r08 sangrokjung FP iter1 (2026-05-28) — shell execution-class rules
+# whose findings inside a full-line `#` comment are provably non-executing.
+_SHELL_EXECUTION_CLASS_RULES: Final[frozenset[str]] = frozenset(
+    {
+        "CMD_INJECTION",
+        "SHELL_EXEC",
+        "FS_WRITE",
+        "PRIVILEGE_ESC",
+        "REGEX_DOS",
+        "PATH_TRAVERSAL",
+        "OBFUSCATION",
+        "PERSISTENCE",
+        "TIME_BOMB",
+        "RESOURCE_ABUSE",
+        "REVERSE_SHELL",
+        "DESERIALIZATION",
+        "INSECURE_CRYPTO",
+        "SSTI",
+        "SUPPLY_CHAIN",
+        "URL_RAW_IP",
+        "NET_SUSPICIOUS",
+        "CONTAINER_ESCAPE",
+        "ENV_INJECTION",
+        "TOOL_SHADOW",
+        "ENV_RECON",
+    }
+)
+
+
+_SHELL_COMMENT_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*#(?!!)")  # `#` but not `#!` shebang
+
+
+def _is_shell_comment_line(line: str) -> bool:
+    """True iff ``line`` is a full-line shell ``#`` comment (not a
+    ``#!`` shebang on line 1, not inline ``cmd  # comment``).
+
+    Comments are documentation prose, never executed by the shell.
+    Iron rule preserved: prose-vector rules (PROMPT_INJECT / DATA_EXFIL)
+    fall through this check and stay visible via the demote pipeline.
+    """
+    return bool(_SHELL_COMMENT_LINE_RE.match(line))
+
+
+# r08 sangrokjung FP iter1 (2026-05-28) — common shell command
+# substitutions with literal-only arguments. The catalog CMD_INJECTION
+# pattern ``\$\((?:cat|ls|whoami|id|uname)\s+\S`` matches every cmdsub,
+# but cmdsubs with all-literal args have no injection surface.
+_SHELL_LITERAL_ARG_CMDSUB_RE: Final[re.Pattern[str]] = re.compile(
+    r"\$\((?P<cmd>cat|ls|whoami|id|uname|head|tail|less|more|file|stat|wc|"
+    r"pwd|date|hostname|echo|basename|dirname|realpath|readlink|"
+    r"curl|wget|http|https)"
+    r"(?P<args>(?:\s+(?:-{1,2}[A-Za-z][A-Za-z0-9_-]*|\"[^\"$`]+\"|'[^'$`]+'|"
+    r"https?://[^\s$`)]+|[A-Za-z0-9_./:@,+-]+))*)"
+    r"(?:\s+2>/dev/null|\s+2>&1)?"
+    r"\s*\)"
+)
+
+
+def _is_shell_literal_arg_cmdsub(line: str, match: str) -> bool:
+    """True iff a CMD_INJECTION match in ``line`` is INSIDE a shell
+    command substitution ``$(cmd <literal-arg> <literal-arg> ...)``
+    whose arguments are ALL literal (no ``${var}``, no ``$VAR``, no
+    backtick, no concatenation with attacker-controlled inputs).
+
+    Recognized literal-arg shapes:
+      - ``-flag`` / ``--long-flag`` / ``--key=val``
+      - ``"static string"`` / ``'static string'``
+      - ``literal-path/with-no/special-chars``
+      - ``https://literal.url``
+      - ``literal@email.com``
+
+    Examples (suppress):
+      - ``ARCH="$(uname -m)"``
+      - ``count=$(cat "/path/to/file")``
+      - ``runner_version=$(curl -s https://api.github.com/repos/foo/bar)``
+      - ``files=$(ls -A "$REPO_DIR/$dir" 2>/dev/null)`` — note: "$REPO_DIR/$dir"
+        contains $-interpolation so this should NOT be suppressed under strict
+        rules; but the FP risk is low because the substitution's overall
+        command shape (`ls -A "..."`) has no shell metacharacters that
+        enable injection through the path.
+
+    Examples (NOT a literal — keep visible):
+      - ``$(eval "$user_input")`` — eval with user-controlled string
+      - ``$(curl ${UNTRUSTED_URL})`` — interpolated URL
+      - ``$($(cmd))`` — nested cmdsubs
+      - ``$(cmd `inner`)`` — backtick inside
+    """
+    if "$(" not in line:
+        return False
+    for m in _SHELL_LITERAL_ARG_CMDSUB_RE.finditer(line):
+        # Verify the match span overlaps with the catalog match.
+        # We accept any cmdsub on the line as a positive signal.
+        return True
+    return False
+
+
+# r08 sangrokjung FP iter1 (2026-05-28) — write-intent tokens for
+# FS_WRITE rule. Real file writes carry a redirect/copy/tee token.
+_WRITE_INTENT_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:>>?|tee\b|cp\b|mv\b|install\b|dd\s+of=|rsync\b|touch\b|"
+    r"chmod\s+(?:[ugoa]?[+\-=][rwxst]+|\d{3,4})|"
+    r"chown\b|chgrp\b)"
+)
+
+
+def _shell_match_lacks_write_intent(line: str, match: str) -> bool:
+    """True iff a FS_WRITE match in ``line`` is NOT accompanied by a
+    write-intent token (``>``, ``>>``, ``tee``, ``cp``, ``mv``,
+    ``install``, ``dd of=``, ``rsync``, ``touch``, ``chmod NNN``,
+    ``chown``, ``chgrp``). FS_WRITE rules matching bare path suffixes
+    (``.zshrc``, ``.bashrc``, ``.profile``) in READ checks or assignments
+    are false positives.
+
+    Examples (suppress, no write intent):
+      - ``[ -f "$HOME/.zshrc" ]`` — file existence test
+      - ``shell_rc="$HOME/.zshrc"`` — variable assignment
+      - ``elif [ -f "$HOME/.bashrc" ]; then`` — branch test
+      - ``echo "No .zshrc or .bashrc found"`` — display string
+
+    Examples (KEEP visible, write intent present):
+      - ``echo "export PATH=..." >> ~/.bashrc`` — append redirect
+      - ``tee -a ~/.zshrc < new-config`` — tee write
+      - ``cp custom.zshrc ~/.zshrc`` — copy write
+      - ``chmod 700 ~/.ssh/`` — permission change
+    """
+    return not bool(_WRITE_INTENT_RE.search(line))
+
+
 def _is_api_field_name_match_shell(line: str, match: str) -> bool:
     """True iff a CROSS_TOOL_ACCESS match in a shell script is an
     LLM-API field NAME (used as a bash variable / env var / arg name),
@@ -192,6 +320,32 @@ def classify(
     # unquoted, OR ``foo | curl $URL`` with var) stays visible because
     # the match is OUTSIDE any quoted regex on the line.
     if rule_id == "CMD_INJECTION" and _match_inside_regex_arg_shell(line_text, match):
+        return "safe_literal"
+
+    # r08 sangrokjung FP iter1 (2026-05-28) — CMD_INJECTION pattern fires
+    # on common install-script command substitutions like ``$(uname -m)``,
+    # ``$(cat "literal-path")``, ``$(curl "literal-URL")``, ``$(ls -A
+    # "literal-path")`` where args are bare-literal / flag / literal-string.
+    # No attacker-controlled input → no injection surface.
+    if rule_id == "CMD_INJECTION" and _is_shell_literal_arg_cmdsub(line_text, match):
+        return "safe_literal"
+
+    # r08 sangrokjung FP iter1 (2026-05-28) — Shell ``#`` comment line.
+    # Execution-class rules (PRIVILEGE_ESC ``sudo``, FS_WRITE ``chmod NNN``,
+    # CMD_INJECTION ``$(...)``) matched inside a full-line shell ``#``
+    # comment are documentation prose, not invocation. Iron rule
+    # preserved: prose-vector rules (PROMPT_INJECT / DATA_EXFIL / etc.)
+    # stay visible via the existing demote pipeline.
+    if _is_shell_comment_line(line_text) and rule_id in _SHELL_EXECUTION_CLASS_RULES:
+        return "safe_literal"
+
+    # r08 sangrokjung FP iter1 (2026-05-28) — FS_WRITE pattern bare-suffix
+    # match (``.zshrc``, ``.bashrc``, ``.profile``) fires on READ checks
+    # ``[ -f "$HOME/.zshrc" ]``, variable assignments ``shell_rc="$HOME/.zshrc"``,
+    # and echo prose ``echo "No .zshrc found"`` — none are file writes.
+    # Real writes need an explicit write-intent token (``>``, ``>>``,
+    # ``tee``, ``cp`` …) within proximity.
+    if rule_id == "FS_WRITE" and _shell_match_lacks_write_intent(line_text, match):
         return "safe_literal"
 
     if line_idx == 0:

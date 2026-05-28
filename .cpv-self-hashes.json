@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-27T20:48:31+00:00",
+  "computed_at": "2026-05-28T00:32:28+00:00",
   "purpose": "Hash manifest of files the CPV security validator skips during self-scan mode. The validator verifies each file's actual SHA256 against this manifest before skipping. Hash mismatch \u2192 the file gets scanned normally, defeating name-only spoofing.",
   "files": {
     ".github/workflows/bot-auto-merge.yml": "sha256:84ca9bec6592304749e979f2f0a9000b5047ce434435d1267f9ba0387d587b08",
@@ -109,11 +109,11 @@
     "scripts/_minimal_yaml.py": "sha256:3b361647dfc8474f7317191e377d20093a19ac7bed74b06db429d60397b2903f",
     "scripts/_plugin_compute_hashes.py": "sha256:5f03fb5fca6986605c76063824eeed2fcbbd04898e2f77448edd2d0e6be07655",
     "scripts/_plugin_verify_hashes.py": "sha256:a5540ec44c612076b97e824e054272077195d2bd1631a6f45198853d54c697ce",
-    "scripts/_skillaudit_json_context.py": "sha256:3342b7daee17b2b4ee1feef084c71f819f4e095820cba290dcf9ad22ed89c4d3",
+    "scripts/_skillaudit_json_context.py": "sha256:040cf0d8245783ac7027c39751a08bed0fc13a4e33bde68363f470b5dbce358f",
     "scripts/_skillaudit_markdown_context.py": "sha256:8bb977711c61f022985e5140282558fe7b732372c36a26ae7e644085ec63c34e",
     "scripts/_skillaudit_python_context.py": "sha256:ecf6faaa2be903ecc923f0b82acc614c7e652eb86695580bebcf7da823ca4509",
-    "scripts/_skillaudit_shell_context.py": "sha256:91c8612ab79829fbd767e863a35099aaf104f4f285ba49927a52990f155559e4",
-    "scripts/_skillaudit_typescript_context.py": "sha256:3c94a3935e86987ee625ee65ebe8a32d34d6b9ff5a7148f1becaacf1ec65256d",
+    "scripts/_skillaudit_shell_context.py": "sha256:39162ec7cc4c5655c2d2b49a6b5f48ee54fc993110a59474c66519ed62aacfc5",
+    "scripts/_skillaudit_typescript_context.py": "sha256:23e8e8d5e7c24cda339b0085af39d5cea636c39792ee912e9b690ed20cb8c53d",
     "scripts/_skillaudit_yaml_context.py": "sha256:a84b45903b365b402562f1882ca06b276ace91ea2b54b82771c331ee87f68b8b",
     "scripts/add_dependencies.py": "sha256:2542db733012a707c8d5754b7398d2f2d2a2db69c0f44ab9a979032e6c099cfe",
     "scripts/audit/agent_emission_audit.py": "sha256:40f74daf813ea9e6948120eeb90d62247678921d555e0fa317156991ceb6351e",
