@@ -6603,6 +6603,18 @@ def validate_no_absolute_paths(
             # patterns and allowlists as data constants, not hardcoded paths
             if filename == "cpv_validation_common.py":
                 continue
+            # Skip CPV's skillaudit pattern-classifier infrastructure. The
+            # native scanner and the per-file-type context classifiers carry
+            # host-sensitive-path DETECTION regexes (``/etc/passwd``,
+            # ``/etc/shadow``, ``~/.ssh/id_rsa`` …) and reconnaissance-path
+            # docstring examples — these are pattern SOURCES (what CPV looks
+            # for in scanned plugins), not path references the validator
+            # follows. Hash-anchored via the self-scan manifest, so a
+            # malicious plugin can't spoof out by mimicking the filename.
+            if filename == "cpv_skillaudit_native.py" or (
+                filename.startswith("_skillaudit_") and filename.endswith("_context.py")
+            ):
+                continue
             # Skip CPV-internal rule catalogs under rules/ or scripts/rules/.
             # These JSON files contain regex pattern STRINGS that match
             # host-sensitive paths like /etc/passwd, /etc/shadow, /etc/cron —
