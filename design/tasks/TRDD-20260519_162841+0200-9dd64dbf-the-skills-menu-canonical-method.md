@@ -1,9 +1,9 @@
 ---
 trdd-id: 9dd64dbf-b716-4069-bbab-99505417c3bc
 title: the-skills-menu — canonical rename of skills-index + universal migrator skill
-status: in-progress
+status: completed
 created: 2026-05-19T16:28:41+0200
-updated: 2026-05-19T17:19:52+0200
+updated: 2026-05-28T20:06:27+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->

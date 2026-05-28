@@ -1,9 +1,10 @@
 ---
 trdd-id: 4de479a0-b2f2-48bb-ad79-a89ae80bd934
 title: Migrate CPV menu rendering to the claude-menu-system Stop-hook plugin
-status: in-progress
+status: superseded
 created: 2026-05-22T21:35:02+0200
-updated: 2026-05-23T03:55:33+0200
+updated: 2026-05-28T20:06:27+0200
+superseded-by: [TRDD-ef3fc7d8-04f2-438f-b861-66f23d40115b]
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->
