@@ -843,6 +843,44 @@ _INLINE_CODE_API_NAME_RE: Final[re.Pattern[str]] = re.compile(
 
 # r10-final FP iter (2026-05-28) — negation prose patterns describing
 # what an agent / tool CANNOT do.
+# r10-final-blanket FP iter (2026-05-28) — security-review docs.
+# Files quoting attack patterns AS the "bad example" with CWE references,
+# "Before:"/"After:" labels, or other defensive vocabulary.
+_SECURITY_DOC_VOCAB_RE: Final[re.Pattern[str]] = re.compile(
+    # Only EXPLICIT documentation markers — generic words like "payload"
+    # "attack" "injection" appear naturally in shell scripts too, so they
+    # cannot be auto-trigger vocab without producing FPs.
+    r"\b(?:CWE-\d+|OWASP\s+(?:Top\s+\d+|\w+)|CVE-\d{4}-\d+|SANS-?\d+|"
+    r"before:|after:|bad:|good:|wrong:|correct:|✗|✘|❌|✓|✔|✅|"
+    r"vulnerable\s+code|vulnerable\s+example|insecure\s+example|"
+    r"don't\s+do\s+this|never\s+do\s+this|avoid\s+this|wrong\s+way|right\s+way|"
+    r"fix(?:ed)?:|recommendation:|remediation:|mitigation:|"
+    r"security\s+(?:risk|issue|concern|review|audit|scan|guidance|standard)|"
+    r"do\s+not\s+(?:use|do|invoke|execute|call)|"
+    r"prefer\s+(?:to|instead)|use\s+instead:|use\s+(?:parameterized|prepared))",
+    re.IGNORECASE,
+)
+_SECURITY_DOC_FILE_PATTERNS: Final[tuple[str, ...]] = (
+    "security", "audit", "review", "scan", "vulnerability", "vulnerab",
+    "compliance", "secure", "harden", "redaction", "redact",
+)
+
+
+def _match_in_security_review_doc(line: str, lines: list[str], line_idx: int) -> bool:
+    """True iff an execution/injection-class match is in a markdown
+    document that shows attack patterns as documentation/education.
+
+    Two cumulative signals:
+      1. The file path contains security/audit/review/vulnerability vocab
+         OR the surrounding ±5 lines contain CWE/OWASP/Before:/Bad:/etc.
+      2. The matched line is markdown prose (not inside a bash fence)
+    """
+    lo = max(0, line_idx - 5)
+    hi = min(len(lines), line_idx + 6)
+    window = "\n".join(lines[lo:hi])
+    return bool(_SECURITY_DOC_VOCAB_RE.search(window))
+
+
 _NEGATION_PROSE_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:cannot|can'?t|never|won'?t|will\s+not|does\s+not|do\s+not|"
     r"shall\s+not|must\s+not|should\s+not|may\s+not|"
@@ -1076,6 +1114,17 @@ def _certain_benign_literal(
     #     file-read — no injection surface. Iron rule preserved:
     #     ``$(cat $USER_INPUT)`` / ``$(cat /tmp/$1)`` stays visible.
     if rule_id == "CMD_INJECTION" and _is_static_literal_path_cmdsub(line) and not _context_has_network_sink(lines, line_idx, span=3):
+        return True
+
+    # (10d) r10-final-blanket FP iter (2026-05-28) — security-review
+    #     documentation matched by execution/injection-class rules.
+    #     Files like commands/security-review.md, agents/security-reviewer.md,
+    #     skills/security-pipeline/SKILL.md are SECURITY DOCUMENTATION
+    #     that QUOTE attack patterns AS the "BAD" example for educational
+    #     purposes. Markdown box-drawing table rows
+    #     (``│ CWE-79 │ innerHTML = userInput │``), ``Before: db.query(...)``
+    #     labels, and ``Bad: exec(userInput)`` examples are doc context.
+    if rule_id in _EXECUTION_CLASS_RULES_MD and _match_in_security_review_doc(line, lines, line_idx):
         return True
 
     # (10c) r10-final FP iter (2026-05-28) — INTENT_DESTRUCTIVE_INTENT
