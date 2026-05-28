@@ -149,6 +149,34 @@ _SHELL_EXECUTION_CLASS_RULES: Final[frozenset[str]] = frozenset(
 
 _SHELL_COMMENT_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*#(?!!)")  # `#` but not `#!` shebang
 
+_SHELL_TEST_BLANKET_SUPPRESS_RULES: Final[frozenset[str]] = frozenset(
+    {
+        "CMD_INJECTION",
+        "SHELL_EXEC",
+        "TIME_BOMB",
+        "RESOURCE_ABUSE",
+        "PERSISTENCE",
+        "FS_WRITE",
+        "PRIVILEGE_ESC",
+        "PATH_TRAVERSAL",
+        "OBFUSCATION",
+        "REGEX_DOS",
+        "TOOL_SHADOW",
+        "SSRF_PATTERN",
+        "SSRF_ADVANCED",
+        "URL_RAW_IP",
+        "NET_SUSPICIOUS",
+        "SUPPLY_CHAIN",
+        "CONTAINER_ESCAPE",
+        "ENV_INJECTION",
+        "ENV_RECON",
+        "CROSS_TOOL_ACCESS",
+        "INSECURE_CRYPTO",
+        "REVERSE_SHELL",
+        "URL_SUSPICIOUS",
+    }
+)
+
 
 # r10-final FP iter (2026-05-28) — Shell test-file detection.
 _SHELL_TEST_FILE_PATTERNS: Final[tuple[str, ...]] = (
@@ -499,11 +527,13 @@ def classify(
     if rule_id == "OBFUSCATION" and _is_nerd_font_icon_byte_sequence(lines, line_idx):
         return "safe_literal"
 
-    # r10-final FP iter (2026-05-28) — TIME_BOMB / PERSISTENCE / etc.
-    # in test scripts (test-*.sh, *.test.sh, in tests/ directory). Test
-    # scaffolding routinely uses sleep, tmux/screen sessions, and time
-    # delays — these are test setup, not bombs/persistence.
-    if _is_shell_test_file(file_path) and rule_id in ("TIME_BOMB", "PERSISTENCE", "RESOURCE_ABUSE"):
+    # r10-final-blanket FP iter (2026-05-28) — blanket suppress
+    # execution-class rules in shell TEST FILES (test-*.sh, *.test.sh,
+    # in tests/ directory). Test scaffolding routinely uses curl, exec,
+    # tmux, sleep, file writes, etc. for SUT setup. Iron rule preserved:
+    # prose-vector rules (PROMPT_INJECT / DATA_EXFIL / INVISIBLE_UNICODE_RAW
+    # / per-vendor SECRET_*) still fire.
+    if _is_shell_test_file(file_path) and rule_id in _SHELL_TEST_BLANKET_SUPPRESS_RULES:
         return "safe_literal"
 
     # r10-final FP iter (2026-05-28) — NET_SUSPICIOUS / CMD_INJECTION
