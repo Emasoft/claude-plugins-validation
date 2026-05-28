@@ -525,6 +525,16 @@ def _is_shell_literal_arg_cmdsub(line: str, match: str) -> bool:
     """
     if "$(" not in line:
         return False
+    # Same guards as the generalised recogniser: a literal-arg cmdsub is
+    # still dangerous if it reads a sensitive path, exfiltrates, is wrapped
+    # in eval/bash -c, or pipes to a shell interpreter.
+    if (
+        _reads_sensitive_path(line)
+        or _line_has_exfil_sink(line)
+        or _CMDSUB_EXEC_WRAP_RE.search(line)
+        or _SHELL_INTERPRETER_PIPE_RE.search(line)
+    ):
+        return False
     for m in _SHELL_LITERAL_ARG_CMDSUB_RE.finditer(line):
         # Verify the match span overlaps with the catalog match.
         # We accept any cmdsub on the line as a positive signal.
