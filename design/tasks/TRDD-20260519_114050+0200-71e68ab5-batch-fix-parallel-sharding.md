@@ -1,9 +1,9 @@
 ---
 trdd-id: 71e68ab5-a74f-4f1b-b180-11a003bd6371
 title: Batch-fix scalability — parallel-shard protocol for 300+ findings
-status: in-progress
+status: completed
 created: 2026-05-19T11:40:50+0200
-updated: 2026-05-19T11:40:50+0200
+updated: 2026-05-28T20:06:27+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->

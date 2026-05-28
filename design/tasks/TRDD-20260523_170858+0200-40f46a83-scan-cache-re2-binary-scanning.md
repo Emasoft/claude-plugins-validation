@@ -1,9 +1,9 @@
 ---
 trdd-id: 40f46a83-359a-43e2-ad4c-aac763aded22
 title: v2.104.0 — content-hash scan cache, RE2 hybrid matcher, binary scanning
-status: not-started
+status: completed
 created: 2026-05-23T17:08:58+0200
-updated: 2026-05-23T17:08:58+0200
+updated: 2026-05-28T20:06:27+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->

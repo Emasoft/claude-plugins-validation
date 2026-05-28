@@ -1,9 +1,10 @@
 ---
 trdd-id: 478d9687-46df-45ae-9a67-2b57c1845c8e
 title: Universal skills-index — drop per-agent preload lists, one shared catalog
-status: in-progress
+status: superseded
 created: 2026-05-19T14:06:53+0200
-updated: 2026-05-19T14:06:53+0200
+updated: 2026-05-28T20:06:27+0200
+superseded-by: [TRDD-9dd64dbf-b716-4069-bbab-99505417c3bc]
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->

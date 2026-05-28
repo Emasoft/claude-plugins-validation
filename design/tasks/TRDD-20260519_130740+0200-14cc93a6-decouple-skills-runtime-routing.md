@@ -1,9 +1,9 @@
 ---
 trdd-id: 14cc93a6-c42a-412e-8e89-7c250faf4236
 title: Decouple skills from agents — runtime routing via the Skill tool
-status: in-progress
+status: completed
 created: 2026-05-19T13:07:40+0200
-updated: 2026-05-19T13:07:40+0200
+updated: 2026-05-28T20:06:27+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->
