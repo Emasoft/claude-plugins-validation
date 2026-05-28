@@ -1467,7 +1467,15 @@ def classify(
     # shell. Iron-rule preserved: ``execSync(`dot ${userInput}`)`` /
     # ``execSync('dot -T' + format)`` / etc. still fire because the
     # static-string check rejects template literals and concatenation.
-    if rule_id == "SHELL_EXEC" and _line_is_static_exec_call(line):
+    if (
+        rule_id == "SHELL_EXEC"
+        and _line_is_static_exec_call(line)
+        and not _SPAWN_SHELL_INTERP_FIRST_ARG_RE.search(line)
+    ):
+        # ``spawn('git', ['status'])`` is safe; ``spawn('bash', ['-c', X])``
+        # is NOT — a shell-interpreter command interprets its (possibly
+        # dynamic) arg as shell code, so the static FIRST arg does not make
+        # it benign. Keep those visible.
         return "safe_literal"
 
     # ── CRED_ENV_READ — "MCP server reading its own API key" FP. ──
