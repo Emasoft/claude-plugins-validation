@@ -153,10 +153,14 @@ def cross_validate_enabled(marketplace_dir: Path | None) -> bool:
     return True
 
 
-def entry_skips_cross_check(entry: dict) -> bool:
-    """Per-entry opt-out via `_cpv_skip_upstream_check: true`."""
-    val = entry.get("_cpv_skip_upstream_check")
-    return val is True
+def entry_skips_cross_check(_entry: dict) -> bool:
+    """SECURITY (TRDD-02e1672b): the per-entry `_cpv_skip_upstream_check`
+    opt-out has been REMOVED — a marketplace entry must not be able to exempt
+    itself from upstream cross-validation. The cross-check ALWAYS runs; this
+    returns False unconditionally (kept so the existing call sites need no
+    change).
+    """
+    return False
 
 
 # ────────────────────────────────────────────────────────────────────────────

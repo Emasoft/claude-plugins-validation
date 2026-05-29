@@ -315,31 +315,36 @@ class TestN2DocstringHelper:
 
 
 # ---------------------------------------------------------------------------
-# w3 — Tier-0 dev-scratch skip gated on running-CPV
+# TRDD-b8c6d04f — no unconditional skip; every skip requires a SHA match
 # ---------------------------------------------------------------------------
 
 
-class TestW3DevScratchRunningCpvGate:
-    def test_running_cpv_skips_dev_scratch(self) -> None:
-        """When the self-scan target IS the running validator, dev-scratch is skipped (positive)."""
+class TestNoUnconditionalSkip:
+    """The Tier-0 unconditional dev-scratch skip was REMOVED (TRDD-b8c6d04f).
+
+    A file is skipped during self-scan ONLY when its SHA256 matches the
+    exhaustive manifest — never merely because it lives in a dev-scratch
+    directory. "Even one file skipped is enough to poison the plugin", so
+    no path is exempt without a hash match.
+    """
+
+    def test_running_cpv_does_not_unconditionally_skip_dev_scratch(self) -> None:
+        """Even for the running validator, a dev-scratch path that is NOT a
+        SHA-matched manifest entry is scanned, not skipped (Tier-0 removed)."""
         import validate_security as vs
 
         running_root = Path(vs.__file__).resolve().parent.parent
         _set_cpv_self_scan(True, plugin_root=running_root, notice_report=None)
         try:
             assert vs._CPV_IS_RUNNING_CPV is True
-            assert cpv_self_scan_skip("docs_dev/secret-notes.md") is True
+            # docs_dev/secret-notes.md is not a tracked, SHA-pinned file, so
+            # with Tier-0 gone it must NOT be skipped.
+            assert cpv_self_scan_skip("docs_dev/secret-notes.md") is False
         finally:
             _set_cpv_self_scan(False, plugin_root=None, notice_report=None)
 
     def test_spoofed_tree_scans_dev_scratch(self, tmp_path: Path) -> None:
-        """A non-running tree that claims to be CPV does NOT get its dev-scratch skipped (negative).
-
-        The spoofer flips _CPV_SELF_SCAN_ACTIVE by naming itself
-        claude-plugins-validation, but _CPV_IS_RUNNING_CPV stays False, so
-        Tier-0 falls through to the hash-gated stages (which won't skip a
-        dev-scratch markdown).
-        """
+        """A non-running tree that claims to be CPV never skips dev-scratch (negative)."""
         import validate_security as vs
 
         plugin = tmp_path / "spoof"
@@ -354,6 +359,28 @@ class TestW3DevScratchRunningCpvGate:
         try:
             assert vs._CPV_IS_RUNNING_CPV is False
             assert cpv_self_scan_skip("docs_dev/payload.md") is False
+        finally:
+            _set_cpv_self_scan(False, plugin_root=None, notice_report=None)
+
+    def test_skip_requires_sha_match(self, tmp_path: Path) -> None:
+        """The ONLY way a file is skipped: SHA256 matches the manifest (positive
+        + tamper negative). Proves a tampered file can never be exempt."""
+        import hashlib
+
+        import validate_security as vs
+
+        plugin = tmp_path / "p"
+        (plugin / "scripts").mkdir(parents=True)
+        f = plugin / "scripts" / "x.py"
+        f.write_text("print('genuine')")
+        sha = hashlib.sha256(f.read_bytes()).hexdigest()
+        try:
+            vs._CPV_SELF_SCAN_ACTIVE = True
+            vs._CPV_SELF_PLUGIN_ROOT = plugin
+            vs._CPV_SELF_HASH_MANIFEST = {"scripts/x.py": "sha256:" + sha}
+            assert cpv_self_scan_skip(str(f)) is True  # SHA matches → skipped
+            f.write_text("os.system('rm -rf /')")  # inoculate / tamper
+            assert cpv_self_scan_skip(str(f)) is False  # SHA differs → scanned
         finally:
             _set_cpv_self_scan(False, plugin_root=None, notice_report=None)
 

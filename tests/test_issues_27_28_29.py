@@ -162,8 +162,9 @@ class TestIssue29MegaLinterTemplateV8Schema:
 
 
 class TestIssue28AllowPipelineDriftHonoured:
-    """``cpv.allow_pipeline_drift`` in plugin.json must suppress
-    RC-PIPELINE-DRIFT-001 WARNINGs for listed files."""
+    """SECURITY (TRDD-02e1672b): `cpv.allow_pipeline_drift` was REMOVED — a
+    plugin cannot suppress RC-PIPELINE-DRIFT-001 from its own config. The
+    drift WARNING ALWAYS fires; any allow-list in plugin.json is ignored."""
 
     def _make_plugin(
         self,
@@ -211,9 +212,10 @@ class TestIssue28AllowPipelineDriftHonoured:
             "Sanity baseline failed — RC-PIPELINE-DRIFT-001 must fire for a drifted file when no allow-list is present"
         )
 
-    def test_drift_warning_suppressed_when_file_in_allow_list(self, tmp_path: Path) -> None:
-        """When ``cpv.allow_pipeline_drift`` lists the drifted file's
-        path, no RC-PIPELINE-DRIFT-001 WARNING is emitted for it."""
+    def test_drift_warning_fires_despite_allow_list(self, tmp_path: Path) -> None:
+        """SECURITY (TRDD-02e1672b): the drift WARNING fires EVEN WHEN
+        ``cpv.allow_pipeline_drift`` lists the drifted file — a plugin cannot
+        self-exempt; the opt-out was removed."""
         from cpv_validation_common import ValidationReport
         from validate_plugin import validate_canonical_pipeline_drift
 
@@ -229,10 +231,9 @@ class TestIssue28AllowPipelineDriftHonoured:
             for r in report.results
             if r.level == "WARNING" and "RC-PIPELINE-DRIFT-001" in r.message and ".mega-linter.yml" in r.message
         ]
-        assert drift_warnings == [], (
-            f"Suppression failed — drift WARNING still fired despite "
-            f"cpv.allow_pipeline_drift containing the file path. Got: "
-            f"{[w.message[:100] for w in drift_warnings]}"
+        assert drift_warnings, (
+            "Drift WARNING MUST still fire despite cpv.allow_pipeline_drift "
+            "listing the file — the opt-out was removed (TRDD-02e1672b)."
         )
 
     def test_allow_list_non_list_silently_ignored(self, tmp_path: Path) -> None:
@@ -262,9 +263,10 @@ class TestIssue28AllowPipelineDriftHonoured:
         except Exception as exc:
             raise AssertionError(f"Malformed allow_pipeline_drift crashed validator: {exc}") from exc
 
-    def test_allow_list_empty_strings_filtered(self, tmp_path: Path) -> None:
-        """Whitespace-only or empty entries in the allow-list must be
-        treated as no entry (no spurious matches against empty rel_path)."""
+    def test_allow_list_entries_ignored_entirely(self, tmp_path: Path) -> None:
+        """SECURITY (TRDD-02e1672b): every entry in a `cpv.allow_pipeline_drift`
+        list is ignored — even a well-formed entry naming the drifted file does
+        not suppress the WARNING."""
         from cpv_validation_common import ValidationReport
         from validate_plugin import validate_canonical_pipeline_drift
 
@@ -280,7 +282,7 @@ class TestIssue28AllowPipelineDriftHonoured:
             for r in report.results
             if r.level == "WARNING" and "RC-PIPELINE-DRIFT-001" in r.message and ".mega-linter.yml" in r.message
         ]
-        # Real entry .mega-linter.yml still suppresses
-        assert drift_warnings == [], (
-            f"Whitespace filtering broke real suppression: {[w.message[:100] for w in drift_warnings]}"
+        assert drift_warnings, (
+            "allow_pipeline_drift entries are ignored — the drift WARNING must "
+            "still fire (TRDD-02e1672b)."
         )
