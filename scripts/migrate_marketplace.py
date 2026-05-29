@@ -146,12 +146,13 @@ def migrate_marketplace(
             entry["source"] = new_source
             changes.append(f"  - {name}: source migrated ({desc})")
 
-        if probe and isinstance(entry.get("source"), dict):
-            src = entry["source"]
-            if src.get("type") == "github" and isinstance(src.get("repo"), str):
-                alive, status = probe_repo_alive(src["repo"])
+        src = entry.get("source")
+        if probe and isinstance(src, dict):
+            repo = src.get("repo")
+            if src.get("type") == "github" and isinstance(repo, str):
+                alive, status = probe_repo_alive(repo)
                 if not alive:
-                    dead_repos.append(f"  - {name} ({src['repo']}): {status}")
+                    dead_repos.append(f"  - {name} ({repo}): {status}")
 
     if not changes:
         # No source-shape changes needed — don't touch the file just to
