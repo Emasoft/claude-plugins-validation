@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-29T11:09:00+00:00",
+  "computed_at": "2026-05-29T11:10:36+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:ea6f6a13ec223604dcb2cf0cbd4987f1e415e1f8076d5b1bb3cba15d4af3ebb7",
@@ -85,6 +85,7 @@
     "design/tasks/TRDD-20260529_081521+0200-b8c6d04f-exhaustive-sha-self-recognition.md": "sha256:4ae7f6d418bfb7532fcacb453a8a8019a0404d659cc54066b86d069f0b44668e",
     "design/tasks/TRDD-20260529_123821+0200-4243a768-self-scan-name-signal-hardening.md": "sha256:c628e0284e67d9e1a2728ea57c02e081c2de324751f44fcb7c69ed45dacad1f6",
     "design/tasks/TRDD-20260529_125911+0200-9ed64592-abspath-data-vs-sink-discriminator.md": "sha256:c2c3f4a934334aabaa5828486949e22beca395c4e44094b45cc3af6eafac130c",
+    "design/tasks/TRDD-20260529_130947+0200-25e57b01-hard-kill-wedged-scan-worker.md": "sha256:d3277c0499a25489ab458ef356681020d0538ac157e043d1e173a9eed99067ff",
     "design/tasks/TRDD-26446eed-ea5e-43e7-886c-8512866d92be-semantic-channel-source.md": "sha256:b20480b2cf4e0a97cc06e53a32a39a4d09a4740b94c92804298a8286d88d991c",
     "design/tasks/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md": "sha256:e2f55a383481238d738aaea92cfdbcb0ce34e6f1bdeab22a3b641cfca583431d",
     "design/tasks/TRDD-2be75e88-3c23-4c91-9e4e-5ce315b497dc-scope-validators.md": "sha256:6aba8e45a304a4b8b33177decdc271a7e1677098d7b5e09903f132f73cabff68",
