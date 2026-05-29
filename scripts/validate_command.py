@@ -65,6 +65,7 @@ KNOWN_FRONTMATTER_FIELDS = {
     "name",
     "description",
     "allowed-tools",
+    "disallowed-tools",  # v2.1.152 — remove specific tools from the model while the command is active
     "model",
     "argument-hint",
     # Skill fields now accepted for commands (commands-as-skills per skills.md)

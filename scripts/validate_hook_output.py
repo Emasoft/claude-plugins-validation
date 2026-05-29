@@ -137,8 +137,9 @@ ELICITATION_ACTIONS: frozenset[str] = frozenset({"accept", "decline", "cancel"})
 # with an empty set — the universal fields still apply to them.
 
 HOOK_OUTPUT_EVENT_FIELDS: dict[str, frozenset[str]] = {
-    # hooks.md L717
-    "SessionStart": frozenset({"additionalContext"}),
+    # hooks.md L717 + v2.1.152: reloadSkills (bool) re-scans skill/command dirs;
+    # sessionTitle (str) names the session on startup/resume (same effect as /rename).
+    "SessionStart": frozenset({"additionalContext", "reloadSkills", "sessionTitle"}),
     # hooks.md L842-847
     "UserPromptSubmit": frozenset({"decision", "reason", "additionalContext", "sessionTitle"}),
     # hooks.md L982-987
@@ -217,6 +218,10 @@ HOOK_OUTPUT_EVENT_FIELDS: dict[str, frozenset[str]] = {
     # the next model call. Per hooks.md, supports decision/reason/additionalContext
     # plus per-tool `updatedToolOutput`.
     "PostToolBatch": frozenset({"decision", "reason", "additionalContext", "updatedToolOutput"}),
+    # v2.1.152 — MessageDisplay transforms/hides assistant text as displayed.
+    # displayContent (str) replaces the on-screen text only; transcript and
+    # what Claude sees keep the original.
+    "MessageDisplay": frozenset({"displayContent"}),
 }
 
 
@@ -335,6 +340,8 @@ def _validate_hook_specific_output(event_name: str, hso: Any, report: Validation
         _validate_watch_paths_hso(event_name, hso, report)
     elif event_name == "WorktreeCreate":
         _validate_worktree_create_hso(hso, report)
+    elif event_name == "MessageDisplay":
+        _validate_message_display_hso(hso, report)
 
 
 def _validate_pretooluse_hso(hso: dict[str, Any], report: ValidationReport) -> None:
@@ -461,10 +468,29 @@ def _validate_elicitation_hso(event_name: str, hso: dict[str, Any], report: Vali
 
 
 def _validate_session_start_hso(hso: dict[str, Any], report: ValidationReport) -> None:
-    """Validate SessionStart hookSpecificOutput (hooks.md L717)."""
+    """Validate SessionStart hookSpecificOutput (hooks.md L717 + v2.1.152)."""
     ctx = hso.get("additionalContext")
     if ctx is not None and not isinstance(ctx, str):
         report.major(f"SessionStart additionalContext must be a string, got {type(ctx).__name__}")
+    # v2.1.152 — reloadSkills re-scans skill/command dirs after the hook runs.
+    reload_skills = hso.get("reloadSkills")
+    if reload_skills is not None and not isinstance(reload_skills, bool):
+        report.major(f"SessionStart reloadSkills must be a boolean, got {type(reload_skills).__name__}")
+    # v2.1.152 — sessionTitle names the session (startup/resume only).
+    title = hso.get("sessionTitle")
+    if title is not None and not isinstance(title, str):
+        report.major(f"SessionStart sessionTitle must be a string, got {type(title).__name__}")
+
+
+def _validate_message_display_hso(hso: dict[str, Any], report: ValidationReport) -> None:
+    """Validate MessageDisplay hookSpecificOutput (v2.1.152).
+
+    displayContent replaces the on-screen assistant text (display-only — the
+    transcript and what Claude sees keep the original message).
+    """
+    content = hso.get("displayContent")
+    if content is not None and not isinstance(content, str):
+        report.major(f"MessageDisplay displayContent must be a string, got {type(content).__name__}")
 
 
 def _validate_watch_paths_hso(event_name: str, hso: dict[str, Any], report: ValidationReport) -> None:
