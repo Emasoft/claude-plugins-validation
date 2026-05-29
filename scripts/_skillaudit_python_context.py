@@ -41,12 +41,8 @@ _PY_ENV_HIJACK_LITERAL_RE: Final[re.Pattern[str]] = re.compile(
 )
 # A dynamic ``os.environ[<identifier>] =`` assignment (variable key, not a
 # string literal).
-_PY_ENV_DYNAMIC_KEY_RE: Final[re.Pattern[str]] = re.compile(
-    r"os\.environ\s*\[\s*[A-Za-z_]\w*\s*\]\s*="
-)
-_PY_ENV_READ_RE: Final[re.Pattern[str]] = re.compile(
-    r"os\.environ\.get\s*\(|os\.environ\s*\[\s*[A-Za-z_]"
-)
+_PY_ENV_DYNAMIC_KEY_RE: Final[re.Pattern[str]] = re.compile(r"os\.environ\s*\[\s*[A-Za-z_]\w*\s*\]\s*=")
+_PY_ENV_READ_RE: Final[re.Pattern[str]] = re.compile(r"os\.environ\.get\s*\(|os\.environ\s*\[\s*[A-Za-z_]")
 
 
 def _is_env_read_modify_write(lines: list[str], line_idx: int) -> bool:
@@ -71,6 +67,7 @@ def _is_env_read_modify_write(lines: list[str], line_idx: int) -> bool:
         return False
     # Require a same-window env READ (the "read" half of read-modify-write).
     return bool(_PY_ENV_READ_RE.search(window))
+
 
 # Modules + attributes whose calls reach a shell. Every plugin uses at
 # least one of these.
@@ -822,11 +819,7 @@ def _is_inside_docstring(tree: ast.AST, line: int) -> bool:
         if not body:
             continue
         first = body[0]
-        if (
-            isinstance(first, ast.Expr)
-            and isinstance(first.value, ast.Constant)
-            and isinstance(first.value.value, str)
-        ):
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
             start = getattr(first.value, "lineno", None)
             end = getattr(first.value, "end_lineno", None)
             if start is not None and end is not None and start <= line <= end:
@@ -924,9 +917,7 @@ def _ssrf_url_is_static_literal_py(line: str, match: str) -> bool:
 # ai-maestro-webdesign:
 #     url = f"http://localhost:{args.port}"
 #     return server, f"http://127.0.0.1:{port}"
-_LOOPBACK_HOSTS_PY: Final[frozenset[str]] = frozenset(
-    {"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"}
-)
+_LOOPBACK_HOSTS_PY: Final[frozenset[str]] = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"})
 
 
 def _ssrf_url_is_loopback_with_literal_host_py(line: str, match: str) -> bool:
@@ -1192,9 +1183,7 @@ def _is_inside_llm_prompt_template_constant(tree: ast.AST, line: int) -> bool:
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
-            if not any(
-                isinstance(t, ast.Name) and _is_prompt_name(t.id) for t in node.targets
-            ):
+            if not any(isinstance(t, ast.Name) and _is_prompt_name(t.id) for t in node.targets):
                 continue
             if _value_spans_line(node.value):
                 return True
@@ -1295,23 +1284,23 @@ def _match_inside_pattern_catalog(tree: ast.AST, line: int, match: str) -> bool:
 # any 3-byte hex-escape sequence, which falsely matches every embedded
 # binary file (PNG header, JPEG header, PDF magic, ELF, Mach-O, ZIP, …).
 _FILE_MAGIC_HEXES: Final[tuple[str, ...]] = (
-    "\\x89PNG",    # PNG (8950 4E 47 0D 0A 1A 0A)
+    "\\x89PNG",  # PNG (8950 4E 47 0D 0A 1A 0A)
     "\\xff\\xd8",  # JPEG SOI
     "\\xff\\xd9",  # JPEG EOI
-    "GIF8",        # GIF87a / GIF89a
-    "%PDF",        # PDF
-    "PK\\x03",     # ZIP / docx / xlsx / jar
-    "\\x7fELF",    # ELF
+    "GIF8",  # GIF87a / GIF89a
+    "%PDF",  # PDF
+    "PK\\x03",  # ZIP / docx / xlsx / jar
+    "\\x7fELF",  # ELF
     "\\xcf\\xfa\\xed\\xfe",  # Mach-O 64
     "\\xca\\xfe\\xba\\xbe",  # Mach-O fat
-    "MZ",          # PE / DOS executable header
+    "MZ",  # PE / DOS executable header
     "\\x1f\\x8b",  # gzip
-    "BZh",         # bzip2
-    "\\xfd7zXZ",   # xz
-    "\\x00asm",    # WebAssembly
-    "ID3",         # MP3 ID3
-    "RIFF",        # WAV / AVI / WebP
-    "\\x47",       # MPEG TS (loose; combined with other checks would be stronger)
+    "BZh",  # bzip2
+    "\\xfd7zXZ",  # xz
+    "\\x00asm",  # WebAssembly
+    "ID3",  # MP3 ID3
+    "RIFF",  # WAV / AVI / WebP
+    "\\x47",  # MPEG TS (loose; combined with other checks would be stronger)
 )
 
 
@@ -1325,10 +1314,10 @@ def _bytes_literal_is_file_magic(source_line: str) -> bool:
     """
     # Look for bytes literal: b"..." or b'...'
     for m in re.finditer(r"\bb[rR]?[\"']", source_line):
-        rest = source_line[m.end():]
+        rest = source_line[m.end() :]
         # Look at the first ~16 chars of the bytes literal content
         head = rest[:32]
-        if any(head.startswith(magic) or head.lstrip()[:len(magic)] == magic for magic in _FILE_MAGIC_HEXES):
+        if any(head.startswith(magic) or head.lstrip()[: len(magic)] == magic for magic in _FILE_MAGIC_HEXES):
             return True
     return False
 
@@ -1433,9 +1422,7 @@ def _line_has_quoted_string(source_line: str) -> bool:
     return bool(re.search(r"[\"']", source_line))
 
 
-_PYTHON_DEF_RE: Final[re.Pattern[str]] = re.compile(
-    r"^\s*(?:async\s+)?def\s+[A-Za-z_][\w]*\s*\("
-)
+_PYTHON_DEF_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?:async\s+)?def\s+[A-Za-z_][\w]*\s*\(")
 
 
 def _line_is_python_function_def(source_line: str) -> bool:
@@ -1736,11 +1723,7 @@ def classify(
     # (e.g. the `_REDOS_SHAPES = [re.compile(...)]` from the security-
     # guidance plugin's extensibility.py), not a live exec sink.
     # Suppress for REGEX_DOS specifically — other rules still fire normally.
-    if (
-        rule_id == "REGEX_DOS"
-        and 0 <= line_idx < len(lines)
-        and _line_is_re_module_call(lines[line_idx])
-    ):
+    if rule_id == "REGEX_DOS" and 0 <= line_idx < len(lines) and _line_is_re_module_call(lines[line_idx]):
         return "safe_literal"
 
     # r03 trailofbits FP iteration (2026-05-27) — OBFUSCATION pattern
@@ -1767,22 +1750,14 @@ def classify(
     # NODE_OPTIONS, PYTHONPATH, PYTHONSTARTUP, BASH_ENV, GIT_SSH_COMMAND).
     # Suppress when BOTH key and value are pure literals AND the key is
     # NOT in the hijack-var list.
-    if (
-        rule_id == "ENV_INJECTION"
-        and 0 <= line_idx < len(lines)
-        and _is_safe_env_literal_set(lines[line_idx])
-    ):
+    if rule_id == "ENV_INJECTION" and 0 <= line_idx < len(lines) and _is_safe_env_literal_set(lines[line_idx]):
         return "safe_literal"
 
     # r01 FP iter (2026-05-28) — ENV_INJECTION read-modify-write of an env
     # var via a dynamic key (``os.environ[var] = <transform of existing
     # value>``) with no hijack-var literal nearby (e.g. stripping a host
     # from NO_PROXY). The value is the env's own value, not attacker input.
-    if (
-        rule_id == "ENV_INJECTION"
-        and 0 <= line_idx < len(lines)
-        and _is_env_read_modify_write(lines, line_idx)
-    ):
+    if rule_id == "ENV_INJECTION" and 0 <= line_idx < len(lines) and _is_env_read_modify_write(lines, line_idx):
         return "safe_literal"
 
     # r03 trailofbits FP iteration (2026-05-27) — CRED_ENV_SAFE is the
@@ -1793,11 +1768,7 @@ def classify(
     # CRED_ENV_READ — not on a string literal mention. Iron-rule
     # preserved: HARDCODED_SECRET / SECRET_OPENAI_KEY / API_KEY_LEAK
     # rules fire on the actual key payload, not on the word ``.env``.
-    if (
-        rule_id == "CRED_ENV_SAFE"
-        and 0 <= line_idx < len(lines)
-        and _line_has_quoted_string(lines[line_idx])
-    ):
+    if rule_id == "CRED_ENV_SAFE" and 0 <= line_idx < len(lines) and _line_has_quoted_string(lines[line_idx]):
         return "safe_literal"
 
     # PRIMARY PATH: find the enclosing Call. A line that contains a
@@ -1909,9 +1880,18 @@ def classify(
     # module-level data structure (e.g. publish.py's
     # ``REQUIRED_TOOLS = [("uvx", "curl -LsSf https://astral.sh/uv/install.sh | sh"), …]``).
     # It is text the program SHOWS the user, never executed.
-    if rule_id in {"CMD_INJECTION", "SUPPLY_CHAIN"} and _match_inside_module_data_literal(
-        tree, line, source, match
-    ):
+    # Issue #57 Fix B: a security plugin's pattern catalog legitimately trips
+    # execution-class rules BEYOND CMD_INJECTION/SUPPLY_CHAIN (code_execution,
+    # privilege_escalation, path_traversal, reconnaissance, …). Suppress ANY
+    # non-prose-vector rule whose match is an inert string in a module-level
+    # pure-literal container (the catalog DEFINITION). Prose-vector rules
+    # (PROMPT_INJECT / DATA_EXFIL / SECRET_* / …) stay VISIBLE — an injected
+    # instruction or secret embedded in a data literal is still a delivery
+    # vector. A sink that CONSUMES the catalog string
+    # (e.g. os.system(PATTERNS["x"])) is a different match on a different line
+    # and stays flagged — _match_inside_module_data_literal only matches the
+    # pure-literal definition, never a Call argument.
+    if not _rule_is_prose_vector(rule_id) and _match_inside_module_data_literal(tree, line, source, match):
         return "safe_literal"
 
     # Issue #39 — SECRET_* FP: synthetic test-fixture secret in a
@@ -1960,8 +1940,7 @@ def classify(
     # (issue #41 follow-up: a loopback host can't reach an external
     # destination regardless of how the port/path is computed).
     if rule_id == "SSRF_PATTERN" and (
-        _ssrf_url_is_static_literal_py(line_text, match)
-        or _ssrf_url_is_loopback_with_literal_host_py(line_text, match)
+        _ssrf_url_is_static_literal_py(line_text, match) or _ssrf_url_is_loopback_with_literal_host_py(line_text, match)
     ):
         return "safe_literal"
 
@@ -2553,9 +2532,7 @@ def _path_chain_has_home_anchor_and_safe_basename(node: ast.AST) -> bool:
     return has_home_anchor and has_safe_basename and not has_unsafe_component
 
 
-def _match_inside_module_data_literal(
-    tree: ast.AST, line: int, source: str, match: str
-) -> bool:
+def _match_inside_module_data_literal(tree: ast.AST, line: int, source: str, match: str) -> bool:
     """True iff ``match`` text on ``line`` is inside a pure-string
     Constant that is reachable via pure-literal containers
     (List / Tuple / Set / Dict / nested) from a module-level
