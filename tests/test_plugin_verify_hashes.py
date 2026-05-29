@@ -249,3 +249,126 @@ def _build_plugin_root(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return root
+
+
+def _sha(p: Path) -> str:
+    return f"sha256:{hashlib.sha256(p.read_bytes()).hexdigest()}"
+
+
+# ── Change 3 (TRDD-b8c6d04f): bidirectional added-file detection ──────────────
+
+
+class TestChange3AddedFileDetection:
+    """An ADDED (inoculated) shipped file — present locally but absent from the
+    canonical manifest — must be caught. The manifest→local loop alone cannot
+    see it, because it only iterates entries that are ALREADY in the manifest.
+    "Even one file skipped is enough to poison the plugin" (user directive)."""
+
+    def test_added_file_detected_by_helper(self, tmp_path):
+        """_detect_added_files flags a non-manifest .py and ignores OS/runtime cruft."""
+        root = tmp_path / "plugin"
+        (root / "scripts").mkdir(parents=True)
+        (root / "scripts" / "good.py").write_text("x = 1\n")
+        (root / "scripts" / "evil.py").write_text("import os  # injected\n")
+        (root / ".DS_Store").write_bytes(b"\x00")  # cruft → must NOT flag
+        (root / "scripts" / "__pycache__").mkdir()
+        (root / "scripts" / "__pycache__" / "good.cpython-312.pyc").write_bytes(b"\x00")
+        manifest_files = {"scripts/good.py": "sha256:deadbeef"}
+        added = _plugin_verify_hashes._detect_added_files(root, manifest_files)
+        assert added == ["scripts/evil.py"], f"expected only evil.py, got {added}"
+
+    def test_verify_fails_on_added_file(self, monkeypatch, tmp_path, capsys):
+        """End-to-end: an added file makes verify_self_integrity return False and
+        the report names it as added/inoculated."""
+        # pytest re-sets PYTEST_CURRENT_TEST for the call phase (after the
+        # _isolate fixture's setup-time delenv), which would trip the auto-bypass
+        # and short-circuit to True. Clear it here so real verify logic runs.
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        root = _build_plugin_root(tmp_path)
+        covered = root / "scripts" / "validate_x.py"
+        covered.parent.mkdir(parents=True)
+        covered.write_text("# covered\n")
+        # An UNTRACKED, unhashed payload dropped into the install.
+        (root / "scripts" / "evil.py").write_text("import os  # inoculated\n")
+        # Manifest covers EVERY legit shipped file (plugin.json + validate_x.py)
+        # so evil.py is the ONLY uncovered one.
+        manifest = {
+            "version": 1,
+            "files": {
+                "scripts/validate_x.py": _sha(covered),
+                ".claude-plugin/plugin.json": _sha(root / ".claude-plugin" / "plugin.json"),
+            },
+        }
+        monkeypatch.setattr(_plugin_verify_hashes, "_fetch_github_manifest", lambda v, prefer_cache=True: manifest)
+        ok = _plugin_verify_hashes.verify_self_integrity(plugin_root=root, fail_on_mismatch=False, quiet=True)
+        assert ok is False, "verify must FAIL when an unhashed file is added to the install"
+        err = capsys.readouterr().err
+        assert "scripts/evil.py" in err
+        assert "added/inoculated" in err
+
+    def test_clean_install_passes(self, monkeypatch, tmp_path):
+        """Two-sided: when the manifest covers exactly the on-disk shipped files,
+        verify passes (no spurious added-file finding)."""
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)  # run real verify, not the auto-bypass
+        root = _build_plugin_root(tmp_path)
+        f = root / "scripts" / "validate_x.py"
+        f.parent.mkdir(parents=True)
+        f.write_text("# covered\n")
+        manifest = {
+            "version": 1,
+            "files": {
+                "scripts/validate_x.py": _sha(f),
+                ".claude-plugin/plugin.json": _sha(root / ".claude-plugin" / "plugin.json"),
+            },
+        }
+        monkeypatch.setattr(_plugin_verify_hashes, "_fetch_github_manifest", lambda v, prefer_cache=True: manifest)
+        ok = _plugin_verify_hashes.verify_self_integrity(plugin_root=root, fail_on_mismatch=False, quiet=True)
+        assert ok is True
+
+    def test_cruft_not_flagged_as_added(self, monkeypatch, tmp_path):
+        """OS/runtime cruft (.DS_Store, *.pyc, *~) is never flagged as added."""
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)  # run real verify, not the auto-bypass
+        root = _build_plugin_root(tmp_path)
+        f = root / "scripts" / "validate_x.py"
+        f.parent.mkdir(parents=True)
+        f.write_text("# covered\n")
+        (root / ".DS_Store").write_bytes(b"\x00")
+        (root / "scripts" / "validate_x.py~").write_text("backup\n")
+        (root / "scripts" / "__pycache__").mkdir()
+        (root / "scripts" / "__pycache__" / "x.pyc").write_bytes(b"\x00")
+        manifest = {
+            "version": 1,
+            "files": {
+                "scripts/validate_x.py": _sha(f),
+                ".claude-plugin/plugin.json": _sha(root / ".claude-plugin" / "plugin.json"),
+            },
+        }
+        monkeypatch.setattr(_plugin_verify_hashes, "_fetch_github_manifest", lambda v, prefer_cache=True: manifest)
+        ok = _plugin_verify_hashes.verify_self_integrity(plugin_root=root, fail_on_mismatch=False, quiet=True)
+        assert ok is True, "cruft must not be flagged as an added file"
+
+    def test_manifest_files_excluded_from_enumeration(self, tmp_path):
+        """The two manifest files are never part of the shipped set (they cannot
+        self-hash), so they are never flagged as added."""
+        root = tmp_path / "plugin"
+        root.mkdir()
+        (root / ".plugin-self-hashes.json").write_text("{}")
+        (root / ".cpv-self-hashes.json").write_text("{}")
+        (root / "real.py").write_text("x=1\n")
+        shipped = _plugin_compute_hashes.enumerate_shipped_files(root)
+        assert ".plugin-self-hashes.json" not in shipped
+        assert ".cpv-self-hashes.json" not in shipped
+        assert "real.py" in shipped
+
+    def test_builder_is_exhaustive_over_enumeration(self):
+        """compute_manifest hashes EVERY enumerated shipped file that exists on
+        disk (change 1 + change 3 consistency), and adds no extras. Run against
+        the real repo — pins the security invariant that no shipped file is
+        left unhashed."""
+        repo = Path(__file__).resolve().parent.parent
+        shipped = _plugin_compute_hashes.enumerate_shipped_files(repo)
+        manifest = _plugin_compute_hashes.compute_manifest(repo)
+        keys = set(manifest["files"].keys())
+        assert keys <= shipped, f"manifest has keys not in the shipped set: {sorted(keys - shipped)[:5]}"
+        missing = {rel for rel in shipped if (repo / rel).is_file() and rel not in keys}
+        assert not missing, f"shipped files NOT hashed by compute_manifest: {sorted(missing)[:5]}"
