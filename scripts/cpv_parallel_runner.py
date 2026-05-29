@@ -31,6 +31,7 @@ nothing else; validators retain their domain logic.
 from __future__ import annotations
 
 import os
+import sys
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import TimeoutError as FutTimeoutError
 from dataclasses import dataclass
@@ -68,6 +69,18 @@ class ScanResult:
     error: str | None = None
 
 
+def _emit_scan_progress(path: Any) -> None:
+    """#54: env-gated per-file scan progress. When CPV_SCAN_PROGRESS is set in
+    the environment, emit a flushed ``scanning <path>`` line to stderr from
+    INSIDE the worker — the parent cannot name the in-flight file because the
+    pool scans N files concurrently. Default-silent (no output, negligible
+    cost) when the env var is unset, so a hung/stuck file can be identified on
+    demand without changing default behaviour. Pairs with the #53 ReDoS bound.
+    """
+    if os.environ.get("CPV_SCAN_PROGRESS"):
+        print(f"[cpv-scan] scanning {path}", file=sys.stderr, flush=True)
+
+
 def _run_one(scan_func: Callable[[Any], list], path: Any) -> list:
     """Top-level worker shim for ``chunk_size == 1`` (one file per task).
 
@@ -80,6 +93,7 @@ def _run_one(scan_func: Callable[[Any], list], path: Any) -> list:
     Kept intentionally trivial — any exception propagates back through the
     future to ``parallel_scan``, which decides whether to collect or re-raise.
     """
+    _emit_scan_progress(path)
     return scan_func(path)
 
 
@@ -102,6 +116,7 @@ def _run_batch(
     """
     out: list[tuple[int, list, str | None]] = []
     for i, path in enumerate(paths):
+        _emit_scan_progress(path)
         try:
             out.append((i, scan_func(path), None))
         except Exception as exc:

@@ -44,6 +44,7 @@ from cpv_validation_common import (
     COLORS,
     ValidationReport,
     get_gitignore_filter,
+    is_test_path,
     save_report_and_print_summary,
 )
 
@@ -498,6 +499,12 @@ def validate_broken_links(plugin_path: Path, report: DocumentationValidationRepo
         # plugin's .gitignore does not list them.
         if _is_under_skip_dir(rel_md, _LINK_CHECK_SKIP_DIRS):
             continue
+        # #50: test-fixture markdown (tests/, tests/fixtures/*-malicious.md, …)
+        # intentionally contains fake/broken refs as test data — never
+        # link-check it. Deterministic path-role test, NOT a plugin-config
+        # opt-out (TRDD-02e1672b).
+        if is_test_path(str(rel_md)):
+            continue
 
         try:
             content = md_file.read_text(encoding="utf-8")
@@ -856,6 +863,10 @@ def validate_image_references(plugin_path: Path, report: DocumentationValidation
     for md_file in gi.rglob("*.md"):
         rel_md = md_file.relative_to(plugin_root_resolved)
         if _is_under_skip_dir(rel_md, _LINK_CHECK_SKIP_DIRS):
+            continue
+        # #50: skip test-fixture markdown (see validate_broken_links) — its
+        # image refs are intentionally fake test data.
+        if is_test_path(str(rel_md)):
             continue
 
         try:

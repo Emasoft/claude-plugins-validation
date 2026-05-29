@@ -2146,6 +2146,18 @@ class SkillAuditScanResult:
 # ────────────────────────────────────────────────────────────────────────
 
 
+# SECURITY (#53 ReDoS): cap the per-line input fed to the regex engine. A
+# pathological catalog pattern (>=2 chained unbounded `.*` between alternation
+# groups) can backtrack super-linearly on a single very long line, pinning a
+# CPU core indefinitely. Bounding the matched span makes the worst case linear
+# in _MAX_SCAN_LINE regardless of pattern shape — the single strongest guard,
+# covering current AND future catalog patterns. Truncation affects MATCHING
+# ONLY: reported line numbers / content are unchanged, and a real payload in a
+# very long minified/base64 line still matches within the first _MAX_SCAN_LINE
+# chars. Belt-and-suspenders with the per-file worker wall-clock kill (#52).
+_MAX_SCAN_LINE = 2000
+
+
 def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
     """Run the full skillaudit native scan on a single string of content.
 
@@ -2194,7 +2206,9 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
         rule_desc = rule.get("description", "")
         for pat in compiled_pats:
             for i, line in enumerate(lines):
-                m = pat.search(line)
+                # #53: bound the regex input — see _MAX_SCAN_LINE. Match only;
+                # `line` (full) is still used for reporting/context below.
+                m = pat.search(line if len(line) <= _MAX_SCAN_LINE else line[:_MAX_SCAN_LINE])
                 if not m:
                     continue
                 in_cb = cb_map[i]
