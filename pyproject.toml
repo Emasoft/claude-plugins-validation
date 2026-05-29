@@ -112,7 +112,27 @@ warn_return_any = true
 warn_unused_configs = true
 
 [tool.pyright]
+# Kept in sync with pyrightconfig.json (which takes precedence when both
+# files exist). Mirrored here so tooling that reads pyproject.toml
+# [tool.pyright] instead of pyrightconfig.json (some IDE integrations) gets
+# the same venv + rule config and does not emit false-positive
+# missing-import / unused-variable diagnostics. pyrightconfig.json is the
+# canonical copy — update both together.
 pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
 extraPaths = ["scripts", "tests"]
+include = ["scripts", "tests"]
+exclude = ["**/__pycache__", "**/.venv", "**/build", "**/dist"]
 reportMissingImports = "warning"
+reportUnusedVariable = "none"
 typeCheckingMode = "basic"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+extraPaths = ["scripts", "tests"]
+reportUnusedVariable = "none"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts"
+extraPaths = ["scripts"]
