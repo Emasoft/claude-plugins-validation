@@ -6754,6 +6754,8 @@ def validate_toc_embedding(
     md_file_path: Path,
     base_dir: Path,
     report: ValidationReport,
+    *,
+    body_over_token_cap: bool = False,
 ) -> None:
     """Validate that .md files embed TOCs from referenced .md files.
 
@@ -6780,6 +6782,12 @@ def validate_toc_embedding(
         md_file_path: Path to the markdown file being validated
         base_dir: Base directory for resolving relative references
         report: ValidationReport to add results to
+        body_over_token_cap: True when the SKILL.md body already exceeds
+            SKILL_BODY_TOKEN_LIMIT. The TOC-completeness findings are then
+            demoted from MINOR to NIT (issue #51): embedding MORE TOC content
+            into an over-cap SKILL.md only deepens the size MAJOR, so the
+            author should see ONE actionable signal (the MAJOR) instead of
+            self-contradictory guidance. Never silently dropped.
     """
     lines = md_content.split("\n")
     rel_file = md_file_path.name
@@ -6787,6 +6795,26 @@ def validate_toc_embedding(
     refs_with_toc = 0
     # Track lines inside fenced code blocks — backtick refs there are skipped
     fenced_lines = _build_fenced_line_set(lines)
+
+    # Issue #51: a SKILL.md over the token cap and the COMPLETE-TOC-embedding
+    # rule pull in opposite directions on the SAME file — the TOC rule forces
+    # more verbatim content in, the cap punishes size. When the body is already
+    # over-cap, demote the TOC-completeness findings to NIT (with an explicit
+    # note) so the author resolves the size MAJOR first; the finding is NEVER
+    # silently dropped. Under-cap skills keep the full MINOR (rule unchanged).
+    _toc_overcap_note = (
+        f" (Demoted to NIT: SKILL.md is already over the {SKILL_BODY_TOKEN_LIMIT}-token "
+        "body cap — embedding more TOC content would deepen that MAJOR. Resolve the size "
+        "MAJOR first; full-TOC embedding is only required for skills under the cap.)"
+    )
+
+    def _toc_finding(msg: str, file: str) -> None:
+        """Emit a COMPLETE-TOC-embedding finding — MINOR normally, NIT (with an
+        explanatory note) when the SKILL.md body already exceeds the token cap."""
+        if body_over_token_cap:
+            report.nit(msg + _toc_overcap_note, file)
+        else:
+            report.minor(msg, file)
 
     for link_match in _MD_LINK_RE.finditer(md_content):
         link_target = link_match.group(2)
@@ -6861,7 +6889,7 @@ def validate_toc_embedding(
             # branch below). If the line genuinely IS a TOC title rather
             # than a reference, the fix is to drop the markdown link
             # (the message body explains how).
-            report.minor(
+            _toc_finding(
                 f"Link to '{ref_path.name}' in a list entry of {rel_file} "
                 f"has {embedded_count}/{len(toc_headings)} TOC headings "
                 f"embedded. SKILL.md must copy the COMPLETE TOC of each "
@@ -6885,7 +6913,7 @@ def validate_toc_embedding(
             )
         else:
             # Clear standalone reference — full TOC must be embedded
-            report.minor(
+            _toc_finding(
                 f"Reference to '{ref_path.name}' in {rel_file} has "
                 f"{embedded_count}/{len(toc_headings)} TOC headings embedded. "
                 f"SKILL.md must copy the COMPLETE TOC of each referenced .md "
@@ -7009,7 +7037,7 @@ def validate_toc_embedding(
             refs_with_toc += 1
         else:
             # TOC not fully embedded — report missing embedding as separate MINOR
-            report.minor(
+            _toc_finding(
                 f"Backtick reference to '{ref_path.name}' in {rel_file} has "
                 f"{embedded_count}/{len(toc_headings)} TOC headings embedded. "
                 f"Convert to a markdown link and copy the COMPLETE TOC of the "

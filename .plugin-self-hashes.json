@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-29T11:00:07+00:00",
+  "computed_at": "2026-05-29T11:09:00+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:ea6f6a13ec223604dcb2cf0cbd4987f1e415e1f8076d5b1bb3cba15d4af3ebb7",
@@ -196,7 +196,7 @@
     "scripts/cpv_upstream_plugin_json.py": "sha256:0405551a8f53d156ad81e2b77104554f4f55e014812b01464bb35561411fee73",
     "scripts/cpv_validate_benchmark.py": "sha256:f357db441c8408d0a3821beb7ba5d9ddedd516cd3a3ea71b79a2eda904c417da",
     "scripts/cpv_validate_gitmodules.py": "sha256:a6c9a3b5688d6fea97ef12af942cea846475cbe8c8e2fcd467562cbab8d45eb7",
-    "scripts/cpv_validation_common.py": "sha256:1d1cad2066bdaa605ceb63156f92942339cdc1e83c71c84e10065e8604bd9c91",
+    "scripts/cpv_validation_common.py": "sha256:58230e268ee7bf5b982d1c23c45f9f3f31c6ee029cf4260990722572e5de743b",
     "scripts/data/o200k_base.tiktoken.gz": "sha256:f8dd2003cbdc57252f4a0fed49fe79448b005a025512a5c5793b43b7f744bcda",
     "scripts/detect_language.py": "sha256:257731e571b9ffc9fff3813fde0e865a0e23024d6de45193b40b4dbf3f30d1a3",
     "scripts/detect_lockfiles.py": "sha256:17c03bd5d381395f6348a7a2b8c2d4df99422cabdd600b98fe7be0b01ebb6971",
@@ -248,7 +248,7 @@
     "scripts/validate_security.py": "sha256:52d9e8b87f4dae9de68b439aef07545ace8cbeafd5f3d33adcb8366ee73687d1",
     "scripts/validate_settings_marketplace.py": "sha256:23ecc028cd68af0259e70fbf14e8a075425f3068af04adf1222cfdc70e8053d7",
     "scripts/validate_skill.py": "sha256:7a3c7cfa652b34a51c99fdf11633c9b6615d0a1f0c7eab88cc8281307f7aeab9",
-    "scripts/validate_skill_comprehensive.py": "sha256:e793f1004e6769d93fda65107fb9d87c1121519fbf4ac1749e361e44bb33e6ea",
+    "scripts/validate_skill_comprehensive.py": "sha256:4e86a6f781bdef2a6fa6b38e63a32e611a31970efb7bc9a7c35da0c60fa3ff59",
     "scripts/validate_telemetry.py": "sha256:0a609efce16b7cd0be5da3884a8e0efb8ec74d678777c3690b9921e0eb8fa87c",
     "scripts/validate_xref.py": "sha256:1ff2e437ccbcf3a91168766964cf874b3184e03fd0aadf59818de9e52dababd3",
     "skills/add-component-to-plugin/SKILL.md": "sha256:81fe1fdf8c3b8799c13abb7d1302b8549623439d66ffbc7b0b752a1176c140b9",
@@ -664,6 +664,7 @@
     "tests/test_issue_43_no_5000_char_minor.py": "sha256:adb6a3d19c7936e0e3692ec0e59f5632f33726cbc152b9e03587733cd4725797",
     "tests/test_issue_44_skills_path_segment.py": "sha256:794c0fdcf5df3fb5ca50f859ad0ffc49a6ea362a32aebbb7a55aa9ba77f5eca0",
     "tests/test_issue_45_subprocess_kwargs_splat.py": "sha256:e6255a6d84500fe70d9133bb93509f1363bd674cbf3086209c415614db5d0d6c",
+    "tests/test_issue_51_toc_size_tradeoff.py": "sha256:62f98def305984681c4c2853b4edd0c37f3db4815a03616fa1af0656b9f6a6aa",
     "tests/test_issue_57_skillaudit_gate.py": "sha256:59d8a026c4522bd59b686304df181d2145b8de14626eac29c96249060af0d15a",
     "tests/test_issue_58_fp_classes.py": "sha256:02c8bf35217d2efda7e5f5b5b808e121987701c13d1df0543b9718c638e3d987",
     "tests/test_issues_27_28_29.py": "sha256:0dbeb31cdf6c5cd856b5b98900320ed041ae602821e3f6a65b77b833c2b094d1",
