@@ -266,6 +266,16 @@ def _strip_noise(content: str) -> str:
     # Strip HTML comments
     content = re.sub(r"<!--.*?-->", _blank, content, flags=re.DOTALL)
 
+    # Blank lines containing Unicode box-drawing chars (U+2500-U+257F). These are
+    # ASCII-art example boxes — e.g. a rendered sample finding
+    # `| skills/foo/SKILL.md:7 |` drawn with box chars — NOT real intra-plugin
+    # references (issue #58). Markdown tables use the ASCII pipe `|` (U+007C),
+    # which is OUTSIDE this range, so real table rows are untouched; box-drawing
+    # chars are impossible in a kebab-case skill name, so no genuine reference is
+    # blanked. The only tradeoff — a real reference sharing a line with box art is
+    # skipped — is the safe direction (under-flag xref, never invent a broken-ref).
+    content = re.sub(r"(?m)^.*[─-╿].*$", _blank, content)
+
     return content
 
 
@@ -468,11 +478,7 @@ def _xref_extract_skill_refs_worker(path: Path) -> list[str]:
     # Apply the same two filters as the serial code:
     # 1. Plugin-structural directory names ("agents", "commands", etc.)
     # 2. Belt-and-suspenders against trailing-hyphen captures (issue #27)
-    return [
-        m
-        for m in matches
-        if m.lower() not in _SKILL_REF_PLUGIN_DIRS and not m.endswith("-")
-    ]
+    return [m for m in matches if m.lower() not in _SKILL_REF_PLUGIN_DIRS and not m.endswith("-")]
 
 
 def _get_plugin_name(plugin_root: Path) -> str | None:
@@ -885,9 +891,7 @@ def validate_subagent_type_matching(
     # serial path used to see, and we don't waste worker time on files
     # we'll discard. Sorting pins per-platform glob order so parallel
     # output stays deterministic.
-    md_files = sorted(
-        md for md in md_files if not any(should_skip_dir(p) for p in md.parents)
-    )
+    md_files = sorted(md for md in md_files if not any(should_skip_dir(p) for p in md.parents))
 
     # Task #384: per-file extraction in parallel, resolution serial.
     if _xref_parallel_enabled() and len(md_files) > 1:
@@ -1280,9 +1284,7 @@ def validate_skill_refs(
 
     # Filter hidden/cache dirs BEFORE parallel dispatch and sort for
     # deterministic order across platforms. (task #384)
-    file_paths = sorted(
-        fp for fp in file_paths if not any(should_skip_dir(p) for p in fp.parents)
-    )
+    file_paths = sorted(fp for fp in file_paths if not any(should_skip_dir(p) for p in fp.parents))
 
     # Task #384: per-file extraction parallel, serial join below. The
     # worker handles read + _strip_noise + regex + the _plugin_dirs and

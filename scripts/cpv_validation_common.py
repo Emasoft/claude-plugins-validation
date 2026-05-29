@@ -4898,8 +4898,8 @@ MAX_BODY_WORDS = 2000
 # These are HARD limits with NO per-plugin override — a validator must not be
 # configurable into passing a plugin the runtime will silently truncate.
 SKILL_BODY_TOKEN_LIMIT = 5000
-DESCRIPTION_TOKEN_LIMIT = 200        # skill + command ``description``
-WHEN_TO_USE_TOKEN_LIMIT = 100        # skill + command ``when_to_use``
+DESCRIPTION_TOKEN_LIMIT = 200  # skill + command ``description``
+WHEN_TO_USE_TOKEN_LIMIT = 100  # skill + command ``when_to_use``
 AGENT_DESCRIPTION_TOKEN_LIMIT = 300  # agent ``description`` (no separate when_to_use)
 
 # =============================================================================
@@ -5080,9 +5080,7 @@ class ValidationReport:
         scope-merge and rules-filter replays lossless for category/suggestion
         (audit scope-doc m9). Defaults match ``ValidationResult`` exactly.
         """
-        self.results.append(
-            ValidationResult(level, message, file, line, phase, fixable, fix_id, category, suggestion)
-        )
+        self.results.append(ValidationResult(level, message, file, line, phase, fixable, fix_id, category, suggestion))
 
     def passed(self, message: str, file: str | None = None) -> None:
         """Add a passed check."""
@@ -5437,8 +5435,7 @@ def check_token_limit(
     est = estimate_tokens(text)
     if est.tokens > max_tokens:
         report.major(
-            f"{field_label} is ~{est.tokens} tokens (limit {max_tokens}; "
-            f"{est.method} estimate). {advice}",
+            f"{field_label} is ~{est.tokens} tokens (limit {max_tokens}; {est.method} estimate). {advice}",
             file,
         )
         return True
@@ -6948,6 +6945,18 @@ def validate_toc_embedding(
             ref_path = md_file_path.parent / bt_path_str
             if not ref_path.is_file():
                 continue
+
+        # Issue #58 class 3c: a backtick ref that resolves to the file being
+        # scanned ITSELF is the author naming their own file generically in
+        # prose (e.g. "we scan every `SKILL.md` under skills/"), never a
+        # cross-file navigation reference — the TOC-embedding rule does not
+        # apply, so demanding a markdown link would be a false positive. A bare
+        # `SKILL.md` inside a skills/<name>/SKILL.md resolves to itself via the
+        # md_file_path.parent fallback above. Real cross-file refs (a sibling
+        # `notes.md`, a `references/foo.md`) resolve to a DIFFERENT file and
+        # still fire — this guard is narrow, only self-references are skipped.
+        if ref_path.resolve() == md_file_path.resolve():
+            continue
 
         # Only validate .md files (already enforced by regex, but be safe)
         if ref_path.suffix.lower() != ".md":
