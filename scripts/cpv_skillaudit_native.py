@@ -311,6 +311,11 @@ def _hybrid_matcher() -> Any:
         return None
     if _HYBRID_MATCHER is not None:
         return _HYBRID_MATCHER
+    if _HybridMatcherCls is None:
+        # RE2 import failed (the `_RE2_AVAILABLE` guard above normally covers
+        # this, but pyright can't connect that bool to the class binding).
+        _HYBRID_MATCHER_INIT_FAILED = True
+        return None
     try:
         # Build the flattened {rule_id#idx: pattern_source} dict.
         # Skip non-string patterns and malformed entries — same

@@ -534,7 +534,7 @@ def _decoded_to_text(data: bytes) -> str | None:
 # ────────────────────────────────────────────────────────────────────────
 
 
-def _load_default_catalog() -> Any:
+def _load_default_catalog() -> list[tuple[dict[str, Any], list[re.Pattern[str]]]]:
     """Load the same skillaudit catalog the text scanner uses.
 
     Returns the compiled rules list (the data structure
