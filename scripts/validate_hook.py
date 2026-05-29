@@ -271,9 +271,9 @@ POSTTOOLUSE_HOOK_INPUT_FIELDS = GENERIC_HOOK_INPUT_FIELDS | {
 # Authoritative for hook scripts that parse ``JSON.parse(stdin)`` on
 # Stop / SubagentStop events.
 STOP_HOOK_INPUT_FIELDS = GENERIC_HOOK_INPUT_FIELDS | {
-    "stop_hook_active",   # historical — boolean, true while this Stop hook runs
-    "background_tasks",   # v2.1.145 — list of pending background-task descriptors
-    "session_crons",      # v2.1.145 — list of scheduled session-cron entries
+    "stop_hook_active",  # historical — boolean, true while this Stop hook runs
+    "background_tasks",  # v2.1.145 — list of pending background-task descriptors
+    "session_crons",  # v2.1.145 — list of scheduled session-cron entries
 }
 
 # Permission-update-entry type enum (hooks.md L1115-1141, PermissionRequest
@@ -1522,6 +1522,33 @@ def _is_raise_system_exit(node: ast.AST) -> bool:
     return False
 
 
+def _is_dunder_main_guard(node: ast.AST) -> bool:
+    """True for the canonical ``if __name__ == "__main__":`` entrypoint guard.
+
+    ONLY the exact equality form (either operand order) — NOT ``!=``, NOT a
+    membership test, NOT any other condition. Code under this guard runs ONLY
+    when the file is executed as a script, never on import, so a ``sys.exit``
+    there is the correct entrypoint idiom (``sys.exit(main())``), not an
+    import-time process kill (issue #58). The walker must NOT descend into it.
+    """
+    if not isinstance(node, ast.If):
+        return False
+    test = node.test
+    if not isinstance(test, ast.Compare) or len(test.ops) != 1 or len(test.comparators) != 1:
+        return False
+    if not isinstance(test.ops[0], ast.Eq):
+        return False
+
+    def _is_name_dunder(n: ast.AST) -> bool:
+        return isinstance(n, ast.Name) and n.id == "__name__"
+
+    def _is_str_main(n: ast.AST) -> bool:
+        return isinstance(n, ast.Constant) and n.value == "__main__"
+
+    left, right = test.left, test.comparators[0]
+    return (_is_name_dunder(left) and _is_str_main(right)) or (_is_str_main(left) and _is_name_dunder(right))
+
+
 def _walk_module_scope(node: ast.AST, hits: list[int]) -> None:
     """Walk a module-scope AST subtree, collecting `sys.exit`/`SystemExit`
     line numbers. Descends into import-time-reachable constructs (If, Try,
@@ -1537,6 +1564,8 @@ def _walk_module_scope(node: ast.AST, hits: list[int]) -> None:
     """
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
         return  # Stop: these bodies don't run at import time.
+    if _is_dunder_main_guard(node):
+        return  # Body runs ONLY as a script, never on import — safe entrypoint (#58).
     # Statement nodes (Expr, Raise, If, Try, For, While, With, ...) always have
     # a `lineno` attribute — ast.AST itself does not, hence the explicit check.
     if _is_sys_exit_call(node) and isinstance(node, ast.stmt):
@@ -3207,9 +3236,7 @@ def validate_matcher_block(
     # input order so per-hook findings appear after their corresponding
     # "Validating hook N of M..." INFO header — identical sequencing to
     # the pre-parallelization serial loop.
-    return _validate_hooks_in_matcher_block(
-        hooks, event_name, plugin_root, report, hooks_json_data
-    )
+    return _validate_hooks_in_matcher_block(hooks, event_name, plugin_root, report, hooks_json_data)
 
 
 def validate_event_hooks(

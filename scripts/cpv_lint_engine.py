@@ -258,6 +258,68 @@ def _relpath(repo_root: Path, p: str) -> str:
         return p
 
 
+def _canonical_python_typechecker(repo_root: Path) -> str:
+    """Decide which type-checker the project canonically uses — from config ONLY.
+
+    Deterministic and content-derived (never a plugin-declared allow-list, per
+    CPV's no-self-exemption doctrine): the choice is a structural fact about the
+    target's own config files, so a project that opted into pyright is not also
+    forced through mypy (which mis-infers types pyright gets right → FPs, #58).
+
+    Precedence (matches the tie-break the issue specifies):
+      1. pyrightconfig.json present                 -> "pyright" (strongest; wins
+         over every mypy signal — a dedicated file is an unambiguous opt-in).
+      2. else any mypy signal (mypy.ini / .mypy.ini / [tool.mypy] / setup.cfg
+         [mypy]) -> "mypy" (an explicit mypy config beats a bare [tool.pyright]).
+      3. else [tool.pyright] in pyproject.toml      -> "pyright".
+      4. else                                       -> "mypy" (status-quo default).
+
+    Unparseable config is treated as "no signal" (fail-safe to the default).
+    """
+    if (repo_root / "pyrightconfig.json").is_file():
+        return "pyright"
+
+    has_tool_pyright = False
+    has_tool_mypy = False
+    pyproject = repo_root / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            import tomllib as _toml
+        except ModuleNotFoundError:
+            try:
+                import tomli as _toml  # type: ignore[no-redef,import-not-found]
+            except ModuleNotFoundError:
+                _toml = None  # type: ignore[assignment]
+        if _toml is not None:
+            try:
+                with open(pyproject, "rb") as fp:
+                    data = _toml.load(fp)
+                tool = data.get("tool", {}) if isinstance(data, dict) else {}
+                if isinstance(tool, dict):
+                    has_tool_pyright = "pyright" in tool
+                    has_tool_mypy = "mypy" in tool
+            except (OSError, ValueError):
+                pass  # unparseable -> no signal
+
+    # A dedicated mypy config (or [tool.mypy]) beats a bare [tool.pyright];
+    # only pyrightconfig.json (handled above) overrides an explicit mypy opt-in.
+    if (repo_root / "mypy.ini").is_file() or (repo_root / ".mypy.ini").is_file():
+        return "mypy"
+    if has_tool_mypy:
+        return "mypy"
+    setup_cfg = repo_root / "setup.cfg"
+    if setup_cfg.is_file():
+        try:
+            if re.search(r"(?m)^\[mypy\]", setup_cfg.read_text(encoding="utf-8", errors="replace")):
+                return "mypy"
+        except OSError:
+            pass
+
+    if has_tool_pyright:
+        return "pyright"
+    return "mypy"
+
+
 def lint_python(
     repo_root: Path,
     files: list[Path],
@@ -265,7 +327,8 @@ def lint_python(
     *,
     strict_missing_tools: bool = True,
 ) -> bool:
-    """Lint Python files with ruff (errors) and mypy (warnings)."""
+    """Lint Python files with ruff (errors) and the project's canonical
+    type-checker — pyright OR mypy, never both (issue #58) — as warnings."""
     if not files:
         return True
 
@@ -341,6 +404,45 @@ def lint_python(
     mypy_targets = [str(f) for f in files if _is_own_script(f)]
     if not mypy_targets:
         return ok
+
+    # Run the project's CANONICAL type-checker, never both. Imposing mypy on a
+    # pyright-canonical project surfaces divergence FPs on code the project's
+    # own checker accepts (issue #58).
+    if _canonical_python_typechecker(repo_root) == "pyright":
+        pyright_cmd = _resolve("pyright")
+        if not pyright_cmd:
+            # pyright is auxiliary — never fail strict on its absence; only inform.
+            report.info("pyright not available locally or via npx/uvx; skipping Python type check")
+            return ok
+        try:
+            pr = subprocess.run(
+                pyright_cmd + ["--outputjson", *mypy_targets],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+        except subprocess.TimeoutExpired:
+            report.warning("pyright timed out after 180s — skipping type check")
+            return ok
+        try:
+            payload = json.loads(pr.stdout) if (pr.stdout or "").strip() else {}
+            diagnostics = payload.get("generalDiagnostics", []) if isinstance(payload, dict) else []
+        except (json.JSONDecodeError, ValueError):
+            diagnostics = []
+        errors = [d for d in diagnostics if isinstance(d, dict) and d.get("severity") == "error"]
+        if not errors:
+            report.passed(f"pyright passed for {len(mypy_targets)} script file(s)")
+        else:
+            for d in errors[:20]:
+                f_str = d.get("file", "") or ""
+                rng = d.get("range")
+                start = rng.get("start", {}) if isinstance(rng, dict) else {}
+                line_no = (start.get("line", 0) + 1) if isinstance(start, dict) else 0
+                msg = (d.get("message") or "").splitlines()[0] if d.get("message") else ""
+                rel = _relpath(repo_root, f_str) if f_str else "?"
+                report.minor(f"Pyright: {rel}:{line_no} {msg}")
+        return ok
+
     mypy_cmd = _resolve("mypy")
     if mypy_cmd:
         try:
@@ -1279,7 +1381,18 @@ _LANG_CONFIG_FILENAMES: dict[str, tuple[str, ...]] = {
         ".markdownlint-cli2.yaml",
         ".markdownlint-cli2.cjs",
     ),
-    "python": ("pyproject.toml", "ruff.toml", ".ruff.toml", "setup.cfg", "tox.ini"),
+    "python": (
+        "pyproject.toml",
+        "ruff.toml",
+        ".ruff.toml",
+        "setup.cfg",
+        "tox.ini",
+        # Type-checker config — folded in so switching/editing the canonical
+        # checker (pyright<->mypy) invalidates the lint cache (issue #58).
+        "pyrightconfig.json",
+        "mypy.ini",
+        ".mypy.ini",
+    ),
     "javascript": (
         ".eslintrc",
         ".eslintrc.js",
