@@ -238,11 +238,14 @@ class TestLayoutBNestedEntriesStrict:
             assert len(findings) >= 1, f"Expected MAJOR for unknown field on Layout B entry, got: {report.results}"
 
 
-class TestUnderscoreFieldsAcceptedWithoutWarning:
-    """Phase A.4 — fields starting with `_` are CPV-private (per-entry opt-out flags)."""
+class TestUnderscoreFieldsFlagged:
+    """SECURITY (TRDD-02e1672b): fields starting with `_` are NO LONGER
+    silently accepted — a marketplace entry cannot smuggle a `_`-prefixed
+    suppression flag (e.g. `_cpv_skip_upstream_check`) past the strict
+    allowlist."""
 
-    def test_underscore_field_no_unknown_finding(self):
-        """`_cpv_skip_upstream_check` and similar private flags must not emit findings."""
+    def test_underscore_field_emits_unknown_finding(self):
+        """`_cpv_skip_upstream_check` (and any `_`-prefixed field) now emits RC-MKPL-UNKNOWN-FIELD."""
         from validate_marketplace import validate_marketplace
 
         with tempfile.TemporaryDirectory() as td:
@@ -264,4 +267,7 @@ class TestUnderscoreFieldsAcceptedWithoutWarning:
 
             report = validate_marketplace(root)
             findings = [r for r in report.results if "RC-MKPL-UNKNOWN-FIELD" in r.message and "_cpv" in r.message]
-            assert not findings, f"Private `_cpv_*` field should not emit MKPL-UNKNOWN, got: {findings}"
+            assert findings, (
+                "`_`-prefixed fields must now emit RC-MKPL-UNKNOWN-FIELD — the "
+                "blanket silent-accept was removed (TRDD-02e1672b)."
+            )

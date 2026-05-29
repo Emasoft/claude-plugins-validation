@@ -61,7 +61,6 @@ from cpv_validation_common import (
     Level,
     check_token_limit,
     has_numbered_prose_steps,
-    is_orchestrator_skill,
     is_valid_model,
     is_valid_plugin_env_var,
     load_cpv_config,
@@ -2211,62 +2210,34 @@ def validate_resource_references(skill_path: Path, body: str, report: Validation
             continue
         checked_files.add(file_path)
 
-        # Check for parent directory traversal (../) which breaks portability.
-        # Issue #16 category A: when the traversal targets an orchestrator
-        # skill (≥3 sibling skills reference the same `../<name>/` prefix),
-        # downgrade to MINOR — this is the documented orchestrator+
-        # executor+shared-library pattern, not a portability bug.
-        # An explicit `cpv.allow_orchestrator_traversal` allow-list in
-        # plugin.json overrides the heuristic and skips the rule entirely
-        # for the listed prefixes.
+        # Parent-traversal (`../`) handling. SECURITY (TRDD-02e1672b): CPV
+        # decides this from a DETERMINISTIC structural fact — does the resolved
+        # reference ESCAPE the plugin root? — NEVER from a plugin-declared
+        # allow-list (a plugin must not be able to self-exempt). A `../` that
+        # stays inside the plugin is a benign within-plugin sibling reference
+        # (the target ships with the plugin and is itself scanned); a `../`
+        # that escapes the plugin root is a real portability/traversal hazard.
+        # The within-vs-escaping test is purely lexical (os.path.normpath), so
+        # it cannot be deceived by content the way a name/keyword heuristic can.
         if "../" in file_path:
-            target_skill_name = file_path.split("/")[1] if file_path.startswith("../") else None
             skills_root = skill_path.parent
-            plugin_root = skills_root.parent
-
-            cpv_cfg = load_cpv_config(plugin_root)
-            allow_traversal = cpv_cfg.get("allow_orchestrator_traversal", "")
-            if isinstance(allow_traversal, str):
-                allow_list = [allow_traversal] if allow_traversal else []
-            elif isinstance(allow_traversal, list):
-                allow_list = [a for a in allow_traversal if isinstance(a, str)]
-            else:
-                allow_list = []
-
-            target_subpath = f"skills/{target_skill_name}" if target_skill_name else ""
-            in_allow_list = any(
-                target_subpath == p.strip().rstrip("/") or target_subpath.startswith(p.strip().rstrip("/") + "/")
-                for p in allow_list
+            plugin_root_str = os.path.normpath(str(skills_root.parent))
+            resolved_str = os.path.normpath(os.path.join(str(skill_path), file_path))
+            escapes_plugin = not (
+                resolved_str == plugin_root_str or resolved_str.startswith(plugin_root_str + os.sep)
             )
-            is_orchestrator_target = bool(target_skill_name and is_orchestrator_skill(target_skill_name, skills_root))
-
-            if in_allow_list:
-                report.passed(
-                    f"Parent-traversal allowed by cpv.allow_orchestrator_traversal: {file_path}",
-                    "SKILL.md",
-                    category="Resource References",
-                )
-            elif is_orchestrator_target:
-                report.minor(
-                    f"Reference uses parent traversal '../': {file_path} — target "
-                    f"'{target_skill_name}' is an orchestrator-shared library "
-                    f"(referenced by ≥3 sibling skills). This is intentional "
-                    f"shared-rule reuse, not a portability bug. Add to "
-                    f"cpv.allow_orchestrator_traversal in plugin.json to silence.",
+            if escapes_plugin:
+                report.major(
+                    f"Reference uses parent traversal that ESCAPES the plugin root: "
+                    f"{file_path} — a skill must not reference paths outside the plugin.",
                     "SKILL.md",
                     category="Resource References",
                 )
             else:
-                report.major(
-                    f"Reference uses parent traversal '../': {file_path} - skill should be self-contained",
-                    "SKILL.md",
-                    category="Resource References",
-                )
-            # Still check if file exists for completeness
-            ref_path = skill_path / file_path
-            if ref_path.exists() and not (in_allow_list or is_orchestrator_target):
                 report.info(
-                    f"External file exists but skill not portable: {file_path}",
+                    f"Reference uses within-plugin parent traversal: {file_path} — "
+                    f"resolves inside the plugin (ships together); harmless, though "
+                    f"the skill is not standalone-portable if copied alone.",
                     "SKILL.md",
                     category="Resource References",
                 )

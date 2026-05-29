@@ -163,10 +163,13 @@ def _is_valid_semver_range(text: str) -> bool:
     return bool(_SEMVER_ATOM_RE.match(text))
 
 
-def _path_has_traversal(path: str) -> bool:
+def _path_has_traversal(path: object) -> bool:
     """Return True when ``path`` contains a `..` path segment.
 
-    Splits on both ``/`` and ``\\`` so Windows-style paths are caught too.
+    Accepts ``object`` (not just ``str``) because callers pass values parsed
+    from untrusted ``marketplace.json`` where the field is not guaranteed to
+    be a string. Non-str inputs are treated as "no traversal". Splits on both
+    ``/`` and ``\\`` so Windows-style paths are caught too.
     """
     if not isinstance(path, str):
         return False
@@ -331,23 +334,16 @@ def validate_dependencies(
                 # the latest available version, so an upstream release can
                 # change the dependency under your plugin without warning."
                 # An unversioned bare-string dep is therefore a soft-WARNING
-                # signal — install can break on the next upstream tag. Authors
-                # who explicitly want auto-tracking can suppress with
-                # `cpv: { allow_unversioned_dependencies: true }` in plugin.json.
-                cpv_block = manifest.get("cpv") if isinstance(manifest, dict) else None
-                allow_unversioned = isinstance(cpv_block, dict) and bool(
-                    cpv_block.get("allow_unversioned_dependencies")
+                # signal — install can break on the next upstream tag. Always
+                # flagged: a plugin cannot self-exempt via config
+                # (TRDD-02e1672b removed `cpv.allow_unversioned_dependencies`).
+                report.warning(
+                    f"'dependencies[{i}]' = '{entry}' has no version constraint "
+                    f"— it auto-tracks the latest tag and the next upstream release "
+                    f"can break this plugin without warning. Pin a semver range: "
+                    f"{{'name': '{entry}', 'version': '~1.2.0'}} (plugin-dependencies.md:9-11).",
+                    ".claude-plugin/plugin.json",
                 )
-                if not allow_unversioned:
-                    report.warning(
-                        f"'dependencies[{i}]' = '{entry}' has no version constraint "
-                        f"— it auto-tracks the latest tag and the next upstream release "
-                        f"can break this plugin without warning. Pin a semver range: "
-                        f"{{'name': '{entry}', 'version': '~1.2.0'}} (plugin-dependencies.md:9-11). "
-                        f"Suppress with `cpv.allow_unversioned_dependencies: true` if "
-                        f"intentional.",
-                        ".claude-plugin/plugin.json",
-                    )
             continue
         if not isinstance(entry, dict):
             report.major(
@@ -1267,6 +1263,7 @@ def validate_manifest(
         "userConfig",  # User-configurable values prompted at enable time (v2.1.80)
         "channels",  # Channel declarations for message injection (v2.1.85)
         "dependencies",  # v2.1.110+ — plugin dependency declarations with semver ranges (see plugin-dependencies.md)
+        "defaultEnabled",  # v2.1.154 — when false, plugin ships disabled; enable via /plugin or `claude plugin enable`
         # CPV-managed config block (TRDD-793ac32a strip-dev-parts). The
         # generator emits a `cpv.strip` block on every fresh scaffold, and
         # `cpv strip-dev-parts` reads it later. Allowlisted so CPV's own
@@ -1284,6 +1281,26 @@ def validate_manifest(
                 f"Unknown manifest field '{key}' — not part of the Claude Code plugin spec. If used by plugin scripts, consider documenting it.",
                 ".claude-plugin/plugin.json",
             )
+
+    # SECURITY (TRDD-02e1672b): the cpv.* finding-suppression opt-outs were
+    # removed — a plugin must NOT be able to silence CPV findings from its own
+    # config (a malicious author could self-exempt malicious content). Emit a
+    # one-release deprecation WARNING for any still present; CPV ignores them.
+    cpv_optout_block = manifest.get("cpv")
+    if isinstance(cpv_optout_block, dict):
+        for removed_key in (
+            "allow_root_dirs",
+            "allow_orchestrator_traversal",
+            "allow_unversioned_dependencies",
+            "allow_pipeline_drift",
+        ):
+            if removed_key in cpv_optout_block:
+                report.warning(
+                    f"[RC-DEPRECATED-OPTOUT] `cpv.{removed_key}` in plugin.json is "
+                    f"no longer honored — CPV determines findings itself; a plugin "
+                    f"cannot self-exempt (TRDD-02e1672b). Remove this key.",
+                    ".claude-plugin/plugin.json",
+                )
 
     # v2.1.129 — Recommend the `experimental: { themes, monitors }` wrapper.
     # Top-level `themes` and `monitors` are still honoured but `claude plugin
@@ -1370,6 +1387,18 @@ def validate_manifest(
             report.major("'keywords' must contain only strings", ".claude-plugin/plugin.json")
         else:
             report.passed(f"Keywords: {len(kw)} keyword(s)", ".claude-plugin/plugin.json")
+
+    # v2.1.154 — defaultEnabled: false ships the plugin disabled (enable via
+    # /plugin or `claude plugin enable`). Must be a boolean.
+    if "defaultEnabled" in manifest:
+        de = manifest["defaultEnabled"]
+        if not isinstance(de, bool):
+            report.major(
+                f"'defaultEnabled' must be a boolean, got {type(de).__name__}",
+                ".claude-plugin/plugin.json",
+            )
+        else:
+            report.passed(f"defaultEnabled: {de}", ".claude-plugin/plugin.json")
 
     # Validate homepage and license field types
     for string_field in ("homepage", "license"):
@@ -1856,6 +1885,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "output-styles",
         "design",  # TRDD design docs (design/tasks/)
         "reports",  # v2.24.0 — mandated report output folder (gitignored; see cpv_validation_common.resolve_reports_dir())
+        "reviews",  # code-review output folder (recognised built-in; TRDD-02e1672b)
         # Common dirs across many plugins (added v2.23.2 after empirical scan
         # of 160 installed plugins surfaced these as repeat false positives):
         "prompts",  # prompt templates (used by codex and most AI plugins)
@@ -1908,14 +1938,16 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         except (json.JSONDecodeError, OSError):
             pass
 
-    # Hoisted out of the per-directory loop below (was re-read once per
-    # candidate directory): the cpv.allow_root_dirs allow-list and the parsed
-    # .gitignore patterns are plugin-wide, so reading/parsing them once is
-    # O(1) instead of O(number-of-top-level-dirs). The gitignore helpers are
-    # imported once here rather than inside the loop body.
-    cpv_cfg = load_cpv_config(plugin_root)
-    allow_roots = cpv_cfg.get("allow_root_dirs", [])
-    allow_roots_set = {d for d in allow_roots if isinstance(d, str)} if isinstance(allow_roots, list) else set()
+    # SECURITY (TRDD-02e1672b): CPV no longer honors a plugin-declared
+    # `cpv.allow_root_dirs` allow-list — a plugin must not be able to exempt
+    # its own directories from CPV's checks. Legitimate non-standard
+    # directories are recognised by the built-in `known_dirs` set above (CPV's
+    # own logic), by manifest references, by .gitignore, or by the
+    # vendoring/submodule heuristics. The removed-key deprecation WARNING is
+    # emitted once in validate_manifest (consolidated for all cpv.* opt-outs).
+    # The .gitignore patterns are plugin-wide, so parse them once here (O(1)
+    # instead of once per candidate directory). The gitignore helpers are
+    # imported once rather than inside the loop body.
     gitignore_patterns: list[Any] | None = None
     try:
         from cpv_validation_common import (
@@ -1951,12 +1983,8 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
             continue
         # Issue #16 category H: skip vendoring-conventional roots
         # (external/, vendor/, third_party/, node_modules/, etc.) AND any
-        # directory listed as a submodule in .gitmodules. Also honor
-        # `cpv.allow_root_dirs` allow-list in plugin.json for explicit
-        # opt-out of edge-case directory names.
+        # directory listed as a submodule in .gitmodules.
         if is_vendored_path(Path(dirname), plugin_root):
-            continue
-        if dirname in allow_roots_set:
             continue
         # Issue #37 — directories the plugin explicitly excludes from
         # distribution via .gitignore are not part of "what the plugin
@@ -1981,12 +2009,12 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         # standard component directories.
         report.major(
             f"[RC-NONSTD-DIR-001] Non-standard directory '{dirname}/' — not part "
-            "of the plugin spec, and not declared in plugin.json's "
-            "`cpv.allow_root_dirs`. Either move the contents under a standard "
-            "component dir (skills/agents/commands/hooks/scripts/...) OR add "
-            f"'{dirname}' to `cpv.allow_root_dirs` in .claude-plugin/plugin.json. "
-            "Undeclared non-standard root dirs are the #1 cause of empty plugin "
-            "installs because the install pipeline only loads from the standard "
+            "of the plugin spec and not recognised by CPV. Move its contents "
+            "under a standard component dir (skills/agents/commands/hooks/"
+            "scripts/...), gitignore it if it is dev-only and not shipped, or "
+            "reference it from the manifest if a component genuinely uses it. "
+            "Non-standard root dirs are the #1 cause of empty plugin installs "
+            "because the install pipeline only loads from the standard "
             "directories."
         )
 
@@ -4678,19 +4706,12 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
     except Exception:  # noqa: BLE001 — _params_from_manifest is an external helper; any failure here just disables the optional drift check, never the run
         return
 
-    # Issue #28 (v2.97.0): implement the `cpv.allow_pipeline_drift`
-    # suppression key that has been documented in WARNING text since
-    # v2.86.0 but never actually consumed. The key is a list of
-    # plugin-root-relative paths; any RC-PIPELINE-DRIFT-001 finding
-    # whose file path matches an entry is silently suppressed
-    # (intentional drift, opt-in per plugin).
-    cpv_settings = manifest_data.get("cpv", {})
-    if not isinstance(cpv_settings, dict):
-        cpv_settings = {}
-    allow_list_raw = cpv_settings.get("allow_pipeline_drift", [])
-    if not isinstance(allow_list_raw, list):
-        allow_list_raw = []
-    allow_pipeline_drift = {str(p).strip() for p in allow_list_raw if str(p).strip()}
+    # SECURITY (TRDD-02e1672b): the `cpv.allow_pipeline_drift` suppression key
+    # has been REMOVED — a plugin must not be able to silence CPV's
+    # pipeline-drift findings from its own config (a malicious author could
+    # list every drifted file and self-approve). Drift is ALWAYS reported
+    # (WARNING, non-blocking); intentional drift is the maintainer's call to
+    # live with the advisory, not to suppress it.
 
     # Per-file emission with embedded unified diff.
     #
@@ -4702,11 +4723,6 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
     # which targets a NARROWER subset (broken paths/globs in workflow run:
     # bodies), not whole-file template drift.
     for rel_path, gen_func_name in _CANONICAL_PIPELINE_FILES:
-        # Issue #28: honour the cpv.allow_pipeline_drift opt-out before
-        # doing any work (skip the generator invocation + diff cost
-        # entirely for allow-listed files).
-        if rel_path in allow_pipeline_drift:
-            continue
         target = plugin_root / rel_path
         if not target.is_file():
             continue
@@ -4792,12 +4808,8 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
                 "etc.). Review the unified diff and decide whether the "
                 "remaining deltas are intentional. If your version is "
                 "STRICTLY above canon, consider opening an upstream PR to "
-                "narrow this gap; if you want CPV to ignore it for this "
-                "plugin, add the file path (plugin-root-relative, e.g. "
-                f"`{rel_path!r}`) to the "
-                "`cpv.allow_pipeline_drift` list in plugin.json — the key "
-                "is implemented as of v2.97.0 and silently suppresses this "
-                "WARNING for the listed paths."
+                "narrow this gap. This WARNING is advisory and non-blocking; "
+                "it cannot be suppressed via plugin config (TRDD-02e1672b)."
             )
         else:
             recommendation = (
@@ -5454,10 +5466,10 @@ def _classify_path(path: Path) -> str:
     if (path / "SKILL.md").is_file() and not (path / ".claude-plugin" / "plugin.json").is_file():
         # Distinguish a skill nested INSIDE a plugin's skills/<name>/ from a truly
         # standalone skill by checking ancestors within 3 levels for plugin.json.
-        ancestor: Path | None = path.parent
+        # Path.parent is always a Path (never None), so the loop terminates on
+        # the filesystem-root self-parent check below, not on a None guard.
+        ancestor: Path = path.parent
         for _ in range(3):
-            if ancestor is None:
-                break
             if (ancestor / ".claude-plugin" / "plugin.json").is_file():
                 return "skill_inside_plugin"
             if ancestor.parent == ancestor:

@@ -35,18 +35,5 @@
     "scaffolding",
     "templates",
     "standardization"
-  ],
-  "cpv": {
-    "allow_root_dirs": [
-      "reviews",
-      "design",
-      "templates",
-      "git-hooks"
-    ],
-    "allow_orchestrator_traversal": [
-      "skills/cpv-batch-validate",
-      "skills/cpv-batch-scope-diagnose",
-      "skills/canonical-pipeline"
-    ]
-  }
+  ]
 }

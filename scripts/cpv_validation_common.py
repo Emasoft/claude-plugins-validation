@@ -328,6 +328,7 @@ VALID_HOOK_EVENTS = {
     "FileChanged",  # v2.1.83 — fires when watched files change
     "TaskCreated",  # v2.1.84 — fires when a task is created via TaskCreate tool
     "PermissionDenied",  # v2.1.89 — fires when auto mode classifier denies a tool call
+    "MessageDisplay",  # v2.1.152 — transform/hide assistant message text as displayed (hookSpecificOutput.displayContent)
 }
 
 # =============================================================================
@@ -602,6 +603,7 @@ VALID_TOOLS = {
     "LSP",
     "Agent",
     "Monitor",  # v2.1.98 — run command in background, feed each output line to Claude (same permissions as Bash)
+    "Workflow",  # v2.1.154 — dynamic workflows: orchestrate work across many background agents (see /workflows)
     "PowerShell",  # v2.1.84 — Windows opt-in preview (CLAUDE_CODE_USE_POWERSHELL_TOOL=1)
     "ListMcpResourcesTool",  # Lists MCP server resources
     "ReadMcpResourceTool",  # Reads a specific MCP resource by URI
@@ -1158,6 +1160,7 @@ SKILL_FRONTMATTER_FIELDS = {
     "disable-model-invocation",
     "user-invocable",
     "allowed-tools",
+    "disallowed-tools",  # v2.1.152 — remove specific tools from the model while the skill is active
     "model",
     "context",
     "agent",
@@ -3004,13 +3007,17 @@ def detect_mcp_unbounded_retry(content: str) -> list[tuple[int, str]]:
         m = _RC55_HUGE_RANGE_RE.search(line)
         if m:
             count = int(m.group(1))
+            # The regex requires 5+ digits, so count is always >= 10000; the
+            # guard is kept for clarity. `i = block_end` lives INSIDE it so
+            # block_end can never be referenced unbound (a sub-10000 count
+            # would otherwise fall through with block_end never assigned).
             if count >= 10000:
                 block_end = min(i + 30, n)
                 block = "\n".join(lines[i:block_end])
                 if _RC55_NETWORK_OR_EXEC_RE.search(block):
                     findings.append((i + 1, f"for-range({count}) loop containing network/exec call"))
-            i = block_end
-            continue
+                i = block_end
+                continue
         i += 1
     return findings
 
@@ -6107,7 +6114,7 @@ def print_results_aggregated(
             f"({total} across {len(per_rule)} rule"
             f"{'s' if len(per_rule) != 1 else ''}){annotation}{COLORS['RESET']}"
         )
-        for (rule_id, stem), occurrences in per_rule.items():
+        for (rule_id, _stem), occurrences in per_rule.items():
             count = len(occurrences)
             anchor = occurrences[0]
             # Show the EXPLANATION (full message of the first

@@ -1622,79 +1622,42 @@ def cpv_self_scan_skip_line(
 
 
 def cpv_self_scan_skip(file_path: str) -> bool:
-    """Return True if `file_path` should be skipped during a CPV-self-scan.
+    """Return True iff `file_path` is a SHA-verified genuine shipped CPV file.
 
-    Three-stage check:
+    SECURITY (TRDD-b8c6d04f): during a CPV self-scan a file is skipped ONLY
+    when its SHA256 matches the EXHAUSTIVE trusted manifest (every shipped /
+    git-tracked file is hashed). There is NO unconditional dev-scratch skip
+    and NO name-based eligibility shortcut — every skip requires a hash
+    match. Consequences:
 
-    1. **Dev-scratch shortcut** — if the file lives in a gitignored
-       dev-scratch directory (docs_dev/, design/tasks/, scripts_dev/,
-       …), skip unconditionally. These dirs aren't in the hash manifest
-       (_plugin_compute_hashes.py skips them), they're not shipped,
-       and they exist purely to document patterns by example.
-    2. **Name-based eligibility** — does the path match a CPV-internal
-       file pattern (validator script, fix-validation reference, security
-       test, semantic-validation reference)? If not, no skip.
-    3. **Hash verification** — compute the file's actual SHA256 and look
-       it up in `.plugin-self-hashes.json` (or legacy
-       `.cpv-self-hashes.json` for one release). Only skip if the hash
-       matches the canonical value. Hash mismatch (file modified) or
-       missing entry → don't skip; the file is scanned normally.
-
-    Stages 2+3 defend against name-spoofing: a malicious plugin that
-    names a file `cpv_taint_engine.py` cannot evade the security scan by
-    relying on the name match — the hash check fails and the file is
-    scanned. Stage 1's "land a file in docs_dev/ requires write access to
-    the validator's own tree" argument only holds when the self-scan
-    target IS the running validator. `_CPV_SELF_SCAN_ACTIVE` can be flipped
-    on a tree the attacker controls (a plugin that names itself
-    `claude-plugins-validation` OR ships the two CPV signature files), and
-    that tree's `docs_dev/` IS attacker-controlled. So Tier-0 is gated on
-    `_CPV_IS_RUNNING_CPV` (target root == running validator root); a
-    spoofed-but-not-running CPV tree gets its dev-scratch SCANNED, falling
-    through to the hash-gated stages 2+3. (audit w3)
+    * A tampered or inoculated file → SHA mismatch → NOT skipped → scanned.
+    * A file absent from the manifest (untracked, not-yet-committed, or
+      gitignored) → NOT skipped → scanned. Gitignored files aren't shipped
+      and are excluded from scanning upstream by gitignore-filtering.
+    * Spoofing is defeated upstream by `_set_cpv_self_scan`: it trusts the
+      local manifest ONLY for the running (GitHub-verified) CPV, and
+      otherwise fetches the canonical manifest from GitHub (refusing to skip
+      anything if it cannot). So a single unhashed file can never hide
+      malicious content behind the self-scan exemption — "even one file
+      skipped is enough to poison the plugin" no longer holds.
     """
     if not _CPV_SELF_SCAN_ACTIVE:
         return False
-
-    # Tier 0 — dev-scratch directories: skip unconditionally, but ONLY
-    # when the target is the running validator instance (see docstring).
-    if _CPV_IS_RUNNING_CPV and _is_dev_scratch_path(file_path):
-        return True
-
-    if not _is_self_scan_eligible(file_path):
-        return False
-
-    # Hash verification — must match the canonical entry to skip.
     if _CPV_SELF_PLUGIN_ROOT is None:
         return False
 
-    # Normalize to plugin-root-relative path. Some scanners pass
-    # absolute paths (e.g., cc-audit external invocation); convert
-    # back to rel-path so the manifest lookup matches.
+    # Normalize to plugin-root-relative path. Some scanners pass absolute
+    # paths (e.g., cc-audit external invocation); convert back to rel-path
+    # so the manifest lookup matches.
     file_normalized = _normalize_to_relpath(file_path, _CPV_SELF_PLUGIN_ROOT)
     if file_normalized is None:
         return False  # File outside plugin_root — never a self-match.
 
     expected = _CPV_SELF_HASH_MANIFEST.get(file_normalized)
     if expected is None:
-        # File matches the pattern but has no manifest entry — possibly
-        # a new/renamed file the manifest wasn't regenerated for. Don't
-        # skip; report once per file so reviewers refresh the manifest.
-        if _CPV_SELF_HASH_NOTICE_REPORT is not None and file_normalized not in _CPV_SELF_HASH_REPORTED_MISSING:
-            _CPV_SELF_HASH_REPORTED_MISSING.add(file_normalized)
-            # Manifest-coverage gap is operational telemetry, not a security
-            # finding — the file gets scanned normally regardless. Demoted
-            # from MINOR to INFO in v2.41.0 because external plugins kept
-            # accumulating noise from CPV's own files when run from a
-            # different working directory.
-            _CPV_SELF_HASH_NOTICE_REPORT.info(
-                f"[RC-161] CPV self-scan: file `{file_normalized}` matches a "
-                f"self-scan pattern but is not in the hash manifest; scanning "
-                f"normally. Fix: regenerate the manifest with "
-                f"`uv run python scripts/_plugin_compute_hashes.py` (the "
-                f"manifest must be refreshed after any change to the "
-                f"validator source set)."
-            )
+        # Not in the exhaustive manifest → not a SHA-verified shipped file →
+        # scan it. Every skip requires a hash match (TRDD-b8c6d04f), so a
+        # file the manifest doesn't cover is never exempt.
         return False
 
     actual = _sha256_file(_CPV_SELF_PLUGIN_ROOT / file_normalized)

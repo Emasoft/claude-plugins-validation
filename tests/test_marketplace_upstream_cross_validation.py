@@ -288,10 +288,13 @@ class TestSkipEnvVarBypassesCheck:
 
 
 class TestPerEntryOptOut:
-    """Phase B.7 — `_cpv_skip_upstream_check: true` on the entry skips it."""
+    """SECURITY (TRDD-02e1672b): the per-entry `_cpv_skip_upstream_check`
+    opt-out was REMOVED — an entry cannot skip Phase B cross-validation, and
+    the `_`-prefixed field is no longer silently accepted."""
 
-    def test_per_entry_opt_out_via_underscore_field(self):
-        """Per-entry opt-out blocks Phase B for that entry but not Phase A."""
+    def test_underscore_optout_no_longer_skips_cross_check(self):
+        """`_cpv_skip_upstream_check: true` does NOT skip Phase B, and the field
+        itself now emits RC-MKPL-UNKNOWN-FIELD."""
         from validate_marketplace import validate_marketplace
 
         with tempfile.TemporaryDirectory() as td:
@@ -312,15 +315,20 @@ class TestPerEntryOptOut:
                 for r in report.results
                 if "RC-MKPL-NAME-MISMATCH" in r.message or "RC-MKPL-VERSION-DRIFT" in r.message
             ]
-            assert not phase_b_findings, f"Per-entry opt-out failed; got: {[r.message for r in phase_b_findings]}"
+            assert phase_b_findings, (
+                "Phase B cross-validation MUST run — the per-entry opt-out was removed (TRDD-02e1672b)."
+            )
 
-            # The underscore field itself must NOT trigger UNKNOWN-FIELD.
+            # The underscore field is no longer silently accepted.
             unknown = [
                 r
                 for r in report.results
                 if "RC-MKPL-UNKNOWN-FIELD" in r.message and "_cpv_skip_upstream_check" in r.message
             ]
-            assert not unknown
+            assert unknown, (
+                "`_cpv_skip_upstream_check` must now trip RC-MKPL-UNKNOWN-FIELD "
+                "(no blanket `_`-prefix accept; TRDD-02e1672b)."
+            )
 
 
 class TestPerMarketplaceSentinel:

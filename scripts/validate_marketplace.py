@@ -150,6 +150,7 @@ OPTIONAL_PLUGIN_FIELDS = {
     "category",
     "dependencies",
     "enabled",
+    "defaultEnabled",  # v2.1.154 — plugin ships disabled; enable via /plugin or `claude plugin enable`
     "strict",
     "homepage",
     "commands",
@@ -205,9 +206,9 @@ SOURCE_REQUIRED_FIELDS = {
 #
 # The set mirrors OPTIONAL_PLUGIN_FIELDS plus REQUIRED_PLUGIN_FIELDS plus a
 # small extension list. The CPV extensions (`alwaysLoad`, `headersHelper`)
-# are documented in references/marketplace-error-index.md. Per-entry CPV
-# opt-out flags use a leading underscore (`_cpv_skip_upstream_check`) and
-# are accepted without warning — see `_validate_known_entry_fields` below.
+# are documented in references/marketplace-error-index.md. SECURITY
+# (TRDD-02e1672b): there is NO `_`-prefixed silent-accept — a marketplace
+# entry cannot smuggle a finding-suppression flag past this allowlist.
 # ─────────────────────────────────────────────────────────────────────────────
 _KNOWN_MARKETPLACE_ENTRY_FIELDS: frozenset[str] = frozenset(REQUIRED_PLUGIN_FIELDS | OPTIONAL_PLUGIN_FIELDS)
 
@@ -221,10 +222,11 @@ _KNOWN_MARKETPLACE_ENTRY_FIELDS: frozenset[str] = frozenset(REQUIRED_PLUGIN_FIEL
 # `git-subdir`; `path` is accepted as a one-release-compat alias because
 # pre-v2.81 docs used both names interchangeably.
 _KNOWN_SOURCE_FIELDS_BY_TYPE: dict[str, frozenset[str]] = {
-    "github": frozenset({"source", "repo", "ref"}),
+    # `skipLfs` (v2.1.153) skips Git LFS downloads during clone/update — github + git sources only.
+    "github": frozenset({"source", "repo", "ref", "skipLfs"}),
     "url": frozenset({"source", "url"}),
     "npm": frozenset({"source", "package", "version"}),
-    "git": frozenset({"source", "url", "ref", "subdir"}),
+    "git": frozenset({"source", "url", "ref", "subdir", "skipLfs"}),
     "git-subdir": frozenset({"source", "url", "subdir", "ref", "path"}),
     "directory": frozenset({"source", "path"}),
     # "relative-path" is the bare string form ("./path") — never reached via
@@ -240,18 +242,19 @@ def _validate_known_entry_fields(
 ) -> list[ValidationResult]:
     """Phase A — strict allowlist for marketplace entry top-level fields.
 
-    Emits MAJOR per unknown field with code RC-MKPL-UNKNOWN-FIELD. Fields
-    starting with `_` (e.g. `_cpv_skip_upstream_check`) are CPV-private
-    opt-out flags and pass through without warning.
+    Emits MAJOR per unknown field with code RC-MKPL-UNKNOWN-FIELD. There is
+    NO `_`-prefixed silent-accept (TRDD-02e1672b) — every unknown field,
+    underscore-prefixed or not, is flagged, so a marketplace entry cannot
+    self-exempt by smuggling a `_`-prefixed suppression flag.
     """
     results: list[ValidationResult] = []
     for field_name in sorted(plugin.keys()):
         if field_name in _KNOWN_MARKETPLACE_ENTRY_FIELDS:
             continue
-        if field_name.startswith("_"):
-            # CPV-private opt-out flag — accepted silently. The leading
-            # underscore signals "non-spec, intentional".
-            continue
+        # SECURITY (TRDD-02e1672b): NO blanket `_`-prefixed silent-accept. A
+        # marketplace entry cannot smuggle a finding-suppression flag (e.g.
+        # `_cpv_skip_upstream_check`) past the strict allowlist — every
+        # unknown field, underscore-prefixed or not, is flagged.
         results.append(
             ValidationResult(
                 level="MAJOR",
@@ -299,8 +302,8 @@ def _validate_known_source_subfields(
     for field_name in sorted(src.keys()):
         if field_name in allowed:
             continue
-        if field_name.startswith("_"):
-            continue
+        # SECURITY (TRDD-02e1672b): no `_`-prefixed silent-accept here either
+        # (see _validate_known_entry_fields).
         results.append(
             ValidationResult(
                 level="MAJOR",
@@ -1921,9 +1924,11 @@ def _cross_validate_upstream_for_entries(
                     ),
                     file=json_path,
                     suggestion=(
-                        "If this entry is intentionally unreachable, "
-                        'add `"_cpv_skip_upstream_check": true` to '
-                        "silence the warning."
+                        "Ensure network access to the upstream source, or "
+                        "host the plugin where its plugin.json is reachable. "
+                        "There is no per-entry opt-out — a marketplace entry "
+                        "cannot self-exempt from cross-validation "
+                        "(TRDD-02e1672b)."
                     ),
                 )
             )
@@ -2562,7 +2567,7 @@ def validate_marketplace_private_info(
         """
         gi = GitignoreFilter(root_dir)
         files_scanned = 0
-        for dirpath, dirnames, filenames in gi.walk(root_dir):
+        for dirpath, _dirnames, filenames in gi.walk(root_dir):
             for filename in filenames:
                 filepath = Path(dirpath) / filename
                 if filepath.suffix.lower() not in SCANNABLE_EXTENSIONS:

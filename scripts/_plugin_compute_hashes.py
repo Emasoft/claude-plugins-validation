@@ -160,77 +160,93 @@ def _git_tracked_files(plugin_root: Path) -> set[str] | None:
 
 
 def compute_manifest(plugin_root: Path) -> dict[str, object]:
-    """Walk plugin_root, hash every self-scan-eligible file, return manifest dict.
+    """Hash EVERY shipped (git-tracked) file under plugin_root.
 
-    Honours `git ls-files` so untracked / gitignored files (`.DS_Store`,
-    macOS metadata, IDE state) never enter the manifest. The published
-    manifest must only describe files that exist in the public repo, or
-    a clean clone (CI's fresh checkout, or any user pulling the plugin)
-    will fail integrity verification on the missing-locally delta.
+    SECURITY (TRDD-b8c6d04f): the manifest is EXHAUSTIVE over the shipped
+    fileset. One unhashed shipped file is a poisoning vector, so every
+    git-tracked file is hashed — minus the two manifest files themselves,
+    which cannot contain their own hash (chicken-and-egg; their integrity
+    comes from the GitHub-anchored manifest comparison, not a self-hash).
+    Gitignored files are not part of the plugin and are excluded.
+
+    `verify_self_integrity` rejects any tracked file added / modified /
+    deleted relative to this manifest, and `cpv_self_scan_skip` skips a file
+    ONLY when its SHA256 matches an entry here.
+
+    `git ls-files` is the source of truth for "what ships". Falls back to a
+    directory walk (minus build/cache/dev-scratch dirs) only when the target
+    is not a git repo.
     """
     files: dict[str, str] = {}
-
-    # Skip these dirs entirely — never useful to hash venvs, build artifacts,
-    # cache, git internals.
-    skip_dirs = {
-        ".git",
-        ".venv",
-        "venv",
-        "__pycache__",
-        "node_modules",
-        "dist",
-        "build",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        "reports",
-        "reports_dev",
-        "downloads_dev",
-        "libs_dev",
-        "builds_dev",
-        "samples_dev",
-        "scripts_dev",
-        "tests_dev",
-        "examples_dev",
-        "docs_dev",
-    }
-
     tracked = _git_tracked_files(plugin_root)
 
-    for path in plugin_root.rglob("*"):
-        if not path.is_file():
-            continue
-        # Filter out anything inside a skipped directory.
-        rel = path.relative_to(plugin_root)
-        if any(part in skip_dirs for part in rel.parts):
-            continue
-        rel_path = str(rel).replace("\\", "/")
-        if not is_self_scan_eligible(rel_path):
-            continue
-        # Never hash either manifest file itself.
-        if rel.name in _MANIFEST_BASENAMES:
-            continue
-        # If git ls-files succeeded, only include tracked files. This is
-        # the contract: the published manifest describes the published
-        # source. Untracked local files (`.DS_Store`, IDE droppings)
-        # never enter the manifest, so they can never cause an
-        # integrity-mismatch FP on a clean checkout.
-        if tracked is not None and rel_path not in tracked:
-            continue
-        try:
-            digest = sha256_of_file(path)
-        except (OSError, PermissionError):
-            continue
-        files[rel_path] = f"sha256:{digest}"
+    if tracked is not None:
+        # Primary path: hash exactly the git-tracked (shipped) fileset.
+        for rel_path in sorted(tracked):
+            # The manifest cannot contain its own hash.
+            if Path(rel_path).name in _MANIFEST_BASENAMES:
+                continue
+            path = plugin_root / rel_path
+            if not path.is_file():
+                # Tracked but absent locally (e.g. sparse checkout) — nothing
+                # to hash here; verify_self_integrity flags genuine deletions.
+                continue
+            try:
+                digest = sha256_of_file(path)
+            except (OSError, PermissionError):
+                continue
+            files[rel_path] = f"sha256:{digest}"
+    else:
+        # Fallback: not a git repo. Walk the tree, excluding only dirs that
+        # are never shipped (build artifacts, caches, dev-scratch). Still hash
+        # ALL remaining files — no eligibility filter (exhaustive by design).
+        skip_dirs = {
+            ".git",
+            ".venv",
+            "venv",
+            "__pycache__",
+            "node_modules",
+            "dist",
+            "build",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            "reports",
+            "reports_dev",
+            "downloads_dev",
+            "libs_dev",
+            "builds_dev",
+            "samples_dev",
+            "scripts_dev",
+            "tests_dev",
+            "examples_dev",
+            "docs_dev",
+        }
+        for path in plugin_root.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(plugin_root)
+            if any(part in skip_dirs for part in rel.parts):
+                continue
+            rel_path = str(rel).replace("\\", "/")
+            if rel.name in _MANIFEST_BASENAMES:
+                continue
+            try:
+                digest = sha256_of_file(path)
+            except (OSError, PermissionError):
+                continue
+            files[rel_path] = f"sha256:{digest}"
 
     return {
         "version": MANIFEST_VERSION,
         "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "purpose": (
-            "Hash manifest of files the CPV security validator skips during "
-            "self-scan mode. The validator verifies each file's actual SHA256 "
-            "against this manifest before skipping. Hash mismatch → the file "
-            "gets scanned normally, defeating name-only spoofing."
+            "Exhaustive SHA256 manifest of every shipped (git-tracked) file in "
+            "the plugin. verify_self_integrity rejects any tracked file added, "
+            "modified, or deleted relative to this manifest; CPV self-scan skips "
+            "a file ONLY when its hash matches an entry here. One unhashed "
+            "shipped file would be a poisoning vector, so the manifest is "
+            "exhaustive (TRDD-b8c6d04f)."
         ),
         "files": dict(sorted(files.items())),
     }
