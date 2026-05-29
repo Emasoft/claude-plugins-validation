@@ -183,6 +183,8 @@ MANAGED_ONLY_KEYS: frozenset[str] = frozenset(
         "strictKnownMarketplaces",
         "wslInheritsWindowsSettings",  # v2.1.118 — WSL inherits Windows-side managed settings
         "parentSettingsBehavior",  # v2.1.133 — admin-tier 'first-wins' | 'merge' for SDK managedSettings
+        "allowAllClaudeAiMcps",  # v2.1.149 — enterprise: load claude.ai cloud MCP connectors alongside managed-mcp.json
+        "pluginSuggestionMarketplaces",  # v2.1.152 — admin allowlist of org marketplaces whose plugins may be suggested
     }
 )
 
@@ -298,6 +300,8 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         "forceRemoteSettingsRefresh",
         "pluginTrustMessage",
         "strictKnownMarketplaces",
+        "allowAllClaudeAiMcps",  # v2.1.149 — managed-only (semantics enforced via MANAGED_ONLY_KEYS)
+        "pluginSuggestionMarketplaces",  # v2.1.152 — managed-only (semantics enforced via MANAGED_ONLY_KEYS)
         # Plugin-only (kept here for typo detection; emits CRITICAL when misplaced)
         "lspServers",
         "monitors",
