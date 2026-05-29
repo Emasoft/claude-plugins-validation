@@ -159,6 +159,101 @@ def _git_tracked_files(plugin_root: Path) -> set[str] | None:
         return None
 
 
+# Directories that never ship (build artifacts, caches, dev-scratch). Used
+# ONLY by the non-git walk fallback — `git ls-files` already excludes
+# gitignored dirs. Single source of truth for both the manifest builder and
+# verify_self_integrity's added-file detection.
+_SHIPPED_WALK_SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "node_modules",
+        "dist",
+        "build",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".idea",
+        ".vscode",
+        "reports",
+        "reports_dev",
+        "downloads_dev",
+        "libs_dev",
+        "builds_dev",
+        "samples_dev",
+        "scripts_dev",
+        "tests_dev",
+        "examples_dev",
+        "docs_dev",
+    }
+)
+
+# Runtime / OS cruft that can appear inside an install dir but is never a
+# shipped (git-tracked) file. Excluded from the non-git walk so the manifest
+# never hashes them AND verify_self_integrity's added-file detection never
+# false-flags a developer's `.DS_Store` or a stray `.pyc` as an inoculated
+# file. The git path needs no such list — `git ls-files` excludes them.
+_RUNTIME_CRUFT_BASENAMES = frozenset({".DS_Store", "Thumbs.db", "desktop.ini"})
+_RUNTIME_CRUFT_SUFFIXES = (".pyc", ".pyo", ".pyd", ".swp", ".swo", ".swn", ".orig", ".bak", ".tmp")
+
+
+def _is_runtime_cruft(rel_path: str) -> bool:
+    """True for OS/editor/runtime files that are never part of the shipped set."""
+    name = rel_path.rsplit("/", 1)[-1]
+    if name in _RUNTIME_CRUFT_BASENAMES:
+        return True
+    if name.endswith("~"):  # editor backup files (foo.py~)
+        return True
+    if name == ".coverage" or name.startswith(".coverage."):
+        return True
+    return rel_path.endswith(_RUNTIME_CRUFT_SUFFIXES)
+
+
+def enumerate_shipped_files(plugin_root: Path) -> set[str]:
+    """Return the relative paths of every shipped (git-tracked) file.
+
+    SINGLE SOURCE OF TRUTH for "what ships" (TRDD-b8c6d04f). Used by BOTH
+    `compute_manifest` (hash each entry) AND
+    `_plugin_verify_hashes.verify_self_integrity` (added-file detection:
+    any on-disk file NOT in the manifest is an added/inoculated file).
+    Because both sides enumerate identically, runtime cruft / caches /
+    gitignored files are excluded symmetrically and never false-flag.
+
+    Dual path, mirroring how a plugin is shipped:
+      * `git ls-files` when plugin_root is a git repo — the exact shipped set.
+      * a directory walk minus `_SHIPPED_WALK_SKIP_DIRS` and runtime cruft
+        when it is not (uvx / tarball / sparse install with no `.git`).
+
+    The two manifest files are always excluded — they cannot contain their
+    own hash (chicken-and-egg), so they are neither hashed nor flagged.
+    """
+    out: set[str] = set()
+    tracked = _git_tracked_files(plugin_root)
+    if tracked is not None:
+        for rel_path in tracked:
+            if Path(rel_path).name in _MANIFEST_BASENAMES:
+                continue
+            out.add(rel_path)
+        return out
+    # Fallback: not a git repo. Walk the tree, excluding never-shipped dirs
+    # and runtime cruft. No eligibility filter — exhaustive by design.
+    for path in plugin_root.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(plugin_root)
+        if any(part in _SHIPPED_WALK_SKIP_DIRS for part in rel.parts):
+            continue
+        rel_path = str(rel).replace("\\", "/")
+        if rel.name in _MANIFEST_BASENAMES:
+            continue
+        if _is_runtime_cruft(rel_path):
+            continue
+        out.add(rel_path)
+    return out
+
+
 def compute_manifest(plugin_root: Path) -> dict[str, object]:
     """Hash EVERY shipped (git-tracked) file under plugin_root.
 
@@ -178,64 +273,21 @@ def compute_manifest(plugin_root: Path) -> dict[str, object]:
     is not a git repo.
     """
     files: dict[str, str] = {}
-    tracked = _git_tracked_files(plugin_root)
-
-    if tracked is not None:
-        # Primary path: hash exactly the git-tracked (shipped) fileset.
-        for rel_path in sorted(tracked):
-            # The manifest cannot contain its own hash.
-            if Path(rel_path).name in _MANIFEST_BASENAMES:
-                continue
-            path = plugin_root / rel_path
-            if not path.is_file():
-                # Tracked but absent locally (e.g. sparse checkout) — nothing
-                # to hash here; verify_self_integrity flags genuine deletions.
-                continue
-            try:
-                digest = sha256_of_file(path)
-            except (OSError, PermissionError):
-                continue
-            files[rel_path] = f"sha256:{digest}"
-    else:
-        # Fallback: not a git repo. Walk the tree, excluding only dirs that
-        # are never shipped (build artifacts, caches, dev-scratch). Still hash
-        # ALL remaining files — no eligibility filter (exhaustive by design).
-        skip_dirs = {
-            ".git",
-            ".venv",
-            "venv",
-            "__pycache__",
-            "node_modules",
-            "dist",
-            "build",
-            ".pytest_cache",
-            ".mypy_cache",
-            ".ruff_cache",
-            "reports",
-            "reports_dev",
-            "downloads_dev",
-            "libs_dev",
-            "builds_dev",
-            "samples_dev",
-            "scripts_dev",
-            "tests_dev",
-            "examples_dev",
-            "docs_dev",
-        }
-        for path in plugin_root.rglob("*"):
-            if not path.is_file():
-                continue
-            rel = path.relative_to(plugin_root)
-            if any(part in skip_dirs for part in rel.parts):
-                continue
-            rel_path = str(rel).replace("\\", "/")
-            if rel.name in _MANIFEST_BASENAMES:
-                continue
-            try:
-                digest = sha256_of_file(path)
-            except (OSError, PermissionError):
-                continue
-            files[rel_path] = f"sha256:{digest}"
+    # Hash every shipped file. enumerate_shipped_files is the single source of
+    # truth (git-tracked when a repo, else walk minus skip-dirs/cruft) shared
+    # with verify_self_integrity's added-file detection, so the manifest and the
+    # verifier agree exactly on the shipped set.
+    for rel_path in sorted(enumerate_shipped_files(plugin_root)):
+        path = plugin_root / rel_path
+        if not path.is_file():
+            # Tracked but absent locally (e.g. sparse checkout) — nothing to
+            # hash here; verify_self_integrity flags genuine deletions.
+            continue
+        try:
+            digest = sha256_of_file(path)
+        except (OSError, PermissionError):
+            continue
+        files[rel_path] = f"sha256:{digest}"
 
     return {
         "version": MANIFEST_VERSION,

@@ -3,7 +3,7 @@ trdd-id: b8c6d04f-5bf6-4c6b-be70-f54f77725595
 title: Exhaustive SHA self-recognition — every shipped (git-tracked) file is hashed; no file is skipped without a SHA match
 status: in-progress
 created: 2026-05-29T08:15:21+0200
-updated: 2026-05-29T08:15:21+0200
+updated: 2026-05-29T12:38:21+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->
@@ -86,6 +86,35 @@ updated: 2026-05-29T08:15:21+0200
 - Existing self-scan / integrity tests will need updates; ADD adversarial tests:
   added shipped file → integrity FAIL + self-scan does NOT skip it; modified
   file → not skipped; gitignored file → out of scope (not hashed, not shipped).
+
+## Implementation status (2026-05-29)
+
+- **Change 1 — DONE** (committed 4781215). `compute_manifest` hashes every
+  git-tracked file; manifest now 796 entries. Enumeration refactored into a
+  shared `enumerate_shipped_files(plugin_root)` (git-tracked when a repo, else
+  walk minus `_SHIPPED_WALK_SKIP_DIRS` and runtime cruft).
+- **Change 2 — DONE** (committed 4781215). `cpv_self_scan_skip` skips a file
+  ONLY on SHA match; Tier-0 + name-eligibility pre-filter removed.
+- **Change 3 — DONE** (this commit). `verify_self_integrity` now bidirectional:
+  `_detect_added_files` diffs the on-disk shipped set (via the shared
+  `enumerate_shipped_files`) against the manifest and reports any ADDED /
+  inoculated file. Cruft (`.DS_Store`, `*.pyc`, `*~`, …) is excluded so real
+  installs are not false-flagged. Adversarial two-sided tests in
+  `tests/test_plugin_verify_hashes.py::TestChange3AddedFileDetection`.
+
+### Deferred (NOT blocking this TRDD's acceptance)
+
+The change-1 note "`is_self_scan_eligible` becomes dead → remove if
+unreferenced" is **not yet actioned** because the two functions
+(`_plugin_compute_hashes.is_self_scan_eligible`,
+`validate_security._is_self_scan_eligible`) are STILL referenced — by the
+legacy `compute_cpv_self_hashes.py` re-export shim and by three audit tests
+(`test_audit_caches_token.py` cache #3, `test_audit_integrity_nits.py`,
+`test_legacy_integrity_fallback.py`). The TRDD's own condition ("if
+unreferenced") is therefore not met. They are harmless (no live caller —
+`cpv_self_scan_skip` is fully SHA-gated, verified) but should be removed for
+hygiene once the references are torn down. Tracked in the follow-up TRDD
+[[self-scan-name-signal-hardening]] (TRDD-4243a768).
 
 ## Acceptance criteria
 

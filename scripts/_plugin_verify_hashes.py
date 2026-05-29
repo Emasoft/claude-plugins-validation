@@ -249,6 +249,40 @@ def _read_skip_env_var() -> bool:
     return False
 
 
+def _detect_added_files(plugin_root: Path, manifest_files: dict[str, object]) -> list[str]:
+    """Shipped files present on disk but ABSENT from the canonical manifest.
+
+    TRDD-b8c6d04f change 3 — integrity verification must be BIDIRECTIONAL.
+    Besides catching manifest entries that were modified or deleted locally,
+    it must catch an ADDED (inoculated) shipped file that is not in the
+    canonical manifest at all — otherwise an attacker who drops a new
+    `scripts/evil.py` (or a malicious skill / command / agent) into the
+    install evades detection, because the manifest→local loop only iterates
+    entries that are ALREADY in the manifest. "Even one file skipped is
+    enough to poison the plugin" — so an extra file must be caught too.
+
+    Enumeration reuses `enumerate_shipped_files` (the same git-tracked / walk
+    logic the manifest builder uses), so runtime cruft, caches, and
+    gitignored files are excluded symmetrically and never false-flag. The two
+    manifest files are excluded by the enumerator. Returns a sorted list of
+    relative paths; empty when enumeration is unavailable (graceful — an
+    enumeration failure must not become a spurious integrity CRITICAL).
+    """
+    try:
+        scripts_dir = Path(__file__).resolve().parent
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        from _plugin_compute_hashes import enumerate_shipped_files
+    except ImportError:
+        return []
+    try:
+        on_disk = enumerate_shipped_files(plugin_root)
+    except (OSError, ValueError):
+        return []
+    manifest_set = {k for k in manifest_files if isinstance(k, str)}
+    return sorted(on_disk - manifest_set)
+
+
 def verify_self_integrity(
     plugin_root: Path | None = None,
     *,
@@ -354,17 +388,29 @@ def verify_self_integrity(
         if actual != expected_hex:
             mismatches.append((rel_path, expected_hex, actual))
 
+    # Bidirectional check (TRDD-b8c6d04f change 3): an ADDED shipped file —
+    # present locally but absent from the canonical manifest — is an
+    # inoculation vector the manifest→local loop above can never see.
+    for added_rel in _detect_added_files(plugin_root, files):
+        mismatches.append((added_rel, "<not-in-manifest>", "<added>"))
+
     if mismatches:
         print(
             "\n" + "=" * 70 + "\n"
             "[CPV integrity] CRITICAL: integrity manifest mismatch\n" + "=" * 70 + "\n"
-            f"The following {len(mismatches)} CPV-internal file(s) differ from "
-            "the canonical manifest published on GitHub:\n",
+            f"The following {len(mismatches)} CPV-internal file(s) differ from, "
+            "are missing from, or were added beyond the canonical manifest "
+            "published on GitHub:\n",
             file=sys.stderr,
         )
         for rel_path, expected_hex, actual in mismatches[:50]:
             if actual == "<missing>":
                 print(f"  - {rel_path}  (deleted locally)", file=sys.stderr)
+            elif actual == "<added>":
+                print(
+                    f"  - {rel_path}  (present locally but NOT in the canonical manifest — added/inoculated file)",
+                    file=sys.stderr,
+                )
             else:
                 print(
                     f"  - {rel_path}\n"
