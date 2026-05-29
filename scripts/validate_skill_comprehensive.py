@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from cpv_token_estimate import estimate_tokens
 from cpv_validation_common import (
     BUILTIN_AGENT_TYPES,
     COLORS,
@@ -2223,9 +2224,7 @@ def validate_resource_references(skill_path: Path, body: str, report: Validation
             skills_root = skill_path.parent
             plugin_root_str = os.path.normpath(str(skills_root.parent))
             resolved_str = os.path.normpath(os.path.join(str(skill_path), file_path))
-            escapes_plugin = not (
-                resolved_str == plugin_root_str or resolved_str.startswith(plugin_root_str + os.sep)
-            )
+            escapes_plugin = not (resolved_str == plugin_root_str or resolved_str.startswith(plugin_root_str + os.sep))
             if escapes_plugin:
                 report.major(
                     f"Reference uses parent traversal that ESCAPES the plugin root: "
@@ -2855,7 +2854,13 @@ def validate_skill(
 
     # Validate TOC embedding — SKILL.md must embed TOCs from referenced .md files
     if skill_md is not None:
-        validate_toc_embedding(content, skill_md, skill_path, report)
+        # Issue #51: when the body already exceeds the token cap, demote the
+        # TOC-completeness findings to NIT — embedding more TOC content would
+        # only deepen the size MAJOR. Use the SAME body + estimator + strict-`>`
+        # comparison as the body token gate (check_token_limit) so the demotion
+        # predicate matches the size-MAJOR predicate exactly (no off-by-one).
+        body_over_cap = estimate_tokens(body).tokens > SKILL_BODY_TOKEN_LIMIT
+        validate_toc_embedding(content, skill_md, skill_path, report, body_over_token_cap=body_over_cap)
 
     # Validate 8+1 Pillars (optional)
     if validate_pillars_flag:
