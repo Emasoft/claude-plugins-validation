@@ -24,7 +24,9 @@ Contract:
 from __future__ import annotations
 
 import ast
+import io
 import re
+import tokenize
 from typing import Final, Literal
 
 from _skillaudit_markdown_context import _is_charset_detection_vocab  # type: ignore[import-not-found]
@@ -1198,6 +1200,40 @@ def _outermost_pure_literal_container(tree: ast.AST, target: ast.AST) -> ast.AST
     return outer
 
 
+def _match_inside_python_comment(source: str, line: int, match: str) -> bool:
+    """True iff ``match`` appears inside a Python ``#`` COMMENT on ``line``.
+
+    A comment is never executed, opened, or fed to a sink, so an absolute path
+    inside one is inert documentation — the dominant residual shape in a
+    security plugin's detector libraries, whose regexes are annotated with the
+    attack-target paths they match (``# Restrict to /tmp/, /var/tmp/,
+    /dev/shm/``). Uses :mod:`tokenize` so a ``#`` inside a string literal is
+    NOT mistaken for a comment. Conservative: returns ``False`` on any
+    tokenize error, or if the path ALSO appears in the code portion preceding
+    the comment on the same line (then it is a real code path that the comment
+    merely repeats). (issue #57 Fix A — comment extension)
+    """
+    if not source or not match:
+        return False
+    try:
+        toks = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return False
+    src_lines = source.splitlines()
+    for tok in toks:
+        # A Python COMMENT token is always single-line (it ends at the newline).
+        if tok.type != tokenize.COMMENT or tok.start[0] != line:
+            continue
+        if match not in tok.string:
+            continue
+        col = tok.start[1]
+        code_part = src_lines[line - 1][:col] if 0 <= line - 1 < len(src_lines) else ""
+        if match in code_part:
+            return False  # real code path; the trailing comment merely repeats it
+        return True
+    return False
+
+
 def abs_path_const_is_inert_py_data(
     source: str, line: int, matched_text: str, is_test_file: bool, tree: ast.AST | None = None
 ) -> bool:
@@ -1214,6 +1250,13 @@ def abs_path_const_is_inert_py_data(
             tree = ast.parse(source)
         except (SyntaxError, ValueError):
             return False
+    # A path inside a `#` COMMENT is inert documentation — comments are never
+    # executed or opened, and (unlike a prose-vector match) a hardcoded path in
+    # a comment has zero portability impact. Checked FIRST: a comment has no
+    # string Constant, so the covering-Constant search below would short-circuit
+    # to False before any clause runs. (issue #57 Fix A — comment extension)
+    if _match_inside_python_comment(source, line, matched_text):
+        return True
     # Locate the covering string Constant that carries the matched path.
     needle = matched_text.rstrip("/.")
     target: ast.Constant | None = None
@@ -1240,12 +1283,35 @@ def abs_path_const_is_inert_py_data(
     # feeds exec still stays visible.
     if _match_inside_re_pattern_literal(tree, line, source, matched_text):
         return True
-    # Module-level pure-data container assignment qualifies in ANY file.
-    if _node_is_in_module_level_pure_data_assign(tree, target):
+    # Module-level pure-data container assignment qualifies in ANY file —
+    # UNLESS the container's bound name is later opened / exec'd (directly, by
+    # iteration, or via subscript), which makes the embedded paths live.
+    if _node_is_in_module_level_pure_data_assign(tree, target) and not _module_container_name_flows_to_sink(
+        tree, target
+    ):
         return True
     # In a TEST file, a path inside a pure-literal container is inert
     # test-input data (assigned locally or passed to a non-sink helper).
     if is_test_file and _outermost_pure_literal_container(tree, target) is not None:
+        return True
+    # A sensitive path inside a BARE-STRING STATEMENT — a module / class /
+    # function DOCSTRING, or any string literal evaluated-and-discarded as a
+    # statement — is pure documentation. Python never assigns or opens a bare
+    # string, and the sink guard above already proved it reaches no live sink.
+    # This is the dominant residual shape in a security plugin's pattern
+    # libraries, whose module / rule docstrings cite attack-target paths
+    # (``/etc/passwd``, ``/etc/restic/pw``) by name to explain what each
+    # detector matches. (issue #57 Fix A — docstring/description extension)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr) and node.value is target:
+            return True
+    # A sensitive path inside a METADATA / DESCRIPTION field string — a
+    # ``name=`` / ``description=`` / ``message=`` constructor kwarg, or a Dict
+    # value under such a key — is the human-readable doc of what a detector
+    # MATCHES, never a path the plugin opens. Reuses the skillaudit
+    # metadata-field discriminator; double sink-guarded (the fs/exec/net guard
+    # above + the helper's own exec guard). (issue #57 Fix A — description ext.)
+    if _match_inside_metadata_field_string(tree, line, source, matched_text):
         return True
     return False
 
@@ -3150,6 +3216,22 @@ def _node_is_in_module_level_pure_data_assign(tree: ast.AST, target: ast.AST) ->
         val = stmt.value
         if val is None:
             continue
+        # See through a container-constructor call wrapping a single literal
+        # container — ``frozenset({...})`` / ``set({...})`` / ``tuple([...])``
+        # / ``list([...])`` / ``dict({...})`` are idiomatic module-level
+        # constant-data declarations (e.g. a detector's ``_SAFE = frozenset({
+        # "/usr/share/git-core/templates", ...})``). Same data-declaration
+        # intent and same risk profile as a bare ``{...}`` literal, which this
+        # function already accepts. (issue #57 Fix A — constructor-call ext.)
+        if (
+            isinstance(val, ast.Call)
+            and isinstance(val.func, ast.Name)
+            and val.func.id in {"frozenset", "set", "tuple", "list", "dict"}
+            and len(val.args) == 1
+            and not val.keywords
+            and isinstance(val.args[0], (ast.List, ast.Tuple, ast.Set, ast.Dict))
+        ):
+            val = val.args[0]
         # Iron rule: only CONTAINER literals qualify, not bare
         # Constant strings. A `CONSTANT = """..."""` triple-quoted
         # string is documentation; the safe_doc multi-line check
@@ -3160,6 +3242,76 @@ def _node_is_in_module_level_pure_data_assign(tree: ast.AST, target: ast.AST) ->
             continue
         if _contains_target(val, target):
             return True
+    return False
+
+
+def _module_container_name_flows_to_sink(tree: ast.AST, target: ast.AST) -> bool:
+    """Defense-in-depth guard for the module-level pure-data-container
+    suppression. A module-level ``NAME = {…paths…}`` / ``frozenset({…})`` is
+    normally inert data — but if ``NAME`` is then OPENED / EXEC'd, directly
+    (``open(NAME)``), by iteration (``for p in NAME: open(p)``), or via a
+    subscript / conversion (``open(list(NAME)[0])``), the paths are LIVE and
+    the suppression must NOT apply. Returns ``True`` iff the container's bound
+    name reaches a live fs/exec/net sink, so the caller keeps the finding
+    visible. Conservative (over-keeps-visible on ambiguity). Closes the
+    pre-existing indirect-via-variable hole for module-level containers.
+    (issue #57 Fix A — container-name sink guard)
+    """
+    if not isinstance(tree, ast.Module):
+        return False
+
+    def _contains(n: ast.AST, t: ast.AST) -> bool:
+        if n is t:
+            return True
+        return any(_contains(c, t) for c in ast.iter_child_nodes(n))
+
+    # Mirror the constructor-unwrap of _node_is_in_module_level_pure_data_assign
+    # so we collect the SAME assigns' bound names.
+    names: set[str] = set()
+    for stmt in tree.body:
+        if not isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+            continue
+        val = stmt.value
+        if val is None:
+            continue
+        if (
+            isinstance(val, ast.Call)
+            and isinstance(val.func, ast.Name)
+            and val.func.id in {"frozenset", "set", "tuple", "list", "dict"}
+            and len(val.args) == 1
+            and not val.keywords
+            and isinstance(val.args[0], (ast.List, ast.Tuple, ast.Set, ast.Dict))
+        ):
+            val = val.args[0]
+        if not isinstance(val, (ast.List, ast.Tuple, ast.Set, ast.Dict)):
+            continue
+        if not _contains(val, target):
+            continue
+        bound = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+        for tnode in bound:
+            if isinstance(tnode, ast.Name):
+                names.add(tnode.id)
+    if not names:
+        return False
+
+    sinks = _STRING_CMD_EXEC_FQNAMES | _FS_NET_SINK_FQNAMES | _SHELL_CALL_FQNAMES
+
+    def _name_in_call_args(call: ast.Call) -> bool:
+        for arg in list(call.args) + [kw.value for kw in call.keywords]:
+            for sub in ast.walk(arg):
+                if isinstance(sub, ast.Name) and sub.id in names:
+                    return True
+        return False
+
+    for node in ast.walk(tree):
+        # (a) NAME (or an expression containing it) is an argument to a sink.
+        if isinstance(node, ast.Call) and _node_qualname(node.func) in sinks and _name_in_call_args(node):
+            return True
+        # (b) `for x in NAME:` whose body contains any sink call.
+        if isinstance(node, ast.For) and isinstance(node.iter, ast.Name) and node.iter.id in names:
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Call) and _node_qualname(sub.func) in sinks:
+                    return True
     return False
 
 

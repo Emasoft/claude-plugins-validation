@@ -339,5 +339,86 @@ class TestIssue59AbsPathAlias:
         assert _abs_path_issue_count(tmp_path, "TECH-registry-lookup.md", src) >= 1
 
 
+class TestIssue57FixAAbsPathDocCommentExt:
+    """Issue #57 Fix A — docstring / comment / description / frozenset
+    extensions to the absolute-path data-vs-sink discriminator. These cleared
+    the ai-maestro-janitor abs-path FP wave (87 → 3 MINOR) by recognising the
+    inert shapes a security plugin's pattern libraries use to DOCUMENT the
+    attack-target paths their detectors match — without suppressing a single
+    path that reaches a live fs/exec/net sink. Every case is two-sided.
+    """
+
+    def test_comment_path_suppressed(self, tmp_path: Path) -> None:
+        """A ``#`` comment citing an attack-target path is inert doc."""
+        src = "# Harvest target: /etc/passwd is read by the attacker.\nX = 1\n"
+        assert _abs_path_issue_count(tmp_path, "ai_jailbreak_patterns.py", src) == 0
+
+    def test_comment_repeating_real_code_path_kept(self, tmp_path: Path) -> None:
+        """A trailing comment must NOT hide a real ``open()`` on the same
+        line — the path is in the CODE part, so the comment guard declines."""
+        src = 'open("/etc/passwd")  # opens /etc/passwd\n'
+        assert _abs_path_issue_count(tmp_path, "evil.py", src) >= 1
+
+    def test_hash_inside_string_not_treated_as_comment_kept(self, tmp_path: Path) -> None:
+        """A ``#`` INSIDE a string literal is not a comment — a real path that
+        flows to ``open`` via the variable stays flagged (tokenize-precise)."""
+        src = 'x = "cfg # /etc/passwd"\nopen(x).read()\n'
+        assert _abs_path_issue_count(tmp_path, "evil.py", src) >= 1
+
+    def test_module_docstring_path_suppressed(self, tmp_path: Path) -> None:
+        """A module docstring citing ``/etc/passwd`` is a bare-string statement
+        → inert documentation."""
+        src = '"""Detector for harvest of /etc/passwd by malicious agents."""\nX = 1\n'
+        assert _abs_path_issue_count(tmp_path, "ai_jailbreak_patterns.py", src) == 0
+
+    def test_real_open_near_docstring_kept(self, tmp_path: Path) -> None:
+        """A real ``open("/etc/passwd")`` is a Call argument, NOT a bare-string
+        statement → flagged even with the same path in a sibling docstring."""
+        src = 'def load():\n    """Reads /etc/passwd."""\n    return open("/etc/passwd").read()\n'
+        assert _abs_path_issue_count(tmp_path, "evil.py", src) >= 1
+
+    def test_description_kwarg_path_suppressed(self, tmp_path: Path) -> None:
+        """A ``description=`` rule-metadata string is doc of what a detector
+        matches, never a path the plugin opens → inert."""
+        src = (
+            "Rule(\n"
+            '    name="PAX header path override",\n'
+            "    description=(\n"
+            '        "Member-1 PAX header sets path=/etc/passwd, member-2 is safe.txt."\n'
+            "    ),\n"
+            ")\n"
+        )
+        assert _abs_path_issue_count(tmp_path, "archive_extraction_patterns.py", src) == 0
+
+    def test_metadata_position_path_feeding_exec_kept(self, tmp_path: Path) -> None:
+        """A ``description=``-shaped kwarg whose value ALSO flows to a real
+        exec sink stays flagged (the metadata clause is sink-guarded)."""
+        src = 'import subprocess\nsubprocess.run(description="/etc/passwd; rm -rf /", shell=True)\n'
+        assert _abs_path_issue_count(tmp_path, "evil.py", src) >= 1
+
+    def test_module_frozenset_path_suppressed(self, tmp_path: Path) -> None:
+        """A module-level ``frozenset({...})`` of known-safe template dirs is
+        inert constant data (the constructor-call wrapper is seen through)."""
+        src = (
+            "_INIT_TEMPLATEDIR_SAFE = frozenset({\n"
+            '    "/usr/share/git-core/templates",\n'
+            '    "/opt/homebrew/share/git-core/templates",\n'
+            "})\n"
+        )
+        assert _abs_path_issue_count(tmp_path, "git_ops_patterns.py", src) == 0
+
+    def test_frozenset_name_opened_in_loop_kept(self, tmp_path: Path) -> None:
+        """A module ``frozenset`` whose NAME is iterated and opened is live →
+        flagged (container-name sink guard closes the indirect hole)."""
+        src = 'PATHS = frozenset({"/etc/passwd"})\nfor p in PATHS:\n    open(p).read()\n'
+        assert _abs_path_issue_count(tmp_path, "evil.py", src) >= 1
+
+    def test_module_set_name_subscript_opened_kept(self, tmp_path: Path) -> None:
+        """A module ``set`` whose NAME is subscripted into ``open`` is live →
+        flagged (defense in depth; closes the pre-existing module-Set hole)."""
+        src = 'PATHS = {"/etc/passwd"}\nopen(list(PATHS)[0]).read()\n'
+        assert _abs_path_issue_count(tmp_path, "evil.py", src) >= 1
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
