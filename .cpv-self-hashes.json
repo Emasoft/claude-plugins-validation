@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-30T22:08:33+00:00",
+  "computed_at": "2026-05-30T22:45:45+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:a9629790b798654f4abe61f0b7e3a260157b9c304a1d4dc7a3c5e600c837420f",
@@ -139,7 +139,7 @@
     "scripts/_plugin_verify_hashes.py": "sha256:ca2fbfe046122797dd2915a4ffaae43e21f3c25b1f7f9613f7a512f24934c063",
     "scripts/_skillaudit_json_context.py": "sha256:e450484d49a852eb6ac8af65d82df86481cf27f222ebdbc31520759632b25cfb",
     "scripts/_skillaudit_markdown_context.py": "sha256:066a4358ce86bf6bc765ce2429878ac1904d1df1c3b22c1bb9efb6ab5cf5aab9",
-    "scripts/_skillaudit_python_context.py": "sha256:e332967ceaa0a167c9e72b74a06abce4717a026dfccb3cd3b6ee8fde1785c84c",
+    "scripts/_skillaudit_python_context.py": "sha256:3d4a32f132ab4bdc8797ab552423cdbd66a4901a81639452fef41e7286b8d047",
     "scripts/_skillaudit_shell_context.py": "sha256:413e26772fedc2617395cc1b51b530ad8b1010736277bbcb790ac5310d961a3a",
     "scripts/_skillaudit_typescript_context.py": "sha256:ce7427887d191cc8b0c6ccd8805766198e1b1b1db0e71da08a4b9fc43f9bcfac",
     "scripts/_skillaudit_yaml_context.py": "sha256:be871acaa3bb9ff0c03e13cf807a9c9fb8a09b71d166319612598bdb01189da4",
@@ -671,7 +671,7 @@
     "tests/test_issues_27_28_29.py": "sha256:0dbeb31cdf6c5cd856b5b98900320ed041ae602821e3f6a65b77b833c2b094d1",
     "tests/test_issues_30_31_batch_thresholds.py": "sha256:cf02ce59a767d0695119adc781f2978995a018f05c3753d46c874fe27aa2b5dd",
     "tests/test_issues_40_42_skillaudit_fp.py": "sha256:d15fd50ca04ea462b7adce4f52b1603e8f9d59cf68fd76864abf7c89259ba56b",
-    "tests/test_janitor_fp_wave_and_issues_57_59.py": "sha256:882f674331742357a2faea8247da19da3010ec10ef336d325a5ec8ff67788518",
+    "tests/test_janitor_fp_wave_and_issues_57_59.py": "sha256:d4ae5690cfb3d9edf1681238b437d41285424a8609e5dea87b999438c5ef507b",
     "tests/test_legacy_integrity_fallback.py": "sha256:2bcabc7f4029177d730651a40a877aef24075333524d147fa5d24f9dcc68fef3",
     "tests/test_legacy_pipeline_scripts.py": "sha256:7fa9bd9256121ea23ea0d2fe35983cf9610a7372e026a5f72d39c23983fdb683",
     "tests/test_lint_cache_integration.py": "sha256:cd8e44038411371d3710f154dad22418099ba15a3a512bf680f1128430cae777",

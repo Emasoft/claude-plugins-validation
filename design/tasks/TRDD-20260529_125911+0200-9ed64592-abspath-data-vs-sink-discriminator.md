@@ -3,7 +3,7 @@ trdd-id: 9ed64592-6af1-4733-bea4-a95e79a4e8ba
 title: Absolute-path linter data-vs-sink AST discriminator (issue #57 Fix A, deferred)
 status: completed
 created: 2026-05-29T12:59:11+0200
-updated: 2026-05-31T00:06:01+0200
+updated: 2026-05-31T00:47:29+0200
 ---
 
 > **IMPLEMENTED 2026-05-31.** Shipped as `abs_path_const_is_inert_py_data`
@@ -14,6 +14,23 @@ updated: 2026-05-31T00:06:01+0200
 > as part of the same session that cleared the ai-maestro-janitor FP wave
 > (99→4 CRITICAL). Two-sided regression tests in
 > `tests/test_janitor_fp_wave_and_issues_57_59.py::TestIssue57FixAAbsPath`.
+>
+> **EXTENDED 2026-05-31 (v2.110.1).** The first cut cleared the regex/module/
+> test shapes but left 87 janitor abs-path MINORs in three inert shapes the
+> pattern libraries actually use to DOCUMENT attack-target paths. Added four
+> sink-guarded clauses, each two-sided
+> (`TestIssue57FixAAbsPathDocCommentExt`): (1) `#` COMMENT
+> (`_match_inside_python_comment`, tokenize-precise so a `#` inside a string
+> is not mistaken for a comment); (2) bare-string statement / DOCSTRING; (3)
+> metadata/`description=` field string (reuses `_match_inside_metadata_field_string`);
+> (4) `frozenset({…})`/`set`/`tuple`/`list`/`dict` constructor-call wrapper
+> over a module-level literal. PLUS a defense-in-depth `_module_container_name_
+> flows_to_sink` guard that keeps a container VISIBLE when its bound NAME is
+> later opened/exec'd (direct arg, `for x in NAME: open(x)`, or `open(list(NAME)[0])`)
+> — this also closes the pre-existing indirect-via-variable hole for the
+> module-level `{…}` case. Janitor abs-path 87 → 3 (the 3 are genuine: two
+> real `Path("/usr/local/lib/node_modules").is_dir()` probes + one
+> conservatively-kept function-local prefix tuple).
 
 <!-- markdownlint-disable-next-line MD025 -->
 # TRDD-9ed64592 — Absolute-path linter data-vs-sink AST discriminator
