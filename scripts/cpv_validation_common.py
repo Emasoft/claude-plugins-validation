@@ -6510,6 +6510,30 @@ def scan_file_for_absolute_paths(
     doc_extensions = {".md", ".txt", ".html", ".rst", ".adoc"}
     is_doc_file = filepath.suffix.lower() in doc_extensions
 
+    # Issue #57 Fix A — for .py files, parse once so the absolute-path loop can
+    # suppress INERT data (a detector's pattern list, a test-input fixture
+    # dict) while keeping any path that flows to a live fs/exec/network sink.
+    # The data-vs-sink distinction is computed intrinsically from the AST,
+    # never self-declared by the scanned plugin.
+    py_tree = None
+    is_py_test = False
+    _inert_check = None
+    if filepath.suffix.lower() == ".py":
+        try:
+            import ast as _ast
+
+            from _skillaudit_python_context import (  # type: ignore[import-not-found]
+                _is_python_test_file,
+                abs_path_const_is_inert_py_data,
+            )
+
+            py_tree = _ast.parse(content)
+            is_py_test = _is_python_test_file(str(filepath))
+            _inert_check = abs_path_const_is_inert_py_data
+        except Exception:
+            py_tree = None
+            _inert_check = None
+
     # Then check for ALL absolute paths (MAJOR)
     for pattern, desc in ABSOLUTE_PATH_PATTERNS:
         for match in pattern.finditer(content):
@@ -6517,6 +6541,14 @@ def scan_file_for_absolute_paths(
 
             # Skip if this looks like a regex pattern
             if any(c in matched_text for c in r"[]\^$.*+?{}|()"):
+                continue
+
+            # Issue #59 Section B — `@/…` is a TypeScript/JS import-path alias
+            # (`@/` → project src root), not a filesystem absolute path. The
+            # pattern captures the `/lib/…` tail after the `@`; skip when the
+            # character immediately before the match is `@`.
+            m_start = match.start(1) if match.lastindex else match.start(0)
+            if m_start > 0 and content[m_start - 1] == "@":
                 continue
 
             # Skip allowed documentation paths — only in doc files, not in code/scripts
@@ -6536,6 +6568,16 @@ def scan_file_for_absolute_paths(
                     continue
 
             line_num = content[: match.start()].count("\n") + 1
+
+            # Issue #57 Fix A — suppress an INERT path literal in a .py file
+            # (a detector's pattern list, a test-input fixture dict) that does
+            # NOT feed a live fs/exec/network sink. Never suppresses a path
+            # that reaches open() / subprocess / os.remove / requests, etc.
+            if _inert_check is not None and py_tree is not None and _inert_check(
+                content, line_num, matched_text, is_py_test, tree=py_tree
+            ):
+                continue
+
             issues_found += 1
             # System binary paths are expected for tool detection — downgrade to INFO
             if desc == "system absolute path" and any(matched_text.startswith(p) for p in _SYSTEM_BINARY_PREFIXES):

