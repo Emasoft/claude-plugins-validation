@@ -43,6 +43,7 @@ import math
 import sys
 import time
 import unicodedata
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -62,11 +63,22 @@ _COMBINING_ACUTE = "́"
 
 
 @pytest.fixture(autouse=True)
-def _reset_module_cache() -> None:
-    """Restore a clean vocab-cache state before each test (mirrors the sibling suite)."""
-    cte._RANKS = None
-    cte._RANKS_LOAD_FAILED = False
-    cte._VOCAB_PATH = Path(cte.__file__).parent / "data" / "o200k_base.tiktoken.gz"
+def _reset_module_cache() -> Iterator[None]:
+    """Restore a clean vocab-cache state before AND after each test.
+
+    Mirrors the sibling suite. The teardown (restore on the way OUT) is what
+    stops this file from leaking a bogus ``_VOCAB_PATH`` / ``_RANKS_LOAD_FAILED``
+    to whatever test file runs next in CI's single-process serial run.
+    """
+
+    def _clean() -> None:
+        cte._RANKS = None
+        cte._RANKS_LOAD_FAILED = False
+        cte._VOCAB_PATH = Path(cte.__file__).parent / "data" / "o200k_base.tiktoken.gz"
+
+    _clean()
+    yield
+    _clean()
 
 
 # ===========================================================================

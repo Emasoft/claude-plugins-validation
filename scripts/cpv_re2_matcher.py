@@ -530,6 +530,25 @@ class HybridMatcher:
         }
 
     @property
+    def has_re2_set(self) -> bool:
+        """True iff a compiled ``RE2::Set`` is backing the fast pre-filter pass.
+
+        This is the ONLY honest signal a caller can use to decide whether a
+        whole-blob ``scan()`` is cheap (linear, RE2-backed) or expensive
+        (every pattern run through the Python ``re`` fallback). It is False
+        when google-re2 is absent, when the caller force-disabled it, AND
+        when ``RE2::Set::Compile()`` failed (every accepted pattern was
+        re-routed to the fallback). In all three cases ``scan()`` walks the
+        ENTIRE catalog over the whole blob via Python ``re`` — which on a
+        pathological line catastrophically backtracks for the catalog's
+        chained-``.*`` rules (e.g. ``A2A_CAPABILITY_ABUSE`` has 4 chained
+        ``.*``). The pre-filter therefore MUST NOT run a whole-blob ``scan()``
+        when this is False; the caller falls back to its own per-line,
+        length-bounded loop instead. (ReDoS guard — see issue #53 follow-up.)
+        """
+        return self._re2_set is not None
+
+    @property
     def invalid_patterns(self) -> list[InvalidPattern]:
         """Return the list of patterns that failed BOTH RE2 and Python re.
 

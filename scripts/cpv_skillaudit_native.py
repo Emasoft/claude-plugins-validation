@@ -376,6 +376,22 @@ def _prefilter_rule_ids(text: str) -> frozenset[str] | None:
     matcher = _hybrid_matcher()
     if matcher is None:
         return None
+    # ReDoS guard (issue #53 follow-up): a whole-blob ``scan()`` is only cheap
+    # when a compiled RE2 Set backs it (linear matching). When google-re2 is
+    # absent — exactly the CI configuration, where ``uv sync`` installs only
+    # base deps and skips the optional ``performance`` extra — ``scan()`` runs
+    # EVERY catalog pattern through the Python ``re`` fallback over the entire
+    # unbounded blob. The catalog's chained-``.*`` rules (notably
+    # ``A2A_CAPABILITY_ABUSE`` with 4 chained ``.*`` then a required literal)
+    # then backtrack exponentially on a long non-matching line and the process
+    # hangs (CI 15-min timeout). In that state the pre-filter also delivers
+    # ZERO speedup (there is no RE2 Set to fast-skip rules), so the correct
+    # behaviour is the documented legacy path: return ``None`` → the caller
+    # runs every rule through its own per-line loop, which IS length-bounded by
+    # ``_MAX_SCAN_LINE``. This keeps the all-Python-``re`` fallback ReDoS-safe
+    # on its own without making google-re2 a hard dependency.
+    if not matcher.has_re2_set:
+        return None
     try:
         pairs = matcher.scan(text)
     except Exception:  # pragma: no cover — matcher must never break a scan
@@ -741,9 +757,7 @@ def _is_in_line_comment(line: str, file_path: str) -> bool:
     suffix = file_path.lower()
     # Python / shell / YAML / TOML / make / Ruby — `#` line comments
     if (
-        suffix.endswith(
-            (".py", ".sh", ".bash", ".zsh", ".fish", ".yml", ".yaml", ".toml", ".ini", ".conf", ".rb")
-        )
+        suffix.endswith((".py", ".sh", ".bash", ".zsh", ".fish", ".yml", ".yaml", ".toml", ".ini", ".conf", ".rb"))
         or suffix == "makefile"
     ):
         return stripped.startswith("#")
@@ -1012,11 +1026,7 @@ def _rule_is_secret_detection(rule_id: str) -> bool:
     above (per #38). This helper exists for the per-vendor SECRET_*
     rules which are NOT in ``_INTENT_HARD_SIGNAL_RULES``.
     """
-    return (
-        rule_id.startswith("SECRET_")
-        or rule_id == "HARDCODED_SECRET"
-        or rule_id == "API_KEY_LEAK"
-    )
+    return rule_id.startswith("SECRET_") or rule_id == "HARDCODED_SECRET" or rule_id == "API_KEY_LEAK"
 
 
 def _is_documentation_only_path(file_path: str) -> bool:
@@ -1584,8 +1594,7 @@ def _detect_structural_read_to_net(lines: list[str], cb_map: list[bool]) -> list
                 "category": "structural",
                 "name": "Read → Network pattern detected",
                 "description": (
-                    f"File read result piped into a network call on line {first}. "
-                    "Potential data exfiltration flow."
+                    f"File read result piped into a network call on line {first}. Potential data exfiltration flow."
                 ),
                 "line": first,
                 "lineContent": lines[first - 1].strip()[:200],
@@ -1713,11 +1722,7 @@ def _detect_invisible_unicode(lines: list[str]) -> list[dict[str, Any]]:
                     continue
                 # ZWJ that only appears as emoji combiners → benign sequence.
                 if ch == "‍":
-                    bare = [
-                        p
-                        for p, c in enumerate(line)
-                        if c == "‍" and not _is_emoji_combiner_zwj(line, p)
-                    ]
+                    bare = [p for p, c in enumerate(line) if c == "‍" and not _is_emoji_combiner_zwj(line, p)]
                     if not bare:
                         continue
                     count = len(bare)
@@ -1817,8 +1822,17 @@ def _analyze_intent(lines: list[str], cb_map: list[bool]) -> list[dict[str, Any]
     for i, line in enumerate(lines):
         if cb_map[i]:
             continue
+        # ReDoS guard (issue #53 follow-up): bound the regex input the same way
+        # the catalog loop is bounded (see _MAX_SCAN_LINE). _INTENT_PATTERNS
+        # includes chained-.* rules (e.g. `read .* \.env .* (send|post|...)`)
+        # that backtrack super-linearly on a long NON-matching line when
+        # google-re2 is absent (these run as a separate per-line scan the RE2
+        # prefilter cannot pre-skip). Match-only; the FULL `line` is still used
+        # for lineContent reporting below, and m.group(0) stays valid because a
+        # real intent clause is local (well within the first _MAX_SCAN_LINE chars).
+        intent_line = line if len(line) <= _MAX_SCAN_LINE else line[:_MAX_SCAN_LINE]
         for pat, sev, name, desc in _INTENT_PATTERNS:
-            m = pat.search(line)
+            m = pat.search(intent_line)
             if m:
                 findings.append(
                     {
@@ -2718,9 +2732,7 @@ def _is_skillaudit_catalog_json(content: str, file_path: Path) -> bool:
     if not isinstance(rules, list) or len(rules) < 5:
         return False
     rule_shaped = sum(
-        1
-        for r in rules
-        if isinstance(r, dict) and isinstance(r.get("patterns"), list) and ("id" in r or "name" in r)
+        1 for r in rules if isinstance(r, dict) and isinstance(r.get("patterns"), list) and ("id" in r or "name" in r)
     )
     # Overwhelming majority must be rule-shaped — a single object that
     # happens to have a "rules" key cannot trip this.
@@ -2793,16 +2805,9 @@ def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
             bin_ext = "binary:" + Path(rel).suffix.lower()
             bin_cache_on = _cache_enabled()
 
-            if (
-                bin_cache_on
-                and bin_content_hash
-                and not _cache_deep_enabled()
-                and _scan_cache_get is not None
-            ):
+            if bin_cache_on and bin_content_hash and not _cache_deep_enabled() and _scan_cache_get is not None:
                 try:
-                    bin_cached = _scan_cache_get(
-                        bin_content_hash, _CATALOG_HASH, __version__, file_ext=bin_ext
-                    )
+                    bin_cached = _scan_cache_get(bin_content_hash, _CATALOG_HASH, __version__, file_ext=bin_ext)
                 except Exception:  # pragma: no cover — cache must never break a scan
                     bin_cached = None
                 if bin_cached is not None:
@@ -2826,11 +2831,7 @@ def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
                     f["file"] = rel
                     findings_bin.append(f)
 
-            if (
-                bin_cache_on
-                and bin_content_hash
-                and _scan_cache_put is not None
-            ):
+            if bin_cache_on and bin_content_hash and _scan_cache_put is not None:
                 try:
                     _scan_cache_put(
                         bin_content_hash,
@@ -2891,9 +2892,7 @@ def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
     cache_on = _cache_enabled()
     if cache_on and not _cache_deep_enabled() and _scan_cache_get is not None:
         try:
-            cached = _scan_cache_get(
-                content_hash, _CATALOG_HASH, __version__, file_ext=file_ext
-            )
+            cached = _scan_cache_get(content_hash, _CATALOG_HASH, __version__, file_ext=file_ext)
         except Exception:  # pragma: no cover — cache must never break a scan
             cached = None
         if cached is not None:
@@ -2928,9 +2927,7 @@ def _scan_one_file_skillaudit(file_path: Path) -> list[dict[str, Any]]:
                 # shallow copy minus the file path
                 f_copy = {k: v for k, v in f.items() if k != "file"}
                 to_cache.append(f_copy)
-            _scan_cache_put(
-                content_hash, _CATALOG_HASH, __version__, to_cache, file_ext=file_ext
-            )
+            _scan_cache_put(content_hash, _CATALOG_HASH, __version__, to_cache, file_ext=file_ext)
         except Exception:  # pragma: no cover — cache must never break a scan
             pass
 
@@ -2964,9 +2961,7 @@ def scan_path(plugin_root: Path) -> tuple[list[dict[str, Any]], int]:
     return _scan_path_parallel(plugin_root, files)
 
 
-def _scan_path_serial(
-    plugin_root: Path, files: list[Path]
-) -> tuple[list[dict[str, Any]], int]:
+def _scan_path_serial(plugin_root: Path, files: list[Path]) -> tuple[list[dict[str, Any]], int]:
     """Serial scan loop — routes through `_scan_one_file_skillaudit`.
 
     Up through v2.103.x this was an independent re-implementation of
@@ -3013,9 +3008,7 @@ def _scan_path_serial(
     return all_findings, files_scanned
 
 
-def _scan_path_parallel(
-    plugin_root: Path, files: list[Path]
-) -> tuple[list[dict[str, Any]], int]:
+def _scan_path_parallel(plugin_root: Path, files: list[Path]) -> tuple[list[dict[str, Any]], int]:
     """Parallel scan path — dispatches per-file work via parallel_scan.
 
     Encodes the plugin root into ``CPV_SKILLAUDIT_WORKER_PLUGIN_ROOT``
@@ -3107,9 +3100,7 @@ def _scan_path_parallel(
         #   - empty file (sentinel "empty") → counted
         #   - scanned non-empty file (any real finding OR sentinel
         #     "scanned") → counted
-        if had_sentinel or any(
-            not f.get("_skillaudit_sentinel") for f in scan_result.findings
-        ):
+        if had_sentinel or any(not f.get("_skillaudit_sentinel") for f in scan_result.findings):
             files_scanned += 1
 
     return all_findings, files_scanned

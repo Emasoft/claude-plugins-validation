@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import math
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -60,15 +61,28 @@ FIXTURES: list[tuple[str, str, int]] = [
 
 
 @pytest.fixture(autouse=True)
-def _reset_module_cache() -> None:
-    """Reset the module-level vocab cache and path before each test.
+def _reset_module_cache() -> Iterator[None]:
+    """Reset the module-level vocab cache and path before AND after each test.
 
-    Tests that force the vocab missing mutate module globals; this fixture
-    restores a clean state so test order never matters.
+    Tests that force the vocab missing mutate module globals (``_RANKS``,
+    ``_RANKS_LOAD_FAILED``, ``_VOCAB_PATH``). WITHOUT a teardown the LAST such
+    test leaks the bad state (``_RANKS_LOAD_FAILED=True`` / a bogus
+    ``_VOCAB_PATH``) to whatever test file runs next in CI's single-process
+    serial run — forcing the Tier-3 heuristic that OVER-estimates and breaking
+    unrelated token-budget assertions (e.g. ``test_issue_51``'s under-cap
+    negative). Restoring a clean state on the way OUT too makes test order
+    irrelevant in-file AND cross-file. (xdist masks this because each worker is
+    a separate process; CI's serial ``pytest tests/ -v`` does not.)
     """
-    cte._RANKS = None
-    cte._RANKS_LOAD_FAILED = False
-    cte._VOCAB_PATH = Path(cte.__file__).parent / "data" / "o200k_base.tiktoken.gz"
+
+    def _clean() -> None:
+        cte._RANKS = None
+        cte._RANKS_LOAD_FAILED = False
+        cte._VOCAB_PATH = Path(cte.__file__).parent / "data" / "o200k_base.tiktoken.gz"
+
+    _clean()
+    yield
+    _clean()
 
 
 # ---------------------------------------------------------------------------
