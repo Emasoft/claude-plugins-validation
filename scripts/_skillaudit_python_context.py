@@ -29,7 +29,7 @@ from typing import Final, Literal
 
 from _skillaudit_markdown_context import _is_charset_detection_vocab  # type: ignore[import-not-found]
 
-ContextVerdict = Literal["safe_literal", "safe_doc", "suspect", "unknown"]
+ContextVerdict = Literal["safe_literal", "safe_doc", "code_fence_neutral", "suspect", "unknown"]
 
 # r03 FP iter (2026-05-28) — env-var names whose presence as a string
 # literal in the surrounding scope means a dynamic ``os.environ[var] = …``
@@ -1019,6 +1019,65 @@ def _is_re_module_pattern_call(node: ast.AST) -> bool:
     )
 
 
+def _re_compile_wrapper_names(tree: ast.AST) -> frozenset[str]:
+    """Return the names of local functions that are PROVABLY thin
+    ``re.compile`` wrappers — body is exactly ``return re.compile(<first
+    param>, …)`` (an optional leading docstring is allowed). A string
+    argument to such a function is a regex pattern literal, identical to a
+    direct ``re.compile(...)`` argument.
+
+    Security plugins routinely define ``def _re(p): return re.compile(p,
+    re.M)`` / ``def _re_i(p): return re.compile(p, re.I|re.M)`` and pass
+    every attack-pattern regex through them (ai-maestro-janitor's
+    ``scripts/lib/*_patterns.py``). The strict single-return shape is what
+    keeps this safe: a function that ALSO does anything with the param —
+    exec it, open it, send it — has more than one body statement, so it
+    cannot masquerade as a compile wrapper and its argument stays visible.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        params = list(node.args.posonlyargs) + list(node.args.args)
+        if not params:
+            continue
+        first_param = params[0].arg
+        body = list(node.body)
+        # Allow (and skip) a single leading docstring.
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(getattr(body[0], "value", None), ast.Constant)
+            and isinstance(body[0].value.value, str)  # type: ignore[attr-defined]
+        ):
+            body = body[1:]
+        if len(body) != 1 or not isinstance(body[0], ast.Return):
+            continue
+        ret = body[0].value
+        if not isinstance(ret, ast.Call):
+            continue
+        f = ret.func
+        if not (isinstance(f, ast.Attribute) and f.attr == "compile" and isinstance(f.value, ast.Name) and f.value.id == "re"):
+            continue
+        if ret.args and isinstance(ret.args[0], ast.Name) and ret.args[0].id == first_param:
+            names.add(node.name)
+    return frozenset(names)
+
+
+def _is_re_pattern_call_or_wrapper(node: ast.AST, wrapper_names: frozenset[str]) -> bool:
+    """True iff ``node`` is a stdlib ``re.<func>(...)`` call OR a call to a
+    local function proven (by :func:`_re_compile_wrapper_names`) to be a thin
+    ``re.compile`` wrapper. Used to treat ``_re_i(r"…")`` exactly like
+    ``re.compile(r"…")`` for regex-pattern-literal suppression."""
+    if _is_re_module_pattern_call(node):
+        return True
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in wrapper_names
+    )
+
+
 def _re_literal_feeds_exec_sink(tree: ast.AST, target: ast.Constant) -> bool:
     """True iff the regex-pattern Constant ``target`` is consumed by a dangerous
     exec sink — ``os.system``/``eval``/``exec``/… directly, or ``subprocess.*``/
@@ -1042,6 +1101,152 @@ def _re_literal_feeds_exec_sink(tree: ast.AST, target: ast.Constant) -> bool:
             return True
         if qn in _SHELL_CALL_FQNAMES and _shell_kwarg_is_true(node):
             return True
+    return False
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Issue #57 Fix A — absolute-path linter data-vs-sink discriminator.
+# A sensitive path literal (`/etc/passwd`, `/etc/hosts`, …) sitting in an
+# inert pure-literal container (a detector's pattern list, a test-input
+# fixture dict) is NOT a live finding; one that flows into a filesystem /
+# exec / network sink IS. The distinction is computed intrinsically from
+# the AST — never self-declared by the scanned plugin.
+# ──────────────────────────────────────────────────────────────────────
+
+# Filesystem / network sinks that CONSUME a path string as a live operation
+# (open/read/write/delete the path, or send it over the network).
+_FS_NET_SINK_FQNAMES: Final[frozenset[str]] = frozenset(
+    {
+        "open", "io.open", "os.open", "os.fdopen",
+        "os.remove", "os.unlink", "os.rmdir", "os.removedirs",
+        "os.rename", "os.replace", "os.truncate", "os.chmod",
+        "os.chown", "os.mkdir", "os.makedirs", "os.scandir",
+        "os.listdir", "os.stat", "os.lstat", "os.readlink", "os.symlink",
+        "os.link", "os.access", "os.walk", "os.chdir",
+        "pathlib.Path", "Path",
+        "shutil.copy", "shutil.copy2", "shutil.copyfile", "shutil.copytree",
+        "shutil.move", "shutil.rmtree", "shutil.copyfileobj",
+        "requests.get", "requests.post", "requests.put", "requests.delete",
+        "requests.head", "requests.patch", "requests.request",
+        "httpx.get", "httpx.post", "httpx.request",
+        "urllib.request.urlopen", "urlopen",
+    }
+)
+
+
+def _path_literal_feeds_fs_or_exec_sink(tree: ast.AST, target: ast.Constant) -> bool:
+    """True iff the path-string Constant ``target`` is consumed by a live
+    filesystem / exec / network sink — modeled on
+    ``_re_literal_feeds_exec_sink`` but with the FS/network sink set added.
+
+    A sensitive path literal is normally inert (a detector pattern or test
+    fixture), but the moment its string flows into ``open(...)`` /
+    ``subprocess.run(...)`` / ``os.remove(...)`` / ``requests.get(...)`` it
+    IS a live operation, so the data-vs-sink suppression must NOT apply.
+    Conservative: ANY subprocess/os-exec call carrying the path keeps it
+    visible (a path argument is plausibly executed or is a binary path —
+    either way not inert data worth suppressing). (issue #57 Fix A)
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        qn = _node_qualname(node.func)
+        if qn is None:
+            continue
+        in_args = any(sub is target for arg in node.args for sub in ast.walk(arg))
+        in_kwargs = any(sub is target for kw in node.keywords for sub in ast.walk(kw.value))
+        if not (in_args or in_kwargs):
+            continue
+        if qn in _STRING_CMD_EXEC_FQNAMES or qn in _FS_NET_SINK_FQNAMES or qn in _SHELL_CALL_FQNAMES:
+            return True
+    return False
+
+
+def _outermost_pure_literal_container(tree: ast.AST, target: ast.AST) -> ast.AST | None:
+    """Return the outermost List/Tuple/Set/Dict that contains ``target``
+    through an unbroken chain of PURE-literal containers, or ``None`` if
+    ``target`` is not inside any pure container. A container is pure iff
+    every element is a Constant or a nested pure container (no Name / Call /
+    f-string / unpacking)."""
+
+    def _is_pure(n: ast.AST) -> bool:
+        if isinstance(n, ast.Constant):
+            return True
+        if isinstance(n, (ast.List, ast.Tuple, ast.Set)):
+            return all(_is_pure(e) for e in n.elts)
+        if isinstance(n, ast.Dict):
+            return all(
+                (k is None or _is_pure(k)) and _is_pure(v)
+                for k, v in zip(n.keys, n.values, strict=False)
+            ) and None not in n.keys  # **unpack → impure
+        return False
+
+    parents: dict[int, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[id(child)] = node
+
+    outer: ast.AST | None = None
+    cur: ast.AST = target
+    while True:
+        parent = parents.get(id(cur))
+        if isinstance(parent, (ast.List, ast.Tuple, ast.Set, ast.Dict)) and _is_pure(parent):
+            outer = parent
+            cur = parent
+            continue
+        break
+    return outer
+
+
+def abs_path_const_is_inert_py_data(
+    source: str, line: int, matched_text: str, is_test_file: bool, tree: ast.AST | None = None
+) -> bool:
+    """Issue #57 Fix A entry point. True iff the absolute-path token
+    ``matched_text`` on ``line`` of Python ``source`` is INERT data — a
+    string Constant reachable through pure-literal containers from a
+    module-level assignment (ANY file) or, in a TEST file, sitting inside a
+    pure-literal container (a test-input fixture) — AND it does NOT feed a
+    live fs/exec/network sink. Defaults to False (keep visible) on any
+    uncertainty, syntax error, or sink flow.
+    """
+    if tree is None:
+        try:
+            tree = ast.parse(source)
+        except (SyntaxError, ValueError):
+            return False
+    # Locate the covering string Constant that carries the matched path.
+    needle = matched_text.rstrip("/.")
+    target: ast.Constant | None = None
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            continue
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", None)
+        if start is None or end is None or not (start <= line <= end):
+            continue
+        if matched_text in node.value or needle in node.value:
+            target = node
+            break
+    if target is None:
+        return False
+    # Sink guard — a path feeding a live sink is never inert (keep visible).
+    if _path_literal_feeds_fs_or_exec_sink(tree, target):
+        return False
+    # A sensitive path inside a regex PATTERN literal (``re.compile(r"…")`` or
+    # a local ``_re()`` compile-wrapper arg) is a detector's matching
+    # vocabulary, not a path the plugin opens — the dominant shape in a
+    # security plugin's ``*_patterns.py`` libraries. ``_match_inside_re_
+    # pattern_literal`` carries its own exec-sink guard, so a pattern that
+    # feeds exec still stays visible.
+    if _match_inside_re_pattern_literal(tree, line, source, matched_text):
+        return True
+    # Module-level pure-data container assignment qualifies in ANY file.
+    if _node_is_in_module_level_pure_data_assign(tree, target):
+        return True
+    # In a TEST file, a path inside a pure-literal container is inert
+    # test-input data (assigned locally or passed to a non-sink helper).
+    if is_test_file and _outermost_pure_literal_container(tree, target) is not None:
+        return True
     return False
 
 
@@ -1510,9 +1715,14 @@ def _match_inside_re_pattern_literal(tree: ast.AST, line: int, source: str, matc
     if _re_literal_feeds_exec_sink(tree, target):
         return False
 
+    # Local thin ``re.compile`` wrappers (``def _re(p): return
+    # re.compile(p, …)``) are treated exactly like ``re.<func>`` calls, so a
+    # string argument to ``_re_i(r"…")`` counts as a regex pattern literal.
+    wrapper_names = _re_compile_wrapper_names(tree)
+
     # Shape 1 — target inside the first arg of an re.<func>(...) call.
     for node in ast.walk(tree):
-        if _is_re_module_pattern_call(node):
+        if _is_re_pattern_call_or_wrapper(node, wrapper_names):
             args = node.args  # type: ignore[attr-defined]
             if args and any(sub is target for sub in ast.walk(args[0])):
                 return True
@@ -1546,7 +1756,7 @@ def _match_inside_re_pattern_literal(tree: ast.AST, line: int, source: str, matc
         # Search the same tree for ``re.<func>(var, ...)`` where ``var`` is
         # in target_variable_names. Also accept ``for p in var: re.<func>(p)``.
         for node in ast.walk(tree):
-            if not _is_re_module_pattern_call(node):
+            if not _is_re_pattern_call_or_wrapper(node, wrapper_names):
                 continue
             args = node.args  # type: ignore[attr-defined]
             if not args:
@@ -1569,7 +1779,7 @@ def _match_inside_re_pattern_literal(tree: ast.AST, line: int, source: str, matc
                 continue
             # Inside the loop body, look for re.<func>(loop_var, ...)
             for body_node in ast.walk(node):
-                if not _is_re_module_pattern_call(body_node):
+                if not _is_re_pattern_call_or_wrapper(body_node, wrapper_names):
                     continue
                 body_args = body_node.args  # type: ignore[attr-defined]
                 if body_args and isinstance(body_args[0], ast.Name) and body_args[0].id == loop_var:
@@ -1580,12 +1790,233 @@ def _match_inside_re_pattern_literal(tree: ast.AST, line: int, source: str, matc
     for node in ast.walk(tree):
         if not isinstance(node, (ast.GeneratorExp, ast.ListComp, ast.SetComp)):
             continue
-        if not _is_re_module_pattern_call(node.elt):
+        if not _is_re_pattern_call_or_wrapper(node.elt, wrapper_names):
             continue
         for gen in node.generators:
             if any(sub is target for sub in ast.walk(gen.iter)):
                 return True
 
+    return False
+
+
+# Metadata / description field NAMES whose string value is human-readable
+# documentation of a detection rule (or any record), never an executable
+# action. A SECURITY plugin's *_patterns.py rule catalogs name and describe
+# every rule in their own attack vocabulary.
+_METADATA_FIELD_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "id", "rule_id", "ruleid", "name", "title", "label", "description",
+        "desc", "summary", "severity", "category", "owasp", "owasp_asi",
+        "cwe", "cwe_id", "references", "reference", "remediation",
+        "mitigation", "message", "note", "notes", "reason", "rationale",
+        "explanation", "help", "hint", "doc", "docs", "tags", "tag",
+    }
+)
+
+
+def _match_is_identifier_fragment(tree: ast.AST, source: str, line: int, match: str) -> bool:
+    """True iff every occurrence of ``match`` on ``line`` is a FRAGMENT of a
+    larger Python identifier (``SETUID`` inside ``_SETUID_CHMOD``). A name is
+    not an action; ``os.setuid(0)`` (standalone) stays visible.
+
+    Two guards keep this from over-firing:
+    * the match must be a CODE identifier, NOT text inside a string literal —
+      a word inside an f-string / docstring is documentation, handled by the
+      safe_doc / slug paths, never suppressed here;
+    * "embedded" is START/END-word-aware: a match is a fragment only if a
+      WORD-char border CONTINUES one of its WORD-char ends into a larger
+      identifier. ``SECRET_KEY =`` (left end ``S`` preceded by ``_`` in
+      ``_WP_DEFAULT_SECRET_KEY``) is embedded; ``yaml.load(`` (right end ``(``,
+      not a word char) is a real call and stays visible.
+
+    Returns False if any occurrence is standalone, or the token does not appear
+    on the line — defaults to KEEP."""
+    if not match:
+        return False
+    lines = source.splitlines()
+    if not (0 <= line - 1 < len(lines)):
+        return False
+    # The match must be a CODE identifier — if it falls inside a string
+    # literal (a plain string Constant OR an f-string / JoinedStr span), it is
+    # documentation text, not a name fragment, and is handled by the safe_doc /
+    # slug paths.
+    for node in ast.walk(tree):
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", None)
+        if start is None or end is None or not (start <= line <= end):
+            continue
+        if isinstance(node, ast.JoinedStr):
+            return False
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and match in node.value:
+            return False
+    def _is_word(ch: str) -> bool:
+        return bool(ch) and (ch.isalnum() or ch == "_")
+
+    starts_word = _is_word(match[:1])
+    ends_word = _is_word(match[-1:])
+    text = lines[line - 1]
+    found = False
+    for m in re.finditer(re.escape(match), text):
+        found = True
+        before = text[m.start() - 1] if m.start() > 0 else ""
+        after = text[m.end()] if m.end() < len(text) else ""
+        # A WORD-char border extends a WORD-char END of the match into a larger
+        # identifier (``_SECRET_KEY`` → ``_WP_DEFAULT_SECRET_KEY``;
+        # ``_scan_dockerfile_setuid``). ``yaml.load(`` ends in ``(`` (not a word
+        # char) so the argument after it does NOT extend it → stays visible;
+        # ``os.setuid(0)`` is standalone (``.``/``(`` borders) → stays visible.
+        left_embed = starts_word and _is_word(before)
+        right_embed = ends_word and _is_word(after)
+        if not (left_embed or right_embed):
+            return False
+    return found
+
+
+def _match_inside_metadata_field_string(tree: ast.AST, line: int, source: str, match: str) -> bool:
+    """True iff ``match`` sits inside a string Constant that is the VALUE of a
+    metadata/description field — a ``name=``/``description=``/``id=`` keyword
+    argument of a constructor call, or a Dict entry with such a key. These are
+    human-readable docs of what a rule DETECTS, never an executable action.
+    Exec-sink guarded: a description string that also flows into a shell/exec
+    sink stays visible."""
+    if not source:
+        return False
+    lines = source.splitlines()
+    if not (0 <= line - 1 < len(lines)) or (match and match not in lines[line - 1]):
+        return False
+    target: ast.Constant | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            start = getattr(node, "lineno", None)
+            end = getattr(node, "end_lineno", None)
+            if start is not None and end is not None and start <= line <= end and (not match or match in node.value):
+                target = node
+                break
+    if target is None:
+        return False
+    if _re_literal_feeds_exec_sink(tree, target):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg in _METADATA_FIELD_NAMES:
+            if any(sub is target for sub in ast.walk(node.value)):
+                return True
+        if isinstance(node, ast.Dict):
+            for k, v in zip(node.keys, node.values, strict=False):
+                if (
+                    isinstance(k, ast.Constant)
+                    and isinstance(k.value, str)
+                    and k.value in _METADATA_FIELD_NAMES
+                    and any(sub is target for sub in ast.walk(v))
+                ):
+                    return True
+    return False
+
+
+# A slug string is a SINGLE identifier-like token (kebab / snake / dotted
+# case), no whitespace and no shell / URL metacharacters — a rule-ID
+# reference, an env-var name, a capability name, a registry key. The leading
+# char must be alphanumeric (so a ``/etc/passwd`` path or a ``http://`` URL
+# does NOT qualify), and slashes/colons are excluded (no paths, no URLs).
+_SLUG_STRING_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9][\w.\-]*$")
+
+
+def _match_inside_slug_string(tree: ast.AST, line: int, source: str, match: str) -> bool:
+    """True iff ``match`` sits inside a string Constant whose ENTIRE value is a
+    single identifier-like slug (a rule-ID reference / env-var name /
+    capability name / registry key). A slug is a NAME, never a command or
+    payload. Exec/fs/net-sink guarded — a slug that flows into a live sink
+    (``subprocess.run([slug])``) stays visible."""
+    if not source:
+        return False
+    lines = source.splitlines()
+    if not (0 <= line - 1 < len(lines)) or (match and match not in lines[line - 1]):
+        return False
+    # An f-string (JoinedStr) is formatted documentation text, not a slug
+    # reference — a single word inside one is not a rule-ID / env-var name.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            fstart = getattr(node, "lineno", None)
+            fend = getattr(node, "end_lineno", None)
+            if fstart is not None and fend is not None and fstart <= line <= fend:
+                return False
+    target: ast.Constant | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            start = getattr(node, "lineno", None)
+            end = getattr(node, "end_lineno", None)
+            if start is not None and end is not None and start <= line <= end and (not match or match in node.value):
+                target = node
+                break
+    if target is None:
+        return False
+    if not _SLUG_STRING_RE.match(str(target.value).strip()):
+        return False
+    if _path_literal_feeds_fs_or_exec_sink(tree, target):
+        return False
+    return True
+
+
+# Invisible / zero-width / bidi / format characters — the vocabulary a
+# unicode-smuggling DETECTOR necessarily contains to recognise them. Written
+# as explicit \u escapes (never literal invisibles) so this source stays
+# readable and does not trip CPV's own invisible-unicode self-scan.
+_INVISIBLE_CODEPOINTS: Final[frozenset[int]] = frozenset(
+    {
+        0x200B, 0x200C, 0x200D, 0x200E, 0x200F,  # zero-width + LRM/RLM
+        0x2060, 0x2061, 0x2062, 0x2063, 0x2064,  # word-joiner + invisible math
+        0x202A, 0x202B, 0x202C, 0x202D, 0x202E,  # bidi embedding/override
+        0x2066, 0x2067, 0x2068, 0x2069,          # bidi isolates
+        0xFEFF, 0x00AD, 0x180E, 0x061C,          # BOM, soft-hyphen, MVS, ALM
+    }
+)
+
+
+def _has_invisible_char(text: str) -> bool:
+    """True iff ``text`` contains any invisible / zero-width / bidi / format
+    character from :data:`_INVISIBLE_CODEPOINTS`."""
+    return any(ord(c) in _INVISIBLE_CODEPOINTS for c in text)
+
+
+def _strip_invisible_chars(text: str) -> str:
+    """Return ``text`` with every invisible / format character removed."""
+    return "".join(c for c in text if ord(c) not in _INVISIBLE_CODEPOINTS)
+
+
+def _invisible_unicode_is_detector_vocab(tree: ast.AST, line: int, source: str) -> bool:
+    """True iff the invisible / bidi / zero-width characters on ``line`` form a
+    DETECTOR's charset vocabulary — they sit inside a regex pattern literal
+    (``re.compile`` / ``_re()`` char-class) OR a string Constant composed
+    ONLY of invisible / format / control characters
+    (``_ZERO_WIDTH = "\\u200b\\u200c…"``). Invisible chars interspersed in
+    VISIBLE text (a smuggling payload) are NOT detector vocabulary and stay
+    visible."""
+    lines = source.splitlines()
+    if not (0 <= line - 1 < len(lines)):
+        return False
+    if not _has_invisible_char(lines[line - 1]):
+        return False
+    target: ast.Constant | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            start = getattr(node, "lineno", None)
+            end = getattr(node, "end_lineno", None)
+            if start is not None and end is not None and start <= line <= end and _has_invisible_char(node.value):
+                target = node
+                break
+    if target is None:
+        return False
+    # (a) inside a regex pattern literal call (stdlib re.<func> or _re wrapper).
+    wrapper_names = _re_compile_wrapper_names(tree)
+    for node in ast.walk(tree):
+        if _is_re_pattern_call_or_wrapper(node, wrapper_names):
+            args = node.args  # type: ignore[attr-defined]
+            if args and any(sub is target for sub in ast.walk(args[0])):
+                return True
+    # (b) pure charset — the Constant is ONLY invisible/format chars (after
+    # removing them nothing visible remains). A payload mixes invisibles into
+    # visible text, so its stripped form is non-empty → stays visible.
+    if _strip_invisible_chars(str(target.value)).strip() == "":
+        return True
     return False
 
 
@@ -1710,6 +2141,57 @@ def classify(
     # cannot reach a shell whether it spells `exec(`, `rm -rf /`, or
     # `Ignore previous instructions`.
     if _match_inside_pattern_catalog(tree, line, match):
+        return "safe_literal"
+
+    # Janitor FP wave (2026-05-30) — a SECURITY plugin's detection-rule
+    # catalogs (``scripts/lib/*_patterns.py``) name and describe every rule
+    # in its own security vocabulary. Three intrinsic shapes:
+    #
+    #  A. The matched keyword is a FRAGMENT of a larger Python identifier
+    #     (``_SETUID_CHMOD = _re(...)`` — ``SETUID`` is part of the variable
+    #     name). A name is not an action; the action would be a CALL
+    #     (``os.setuid(0)``) where the keyword is standalone, not embedded.
+    #     Gated to NON-prose-vector rules.
+    #  B. The matched keyword is inside a metadata/description string FIELD
+    #     (``name="setuid/setgid chmod() after open"``, ``id="race-setuid-…"``)
+    #     of a rule-definition constructor / dict — human-readable docs of
+    #     what the rule DETECTS, never executed. Non-prose-vector → suppress;
+    #     prose-vector → DEMOTE (a rule NAME/description in a NON-instruction-
+    #     loadable ``.py`` catalog is never a publish-blocking CRITICAL, but a
+    #     prompt-injection phrase stays VISIBLE at NIT per the iron rule).
+    #     Exec-sink-guarded either way.
+    #  C. Invisible/bidi/zero-width characters that are a detector's own
+    #     charset vocabulary (regex char-class or a pure all-invisible string
+    #     constant). The smuggling-payload shape (invisibles in visible text)
+    #     stays visible.
+    #  D. The matched keyword is inside a SLUG string — a single identifier-like
+    #     token used as a rule-ID reference / env-var name / capability name
+    #     (``rule_by_id["…ptrace…"]``, ``"LD_PRELOAD"``, ``== "race-setuid-…"``).
+    #     A slug is a name, not a command. Sink-guarded.
+    #
+    # NON-prose-vector matches (A/B/D/module-data) are inert detection data →
+    # SUPPRESS. PROSE-vector matches (DATA_EXFIL / INDIRECT_PROMPT_INJECT /
+    # PROMPT_INJECT) that are the detector's own vocabulary — an exfil-domain
+    # blocklist, a rule NAME/description, a slug — DEMOTE to NIT: they stay
+    # VISIBLE (the agent reviews them) but never publish-block a security
+    # plugin. A real injection / exfil instruction in INSTRUCTION-LOADABLE
+    # prose (SKILL.md / agents) is a different surface (markdown classifier)
+    # and stays at full severity.
+    _is_prose = _rule_is_prose_vector(rule_id)
+    if not _is_prose and _match_is_identifier_fragment(tree, source, line, match):
+        return "safe_literal"
+    if not _is_prose and _match_inside_slug_string(tree, line, source, match):
+        return "safe_literal"
+    if _match_inside_metadata_field_string(tree, line, source, match):
+        return "safe_literal" if not _is_prose else "code_fence_neutral"
+    if _is_prose and (
+        _match_inside_module_data_literal(tree, line, source, match)
+        or _match_inside_slug_string(tree, line, source, match)
+    ):
+        return "code_fence_neutral"
+    if rule_id in ("INVISIBLE_UNICODE_RAW", "INDIRECT_PROMPT_INJECT") and _invisible_unicode_is_detector_vocab(
+        tree, line, source
+    ):
         return "safe_literal"
 
     # r03 trailofbits FP iteration (2026-05-27) — REGEX_DOS pattern
@@ -2253,6 +2735,43 @@ def _weak_hash_is_identity_usage(source: str, line_idx: int) -> bool:
                     if isinstance(parent, ast.NamedExpr):
                         if isinstance(parent.target, ast.Name) and parent.target.id in _IDENTITY_TARGET_NAMES:
                             return True
+
+    # (4) MULTI-LINE / chained shape the line-based checks (1)/(2) miss — walk
+    #     up to the enclosing Assign/AnnAssign and inspect its VALUE subtree for
+    #     a truncating slice (``[:N]``) or a ``.hexdigest()`` chain to an
+    #     identity-named target, regardless of how many lines the call spans:
+    #         sig = hashlib.sha1(
+    #             ",".join(...).encode()
+    #         ).hexdigest()[:8]
+    #     The security-sensitive-target override is preserved (a multi-line
+    #     ``password_digest = hashlib.sha1(...)[:8]`` stays VISIBLE).
+    for stmt in ast.walk(tree):
+        if not isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+            continue
+        value = stmt.value
+        if value is None:
+            continue
+        if not any(
+            isinstance(n, ast.Call)
+            and _node_qualname(n.func) in _WEAK_HASH_FQNAMES
+            and getattr(n, "lineno", 0) <= line <= getattr(n, "end_lineno", 0)
+            for n in ast.walk(value)
+        ):
+            continue
+        targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+        tgt_names = [t.id for t in targets if isinstance(t, ast.Name)]
+        # security-sensitive target → NEVER identity usage (audit MAJOR #8).
+        if any(any(stem in tn.lower() for stem in _SECURITY_TARGET_STEMS) for tn in tgt_names):
+            return False
+        # truncating slice anywhere in the value subtree → identity lookup key.
+        if any(isinstance(n, ast.Subscript) and isinstance(n.slice, ast.Slice) for n in ast.walk(value)):
+            return True
+        # .hexdigest() chain assigned to an identity-named target.
+        if any(
+            isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "hexdigest"
+            for n in ast.walk(value)
+        ) and any(tn in _IDENTITY_TARGET_NAMES for tn in tgt_names):
+            return True
     return False
 
 

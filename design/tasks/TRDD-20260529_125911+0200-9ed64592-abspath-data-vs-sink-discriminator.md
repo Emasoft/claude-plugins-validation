@@ -1,10 +1,19 @@
 ---
 trdd-id: 9ed64592-6af1-4733-bea4-a95e79a4e8ba
 title: Absolute-path linter data-vs-sink AST discriminator (issue #57 Fix A, deferred)
-status: not-started
+status: completed
 created: 2026-05-29T12:59:11+0200
-updated: 2026-05-29T12:59:11+0200
+updated: 2026-05-31T00:06:01+0200
 ---
+
+> **IMPLEMENTED 2026-05-31.** Shipped as `abs_path_const_is_inert_py_data`
+> in `scripts/_skillaudit_python_context.py` (sink-guarded via
+> `_path_literal_feeds_fs_or_exec_sink`, regex-literal-aware via
+> `_match_inside_re_pattern_literal`, module-level AND test-file-local
+> pure-literal containers) wired into `scan_file_for_absolute_paths`. Done
+> as part of the same session that cleared the ai-maestro-janitor FP wave
+> (99→4 CRITICAL). Two-sided regression tests in
+> `tests/test_janitor_fp_wave_and_issues_57_59.py::TestIssue57FixAAbsPath`.
 
 <!-- markdownlint-disable-next-line MD025 -->
 # TRDD-9ed64592 — Absolute-path linter data-vs-sink AST discriminator

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-30T07:16:55+00:00",
+  "computed_at": "2026-05-30T21:54:28+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:049e1deb7962f72fb116788b63b0f53219e9157ea05417c66e0eed7ac8fb0953",
@@ -139,8 +139,8 @@
     "scripts/_plugin_verify_hashes.py": "sha256:ca2fbfe046122797dd2915a4ffaae43e21f3c25b1f7f9613f7a512f24934c063",
     "scripts/_skillaudit_json_context.py": "sha256:e450484d49a852eb6ac8af65d82df86481cf27f222ebdbc31520759632b25cfb",
     "scripts/_skillaudit_markdown_context.py": "sha256:066a4358ce86bf6bc765ce2429878ac1904d1df1c3b22c1bb9efb6ab5cf5aab9",
-    "scripts/_skillaudit_python_context.py": "sha256:9c7e65bf0d5490738ee0345e69f02d34b86b6fe2fffaaeffce6790a0aa79e54f",
-    "scripts/_skillaudit_shell_context.py": "sha256:898e26a94d521aed54f1c4ca1abdc93360b7db431149915bb6e82b4f1c0aa087",
+    "scripts/_skillaudit_python_context.py": "sha256:e332967ceaa0a167c9e72b74a06abce4717a026dfccb3cd3b6ee8fde1785c84c",
+    "scripts/_skillaudit_shell_context.py": "sha256:413e26772fedc2617395cc1b51b530ad8b1010736277bbcb790ac5310d961a3a",
     "scripts/_skillaudit_typescript_context.py": "sha256:ce7427887d191cc8b0c6ccd8805766198e1b1b1db0e71da08a4b9fc43f9bcfac",
     "scripts/_skillaudit_yaml_context.py": "sha256:be871acaa3bb9ff0c03e13cf807a9c9fb8a09b71d166319612598bdb01189da4",
     "scripts/add_component.py": "sha256:14f63aeb8ac4279c884c0aba50fb49bccbfe0f7e35bd02dc2a254c9a8ac0e1e1",
@@ -197,7 +197,7 @@
     "scripts/cpv_upstream_plugin_json.py": "sha256:0405551a8f53d156ad81e2b77104554f4f55e014812b01464bb35561411fee73",
     "scripts/cpv_validate_benchmark.py": "sha256:f357db441c8408d0a3821beb7ba5d9ddedd516cd3a3ea71b79a2eda904c417da",
     "scripts/cpv_validate_gitmodules.py": "sha256:a6c9a3b5688d6fea97ef12af942cea846475cbe8c8e2fcd467562cbab8d45eb7",
-    "scripts/cpv_validation_common.py": "sha256:58230e268ee7bf5b982d1c23c45f9f3f31c6ee029cf4260990722572e5de743b",
+    "scripts/cpv_validation_common.py": "sha256:549cb13f0ed80e703f8fd1affad338bafd92370ca8c3deb691b6545a27ca8a24",
     "scripts/data/o200k_base.tiktoken.gz": "sha256:f8dd2003cbdc57252f4a0fed49fe79448b005a025512a5c5793b43b7f744bcda",
     "scripts/detect_language.py": "sha256:257731e571b9ffc9fff3813fde0e865a0e23024d6de45193b40b4dbf3f30d1a3",
     "scripts/detect_lockfiles.py": "sha256:17c03bd5d381395f6348a7a2b8c2d4df99422cabdd600b98fe7be0b01ebb6971",
