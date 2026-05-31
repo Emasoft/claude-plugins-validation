@@ -226,11 +226,14 @@ class TestParallelScanIntegration:
         assert len(res) == 3
         assert all(r.error is None for r in res)
 
-    def test_scan_one_target_timeout_completes_on_clean_plugin(self, tmp_path: Path) -> None:
+    def test_scan_one_target_timeout_completes_on_clean_plugin(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """``scan_one_target(timeout_seconds=)`` uses the killable path and
         completes normally on a non-wedging plugin — returns stats, no raise."""
         import validate_security as vs
 
+        # Isolate the on-disk scan cache so this real scan does not write to the
+        # shared default cache that the xdist-parallel cache-contract tests read.
+        monkeypatch.setenv("CPV_SCAN_CACHE_DIR", str(tmp_path / "_scan_cache"))
         plugin = tmp_path / "p"
         (plugin / ".claude-plugin").mkdir(parents=True)
         (plugin / ".claude-plugin" / "plugin.json").write_text('{"name":"p","version":"1.0.0"}')
@@ -246,6 +249,13 @@ class TestParallelScanIntegration:
 class TestIssue56EnvControl:
     """#56 — env-var knobs enable supervision on the normal CPV scan path
     without a code change (mirrors CPV_SCAN_PROGRESS / CPV_MAX_SCAN_BYTES)."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate_cache_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> object:
+        """These tests run REAL scans; isolate the on-disk cache so they never
+        pollute the shared default cache the xdist cache-contract tests read."""
+        monkeypatch.setenv("CPV_SCAN_CACHE_DIR", str(tmp_path / "_scan_cache"))
+        yield
 
     def _clean_plugin(self, tmp_path: Path) -> Path:
         plugin = tmp_path / "p"
