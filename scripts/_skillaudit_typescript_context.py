@@ -258,15 +258,33 @@ def _is_hijack_var_injection(source_line: str) -> bool:
     return bool(_HIJACK_VAR_INJECTION_RE.search(source_line))
 
 
+# Rules that genuinely OVER-FIRE on legitimate test-fixture patterns, so a
+# *.test.ts / *.spec.ts match is blanket-demoted to safe_literal. These are
+# either injection-SURFACE rules (you called exec/spawn for SUT setup — the
+# argv shape, not the content, tripped them), common test-harness patterns
+# (setTimeout, temp-file writes, loops, `../` paths, regex fixtures,
+# monkeypatch), or rules whose match is intentional test DATA fed to a
+# sanitizer-under-test (XSS / SQL / SSTI / localhost SSRF fixtures).
+#
+# Recheck 2026-05-31 (security-bypass HIGH): the content-threat EXECUTION
+# rules — REVERSE_SHELL, CONTAINER_ESCAPE, PERSISTENCE, PRIVILEGE_ESC,
+# CRED_ENV_READ, TOKEN_STEAL, TOOL_POISONING, MCP_SCHEMA_POISON, the A2A_*
+# family, AGENT_MEMORY_MOD — were REMOVED from this set. They fire on a
+# specific MALICIOUS payload (`bash -i >& /dev/tcp/…`, `docker --privileged`,
+# a launchd/crontab install, reading `~/.ssh/id_rsa`), are rare in legitimate
+# tests, AND plugin test files ARE EXECUTED at publish time. Suppressing them
+# by filename alone (no content/AST check) was a false negative — a reverse
+# shell parked in `evil.spec.ts` came back non-blocking `info`. The Python
+# classifier already blocks these in `test_evil.py`; TS/JS now matches. Per
+# the project invariant, over-flagging a benign test is acceptable; hiding an
+# executed reverse shell is not.
 _TEST_FILE_BLANKET_SUPPRESS_RULES: Final[frozenset[str]] = frozenset(
     {
         "CMD_INJECTION",
         "SHELL_EXEC",
         "TIME_BOMB",
         "RESOURCE_ABUSE",
-        "PERSISTENCE",
         "FS_WRITE",
-        "PRIVILEGE_ESC",
         "PATH_TRAVERSAL",
         "OBFUSCATION",
         "REGEX_DOS",
@@ -275,7 +293,6 @@ _TEST_FILE_BLANKET_SUPPRESS_RULES: Final[frozenset[str]] = frozenset(
         "SSRF_ADVANCED",
         "URL_RAW_IP",
         "NET_SUSPICIOUS",
-        "CONTAINER_ESCAPE",
         "ENV_INJECTION",
         "ENV_RECON",
         "CROSS_TOOL_ACCESS",
@@ -283,21 +300,11 @@ _TEST_FILE_BLANKET_SUPPRESS_RULES: Final[frozenset[str]] = frozenset(
         "DESERIALIZATION",
         "XSS_INJECTION",
         "SQL_INJECTION",
-        "REVERSE_SHELL",
         "SSTI",
-        "TOOL_POISONING",
         "INTENT_DESTRUCTIVE_INTENT",
         "RECONNAISSANCE",
         "CREDENTIAL_REFERENCE",
-        "CRED_ENV_READ",
         "CRED_ENV_SAFE",
-        "TOKEN_STEAL",
-        "MCP_SCHEMA_POISON",
-        "A2A_TASK_HIJACK",
-        "A2A_DATA_LEAK",
-        "A2A_CAPABILITY_ABUSE",
-        "A2A_CROSS_AGENT_INJECT",
-        "AGENT_MEMORY_MOD",
         "URL_SUSPICIOUS",
         "INDIRECT_PROMPT_INJECT",
     }
