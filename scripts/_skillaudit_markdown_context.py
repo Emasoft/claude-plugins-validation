@@ -512,8 +512,10 @@ _DOC_ONLY_BASENAMES_MD: Final[frozenset[str]] = frozenset(
 _DOC_ONLY_DIR_PREFIXES_MD: Final[tuple[str, ...]] = (
     "docs/",
     "doc/",
-    "references/",
-    "reference/",
+    # SECURITY (bypass fix) — kept in sync with the native list: `references/`
+    # is an Agent-Skills progressive-disclosure surface (a SKILL.md points the
+    # agent at `references/x.md` to load + follow), so it is NOT inert docs.
+    # Removing it stops an attacker hiding an executable recipe there.
     "examples/",
     "example/",
     "changelog/",
