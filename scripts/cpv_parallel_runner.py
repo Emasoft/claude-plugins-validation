@@ -132,6 +132,12 @@ def parallel_scan(
     chunk_size: int = 1,
     on_error: str = "collect",
     timeout_per_file: float | None = None,
+    hard_kill_after_s: float | None = None,
+    stuck_warn_after_s: float | None = None,
+    on_event: Callable[[dict], None] | None = None,
+    state_path: Any = None,
+    resume: bool = False,
+    notify: Callable[[str], None] | None = None,
 ) -> list[ScanResult]:
     """Run ``scan_func(file)`` for each file in parallel via ``ProcessPoolExecutor``.
 
@@ -183,6 +189,33 @@ def parallel_scan(
     file_list: list[Path] = list(files)
     if not file_list:
         return []
+
+    # Issue #52 / #56 — when a HARD-KILL budget (or any supervision feature) is
+    # requested, route through the killable supervisor. ``ProcessPoolExecutor``
+    # cannot cancel a started task, so a worker wedged in a C-level regex would
+    # block ``shutdown(wait=True)`` open-endedly; the supervisor SIGKILLs the
+    # wedged worker, records the file ``TIMED_OUT``, and drains the rest. This
+    # path is OPT-IN, so the default per-plugin scan keeps the lean executor and
+    # pays none of the manager-process overhead.
+    if (
+        hard_kill_after_s is not None
+        or on_event is not None
+        or state_path is not None
+        or notify is not None
+    ):
+        from cpv_scan_supervisor import supervised_scan  # noqa: PLC0415
+
+        return supervised_scan(
+            file_list,
+            scan_func,
+            n_workers=n_workers,
+            hard_kill_after_s=hard_kill_after_s,
+            stuck_warn_after_s=stuck_warn_after_s,
+            on_event=on_event,
+            state_path=state_path,
+            resume=resume,
+            notify=notify,
+        )
 
     if n_workers is None:
         # ``os.cpu_count()`` returns ``None`` on platforms that can't

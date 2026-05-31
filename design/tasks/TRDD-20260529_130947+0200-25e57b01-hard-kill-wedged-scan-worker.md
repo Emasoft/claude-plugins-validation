@@ -1,10 +1,34 @@
 ---
 trdd-id: 25e57b01-db7a-4cac-aa12-4b017fee6077
 title: Hard process-kill for a scan worker wedged in a C-level regex (issue #52, deferred robustness)
-status: not-started
+status: completed
 created: 2026-05-29T13:09:47+0200
-updated: 2026-05-29T13:09:47+0200
+updated: 2026-05-31T01:58:50+0200
 ---
+
+> **IMPLEMENTED 2026-05-31 (v2.111.0).** Change A + A' shipped; Change B
+> deferred (see below). New module `scripts/cpv_scan_supervisor.py`
+> (`supervised_scan`) — a queue-fed worker pool with a single-threaded parent
+> drain+watchdog loop that `SIGKILL`s a worker whose in-flight file exceeds
+> `hard_kill_after_s`, records the file `TIMED_OUT`, and respawns. Kill-safe by
+> construction: tasks flow through one `Queue` (worker holds no queue lock
+> during the long scan), results/heartbeats live in a `Manager` dict (a SIGKILL
+> can't corrupt a separate manager process), and the watchdog times each
+> in-flight file on the PARENT's clock (monotonic isn't comparable across
+> processes). `Process.kill()` is cross-platform, so this also fixes the old
+> SIGALRM path's POSIX-only limitation. **Change A** — `parallel_scan` gains
+> `hard_kill_after_s` (+ supervision args) and delegates to the supervisor when
+> set (opt-in; the default executor path is unchanged). **Change A'** —
+> `scan_one_target` drops the unfixable SIGALRM and threads a PER-FILE hard-kill
+> through `scan_all_files` → `parallel_scan`; a wedged file is recorded + the
+> scan CONTINUES (no abort). **Change B (route validate_security per-line loops
+> through HybridMatcher) deferred** — #53's per-line input cap + Change A's
+> hard-kill together already guarantee termination; B is a perf optimisation,
+> not a correctness requirement, and is a behaviour-sensitive refactor better
+> done in its own focused session. Tests: `tests/test_issue_52_hard_timeout_kill.py`
+> (16, incl. a busy-loop wedge + `mp.active_children()` leak assertions →
+> ZERO leaked PIDs). Issue #56's supervision layer (progress / stuck-warn /
+> resume / inspect / notify + `CPV_SCAN_*` env knobs) ships in the SAME module.
 
 <!-- markdownlint-disable-next-line MD025 -->
 # TRDD-25e57b01 — Hard process-kill for a wedged scan worker
