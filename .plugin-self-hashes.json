@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-05-31T13:48:05+00:00",
+  "computed_at": "2026-05-31T14:06:51+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:93207ea028afa2a67f39e031f5d9a1401f428d70afe63cf717ad76ec76d15169",
@@ -580,7 +580,7 @@
     "tests/test_audit_dedup_findings.py": "sha256:31cb4f78a8fc953b2659713b31ca330a57fe5826c3b7315139d62cf9b48a9550",
     "tests/test_audit_fix_b01.py": "sha256:6f1aaace76edd5dfd1b2cb871c58bcba72201521c8d543a5eea260b73ce3f99c",
     "tests/test_audit_fix_b02.py": "sha256:19a6c4d036702b0929695f974fbf395b1ceaae06062430030d43d76f31e48206",
-    "tests/test_audit_fix_b03.py": "sha256:bc161427e9f799ef4ec4a83e514a07b5ec74f383a8a1e72b403e1e334dc7960f",
+    "tests/test_audit_fix_b03.py": "sha256:9c0c0e3e776b010a83378eb30760795775241a51da727847257a29d95f7796ac",
     "tests/test_audit_fix_b04.py": "sha256:7877fa1ee1b2e3e2e820a2948d96700d499f46ce10c464ffa458dfd959a4d091",
     "tests/test_audit_fix_b05.py": "sha256:551a15f6b8181a6bda6c469ba85d43576fd646f780aeb7c0d8c50cb8c034d89a",
     "tests/test_audit_fix_b06.py": "sha256:be5d775cb91ad577d0428a7efcef2f7d9d472e8eacf73443e6fc250a1094296a",
@@ -594,7 +594,7 @@
     "tests/test_audit_fix_b15.py": "sha256:f9c985b8dca506688ca6fa48a9e802494acc9924aad161ec60df9d31c190ac5f",
     "tests/test_audit_fix_b17.py": "sha256:e34a580d1b659bea0dd7d0e02176fa05e2e16a7174ec1e177881c5d56520d45f",
     "tests/test_audit_fix_b18.py": "sha256:4b19ee8c50018ac60f2de4d873322579a1330d6098fe5d59fd976c9fefdcbc95",
-    "tests/test_audit_fix_b19.py": "sha256:5f6579efb39a0da86fd0c7447fbbd9e950c01d82d2964a3589406f89dc499480",
+    "tests/test_audit_fix_b19.py": "sha256:b43f913e3691b151f11b577778cda4b416e47a0773b835099441f5db11aa81fe",
     "tests/test_audit_fix_b20.py": "sha256:e34e3158fb7e26bbcd6e1a21e8920d914162034c026b0326b9080ef8f1dedbfb",
     "tests/test_audit_fix_b21.py": "sha256:cd0e880c75b27a5e0603bc6219e970c56ed7dbfc79767a2a1d61a3958523f4f3",
     "tests/test_audit_fix_b22.py": "sha256:f7b8b6678797828a0051861950e0d0ed4cce43b35df4b0ba0665214b414d6b1c",
