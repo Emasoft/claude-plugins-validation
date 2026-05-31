@@ -253,7 +253,17 @@ def check_json_unicode(content: str, file_path: str, report: EncodingValidationR
             report.major(f"JSON Unicode error in {file_path}: {e}")
             report.stats["unicode_issues"] += 1
             return False
-        # Other JSON errors handled by JSON validator
+        # This check is scoped to Unicode handling only (Rule 3) — a plain JSON
+        # *syntax* error is intentionally NOT reported here, because the JSON
+        # config files the runtime actually loads each have a dedicated validator
+        # that already CRITICALs a malformed file: plugin.json (validate_plugin),
+        # hooks.json (validate_hook / validate_hook_precedence), .mcp.json
+        # (validate_mcp), .lsp.json (validate_lsp), settings.json
+        # (validate_settings_marketplace / validate_telemetry), marketplace.json
+        # (validate_marketplace). Reporting syntax errors here as well would
+        # double-report every one of those (the encoding walk covers them all).
+        # Arbitrary non-config data `.json` files are not part of the plugin's
+        # executable surface, so a syntax error there is out of scope.
         return True
 
 

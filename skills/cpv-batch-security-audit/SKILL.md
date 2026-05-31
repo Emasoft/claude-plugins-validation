@@ -31,7 +31,7 @@ orchestrator body lives in this plugin's
 - The five external scanners installed (cc-audit, tirith,
   trufflehog, semgrep, Cisco AI Defense skill-scanner) — each
   self-skips when its binary is unreachable, so partial coverage
-  is fine; run `/cpv-doctor --install-scanners` to pre-install
+  is fine; run `cpv-doctor --install-scanners` to pre-install
   everything.
 - For URL inputs: `git` on PATH and network access to `github.com`.
 

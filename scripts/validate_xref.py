@@ -1044,16 +1044,18 @@ def validate_version_sync(
                 continue
             try:
                 content = skill_md.read_text(encoding="utf-8")
-                if content.startswith("---"):
-                    end = content.find("---", 3)
-                    if end > 0:
-                        fm_text = content[3:end]
-                        for line in fm_text.splitlines():
-                            line = line.strip()
-                            if line.startswith("version:"):
-                                ver = line.split(":", 1)[1].strip().strip("'\"")
-                                if ver:
-                                    versions_found[f"skills/{skill_subdir.name}/SKILL.md"] = ver
+                # Use the line-based frontmatter parser rather than
+                # content.find("---", 3): the latter stops at the FIRST "---"
+                # substring after the opener, so a "---" inside a value (e.g.
+                # description: "a --- b") truncates the block and a real
+                # version: line after it is silently dropped — masking a genuine
+                # version-sync mismatch. parse_yaml_frontmatter matches whole
+                # "---" delimiter lines only.
+                frontmatter = parse_yaml_frontmatter(content)
+                if frontmatter is not None and "version" in frontmatter:
+                    ver = str(frontmatter["version"]).strip().strip("'\"")
+                    if ver:
+                        versions_found[f"skills/{skill_subdir.name}/SKILL.md"] = ver
             except (OSError, UnicodeDecodeError):
                 pass
 
@@ -1446,13 +1448,12 @@ def extract_script_paths_from_hooks(hooks_config: dict[str, Any]) -> list[str]:
             matches = HOOK_SCRIPT_PATTERN.findall(value)
             script_paths.extend(matches)
         elif isinstance(value, dict):
-            # Check 'command' field specifically
-            if "command" in value:
-                cmd = value["command"]
-                if isinstance(cmd, str):
-                    matches = HOOK_SCRIPT_PATTERN.findall(cmd)
-                    script_paths.extend(matches)
-            # Recurse into nested dicts
+            # Recurse into EVERY value. A 'command' string is reached here via
+            # the str branch above, so there is no separate 'command' special
+            # case — a dedicated one would scan the command string a second time
+            # and append every hook path twice (the trailing dict.fromkeys dedup
+            # hid it, but the redundant work and the duplicate-then-collapse were
+            # real). The recursion is the single source of truth.
             for v in value.values():
                 extract_from_value(v)
         elif isinstance(value, list):

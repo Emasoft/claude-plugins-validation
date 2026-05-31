@@ -49,7 +49,7 @@ Copy this checklist and track your progress:
 | Name not kebab-case | Use only `[a-z0-9-]`, starting with a letter |
 | File exists | Re-run with `--force` only if you mean to overwrite |
 | Target not a plugin | Verify `.claude-plugin/plugin.json` at the path |
-| Unscoped `Bash` MAJOR | Replace `Bash` with `Bash(git:*)` or similar scoped form |
+| Want least-privilege tools | `validate_plugin` does NOT flag bare `Bash`, but scoping it (`Bash(git:*)`, `Bash(uv:*)`) is best practice — narrow the grant to only what the command runs |
 | Command doesn't appear after reload | Run `/reload-plugins` or restart Claude Code |
 
 ## Examples

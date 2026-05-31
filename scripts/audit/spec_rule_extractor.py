@@ -70,7 +70,16 @@ _MUST_PATTERNS = (
     re.compile(r"[^.\n]{0,80}\bFORBIDDEN\b[^.\n]{0,160}", re.IGNORECASE),
 )
 
-# Indexed CPV rule keywords used to coarsely tag "covered" vs "missing".
+# Indexed CPV rule keywords used to coarsely tag a spec rule with a LIKELY
+# related CPV check. A keyword hit is weak evidence (the subject word appears
+# in the obligation sentence) — far from proof of full coverage — so the
+# heuristic deliberately assigns the conservative ``"partial"`` coverage, and
+# ``"unmapped"`` when nothing matches. The stronger ``"covered"`` / ``"missing"``
+# verdicts are reserved for the human auditor reviewing the matrix row by row;
+# the automated pass never emits them (see `_heuristic_coverage`). The summary
+# table still lists all four buckets so the auditor can fill the empty ones in.
+# (audit MED #61 — corrected the prior "covered vs missing" comment, which
+# overstated what this keyword pass decides.)
 _CPV_RULE_KEYWORDS: tuple[tuple[str, str], ...] = (
     ("name", "plugin.json `name` checks (Phase 7+ regex)"),
     ("version", "plugin.json `version` semver check"),
@@ -209,9 +218,15 @@ def _classify_modal(sentence: str) -> str:
 def _heuristic_coverage(sentence: str) -> tuple[str | None, str]:
     """Map a rule sentence onto an existing CPV check via keyword match.
 
-    Returns (likely_cpv_check, coverage_status). When no keyword in
-    `_CPV_RULE_KEYWORDS` matches, coverage is "unmapped" (the auditor
-    will mark it manually).
+    Returns (likely_cpv_check, coverage_status). A keyword hit yields the
+    conservative ``"partial"`` status (the sentence MENTIONS a subject CPV
+    is known to check — not a guarantee the obligation is fully enforced);
+    no keyword match yields ``"unmapped"``. This pass NEVER returns the
+    stronger ``"covered"`` / ``"missing"`` verdicts: those require a human
+    to confirm, and the auditor promotes/demotes rows by hand when
+    reviewing the matrix. The empty ``covered``/``missing`` summary rows
+    are therefore expected on a fresh automated run — they are the buckets
+    the human fills in. (audit MED #61)
     """
     low = sentence.lower()
     for keyword, description in _CPV_RULE_KEYWORDS:
@@ -270,6 +285,12 @@ def write_spec_coverage_report(rules: list[SpecRule], path: Path, *, fetch_error
     lines.append("")
     counts = _bucket_counts(rules)
     lines.append("## 1. Summary counts\n")
+    lines.append(
+        "> `partial` / `unmapped` are assigned automatically by the keyword "
+        "heuristic. `covered` / `missing` are **human-audit** buckets — the "
+        "automated pass never emits them, so they read 0 until an auditor "
+        "promotes/demotes rows in §2 by hand.\n"
+    )
     lines.append("| Bucket | Count |")
     lines.append("|---|---:|")
     for bucket in ("covered", "partial", "missing", "unmapped"):

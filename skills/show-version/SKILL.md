@@ -30,7 +30,7 @@ Copy this checklist and track your progress:
 
 ## Output
 
-A single line printed to stdout, e.g. `claude-plugins-validation 2.90.0`.
+A single line printed to stdout in the form `manage_plugin.py v<TOOL_VERSION>`, e.g. `manage_plugin.py v2.1.0`. Note this is the management-CLI tool version, not the CPV package version.
 
 ## Error Handling
 
@@ -38,7 +38,7 @@ A single line printed to stdout, e.g. `claude-plugins-validation 2.90.0`.
 |-------|------------|
 | `command not found` | Confirm the CPV plugin is installed |
 | `${CLAUDE_PLUGIN_ROOT}` unset | Run from inside a Claude Code session, or set the env var manually |
-| Exit non-zero | Re-run with `--debug` and check stderr |
+| Exit non-zero | Check stderr for the underlying error (no `--debug` flag exists) |
 
 ## Examples
 

@@ -28,7 +28,7 @@ Layout C (marketplace-in-plugin) needs a different release pipeline:
 
 ## Instructions
 
-1. **Create plugin repo**: Run `generate_plugin_repo.py` or use `/cpv-create`
+1. **Create plugin repo**: Run `generate_plugin_repo.py` or use `/cpv-main-menu` → Create
 2. **Verify standard files**: Check all required files exist per [Detailed Standard](references/detailed-standard.md#standard-plugin-files)
 3. **Install CI/CD workflows**: Ensure `ci.yml` (consolidated lint + validate + test), `release.yml`, `notify-marketplace.yml` in `.github/workflows/`. `validate.yml` was merged into `ci.yml` in v2.12.32.
 4. **Install pre-push hook**: `uv run python scripts/publish.py --install-hook`
@@ -67,14 +67,14 @@ A fully configured plugin repository with:
 
 **Create and publish:**
 ```
-/cpv-create
-> Choose: Create a new plugin → then Publish to GitHub
+/cpv-main-menu
+> Choose: 6 — Create → Create a new plugin → then Publish to GitHub
 ```
 
 **Standardize existing:**
 ```
-/cpv-create
-> Choose: Standardize an existing plugin
+/cpv-main-menu
+> Choose: 8 — Manage → Standardize plugin
 ```
 
 ## Resources
@@ -93,4 +93,4 @@ A fully configured plugin repository with:
   > Table of contents · Overview · Storage path resolution chain · SQLite schema · Security invariants · Env-vars · GitHub Actions integration · LRU pruning · Stats CLI · When to invalidate manually · What the cache does NOT cache · Performance characteristics · See also
 - [Binary scanning (v2.104.0+)](references/binary-scanning.md) — binary-aware STRATEGY replacing the dangerous "skip binaries" anti-pattern; runs the full skillaudit catalog on ASCII / UTF-16 strings + recursive decode chain (base64 / hex / gzip / zlib); never skips a file
   > Table of contents · The security principle: NEVER skip a file · Detection · Scanning pipeline · Edge cases (ALL logged, NEVER silent) · Env-var · What this scanner does NOT do · Coverage gain vs current text-only behavior · Performance characteristics · Future work
-- Migration exit gate: `references/canonical-pipeline-migration-checklist.md`
+- Migration exit gate: the repo-root `references/canonical-pipeline-migration-checklist.md` (CPV ships it at the repo root, NOT inside this skill dir)

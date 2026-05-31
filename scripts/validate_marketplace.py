@@ -554,24 +554,19 @@ def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResul
             )
         )
 
-    # Naming pattern check (kebab-case, must start and end with letter)
+    # Naming pattern check (kebab-case, must start and end with letter).
+    # NAME_PATTERN = ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ already requires every hyphen
+    # to be followed by [a-z0-9]+, so a trailing-hyphen name can never match and
+    # is reported here. (A former `elif name[-1] == "-"` branch was unreachable
+    # dead code — the pattern always fails first — so it was removed; audit LOW.)
     if not NAME_PATTERN.match(name):
         results.append(
             ValidationResult(
                 level="CRITICAL",
                 category="manifest",
-                message=f"Marketplace name '{name}' does not match naming pattern (lowercase letters, digits, hyphens; must start with letter)",
+                message=f"Marketplace name '{name}' does not match naming pattern (lowercase letters, digits, hyphens; must start with letter, no trailing hyphen)",
                 file=json_path,
                 suggestion="Use format: my-marketplace-name",
-            )
-        )
-    elif name[-1] == "-":
-        results.append(
-            ValidationResult(
-                level="CRITICAL",
-                category="manifest",
-                message=f"Marketplace name '{name}' must not end with a hyphen",
-                file=json_path,
             )
         )
 
@@ -645,23 +640,17 @@ def validate_plugin_entry(
                     file=json_path,
                 )
             )
+        # NAME_PATTERN already rejects a trailing hyphen (every '-' must be
+        # followed by [a-z0-9]+), so the former `elif name[-1] == "-"` branch
+        # below was unreachable dead code and was removed (audit LOW).
         if not NAME_PATTERN.match(name):
             results.append(
                 ValidationResult(
                     level="CRITICAL",
                     category="plugin",
-                    message=f"Plugin name '{name}' does not match naming pattern (lowercase, hyphens, must start with letter)",
+                    message=f"Plugin name '{name}' does not match naming pattern (lowercase, hyphens, must start with letter, no trailing hyphen)",
                     file=json_path,
                     suggestion="Use format: my-plugin-name",
-                )
-            )
-        elif name[-1] == "-":
-            results.append(
-                ValidationResult(
-                    level="CRITICAL",
-                    category="plugin",
-                    message=f"Plugin name '{name}' must not end with a hyphen",
-                    file=json_path,
                 )
             )
 
@@ -1587,6 +1576,14 @@ def validate_plugin_source(
             )
 
         # Check source-specific required fields.
+        # A source's required sub-field (repo/url/package/path) MUST live inside
+        # the `source` object — Claude Code's loader reads `source.repo`,
+        # `source.url`, etc. from there. A sibling field of the same name at the
+        # plugin top level does NOT satisfy the requirement (the loader never
+        # consults it as the source field), so checking `field_name in plugin`
+        # was a false-negative: `{"source": {"source": "github"}, "repo": "o/r"}`
+        # silently passed despite the github source missing its `repo` (audit
+        # LOW finding).
         # n4 — `git-subdir` documents `subdir` as canonical and `path` as a
         # one-release-compat alias (see _KNOWN_SOURCE_FIELDS_BY_TYPE), yet
         # SOURCE_REQUIRED_FIELDS lists `path` as the required sub-field. Treat
@@ -1596,13 +1593,13 @@ def validate_plugin_source(
         _SUBDIR_ALIASES = {"subdir", "path"}
         required = SOURCE_REQUIRED_FIELDS.get(source_type, set())
         for field_name in required:
-            if field_name in source or field_name in plugin:
+            if field_name in source:
                 continue
-            # git-subdir: `subdir` and `path` satisfy each other.
+            # git-subdir: `subdir` and `path` satisfy each other (both inside source).
             if (
                 source_type == "git-subdir"
                 and field_name in _SUBDIR_ALIASES
-                and any(alias in source or alias in plugin for alias in _SUBDIR_ALIASES)
+                and any(alias in source for alias in _SUBDIR_ALIASES)
             ):
                 continue
             results.append(
@@ -2309,11 +2306,28 @@ def validate_git_submodules(
             if path and url:
                 submodules[path] = url
 
+    # Resolve the actual .gitmodules submodule PATH for a plugin name. The
+    # `submodules` dict is keyed by PATH (e.g. "plugins/foo"), not by plugin
+    # name, so a bare `submodules.get(plugin_name)` returns None for the
+    # canonical nested "plugins/<name>" layout — silently no-op'ing the URL
+    # mismatch check (m-#13) and feeding `git submodule status` the wrong
+    # argument (m-#45). Match by exact name OR path tail (same idiom used by
+    # the "not a git submodule" guard and the final INFO summary), falling
+    # back to the bare name when no submodule matches so flat layouts keyed by
+    # name (submodule "foo") behave exactly as before.
+    def _submod_path_for(name: str) -> str:
+        for sp in submodules:
+            if sp == name or sp.endswith(f"/{name}"):
+                return sp
+        return name
+
     # Check each plugin
     for plugin in plugins:
         plugin_name = plugin.get("name", "unknown")
         plugin_path = marketplace_dir / plugin_name
         source = plugin.get("source", {})
+        # The submodule path git actually tracks (nested for "plugins/<name>").
+        submod_path_key = _submod_path_for(plugin_name)
 
         # Get the expected repository URL from plugin source
         expected_repo: str | None = None
@@ -2367,8 +2381,11 @@ def validate_git_submodules(
                 )
                 continue
 
-        # Verify submodule URL matches plugin source
-        submod_url = submodules.get(plugin_name)
+        # Verify submodule URL matches plugin source. Look the URL up by the
+        # resolved submodule PATH, not the bare plugin name — otherwise the
+        # nested "plugins/<name>" layout always misses and the mismatch check
+        # silently never fires (m-#13).
+        submod_url = submodules.get(submod_path_key)
         if submod_url and expected_repo:
             # Normalize URLs for comparison (remove .git suffix, normalize case)
             norm_submod = submod_url.rstrip("/").removesuffix(".git").lower()
@@ -2389,10 +2406,13 @@ def validate_git_submodules(
         submod_git = plugin_path / ".git"
         if not submod_git.exists():
             # For submodules, .git is a file pointing to the git directory
-            # Check if it's an uninitialized submodule
+            # Check if it's an uninitialized submodule. Pass the resolved
+            # submodule PATH (e.g. "plugins/foo") — git knows submodules by
+            # path, so the bare plugin name would not match a nested layout and
+            # the status check would never report it uninitialized (m-#45).
             try:
                 result = subprocess.run(
-                    ["git", "submodule", "status", plugin_name],
+                    ["git", "submodule", "status", submod_path_key],
                     cwd=str(marketplace_dir),
                     capture_output=True,
                     text=True,
@@ -2548,11 +2568,15 @@ def validate_marketplace_private_info(
                         continue
 
                 line_num = content[: match.start()].count("\n") + 1
+                # Only append the ellipsis when the path was actually truncated;
+                # a path <= 60 chars must not gain a spurious trailing "..."
+                # (audit LOW — the ellipsis was appended unconditionally).
+                shown = matched_text[:60] + "..." if len(matched_text) > 60 else matched_text
                 results.append(
                     ValidationResult(
                         level="MAJOR",
                         category="private-info",
-                        message=f"Absolute path found: '{matched_text[:60]}...' "
+                        message=f"Absolute path found: '{shown}' "
                         "(use relative path, ${CLAUDE_PLUGIN_ROOT}, or ${HOME})",
                         file=rel_path,
                         line=line_num,
@@ -2641,12 +2665,16 @@ def validate_github_source_required(
     json_path: str,
 ) -> list[ValidationResult]:
     """
-    Validate that plugins have GitHub repository URLs for publishing.
+    Advise on GitHub repository URLs for publishing.
 
-    For a marketplace to be publishable to GitHub and installable by users,
-    each plugin should have a 'repository' field pointing to its GitHub repo.
-    The 'source' field can be a local relative path (for submodules) but
-    'repository' should always be the canonical GitHub URL.
+    A canonical 'repository' GitHub URL helps users find a plugin's upstream
+    repo, but it is an OPTIONAL plugin-entry field per the marketplace spec
+    (plugin-marketplaces.md / marketplace_spec_official.md "Plugin Entry
+    Optional Fields"). A spec-compliant marketplace whose plugins use a
+    `{"source": {"source": "github", "repo": "owner/x"}}` (or local Layout-B)
+    source and omit 'repository' is fully valid. The "missing repository"
+    finding is therefore a non-blocking WARNING — emitting MAJOR here marked
+    every such spec-compliant marketplace INVALID (audit HIGH finding).
 
     Args:
         plugins: List of plugin entries from marketplace.json
@@ -2662,16 +2690,19 @@ def validate_github_source_required(
         repository = plugin.get("repository")
         source = plugin.get("source")
 
-        # Check if repository field exists
+        # Check if repository field exists. 'repository' is OPTIONAL — absence
+        # is a publishing-hygiene recommendation (WARNING, never blocks), not a
+        # spec violation. WARNING does not affect the exit code or the
+        # VALID/INVALID verdict (see ValidationReport.exit_code).
         if not repository:
             results.append(
                 ValidationResult(
-                    level="MAJOR",
+                    level="WARNING",
                     category="github-source",
-                    message=f"Plugin '{plugin_name}' missing 'repository' field - "
-                    "required for GitHub marketplace publishing",
+                    message=f"Plugin '{plugin_name}' has no 'repository' field - "
+                    "recommended (not required) so users can find the upstream GitHub repo",
                     file=json_path,
-                    suggestion=f'Add: "repository": "https://github.com/OWNER/{plugin_name}"',
+                    suggestion=f'Optionally add: "repository": "https://github.com/OWNER/{plugin_name}"',
                 )
             )
             continue
@@ -2721,7 +2752,12 @@ def validate_github_source_required(
                     )
                 )
 
-    if not any(r.level in ("CRITICAL", "MAJOR") for r in results):
+    # Only claim "all valid" when NO repository finding of any actionable
+    # severity was emitted — including the demoted missing-repository WARNING
+    # and the malformed-URL MINOR. Otherwise the INFO contradicts a WARNING in
+    # the same report ("all plugins have valid repository URLs" alongside
+    # "Plugin X has no 'repository' field").
+    if not any(r.level in ("CRITICAL", "MAJOR", "MINOR", "WARNING") for r in results):
         results.append(
             ValidationResult(
                 level="INFO",
@@ -3324,16 +3360,23 @@ def format_report(report: ValidationReport, verbose: bool = False) -> str:
         lines.append(f"  - {', '.join(report.plugins_found)}")
     lines.append("")
 
-    # Group results by level
+    # Group results by level. NIT and WARNING used to be dropped entirely here —
+    # a NIT or WARNING finding (e.g. the demoted missing-'repository' WARNING)
+    # appeared in neither the counts nor the detail sections, so it was silently
+    # invisible in the default human output (audit MEDIUM finding).
     critical = [r for r in report.results if r.level == "CRITICAL"]
     major = [r for r in report.results if r.level == "MAJOR"]
     minor = [r for r in report.results if r.level == "MINOR"]
+    nit = [r for r in report.results if r.level == "NIT"]
+    warning = [r for r in report.results if r.level == "WARNING"]
     info = [r for r in report.results if r.level == "INFO"]
 
     # Summary
     lines.append(f"Critical Issues: {len(critical)}")
     lines.append(f"Major Issues: {len(major)}")
     lines.append(f"Minor Issues: {len(minor)}")
+    lines.append(f"Nits: {len(nit)}")
+    lines.append(f"Warnings: {len(warning)}")
     if verbose:
         lines.append(f"Info: {len(info)}")
     lines.append("")
@@ -3370,6 +3413,18 @@ def format_report(report: ValidationReport, verbose: bool = False) -> str:
     if minor:
         lines.append("--- MINOR ISSUES ---")
         for r in minor:
+            lines.extend(format_result(r))
+        lines.append("")
+
+    if nit:
+        lines.append("--- NITS ---")
+        for r in nit:
+            lines.extend(format_result(r))
+        lines.append("")
+
+    if warning:
+        lines.append("--- WARNINGS ---")
+        for r in warning:
             lines.extend(format_result(r))
         lines.append("")
 
@@ -3515,6 +3570,11 @@ Examples:
                 "critical": sum(1 for r in report.results if r.level == "CRITICAL"),
                 "major": sum(1 for r in report.results if r.level == "MAJOR"),
                 "minor": sum(1 for r in report.results if r.level == "MINOR"),
+                # NIT and WARNING were previously absent from the summary
+                # counts even though they appear in `results` — a consumer
+                # reading only `summary` could not see them (audit finding).
+                "nit": sum(1 for r in report.results if r.level == "NIT"),
+                "warning": sum(1 for r in report.results if r.level == "WARNING"),
                 "info": sum(1 for r in report.results if r.level == "INFO"),
             },
             "exit_code": report.exit_code_strict() if args.strict else report.exit_code,

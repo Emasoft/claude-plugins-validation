@@ -242,8 +242,13 @@ def scan_ide_config_for_env_refs(
     # --- Emit a single .env reference NIT (per file) -------------------------
     dotenv_match = _DOTENV_REFERENCE.search(content)
     if dotenv_match:
-        # Compute 1-based line number of the first match
-        offset = dotenv_match.start()
+        # Compute the 1-based line of the `.env` TOKEN, not the overall match.
+        # The leading bound `(?:^|[\s'":/=])` can consume a trailing newline of
+        # the PRECEDING line (\s includes \n), so `dotenv_match.start()` would
+        # point one line too early when `.env` begins a line. Anchor on the
+        # named `env` group instead so the reported line is the `.env` line
+        # itself (audit #161).
+        offset = dotenv_match.start("env")
         line_no = content[:offset].count("\n") + 1
         report.nit(
             "IDE config references .env file — confirm the .env is gitignored on the user's side and never committed",

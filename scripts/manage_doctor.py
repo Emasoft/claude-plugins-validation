@@ -236,13 +236,20 @@ def do_doctor(verbose: bool = False, fix: bool = False, quick: bool = False):
     # 2. Check Claude CLI authentication
     claude_bin = shutil.which("claude")
     if claude_bin:
+        # Strip the nested-instance markers entirely (same pattern as
+        # _run_claude_validate and manage_marketplace). Removing the keys is
+        # safer than blanking CLAUDECODE="" — an absent var fails both a
+        # presence and a truthiness check, while "" still satisfies a
+        # presence check. Also drops CLAUDE_CODE_ENTRYPOINT so the auth
+        # subprocess carries no Claude-Code marker.
+        auth_env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")}
         try:
             result = subprocess.run(
                 [claude_bin, "auth", "status"],
                 capture_output=True,
                 text=True,
                 timeout=10,
-                env={**os.environ, "CLAUDECODE": ""},
+                env=auth_env,
             )
             if result.returncode == 0:
                 # Extract key info from auth status output
@@ -983,10 +990,14 @@ def main():
     if args.install_scanners:
         sys.exit(do_install_scanners())
     if args.prune_old_versions or args.prune_dry_run:
-        # --prune-dry-run implies dry-run; --prune-old-versions actually deletes
+        # --prune-dry-run always wins: when present it forces a preview, even
+        # if --prune-old-versions is also passed. For a destructive op the
+        # explicit "preview only" request must take precedence over the
+        # "delete" request — never the reverse — so passing both flags can
+        # never silently delete. --prune-old-versions alone deletes.
         sys.exit(
             do_prune_old_versions(
-                dry_run=args.prune_dry_run and not args.prune_old_versions,
+                dry_run=args.prune_dry_run,
                 keep_n=args.prune_keep,
             )
         )

@@ -640,17 +640,29 @@ class PipelineSetup:
             )
             return self.status
 
-        # Check git repository
-        if not (self.project_path / ".git").exists():
+        # Check git repository.
+        #
+        # If there is no .git, this tool cannot proceed: it does NOT run
+        # `git init` (that is a deliberate side effect the user must opt into),
+        # so the issue is NOT auto-fixable — fix_available is False so the
+        # --fix path never claims it can resolve it. We also return EARLY:
+        # without a real git directory, hook validation is meaningless (hooks
+        # under a non-existent .git can never fire), and — worse — letting
+        # _fix_hooks run would call hooks_dir.mkdir(parents=True) which
+        # FABRICATES a bare `.git/hooks/` tree. That fake directory then makes
+        # the next `(self.project_path / ".git").exists()` check pass, silently
+        # masking this blocking CRITICAL and flipping is_valid to True. Stop here.
+        if not self._git_repo_exists():
             self.status.issues.append(
                 PipelineIssue(
                     level=IssueLevel.CRITICAL,
                     component="git",
-                    message="Not a git repository",
-                    fix_available=True,
-                    fix_description="Initialize git repository",
+                    message="Not a git repository (run `git init` first)",
+                    fix_available=False,
+                    fix_description="Initialize a git repository with `git init`, then re-run this setup",
                 )
             )
+            return self.status
 
         # Check hooks
         self._validate_hooks()
@@ -663,6 +675,16 @@ class PipelineSetup:
             self._validate_submodule_hooks()
 
         return self.status
+
+    def _git_repo_exists(self) -> bool:
+        """Return True only when this project actually has a git repository.
+
+        `.git` is a directory in a normal checkout and a file (``gitdir: ...``)
+        in a submodule worktree — both count. When `.git` is absent entirely
+        there is no repository, and any hook we write would be inert. The
+        callers rely on this to avoid fabricating a fake `.git/hooks/` tree.
+        """
+        return (self.project_path / ".git").exists()
 
     def _get_hooks_dir(self) -> Path:
         """Get the hooks directory for this project."""
@@ -854,6 +876,17 @@ class PipelineSetup:
 
     def _fix_hooks(self) -> int:
         """Install/fix git hooks."""
+        # NEVER fabricate a git repository. If there is no real .git, the
+        # mkdir below would create a bare `.git/hooks/` tree that no git
+        # command recognises, yet `(project / ".git").exists()` would then
+        # return True on the next validate() — silently masking the
+        # "Not a git repository" CRITICAL. Refuse instead: hooks under a
+        # non-existent repo can never fire, so there is nothing to install.
+        if not self._git_repo_exists():
+            if self.verbose:
+                print(f"{YELLOW}Skipping hook install: not a git repository (run `git init` first){NC}")
+            return 0
+
         hooks_dir = self._get_hooks_dir()
         hooks_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1163,11 +1196,20 @@ Examples:
     if args.validate or args.fix:
         return 0 if status.is_valid else 1
 
-    # Default: setup (fix if needed)
+    # Default: setup (fix if needed). Re-validate afterwards and propagate the
+    # real outcome — printing "Pipeline setup complete" and returning 0
+    # unconditionally would report success even when fix() could not resolve a
+    # blocking issue (e.g. no git repository, which this tool does not init).
     if not status.is_valid:
         print(f"\n{BOLD}Setting up pipeline...{NC}")
         setup.fix()
-        print(f"\n{GREEN}Pipeline setup complete{NC}")
+        setup.status = PipelineStatus(project_type=ProjectType.UNKNOWN, project_path=project_path)
+        status = setup.validate()
+        if status.is_valid:
+            print(f"\n{GREEN}Pipeline setup complete{NC}")
+        else:
+            print(f"\n{YELLOW}Pipeline setup incomplete - manual intervention needed{NC}")
+            return 1
 
     return 0
 

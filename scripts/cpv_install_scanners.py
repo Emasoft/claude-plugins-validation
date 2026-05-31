@@ -540,10 +540,20 @@ def install_all_scanners() -> dict[str, bool]:
     }
 
 
+# Scanners whose absence is a PERFORMANCE signal, never a correctness one.
+# `google-re2` only accelerates skillaudit's regex matcher; CPV falls back
+# to the stdlib ``re`` module when it's missing, so its install failing must
+# NOT make the batch-installer CLI report a non-zero (failed) exit. (audit MED #68)
+_OPTIONAL_SCANNERS = frozenset({"google-re2"})
+
+
 if __name__ == "__main__":  # pragma: no cover — convenience entry point
     statuses = install_all_scanners()
     width = max(len(name) for name in statuses)
     for name, ok in statuses.items():
         marker = "[OK]" if ok else "[--]"
         print(f"{marker} {name:<{width}}  {'available' if ok else 'unavailable'}")
-    sys.exit(0 if all(statuses.values()) else 1)
+    # Exit code reflects only the REQUIRED scanners — an optional accelerator
+    # (google-re2) being unavailable is a perf note, not an install failure.
+    required_ok = all(ok for name, ok in statuses.items() if name not in _OPTIONAL_SCANNERS)
+    sys.exit(0 if required_ok else 1)

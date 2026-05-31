@@ -17,12 +17,12 @@ user-invocable: false
 
 ## Overview
 
-Seven sub-rules make marketplace.json authoring deterministic. Agents internalise them and emit correct entries on the FIRST try; `validate_marketplace.py --strict --cross-validate-upstream` becomes a safety net.
+Seven sub-rules make marketplace.json authoring deterministic. Agents internalise them and emit correct entries on the FIRST try; `validate_marketplace.py --strict` (upstream cross-validation runs unconditionally) becomes a safety net.
 
 ## Prerequisites
 
 - FS write access to the marketplace.json
-- `validate_marketplace.py --strict --cross-validate-upstream` runnable
+- `validate_marketplace.py --strict` runnable (upstream cross-validation runs unconditionally — no flag needed)
 - Remote sources: upstream `plugin.json` reachable via TRDD-c0ee9543 Phase B fetcher
 
 ## Instructions
@@ -68,10 +68,10 @@ The contract is non-negotiable.
 Input: plugin-creator scaffolds for `github.com/owner/foo-plugin`.
 
 ```json
-{"name":"foo-plugin","source":"github","repo":"owner/foo-plugin"}
+{"name":"foo-plugin","source":{"source":"github","repo":"owner/foo-plugin"}}
 ```
 
-Name matches upstream. No version on github source. Validator exits 0.
+`source` is a NESTED object — `repo` lives INSIDE it, not as a top-level sibling (a flat sibling `repo` triggers MAJOR RC-MKPL-UNKNOWN-FIELD). Name matches upstream. No version on github source. Validator exits 0.
 
 Input: plugin-fixer addresses PIT-002 stale-version. Output: version DROPPED. Finding clears.
 

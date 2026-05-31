@@ -166,7 +166,7 @@ In most cases, /cpv-validate-plugin is sufficient. Do you really need this?
 <example>
 user: Yes, I need to check the description quality before publishing.
 assistant: Running baseline script validation...
-[Runs validate_skill_comprehensive.py --strict]
+[Runs the launcher: remote_validation.py skill ./my-skill --strict]
 Now performing deep semantic analysis...
 [Reads SKILL.md, evaluates 7 criteria]
 [DONE] Grade: B. 5 Pass, 2 Partial. Report: reports/semantic-validator/20260421_183012+0200-my-skill.md

@@ -147,9 +147,14 @@ def compute_parametrize_body_lines(
     """Return the set of 1-based line numbers that lie inside the body
     (parenthesised arguments) of a `@pytest.mark.parametrize(` decorator.
 
-    The decorator line itself is NOT included — only the argument-body
-    lines are. The closing `)` line is included (it is part of the body
-    syntactically).
+    A line is included when it carries any of the parenthesised argument
+    body. For a MULTI-line decorator the opening `@pytest.mark.parametrize(`
+    line is included only when the `(` does not balance on that same line
+    (i.e. the arg list spills onto it — e.g. an inline `[`); the trailing
+    body lines and the closing `)` line are always included. For a
+    SINGLE-line decorator such as `@pytest.mark.parametrize("a", [1, 2])`
+    the whole construct lives on the decorator line, so that one line IS
+    included (it is the entire body).
 
     Triple-quoted strings inside parametrize args (e.g. multi-line
     payload literals) are entirely included since they are part of the

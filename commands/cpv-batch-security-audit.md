@@ -44,6 +44,18 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   --max-parallel "$MAX_PARALLEL"
 ```
 
+Capture the orchestrator's stdout. It prints one `KEY: value` line each
+for `PLAN`, `STATUS_TABLE`, `SESSION_DIR`, `PLUGIN_COUNT`, and
+`DISPATCH_GROUPS`. Bind the two you need downstream:
+
+```bash
+STATUS_TABLE="$(... STATUS_TABLE line from the plan output ...)"
+SESSION_DIR="$(...  SESSION_DIR  line from the plan output ...)"
+```
+
+If `PLUGIN_COUNT` is `0`, reply plain-text that there is nothing to
+audit and stop.
+
 Queue the initial status table for the claude-menu-system Stop hook
 (emitted post-turn via ``systemMessage`` — zero token cost, NEVER
 printed inline by the orchestrator):

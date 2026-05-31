@@ -123,12 +123,38 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any] | None, str, int]:
 
 
 def count_frontmatter_markers(content: str) -> int:
-    """Count the number of --- markers in the file."""
-    count = 0
+    """Count the ``---`` delimiter markers that belong to the YAML frontmatter.
+
+    Body ``---`` lines (markdown thematic breaks / horizontal rules) are NOT
+    frontmatter delimiters and must not inflate the count. Counting *every*
+    ``---`` in the file produced a false MINOR ``Multiple --- markers`` for any
+    command whose body legitimately used a horizontal rule (audit #86).
+
+    When the frontmatter parses, only the markers at or before its closing
+    delimiter are counted (a validly-closed frontmatter therefore yields exactly
+    two). When it does NOT parse (no valid closer), only the leading contiguous
+    ``---`` block is counted — body horizontal rules deeper in the file must not
+    rescue an unclosed frontmatter from the ``< 2`` CRITICAL.
+    """
     lines = content.split("\n")
+    _, _, frontmatter_end_line = parse_frontmatter(content)
+    if frontmatter_end_line > 0:
+        # Frontmatter closed at `frontmatter_end_line` (1-based, inclusive).
+        # Everything below it is body — count delimiters in the region only.
+        return sum(1 for line in lines[:frontmatter_end_line] if line.strip() == "---")
+    # No valid frontmatter closer. Count only the leading contiguous delimiter
+    # block (stop at the first non-blank, non-`---` content line) so a `---`
+    # horizontal rule in the body cannot lift the count to >=2 and silence the
+    # missing-frontmatter CRITICAL.
+    count = 0
     for line in lines:
-        if line.strip() == "---":
+        stripped = line.strip()
+        if stripped == "---":
             count += 1
+        elif stripped == "":
+            continue
+        else:
+            break
     return count
 
 
@@ -138,7 +164,16 @@ def count_frontmatter_markers(content: str) -> int:
 
 
 def validate_file_format(content: str, report: CommandValidationReport, filename: str) -> bool:
-    """Validate file format: must have exactly two --- markers for YAML frontmatter."""
+    """Validate file format: must have exactly two --- markers for YAML frontmatter.
+
+    ``count_frontmatter_markers`` counts only delimiters in the frontmatter
+    region, so body horizontal rules never inflate the count (audit #86). A
+    validly-closed frontmatter yields exactly two; an unclosed one yields fewer
+    and is reported here, while ``validate_frontmatter_exists`` independently
+    surfaces the malformed-YAML detail. (There is no ``> 2`` case to flag — the
+    frontmatter parser always closes at the second ``---``, so any extra ``---``
+    is body, not a stray frontmatter marker.)
+    """
     marker_count = count_frontmatter_markers(content)
 
     if marker_count < 2:
@@ -147,12 +182,6 @@ def validate_file_format(content: str, report: CommandValidationReport, filename
             filename,
         )
         return False
-
-    if marker_count > 2:
-        report.minor(
-            f"Multiple --- markers found ({marker_count}). Only first two are used for frontmatter",
-            filename,
-        )
 
     return True
 

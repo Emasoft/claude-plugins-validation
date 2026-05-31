@@ -69,8 +69,13 @@ What should I batch-validate? Provide an absolute path, a GitHub URL (https://gi
 Resolve `$CLAUDE_PLUGIN_ROOT` and run the orchestrator's plan subcommand:
 
 ```bash
-BATCH_SPEC="$1"   # positional arg from /cpv-batch-validate
-MAX_PARALLEL=8    # or override via --max-parallel
+BATCH_SPEC="$1"   # first positional arg from /cpv-batch-validate
+# Parse the advertised --max-parallel N flag; default 8. The orchestrator
+# itself re-caps the value at 16, so passing a larger N is safe.
+MAX_PARALLEL=8
+if printf '%s\n' "$@" | grep -q -- '--max-parallel'; then
+  MAX_PARALLEL="$(printf '%s\n' "$@" | grep -A1 -- '--max-parallel' | tail -n1)"
+fi
 
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   "$BATCH_SPEC" \

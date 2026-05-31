@@ -765,6 +765,12 @@ def validate_matcher(matcher: Any, event_name: str, report: ValidationReport) ->
         _check_matcher_values(matcher, COMPACT_TRIGGERS, "PreCompact", "trigger", report)
     if event_name == "PostCompact":
         _check_matcher_values(matcher, COMPACT_TRIGGERS, "PostCompact", "trigger", report)
+    if event_name == "Setup":
+        # Setup is a legacy event (matcher: init/maintenance). The check is
+        # INFO-only via _check_matcher_values, so an undocumented future
+        # trigger is hinted, never rejected. Wires in SETUP_TRIGGERS, which
+        # was defined for exactly this branch but previously never referenced.
+        _check_matcher_values(matcher, SETUP_TRIGGERS, "Setup", "trigger", report)
     if event_name == "StopFailure":
         _check_matcher_values(matcher, STOPFAILURE_ERRORS, "StopFailure", "error", report)
     if event_name == "InstructionsLoaded":
@@ -1799,13 +1805,30 @@ def reconcile_python_runtime_deps(
             sessions = hooks_json_data.get("hooks", {}).get("SessionStart", [])
             for block in sessions if isinstance(sessions, list) else []:
                 for h in block.get("hooks", []) if isinstance(block, dict) else []:
-                    cmd = h.get("command", "") if isinstance(h, dict) else ""
-                    if not isinstance(cmd, str):
+                    if not isinstance(h, dict):
                         continue
+                    cmd = h.get("command", "")
+                    if not isinstance(cmd, str):
+                        cmd = ""
+                    # v2.1.139 exec-form hooks split the invocation across
+                    # `command` + `args` (e.g. command="uv", args=["venv",
+                    # "${CLAUDE_PLUGIN_DATA}/.venv"]). Scanning `command` alone
+                    # would miss every exec-form venv-setup hook and fire a
+                    # false-positive MINOR. Join args onto command so both the
+                    # shell form and the exec form are recognised (audit code
+                    # #44; mirrors the args-aware suppressor at the not-found
+                    # check in validate_command_hook).
+                    args = h.get("args", [])
+                    if isinstance(args, list):
+                        cmd = cmd + " " + " ".join(str(a) for a in args)
                     # Heuristic: any venv-creation or pip-install command targeting
-                    # ${CLAUDE_PLUGIN_DATA} counts as setup.
+                    # ${CLAUDE_PLUGIN_DATA} counts as setup. Allow flag tokens
+                    # (e.g. `uv --quiet venv`) between `uv` and the `venv`
+                    # subcommand so exec-form `command="uv", args=["venv", …]`
+                    # and flag-prefixed shell forms both match — but NOT
+                    # `uv run …` (a non-flag subcommand), which is not venv setup.
                     if "CLAUDE_PLUGIN_DATA" in cmd and re.search(
-                        r"\b(uv\s+venv|python\s+-m\s+venv|pip\s+install)\b", cmd
+                        r"\b(uv\s+(?:-\S+\s+)*venv\b|python\s+-m\s+venv|pip\s+install)\b", cmd
                     ):
                         has_setup = True
                         break
@@ -2122,6 +2145,35 @@ _POSIX_ONLY_TOOLS = ("jq", "sed", "awk", "shellcheck")
 _POSIX_TOOL_RE = re.compile(r"(?:^|[\s;&|])(" + "|".join(_POSIX_ONLY_TOOLS) + r")(?=\s|$)")
 _SHELL_WRAPPER_RE = re.compile(r"(?:python3?|node|bash|sh|wsl)\s+-c\b")
 
+# Path-traversal detection (used once per hook command in validate_command_hook).
+# Compiled at module scope — like every other regex in this module — so it is
+# built once at import rather than recompiled on every validate_command_hook
+# call (a plugin can declare many command hooks). Matches `..` path segments
+# that escape the plugin root via an env-var prefix or as a path component, in
+# both POSIX (/../) and Windows (\..\) forms; checked against the original
+# (unresolved) command string because shlex would normalize quoted traversals.
+_TRAVERSAL_RE = re.compile(
+    r"""
+    (?:
+        # env-var-prefixed (POSIX forward slash):  ${VAR}/.. or $VAR/..
+        \$\{?CLAUDE_[A-Z_]+\}?/\.\./
+        |
+        # env-var-prefixed (Windows backslash): ${VAR}\.. or $VAR\..
+        \$\{?CLAUDE_[A-Z_]+\}?\\\.\.\\
+        |
+        # POSIX absolute path containing /../ (not //./ or similar)
+        /[A-Za-z0-9_.\-]+/\.\./
+        |
+        # Windows path containing \..\  — matches both C:\foo\..\bar
+        # and UNC-style \\server\share\..\bar. Excludes \. escape
+        # sequences (e.g. \t, \n) by requiring an actual \..\ segment
+        # between path components.
+        \\[A-Za-z0-9_.\-]+\\\.\.\\
+    )
+    """,
+    re.VERBOSE,
+)
+
 
 def check_hook_command_cross_platform(
     command: str,
@@ -2365,33 +2417,8 @@ def validate_command_hook(
     # paths that escape the plugin root via `..` segments. A path like
     # `${CLAUDE_PLUGIN_ROOT}/../other-plugin/foo.py` breaks plugin isolation
     # and may violate the security model. Same rule for `${CLAUDE_PROJECT_DIR}`,
-    # `${CLAUDE_PLUGIN_DATA}`, and bare `$HOME` references.
-    #
-    # We check the original (unresolved) command string for `..` segments that
-    # appear immediately after an env-var prefix OR as a path component
-    # anywhere inside a path-looking token. Tokenizer-level detection would
-    # miss traversal inside quoted strings that shlex normalizes.
-    _TRAVERSAL_RE = re.compile(
-        r"""
-        (?:
-            # env-var-prefixed (POSIX forward slash):  ${VAR}/.. or $VAR/..
-            \$\{?CLAUDE_[A-Z_]+\}?/\.\./
-            |
-            # env-var-prefixed (Windows backslash): ${VAR}\.. or $VAR\..
-            \$\{?CLAUDE_[A-Z_]+\}?\\\.\.\\
-            |
-            # POSIX absolute path containing /../ (not //./ or similar)
-            /[A-Za-z0-9_.\-]+/\.\./
-            |
-            # Windows path containing \..\  — matches both C:\foo\..\bar
-            # and UNC-style \\server\share\..\bar. Excludes \. escape
-            # sequences (e.g. \t, \n) by requiring an actual \..\ segment
-            # between path components.
-            \\[A-Za-z0-9_.\-]+\\\.\.\\
-        )
-        """,
-        re.VERBOSE,
-    )
+    # `${CLAUDE_PLUGIN_DATA}`, and bare `$HOME` references. The matcher
+    # (_TRAVERSAL_RE) is compiled once at module scope.
     if _TRAVERSAL_RE.search(command):
         report.warning(
             "Command contains a `..` path segment that escapes the plugin/project root — "
@@ -2599,10 +2626,23 @@ def validate_command_hook(
             # hook["command"] crashed with KeyError, and a runtime-resolved env var
             # may live in args rather than command. (audit MAJOR lsp #2)
             invocation = hook.get("command", "") + " " + " ".join(str(a) for a in hook.get("args", []))
+            # Suppress the MAJOR for any runtime-resolved root. Both the braced
+            # (${VAR}) and bare ($VAR) spellings must be checked: _resolve_plugin_vars
+            # substitutes BOTH forms of CLAUDE_PLUGIN_ROOT, so a hook written as
+            # "$CLAUDE_PLUGIN_ROOT/scripts/foo.py" (no braces) gets its script path
+            # resolved against plugin_root and then correctly detected as
+            # nonexistent — but a braced-only suppressor would fire a false-positive
+            # MAJOR on it. Mirror the four-clause guard at the relative-path check
+            # above (the unbraced clauses were missing here). $CLAUDE_PLUGIN_DATA /
+            # $CLAUDE_PROJECT_DIR are NOT statically substituted, but their bare
+            # forms still belong in the suppressor for consistency and to cover the
+            # args-only exec form where the placeholder lives in args.
             if (
                 plugin_root
                 and "${CLAUDE_PLUGIN_ROOT}" not in invocation
+                and "$CLAUDE_PLUGIN_ROOT" not in invocation
                 and "${CLAUDE_PLUGIN_DATA}" not in invocation
+                and "$CLAUDE_PLUGIN_DATA" not in invocation
                 and "$CLAUDE_PROJECT_DIR" not in invocation
                 and "${CLAUDE_PROJECT_DIR}" not in invocation
             ):
@@ -3040,6 +3080,11 @@ def validate_single_hook(
         "description",
         "if",  # v2.1.85 — conditional execution using permission rule syntax
         "shell",  # v2.1.84 — "bash" (default) or "powershell" (Windows)
+        "args",  # v2.1.139 — exec-form command hooks (validated in validate_command_hook)
+        "server",  # mcp_tool hooks (required; validated in validate_mcp_tool_hook)
+        "tool",  # mcp_tool hooks (required; validated in validate_mcp_tool_hook)
+        "input",  # mcp_tool hooks (optional argument map; validated in validate_mcp_tool_hook)
+        "continueOnBlock",  # v2.1.139 — PostToolUse-only (validated below in this function)
     }
     for key in hook:
         if key not in known_hook_fields:
@@ -3333,13 +3378,27 @@ def validate_event_hooks(
 
     report.info(f"Validating {len(event_config)} matcher block(s) for {event_name}")
 
+    # Anchor the results list so the "All hooks valid" gate can see EVERY
+    # finding this event produced (CRITICAL or MAJOR), not just the CRITICALs.
+    event_anchor = len(report.results)
+
     all_valid = True
     for i, matcher_block in enumerate(event_config):
         report.info(f"Matcher block {i + 1}...")
         if not validate_matcher_block(matcher_block, event_name, plugin_root, report, hooks_json_data):
             all_valid = False
 
-    if all_valid:
+    # `all_valid` preserves the legacy boolean-return contract (driven by
+    # validate_matcher_block, which flips False only on CRITICAL via
+    # _has_blocking_results_after — pinned by test_validate_event_hooks_*).
+    # The user-facing "All hooks valid" PASSED line, however, must NOT lie:
+    # a MAJOR finding (e.g. "Script not found") leaves all_valid True but
+    # means the hooks are NOT all valid. Gate the cosmetic line on the
+    # absence of any CRITICAL *or* MAJOR added while validating this event
+    # so the report can never simultaneously say "All hooks valid" and carry
+    # a blocking finding for the same event (audit code #43).
+    event_blocking = any(r.level in ("CRITICAL", "MAJOR") for r in report.results[event_anchor:])
+    if all_valid and not event_blocking:
         report.passed(f"All hooks valid for {event_name}")
 
     return all_valid

@@ -70,8 +70,8 @@ Copy this checklist and track your progress:
 
 | Symptom | Fix |
 |---------|-----|
-| `Bad credentials` / 401 | Rotate PAT; re-run `gh secret set --body` on both repos |
-| Env var set but `gh secret set` fails 401/403 | `unset MARKETPLACE_PAT`, re-run skill, create fresh token |
+| `Bad credentials` / 401 | Rotate the PAT, then re-store it on both repos via `scripts/set_marketplace_pat.py` (never hand-roll `gh secret set` — see step 2) |
+| Env var set but secret-store fails 401/403 | `unset MARKETPLACE_PAT`, re-run the skill (which calls `scripts/set_marketplace_pat.py`), create a fresh token |
 | Dispatch never fires | Push to default branch; check `paths:` filter |
 | 404 from dispatch API | Fix `MARKETPLACE_OWNER` / `MARKETPLACE_REPO` |
 | Receiver never runs | Commit receiver workflow to marketplace default branch |

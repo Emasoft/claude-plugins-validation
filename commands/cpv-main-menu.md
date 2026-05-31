@@ -2,6 +2,7 @@
 name: cpv-main-menu
 description: Single entry point — Stop-hook menu of every CPV command/skill/agent (validate, fix, create, manage, GitHub, semantic-grade)
 argument-hint: "(none — this command is fully interactive)"
+context: fork
 agent: cpv-main-menu-agent
 user-invocable: true
 ---
@@ -46,7 +47,10 @@ within the `cpv-main-menu-skill`. The skill is loaded automatically.
 - The Stop hook emits via `systemMessage`, so the menu **never enters
   the agent's transcript or prompt cache** — zero context cost regardless
   of menu size.
-- No subagent fork, so no prompt-cache re-prime.
+- No *per-menu* subagent fork, so no prompt-cache re-prime on every
+  drill-down. (The command itself forks ONCE into `cpv-main-menu-agent`
+  at entry — that's the `context: fork` + `agent:` frontmatter — but each
+  subsequent menu/sub-menu is rendered by the Stop hook, not by re-forking.)
 - Menus are **unbounded** — the user can scroll back; there's no
   4-or-5-row UI cap.
 - Menus support **multi-column metadata** when needed.

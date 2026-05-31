@@ -213,15 +213,27 @@ def _walk_with_lines(
     obj: object,
     source: str,
     path: tuple[str, ...] = (),
+    *,
+    _cursor: list[int] | None = None,
 ) -> list[tuple[tuple[str, ...], int, int]]:
     """Walk a parsed JSON tree, returning ``(path, start_line, end_line)``
     tuples for every string value.
 
     The line range is recovered by searching the source text for the
-    exact JSON-encoded value. Not perfect (two identical strings would
-    collide) but adequate for the SkillAudit use case where the matcher
-    points at one specific line.
+    exact JSON-encoded value. ``json.loads`` preserves source order for
+    both objects and arrays, and this walk visits values in that same
+    order (each nested container is fully recursed before its next
+    sibling) — so a monotonic forward search cursor maps the Nth
+    occurrence of a duplicated string value onto its Nth position in the
+    source. Without the cursor a plain ``source.find()`` always returned
+    the FIRST occurrence, collapsing every later identical value onto
+    line 1's span and dropping the covering context for the real
+    (later) line. (audit LOW #174)
+
+    The ``_cursor`` argument is an internal single-element list holding
+    the next search offset; callers should not pass it.
     """
+    cursor = _cursor if _cursor is not None else [0]
     out: list[tuple[tuple[str, ...], int, int]] = []
     if isinstance(obj, str):
         # Find the encoded form in source. A JSON string can be written with raw
@@ -229,23 +241,32 @@ def _walk_with_lines(
         # first (the common case), then the ASCII-escaped form. Without this a
         # value containing non-ASCII lost its line/path and the covering
         # DANGEROUS-key context (hooks[].command) was dropped. (audit MINOR #13)
+        #
+        # Search FROM the running cursor so duplicate string values resolve to
+        # successive source occurrences instead of all collapsing onto the
+        # first. (audit LOW #174)
         idx = -1
         encoded = ""
         for candidate in (json.dumps(obj, ensure_ascii=False), json.dumps(obj)):
-            idx = source.find(candidate)
-            if idx >= 0:
+            found = source.find(candidate, cursor[0])
+            if found >= 0:
+                idx = found
                 encoded = candidate
                 break
         if idx >= 0:
             start_line = source.count("\n", 0, idx) + 1
             end_line = source.count("\n", 0, idx + len(encoded)) + 1
             out.append((path, start_line, end_line))
+            # Advance past this token so the next identical value is matched
+            # at a later position. A token cannot overlap itself in valid
+            # JSON, so jumping to the end of the encoded form is safe.
+            cursor[0] = idx + len(encoded)
     elif isinstance(obj, dict):
         for key, val in obj.items():
-            out.extend(_walk_with_lines(val, source, path + (key,)))
+            out.extend(_walk_with_lines(val, source, path + (key,), _cursor=cursor))
     elif isinstance(obj, list):
         for i, val in enumerate(obj):
-            out.extend(_walk_with_lines(val, source, path + (f"[{i}]",)))
+            out.extend(_walk_with_lines(val, source, path + (f"[{i}]",), _cursor=cursor))
     return out
 
 

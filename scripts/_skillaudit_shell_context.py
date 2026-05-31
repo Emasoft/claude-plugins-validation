@@ -596,10 +596,18 @@ _UNICODE_CODEPOINT_COMMENT_RE: Final[re.Pattern[str]] = re.compile(
 # r10-final FP iter (2026-05-28) — execution-class match inside a
 # shell echo/printf/cat string. ``echo "Install with: sudo apt..."``
 # is display text, not invocation.
+#
+# The body is matched with one alternative per quote style so that the
+# OTHER quote may appear inside the string: a double-quoted body may
+# contain ``'`` (``echo "it's: sudo apt..."``) and a single-quoted body
+# may contain ``"``. A single ``(?P<body>[^'\"]*)`` negated class stopped
+# at EITHER quote regardless of the opener, so ``echo "it's …"`` failed to
+# match and the execution-class token inside it was NOT recognised as
+# display text (kept visible — a false positive). (audit LOW #140)
 _SHELL_ECHO_STRING_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:echo|printf|cat|builtin\s+echo)\b"
     r"(?:\s+-[A-Za-z]+)*"  # flags
-    r"\s+(?P<quote>['\"])(?P<body>[^'\"]*)(?P=quote)"
+    r"\s+(?:\"(?P<body_dq>[^\"]*)\"|'(?P<body_sq>[^']*)')"
 )
 
 
@@ -623,7 +631,10 @@ def _match_inside_shell_echo_string(line: str, match: str) -> bool:
     if not match:
         return False
     for m in _SHELL_ECHO_STRING_RE.finditer(line):
-        body = m.group("body")
+        # Exactly one of the two quote-style alternatives captures the body.
+        body = m.group("body_dq")
+        if body is None:
+            body = m.group("body_sq") or ""
         # Use simple substring check — the matched text should appear in the body
         if match in body:
             return True

@@ -18,8 +18,8 @@ Phase 4 (Broader cache-aware refactor) is **deliberately skipped**
 in batch mode: Phase 4 changes require interactive per-step
 approval and that doesn't compose with a parallel dispatch
 (each agent would block waiting for the orchestrator's permission).
-Run `/cpv-cache-optimize <one plugin>` interactively if you want
-Phase 4 on a specific plugin.
+Run the interactive cache flow from `/cpv-main-menu` (menu-tree §3.3.3
+"Audit + broader refactoring") on a single plugin if you want Phase 4.
 
 Same input grammar as the rest of the batch family.
 
@@ -143,8 +143,9 @@ After every plugin has reported:
    ```text
    Some plugins still have remaining CA-* findings. Inspect their
    reports for per-plugin error details and re-run /cpv-batch-caching-optimize
-   to retry; or run /cpv-cache-optimize <one plugin> interactively for
-   Phase 4 (broader refactor).
+   to retry; or run the interactive cache flow from /cpv-main-menu
+   (menu-tree §3.3.3 "Audit + broader refactoring") on a single plugin
+   for Phase 4 (broader refactor).
    ```
 
 End the turn. The CMS Stop hook emits the final table via systemMessage.
@@ -154,7 +155,8 @@ End the turn. The CMS Stop hook emits the final table via systemMessage.
 `/cpv-batch-caching-optimize` is a one-shot fleet cache fixer; the
 status table is informational only. No numbered or lettered action
 rows — the user's next move is the text suggestion above (re-run, or
-switch to interactive `/cpv-cache-optimize` for Phase 4). The slug
+switch to the interactive cache flow via `/cpv-main-menu` →
+menu-tree §3.3.3 "Audit + broader refactoring" for Phase 4). The slug
 ``batch-cache-optimizer-agent-status`` is shared with
 `/cpv-batch-caching-audit` (same agent type — intentional). The fixed
 key→action map is empty by design; future post-scan menus extend this
@@ -168,7 +170,8 @@ the user to approve each refactor individually because they
 affect the plugin's user-facing structure. In batch mode the
 orchestrator can't surface 17 different "should I refactor this?"
 prompts mid-dispatch — every agent would block. Phase 4 stays
-opt-in via the per-plugin `/cpv-cache-optimize` command.
+opt-in via the interactive single-plugin cache flow under
+`/cpv-main-menu` (menu-tree §3.3.3 "Audit + broader refactoring").
 
 ## See also
 

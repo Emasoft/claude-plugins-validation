@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Appends an existing plugin to an existing marketplace's `marketplace.json`, preserving existing entries. Uses the correct `source.source` schema key (not the legacy `source.type`). Loaded by `cpv-main-menu-agent` via the GitHub setup → Link plugin menu branch.
+Appends an existing plugin to an existing marketplace's `marketplace.json`, preserving entries for *other* plugins. If a plugin with the same `name` is already listed, its entry is replaced in place with fresh metadata (so re-runs stay idempotent — one entry per name, never duplicated). Uses the correct `source.source` schema key (not the legacy `source.type`). Loaded by `cpv-main-menu-agent` via the GitHub setup → Link plugin menu branch.
 
 ## Prerequisites
 
@@ -24,7 +24,7 @@ Appends an existing plugin to an existing marketplace's `marketplace.json`, pres
 1. Confirm the marketplace's `marketplace.json` exists at the canonical location.
 2. Choose the plugin source form: local path or `owner/repo` GitHub slug.
 3. Invoke `manage_plugin.py --link-plugin <marketplace-path> <plugin-spec>`.
-4. The script appends a new entry; existing entries are NEVER overwritten.
+4. The script appends a new entry. Entries for other plugins are left untouched; an existing entry with the same `name` is replaced in place with fresh metadata.
 5. Re-validate the marketplace via `plugin-validation-skill` (or `validate_marketplace.py --strict`).
 
 Copy this checklist and track your progress:
@@ -46,7 +46,7 @@ Copy this checklist and track your progress:
 | Error | Resolution |
 |-------|------------|
 | Marketplace not found | Verify path; check for `.claude-plugin/marketplace.json` |
-| Plugin already linked | Re-runs are idempotent — duplicate entries are skipped |
+| Plugin already linked | Re-runs are idempotent — the same-name entry is replaced in place (refreshing version/description), never duplicated |
 | Local plugin not found | Verify path; `.claude-plugin/plugin.json` must exist |
 | GitHub repo invalid | Verify `owner/repo` slug exists on GitHub |
 | Validator regression after link | Check upstream cross-validation (RC-MKPL-*) findings |

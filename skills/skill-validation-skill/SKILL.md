@@ -82,5 +82,5 @@ Always `--report <path>` — share path, don't read. Prefer LLM Externalizer MCP
 
 ## Checklist
 Copy this checklist and track your progress:
-- [ ] Run validate_skill_comprehensive.py --report
+- [ ] Run validation via `remote_validation.py skill <path> --report <path>` (never call `validate_skill_comprehensive.py` directly)
 - [ ] Fix issues, re-run until exit 0

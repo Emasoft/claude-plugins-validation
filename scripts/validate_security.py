@@ -160,6 +160,18 @@ MAX_SCAN_BYTES = int(os.environ.get("CPV_MAX_SCAN_BYTES", str(DEFAULT_MAX_SCAN_B
 _split_lines_last_text: str | None = None
 _split_lines_last_value: list[str] = []
 
+# Cache of cumulative line-start character offsets, keyed by identity of the
+# `content_lines` list it was computed from (same one-shot identity-cache
+# discipline as `_split_lines`). Lets the negation-guard call sites map a
+# 1-based line number to its absolute offset in O(1) WITHOUT the historical
+# `content.find(line)` bug: `str.find` returns the offset of the FIRST
+# textual occurrence, so a duplicate line silently resolved to the wrong
+# (earlier) position and the negation-guard window was inspected at the
+# wrong place — suppressing a genuine finding on the 2nd+ occurrence when an
+# earlier identical line happened to sit near a negation word.
+_line_offsets_last_lines: list[str] | None = None
+_line_offsets_last_value: list[int] = []
+
 
 # =============================================================================
 # Per-scan step-status tracker (visibility for which steps actually ran)
@@ -313,6 +325,41 @@ def _split_lines(text: str) -> list[str]:
     _split_lines_last_value = text.split("\n")
     _split_lines_last_text = text
     return _split_lines_last_value
+
+
+def _line_abs_offset(content_lines: list[str], line_no: int) -> int:
+    """Absolute char offset of the start of 1-based `line_no` in the text that
+    `content_lines` was split from with ``text.split("\\n")``.
+
+    Because the split drops the `\\n` separators, the start of line N is the
+    sum of every preceding line's length plus one separator each:
+    ``sum(len(l) + 1 for l in content_lines[:line_no - 1])``.
+
+    Replaces `content.find(line) + m.start()` at the negation-guard call
+    sites. `str.find` returns the FIRST textual occurrence, so when the same
+    line text appears more than once in a file every occurrence after the
+    first mapped to the wrong character offset — the negation-guard window
+    was then read at the wrong place and a real finding on a duplicate line
+    was suppressed whenever an EARLIER identical line sat near a negation
+    word. Mapping by line NUMBER instead of line TEXT is occurrence-correct.
+
+    The cumulative-offset list is cached by identity of `content_lines`
+    (same one-shot discipline as `_split_lines`) so repeated lookups across
+    the per-pattern inner loops stay O(1) instead of O(line_no).
+    """
+    global _line_offsets_last_lines, _line_offsets_last_value
+    if _line_offsets_last_lines is not content_lines:
+        offsets: list[int] = []
+        running = 0
+        for ln in content_lines:
+            offsets.append(running)
+            running += len(ln) + 1  # +1 for the dropped "\n" separator
+        _line_offsets_last_value = offsets
+        _line_offsets_last_lines = content_lines
+    idx = line_no - 1
+    if idx < 0 or idx >= len(_line_offsets_last_value):
+        return 0
+    return _line_offsets_last_value[idx]
 
 
 # =============================================================================
@@ -3129,8 +3176,18 @@ _RC02_DOC_ROLE_STEMS: tuple[str, ...] = (
     "requirement",
     "requirements",
 )
+# Anchor each stem to a leading word boundary (`\b`). Without it the bare
+# alternation matched a stem as an arbitrary SUBSTRING of a longer word —
+# e.g. the `note` stem matched `## Footnote` / `## Keynote`, the `state`
+# stem matched `## Statements` — so an attacker could title a section with
+# any word that merely CONTAINS a doc-role stem and thereby suppress RC-02
+# prompt-injection findings in the following ≤30 lines. A leading boundary
+# closes that bypass (`Footnote`/`Keynote` no longer match) while still
+# matching legitimate plural forms (`## Phases`, `## Steps`, `## Notes`),
+# because the trailing edge is intentionally left unbounded so a `…s` /
+# `…es` plural of a singular-only stem keeps matching.
 _RC02_DOC_ROLE_RE = re.compile(
-    "|".join(re.escape(s) for s in _RC02_DOC_ROLE_STEMS),
+    "|".join(r"\b" + re.escape(s) for s in _RC02_DOC_ROLE_STEMS),
     re.IGNORECASE,
 )
 
@@ -3821,10 +3878,18 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
             for pattern, msg in PIPE_TO_SHELL_PATTERNS:
                 pipe_match = pattern.search(line)
                 if pipe_match:
-                    # In Python files, skip if pipe-to-shell is inside a string literal
-                    # (e.g. install instructions in dict values or help text)
-                    if is_python_file and ('"' in stripped or "'" in stripped):
-                        continue
+                    # NOTE: the precise "match is inside a string literal"
+                    # suppression lives below at the `_match_inside_quoted_span`
+                    # guard. A previous crude guard here
+                    # (`is_python_file and ('"' in stripped or "'" in stripped)`)
+                    # skipped the ENTIRE pipe-to-shell check for any Python
+                    # line that merely CONTAINED a quote anywhere — so a bare
+                    # `… | bash` on a line like `os.system("ok") ; foo URL | bash`
+                    # (where the `| bash` is NOT inside any string) was silently
+                    # suppressed. The span-precise helper below correctly only
+                    # suppresses when the match itself lies inside a quoted span,
+                    # so the crude guard was both redundant (in-string case) and
+                    # unsafe (quote-elsewhere case). Removed.
                     # GENERAL — pipe-to-shell with an explicit positional
                     # argument is INTERPRETER INVOCATION, not stdin-eval.
                     # The classic RCE shape is `curl URL | bash` (no
@@ -5278,6 +5343,14 @@ def scan_for_credential_harvest(content: str, file_path: str, report: Validation
     # pattern, not using a real credential.
     js_regex_re = re.compile(r"/[^/\n]+/[gimsuy]*")
     py_regex_re = re.compile(r"re\.compile\s*\(|RegExp\s*\(|regex\s*=\s*r['\"]")
+    # `env=` as a function KEYWORD ARGUMENT (`subprocess.run(..., env=…)`,
+    # `click.option("--x", env="GITHUB_TOKEN")`) — matched only at an
+    # argument boundary (line-start, `(`, `,`, or whitespace) so an
+    # unrelated hyphen/underscore-joined token such as `run-env=prod` or
+    # `myenv=secret` does NOT collide and suppress a real credential write
+    # on the same line. The previous bare `"env=" in line` substring test
+    # let any `…-env=…` token defang the credential-harvest check. (audit row 50)
+    env_kwarg_re = re.compile(r"(?:^|[(,\s])env\s*=")
 
     issues_found = 0
     lines = _split_lines(content)
@@ -5310,7 +5383,6 @@ def scan_for_credential_harvest(content: str, file_path: str, report: Validation
             for api in (
                 "default=",
                 "envvar=",
-                "env=",
                 "os.environ.get",
                 "os.getenv",
                 "process.env.",
@@ -5320,11 +5392,23 @@ def scan_for_credential_harvest(content: str, file_path: str, report: Validation
             )
         ):
             continue
-        # Skip env-var-mapping configs: `OPENROUTER_API_KEY: "CLAUDE_PLUGIN_OPTION_..."`,
-        # `"AWS_SECRET_ACCESS_KEY": process.env.AWS_SECRET_ACCESS_KEY`. Both
-        # sides of the colon/equals reference the same NAME (or a known
-        # placeholder); no credential value is being declared.
-        if "CLAUDE_PLUGIN_OPTION_" in line or "process.env." in line:
+        # `env=` is checked separately with an argument-boundary regex (see
+        # `env_kwarg_re`) so `run-env=` / `myenv=` can't bypass the scan.
+        if env_kwarg_re.search(line):
+            continue
+        # Skip env-var-mapping configs: `OPENROUTER_API_KEY: "CLAUDE_PLUGIN_OPTION_..."`.
+        # The placeholder reference is the credential VALUE, so it must sit
+        # inside a quoted span — a bare co-mention elsewhere on the line
+        # (e.g. a trailing `# see CLAUDE_PLUGIN_OPTION_FOO` comment next to a
+        # real `GITHUB_TOKEN="ghp_…"`) must NOT defang the check. The old
+        # `"CLAUDE_PLUGIN_OPTION_" in line` substring test allowed exactly
+        # that bypass. The `process.env.` arm here was DEAD CODE — every
+        # line containing `process.env.` already `continue`d at the api-skip
+        # set above — so it is removed. (audit row 54)
+        _claude_opt_idx = line.find("CLAUDE_PLUGIN_OPTION_")
+        if _claude_opt_idx >= 0 and _match_inside_quoted_span(
+            line, _claude_opt_idx, _claude_opt_idx + len("CLAUDE_PLUGIN_OPTION_")
+        ):
             continue
         # v2.46 FP-G — GitHub Actions canonical secrets-passthrough.
         # Lines like `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` or
@@ -5402,6 +5486,14 @@ def scan_for_sandbox_escape(content: str, file_path: str, report: ValidationRepo
     ):
         return 0
     is_python = file_lower.endswith(".py")
+    # YAML sequence items (`- run: …`, `- name: …`) share the leading
+    # `- ` shape with a markdown bullet, but in YAML the dash is STRUCTURAL
+    # and the rest of the line is a LIVE value — e.g. a GitHub Actions step
+    # `- run: git push --no-verify`. The markdown-bullet doc-skip below must
+    # therefore NOT fire for YAML, or RC-152..156 would be silently
+    # suppressed in exactly the workflow files where a malicious step hides.
+    # (audit row 48)
+    is_yaml = file_lower.endswith((".yml", ".yaml"))
 
     issues_found = 0
     lines = _split_lines(content)
@@ -5439,14 +5531,24 @@ def scan_for_sandbox_escape(content: str, file_path: str, report: ValidationRepo
         # GENERAL: markdown-bullet shape (`- Skip hooks`,
         # `* Skip hooks`, `+ Skip hooks`) inside any source file is a
         # doc list, not a live operation. Same shape as a markdown
-        # bullet point.
-        if re.match(r"^[\s>]*[-*+]\s", line):
+        # bullet point. EXCLUDES YAML — there `- ` is a sequence item
+        # whose value is live (`- run: git push --no-verify`).
+        if not is_yaml and re.match(r"^[\s>]*[-*+]\s", line):
             continue
         # Skip Python string literals (templates, help text, generator output)
         if is_python and _is_python_string_context(stripped):
             continue
-        # Skip reference .py files inside skills/ (they're templates, not executable code)
-        if "/references/" in file_normalized or file_normalized.startswith("skills/"):
+        # Skip reference files inside any */references/ folder (they're
+        # documentation templates, not executable code). The previous
+        # `or file_normalized.startswith("skills/")` arm was over-broad:
+        # it discarded EVERY file under skills/ — including live SKILL.md,
+        # hook.sh, .js, etc. — so a reverse-shell payload in
+        # skills/evil/hook.sh was silently ignored. The genuine
+        # skills-references case (skills/<name>/references/*.py) already
+        # contains "/references/", so this single guard covers it while
+        # keeping real skill scripts in scope. Mirrors the AND-combined
+        # guards at the doc-context helpers above (skills/ WITH references/).
+        if "/references/" in file_normalized:
             continue
         for pattern, msg in SANDBOX_ESCAPE_PATTERNS:
             if pattern.search(line):
@@ -7184,7 +7286,9 @@ def check_phase1_supply_chain_rules(plugin_path: Path, report: ValidationReport)
             # RC-37 — GTFOBins / LOLBins
             for pattern in GTFOBIN_LOLBIN_PATTERNS:
                 m = pattern.search(line)
-                if m and not has_negation_guard_nearby(content, content.find(line) + m.start()):
+                if m and not has_negation_guard_nearby(
+                    content, _line_abs_offset(content_lines_phase2c, line_no) + m.start()
+                ):
                     level = effective_severity("critical", rel_path, rule_id="RC-37")
                     getattr(report, level)(
                         f"RC-37: GTFOBin/LOLBin pattern at line {line_no}: {m.group(0)[:80]}",
@@ -7581,21 +7685,33 @@ def _rc76_is_security_audit_role(rel_path: str) -> bool:
     indicate the role.
     """
     rel = rel_path.lower().replace("\\", "/")
-    # Tokenize the path on `/` and `-`/`_` boundaries.
-    role_keywords = (
-        "security",
-        "audit",
-        "review",
-        "vulnerability",
-        "vulnerabilities",
-        "owasp",
-        "threat",
-        "pentest",
-        "exploit",
-        "harden",
+    # Tokenize the path on `/`, `-`, `_`, and `.` boundaries (the `.` split
+    # also peels the file extension off the basename, so `SECURITY.md`
+    # yields the token `security`).
+    role_keywords = frozenset(
+        {
+            "security",
+            "audit",
+            "review",
+            "vulnerability",
+            "vulnerabilities",
+            "owasp",
+            "threat",
+            "pentest",
+            "exploit",
+            "harden",
+        }
     )
-    parts = re.split(r"[/_-]", rel)
-    return any(kw in part for kw in role_keywords for part in parts)
+    # Match a role keyword as a WHOLE path token, never as a substring.
+    # The previous `kw in part` test matched substrings, so unrelated
+    # skills were wrongly classified as security-audit roles and had their
+    # RC-76 prompt-injection findings suppressed: `preview` contains
+    # `review`, `threatening` contains `threat`, `exploitation` contains
+    # `exploit`. Whole-token equality keeps every genuine
+    # security/audit/review/owasp/pentest path matching while closing that
+    # bypass. (audit row 52)
+    parts = re.split(r"[/_.\-]", rel)
+    return any(part in role_keywords for part in parts)
 
 
 # GENERAL: RC-76 attack-shape signals. RC-76 by itself just looks for
@@ -7823,7 +7939,7 @@ def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
                 m = pattern.search(line)
                 if not m:
                     continue
-                if has_negation_guard_nearby(content, content.find(line) + m.start()):
+                if has_negation_guard_nearby(content, _line_abs_offset(content_lines, line_no) + m.start()):
                     continue
                 # v2.42 — opt-in classifier path for RC-87.
                 if _CLASSIFIER_ACTIVE and rule_id == "RC-87":
@@ -7920,7 +8036,7 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                 m = pattern.search(line)
                 if not m:
                     continue
-                if has_negation_guard_nearby(content, content.find(line) + m.start()):
+                if has_negation_guard_nearby(content, _line_abs_offset(content_lines, line_no) + m.start()):
                     continue
                 # v2.42 — opt-in classifier path for rules with a registered
                 # classifier (RC-22, RC-93 in this loop). When active, the
@@ -7941,8 +8057,13 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                     level = effective_severity(new_severity, rel_path, rule_id=rule_id)
                 else:
                     # v2.41.0 — per-rule context-aware FP guards (binary).
-                    if rule_id == "RC-87" and _rc87_is_semver_context(line, rel_path):
-                        continue
+                    # NOTE: RC-87 is a PHASE 4 rule (PHASE4_PATTERNS, the
+                    # RC-85/86/87/88 quartet), never a PHASE 3 rule — so a
+                    # `rule_id == "RC-87"` guard in THIS PHASE3_PATTERNS loop
+                    # is unreachable. The RC-87 semver-context + history-doc
+                    # guards live (and run) at the check_phase4_all emit site;
+                    # the dead copies that used to sit here were removed.
+                    # (audit row 134)
                     if rule_id == "RC-93" and _rc93_is_markdown_table_row(line):
                         continue
                     # GENERAL FP: RC-92 CSS-hidden injection fires on
@@ -8116,16 +8237,10 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                         ):
                             continue
                     level = effective_severity(severity.lower(), rel_path, rule_id=rule_id)
-                # v2.45 FP8 — RC-87 in CHANGELOG / HISTORY / NEWS /
-                # README is project narrative, never live config.
-                # Demote one extra tier (see Phase 4 site for rationale).
-                if rule_id == "RC-87" and _rc87_is_history_doc(rel_path):
-                    if level == "minor":
-                        level = "nit"
-                    elif level == "warning":
-                        level = "nit"
-                    elif level == "major":
-                        level = "minor"
+                # (The RC-87 CHANGELOG/HISTORY narrative-doc demotion that
+                # used to sit here was dead code — RC-87 is a Phase 4 rule,
+                # never reached in this PHASE3_PATTERNS loop. The live copy
+                # runs at the check_phase4_all emit site. audit row 134)
                 getattr(report, level)(
                     f"{rule_id}: {msg.split(': ', 1)[-1] if ': ' in msg else msg} (line {line_no})",
                     rel_path,
@@ -8235,7 +8350,9 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                 continue
             for pattern in CLOUD_IMDS_PATTERNS:
                 m = pattern.search(line)
-                if m and not has_negation_guard_nearby(content, content.find(line) + m.start()):
+                if m and not has_negation_guard_nearby(
+                    content, _line_abs_offset(content_lines, line_no) + m.start()
+                ):
                     surrounding = _surrounding_lines(content_lines, line_no - 1, window=4)
                     # v2.42 — opt-in classifier path. The classifier
                     # re-uses `_rc65_is_pattern_source` semantics under
@@ -8275,7 +8392,9 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                 continue
             for pattern in PERSISTENCE_PATTERNS:
                 m = pattern.search(line)
-                if m and not has_negation_guard_nearby(content, content.find(line) + m.start()):
+                if m and not has_negation_guard_nearby(
+                    content, _line_abs_offset(content_lines_persistence, line_no) + m.start()
+                ):
                     level = effective_severity("major", rel_path)
                     getattr(report, level)(
                         f"RC-39: persistence pattern at line {line_no}: {m.group(0)[:80]}",
@@ -8285,8 +8404,17 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                     issues += 1
                     break
 
-        # RC-70 — Generic obfuscation with proximity-to-exec
+        # RC-70 — Generic obfuscation with proximity-to-exec.
+        # Apply the SAME fenced-code-block + pattern-source guards the
+        # RC-65/RC-39 per-line loops above use. Without them RC-70 fired on
+        # decoder+sink EXAMPLES inside a markdown ```fence``` (security docs
+        # demonstrating "what attackers do") — an FP every other rule in
+        # this function already suppresses. (audit row 53)
         for line_no, msg in find_obfuscated_exec(content, proximity_lines=3):
+            if is_in_fenced_code_block(line_no - 1, fence_state):
+                continue
+            if cpv_self_scan_skip_line(rel_path, content_lines, line_no):
+                continue
             level = effective_severity("critical", rel_path)
             getattr(report, level)(f"RC-70: {msg}", rel_path, line_no)
             issues += 1
@@ -8298,6 +8426,11 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
         # decoder near a sink; RC-68 finds a sink HIDDEN INSIDE the literal
         # itself after recursive decoding. Both can co-fire on the same line.
         for line_no, layers, sink_match in detect_multilayer_encoded_payload(content):
+            # Same fenced-code-block guard as RC-70/RC-65/RC-39 — an encoded
+            # payload shown INSIDE a markdown fence is documentation, not a
+            # live sink. (audit row 53)
+            if is_in_fenced_code_block(line_no - 1, fence_state):
+                continue
             if cpv_self_scan_skip_line(rel_path, content_lines, line_no):
                 continue
             level = effective_severity("warning", rel_path)
@@ -8861,19 +8994,12 @@ def validate_security(
         21, "Phase 10 — Python taint engine", "COMPLETED", findings=phase10_issues, files="RC-73/74/75 source-sink"
     )
 
-    # --- RC-103 disposition — emitted as a single INFO line ---
-    counts = {
-        "CRITICAL": sum(1 for r in report.results if r.level == "CRITICAL"),
-        "MAJOR": sum(1 for r in report.results if r.level == "MAJOR"),
-        "MINOR": sum(1 for r in report.results if r.level == "MINOR"),
-        "WARNING": sum(1 for r in report.results if r.level == "WARNING"),
-    }
-    verdict = disposition(counts)
-    report.info(
-        f"RC-103 disposition: {verdict} (counts: "
-        f"CRITICAL={counts['CRITICAL']} MAJOR={counts['MAJOR']} "
-        f"MINOR={counts['MINOR']} WARNING={counts['WARNING']})"
-    )
+    # RC-103 disposition is emitted as a single INFO line at the very END of
+    # validate_security() — see just before `return report`. It MUST be
+    # computed from the FINAL counts: the external scanners below (cc-audit,
+    # tirith, trufflehog, semgrep, Cisco, SkillAudit) all add findings via
+    # report.X(), so computing the disposition HERE would emit a stale verdict
+    # that ignores every external-scanner CRITICAL/MAJOR. (audit row 47)
 
     # --- External scanners (always run; each self-skips on absent source) ---
     #
@@ -9065,20 +9191,33 @@ def validate_security(
         """
         local = ValidationReport()
         steps: list[dict[str, Any]] = []
-        if shutil.which("npx"):
+        # cc-audit can launch via EITHER the persistent `cc-audit` binary
+        # (preferred — installed by `cpv-doctor --install-scanners`) OR an
+        # `npx --yes @cc-audit/cc-audit` fallback — see check_cc_audit's
+        # launcher resolution. The previous gate keyed on `npx` ALONE, so on
+        # a host with the persistent binary but no `npx` the step log
+        # recorded "SKIPPED / 0 findings / npx not on PATH" while
+        # check_cc_audit actually RAN cc-audit via the binary and merged its
+        # findings into the report — a lying step row. Gate on either
+        # launcher and derive RAN vs SKIPPED from what actually happened.
+        # (audit row 135)
+        cc_persistent = shutil.which("cc-audit")
+        cc_npx = shutil.which("npx")
+        if cc_persistent or cc_npx:
             cc_count = _run_scanner_with_cache(
                 "cc-audit",
                 check_cc_audit,
                 ["check", "-t", "plugin", "--format", "json", "--ci"],
                 local,
             )
+            launcher_label = "cc-audit (persistent binary)" if cc_persistent else "npx @cc-audit/cc-audit (auto-fetched)"
             steps.append(
                 {
                     "num": 22,
                     "name": "External: cc-audit (100+ AI rules)",
                     "status": "RAN",
                     "findings": cc_count,
-                    "files": "npx @cc-audit/cc-audit (auto-fetched)",
+                    "files": launcher_label,
                     "details": "",
                 }
             )
@@ -9091,7 +9230,7 @@ def validate_security(
                     "status": "SKIPPED",
                     "findings": 0,
                     "files": "",
-                    "details": "`npx` not on PATH — install Node.js to enable",
+                    "details": "neither `cc-audit` binary nor `npx` on PATH — run `cpv-doctor --install-scanners`",
                 }
             )
         return local, steps
@@ -9432,6 +9571,24 @@ def validate_security(
         findings=skillaudit_findings_count,
         files=f"{skillaudit_result.files_scanned} files" if skillaudit_status == "RAN" else "",
         details=skillaudit_details,
+    )
+
+    # --- RC-103 disposition — single INFO line, computed from the FINAL
+    # counts (after EVERY native phase AND every external scanner above).
+    # Moved here from mid-function so the verdict reflects the complete
+    # report state instead of a snapshot taken before the external
+    # scanners ran. (audit row 47)
+    counts = {
+        "CRITICAL": sum(1 for r in report.results if r.level == "CRITICAL"),
+        "MAJOR": sum(1 for r in report.results if r.level == "MAJOR"),
+        "MINOR": sum(1 for r in report.results if r.level == "MINOR"),
+        "WARNING": sum(1 for r in report.results if r.level == "WARNING"),
+    }
+    verdict = disposition(counts)
+    report.info(
+        f"RC-103 disposition: {verdict} (counts: "
+        f"CRITICAL={counts['CRITICAL']} MAJOR={counts['MAJOR']} "
+        f"MINOR={counts['MINOR']} WARNING={counts['WARNING']})"
     )
 
     return report

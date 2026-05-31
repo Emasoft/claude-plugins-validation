@@ -108,6 +108,41 @@ def _parse_inline_list(raw: str) -> list[Any]:
     return [_coerce_scalar(item) for item in _split_inline_items(body, raw)]
 
 
+def _fold_block_lines(block_lines: list[str]) -> tuple[str, int]:
+    """Fold a ``>`` (folded) block scalar's lines, YAML-1.2 semantics.
+
+    Consecutive non-empty lines are joined with a single space, but a run of
+    ``k`` blank lines between content (or at the start) becomes ``k`` literal
+    newlines rather than being dropped. The previous implementation discarded
+    blank lines entirely (``" ".join(... if s != "")``), which ran the words on
+    either side of a blank line together — diverging from ``pyyaml`` (verified:
+    ``>`` with a blank line yields ``"a b\\nc"`` in pyyaml, not ``"a b c"``).
+
+    Returns ``(body, trailing_blank_count)`` *before* chomping. The caller
+    applies strip / clip / keep chomping using ``trailing_blank_count`` so the
+    result matches pyyaml across every blank-line / chomp combination.
+    """
+    parts: list[str] = []
+    prev_content = False
+    pending = 0  # consecutive blank lines since the last content line (or start)
+    for ln in block_lines:
+        if ln == "":
+            pending += 1
+            continue
+        if not prev_content:
+            # Leading blank lines become that many newlines before the content.
+            if pending:
+                parts.append("\n" * pending)
+        else:
+            # A run of blanks between content lines folds to that many
+            # newlines; zero blanks fold to a single joining space.
+            parts.append("\n" * pending if pending else " ")
+        parts.append(ln)
+        prev_content = True
+        pending = 0
+    return "".join(parts), pending
+
+
 def safe_load(text: str) -> dict[str, Any] | None:
     """Parse a YAML frontmatter document into a Python ``dict``.
 
@@ -177,15 +212,31 @@ def safe_load(text: str) -> dict[str, Any] | None:
                     break
                 block_lines.append(blk[block_indent:])
                 i += 1
-            joined = ("\n".join(block_lines)) if not folded else (" ".join(s for s in block_lines if s != ""))
-            if chomp_strip:
-                joined = joined.rstrip("\n")
-            elif chomp_keep:
-                if not joined.endswith("\n"):
-                    joined += "\n"
-            else:  # default: clip — single trailing newline (YAML 1.2 default)
-                if joined and not joined.endswith("\n"):
-                    joined += "\n"
+            if folded:
+                # Folded (``>``): blank lines fold to newlines (NOT dropped).
+                # Chomping needs the trailing-blank count, so handle it here
+                # rather than via the shared endswith("\n") logic below.
+                joined, trailing_blanks = _fold_block_lines(block_lines)
+                if chomp_strip:
+                    joined = joined.rstrip("\n")
+                elif chomp_keep:
+                    # Keep: trailing blanks become newlines; a non-empty body
+                    # also gets the block's own final line break (+1).
+                    joined = ("\n" * trailing_blanks) if not joined else (joined + "\n" * (trailing_blanks + 1))
+                else:  # clip — single trailing newline (YAML 1.2 default)
+                    if joined and not joined.endswith("\n"):
+                        joined += "\n"
+            else:
+                # Literal (``|``): preserve every line break verbatim.
+                joined = "\n".join(block_lines)
+                if chomp_strip:
+                    joined = joined.rstrip("\n")
+                elif chomp_keep:
+                    if not joined.endswith("\n"):
+                        joined += "\n"
+                else:  # default: clip — single trailing newline (YAML 1.2 default)
+                    if joined and not joined.endswith("\n"):
+                        joined += "\n"
             result[key] = joined
             continue
 

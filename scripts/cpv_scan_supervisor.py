@@ -89,8 +89,10 @@ def _worker_main(
 ) -> None:
     """Top-level worker loop (picklable for `spawn`). Pulls `(idx, path)` items,
     publishes a heartbeat before each scan, runs `scan_func` lock-free, then
-    records `(findings, error, duration)` in the manager dict. Exits on the
-    `None` sentinel."""
+    records `(findings, error, duration, wid)` in the manager dict. The `wid`
+    is stamped here so the parent can attribute the finish event to the
+    worker that produced it (the heartbeat has already advanced by the time
+    the parent collects the result). Exits on the `None` sentinel."""
     while True:
         try:
             item = task_q.get(timeout=0.5)
@@ -114,7 +116,7 @@ def _worker_main(
         except Exception as exc:  # noqa: BLE001 — report ANY scan failure, never crash the worker silently
             findings = []
             err = f"{type(exc).__name__}: {exc}"
-        results[idx] = (findings, err, time.monotonic() - t0)
+        results[idx] = (findings, err, time.monotonic() - t0, wid)
         heartbeat[wid] = _IDLE
 
 
@@ -456,7 +458,7 @@ def supervised_scan(
             for idx in list(results.keys()):
                 if idx in seen:
                     continue
-                findings, err, dur = results[idx]
+                findings, err, dur, worker_wid = results[idx]
                 res = ScanResult(file_path=files[idx], findings=findings, error=err)
                 out[idx] = res
                 seen.add(idx)
@@ -471,6 +473,7 @@ def supervised_scan(
                         "findings": len(findings),
                         "error": err,
                         "duration_s": round(dur, 4),
+                        "worker": worker_wid,
                     },
                 )
                 _persist_finished(idx, res, dur)

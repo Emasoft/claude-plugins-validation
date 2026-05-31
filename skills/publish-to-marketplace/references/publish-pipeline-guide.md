@@ -44,7 +44,9 @@ A Personal Access Token (PAT) is required for cross-repo dispatch. `GITHUB_TOKEN
 
 ```bash
 # Set on the PLUGIN repo (not marketplace)
-gh secret set MARKETPLACE_PAT --repo <placeholder-for-github-repo-owner>/<placeholder-for-plugin-name>
+# MUST use --body — an echo-pipe / heredoc / here-string adds a trailing
+# newline to the secret value, which makes every dispatch fail with 401.
+gh secret set MARKETPLACE_PAT --repo <placeholder-for-github-repo-owner>/<placeholder-for-plugin-name> --body "$MARKETPLACE_PAT"
 
 # Verify
 gh secret list --repo <placeholder-for-github-repo-owner>/<placeholder-for-plugin-name>
@@ -255,9 +257,12 @@ If no plugin files changed, the hook passes immediately.
 
 ```bash
 # The pre-push template goes in git-hooks/pre-push
-# Then install with:
-uv run python scripts/setup-hooks.py
-# This copies git-hooks/* to .git/hooks/ and sets core.hooksPath
+# Then install with (canonical — copies git-hooks/pre-push to .git/hooks/
+# AND sets core.hooksPath = git-hooks):
+uv run python scripts/publish.py --install-hook
+
+# Alternative: scripts/setup-hooks.py copies every git-hooks/* file into
+# .git/hooks/ (it does NOT set core.hooksPath).
 ```
 
 ---

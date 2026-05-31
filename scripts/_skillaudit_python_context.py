@@ -68,7 +68,15 @@ def _is_env_read_modify_write(lines: list[str], line_idx: int) -> bool:
     if _PY_ENV_HIJACK_LITERAL_RE.search(window):
         return False
     # Require a same-window env READ (the "read" half of read-modify-write).
-    return bool(_PY_ENV_READ_RE.search(window))
+    # The write line itself (``os.environ[k] = …``) matches the second
+    # alternative of ``_PY_ENV_READ_RE`` (``os.environ[<ident>``), so it would
+    # self-satisfy this check for EVERY dynamic-key write — including a fully
+    # attacker-controlled ``os.environ[user_key] = user_value`` with no real
+    # read anywhere. Exclude the matched write line so the "read" half must
+    # come from a genuinely different line (the canonical shape reads the env
+    # value on a prior line, e.g. ``v = os.environ.get('NO_PROXY')``).
+    read_window = "\n".join(ln for i, ln in enumerate(lines[lo:hi], start=lo) if i != line_idx)
+    return bool(_PY_ENV_READ_RE.search(read_window))
 
 
 # Modules + attributes whose calls reach a shell. Every plugin uses at
@@ -660,6 +668,14 @@ def _find_enclosing_call(tree: ast.AST, line: int) -> ast.Call | None:
 
     "Deepest" so nested calls (``open(subprocess.run(...))``) resolve to
     the inner one — that's the one whose argv shape matters.
+
+    ``ast.walk`` is breadth-first top-down, so an OUTER call is yielded
+    before the INNER call it wraps. When both cover ``line`` with the SAME
+    line span (the common single-line ``open(subprocess.run(...))`` shape),
+    a strict ``<`` would keep the first-yielded OUTER call — the opposite
+    of "deepest". Use ``<=`` so the later-yielded, more-deeply-nested call
+    replaces it on a tie. (audit LOW #123: the docstring promised the inner
+    call but ``<`` returned the outer one.)
     """
     best: ast.Call | None = None
     best_span = float("inf")
@@ -672,7 +688,7 @@ def _find_enclosing_call(tree: ast.AST, line: int) -> ast.Call | None:
             continue
         if start <= line <= end:
             span = end - start
-            if span < best_span:
+            if span <= best_span:
                 best = node
                 best_span = span
     return best
@@ -772,22 +788,19 @@ def _match_in_python_inline_comment(source_line: str, match: str) -> bool:
     comment_start = _python_comment_start_pos(source_line)
     if comment_start < 0:
         return False
-    # Find the match in the line; the FIRST occurrence within the
-    # comment portion qualifies. (A rare match that ALSO happens to
-    # appear in the code portion stays flagged via that occurrence.)
+    # Decide on the FIRST occurrence of ``match``:
+    #   * before ``comment_start`` → the match is in CODE. The rule would
+    #     fire on that code-side occurrence regardless of any later
+    #     comment-side copy, so keep the finding visible (return False).
+    #   * at/after ``comment_start`` → the match is in the inline comment,
+    #     which is provably non-executable → safe (return True).
+    # The first occurrence is therefore decisive: a single ``find`` (no
+    # loop) is all that's needed, because the two cases are exhaustive
+    # for any non-negative offset.
     occurrence = source_line.find(match)
-    while occurrence >= 0:
-        if occurrence >= comment_start:
-            # This occurrence is inside the comment.
-            return True
-        if occurrence < comment_start:
-            # This occurrence is in CODE — caller should not suppress.
-            # Continue searching in case a LATER occurrence is in
-            # comment, but a same-line code-side match means the rule
-            # would have fired regardless. Return False to be safe.
-            return False
-        occurrence = source_line.find(match, occurrence + 1)
-    return False
+    if occurrence < 0:
+        return False
+    return occurrence >= comment_start
 
 
 # ── Issue #40 — execution-class vs prose-vector split for comment/docstring ──
@@ -2945,6 +2958,79 @@ def _line_is_safe_internal_assignment(tree: ast.AST, line: int, line_text: str) 
 _RUAMEL_SAFE_TYPES: Final[frozenset[str]] = frozenset({"rt", "safe", "base"})
 
 
+def _deepest_enclosing_function(
+    tree: ast.AST, line: int
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    """Return the deepest ``FunctionDef`` / ``AsyncFunctionDef`` whose source
+    range covers ``line``, or ``None`` when ``line`` is at module level.
+
+    "Deepest" (smallest span) so a nested helper inside a larger function is
+    resolved to the helper, matching the scope a name lookup on ``line`` would
+    actually see. Mirrors the covering-FunctionDef walk used by
+    ``_enclosing_function_is_template_generator``.
+    """
+    enclosing: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+    best_span: float = float("inf")
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", None)
+        if start is None or end is None or not (start <= line <= end):
+            continue
+        span = end - start
+        if span < best_span:
+            enclosing = node
+            best_span = span
+    return enclosing
+
+
+def _function_locally_binds(
+    func: ast.FunctionDef | ast.AsyncFunctionDef, name: str
+) -> bool:
+    """True iff ``func`` introduces a LOCAL binding for ``name`` in its own
+    scope — a parameter, an ``import name`` / ``from m import name`` (incl.
+    ``as name`` aliases), or an assignment target.
+
+    A local binding shadows any module-level binding of the same name, so the
+    caller must NOT treat a module-level assignment as the source of ``name``
+    when this returns True. The walk descends through statements but does NOT
+    enter nested ``FunctionDef`` / ``AsyncFunctionDef`` / ``ClassDef`` bodies —
+    those introduce their own scopes whose bindings are not ``func``'s locals.
+    """
+    # Parameters.
+    args = func.args
+    for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs):
+        if arg.arg == name:
+            return True
+    if args.vararg is not None and args.vararg.arg == name:
+        return True
+    if args.kwarg is not None and args.kwarg.arg == name:
+        return True
+
+    def _walk_scope(node: ast.AST) -> bool:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue  # nested scope — its bindings are not func's locals
+            if isinstance(child, (ast.Import, ast.ImportFrom)):
+                for alias in child.names:
+                    bound = alias.asname or alias.name.split(".")[0]
+                    if bound == name:
+                        return True
+            elif isinstance(child, ast.Assign):
+                for tgt in child.targets:
+                    if isinstance(tgt, ast.Name) and tgt.id == name:
+                        return True
+            elif isinstance(child, ast.AnnAssign):
+                if isinstance(child.target, ast.Name) and child.target.id == name:
+                    return True
+            if _walk_scope(child):
+                return True
+        return False
+
+    return _walk_scope(func)
+
+
 def _is_ruamel_yaml_safe_load(tree: ast.AST, source: str, line: int) -> bool:
     """True iff ``line`` calls ``<var>.load(...)`` where ``<var>`` was
     assigned from ``YAML(typ="rt"|"safe"|"base")`` (or ``YAML()``) or
@@ -2982,10 +3068,47 @@ def _is_ruamel_yaml_safe_load(tree: ast.AST, source: str, line: int) -> bool:
     if receiver_name is None:
         return False
 
-    # 2. Search the module for an assignment of that name to a
-    #    YAML(...) constructor call.
+    # 2. Search the IN-SCOPE assignments of that name for a YAML(...)
+    #    constructor call. Python LEGB: a binding is in scope for the
+    #    matched ``.load`` line iff it lives in the load's enclosing
+    #    function body (local) OR at module level (global). An assignment
+    #    inside a SIBLING function / class is NOT in scope and must be
+    #    ignored — otherwise an unrelated ``yaml = YAML(typ="rt")`` in one
+    #    function would suppress a genuinely-unsafe PyYAML ``yaml.load()``
+    #    that merely reuses the name elsewhere (audit MED #36; the
+    #    docstring already promises "same enclosing scope").
+    enclosing_func = _deepest_enclosing_function(tree, line)
+    enclosing_func_nodes = (
+        frozenset(map(id, ast.walk(enclosing_func))) if enclosing_func is not None else frozenset()
+    )
+    module_body_ids = frozenset(map(id, tree.body)) if isinstance(tree, ast.Module) else frozenset()
+    # A LOCAL binding of ``receiver_name`` inside the enclosing function
+    # (``import yaml`` / ``from m import yaml`` / ``yaml = …`` / a ``yaml``
+    # parameter) SHADOWS any module-level binding of the same name. When the
+    # function shadows it, only the function's own assignments count — the
+    # module-level ruamel instance is invisible to this ``.load`` (this is
+    # exactly the case (A) FN: a local ``import yaml`` is PyYAML, not the
+    # global ruamel instance). With no local binding, the function closes
+    # over the module-level (global) binding, so module-level assigns count.
+    local_shadows = enclosing_func is not None and _function_locally_binds(enclosing_func, receiver_name)
+
+    def _assign_in_scope(assign_node: ast.AST) -> bool:
+        # Local scope: the assignment is somewhere inside the enclosing
+        # function's lexical region (its body, including nested defs — a
+        # conservative accept that keeps the legitimate ruamel FP suppressed
+        # without widening to sibling scopes).
+        if id(assign_node) in enclosing_func_nodes:
+            return True
+        # Global scope: a module-level statement (direct child of Module),
+        # but ONLY when the enclosing function does not shadow the name.
+        if local_shadows:
+            return False
+        return id(assign_node) in module_body_ids
+
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        if not _assign_in_scope(node):
             continue
         # Get the assignment target name.
         target_name: str | None = None
@@ -3318,11 +3441,18 @@ def _node_is_in_module_level_pure_data_assign(tree: ast.AST, target: ast.AST) ->
         if isinstance(n, (ast.List, ast.Tuple, ast.Set)):
             return all(_is_pure_literal_data(e) for e in n.elts)
         if isinstance(n, ast.Dict):
-            return all(
-                _is_pure_literal_data(k) and _is_pure_literal_data(v)
-                for k, v in zip(n.keys, n.values, strict=False)
-                if k is not None  # **kwargs unpacking → not pure
-            )
+            # A ``None`` key marks a ``**spread`` entry (``{**other, …}``).
+            # The spread value can be ANY object (a non-literal variable,
+            # a call result), so a dict that contains one is NOT a pure
+            # literal — reject it on the spot. (Previously ``if k is not
+            # None`` SKIPPED the spread entry, wrongly certifying
+            # ``{**other, '/p': 'x'}`` as pure-literal; audit MED #37.)
+            for k, v in zip(n.keys, n.values, strict=False):
+                if k is None:  # **spread → not a pure literal
+                    return False
+                if not (_is_pure_literal_data(k) and _is_pure_literal_data(v)):
+                    return False
+            return True
         return False
 
     def _contains_target(n: ast.AST, t: ast.AST) -> bool:

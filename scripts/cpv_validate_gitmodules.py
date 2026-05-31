@@ -54,10 +54,17 @@ from pathlib import Path
 # (file://, ftp://, http://) is rejected.
 _ALLOWED_SCHEMES: frozenset[str] = frozenset({"https", "git+ssh", "ssh"})
 
-# RFC3986-style userinfo (`user@host`). Rejected outright — embedded
-# credentials in URLs are an exfiltration vector and a credential-leak
-# trap when the URL leaks to logs.
-_USERINFO_REJECT_RE = re.compile(r"://[^/@]+@")
+# RFC3986-style userinfo (`user@host` / `user:secret@host`). Embedded
+# credentials in URLs are an exfiltration vector and a credential-leak trap
+# when the URL leaks to logs. This regex CAPTURES the userinfo segment so the
+# shape check can distinguish the one legitimate, secret-free case — the
+# canonical password-less SSH login user `git` (`ssh://git@host/…`, used by
+# GitHub/GitLab/Bitbucket) — from a real credential or an arbitrary
+# exfiltration user. Anything with a password (`user:secret@`) or a username
+# other than `git` is still rejected.
+_USERINFO_CAPTURE_RE = re.compile(r"://([^/@]+)@")
+# The only userinfo permitted: the literal, secret-free git SSH user.
+_ALLOWED_SSH_USER: str = "git"
 
 # Path-traversal markers. Rejected outright — `..` in a URL path
 # component opens up host-substitution attacks via misparsing.
@@ -184,11 +191,18 @@ def _validate_url_shape(url: str) -> tuple[bool, str]:
         return False, "URL is empty"
     if _FORBIDDEN_CHARS_RE.search(url):
         return False, "URL contains backslash or newline"
-    if _USERINFO_REJECT_RE.search(url):
-        return False, (
-            "URL contains embedded user info (`user@host`) — credentials "
-            "in URLs are forbidden (exfiltration / credential-leak risk)"
-        )
+    userinfo_match = _USERINFO_CAPTURE_RE.search(url)
+    if userinfo_match is not None:
+        userinfo = userinfo_match.group(1)
+        # The canonical SSH URL form is `ssh://git@host/…`; `git` is a fixed,
+        # password-less login user — NOT a credential. A `:` means a password
+        # or token is embedded; any other username is an exfiltration vector.
+        if ":" in userinfo or userinfo != _ALLOWED_SSH_USER:
+            return False, (
+                "URL contains embedded user info (`user@host`) — credentials "
+                "in URLs are forbidden (exfiltration / credential-leak risk). "
+                f"Only the secret-free SSH user `{_ALLOWED_SSH_USER}@` is permitted."
+            )
     if _PATH_TRAVERSAL_RE.search(url):
         return False, "URL contains path-traversal `..`"
     scheme = _scheme_of(url)

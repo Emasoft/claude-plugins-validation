@@ -83,6 +83,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from cc_scope_rules import (
     ENABLED_PLUGIN_RE,
@@ -192,6 +193,55 @@ def _safe_path_message(value: Any) -> str:
     if not isinstance(value, str):
         return repr(value)
     return redact_home_path(value)
+
+
+def _url_embeds_credential(url: str) -> bool:
+    """Return True when ``url`` actually *embeds* a credential.
+
+    This is a URL-aware replacement for the previous
+    ``looks_like_secret_key_name(url)`` call, which fed the whole URL into a
+    *key-name* substring heuristic (``token``/``auth``/``secret``/``credential``
+    /…). That produced a high rate of false MINORs on perfectly legitimate
+    MCP endpoints whose host or path merely *contains* such a word
+    (``https://mcp.example.com/oauth/token``, ``.../v1/credentials``,
+    ``https://secrets.example.com/mcp``) while simultaneously *missing* the one
+    shape that is genuinely a leak — a credential in the userinfo
+    (``https://user:ghp_…@host``), because that secret never resembles a
+    field-name keyword (audit #90).
+
+    A URL embeds a credential only when:
+
+    1. The **userinfo** component carries a password (``user:secret@host``), or
+    2. A **query parameter** has a secret-like key AND a non-trivial value, or
+    3. A **query parameter** value matches a known secret-value pattern
+       (``sk-ant-…``, ``ghp_…``, a JWT, …) regardless of its key name.
+
+    The host and the path are deliberately NOT inspected — a routing path that
+    spells ``/oauth/token`` is not a secret, it is a public endpoint name.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        # Unparseable URL — fall back to NOT flagging (a malformed url string
+        # is a different problem than an embedded credential and would only
+        # produce noise here).
+        return False
+    # 1. userinfo password: ``scheme://user:password@host`` → ``parts.password``
+    #    is the secret. A bare ``user@host`` (no colon) has password == None and
+    #    is not a credential leak.
+    if parts.password:
+        return True
+    # 2 + 3. query-string parameters.
+    for key, value in parse_qsl(parts.query, keep_blank_values=True):
+        if not value:
+            continue
+        if is_secret_value(value):
+            return True
+        if looks_like_secret_key_name(key) and len(value) >= 8:
+            # Secret-like key with a non-trivial value (8+ chars rules out
+            # ``?token=1`` style flags / booleans that are not real secrets).
+            return True
+    return False
 
 
 # =============================================================================
@@ -591,9 +641,11 @@ def validate_mcp_json_project_scope(mcp_path: Path, report: ValidationReport) ->
             for idx, arg in enumerate(args):
                 _flag_absolute_home_paths_in_scalar(f"mcpServers.{name}.args[{idx}]", arg, report, file_label)
         url = server.get("url")
-        if isinstance(url, str) and looks_like_secret_key_name(url):
+        if isinstance(url, str) and _url_embeds_credential(url):
             report.minor(
-                f".mcp.json mcpServers.{name}.url looks like it embeds a credential",
+                f".mcp.json mcpServers.{name}.url embeds a credential (userinfo "
+                "password or secret query parameter) — move it to ${VAR} "
+                "expansion or a headers helper instead of the URL string",
                 file_label,
             )
 

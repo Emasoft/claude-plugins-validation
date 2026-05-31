@@ -1446,7 +1446,7 @@ END THE TURN.
 
 #### 3.8.4 Install all external scanners
 
-- **arg-prompt**: `This will install cc-audit, tirith, trufflehog, semgrep, Cisco AI Defense skill-scanner, SkillAudit (MANDATORY — megamind-0x/skillaudit, via npm/npx), AND fclones via brew/snap/pipx/cargo (silent, idempotent, per-platform). Proceed? (yes/no)`
+- **arg-prompt**: `This will install cc-audit, tirith, trufflehog, semgrep, Cisco AI Defense skill-scanner, fclones, AND the optional google-re2 accelerator via brew/snap/pipx/cargo (silent, idempotent, per-platform). (SkillAudit is NOT installed here — it is a native in-process Python check that always runs, no external tool needed.) Proceed? (yes/no)`
 - **execution**: ALWAYS confirm first, then:
   ```bash
   uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/manage_doctor.py" --install-scanners
@@ -1726,7 +1726,7 @@ folded in for one-stop access to the publish workflow.
 > | Doctor row                                          | New home in main menu                                  |
 > |-----------------------------------------------------|--------------------------------------------------------|
 > | 1, 2 (specific plugin / current folder)             | §3.1.1 Plugin (full) — auto-detects $PWD               |
-> | 3 (all installed plugins, deep scan)                | §3.8.3 Doctor (health check) with `--deep` flag        |
+> | 3 (all installed plugins, deep scan)                | §3.8.3 Doctor (health check) — default full per-plugin sweep (no flag; `--quick` skips it) |
 > | 4, 5 (GitHub plugin / marketplace)                  | §3.1.6.1, §3.1.6.2                                     |
 > | 6 (local marketplace)                               | §3.1.3.1                                               |
 > | 7, 8 (local / project scope)                        | §3.1.4.2, §3.1.4.1                                     |

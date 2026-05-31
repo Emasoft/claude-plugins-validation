@@ -26,8 +26,8 @@ orchestrator body lives in this plugin's
 
 - `claude-plugins-validation` plugin installed.
 - The five external security scanners installed (each self-skips
-  when its binary is unreachable; run
-  `/cpv-doctor --install-scanners` to pre-install).
+  when its binary is unreachable; run the `cpv-doctor` CLI as
+  `cpv-doctor --install-scanners` to pre-install).
 - LLM Externalizer MCP available (FP verifier).
 - Write access to every plugin's tree — this skill MUTATES source
   files in place.

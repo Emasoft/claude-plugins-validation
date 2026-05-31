@@ -313,12 +313,20 @@ def validate_readme_exists(plugin_path: Path, report: DocumentationValidationRep
         report.passed("README.md exists at plugin root", "README.md")
         return True
     else:
-        # Also check for lowercase variant
-        readme_lower = plugin_path / "readme.md"
-        if readme_lower.exists():
+        # Accept any case-variant the rest of the validator recognizes.
+        # _find_readme is the single source of truth for which README
+        # spellings count; checking a hard-coded subset here (only
+        # "readme.md") let a plugin shipping "Readme.md" pass the
+        # content-section checks (which use _find_readme) yet still get a
+        # spurious "README.md is missing" WARNING on case-sensitive
+        # filesystems (Linux/CI), where "README.md".exists() is False for a
+        # file literally named "Readme.md" (audit m87).
+        variant = _find_readme(plugin_path)
+        if variant is not None:
             report.minor(
-                "README.md exists but uses lowercase (readme.md) - consider using README.md",
-                "readme.md",
+                f"README.md exists but uses non-canonical case ({variant.name}) "
+                "- consider renaming to README.md",
+                variant.name,
             )
             return True
 
@@ -565,8 +573,13 @@ def validate_changelog_exists(plugin_path: Path, report: DocumentationValidation
         report.passed("CHANGELOG.md exists", "CHANGELOG.md")
         return
 
-    # Check for variations
-    for variant in ["CHANGELOG.md", "changelog.md", "CHANGES.md", "HISTORY.md"]:
+    # Check for variations. "CHANGELOG.md" is intentionally absent here — it
+    # was already tested above and re-listing it made the first loop iteration
+    # dead (it can only fail again at this point). On a case-insensitive
+    # filesystem "changelog.md" also matched the prior check, but it is kept
+    # for case-sensitive filesystems where it is a distinct, still-untested
+    # spelling (audit m158).
+    for variant in ["changelog.md", "CHANGES.md", "HISTORY.md"]:
         if (plugin_path / variant).exists():
             report.passed(f"Changelog found ({variant})", variant)
             return
@@ -594,13 +607,18 @@ def validate_heading_hierarchy(plugin_path: Path, report: DocumentationValidatio
         return
 
     content = readme.read_text(encoding="utf-8")
-    lines = content.split("\n")
 
     # Track current heading level
     current_level = 0
     issues_found = False
 
-    for i, line in enumerate(lines):
+    # Use the shared fence-aware iterator (like rules 10-12) so a line such as
+    # "# shell comment" or "### deep comment" INSIDE a ```/~~~ code block is not
+    # mistaken for an ATX heading, which produced spurious "hierarchy skip"
+    # WARNINGs for any README documenting commented shell snippets (audit m175).
+    for i, line, _stripped, in_fence, _opener in _iter_lines_with_fence_state(content):
+        if in_fence:
+            continue
         # Match ATX-style headings (# Heading)
         match = re.match(r"^(#{1,6})\s+", line)
         if match:

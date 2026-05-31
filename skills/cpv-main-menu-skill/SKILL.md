@@ -133,7 +133,7 @@ Copy this checklist and track your progress:
 
 Example 1:
 - Input: `/cpv-main-menu` → top-level spec queued via `print_menu.py fixed 5`, Stop hook emits menu → user replies `1` (Validate) → §3.1 sub-menu spec queued via `print_menu.py fixed 6` → user replies `1` (Plugin) → user pastes `~/Code/my-plugin/`
-- Output: `Plugin Validation: PASS. Report: reports/validate_skill/<TS>-my-plugin.md`
+- Output: `Plugin Validation: PASS. Report: reports/validate_plugin/<TS>-my-plugin.md`
 
 Example 2:
 - Input: `/cpv-main-menu` → top-level spec queued → user replies `0`

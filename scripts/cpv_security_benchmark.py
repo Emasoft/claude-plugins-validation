@@ -570,11 +570,12 @@ def main(argv: list[str] | None = None) -> int:
         "--clear-cache",
         action="store_true",
         help=(
-            "Clear ~/.cache/cpv/scanner-results/ BEFORE EACH non-warm phase. "
-            "B-cold and the other cold phases already clear the cache; this "
-            "flag ALSO clears it for B-warm (turning it into a second B-cold "
-            "run — useful for confirming the cache-population overhead is "
-            "stable across cold runs)."
+            "Request a scanner-cache wipe before each non-warm phase. The "
+            "cold phases (A / B-cold / C / D) already wipe the cache before "
+            "every run unconditionally, so this flag is a redundant explicit "
+            "request for them. The B-warm phase is ALWAYS left warm even with "
+            "this flag — measuring warm-cache hits is its entire purpose, and "
+            "it depends on B-cold having populated the cache first."
         ),
     )
     parser.add_argument(
@@ -626,15 +627,14 @@ def main(argv: list[str] | None = None) -> int:
                 run_label = f"{label} [run {run_idx + 1}/{args.runs}]"
             else:
                 run_label = label
-            # Cold phases wipe the cache before each run. Warm phase
-            # intentionally does NOT (we're measuring cache hits).
-            # --clear-cache also forces a wipe on the otherwise-warm
-            # phase, turning it into a second cold-cache run (useful
-            # for variance baseline).
+            # Cold phases wipe the cache before each run. The warm phase
+            # intentionally does NOT (we're measuring cache hits), and
+            # --clear-cache never overrides that — see below.
             should_wipe = clear_before or (args.clear_cache and short != "B-warm")
-            # Special case: B-warm depends on B-cold having populated
-            # the cache. If --clear-cache is set, B-warm is no longer
-            # warm — so we don't wipe it even then.
+            # B-warm depends on B-cold having populated the cache, so it
+            # is always left warm regardless of --clear-cache. (The flag
+            # is therefore a no-op for B-warm, and redundant for the cold
+            # phases which already wipe via clear_cache_before=True.)
             if short == "B-warm":
                 should_wipe = False
             if should_wipe:

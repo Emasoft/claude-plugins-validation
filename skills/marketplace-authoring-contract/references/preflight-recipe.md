@@ -24,7 +24,8 @@ Every in-scope agent runs this 4-step recipe before declaring "done" on any mark
 
 ```bash
 # 1. If editing existing marketplace.json
-CPV_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/validate_marketplace.py <mkpl-path> --strict --cross-validate-upstream
+#    (upstream cross-validation runs UNCONDITIONALLY — there is no flag to toggle it).
+PLUGIN_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/validate_marketplace.py <mkpl-path> --strict
 
 # 2. For every entry being added or modified:
 for entry in <list>; do
@@ -37,7 +38,7 @@ done
 write marketplace.json
 
 # 4. Post-emit sanity check (same as step 1)
-CPV_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/validate_marketplace.py <mkpl-path> --strict --cross-validate-upstream
+PLUGIN_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/validate_marketplace.py <mkpl-path> --strict
 ```
 
 Step 1 is OPTIONAL for fresh creates (there is nothing to validate yet). Step 4 is MANDATORY for every flow — pure creates, edits, migrations, fixes.
@@ -47,8 +48,8 @@ Step 1 is OPTIONAL for fresh creates (there is nothing to validate yet). Step 4 
 For flows that modify an existing marketplace.json, capture the baseline first:
 
 ```bash
-CPV_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/validate_marketplace.py \
-    <mkpl-path> --strict --cross-validate-upstream \
+PLUGIN_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/validate_marketplace.py \
+    <mkpl-path> --strict \
     > /tmp/preflight-baseline.txt
 ```
 
@@ -123,8 +124,8 @@ If the file already has a `// FIXME` placeholder from step 2's unreachable-upstr
 The MANDATORY closing step. Re-run the validator against the just-written file:
 
 ```bash
-CPV_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/validate_marketplace.py \
-    <mkpl-path> --strict --cross-validate-upstream
+PLUGIN_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/validate_marketplace.py \
+    <mkpl-path> --strict
 ```
 
 Three possible outcomes:

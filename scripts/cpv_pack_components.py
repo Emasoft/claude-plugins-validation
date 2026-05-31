@@ -136,9 +136,10 @@ def discover(source: Path) -> list[Component]:
         for f in sorted(agents_dir.glob("*.md")):
             found.append(Component(type="agent", name=f.stem, src=f))
 
-    # 4. commands/<name>.md (one per command file). Also detects
-    #    misclassified .md files in agents/ that are commands per
-    #    frontmatter (the user may have dropped them in the wrong dir).
+    # 4. commands/<name>.md (one per command file). Classification is
+    #    purely by directory: every .md under commands/ is a command,
+    #    just as every .md under agents/ (step 3) is an agent. Frontmatter
+    #    is NOT consulted to re-home a misplaced file across dirs.
     commands_dir = source / "commands"
     if commands_dir.is_dir():
         for f in sorted(commands_dir.glob("*.md")):

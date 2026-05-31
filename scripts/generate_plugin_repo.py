@@ -2586,7 +2586,7 @@ def stage_bump(root: Path, new_ver: str, dry_run: bool) -> None:
     cprint(f"  {GREEN}Version bumped to {new_ver}.{NC}")
 
 def stage_update_badges(root: Path, old_ver: str, new_ver: str, dry_run: bool) -> None:
-    """Step 7: Replace version badge in README.md.
+    """Step 8: Replace version badge in README.md.
 
     Strategy:
       1. Try exact-string substitution `version-<old>-blue` → `version-<new>-blue`
@@ -2777,7 +2777,7 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     cprint(f"  {GREEN}Pushed {tag} atomically.{NC}")
 
 def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
-    """Step 10: Create GitHub release via gh CLI.
+    """Step 11: Create GitHub release via gh CLI.
 
     TRDD-bbff5bc5 §5: re-runs the gh-auth precheck before `gh release
     create` so an auth state change between gates 10 and 11 (token
@@ -2810,10 +2810,25 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
         cprint(result.stdout.strip())
     if result.stderr and result.stderr.strip():
         print(result.stderr.strip(), file=sys.stderr)
-    if result.returncode != 0:
-        cprint(f"  {RED}Failed to create release (exit code {result.returncode}).{NC}")
-    else:
+    if result.returncode == 0:
         cprint(f"  {GREEN}Release created.{NC}")
+        return
+    # `gh release create` returns an "already_exists" / "already exists"
+    # validation error when a release for this tag is already present. On a
+    # re-run or interrupted-publish recovery that is the idempotent-success
+    # outcome (the release IS there), so it must NOT abort — match either
+    # spelling gh emits, case-insensitively.
+    combined_err = f"{result.stdout or ''}\n{result.stderr or ''}"
+    if re.search(r"already[ _]exists", combined_err, re.IGNORECASE):
+        cprint(f"  {YELLOW}Release {tag} already exists — treating as success (idempotent re-run).{NC}")
+        return
+    # Any other non-zero exit is a genuine failure (auth revoked mid-pipeline,
+    # malformed notes file, network exhausted all retries). The tag is already
+    # pushed, but the documented final stage did NOT complete — abort so the
+    # pipeline does not falsely report success (fail-fast invariant).
+    cprint(f"  {RED}Failed to create release (exit code {result.returncode}).{NC}")
+    cprint(f"  {RED}  The tag {tag} is pushed; create the release manually or re-run after fixing the cause.{NC}")
+    sys.exit(1)
 
 
 # -- Main ----------------------------------------------------------------------

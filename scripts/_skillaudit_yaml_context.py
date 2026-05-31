@@ -135,6 +135,25 @@ _DANGEROUS_INSTALL_TOKEN_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:^|\s)(?:-o|--option|-c|--config-file)\b" r"|://",
     re.IGNORECASE,
 )
+
+# audit LOW #144 — ``brew install <local-path>`` executes an arbitrary local
+# Ruby formula file (RCE from an attacker-controlled file). The ``brew``
+# segment regex below permits ``/`` and ``.`` so a legit tap spec
+# (``brew install homebrew/cask/foo``, ``brew install user/tap/formula``)
+# stays airtight, but that same allowance lets a path argument
+# (``brew install ../../evil``, ``./local.rb``, ``/abs/x.rb``) slip through.
+# A tap spec is bare ``<word>/<word>[/<word>]`` identifiers; a local-formula
+# PATH carries one of: a leading ``/`` or ``./`` or ``../``, a ``..`` segment
+# anywhere, or a ``.rb`` formula extension. Any of those → NOT airtight
+# (fall back to demote). Matched per ``brew``-install segment, so a benign
+# tap spec on the same chain is unaffected.
+_BREW_LOCAL_PATH_RE: Final[re.Pattern[str]] = re.compile(
+    r"^brew\s+(?:install|update|upgrade)\b.*?"
+    r"(?:(?:^|\s)(?:\.{1,2}/|/)"  # token starting with /  ./  ../
+    r"|(?:^|\s|/)\.\.(?:/|\s|$)"  # a bare ``..`` path component
+    r"|\.rb\b)",  # a Ruby formula file extension
+    re.IGNORECASE,
+)
 _SAFE_RUN_SEGMENT_RE: Final[tuple[re.Pattern[str], ...]] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
@@ -173,6 +192,10 @@ def _run_line_is_airtight_pkg_install(line: str) -> bool:
     segments = [s.strip() for s in body.split("&&") if s.strip()]
     if not segments:
         return False
+    # audit LOW #144 — reject any ``brew install <local-path>`` segment: it
+    # runs an arbitrary local Ruby formula (RCE). Tap specs stay airtight.
+    if any(_BREW_LOCAL_PATH_RE.search(seg) for seg in segments):
+        return False
     return all(any(p.match(seg) for p in _SAFE_RUN_SEGMENT_RE) for seg in segments)
 
 
@@ -185,6 +208,18 @@ def _walk_yaml_keys_naive(source: str) -> list[tuple[tuple[str, ...], int]]:
 
     Path is the inferred dotted sequence based on indentation. List
     entries (``- item``) are represented as ``"[<n>]"``.
+
+    A ``- key: value`` line is a single-key mapping that is the Nth entry
+    of the enclosing list. The mapping's keys live one indentation level
+    DEEPER than the ``-`` marker (at the column where the key text starts,
+    i.e. ``dash_indent + len("- ")``), so a SIBLING key on a following line
+    (which aligns to that key column, with no ``-``) must resolve as a
+    sibling of the first key INSIDE the same list entry — not nested under
+    it. Tracking the key's own column (not the dash column) as its frame
+    level is what makes that happen, and it also lets the next ``- `` at the
+    dash column correctly close the entry and increment the list counter
+    (audit MEDIUM #59 — previously every sibling key was wrongly nested
+    under the first key and the second list entry kept index ``[0]``).
     """
     out: list[tuple[tuple[str, ...], int]] = []
     key_re = re.compile(r"^(?P<indent>[ \t]*)(?P<dash>-\s+)?(?P<key>[A-Za-z_$][\w.$-]*)\s*:")
@@ -200,17 +235,31 @@ def _walk_yaml_keys_naive(source: str) -> list[tuple[tuple[str, ...], int]]:
         indent = len(m.group("indent").expandtabs(4))
         dash = bool(m.group("dash"))
         key = m.group("key")
+        # The key text starts after the optional ``- `` marker. Its column
+        # is the nesting level of the mapping key itself; the list-entry
+        # marker (when present) nests one level shallower, at ``indent``.
+        key_indent = indent + len(m.group("dash").expandtabs(4)) if dash else indent
 
-        # Pop deeper-or-equal frames.
-        while stack and stack[-1][0] >= indent:
-            popped = stack.pop()
-            list_counters.pop(popped[0], None)
+        # A new ``- `` entry closes the previous entry at the list level, so
+        # pop on the dash column; a bare key pops on its own column.
+        pop_level = indent if dash else key_indent
+        while stack and stack[-1][0] >= pop_level:
+            stack.pop()
+
+        # Reset any list counter at a level we have just left, EXCEPT the
+        # list this very line continues: a sibling ``- `` at ``indent`` must
+        # keep the counter alive so the next entry becomes ``[1]``, ``[2]``…
+        # (popping the prior ``[n]`` placeholder above must NOT drop it —
+        # that was the audit MEDIUM #59 "second entry stuck at [0]" bug).
+        keep_level = indent if dash else None
+        for level in [lvl for lvl in list_counters if lvl >= pop_level and lvl != keep_level]:
+            del list_counters[level]
 
         if dash:
             count = list_counters.get(indent, 0)
             list_counters[indent] = count + 1
             stack.append((indent, f"[{count}]"))
-        stack.append((indent, key))
+        stack.append((key_indent, key))
 
         path = tuple(seg for _, seg in stack)
         out.append((path, lineno))

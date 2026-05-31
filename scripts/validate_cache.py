@@ -697,14 +697,28 @@ def _collect_hook_for_fork_unsafe(
         return out
     rel = str(script_path.relative_to(plugin_root)) if script_path.is_relative_to(plugin_root) else str(script_path)
 
-    if any(p.search(content) for p in _PREFIX_FILE_PATTERNS) and _FILE_WRITE_OPS.search(content):
-        out.append(
-            ValidationResult(
-                level="WARNING",
-                message=f"CA-06: {event} hook touches cached-prefix files — verify the parent prefix is preserved across the fork",
-                file=rel,
+    # Require the prefix-file mention AND a write op on the SAME line — same
+    # discipline as CA-02/CA-03. A file-level `any(...) and ...search(content)`
+    # check (the pre-fix shape) fired on mere coincidence: a script that READS
+    # CLAUDE.md on one line and writes to an UNRELATED file on another produced
+    # a spurious CA-06 WARNING, since both patterns matched somewhere in the
+    # file. Same-line co-occurrence is what actually indicates a write to a
+    # cached-prefix file (audit #85).
+    for line_num, line in enumerate(content.split("\n"), start=1):
+        stripped = line.strip()
+        if stripped.startswith("#") and not stripped.startswith("#!"):
+            continue
+        if not _FILE_WRITE_OPS.search(line):
+            continue
+        if any(p.search(line) for p in _PREFIX_FILE_PATTERNS):
+            out.append(
+                ValidationResult(
+                    level="WARNING",
+                    message=f"CA-06: {event} hook touches cached-prefix files — verify the parent prefix is preserved across the fork",
+                    file=rel,
+                    line=line_num,
+                )
             )
-        )
     return out
 
 

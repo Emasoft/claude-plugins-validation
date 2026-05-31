@@ -603,7 +603,7 @@ VALID_TOOLS = {
     "LSP",
     "Agent",
     "Monitor",  # v2.1.98 — run command in background, feed each output line to Claude (same permissions as Bash)
-    "Workflow",  # v2.1.154 — dynamic workflows: orchestrate work across many background agents (see /workflows)
+    "Workflow",  # v2.1.147 — multi-agent orchestration across background agents; off by default (CLAUDE_CODE_WORKFLOWS=1); see /workflows
     "PowerShell",  # v2.1.84 — Windows opt-in preview (CLAUDE_CODE_USE_POWERSHELL_TOOL=1)
     "ListMcpResourcesTool",  # Lists MCP server resources
     "ReadMcpResourceTool",  # Reads a specific MCP resource by URI
@@ -617,7 +617,8 @@ VALID_TOOLS = {
     "PushNotification",
     "SlashCommand",  # v1.0.123 — enables Claude to invoke your slash commands
     "MCPSearch",  # v2.1.7 — MCP-specific tool search (distinct from generic ToolSearch)
-    "Workflow",  # v2.1.147 — deterministic multi-agent orchestration; off by default (CLAUDE_CODE_WORKFLOWS=1)
+    # NOTE: "Workflow" is defined once above (after "Monitor"); a second entry here
+    # was a redundant duplicate with a conflicting version annotation (audit b07).
 }
 
 # Valid model short names for agents (v2.1.74+: full model IDs also accepted)
@@ -977,6 +978,14 @@ def parse_frontmatter(
     The closing delimiter is matched as a ``---`` LINE, never a bare ``---``
     substring: ``content.split("---", 2)`` corrupts valid frontmatter whose
     VALUE contains ``---`` (e.g. ``description: "use --- as a separator"``).
+
+    The closing ``---`` is recognized only when it sits at column 0 (no leading
+    whitespace), matching YAML's directives-end marker rule: an INDENTED ``---``
+    is block-scalar content, not a document delimiter. Without this, a literal
+    (``|``)/folded (``>``) block scalar whose body contains a ``---`` line would
+    truncate the value and silently drop every field after it into ``body``
+    (audit b07): e.g. ``description: |`` with ``  ---`` in its body lost both the
+    rest of the description AND a trailing ``allowed-tools:`` field.
     """
     if (yaml_loader is None) != (yaml_error is None):
         raise ValueError("parse_frontmatter: pass yaml_loader and yaml_error together, or neither")
@@ -995,7 +1004,11 @@ def parse_frontmatter(
         return None, content, 0
     closing_idx = None
     for idx in range(1, len(lines)):
-        if lines[idx].strip() == "---":
+        # Only a column-0 ``---`` is a closing delimiter. ``rstrip()`` (not
+        # ``strip()``) tolerates trailing whitespace from editors but rejects a
+        # LEADING-indented ``---``, which is block-scalar content — never a YAML
+        # document marker (audit b07).
+        if lines[idx].rstrip() == "---":
             closing_idx = idx
             break
     if closing_idx is None:
@@ -2681,7 +2694,9 @@ register_rule(
 # steal IAM credentials. Includes encoding variants that bypass naive
 # string-search rules (hex, decimal, octal IPv4 + IPv6 forms).
 CLOUD_IMDS_PATTERNS: tuple[re.Pattern[str], ...] = (
-    # AWS
+    # AWS (Azure shares the same 169.254.169.254 IMDS IP — one pattern covers both;
+    # a second identical entry under "Azure" would be dead code, since the RC-65
+    # consumer breaks on the first match per line, audit b07).
     re.compile(r"\b169\.254\.169\.254\b"),
     re.compile(r"\b0xa9fea9fe\b", re.IGNORECASE),  # 169.254.169.254 in hex
     re.compile(r"\b2852039166\b"),  # 169.254.169.254 in decimal
@@ -2690,8 +2705,7 @@ CLOUD_IMDS_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bmetadata\.google\.internal\b", re.IGNORECASE),
     re.compile(r"\bmetadata-google-internal\b", re.IGNORECASE),
     re.compile(r"\b169\.254\.170\.2\b"),  # GCP IMDS variant
-    # Azure
-    re.compile(r"\b169\.254\.169\.254\b"),  # Azure shares same IP
+    # Azure (169.254.169.254 already matched by the AWS entry above)
     re.compile(r"\bManagedIdentityExtension\b"),
     # Alibaba Cloud
     re.compile(r"\b100\.100\.100\.200\b"),
@@ -2996,8 +3010,19 @@ def detect_mcp_unbounded_retry(content: str) -> list[tuple[int, str]]:
       with `continue` or `pass` (i.e. retry-on-error with no decay).
     - `for i in range(BIG):` (>= 10000) loops containing a network/exec call.
 
-    Excludes bounded retries with `break` on success or with `time.sleep`
-    backoff — those are legitimate retry-with-backoff patterns.
+    Excludes two legitimate shapes (audit b07 — this is what actually bounds the
+    loop, NOT a mere "break on success"):
+    - `time.sleep` backoff before the `continue`/`pass`: the except handler no
+      longer starts with an immediate `continue`/`pass`, so ``has_except_continue``
+      is False and the loop is not flagged.
+    - `break`/`return` reachable from inside the `except` handler ("give up after
+      error"): the loop terminates on the first failure, so it is bounded.
+
+    A `while True` whose ONLY exit is a `break`/`return` on SUCCESS while it
+    retries-on-error with no backoff is still flagged: on a persistently-failing
+    target it spins forever hammering the endpoint with zero delay — the exact
+    rate-limit-exhaustion / brute-force vector RC-55 targets. The break-on-success
+    does not bound the failure path.
     """
     lines = content.split("\n")
     findings: list[tuple[int, str]] = []
@@ -3017,10 +3042,12 @@ def detect_mcp_unbounded_retry(content: str) -> list[tuple[int, str]]:
             # Fire only when we have BOTH network call AND retry-on-error pattern,
             # AND no obvious termination break/return short-circuit on success.
             if has_network and has_except_continue:
-                # Heuristic: if break/return appears INSIDE an except, it's the
-                # legitimate "give up after error" pattern; otherwise it's
-                # likely a "break on success" inside try — the retry-loop is
-                # genuinely unbounded.
+                # Heuristic (audit b07): a break/return reachable from INSIDE the
+                # except is the legitimate "give up after error" shape — the loop
+                # terminates on the first failure, so it is bounded → do NOT fire.
+                # Otherwise (break/return only on success in the try, or none at
+                # all) the failure path retries forever with no decay → fire. The
+                # break-on-success does not bound the unbounded retry-on-error.
                 if (
                     not re.search(
                         r"except\b[^:]*:[^\n]*(?:\n\s+[^\n]*)*?\n\s+(?:break|return)\b",
@@ -6195,7 +6222,11 @@ def print_compact_summary(
         verdict = f"{COLORS['MINOR']}INVALID{COLORS['RESET']}"
         verdict_line = f"{COLORS['MINOR']}Verdict: INVALID — minor issues should be fixed{COLORS['RESET']}"
 
-    # Print compact output — always show all levels, PASSED first, WARNING last
+    # Print the compact severity breakdown — the six reportable levels, PASSED
+    # first and WARNING last. INFO is intentionally omitted: it is informational
+    # / verbose-only (see the Level hierarchy comment) and is not part of the
+    # mandatory severity-count breakdown (audit b07 — comment previously claimed
+    # "all levels", which wrongly implied INFO was shown here too).
     print(f"{COLORS['BOLD']}{title}{COLORS['RESET']}: {verdict}")
     parts = []
     for level in ("PASSED", "CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING"):

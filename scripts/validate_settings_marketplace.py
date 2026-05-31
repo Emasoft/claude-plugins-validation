@@ -151,6 +151,7 @@ def validate_source_object(
 
     elif source_type in ("url", "git", "git-subdir"):
         url = source_obj.get("url")
+        url_is_valid = False
         if url is not None:
             if not isinstance(url, str):
                 report.major(f"{ctx}.url: must be a string, got {type(url).__name__}", file_label)
@@ -160,7 +161,7 @@ def validate_source_object(
                     file_label,
                 )
             else:
-                report.passed(f"{ctx}: {source_type} source has valid URL", file_label)
+                url_is_valid = True
 
         if source_type == "git-subdir":
             path_val = source_obj.get("path")
@@ -169,6 +170,17 @@ def validate_source_object(
                     f"{ctx}.path: must be a string, got {type(path_val).__name__}",
                     file_label,
                 )
+
+        # Emit the "valid URL" PASSED only when this source object accrued NO
+        # blocking finding (e.g. git-subdir missing its required `path`, or a
+        # wrong-typed `path`). Without this guard a git-subdir entry that is
+        # missing `path` got BOTH a MAJOR (missing required field) AND a
+        # spurious "source has valid URL" PASSED, contradicting each other and
+        # making an INVALID source look partially green (audit #91). Mirror the
+        # `settings`-branch idiom (blocking-count snapshot taken at entry).
+        blocking_now = sum(1 for r in report.results if r.level in ("CRITICAL", "MAJOR"))
+        if url_is_valid and blocking_now == blocking_at_entry:
+            report.passed(f"{ctx}: {source_type} source has valid URL", file_label)
 
     elif source_type == "npm":
         package = source_obj.get("package")

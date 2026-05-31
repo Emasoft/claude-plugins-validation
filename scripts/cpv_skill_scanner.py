@@ -15,11 +15,12 @@ first invocation.
 Reference scan command (assembled by `build_scan_command()`):
     uvx --from cisco-ai-skill-scanner skill-scanner scan-all <plugin>
         --recursive
-        --lenient            # tolerate Claude Code .claude/commands/*.md
-        --use-behavioral     # AST dataflow (no API key)
-        --policy balanced    # default risk preset
+        --lenient                  # tolerate Claude Code .claude/commands/*.md
+        --policy balanced          # default risk preset
         --format json
-        --compact
+        --output-json <path>       # findings written here, then parsed
+        --use-behavioral           # AST dataflow (no API key); default on
+        --use-trigger              # trigger analysis (no API key); default on
 """
 
 from __future__ import annotations

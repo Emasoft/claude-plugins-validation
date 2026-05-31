@@ -276,13 +276,15 @@ def detect_precedence_conflicts(
                 inline_decisions.add(decision)
 
         has_unknown = unknown_count > 0
-        # Uniform-decision groups produce no finding: no silent override.
+        # Uniform-decision groups produce no finding: no silent override. This
+        # single guard covers BOTH no-finding cases — zero inline decisions
+        # with no unknowns, and exactly one inline decision with no unknowns
+        # (both satisfy `len <= 1 and not has_unknown`). A group with exactly
+        # one inline decision BUT unknowns intentionally falls through to emit
+        # a finding, because the exec script(s) might return any decision at
+        # runtime. (A second `len == 1 and not has_unknown` guard here would be
+        # dead code — it is fully subsumed by this one — audit #159.)
         if len(inline_decisions) <= 1 and not has_unknown:
-            continue
-        # A group with exactly one inline decision and no unknowns is uniform.
-        # A group with exactly one inline decision BUT unknowns still needs a
-        # finding because the exec script might return anything at runtime.
-        if len(inline_decisions) == 1 and not has_unknown:
             continue
 
         resolved = _resolve_by_precedence(inline_decisions) if inline_decisions else None

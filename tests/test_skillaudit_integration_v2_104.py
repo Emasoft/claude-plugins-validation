@@ -475,6 +475,12 @@ class TestCacheContract:
         """
         from cpv_scan_cache import reset_cache
 
+        # Force the cache ENABLED: sibling audit-fix test modules set
+        # ``os.environ.setdefault("CPV_SCAN_CACHE", "0")`` at import time, which
+        # permanently disables the cache for the whole xdist worker — making
+        # these cache-CONTRACT tests observe entries=0 (cache off) and fail.
+        # Clear it so the contract (hit/invalidate) is actually exercised.
+        monkeypatch.delenv("CPV_SCAN_CACHE", raising=False)
         monkeypatch.setenv("CPV_SCAN_CACHE_DIR", str(tmp_path / "_scan_cache"))
         reset_cache()
         yield

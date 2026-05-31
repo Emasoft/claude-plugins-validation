@@ -57,8 +57,9 @@ are rejected.
    any `pending_fixes` for the unsafe MAJOR / MINOR recipes.
 5. For pending fixes, suggest running
    `/cpv-batch-scope-diagnose-and-fix` for the same-turn variant
-   OR the doctor's per-project interactive flow
-   (`/cpv-doctor <one project>`).
+   OR the doctor's per-project interactive flow (dispatch the
+   `cpv-doctor-agent` on that single project; the non-interactive
+   one-shot equivalent is the `cpv-doctor <one project>` CLI).
 
 ## Output
 

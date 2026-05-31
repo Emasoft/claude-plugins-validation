@@ -542,7 +542,10 @@ class TestLintMarkdown:
                 side_effect=_make_run(FakeResult(1, "", stderr)),
             ):
                 ok = lint_markdown(tmp_path, [f], report)
-        assert ok is False
+        # audit MED #15: NIT-only findings must NOT flip the return to False —
+        # the documented module contract is "True iff no MAJOR/CRITICAL", and a
+        # stylistic markdownlint nit must not block the publish gate (issue #20).
+        assert ok is True
         # Severities: NIT only — no MINOR markdownlint findings.
         levels = [r.level for r in report.results if "markdownlint" in r.message]
         assert levels and all(level == "NIT" for level in levels), (
@@ -565,7 +568,10 @@ class TestLintMarkdown:
                 side_effect=_make_run(FakeResult(3, "", "")),
             ):
                 ok = lint_markdown(tmp_path, [f], report)
-        assert ok is False
+        # audit MED #15: a silent markdownlint failure surfaces a WARNING (not a
+        # MAJOR), and WARNING does not flip the return — markdownlint never
+        # blocks a publish (issue #20); the WARNING keeps the breakage visible.
+        assert ok is True
         # Either a WARNING (truly silent — empty stderr+stdout) or a NIT
         # carrying the unparsed output. EITHER way at least one finding
         # exists so the user knows why the gate failed.

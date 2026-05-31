@@ -617,7 +617,17 @@ def _code_block_lang(ranges: list[_CodeBlockRange], line_idx: int) -> str | None
 def _code_block_has_placeholder(lines: list[str], ranges: list[_CodeBlockRange], line_idx: int) -> bool:
     for r in ranges:
         if r.start < line_idx < r.end:
-            return any(_has_placeholder(lines[i]) for i in range(r.start, r.end + 1))
+            # SECURITY (audit HIGH, fence-header-placeholder bypass): scan only
+            # lines STRICTLY INSIDE the fence (``range(r.start + 1, r.end)``),
+            # never the opening/closing ``` fence lines themselves. The opening
+            # fence's info string (`` ```bash # YOUR_SETUP_HERE ``) is author
+            # commentary, NOT a content line — counting it let an attacker park
+            # a placeholder token in the fence header and have every dangerous
+            # payload line below it hard-suppressed at _confidence:1436. A real
+            # placeholder sibling (``API_KEY=YOUR_KEY``) is a CONTENT line and
+            # still matches. r.start/r.end bracket the fence rows, so the
+            # exclusive range is exactly the block's content.
+            return any(_has_placeholder(lines[i]) for i in range(r.start + 1, r.end))
     return False
 
 
@@ -855,6 +865,27 @@ _INTENT_HARD_SIGNAL_RULES: frozenset[str] = frozenset(
         "HEX_DECODE_THREAT",
         "UNICODE_ESCAPE_DECODE_THREAT",
         "CHARCODE_DECODE_THREAT",
+        # SECURITY (audit HIGH, intent ruleId/classification-set drift):
+        # ``_analyze_intent`` synthesizes its ``ruleId`` from the pattern NAME
+        # (``"INTENT_" + re.sub(r"[^A-Z]", "_", name.upper())``), so every
+        # _INTENT_PATTERNS entry has a ruleId that MUST be classified here or
+        # the safe_doc branch silently downgrades it to NIT. The unambiguous
+        # threat-delivery intents below are HARD signals exactly like
+        # PROMPT_INJECT — the prose IS the attack (a SKILL.md that instructs
+        # "install a rootkit" / "disable the firewall" / "connect back to the
+        # attacker" / "forward the api-key to …" / "read the .env then upload"
+        # is a live payload). HARD => keep at declared severity on
+        # instruction-loadable paths, suppress only on documentation-only
+        # surfaces (issue #38). Keep these names byte-identical to the
+        # synthesized ruleIds (verified by the round-trip test in
+        # tests/test_audit_fix_b03.py).
+        "INTENT_EXFILTRATION_INTENT",
+        "INTENT_UPLOAD_INTENT",
+        "INTENT_READ_AND_EXFILTRATE_INTENT",
+        "INTENT_CREDENTIAL_FORWARDING_INTENT",
+        "INTENT_MALWARE_INSTALL_INTENT",
+        "INTENT_SECURITY_DISABLE_INTENT",
+        "INTENT_REVERSE_CONNECTION_INTENT",
     }
 )
 
@@ -870,6 +901,14 @@ _INTENT_SOFT_SIGNAL_RULES: frozenset[str] = frozenset(
         "INTENT_DESTRUCTIVE_INTENT",
         "INTENT_AGENT_MANIPULATION",
         "INTENT_INSTRUCTION_OVERRIDE",
+        # audit HIGH (intent classification-set drift): "POST the data/results
+        # to an endpoint" is a MEDIUM-severity _INTENT_PATTERNS entry whose
+        # verb appears benignly in legitimate code/docs ("POST the results to
+        # the status API"). Classify SOFT — demote to NIT so it stays VISIBLE
+        # (agent triages) rather than silently downgrading via the safe_doc
+        # fall-through. The unambiguous-threat siblings (exfil/upload/malware/…)
+        # are HARD above; this one is deliberately the softer bucket.
+        "INTENT_POST_DATA_INTENT",
         "TOKEN_STEAL",
         "CRED_ENV_READ",
         "CRED_ENV_SAFE",
@@ -1053,7 +1092,16 @@ def _is_documentation_only_path(file_path: str) -> bool:
     root, agents/, commands/, .claude/rules/), the function returns
     False and the existing dispatcher behaviour stands.
     """
-    norm = file_path.replace("\\", "/").lstrip("./").lower()
+    # audit MED #8: strip only the LITERAL ``./`` prefix, never every leading
+    # ``.``/``/`` char. ``str.lstrip('./')`` is a CHARACTER SET strip, so it
+    # turned ``.docs/x.md`` → ``docs/x.md`` (and ``.specs/…`` → ``specs/…``),
+    # making non-standard dotfile directories falsely match the doc-only
+    # prefixes and silently suppress PROMPT_INJECT there. The ``[2:]``-on-prefix
+    # idiom (already used at line ~697 / ``_is_documentation_only_path``'s
+    # sibling) preserves the leading dot.
+    norm = file_path.replace("\\", "/").lower()
+    if norm.startswith("./"):
+        norm = norm[2:]
     if not norm:
         return False
     parts = norm.split("/")
@@ -1727,6 +1775,18 @@ def _analyze_urls(lines: list[str]) -> list[dict[str, Any]]:
     for i, line in enumerate(lines):
         for match in _URL_RE.finditer(line):
             url = match.group(0)
+            # audit MED #39: skip a URL that is ITSELF a documentation
+            # placeholder (``https://webhook.site/YOUR_UUID_HERE``,
+            # ``https://example.com/...``). The check is URL-scoped, NOT
+            # line-scoped, on purpose: a line like ``POST your data to
+            # https://webhook.site/abc123`` carries a REAL exfil target whose
+            # only ``YOUR``-ish token (``your data``) is unrelated prose — a
+            # line-level _has_placeholder skip would wrongly suppress the live
+            # URL. _PLACEHOLDER_PATTERNS matches explicit placeholder tokens
+            # (YOUR_/<your-…>/example.com/xxx/…), none of which appear in a
+            # real ``webhook.site/<actual-uuid>``, so this is not a bypass.
+            if _has_placeholder(url):
+                continue
             try:
                 from urllib.parse import urlparse  # local import — std lib
 
@@ -1800,7 +1860,26 @@ def _detect_invisible_unicode(lines: list[str]) -> list[dict[str, Any]]:
     # r01 FP iter (2026-05-28) — U+200D between two emoji is a valid emoji
     # ZWJ SEQUENCE (combiner), not steganography. Reuse the markdown
     # classifier's combiner check so both detectors agree.
-    from _skillaudit_markdown_context import _is_emoji_combiner_zwj  # type: ignore[import-not-found]
+    #
+    # audit MED #38: guard the sibling-module import the same way the six
+    # context-classifier imports in _context_classifier_verdict do — a bare
+    # ``from _skillaudit_markdown_context import …`` would raise ImportError
+    # and crash the ENTIRE scan if the module were ever unavailable (partial
+    # install / sys.path mishap). _detect_invisible_unicode is a HARD-signal
+    # steganography detector; it must never be the thing that aborts the run.
+    # SECURITY: when the combiner helper is missing, fall back to a function
+    # that reports "NOT a benign emoji combiner" for every ZWJ — i.e. flag ALL
+    # zero-width joiners as suspicious. That is the steganography-conservative
+    # choice (a false-positive on a real emoji ZWJ sequence, never a
+    # false-negative that hides an injected zero-width payload).
+    try:
+        from _skillaudit_markdown_context import (  # type: ignore[import-not-found]
+            _is_emoji_combiner_zwj,
+        )
+    except ImportError:
+
+        def _is_emoji_combiner_zwj(text: str, idx: int) -> bool:  # type: ignore[misc]
+            return False
 
     findings: list[dict[str, Any]] = []
     for i, line in enumerate(lines):
@@ -2437,8 +2516,22 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
             best_by_key[key] = f
             order.append(key)
             continue
-        if _severity_rank(str(f.get("severity", ""))) > _severity_rank(str(existing.get("severity", ""))):
+        f_rank = _severity_rank(str(f.get("severity", "")))
+        existing_rank = _severity_rank(str(existing.get("severity", "")))
+        if f_rank > existing_rank:
             best_by_key[key] = f
+        elif f_rank == existing_rank:
+            # audit LOW #124: implement the docstring's equal-rank tiebreak.
+            # When two findings on the same (ruleId, line) tie on severity rank,
+            # a VISIBLE finding must win over a SUPPRESSED one so suppression
+            # never hides a live duplicate — e.g. the catalog rule fires
+            # suppressed (placeholder line) and is appended FIRST, while a
+            # secondary scanner re-surfaces the same ruleId visible; first-seen
+            # alone would have kept the suppressed copy. Only upgrade
+            # suppressed→visible; a true tie (both same suppression state) keeps
+            # the first-seen entry, preserving deterministic ordering.
+            if existing.get("suppressed") and not f.get("suppressed"):
+                best_by_key[key] = f
     deduped: list[dict[str, Any]] = [best_by_key[k] for k in order]
 
     # Attach the file path for downstream consumers.

@@ -22,11 +22,14 @@ Usage:
     uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --strict  # Nixtla strict mode
     uv run python scripts/validate_skill_comprehensive.py path/to/skill/ --pillars # 8+1 Pillars validation
 
-Exit codes:
-    0 - All checks passed (Grade A/B)
-    1 - CRITICAL issues found (Grade F)
-    2 - MAJOR issues found (Grade D)
-    3 - MINOR issues found (Grade C)
+Exit codes (derived purely from the highest-severity issue, NOT from the
+letter grade — the A-F grade is an independent score-based axis and does not
+map 1:1 to the exit code):
+    0 - No CRITICAL/MAJOR/MINOR issues (the letter grade may still be A-F
+        depending on the overall quality score)
+    1 - At least one CRITICAL issue
+    2 - At least one MAJOR issue (and no CRITICAL)
+    3 - At least one MINOR issue (and no CRITICAL/MAJOR)
 """
 
 from __future__ import annotations
@@ -232,7 +235,13 @@ VAGUE_NAME_WORDS = {
 }
 
 # --- Gerund Pattern (verb + -ing, recommended by Anthropic docs) ---
-RE_GERUND_NAME = re.compile(r"^[a-z]+-[a-z]*ing(-[a-z]+)*$")
+# Anthropic recommends the gerund (verb + -ing) as the FIRST segment of the
+# name, e.g. 'processing-pdfs', 'analyzing-data', 'building-apis' — exactly
+# the examples this validator suggests. The previous pattern required the
+# '-ing' token in the SECOND segment, so it matched 'pdf-processing' (gerund
+# last) but rejected 'processing-pdfs' (gerund first), inverting the intent.
+# (audit MEDIUM #56)
+RE_GERUND_NAME = re.compile(r"^[a-z]*ing(-[a-z]+)+$")
 
 # --- Reference File TOC ---
 # TOC must appear in the first 200 characters of referenced .md files
@@ -272,7 +281,13 @@ RE_SKILL_DIR_VAR = re.compile(r"\$\{CLAUDE_SKILL_DIR\}")
 RE_BRACED_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_.]*)\}")  # Matches ${ANY_VAR} or ${user_config.KEY}
 
 # --- Dynamic Context Injection Pattern (skills.md: !`command`) ---
-RE_DYNAMIC_CONTEXT = re.compile(r"!\s*`[^`]+`")  # Correct: !`command`
+# The bang MUST be immediately adjacent to the opening backtick. A space
+# between them (`! `command``) is NOT valid dynamic-context syntax — Claude
+# Code only executes the command when it reads `!` directly followed by the
+# backtick. A `\s*` here wrongly accepted the space variant as correct and
+# let it pass silently; without it the space variant is correctly caught as
+# broken by RE_BANG_ONE_BACKTICK instead. (audit MEDIUM #57)
+RE_DYNAMIC_CONTEXT = re.compile(r"!`[^`]+`")  # Correct: !`command` (no space before backtick)
 
 # Broken dynamic context pattern — exactly one backtick (the "no backticks at
 # all" case is covered inline by the shell_command_words scan in
@@ -800,17 +815,23 @@ def validate_description_field(
     if strict_mode:
         if is_user_invocable:
             # User-facing skill: requires "Use when..." and "Trigger with..."
+            # 'Use when ...' is the hard requirement (MAJOR); 'Trigger with ...'
+            # is a strong recommendation (MINOR). Earlier the MINOR message
+            # claimed both were "required", contradicting its own severity —
+            # a MINOR finding cannot describe a hard requirement. Each message
+            # now states the requirement level that matches how it is emitted.
+            # (audit LOW #137)
             if not RE_DESCRIPTION_USE_WHEN.search(desc):
                 report.major(
                     "Description must include 'Use when ...' phrase (Nixtla strict mode). "
-                    "Both 'Use when ...' AND 'Trigger with ...' are required.",
+                    "'Use when ...' is required; 'Trigger with ...' is recommended.",
                     "SKILL.md",
                     category="Description Quality",
                 )
             if not RE_DESCRIPTION_TRIGGER_WITH.search(desc):
                 report.minor(
-                    "Description should include 'Trigger with ...' phrase (Nixtla strict mode). "
-                    "Both 'Use when ...' AND 'Trigger with ...' are required.",
+                    "Description should include 'Trigger with ...' phrase (Nixtla strict mode) "
+                    "in addition to 'Use when ...' for better discoverability.",
                     "SKILL.md",
                     category="Description Quality",
                 )
@@ -1691,20 +1712,27 @@ def validate_path_formats(
                 line=display_line,
                 category="Path Format",
             )
-        # Generic Windows backslash detection (any backslash followed by letter)
-        elif RE_WINDOWS_PATH.search(line):
-            # Skip shell line continuations (backslash at end of line)
-            # Skip common escape sequences (\n, \t, \r, etc.)
+        # Generic Windows backslash detection (any backslash followed by letter).
+        # The escape-sequence exemption is evaluated PER MATCH, not per line:
+        # a single benign escape (e.g. `\n`) earlier on the line must not mask
+        # a genuine `\drive`-style backslash path appearing elsewhere on the
+        # same line. Previously the heuristic was line-level, so any escape
+        # sequence anywhere suppressed the whole line and produced false
+        # negatives. (audit LOW #138)
+        elif (
+            RE_WINDOWS_PATH.search(line)
+            and not stripped_line.startswith(("```", "`", "#", "//"))
+        ):
             stripped = line.rstrip()
             is_shell_continuation = stripped.endswith(" \\") or stripped.endswith("\t\\")
-            has_escape_sequences = any(
-                esc in line for esc in ["\\n", "\\t", "\\r", "\\\\", '\\"', "\\'", "\\0", "\\x", "\\u"]
+            # A RE_WINDOWS_PATH match is `\` + one letter/underscore. Treat the
+            # match as a benign string escape only when that letter is a known
+            # escape character (\n \t \r \b \f \v \0 \a \x.. \u.. \U..).
+            escape_chars = set("ntrbfv0axuU")
+            path_like_match = any(
+                m.group(0)[1] not in escape_chars for m in RE_WINDOWS_PATH.finditer(line)
             )
-            if (
-                not stripped_line.startswith(("```", "`", "#", "//"))
-                and not is_shell_continuation
-                and not has_escape_sequences
-            ):
+            if path_like_match and not is_shell_continuation:
                 report.minor(
                     f"Line {display_line}: possible Windows-style path (backslash) - use forward slashes for portability",
                     "SKILL.md",
@@ -1772,9 +1800,24 @@ def validate_time_sensitive_info(body: str, report: ValidationReport, line_offse
     lines = body.split("\n")
     time_sensitive_found = []
 
+    # Track fenced code blocks so the WHOLE block is skipped, not just its
+    # fence markers. Code legitimately cites versions/dates (e.g. a pinned
+    # dependency or a sample log line) and must not be flagged as stale prose.
+    # The previous loop only skipped lines that START with a backtick, so
+    # version/date references on inner code lines were scanned despite the
+    # "Skip code blocks" intent. (audit MEDIUM #55)
+    in_code_block = False
     for i, line in enumerate(lines, 1):
-        # Skip code blocks
-        if line.strip().startswith("```") or line.strip().startswith("`"):
+        stripped_line = line.strip()
+        # Toggle on a fenced-block delimiter (``` or ~~~) and skip the marker.
+        if stripped_line.startswith("```") or stripped_line.startswith("~~~"):
+            in_code_block = not in_code_block
+            continue
+        # Skip everything inside a fenced code block.
+        if in_code_block:
+            continue
+        # Skip inline-code-only lines (a line that is a single backtick span).
+        if stripped_line.startswith("`"):
             continue
 
         match = RE_TIME_SENSITIVE.search(line)

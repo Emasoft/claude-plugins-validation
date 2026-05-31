@@ -478,8 +478,11 @@ def _load_installed_plugins() -> dict:
 def _run_cpv_validation(plugin_root: Path, quiet: bool = False) -> Tuple[List[str], List[str], bool]:
     """Run CPV's validate_plugin.py via subprocess. Returns (errors, warnings, valid).
 
-    Exit codes: 0=pass, 1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT, 5+=WARNING.
-    Only CRITICAL and MAJOR (exit 1-2) block installation.
+    Exit codes: 0=pass, 1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT. WARNING never
+    maps to an exit code (it never blocks). NIT (4) is only emitted under
+    --strict, which this caller does not pass, so in practice the validator
+    returns 0/1/2/3 — but 4 is kept in the non-blocking set defensively.
+    Only CRITICAL (1) and MAJOR (2) block installation.
     """
     scripts_dir = Path(__file__).resolve().parent
     validate_script = scripts_dir / "validate_plugin.py"
@@ -502,8 +505,10 @@ def _run_cpv_validation(plugin_root: Path, quiet: bool = False) -> Tuple[List[st
     output = result.stdout + result.stderr
     v_errors = [line for line in output.splitlines() if "CRITICAL" in line or "MAJOR" in line]
     v_warnings = [line for line in output.splitlines() if "MINOR" in line or "NIT" in line or "WARNING" in line]
-    # Only CRITICAL (exit 1) and MAJOR (exit 2) block installation
-    valid = result.returncode in (0, 3, 4, 5)
+    # Only CRITICAL (exit 1) and MAJOR (exit 2) block installation.
+    # 0=pass, 3=MINOR, 4=NIT do not block. (The validator never emits 5;
+    # WARNING has no exit code, so 5 was unreachable dead state.)
+    valid = result.returncode in (0, 3, 4)
     return v_errors, v_warnings, valid
 
 

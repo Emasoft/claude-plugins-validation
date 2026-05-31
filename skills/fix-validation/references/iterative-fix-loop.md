@@ -21,7 +21,7 @@ Copy this checklist into your fix log and tick each item as you go:
 - [ ] Re-validate AFTER every batch (never chain speculative fixes)
 - [ ] Evaluate every remaining WARNING against the publish-blocker rules
 - [ ] Fix publish-blocker WARNINGs; leave truly-advisory WARNINGs with per-entry justification
-- [ ] Stop when findings empty AND no blocking warnings, OR escalate at iteration 5 / identical-finding-set
+- [ ] Stop when findings empty AND no blocking warnings, OR escalate when the finding set is identical to the previous iteration (oscillation). NO fixed iteration cap.
 - [ ] **For migration runs only (`/cpv-upgrade-plugin`)**: run `run_all_checks` from `references/canonical-pipeline-migration-checklist.md` — every BLOCKER + MAJOR must pass.
 - [ ] **For migration runs only**: run `uv run python scripts/publish.py --print-gates` then `--dry-run` then `--patch`, then `gh run watch <run-id> --exit-status` on the resulting tag (and on the marketplace tag if Layout C / Layout A).
 - [ ] Write the iteration-by-iteration fix log to `$MAIN_ROOT/reports/plugin-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (at the **main-repo root** — first entry of `git worktree list`, never a linked worktree; both `reports/` and `reports_dev/` gitignored). NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
@@ -37,7 +37,8 @@ This reference defines the loop both fixer agents (plugin-fixer, marketplace-fix
 
 ```
 iterations = 0
-while iterations < MAX_ITERATIONS (default 5):
+prev_finding_set = None                     # signature of the previous iteration's findings
+while True:                                  # NO iteration cap — see "Termination and safety"
     iterations += 1
     report = validate(<target>)    # validate_plugin.py --strict OR validate_marketplace.py --strict
     findings = report.filter(severity in {CRITICAL, MAJOR, MINOR, NIT})
@@ -57,12 +58,17 @@ while iterations < MAX_ITERATIONS (default 5):
                 if has_marketplace:
                     if marketplace_publish_and_watch() != 0: return PARTIAL
             return SUCCESS (clean)
-        else:
-            fix_batch(blocking_warnings)    # blocking warnings must be fixed too
-            continue
-    fix_batch(findings)                     # CRITICAL → MAJOR → MINOR → NIT, in priority order
-if iterations == MAX_ITERATIONS:
-    return ESCALATE_TO_USER (loop not converging — human must intervene)
+        current_set = signature(blocking_warnings)
+        if current_set == prev_finding_set:  # oscillation guard — see "Termination and safety"
+            return ESCALATE_TO_USER (finding set unchanged — a fix is not landing)
+        prev_finding_set = current_set
+        fix_batch(blocking_warnings)         # blocking warnings must be fixed too
+        continue
+    current_set = signature(findings)
+    if current_set == prev_finding_set:      # oscillation guard — the ONLY non-empty stop condition
+        return ESCALATE_TO_USER (finding set unchanged — a fix is not landing)
+    prev_finding_set = current_set
+    fix_batch(findings)                      # CRITICAL → MAJOR → MINOR → NIT, in priority order
 ```
 
 Key properties:
@@ -140,7 +146,7 @@ The final report from the fixer must include:
 2. **Findings healed**: list of CRITICAL/MAJOR/MINOR/NIT findings that were fixed, with the commits or Edit operations that fixed them.
 3. **Warnings fixed**: list of publish-blocking warnings that were addressed.
 4. **Advisory warnings remaining**: the list of truly-advisory warnings, with a one-line explanation per entry of why they are safe to leave. This lets the user audit the judgment.
-5. **Next steps**: if clean → "ready to publish, run `scripts/publish.py`"; if blocked → "these findings need human decisions: …"; if escalated → "loop stopped at iteration 5 with unchanged findings — need human review of …".
+5. **Next steps**: if clean → "ready to publish, run `scripts/publish.py`"; if blocked → "these findings need human decisions: …"; if escalated → "loop stopped after iteration N because the finding set was identical to the previous iteration (oscillation) — need human review of …".
 6. **For canonical-pipeline migration runs only** (`/cpv-upgrade-plugin`): the Unicode-bordered table from `run_all_checks` (the 82-check matrix from `references/canonical-pipeline-migration-checklist.md`) AND the `gh run` URL of the green CI run on the resulting tag (and on the marketplace tag if Layout C / Layout A registered). Without both, the migration is `[PARTIAL]`, NOT `[DONE]`. See `agents/plugin-fixer.md` § "Pre-completion verification (REQUIRED)" for the exact bash commands. Closes [issue #21 ask #1](https://github.com/Emasoft/claude-plugins-validation/issues/21).
 
 ## Migration runs — extra steps after step 7

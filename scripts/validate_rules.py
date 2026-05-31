@@ -55,17 +55,20 @@ MAX_RULES_TOKENS = 10_000
 # Known frontmatter fields for rules files
 KNOWN_RULES_FRONTMATTER_FIELDS = {"paths"}
 
-# Character-to-token conversion ratios by script category.
+# Character-to-token conversion ratios (tokens per character) by script category.
 # Based on Claude's BPE tokenizer behavior:
 # - Latin/ASCII text: ~4 characters per token (0.25 tokens/char)
 # - CJK ideographs (Chinese, Japanese kanji, Korean hanja): ~1 char per token
-# - Japanese kana (hiragana, katakana): ~1.5 chars per token
+# - Japanese kana (hiragana, katakana): ~1.5 chars per token empirically, but
+#   rounded UP to a denser 0.7 tokens/char (~1.43 chars/token) per the
+#   conservative-overcount policy below.
 # - Korean hangul syllables: ~1 char per token
 # - Cyrillic, Greek, Arabic, Hebrew, Thai, Devanagari: ~2 chars per token
-# Conservative estimates (slightly overcount tokens) to warn early.
+# Conservative estimates (slightly overcount tokens) to warn early — each ratio
+# is the reciprocal of its chars/token figure, rounded up where noted.
 TOKEN_RATIO_LATIN = 0.25  # 1 token per ~4 chars
 TOKEN_RATIO_CJK = 1.0  # 1 token per ~1 char
-TOKEN_RATIO_KANA = 0.7  # 1 token per ~1.5 chars
+TOKEN_RATIO_KANA = 0.7  # 1 token per ~1.43 chars (conservative: kana ~1.5 chars/token rounded up)
 TOKEN_RATIO_OTHER_SCRIPTS = 0.5  # 1 token per ~2 chars
 
 
@@ -659,8 +662,12 @@ def main() -> int:
         print(f"Error: {path} is not a directory", file=sys.stderr)
         return 1
 
-    # Verify content type — rules directory must contain .md rule files
-    if not list(rules_dir.glob("*.md")):
+    # Verify content type — rules directory must contain .md rule files.
+    # Use rglob (recursive) so this pre-check agrees with validate_rules_directory,
+    # which discovers rule files via rglob. A non-recursive glob here would reject
+    # a rules/ tree whose .md files live only in subdirectories even though the
+    # validator would happily scan them.
+    if not next(rules_dir.rglob("*.md"), None):
         print(f"Error: No rule files (.md) found in {rules_dir}", file=sys.stderr)
         return 1
 

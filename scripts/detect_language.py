@@ -101,18 +101,29 @@ def _has_any_source_file(plugin_root: Path, suffix: str, limit: int = 500) -> Pa
         ".idea",
         ".vscode",
     }
-    count = 0
+    # `limit` bounds how many *candidate source* files we examine — i.e. files
+    # NOT under a vendored/skip dir. Counting skipped files against this budget
+    # (the original bug) let a large node_modules/.venv tree exhaust the budget
+    # before any project-owned source was reached, falsely reporting "no source".
+    # A separate absolute ceiling still bounds the total walk so a pathological
+    # tree of only-vendored files can't run away.
+    examined = 0
+    walked = 0
+    walk_ceiling = limit * 50  # hard upper bound on total rglob yields
     for path in plugin_root.rglob(f"*{suffix}"):
-        count += 1
-        if count > limit:
+        walked += 1
+        if walked > walk_ceiling:
             return None
-        # Skip anything under a skipped directory
         try:
             rel_parts = path.relative_to(plugin_root).parts
         except ValueError:
             continue
+        # Skip vendored/build dirs WITHOUT charging them to the source budget.
         if any(part in skip_dirs for part in rel_parts):
             continue
+        examined += 1
+        if examined > limit:
+            return None
         if path.is_file():
             return path
     return None

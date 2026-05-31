@@ -31,7 +31,7 @@ CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
   plugin <scaffolded-path> --strict --report <tmp.md>
 ```
 
-Include the report's `SUMMARY:` line verbatim. If it is anything but `CRITICAL=0 MAJOR=0 MINOR=0 NIT=0 WARNING=<n>`: (1) dispatch plugin-fixer with the report path; (2) re-run the recipe (hard cap 5 iterations); (3) if still dirty, return `[BLOCKED]` (NOT `[DONE]`) with the remaining findings + a recommendation. Marketplace-creation flows: same rule via `validate_marketplace.py --strict`.
+Include the report's `SUMMARY:` line verbatim. If it is anything but `CRITICAL=0 MAJOR=0 MINOR=0 NIT=0 WARNING=<n>`: (1) dispatch plugin-fixer with the report path; (2) re-run the recipe — NO hardcoded iteration cap, terminate only on an empty finding set OR oscillation (iteration N == N-1). (3) On oscillation with findings remaining, return `[BLOCKED]` (NOT `[DONE]`) with the remaining findings. Marketplace flows: same via `validate_marketplace.py --strict`.
 
 ### Marketplace upstream cross-check gate (TRDD-c0ee9543, Phase F)
 
@@ -110,7 +110,7 @@ All at `${CLAUDE_PLUGIN_ROOT}/scripts/`. **VALIDATORS** must always go via the l
 
 **THE GOLDEN RULE — fix everything BEFORE publishing.** The pre-push hook runs `--strict` and blocks on CRITICAL/MAJOR/MINOR/NIT (only WARNINGs pass). Unfixed issues block the push; fix them FIRST.
 
-The full 16-step choreography (validate → standardize → delegate fixes → re-validate → git → `gh repo create` → `publish.py --install-hook` → verify marketplace → notify+PAT → `publish.py` → poll registration → emit the verbatim user-install template) lives in `references/plugin-creator-runbook.md` §3. Pipeline-standards (cross-platform, sanitization, hook→`CLAUDE_PLUGIN_DATA`, PEP 723) are in `canonical-pipeline`'s pipeline-standards.md; the notify/PAT/publish chain is in `publish-to-marketplace` + `canonical-pipeline`. The agent's job ends with the install instructions printed (runbook §3) — NEVER run `claude plugin install`/`enable`/`uninstall` yourself.
+The full 16-step choreography (validate → standardize → fix → re-validate → git → publish → notify → register) lives in `references/plugin-creator-runbook.md` §3. Pipeline-standards (cross-platform, sanitization, hook→`CLAUDE_PLUGIN_DATA`, PEP 723) are in `canonical-pipeline`'s pipeline-standards.md; the notify/PAT/publish chain is in `publish-to-marketplace` + `canonical-pipeline`. The agent's job ends with the install instructions printed (runbook §3) — NEVER run `claude plugin install`/`enable`/`uninstall` yourself.
 
 ## CRITICAL: Marketplace Architecture
 

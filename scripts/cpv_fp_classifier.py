@@ -232,7 +232,12 @@ def file_role_of(rel_path: str) -> str:
         or rel.startswith("tests/")
         or "/test_" in rel
         or basename.startswith("test_")
-        or "test_" in basename  # catches `__test_helper.py`, `_test_x.py`, etc.
+        # Match a `test_` prefix that may be preceded ONLY by leading
+        # underscores (``__test_helper.py``, ``_test_x.py``) — NOT a
+        # `test_` embedded mid-word. A bare ``"test_" in basename``
+        # substring check wrongly classified ``contest_runner.py`` (which
+        # contains "con" + "test_" + "runner") as a test file. (audit MED #67)
+        or basename.lstrip("_").startswith("test_")
         or basename.endswith("_test.py")
         or basename.endswith(".test.ts")
         or basename.endswith(".test.tsx")

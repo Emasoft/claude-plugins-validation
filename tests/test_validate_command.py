@@ -217,13 +217,17 @@ class TestValidateFileFormat:
         assert result is False
         assert any(r.level == "CRITICAL" and "Missing YAML frontmatter markers" in r.message for r in report.results)
 
-    def test_more_than_two_markers_reports_minor(self):
-        """Content with more than 2 --- markers should produce a MINOR warning (line 147)."""
+    def test_body_horizontal_rule_does_not_report_minor(self):
+        """A `---` horizontal rule in the BODY is not a frontmatter marker and must not
+        produce a false 'Multiple ---' MINOR — the frontmatter is validly closed (audit #86)."""
         content = "---\nname: test\n---\nBody\n---\nExtra marker"
         report = CommandValidationReport()
         result = validate_file_format(content, report, "extra.md")
         assert result is True
-        assert any(r.level == "MINOR" and "Multiple ---" in r.message for r in report.results)
+        # Pre-fix this emitted a false MINOR because EVERY `---` line was counted,
+        # including the body horizontal rule on line 5. The frontmatter here closes
+        # at line 3, so only two delimiters belong to it.
+        assert not any(r.level == "MINOR" and "Multiple ---" in r.message for r in report.results)
 
 
 class TestValidateFrontmatterExistsEdgeCases:

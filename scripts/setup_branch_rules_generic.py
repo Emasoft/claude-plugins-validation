@@ -271,38 +271,78 @@ def fetch_legacy_protection_rulesets(
     return legacy
 
 
+def _flatten_installations_stream(stdout: str) -> list[dict]:
+    """Flatten the `.installations` arrays out of a `gh api --paginate` stream.
+
+    The `/user/installations` and `/orgs/{owner}/installations` endpoints
+    return an OBJECT per page (`{"total_count": N, "installations": [...]}`).
+    `gh api --paginate` only auto-merges page bodies when each body is a JSON
+    *array*; for object bodies it simply concatenates them, so a multi-page
+    response is several top-level objects back-to-back — which is NOT a single
+    valid JSON document. (This is exactly why `--paginate --jq '.installations'`
+    silently truncated: the per-page jq filter emitted one array per page, and
+    `json.loads()` on the concatenated arrays raised JSONDecodeError that the
+    old bare `except: pass` swallowed, dropping every page.)
+
+    We therefore decode the stream document-by-document with
+    `json.JSONDecoder.raw_decode`, advancing past inter-document whitespace,
+    and collect the `installations` list from each decoded object. A single
+    array body (older / single-page shape) is also accepted directly.
+    """
+    apps: list[dict] = []
+    decoder = json.JSONDecoder()
+    idx = 0
+    n = len(stdout)
+    while idx < n:
+        # Skip whitespace (incl. the newlines gh inserts between pages).
+        while idx < n and stdout[idx].isspace():
+            idx += 1
+        if idx >= n:
+            break
+        try:
+            doc, end = decoder.raw_decode(stdout, idx)
+        except json.JSONDecodeError:
+            # Malformed trailing bytes — stop rather than loop forever.
+            break
+        idx = end
+        if isinstance(doc, dict):
+            page = doc.get("installations")
+            if isinstance(page, list):
+                apps.extend(item for item in page if isinstance(item, dict))
+        elif isinstance(doc, list):
+            apps.extend(item for item in doc if isinstance(item, dict))
+    return apps
+
+
 def list_installed_apps(owner: str) -> list[dict]:
     """Return the list of GitHub Apps installed on the owner account.
 
     Queries /user/installations for the authenticated user and
     /orgs/{owner}/installations if the owner is an organization. Results
     are deduplicated by app_id.
+
+    Pagination note: we do NOT use `--jq '.installations'` here. Combining
+    `--paginate` with a per-page `--jq` filter on these object-returning
+    endpoints concatenates one JSON array per page, which is not valid JSON
+    and silently dropped every result for accounts with more than one page of
+    installs. Instead we fetch the raw paginated stream and flatten it with
+    `_flatten_installations_stream` (see its docstring).
     """
     apps: list[dict] = []
 
     user_result = run(
-        ["gh", "api", "/user/installations", "--paginate", "--jq", ".installations"],
+        ["gh", "api", "/user/installations", "--paginate"],
         check=False,
     )
     if user_result.returncode == 0 and user_result.stdout.strip():
-        try:
-            user_installations = json.loads(user_result.stdout)
-            if isinstance(user_installations, list):
-                apps.extend(user_installations)
-        except json.JSONDecodeError:
-            pass
+        apps.extend(_flatten_installations_stream(user_result.stdout))
 
     org_result = run(
-        ["gh", "api", f"/orgs/{owner}/installations", "--paginate", "--jq", ".installations"],
+        ["gh", "api", f"/orgs/{owner}/installations", "--paginate"],
         check=False,
     )
     if org_result.returncode == 0 and org_result.stdout.strip():
-        try:
-            org_installations = json.loads(org_result.stdout)
-            if isinstance(org_installations, list):
-                apps.extend(org_installations)
-        except json.JSONDecodeError:
-            pass
+        apps.extend(_flatten_installations_stream(org_result.stdout))
 
     seen: set[int] = set()
     unique: list[dict] = []

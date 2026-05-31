@@ -90,5 +90,5 @@ Copy this checklist and track your progress:
 - [references/ca-rules.md](references/ca-rules.md) — per-rule details
   > CA-01 — dynamic placeholders in cached content · CA-02 — SessionStart / UserPromptSubmit / PreCompact write CLAUDE.md or settings · CA-03 — hook scripts flip permissions / enabledMcpServers between turns · CA-04 — `model:` frontmatter forces in-line model switch · CA-05 — hook scripts run unbounded-output commands · CA-06 — PreCompact / PostCompact / SubagentStart hooks don't preserve prefix · CA-07 — `context: fork`/`branch` re-primes the cache from cold · Why these specific seven
 - `skills/fix-validation/references/cache-fixes.md` — fix recipes
-- `tests/test_validate_cache.py` — 36 tests
+- `tests/test_validate_cache.py` — 54 tests
 - [ussumant/cache-audit](https://github.com/ussumant/cache-audit) — corpus

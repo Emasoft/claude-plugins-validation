@@ -594,10 +594,23 @@ def isolated_scan_cache(monkeypatch, tmp_path):
     cache_dir.mkdir()
     for var in ("CPV_SCAN_CACHE_DIR", "CLAUDE_PLUGIN_DATA", "XDG_CACHE_HOME"):
         monkeypatch.delenv(var, raising=False)
+    # Force the cache ENABLED: a sibling audit-fix test module sets
+    # `os.environ.setdefault("CPV_SCAN_CACHE", "0")` at import time, which
+    # permanently disables the cache for the whole xdist worker. Clear it so
+    # put/get are not silently no-ops here (else entries stay 0 and a fresh
+    # put → get round-trip returns None).
+    monkeypatch.delenv("CPV_SCAN_CACHE", raising=False)
     monkeypatch.setenv("CPV_SCAN_CACHE_DIR", str(cache_dir))
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
+    # Wipe + recreate the cache file in THIS isolated dir so the scan_cache
+    # table exists before any raw-SQL access — and so a sibling test that ran
+    # earlier in the same xdist worker cannot leave us reading a stale/missing
+    # table (the cache is a process-global SQLite shared across workers).
+    import cpv_scan_cache as _sc
+
+    _sc.reset_cache()
     return cache_dir
 
 
