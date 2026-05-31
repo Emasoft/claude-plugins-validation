@@ -348,6 +348,49 @@ def fetch_legacy_protection_rulesets(
     return legacy
 
 
+def _parse_paginated_jq_arrays(stdout: str, *, source: str) -> list[dict]:
+    """Flatten the output of `gh api --paginate --jq <filter-emitting-an-array>`.
+
+    Critical gotcha: `--paginate` combined with `--jq` does NOT produce one
+    merged JSON document. gh runs the jq filter on EACH page separately and
+    concatenates the results, so a multi-page response yields several
+    newline-separated JSON arrays (NDJSON), e.g.::
+
+        [{"app_id": 1}, {"app_id": 2}]
+        [{"app_id": 3}]
+
+    A bare ``json.loads(stdout)`` on that raises ``JSONDecodeError: Extra
+    data`` — and the previous bare ``except: pass`` silently dropped EVERY
+    installed app for any account whose installations spanned more than one
+    page, weakening the generated ruleset (those apps never became bypass
+    actors). gh merges array pages into a single document only when ``--jq``
+    is absent, which is why the no-jq ``--paginate`` callers above are safe.
+
+    Parse line-by-line: each non-empty line is one page's JSON value. Tolerate
+    both the array shape (extend) and a lone object (append). A genuinely
+    malformed line is logged, not silently dropped, so a broken response is
+    distinguishable from "no apps installed".
+    """
+    apps: list[dict] = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            chunk = json.loads(line)
+        except json.JSONDecodeError as exc:
+            print(
+                f"warning: {source} installations line was not valid JSON: {exc}",
+                file=sys.stderr,
+            )
+            continue
+        if isinstance(chunk, list):
+            apps.extend(item for item in chunk if isinstance(item, dict))
+        elif isinstance(chunk, dict):
+            apps.append(chunk)
+    return apps
+
+
 def list_installed_apps(owner: str) -> list[dict]:
     """Return the list of GitHub Apps installed on the owner account.
 
@@ -363,12 +406,7 @@ def list_installed_apps(owner: str) -> list[dict]:
         check=False,
     )
     if user_result.returncode == 0 and user_result.stdout.strip():
-        try:
-            user_installations = json.loads(user_result.stdout)
-            if isinstance(user_installations, list):
-                apps.extend(user_installations)
-        except json.JSONDecodeError:
-            pass
+        apps.extend(_parse_paginated_jq_arrays(user_result.stdout, source="user"))
 
     # Org-level installations (only works if owner is an org)
     org_result = run(
@@ -376,12 +414,7 @@ def list_installed_apps(owner: str) -> list[dict]:
         check=False,
     )
     if org_result.returncode == 0 and org_result.stdout.strip():
-        try:
-            org_installations = json.loads(org_result.stdout)
-            if isinstance(org_installations, list):
-                apps.extend(org_installations)
-        except json.JSONDecodeError:
-            pass
+        apps.extend(_parse_paginated_jq_arrays(org_result.stdout, source="org"))
 
     # De-duplicate by app_id
     seen: set[int] = set()

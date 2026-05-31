@@ -755,13 +755,28 @@ _FUNCTION_DEF_RES: Final[tuple[re.Pattern[str], ...]] = (
     re.compile(
         r"^\s*(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"
     ),
-    # method call on object: ``obj.handleRequest(request);`` — this is also
-    # a function INVOCATION (not definition), but the invocation is on a
-    # local method, not an HTTP function. The SSRF_ADVANCED pattern is too
-    # generic to distinguish.
-    re.compile(
-        r"\b[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\s*\("
-    ),
+)
+# NOTE: the former 4th pattern (``obj.method(`` method-call-on-object) was
+# removed — it was dead code. ``_line_is_function_definition`` never iterated
+# past index 2, and the method-call-on-object case is already handled by the
+# inline ``method_call_re`` in that function, which crucially EXCLUDES the
+# HTTP method names (fetch/axios/get/post/...) so a wrapped HTTP call is kept
+# visible. The dead pattern lacked that exclusion entirely.
+
+
+# A *concise-body* arrow (``= (args) => <expr>``) that inlines a GLOBAL
+# outbound HTTP call in its body is a genuine SSRF surface — the function
+# definition and the dangerous call live on the same line. We must NOT treat
+# such a line as a benign function definition, or SSRF_ADVANCED gets
+# suppressed (security false-negative). The negative lookbehind ``(?<![.\w$])``
+# keeps this scoped to the GLOBAL forms (``fetch(``, ``axios(``, ``axios.get(``,
+# ``http.get(``, ``request(``) and excludes library-client method calls
+# (``client.users.fetch(...)``, ``cache.get(...)``) which have a leading dot
+# and are correctly suppressed elsewhere.
+_ARROW_BODY_GLOBAL_HTTP_RE: Final[re.Pattern[str]] = re.compile(
+    r"=>\s*.*?"
+    r"(?<![.\w$])"
+    r"(?:fetch|axios(?:\.[a-z]+)?|https?\.get|request)\s*\("
 )
 
 
@@ -967,8 +982,16 @@ def _line_is_function_definition(source_line: str) -> bool:
         if method_name in ("fetch", "axios", "get", "post", "put", "delete", "patch", "request"):
             continue  # Could be a wrapped HTTP call; don't suppress
         return True
+    # A concise-body arrow that inlines a GLOBAL outbound HTTP call
+    # (``const h = (req) => fetch(req.query.url)``) is a real SSRF surface,
+    # NOT a benign definition — the dangerous call shares the signature line.
+    # Refuse to classify it as a function definition so SSRF_ADVANCED stays
+    # visible. (A block-body arrow ``=> { ... }`` has no network call on the
+    # signature line, so it does not match this guard.)
+    if _ARROW_BODY_GLOBAL_HTTP_RE.search(stripped):
+        return False
     # Then, check the function-definition shapes
-    return any(p.match(stripped) for p in _FUNCTION_DEF_RES[:3])
+    return any(p.match(stripped) for p in _FUNCTION_DEF_RES)
 
 
 _SSRF_RELATIVE_PATH_RE: Final[re.Pattern[str]] = re.compile(

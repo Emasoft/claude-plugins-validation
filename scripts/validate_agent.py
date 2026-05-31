@@ -207,14 +207,16 @@ def validate_frontmatter_exists(content: str, report: AgentValidationReport, fil
 
     frontmatter, *_ = parse_frontmatter(content)
 
-    if frontmatter is None and content.startswith("---"):
+    # parse_frontmatter returns None ONLY on a yaml.YAMLError (an empty-but-present
+    # frontmatter block is normalized to {} there). content.startswith("---") is
+    # already guaranteed True by the early return above, so this single branch
+    # covers every None case — a separate "if frontmatter is None" guard below
+    # would be unreachable dead code.
+    if frontmatter is None:
         report.critical(
             "Malformed YAML frontmatter (missing closing --- or invalid YAML)",
             filename,
         )
-        return None
-
-    if frontmatter is None:
         return None
 
     # Frontmatter MUST be a mapping (dict). yaml.safe_load can return any
@@ -1174,6 +1176,18 @@ def validate_task_tool_prohibition(frontmatter: dict[str, Any], filename: str, r
 
     tools = frontmatter.get("tools")
     if tools is None:
+        # An ABSENT 'tools' field means the agent inherits ALL tools — which
+        # includes Task (validate_tools_field documents this same inherit-all
+        # semantics). That is exactly the infinite-recursion hazard this check
+        # exists to catch, so the absent case must NOT be silently skipped:
+        # a fork agent that inherits Task can spawn itself just as a fork agent
+        # that explicitly lists Task can.
+        report.major(
+            "Subagent (context: fork) omits 'tools' so it inherits Task - "
+            "may cause infinite recursion; declare an explicit 'tools' list "
+            "without Task",
+            filename,
+        )
         return
 
     # Parse tools field (can be string or list)

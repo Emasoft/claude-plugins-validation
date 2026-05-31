@@ -44,7 +44,7 @@ You MUST NOT return DONE / SUCCESS unless the FINAL `validate_marketplace.py --s
 
 **Final verification is mandatory** — after the fix loop exits clean, run `validate_marketplace.py --strict` ONE MORE TIME as an independent verification. Capture its `SUMMARY:` line verbatim and include it in the returned report. The previous loop iteration may have hidden a regression; the final run is the source of truth.
 
-If after 10 fix iterations findings remain, return `[BLOCKED]` (NOT `[DONE]`) with the iteration count and a clear list of unfixable findings. The user has stated explicitly: "the agents must never output or leave behind a flawed plugin" — the same rule applies to marketplaces.
+If the fix loop oscillates (iteration N produces the same finding set as N-1) while findings remain, return `[BLOCKED]` (NOT `[DONE]`) with the iteration count and the unfixable findings. There is NO hardcoded iteration cap — oscillation is the only termination condition; big marketplaces legitimately need 20, 50+ iterations.
 
 ## Input handling (post-menu dispatch — NO First Contact menu)
 

@@ -127,12 +127,6 @@ def _register_in_the_skills_menu(plugin: Path, new_skill_name: str, description:
     if new_skill_name in ("the-skills-menu", "the-skills-menu-create"):
         return False
     content = catalog.read_text(encoding="utf-8")
-    # Already listed → idempotent no-op. Match the BACKTICK-WRAPPED name as it
-    # appears in a catalog row (`name`), not a bare substring — a bare substring
-    # match falsely skips a new skill whose name is a substring of an existing
-    # entry (e.g. "fix" when "fix-validation" is already listed).
-    if f"`{new_skill_name}`".lower() in content.lower():
-        return False
     raw_desc = description.strip().splitlines()[0][:80] if description.strip() else "(describe the skill)"
     # Escape '|' so a description containing a pipe can't break out of the
     # Markdown table cell and corrupt the catalog table.
@@ -150,8 +144,22 @@ def _register_in_the_skills_menu(plugin: Path, new_skill_name: str, description:
     if next_heading_idx < 0:
         next_heading_idx = len(content)
     section = content[plugin_skills_idx:next_heading_idx]
-    # Find the last "| ... |" table row in the section.
-    table_rows = [m for m in re.finditer(r"^\|[^\n]*\|\s*$", section, re.MULTILINE)]
+    # Already listed → idempotent no-op. Scope the duplicate check to the
+    # Plugin Skills SECTION only (audit LOW #143 — a whole-content search
+    # falsely skips registration when the name merely appears in prose, a
+    # heading, or another section). Match the BACKTICK-WRAPPED name as it
+    # appears in a catalog row (`name`), not a bare substring — a bare
+    # substring match falsely skips a new skill whose name is a substring of
+    # an existing entry (e.g. "fix" when "fix-validation" is already listed).
+    if f"`{new_skill_name}`".lower() in section.lower():
+        return False
+    # Find the last "| ... |" table row in the section. The trailing group is
+    # ``[^\S\n]*$`` (spaces/tabs but NOT the newline) so ``.end()`` stops at
+    # the row's last non-blank char — inserting ``"\n" + row`` then lands the
+    # new row DIRECTLY below the last existing row. A ``\s*$`` group would
+    # swallow the row's terminating newline, dropping the new row one blank
+    # line down and severing it from the table (audit MEDIUM #60).
+    table_rows = [m for m in re.finditer(r"^\|[^\n]*\|[^\S\n]*$", section, re.MULTILINE)]
     if table_rows:
         last_row_end_in_section = table_rows[-1].end()
         insert_at = plugin_skills_idx + last_row_end_in_section

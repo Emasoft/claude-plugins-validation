@@ -549,8 +549,12 @@ def validate_plugin_lsp(
 ) -> ValidationReport:
     """Validate all LSP configurations in a plugin.
 
-    Checks both .lsp.json (auto-discovered at plugin root) and inline lspServers in
-    plugin.json. Sources are loaded ADDITIVELY at runtime (verified empirically:
+    Checks .lsp.json (auto-discovered at plugin root), inline lspServers in
+    plugin.json, AND external config files referenced by a `lspServers`
+    string/array — every per-server field (command/args/env/settings/…) is
+    type-checked regardless of source (audit #163; the same external file is
+    field-validated at most once so a redundant `.lsp.json` reference does not
+    double-report). Sources are loaded ADDITIVELY at runtime (verified empirically:
     TRDD-20260418, cpv-lsp-coexist-test — 4 declarations, 1 collision → 3 LSPs loaded).
     Per-name collisions across sources are silently DEDUPLICATED with INLINE WINNING
     (verified: LSP_WINNER_PLUGIN_JSON_INLINE.flag was created when shared-lsp was
@@ -570,6 +574,31 @@ def validate_plugin_lsp(
     # Track server names per source for cross-source duplicate detection.
     sources: dict[str, list[str]] = {}
 
+    # Track which external config files have already had per-server field
+    # validation run, keyed by resolved absolute path. This prevents
+    # double-reporting when a `lspServers` string/list reference points at a
+    # path the auto-discovery loop below already validated (e.g. the redundant
+    # `lspServers: ".lsp.json"` default case — audit #163).
+    validated_config_paths: set[Path] = set()
+
+    def _validate_external_config_once(external_path: Path) -> None:
+        """Field-validate an externally-referenced LSP config, at most once.
+
+        `lspServers` string/array entries name external config files. Without
+        this, those files only had their server NAMES extracted (for
+        cross-source duplicate detection) — their per-server fields
+        (command/args/env/settings/…) escaped ALL type-checks, contradicting
+        the "validate ALL LSP configurations" contract (audit #163).
+        """
+        try:
+            key = external_path.resolve()
+        except OSError:
+            key = external_path
+        if key in validated_config_paths:
+            return
+        validated_config_paths.add(key)
+        validate_lsp_config(external_path, plugin_root, report)
+
     # Check for common LSP config locations
     lsp_config_paths = [
         plugin_root / ".lsp.json",
@@ -582,6 +611,10 @@ def validate_plugin_lsp(
     for config_path in lsp_config_paths:
         if config_path.exists():
             found_any = True
+            try:
+                validated_config_paths.add(config_path.resolve())
+            except OSError:
+                validated_config_paths.add(config_path)
             validate_lsp_config(config_path, plugin_root, report)
             names = _extract_lsp_server_names_from_config_file(config_path)
             if names:
@@ -653,6 +686,9 @@ def validate_plugin_lsp(
                         external_path = plugin_root / ref_path
                     if external_path.exists():
                         found_any = True
+                        # Field-validate the referenced file (command/args/env/
+                        # settings type-checks), not just extract names (audit #163).
+                        _validate_external_config_once(external_path)
                         names = _extract_lsp_server_names_from_config_file(external_path)
                         if names:
                             sources[f"plugin.json:lspServers -> {ref_path}"] = names
@@ -674,6 +710,9 @@ def validate_plugin_lsp(
                             external_path = plugin_root / ref_path
                         if external_path.exists():
                             found_any = True
+                            # Field-validate the referenced file, not just
+                            # extract names (audit #163).
+                            _validate_external_config_once(external_path)
                             names = _extract_lsp_server_names_from_config_file(external_path)
                             if names:
                                 sources[f"plugin.json:lspServers -> {ref_path}"] = names

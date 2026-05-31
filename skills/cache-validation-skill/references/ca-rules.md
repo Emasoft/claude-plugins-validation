@@ -11,12 +11,12 @@
 - [CA-07 — `context: fork`/`branch` re-primes the cache from cold](#ca-07)
 - [Why these specific seven](#why-these-specific-seven)
 
-The six rules CPV's `validate_cache.py` enforces — derived from
+The seven rules CPV's `validate_cache.py` enforces — derived from
 *"Lessons from Building Claude Code: Prompt Caching Is Everything"* by
 Thariq Shihipar (Anthropic) and the open-source
 [ussumant/cache-audit](https://github.com/ussumant/cache-audit) corpus.
 
-**Since v2.102.0 all six rules are WARNING severity** — a cache miss costs
+**Since v2.102.0 all seven rules are WARNING severity** — a cache miss costs
 tokens/latency but never makes a plugin invalid. `validate_plugin` CALLS this
 scanner as a separate step that writes its own report (the main report carries
 only a one-line pointer); the standalone `cpv-cache-optimize` audit/fix

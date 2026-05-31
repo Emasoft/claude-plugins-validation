@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import re
@@ -154,6 +155,46 @@ def audit_component_dirs(plugin_path: Path) -> list[AuditItem]:
     return items
 
 
+def _gitignore_line_covers_entry(entry: str, line: str) -> bool:
+    """Return True if gitignore ``line`` actually ignores the required ``entry``.
+
+    The earlier implementation used a naive ``entry in line`` substring test,
+    which gave FALSE POSITIVES: a line like ``.env.example`` (a tracked example
+    file) reported the secrets-bearing ``.env`` entry as covered, ``redist/``
+    reported ``dist/`` as covered, ``prebuild/`` reported ``build/``, etc. That
+    masked genuinely-missing entries — a security-relevant false negative.
+
+    Coverage is true only when:
+      * the line is exactly the entry (after a leading-``/`` anchor is dropped,
+        since the required entries are unanchored), or
+      * the line is a glob pattern (contains ``*``/``?``/``[``) that MATCHES the
+        entry path — this preserves the legitimate "a broader pattern covers
+        it" case (e.g. ``*_cache/`` covering ``.pytest_cache/``).
+
+    A plain literal line that merely *contains* the entry as a substring no
+    longer counts.
+    """
+    line = line.strip()
+    entry = entry.strip()
+    # Drop a leading "/" anchor: required entries are written unanchored, and a
+    # repo-root-anchored "/dist/" still covers the unanchored "dist/".
+    pattern = line[1:] if line.startswith("/") else line
+    if entry in (line, pattern):
+        return True
+    # Beyond an exact (optionally anchored) literal, only a wildcard pattern may
+    # cover a *different* literal — a plain literal that merely shares a
+    # substring with the entry must NOT count (that was the false-PASS bug).
+    if not any(ch in pattern for ch in "*?["):
+        return False
+    candidates = [entry]
+    if entry.endswith("/"):
+        candidates.append(entry.rstrip("/"))  # "dist/" should match "dist*"
+    return any(
+        fnmatch.fnmatch(cand, pattern) or fnmatch.fnmatch(cand, pattern.rstrip("/"))
+        for cand in candidates
+    )
+
+
 def audit_gitignore(plugin_path: Path) -> list[AuditItem]:
     """Check .gitignore for required entries."""
     items: list[AuditItem] = []
@@ -172,8 +213,9 @@ def audit_gitignore(plugin_path: Path) -> list[AuditItem]:
             active_lines.append(stripped)
 
     for entry in REQUIRED_GITIGNORE_ENTRIES:
-        # Check if the entry (or a pattern that covers it) is present
-        found = any(entry in line or line == entry for line in active_lines)
+        # Present if an active line equals the entry or is a broader glob that
+        # actually matches it — NOT merely a line that contains it as a substring.
+        found = any(_gitignore_line_covers_entry(entry, line) for line in active_lines)
         if found:
             items.append(AuditItem("gitignore", entry, "PASS", f"Entry '{entry}' present"))
         else:
@@ -582,6 +624,11 @@ def save_report_to_file(results: list[AuditItem], plugin_path: Path, report_path
     lines.append(f"{'=' * 60}")
     lines.append("")
 
+    # Must stay in sync with print_audit_report's category_titles — the loop
+    # below only renders categories whose key is present here, so a missing key
+    # silently drops every finding in that category from the saved file while
+    # the summary line still counts them (making totals not add up). "drift"
+    # was previously absent, so all audit_drift findings vanished from the file.
     category_titles = {
         "files": "Standard Files",
         "dirs": "Component Directories",
@@ -589,6 +636,7 @@ def save_report_to_file(results: list[AuditItem], plugin_path: Path, report_path
         "badges": "README Badges",
         "pyproject": "pyproject.toml Sections",
         "python": "Python Version",
+        "drift": "Project Drift (deps vs imports)",
     }
 
     categories: dict[str, list[AuditItem]] = {}
@@ -1146,13 +1194,23 @@ def fix_missing_files(
                 print(f"  {GREEN}Created dir:{NC} {dir_path}/")
             created.append(str(dir_path) + "/")
 
-    # Auto-add missing .gitignore entries when an existing .gitignore is present
+    # Auto-add missing .gitignore entries when an existing .gitignore is present.
+    # Use the SAME coverage logic as audit_gitignore so the two never disagree.
+    # A naive `entry not in content` substring test would (a) wrongly skip
+    # adding ".env" when only ".env.example" is present — leaving the audit
+    # permanently reporting it missing — and (b) miss the legitimate broader-glob
+    # coverage case that audit_gitignore honours.
     gitignore_path = plugin_path / ".gitignore"
     if not dry_run and gitignore_path.exists():
         content = gitignore_path.read_text(encoding="utf-8")
+        active_lines = [
+            stripped
+            for raw in content.splitlines()
+            if (stripped := raw.strip()) and not stripped.startswith("#")
+        ]
         missing = []
         for entry in REQUIRED_GITIGNORE_ENTRIES:
-            if entry not in content:
+            if not any(_gitignore_line_covers_entry(entry, line) for line in active_lines):
                 missing.append(entry)
         if missing:
             with open(gitignore_path, "a", encoding="utf-8") as f:

@@ -543,7 +543,9 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
                     ".claude-plugin/plugin.json",
                 )
 
-        # description — optional per spec; type-checked when present.
+        # description — REQUIRED per spec (plugins-reference.md:473, "Required: Yes");
+        # its presence is enforced by the `required_sub` loop above (which emits the
+        # missing-sub-field MAJOR). This block only adds the type check when present.
         if "description" in entry and not isinstance(entry["description"], str):
             report.major(
                 f"'userConfig.{key}.description' must be a string, got {type(entry['description']).__name__}",
@@ -733,7 +735,15 @@ def _mcp_server_keys(manifest: dict[str, Any], plugin_root: Path) -> set[str] | 
             return set(mcp["mcpServers"].keys())
         return set(mcp.keys())
     if isinstance(mcp, str):
-        mcp_path = (plugin_root / mcp.lstrip("./")).resolve()
+        # Strip ONLY the literal "./" prefix — NOT a character-set strip.
+        # `"./.mcp.json".lstrip("./")` is "mcp.json" (lstrip removes every
+        # leading '.' and '/'), which mangles the standard `.mcp.json` dotfile
+        # so `is_file()` fails, this returns None, and the channels validator
+        # silently skips its server cross-reference (audit HIGH). The `[2:]`
+        # slice idiom (already used at the inline-walk above) preserves the
+        # leading dot of dotfile names.
+        rel = mcp[2:] if mcp.startswith("./") else mcp
+        mcp_path = (plugin_root / rel).resolve()
         if not mcp_path.is_file():
             return None
         try:
@@ -976,7 +986,13 @@ def validate_monitors_entries(manifest: dict[str, Any], plugin_root: Path, repor
         return
     if isinstance(monitors, str):
         # Path string — resolve relative to plugin_root and load.
-        rel = monitors.lstrip("./")
+        # Strip ONLY the literal "./" prefix (same dotfile-mangling trap as
+        # `_mcp_server_keys`): `lstrip("./")` would turn a `./.monitors.json`
+        # dotfile reference into `monitors.json`, so `is_file()` fails and the
+        # monitors-file contents are silently skipped (a monitor missing
+        # `command`/`description` would pass). The `[2:]` slice preserves the
+        # leading dot.
+        rel = monitors[2:] if monitors.startswith("./") else monitors
         monitors_path = (plugin_root / rel).resolve()
         if not monitors_path.is_file():
             # Missing file is already flagged elsewhere (path validator);
@@ -1438,6 +1454,19 @@ def validate_manifest(
                     "(plugins-reference.md:568-571)",
                     ".claude-plugin/plugin.json",
                 )
+            elif isinstance(value, list) and key == "monitors":
+                # `monitors` is the one path_field whose array form is an inline
+                # list of monitor *objects* (dicts), not path strings — see the
+                # spec (plugins-reference.md:268-318) and `validate_monitors_entries`,
+                # which owns the full inline-array schema. Applying the generic
+                # "each element must be a string path" rule here false-MAJORs every
+                # spec-valid inline monitor (audit HIGH: "monitors[i] must be a
+                # string path, got dict"). The string (path-reference) form is
+                # still checked by the `isinstance(value, str)` branches above,
+                # which `validate_monitors_entries` does NOT duplicate (no ./-prefix
+                # or traversal check there). So: skip the list-element walk for
+                # monitors; everything else falls through to the generic walk.
+                pass
             elif isinstance(value, list):
                 for i, path in enumerate(value):
                     if not isinstance(path, str):
@@ -4441,11 +4470,19 @@ def _collect_run_blocks(content: str) -> list[tuple[str, int]]:
     except yaml.YAMLError:
         doc = None
 
+    # Monotonic search cursor so repeated identical ``run:`` bodies are each
+    # located at their own offset rather than all matching the first occurrence
+    # (audit MED #46). PyYAML preserves mapping insertion order, so ``_walk``
+    # visits ``run:`` keys in (approximately) source order, which is what makes
+    # advancing a single forward-only cursor correct.
+    search_cursor = 0
+
     def _walk(node: Any) -> None:
+        nonlocal search_cursor
         if isinstance(node, dict):
             for k, v in node.items():
                 if k == "run" and isinstance(v, str):
-                    body_start = _locate_run_body(content, v)
+                    body_start, search_cursor = _locate_run_body(content, v, search_cursor)
                     blocks.append((v, body_start))
                 else:
                     _walk(v)
@@ -4498,20 +4535,27 @@ def _collect_run_blocks(content: str) -> list[tuple[str, int]]:
     return blocks
 
 
-def _locate_run_body(content: str, body: str) -> int:
+def _locate_run_body(content: str, body: str, search_from: int = 0) -> tuple[int, int]:
     """Best-effort 1-based line number of a ``run:`` body inside the raw
     YAML source. Used when PyYAML stripped the line metadata.
 
-    Strategy: search for the first non-empty line of ``body`` as a
-    substring. Falls back to line 1 if not found.
+    Strategy: search for the first non-empty line of ``body`` as a substring,
+    starting at character offset ``search_from``. Returns ``(line_no, next_pos)``
+    where ``next_pos`` is the character offset just past the match — the caller
+    passes it back as ``search_from`` for the next body so that two ``run:``
+    blocks sharing the same first non-empty line resolve to DISTINCT source
+    lines instead of both collapsing onto the first occurrence (audit MED #46).
+    Falls back to ``(1, search_from)`` when the body can't be located, leaving
+    the cursor unmoved.
     """
     first_line = next((line for line in body.splitlines() if line.strip()), body)
     if not first_line:
-        return 1
-    idx = content.find(first_line.strip())
+        return 1, search_from
+    needle = first_line.strip()
+    idx = content.find(needle, search_from)
     if idx < 0:
-        return 1
-    return content[:idx].count("\n") + 1
+        return 1, search_from
+    return content[:idx].count("\n") + 1, idx + len(needle)
 
 
 def validate_workflow_path_broken(plugin_root: Path, report: ValidationReport) -> None:

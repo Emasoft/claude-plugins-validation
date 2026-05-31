@@ -992,24 +992,47 @@ def stage_bypass_guard() -> int:
 
 
 def stage_check_working_tree(plugin_root: Path) -> int:
-    """Gate 1: clean working tree check. Auto-commits uv.lock if only diff.
+    """Gate 1: clean working tree check. Auto-commits a uv.lock *modification* if it is the only diff.
 
     `git status --porcelain` emits one line per change with the format
-    ``XY filename`` (2-char status + 1 space + filename). The filename
-    starts at column 3, so the canonical slice is ``line[3:]``.
+    ``XY filename`` (2-char status + 1 space + filename). Column 0 (``X``)
+    is the staged status, column 1 (``Y``) is the worktree status; the
+    filename starts at column 3, so the canonical slice is ``line[3:]``.
 
     DO NOT pre-strip per line — for unstaged-only changes git emits
     " M uv.lock" with a leading space (column 0 is empty, column 1 is
     the worktree status). Calling ``.strip()`` would shift the slice
     by one and produce "v.lock" instead of "uv.lock", silently breaking
     the auto-commit branch.
+
+    The auto-commit is ONLY for the benign case the gate is designed
+    around: ``uv run`` re-resolved and rewrote ``uv.lock`` in place
+    (status ``M``, occasionally ``A`` for a freshly-generated lock).
+    A uv.lock *deletion* (status ``D`` in either column) is NOT benign —
+    it means the lockfile is gone, which would break reproducible
+    installs. Committing that deletion under the message "chore: update
+    uv.lock" would silently bless a broken state, so a deletion must
+    fall through to the hard-stop branch where the maintainer sees it.
+    The status check below therefore requires the sole pending change to
+    be a uv.lock add/modify and rejects any ``D`` status.
     """
     print(f"\n{BLUE}═══ Gate 1: Check working tree ═══{NC}")
     result = run(["git", "status", "--porcelain"], cwd=plugin_root, check=False)
     dirty_lines = [line for line in result.stdout.splitlines() if line]
     if dirty_lines:
-        dirty_files = {line[3:] for line in dirty_lines if len(line) >= 4}
-        if dirty_files == {"uv.lock"}:
+        # (status_code, path) per change. status_code is the 2-char XY field.
+        changes = [(line[:2], line[3:]) for line in dirty_lines if len(line) >= 4]
+        sole_uv_lock_modification = (
+            len(changes) == 1
+            and changes[0][1] == "uv.lock"
+            # Only an add/modify is auto-committable; "D" (delete) in EITHER
+            # status column is a destructive change that must not be silently
+            # committed as an "update". A rename/copy of uv.lock (R/C) is also
+            # not the benign uv-run case, so require strictly A or M.
+            and "D" not in changes[0][0]
+            and any(c in changes[0][0] for c in ("M", "A"))
+        )
+        if sole_uv_lock_modification:
             print(f"{YELLOW}Auto-committing uv.lock (modified by uv run){NC}")
             run(["git", "add", "uv.lock"], cwd=plugin_root)
             run(["git", "commit", "-m", "chore: update uv.lock"], cwd=plugin_root)
@@ -2298,7 +2321,25 @@ def stage_commit_tag_push(
 
 
 def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: Path) -> int:
-    """Gate 13: create GitHub release with notes. Warns (not errors) if gh missing.
+    """Gate 13: create GitHub release with notes.
+
+    Returns 0 on success and on the two benign degradations below; returns the
+    non-zero gh exit code on a *genuine* release-creation failure so the
+    orchestrator surfaces it (instead of printing a false ``✓ Published``):
+
+    * **gh CLI not installed** → warn and return 0. The tag is already on
+      origin; the maintainer can create the release manually. Documented
+      graceful degradation, not a failure.
+    * **release already exists** → return 0. ``gh release create`` is run on a
+      tag that was just pushed in Gate 12; on a re-run / interrupted-publish
+      recovery the release may already be present. That is the *idempotent
+      success* outcome — the release IS there — so it must NOT fail the gate.
+    * **any other non-zero gh exit** (auth revoked mid-pipeline, malformed
+      notes file, network exhausted all retries, etc.) → return the gh exit
+      code. The previous version swallowed every failure as ``return 0``,
+      which made the publish report success even when the release was never
+      created (violating the fail-fast invariant). Gate 13 callers do
+      ``if rc != 0: return rc``, so a non-zero return halts the pipeline.
 
     TRDD-bbff5bc5 §5: gh-auth precheck runs before `gh release create` to
     surface auth issues with an actionable hint instead of a generic
@@ -2348,12 +2389,30 @@ def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: P
         print(gh_result.stderr.strip(), file=sys.stderr)
     if gh_result.returncode == 0:
         print(f"{GREEN}✓ GitHub release {tag_name} published{NC}")
-    else:
+        return 0
+    # `gh release create` returns HTTP 422 with an "already_exists" /
+    # "already exists" validation error when a release for this tag already
+    # exists. On a re-run or interrupted-publish recovery that is the
+    # idempotent-success outcome (the release IS present), so it must NOT
+    # fail the gate — match either spelling gh emits, case-insensitively.
+    combined_err = f"{gh_result.stdout or ''}\n{gh_result.stderr or ''}"
+    if re.search(r"already[ _]exists", combined_err, re.IGNORECASE):
         print(
-            f"{YELLOW}⚠ gh release failed (tag is already pushed — you can create release manually){NC}",
+            f"{YELLOW}⚠ GitHub release {tag_name} already exists — treating as success (idempotent re-run).{NC}",
             file=sys.stderr,
         )
-    return 0
+        return 0
+    # Any other non-zero exit is a genuine failure (auth revoked mid-pipeline,
+    # malformed notes file, network exhausted all retries). The tag is already
+    # pushed, but the documented Gate 13 work did NOT complete — surface it so
+    # the publish does not falsely report "✓ Published" (fail-fast invariant).
+    print(
+        f"{RED}✗ gh release create failed (exit {gh_result.returncode}). "
+        f"The tag {tag_name} is already pushed; create the release manually "
+        f"or re-run publish.py after fixing the cause.{NC}",
+        file=sys.stderr,
+    )
+    return gh_result.returncode if gh_result.returncode != 0 else 1
 
 
 # ── Phase C (v2.77.0) parallel preflight orchestrator ───────────────────────
@@ -2431,11 +2490,19 @@ class _PrefetchResults:
         """Release the executor's worker threads.
 
         ``ThreadPoolExecutor.shutdown(wait=False)`` returns immediately and
-        the worker threads continue running in the background until their
-        tasks complete. Daemon=False threads would block process exit; we
-        use ``wait=False`` to keep main()'s control flow snappy on early
-        failure paths, then rely on the workers being daemon=True (set
-        below in ``start_prefetch()``) so they die with the process.
+        the worker threads keep running in the background until their tasks
+        complete. We use ``wait=False`` so main()'s control flow stays snappy
+        on early-failure paths instead of blocking on the network round-trips.
+
+        The workers are stdlib ``ThreadPoolExecutor`` threads, which are
+        **non-daemon** (``daemon=False``) — the constructor exposes no
+        ``daemon`` parameter, so we cannot make them daemon even if we wanted
+        to. Process exit is still clean because CPython registers an
+        ``atexit`` hook (``concurrent.futures.thread._python_exit``) that joins
+        every outstanding pool worker at interpreter shutdown. The prefetch
+        tasks (gh-auth check, marketplace fetch) are short and bounded, so
+        that join adds at most a couple of seconds on the rare early-abort
+        path; it never hangs.
         """
         if self.executor is not None:
             self.executor.shutdown(wait=False)
@@ -2476,9 +2543,12 @@ def _start_prefetch(plugin_root: Path, layout: str, layout_details: dict) -> _Pr
     """Spawn the background gh-auth + marketplace-json prefetch threads.
 
     Called from main() right before ``run_preflight_parallel``. The two
-    prefetch tasks run on a ThreadPoolExecutor with daemon worker threads
-    so they don't block process exit on early failures. Total preflight
-    workers ≈ 6 (4 from Phase C parallel preflight + 2 from this prefetch).
+    prefetch tasks run on a ThreadPoolExecutor. Its worker threads are
+    stdlib non-daemon threads (the executor exposes no ``daemon`` kwarg);
+    ``_PrefetchResults.shutdown(wait=False)`` returns immediately and the
+    CPython ``atexit`` join handles cleanup at interpreter shutdown, so an
+    early-abort path is not blocked on the in-flight network calls. Total
+    preflight workers ≈ 6 (4 from Phase C parallel preflight + 2 here).
 
     Layout-aware behaviour:
 

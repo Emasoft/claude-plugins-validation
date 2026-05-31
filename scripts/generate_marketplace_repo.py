@@ -523,14 +523,20 @@ jobs:
         run: |
           git add README.md
           git commit -m "docs: regenerate plugin catalog from marketplace.json"
+          pushed=0
           for attempt in 1 2 3; do
             if git push; then
               echo "Push succeeded on attempt $attempt"
+              pushed=1
               break
             fi
             echo "Push failed (attempt $attempt), pulling and retrying..."
             git pull --rebase origin ${{ github.event.repository.default_branch }}
           done
+          if [ "$pushed" -ne 1 ]; then
+            echo "::error::All 3 push attempts failed; catalog update was not pushed."
+            exit 1
+          fi
 
       - name: Summary
         run: |
@@ -549,7 +555,11 @@ Reads .claude-plugin/marketplace.json and writes the plugin table into
 README.md between the Plugins heading and the next heading.
 
 Usage:
-    python scripts/update_catalog.py [--marketplace-dir PATH]
+    python scripts/update_catalog.py [MARKETPLACE_DIR]
+
+MARKETPLACE_DIR is an optional positional path to the marketplace repo
+root (the directory containing .claude-plugin/). Defaults to the current
+working directory when omitted.
 
 Exit codes:
     0 - Success
@@ -598,7 +608,7 @@ def main() -> int:
 
     table_header = """| Plugin | Description | Install |
 |--------|-------------|---------|"""
-    table = table_header + "\n" + "\n".join(rows) if rows else table_header + "\n| (no plugins yet) | | |"
+    table = table_header + "\\n" + "\\n".join(rows) if rows else table_header + "\\n| (no plugins yet) | | |"
 
     # Read existing README
     if not readme_path.exists():
@@ -608,7 +618,7 @@ def main() -> int:
     content = readme_path.read_text(encoding="utf-8")
 
     # Replace the Plugins section table (between "## Plugins" and the next "##")
-    lines = content.split("\n")
+    lines = content.split("\\n")
     new_lines: list[str] = []
     in_plugins_section = False
     table_replaced = False
@@ -638,7 +648,7 @@ def main() -> int:
         print("Warning: ## Plugins section not found in README.md", file=sys.stderr)
         return 0
 
-    readme_path.write_text("\n".join(new_lines), encoding="utf-8")
+    readme_path.write_text("\\n".join(new_lines), encoding="utf-8")
     print(f"Updated README.md with {{len(plugins)}} plugin(s)")
     return 0
 
@@ -1015,9 +1025,12 @@ def generate_marketplace_repo(
     # 7. cliff.toml
     write_file(target_dir / "cliff.toml", _cliff_toml(name, github_owner), dry_run)
 
-    # 8. .githooks/pre-push
+    # 8. .githooks/pre-push — emit the LOCAL-mode hook when github_owner is
+    # empty so local-path (relative string) plugin sources, which _readme_local
+    # recommends, pass the pre-push validator. The hub-and-spoke hook rejects
+    # any non-dict source and would block every commit in a local marketplace.
     pre_push_path = target_dir / ".githooks" / "pre-push"
-    write_file(pre_push_path, _pre_push_hook(), dry_run)
+    write_file(pre_push_path, _pre_push_hook(local=not github_owner), dry_run)
     make_executable(pre_push_path, dry_run)
 
     # Summary

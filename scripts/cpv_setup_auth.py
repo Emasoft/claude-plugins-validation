@@ -376,15 +376,21 @@ def check_branch_rules() -> SurfaceResult:
 
 
 def check_pre_push_hook(plugin_root: Path | None = None) -> SurfaceResult:
-    """git config core.hooksPath + the pre-push hook file.
+    """git config core.hooksPath (local OR global) + the pre-push hook file.
 
     SET      → core.hooksPath set AND <hooksPath>/pre-push exists
     PARTIAL  → no core.hooksPath but .git/hooks/pre-push exists (default
                location — works but is the un-managed path)
     NOT SET  → neither
+
+    core.hooksPath is read with git's normal local-over-global precedence:
+    tools like husky / pre-commit and many users set it via
+    `git config --global core.hooksPath …`, so a local-only lookup would
+    falsely report the managed hook as missing.
     """
     root = plugin_root or REPO_ROOT
-    hooks_path_str = _git_config_get("core.hooksPath")
+    # Honour git precedence (local overrides global) — mirrors check_git_identity.
+    hooks_path_str = _git_config_get("core.hooksPath", "local") or _git_config_get("core.hooksPath", "global")
     if hooks_path_str:
         # core.hooksPath may be relative to the repo root.
         hooks_path = Path(hooks_path_str)

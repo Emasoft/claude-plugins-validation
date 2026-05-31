@@ -38,7 +38,7 @@ All scripts, flags, scope rules, and workflows are documented in the
 5. Report results concisely — summarize errors and warnings separately
 6. If a command fails, show the full error output and suggest corrective action
 
-**CRITICAL**: ALL validation/management scripts must be invoked via the launcher (`${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py <alias>`) — never call `validate_*.py` or `manage_*.py` directly from the plugin cache; the environment-isolation guard refuses with "remote location" error. Aliases: `plugin`, `skill`, `marketplace`, `security`, `cache`, `doctor`, `registry`, `github`, etc.
+**CRITICAL**: Every script that HAS a launcher alias must be invoked via the launcher (`${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py <alias>`) — never call those `validate_*.py` / `manage_*.py` directly from the plugin cache; their environment-isolation guard refuses with a "remote location" error. Aliases: `plugin`, `skill`, `marketplace`, `security`, `cache`, `doctor`, `registry`, `github`, etc. (full map in `remote_validation.py::_ALIASES`). The local install/update/uninstall/enable/disable operations are the documented exception — `manage_plugin.py` has NO launcher alias and NO isolation guard, so it is run DIRECTLY (`uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" …`), exactly as the **plugin-management** skill and Example 1 below show.
 
 For pre-install scanner readiness, suggest running `cpv-doctor --install-scanners` once to install all 5 external scanners (cc-audit, tirith, trufflehog, semgrep, Cisco AI Defense skill-scanner) + fclones for cross-plugin dedup. Subsequent scans run faster (no per-target startup cost).
 

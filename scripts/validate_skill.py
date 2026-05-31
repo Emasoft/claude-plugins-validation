@@ -128,15 +128,16 @@ def validate_frontmatter(_skill_path: Path, content: str, report: ValidationRepo
     frontmatter, _body, _fm_end_line = parse_frontmatter(content)
     del _body, _fm_end_line  # only frontmatter dict is needed here
 
-    if frontmatter is None and content.startswith("---"):
-        # Started with --- but failed to parse
+    if frontmatter is None:
+        # Reaching here means parse_frontmatter failed. content.startswith("---")
+        # is guaranteed True (line 123 already returned otherwise), so this is
+        # always the "started with --- but failed to parse" case — a separate
+        # bare `if frontmatter is None: return None` below was therefore dead
+        # code and was removed (audit m165).
         report.critical(
             "Malformed YAML frontmatter (missing closing --- or invalid YAML)",
             "SKILL.md",
         )
-        return None
-
-    if frontmatter is None:
         return None
 
     report.passed("Valid YAML frontmatter", "SKILL.md")
@@ -677,9 +678,16 @@ def validate_skill(skill_path: Path) -> SkillValidationReport:
     frontmatter = validate_frontmatter(skill_path, content, report)
 
     if frontmatter is not None:
+        # Extract the body (content after frontmatter) ONCE — validate_description_field
+        # inspects it for a fallback-description paragraph, and the tool-consistency
+        # check needs it too. Passing the FULL `content` as `body` made
+        # `body.strip()` always truthy (the frontmatter text is present), so the
+        # "No 'description' field and no body content for fallback" MAJOR could
+        # never fire and was silently demoted to the INFO branch (audit m20).
+        _, _body, _ = parse_frontmatter(content)
         # Validate individual frontmatter fields
         validate_name_field(frontmatter, skill_path.name, report)
-        validate_description_field(frontmatter, content, report)
+        validate_description_field(frontmatter, _body, report)
         validate_context_field(frontmatter, report)
         validate_agent_field(frontmatter, report)
         validate_boolean_field(frontmatter, "user-invocable", report)
@@ -689,9 +697,8 @@ def validate_skill(skill_path: Path) -> SkillValidationReport:
         # not grant — that call fails silently at runtime. Skipped when absent.
         from cpv_tool_permission_match import validate_body_tool_consistency  # noqa: PLC0415
 
-        _, _body_for_tools, _ = parse_frontmatter(content)
         validate_body_tool_consistency(
-            frontmatter.get("allowed-tools"), _body_for_tools, report, filename="SKILL.md", field_name="allowed-tools"
+            frontmatter.get("allowed-tools"), _body, report, filename="SKILL.md", field_name="allowed-tools"
         )
         validate_model_field(frontmatter, report)
         validate_argument_hint_field(frontmatter, report)

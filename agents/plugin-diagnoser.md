@@ -178,7 +178,7 @@ Followed by the phase-9 follow-up menu.
 ## Examples
 
 <example>
-user: /cpv-diagnose-plugin ~/Code/old-plugin/
+user: [dispatched by cpv-main-menu §3.4.1 Diagnose plugin] ~/Code/old-plugin/
 assistant: [Runs phases 1-8, writes report]
 Plugin: old-plugin@1.0.3
 Verdict: NEEDS_UPGRADE (2 CRITICAL, 5 MAJOR, 9 MINOR, 3 WARNING)
@@ -187,7 +187,7 @@ Security: trufflehog flagged 1 hardcoded API key (validate_security.py:1043)
 Cross-platform: 3 bash hook commands use `set -euo pipefail`
 Marketplace: NOT REGISTERED (no notify-marketplace.yml found)
 Cache sync: not applicable (running from local clone)
-Report: ~/reports/plugin-diagnoser/20260508_193000+0200-old-plugin.md
+Report: $MAIN_ROOT/reports/plugin-diagnoser/20260508_193000+0200-old-plugin.md
 [Queues Phase 9 follow-up menu via cpv_menu.py; ends turn — CMS Stop hook emits via systemMessage]
 user: J
 assistant: [Dispatches plugin-fixer with min_severity=MAJOR + pipeline-migration prompt]
@@ -196,15 +196,15 @@ assistant: [Dispatches plugin-fixer with min_severity=MAJOR + pipeline-migration
 </example>
 
 <example>
-user: /cpv-diagnose-plugin ~/Code/my-skill-pack/
+user: [dispatched by cpv-main-menu §3.4.1 Diagnose plugin] ~/Code/my-skill-pack/
 assistant: [Phase 0 shape-detection runs FIRST]
 This directory is NOT a plugin: no `.claude-plugin/plugin.json`, and it ships a top-level `SKILL.md`. Detected shape: standalone skill.
-Per shape-detection.md I will not diagnose it as a plugin. Options: (1) validate it as a skill via /cpv-validate-skill, (2) wrap it in a plugin scaffold via /cpv-create. I will NOT auto-add a plugin.json.
+Per shape-detection.md I will not diagnose it as a plugin. Options: (1) validate it as a skill via cpv-main-menu §3.1.2.1 (SKILL.md), (2) wrap it in a plugin scaffold via cpv-main-menu §3.6.1 (Scaffold a new plugin). I will NOT auto-add a plugin.json.
 [stops — no report written, no phases 1-9 run]
 </example>
 
 <example>
-user: /cpv-diagnose-plugin formatter@my-marketplace
+user: [dispatched by cpv-main-menu §3.4.1 Diagnose plugin] formatter@my-marketplace
 assistant: [Resolves cache path, runs phases 1-8, writes report]
 Plugin: formatter@1.2.0
 Verdict: HEALTHY (0 CRITICAL, 0 MAJOR, 1 MINOR)
@@ -223,4 +223,4 @@ assistant: [Runs the update] ✓ Synced cache to v1.4.0. [Re-queues Phase 9 menu
 - ALWAYS write the diagnostic report to disk; return only the path + 5-line summary.
 - The Phase 9 menu is emitted by the CMS Stop hook via `systemMessage` —
   zero token cost, NOT in the transcript. Never inline-print or measure it.
-- Skill content (plugin-validation-skill, fix-validation) is loaded once per session via frontmatter `skills:`. Do not re-read.
+- Skill content (plugin-validation-skill, fix-validation) is loaded on demand with the Skill() tool, only when a phase needs it. Load each at most once; do not re-load skills you have already pulled in this session.

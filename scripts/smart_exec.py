@@ -136,11 +136,16 @@ TOOL_DB: dict[str, ToolSpec] = {
 
 
 # Executor preference per ecosystem
+# NOTE: the "direct" (already-on-PATH) executor is NOT listed here. choose_best()
+# tries the direct command first, before consulting this table (see choose_best),
+# so a "direct" entry would be unreachable: by the time the loop runs, have(cmd)
+# is already known False for the same command, and build_argv_for_executor("direct")
+# would always return None. Keep the direct path solely in choose_best().
 PRIORITY: dict[str, list[str]] = {
     "python": ["uvx", "uv", "pipx"],
     "node": ["bunx", "pnpm", "npx", "npm", "yarn", "deno"],
     "deno_builtin": ["deno"],
-    "native": ["direct", "bunx", "pnpm", "npx", "npm", "yarn", "deno", "docker"],
+    "native": ["bunx", "pnpm", "npx", "npm", "yarn", "deno", "docker"],
     "powershell_module": ["pwsh", "powershell"],
 }
 

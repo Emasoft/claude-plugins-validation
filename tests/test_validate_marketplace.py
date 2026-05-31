@@ -987,13 +987,18 @@ class TestMarketplacePrivateInfoResolution:
 class TestValidateGithubSourceRequired:
     """Tests for validate_github_source_required covering missing repo, non-string repo, non-github URL."""
 
-    def test_missing_repository_produces_major(self):
-        """Plugin without repository field must produce MAJOR (lines 1445-1456)."""
+    def test_missing_repository_produces_warning_not_major(self):
+        """Plugin without the OPTIONAL repository field must produce a non-blocking WARNING, not MAJOR.
+
+        'repository' is a documented OPTIONAL plugin-entry field, so its absence
+        on a spec-compliant marketplace must not mark it INVALID (audit HIGH).
+        """
         from validate_marketplace import validate_github_source_required
 
         plugins = [{"name": "no-repo-plugin", "source": "./my-plugin"}]
         results = validate_github_source_required(plugins, "mp.json")
-        assert any(r.level == "MAJOR" and "missing 'repository'" in r.message for r in results)
+        assert not any(r.level == "MAJOR" for r in results), [r.message for r in results]
+        assert any(r.level == "WARNING" and "repository" in r.message for r in results)
 
     def test_non_github_url_produces_minor(self):
         """Repository URL that does not look like GitHub must produce MINOR (lines 1471-1484)."""

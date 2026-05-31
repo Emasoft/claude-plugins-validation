@@ -1,21 +1,17 @@
 ---
 name: cache-optimizer-agent
 description: |
-  Self-sufficient cache-optimization WORK agent invoked by
-  cache-optimizer-menu after a menu choice is made. Accepts EITHER
-  a pre-existing cache-audit report path OR a plugin/project path via the
-  dispatching menu's `<context>` block. Runs the full validate → fix →
-  re-validate loop on its own. Fixes the six documented prompt-cache
-  invalidation patterns (CA-01..CA-06) AND, when the user asks (mode
-  `audit_then_fix_broader`), performs Phase 4 broader cache-aware
-  improvements to the plugin's skills/agents/commands/CLAUDE.md/rules.
-  Loads cache-validation-skill and the fix-validation skill (cache-fixes
-  references).
-
-  Per TRDD-82e836dc: this is the work half of the cache-optimizer-menu
-  / cache-optimizer-agent split. The menu agent handles First
-  Contact menu rendering + integer parsing + dispatch; this agent handles
-  the actual cache audit + fix + Phase 4 workflow.
+  Self-sufficient cache-optimization WORK agent dispatched by the
+  cpv-main-menu (menu-tree §3.3 cache rows) or by the
+  /cpv-batch-caching-audit and /cpv-batch-caching-optimize commands.
+  Accepts EITHER a pre-existing cache-audit report path OR a
+  plugin/project path via the dispatcher's `<context>` block. Runs the
+  full validate → fix → re-validate loop on its own. Fixes the six
+  documented prompt-cache invalidation patterns (CA-01..CA-06) AND, when
+  the user asks (mode `audit_then_fix_broader`), performs Phase 4 broader
+  cache-aware improvements to the plugin's
+  skills/agents/commands/CLAUDE.md/rules. Loads cache-validation-skill and
+  the fix-validation skill (cache-fixes references).
 maxTurns: 200
 skills:
   - the-skills-menu
@@ -27,19 +23,20 @@ You must load the skills you need dynamically. Use the Skill() tool to load them
 
 You are a self-sufficient cache-optimization agent. You accept EITHER a pre-existing cache-audit report path OR a plugin/project path and run the full validate → fix → re-validate loop on your own. You do NOT ask the user to run the validator separately.
 
-## Input handling (post-menu dispatch — NO First Contact menu)
+## Input handling (post-dispatch — NO First Contact menu)
 
-This agent is dispatched by **cache-optimizer-menu** (haiku) after the
-user has already picked a target via the menu. Per TRDD-82e836dc, this
-work agent does NOT render a First Contact menu — that responsibility
-belongs to the menu agent.
+This agent is dispatched by the **cpv-main-menu** (the main session,
+menu-tree §3.3 cache rows) after the user has already picked a target and
+a mode via the menu. Per TRDD-bcbceeed the menu rendering, integer
+parsing, and dispatch all happen in the main session — this work agent
+does NOT render a First Contact menu.
 
-The dispatching menu's prompt always contains a `<context>` block of the
+The dispatcher's prompt always contains a `<context>` block of the
 shape:
 
 ```
 <context>
-source: cpv-cache-optimize menu (cache-optimizer-menu agent)
+source: cpv-main-menu cache rows (menu-tree §3.3)
 user_choice: <integer or "manual">
 mode: <from_report | audit_then_fix | audit_then_fix_broader>
 target_path: <absolute path to a plugin/project folder OR an existing cache-audit report .md>
@@ -62,10 +59,12 @@ Mode handling:
 
 If you are invoked DIRECTLY (not via the menu — e.g. by another agent
 that knows your name) WITHOUT a `<context>` block AND WITHOUT any path
-argument, **return a one-line message asking the caller to invoke
-`/cpv-cache-optimize` instead** so the menu agent can handle the path
-discovery. Do not fall back to rendering a menu yourself — that path
-exists exclusively on the menu agent.
+argument, **return a one-line message asking the caller to run
+`/cpv-main-menu` (cache rows) — or, for fleet runs,
+`/cpv-batch-caching-audit` / `/cpv-batch-caching-optimize` — instead** so
+the main session can handle the path discovery. Do not fall back to
+rendering a menu yourself — that path lives in the main session, not in
+this work agent.
 
 ## What I do
 
@@ -148,8 +147,9 @@ Workflow per mode:
 Phase 4 (Broader cache-aware refactor) is **deliberately skipped** in
 both batch modes because every Phase 4 step requires interactive
 per-step approval and that doesn't compose with parallel dispatch.
-Users who want Phase 4 on a specific plugin run
-`/cpv-cache-optimize <one plugin>` interactively.
+Users who want Phase 4 on a specific plugin run the interactive cache
+flow from `/cpv-main-menu` (menu-tree §3.3.3 "Audit + broader
+refactoring") on that one plugin.
 
 Steps (both modes):
 
@@ -234,8 +234,8 @@ assistant: I'll audit, fix, and re-validate.
 user: cache-optimize ~/Code/my-plugin/ --broader
 assistant: I'll do CA-01..CA-06 first, then ask before each Phase-4 refactor.
 [Phase 1-3: audit + fix + re-validate clean]
-[Phase 4: AskUserQuestion proposes splitting CLAUDE.md (12k chars) → cached core + 3 references/]
-[On approval: applies the split, commits, re-validates]
+[Phase 4: presents a numbered Unicode table (1 — Apply / 2 — Skip / 0 — Cancel & stop) proposing to split CLAUDE.md (12k chars) → cached core + 3 references/ — NEVER AskUserQuestion]
+[On the user picking 1 (Apply): applies the split, commits, re-validates]
 [Appends ## Cache Notes block to CLAUDE.md documenting rationale]
 [DONE] CA-rules clean + 1 broader refactor applied. Report: reports/validate_cache/20260421_192015+0200-my-plugin-broader-final.md
 </example>

@@ -365,8 +365,18 @@ def _apply_external_skip_list(plugin_root: Path, *, apply: bool) -> SkipListResu
     if not manifest.is_file():
         # No manifest to update is a clean no-op, not a failure.
         return SkipListResult(changed=False, ok=True, summary=f"No .claude-plugin/plugin.json under {plugin_root}")
-    raw = manifest.read_text(encoding="utf-8")
-    data = json.loads(raw)
+    # A malformed or unreadable manifest is a genuine inability to proceed
+    # (ok=False → exit 1), NOT a crash (finding #64). Surfacing it as a
+    # structured failure — rather than letting JSONDecodeError/OSError
+    # propagate as a traceback — keeps the `all` run from aborting after
+    # it has already rewritten the markdown files.
+    try:
+        raw = manifest.read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+        return SkipListResult(
+            changed=False, ok=False, summary=f"Cannot read .claude-plugin/plugin.json: {exc}"
+        )
     detected: set[str] = set()
     submodules = _read_gitmodules(plugin_root)
     detected.update(submodules)
@@ -529,17 +539,27 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.subcommand == "all":
+        # Every applicable subcommand in safe order: content transforms
+        # first, then external-skip-list which rewrites the manifest.
+        # add-standard-sections is included here too — _process_file
+        # self-skips every file except SKILL.md, so running it over the
+        # whole tree is a no-op everywhere else (finding #62).
         subs = [
             "backtick-to-link",
             "add-toc",
             "dedup-trailing-blanks",
             "wrap-placeholder-paths",
+            "add-standard-sections",
             "external-skip-list",
         ]
+        # Propagate the worst per-subcommand exit code instead of discarding
+        # it (finding #63): a single failing subcommand must fail `all`.
+        worst = 0
         for sub in subs:
             print(f"\n══════════════════════ {sub} ══════════════════════")
-            _run_subcommand(sub, plugin_root, args.apply, args.min_lines)
-        return 0
+            rc = _run_subcommand(sub, plugin_root, args.apply, args.min_lines)
+            worst = max(worst, rc)
+        return worst
     return _run_subcommand(args.subcommand, plugin_root, args.apply, args.min_lines)
 
 

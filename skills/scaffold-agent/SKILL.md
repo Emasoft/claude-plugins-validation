@@ -39,7 +39,7 @@ Copy this checklist and track your progress:
 ## Output
 
 - A new file at `<plugin-path>/agents/<agent-name>.md`.
-- Frontmatter follows canonical Claude Code spec: `name`, `description`, `model` (defaults to `sonnet`), `tools`, `maxTurns`, `skills` (empty initially).
+- Frontmatter emits `name`, `description`, and (when `--tools` is given) `tools`. Optional fields like `model`, `maxTurns`, and `skills` are NOT scaffolded — add them by hand if the agent needs them (the minimal stub still passes `validate_plugin`).
 - Existing files are NEVER overwritten unless `--force` is passed.
 
 ## Error Handling

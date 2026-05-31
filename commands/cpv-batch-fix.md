@@ -70,19 +70,26 @@ If no target was given, ask the user plain-text:
 What should I batch-fix? Provide an absolute path, a GitHub URL, a marketplace, or a list file like @/tmp/plugins.txt.
 ```
 
-Classify the spec via the resolver:
+Classify the spec via the resolver. This single `plan` call BOTH
+classifies the input AND builds the per-plugin `plan.json` the
+fan-out path consumes — capture `SESSION_DIR` so the marketplace
+branch reuses it instead of re-planning:
 
 ```bash
 TARGET="<user-supplied-target>"
+MAX_PARALLEL=8  # or user override (--max-parallel, cap 16)
 RESOLVED_JSON="$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   "$TARGET" \
   --agent plugin-fixer \
-  --mode batch_per_plugin)"
+  --mode batch_per_plugin \
+  --max-parallel "$MAX_PARALLEL")"
 PLUGIN_COUNT=$(echo "$RESOLVED_JSON" | sed -n 's/^PLUGIN_COUNT: //p')
+SESSION_DIR=$(echo "$RESOLVED_JSON" | sed -n 's/^SESSION_DIR: //p')
+STATUS_TABLE=$(echo "$RESOLVED_JSON" | sed -n 's/^STATUS_TABLE: //p')
 ```
 
-- If `PLUGIN_COUNT == 1` AND the resolved kind is `plugin` (single plugin), **fall through to Step 1 — Plan the batch** below using the existing per-shard protocol on that one plugin path.
-- If `PLUGIN_COUNT > 1` OR the input is a marketplace, run the **per-plugin fan-out** instead — see "§Marketplace / list input — per-plugin fan-out" further down.
+- If `PLUGIN_COUNT == 1` AND the resolved kind is `plugin` (single plugin), **fall through to Step 1 — Plan the batch** below using the existing per-shard protocol on that one plugin path. The per-plugin `plan.json` from this classification call is not used by the single-plugin path (Step 1 runs the separate per-SHARD planner `cpv_batch_planner.py`); it lives in `SESSION_DIR` and is harmlessly left behind under `$TMPDIR/cpv-batch/`.
+- If `PLUGIN_COUNT > 1` OR the input is a marketplace, run the **per-plugin fan-out** instead — see "§Marketplace / list input — per-plugin fan-out" further down. That path REUSES the `SESSION_DIR` + `plan.json` already built here (Step M1 does NOT re-plan).
 
 ## Step 1 — Plan the batch
 
@@ -269,17 +276,13 @@ cap 16). Each per-plugin agent runs the standard fix loop on its
 own plugin — including the agent's own internal `batch_shard`
 logic when its finding count justifies it.
 
-### Step M1 — Build the per-plugin plan
+### Step M1 — Reuse the per-plugin plan from Step 0
 
-```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
-  "$TARGET" \
-  --agent plugin-fixer \
-  --mode batch_per_plugin \
-  --max-parallel "$MAX_PARALLEL"
-```
-
-Capture the session_dir + plan.json + STATUS_TABLE path. Queue the
+Step 0 already ran `cpv_batch_orchestrator.py plan` (with the same
+`--agent plugin-fixer --mode batch_per_plugin --max-parallel`), which
+both classified the input AND wrote `plan.json` + `status_table.json`
+into `SESSION_DIR`. Do NOT re-plan — reuse the captured paths:
+`SESSION_DIR`, `$SESSION_DIR/plan.json`, and `STATUS_TABLE`. Queue the
 initial status table for the claude-menu-system Stop hook (emitted
 post-turn via ``systemMessage`` — zero token cost, NEVER printed
 inline by the orchestrator):

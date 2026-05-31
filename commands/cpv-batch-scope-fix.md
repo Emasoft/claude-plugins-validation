@@ -113,12 +113,41 @@ for plugin_index in group:
     )
 ```
 
-## Step 3 — Mid-batch status refresh + Step 4 — Final summary
+## Step 3 — Mid-batch status refresh
 
-Same as `/cpv-batch-scope-diagnose`. If any project has
-`pending_fixes`, list them so the user can pick which to apply
-(via `/cpv-batch-scope-diagnose-and-fix` for the same-turn variant
-or the doctor's per-project interactive flow).
+Queue the live status table via the orchestrator's ``emit-status``
+subcommand (aggregates every per-project status JSON, hands the CMS
+spec to ``cpv_menu`` — Stop hook emits at turn end):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+  emit-status "$SESSION_DIR/plan.json"
+```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at
+turn end. End the turn after this call.
+
+## Step 4 — Final summary
+
+After every project has reported:
+
+1. Queue the final status table (same call as Step 3).
+
+2. Print a one-line summary inline (text, not a menu). This is a
+   **fix** command, so the summary uses the fix vocabulary
+   (`fixed` / `partial` / `failed`) that matches the per-project
+   `status_label` above — NOT the diagnose-mode `clean` / `findings`
+   / `warning-only` shape:
+
+   ```text
+   DONE: projects=N clean=X fixed=Y partial=Z failed=W. Pending fixes: P. Reports under {session_dir}/.
+   ```
+
+3. If any project has `pending_fixes`, list them so the user can pick
+   which to apply (via `/cpv-batch-scope-diagnose-and-fix` for the
+   same-turn variant or the doctor's per-project interactive flow).
+
+End the turn. The CMS Stop hook emits the final table via systemMessage.
 
 ## See also
 

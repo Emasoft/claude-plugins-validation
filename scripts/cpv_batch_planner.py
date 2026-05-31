@@ -205,9 +205,12 @@ def load_report(report_path: Path) -> dict[str, Any]:
 def filter_findings(results: list[dict[str, Any]], min_severity: str) -> list[Finding]:
     """Filter raw report results down to actionable findings at or above ``min_severity``.
 
-    Drops INFO/PASSED rows unconditionally. Drops anything WITHOUT a ``file:``
-    reference (those are plugin-wide findings the shard fixer can't route
-    to a specific file).
+    Drops every row whose severity ranks BELOW the ``min_severity`` floor
+    in ``SEVERITY_ORDER`` (so at the default ``minor`` floor this discards
+    NIT, WARNING, INFO and PASSED; raise/lower the floor to keep/drop more).
+    Also drops any row WITHOUT a ``file:`` reference (those are plugin-wide
+    findings the shard fixer can't route to a specific file), and any
+    non-dict / level-less row from a hand-edited report.
     """
     floor = SEVERITY_ORDER.get(min_severity.upper(), SEVERITY_ORDER["MINOR"])
     findings: list[Finding] = []
@@ -258,7 +261,13 @@ def derive_scope(file_path: str) -> tuple[str, str]:
     parts = normalised.split("/")
     if len(parts) >= 2 and parts[0] == "skills" and parts[1]:
         return (f"skills/{parts[1]}/", SCOPE_KIND_SKILL_DIR)
-    return (file_path, SCOPE_KIND_FILE)
+    # Return the NORMALISED path (not the raw ``file_path``) so the file
+    # scope is keyed consistently regardless of which validator emitted the
+    # ref — otherwise ``./scripts/foo.py`` and ``scripts/foo.py`` (or a
+    # backslash-separated ref) would form two distinct scopes for the SAME
+    # file and land in two shards, breaking the "one file → one shard"
+    # guarantee two parallel fixers rely on.
+    return (normalised, SCOPE_KIND_FILE)
 
 
 def group_by_scope(findings: list[Finding]) -> list[Scope]:

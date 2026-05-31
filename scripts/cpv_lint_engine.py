@@ -856,7 +856,14 @@ def lint_markdown(
                 f"markdownlint exited non-zero (rc={result.returncode}) but "
                 f"produced no output — possible binary or environment issue"
             )
-    return False
+    # Return True: the only findings this branch adds are NIT (or a lone
+    # WARNING). Per the module/`lint_repo` contract — "returns True iff no
+    # MAJOR/CRITICAL finding was added … MINOR/WARNING findings do not flip
+    # the return value" — and issue #20 ("stylistic markdownlint findings
+    # must NOT block a publish"), returning False here would make the
+    # standalone `cpv_lint_engine` CLI exit 1 on a NIT-only run, treating a
+    # non-blocking style nit as a hard lint failure. (audit MED #15)
+    return True
 
 
 def lint_json(
@@ -1076,7 +1083,11 @@ def lint_css(
         stripped = line.strip()
         if stripped:
             report.minor(f"stylelint: {stripped}")
-    return False
+    # Return True: only MINOR findings were added. Per the module/`lint_repo`
+    # contract, MINOR findings do not flip the return value; returning False
+    # here would make the standalone CLI exit 1 on a MINOR-only run. The
+    # missing-tool path above still returns False in strict mode. (audit MED #15)
+    return True
 
 
 def lint_html(
@@ -1122,7 +1133,11 @@ def lint_html(
         stripped = line.strip()
         if stripped:
             report.minor(f"htmlhint: {stripped}")
-    return False
+    # Return True: only MINOR findings were added. Per the module/`lint_repo`
+    # contract, MINOR findings do not flip the return value; returning False
+    # here would make the standalone CLI exit 1 on a MINOR-only run. The
+    # missing-tool path above still returns False in strict mode. (audit MED #15)
+    return True
 
 
 def lint_sql(
@@ -1168,7 +1183,11 @@ def lint_sql(
         stripped = line.strip()
         if stripped:
             report.minor(f"sqlfluff: {stripped}")
-    return False
+    # Return True: only MINOR findings were added. Per the module/`lint_repo`
+    # contract, MINOR findings do not flip the return value; returning False
+    # here would make the standalone CLI exit 1 on a MINOR-only run. The
+    # missing-tool path above still returns False in strict mode. (audit MED #15)
+    return True
 
 
 def lint_toml(

@@ -76,7 +76,8 @@ universal-loader pattern makes every skill available to every agent.
 | Skill | Inputs | Returns | When to invoke |
 |-------|--------|---------|-----------------|
 | `plugin-management` | command + plugin name | install/uninstall/enable/disable/list operations | Plugin lifecycle |
-| `cpv-main-menu-skill` | — | the /cpv-main-menu menu tree | Only `cpv-main-menu-agent` loads this — others should not |
+| `cpv-main-menu-skill` | — | the /cpv-main-menu menu tree | Primarily `cpv-main-menu-agent`; loadable by any agent via the-skills-menu |
+| `the-skills-menu-create` | plugin path | plugin migrated from static `skills:` preloads to the-skills-menu method | Decouple a plugin's agents from static skill lists (runtime `Skill()` discovery) |
 
 ## Batch / fleet skills
 

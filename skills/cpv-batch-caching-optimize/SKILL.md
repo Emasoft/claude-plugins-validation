@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-caching-optimize
-description: "Fleet-wide parallel cache fix. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. One cache-optimizer-agent per plugin runs Phase 1 audit + Phase 2 fix + Phase 3 re-validate; Phase 4 broader refactor SKIPPED (opt in via /cpv-cache-optimize per plugin). Use when applying CA-01..CA-06 fixes across many plugins. Trigger with /cpv-batch-caching-optimize."
+description: "Fleet-wide parallel cache fix. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. One cache-optimizer-agent per plugin runs Phase 1 audit + Phase 2 fix + Phase 3 re-validate; Phase 4 broader refactor SKIPPED (run the cache-optimizer-agent on a single plugin to opt in). Use when applying CA-01..CA-06 fixes across many plugins. Trigger with /cpv-batch-caching-optimize."
 user-invocable: true
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
@@ -52,8 +52,10 @@ table — every shape is supported identically.
 4. The user gets the final status table + a one-line summary
    (`DONE: plugins=N clean=X fixed=Y partial=Z failed=W`).
 5. For Phase 4 (broader refactor — extracting shared cache headers,
-   restructuring agent contexts), suggest
-   `/cpv-cache-optimize <one plugin>` interactively.
+   restructuring agent contexts), run the `cache-optimizer-agent` on
+   that single plugin interactively (it performs Phase 4 with the
+   required per-step approval that does not compose with a parallel
+   batch).
 
 ## Output
 

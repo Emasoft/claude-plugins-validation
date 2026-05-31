@@ -15,11 +15,11 @@ This validator ensures your marketplace can:
 3. Run validation CI on changes
 4. Maintain version consistency
 
-Exit Codes:
+Exit Codes (shared CPV severity ladder: EXIT_OK=0, EXIT_CRITICAL=1, EXIT_MAJOR=2, EXIT_MINOR=3):
   0 - Score >= 90 (A grade) - Pipeline fully operational
-  1 - Score >= 70 (B or C grade) - Minor gaps, mostly functional
-  2 - Score >= 60 (D grade) - Manual updates required
-  3 - Score < 60 (F grade) - Pipeline broken or not configured
+  3 - Score >= 70 (B or C grade) - Minor gaps, mostly functional (EXIT_MINOR)
+  2 - Score >= 60 (D grade) - Manual updates required (EXIT_MAJOR)
+  1 - Score < 60 (F grade) - Pipeline broken or not configured (EXIT_CRITICAL)
 
 Usage:
     uv run python scripts/validate_marketplace_pipeline.py /path/to/marketplace
@@ -409,7 +409,13 @@ def check_python_syntax(file_path: Path) -> bool:
         with open(file_path, encoding="utf-8") as f:
             ast.parse(f.read())
         return True
-    except SyntaxError:
+    except (SyntaxError, ValueError, UnicodeDecodeError, OSError):
+        # A non-UTF8 .py file raises UnicodeDecodeError on read() (NOT a
+        # SyntaxError subclass), which previously crashed the whole validator
+        # on attacker/garbage input. ValueError covers ast.parse on source
+        # containing NUL bytes; OSError covers an unreadable/vanished file.
+        # Any of these means "this file is not a valid, syntactically-clean
+        # Python source" — report it as a syntax problem, do not propagate.
         return False
 
 
@@ -576,20 +582,32 @@ def validate_marketplace_structure(
                 4.0,
                 str(gitmodules_path),
             )
+    elif marketplace_data is None:
+        # marketplace.json is invalid (already flagged CRITICAL above). The
+        # submodule-mapping check cannot run, so it must NOT bank PASSED points
+        # — that inflated the grade of fundamentally broken input. Emit INFO
+        # with 0 possible points, mirroring the Check-6 m4 fix below.
+        #
+        # NOTE: the previous code had an inner `else` here that emitted a
+        # PASSED "Submodule entries present" (+4.0) — that branch was UNREACHABLE
+        # dead code (#162): reaching this outer branch requires marketplace_data
+        # is None OR not plugins_found, but plugins_found is ONLY ever populated
+        # inside the `marketplace_data is not None` block, so plugins_found is
+        # always empty whenever marketplace_data is None. The dead branch could
+        # therefore only have run if both conditions held simultaneously, which
+        # is impossible.
+        report.info(
+            category,
+            "Submodule mapping check skipped (marketplace.json invalid)",
+        )
     else:
-        # Can't check submodule mapping if no plugins found
-        if not report.plugins_found:
-            report.major(
-                category,
-                "No plugins found in marketplace.json to validate submodules against",
-                4.0,
-            )
-        else:
-            report.passed(
-                category,
-                "Submodule entries present",
-                4.0,
-            )
+        # Valid JSON but marketplace.json declares no plugins — nothing to map
+        # against the submodules, which is a real gap.
+        report.major(
+            category,
+            "No plugins found in marketplace.json to validate submodules against",
+            4.0,
+        )
 
     # Check 6: Plugin versions match (3 pts, MAJOR)
     if marketplace_data is not None and report.plugins_found:
@@ -1159,9 +1177,22 @@ def validate_plugin_workflows(
                 if workflow_data:
                     # YAML 1.1 treats 'on' as boolean True, so check both keys
                     triggers_value = workflow_data.get("on") or workflow_data.get(True, {})  # type: ignore[call-overload]
-                    triggers = triggers_value if isinstance(triggers_value, dict) else {}
+                    # GitHub Actions accepts THREE valid shapes for `on:` — a
+                    # mapping (`on:\n  push: ...`), a list (`on: [push, ...]`),
+                    # and a bare string (`on: push`). Checking only the mapping
+                    # form wrongly flagged perfectly valid list/string workflows
+                    # as missing the push trigger (#89). Normalise all three into
+                    # a set of trigger names before membership-checking.
+                    if isinstance(triggers_value, dict):
+                        trigger_names = set(triggers_value.keys())
+                    elif isinstance(triggers_value, list):
+                        trigger_names = {t for t in triggers_value if isinstance(t, str)}
+                    elif isinstance(triggers_value, str):
+                        trigger_names = {triggers_value}
+                    else:
+                        trigger_names = set()
                     # Check push trigger
-                    if "push" in triggers:
+                    if "push" in trigger_names:
                         plugins_with_push_trigger += 1
 
                     # Check for repository_dispatch action
@@ -1593,11 +1624,11 @@ def main() -> int:
         epilog="""
 Checks: GitHub Actions workflows, CI scripts, validation pipeline, deployment config.
 
-Exit Codes:
+Exit Codes (shared CPV severity ladder: EXIT_OK=0, EXIT_CRITICAL=1, EXIT_MAJOR=2, EXIT_MINOR=3):
   0 - Score >= 90 (A grade) - Pipeline fully operational
-  1 - Score >= 70 (B/C grade) - Minor gaps, mostly functional
-  2 - Score >= 60 (D grade) - Manual updates required
-  3 - Score < 60 (F grade) - Pipeline broken
+  3 - Score >= 70 (B/C grade) - Minor gaps, mostly functional (EXIT_MINOR)
+  2 - Score >= 60 (D grade) - Manual updates required (EXIT_MAJOR)
+  1 - Score < 60 (F grade) - Pipeline broken (EXIT_CRITICAL)
 
 """
         + launcher_epilog("validate_marketplace_pipeline"),

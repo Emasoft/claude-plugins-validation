@@ -627,10 +627,12 @@ def should_strip_target(
 ) -> tuple[bool, str]:
     """Return (worth-stripping, reason).
 
-    Heuristic: a target is worth stripping ONLY if BOTH thresholds are
-    crossed (size AND file count). This avoids creating throwaway repos
-    for plugins whose tests/ is just a stub or only contains a couple of
-    smoke tests.
+    Heuristic: a target is worth stripping when it is heavy by EITHER
+    measure — size OR file count. Equivalently, it is skipped ONLY when it
+    is small by BOTH measures (under the byte threshold AND under the file
+    threshold). This keeps a heavy-but-few-files tree (e.g. a 5 MB tests/
+    of three big fixtures) strippable for the install-cache savings, while
+    still skipping a tests/ that is a stub or a couple of smoke tests.
 
     Reason string is always populated for surfacing to the user via
     --dry-run output / --check report.

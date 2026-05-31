@@ -199,6 +199,9 @@ def _plugin_is_clipboard_domain(plugin_meta: dict) -> bool:
 # RC-65 — cloud IMDS endpoint
 # -----------------------------------------------------------------------------
 
+# Unambiguous network-call hints: the presence of any of these on the
+# IMDS line means an HTTP request is being made, regardless of how the
+# literal is positioned. These escalate to DEFINITE_TP on their own.
 _RC65_NETWORK_CALL_HINTS = (
     "requests.",
     "urlopen(",
@@ -211,15 +214,35 @@ _RC65_NETWORK_CALL_HINTS = (
     "got(",
     "needle.",
     "superagent.",
+    "curl ",
+    "wget ",
+    "Invoke-WebRequest",
+    "Invoke-RestMethod",
+)
+
+# Ambiguous accessor hints: fluent HTTP clients use these
+# (`session.get(url)`, `client.post(url)`), but so do plain `dict`/config
+# lookups (`config.get("k", default)`). A bare accessor only counts as a
+# network call when the IMDS literal is itself URL-positioned on the line
+# (see `_RC65_IMDS_IS_URL_TARGET_RE`); otherwise the literal is a default
+# value or map key, not a request target, and escalation is suppressed.
+_RC65_ACCESSOR_CALL_HINTS = (
     ".get(",
     ".post(",
     ".put(",
     ".delete(",
     ".patch(",
-    "curl ",
-    "wget ",
-    "Invoke-WebRequest",
-    "Invoke-RestMethod",
+)
+
+# The IMDS literal is a genuine request target when it sits inside a URL
+# (`http://169.254.169.254`, `://169.254.169.254`) or is followed by a
+# path / port separator (`169.254.169.254/latest`, `169.254.169.254:80`).
+# A bare default value (`"169.254.169.254"` with a closing quote / paren /
+# comma immediately after) is NOT URL-positioned. \d covers the GCP
+# `169.254.170.2` variant too since the IP is matched literally below.
+_RC65_IMDS_IS_URL_TARGET_RE = re.compile(
+    r"(?:https?:)?//\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"  # scheme-or-protocol-relative URL
+    r"|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\s*[:/]"  # IP immediately followed by path or port
 )
 
 _RC65_PATTERN_SOURCE_HINTS = (
@@ -248,11 +271,35 @@ _RC65_PATTERN_SOURCE_HINTS = (
 def classify_rc65(ctx: Context) -> FindingVerdict:
     """Cloud IMDS endpoint — denylist set member is FP, network call is TP.
 
-    The discriminator is the network call: if any sink hint is on the
-    same line, the IMDS literal is being USED (TP regardless of
-    surrounding identifiers). Otherwise, surrounding identifiers like
-    `unsafe_hosts`, `_PATTERNS`, etc. mark the line as a detector's
-    pattern source and the verdict drops to DEFINITE_FP.
+    The discriminator is the network call: if the IMDS literal is being
+    fetched on the same line it is a TP (regardless of surrounding
+    identifiers). Otherwise, surrounding identifiers like `unsafe_hosts`,
+    `_PATTERNS`, etc. mark the line as a detector's pattern source and the
+    verdict drops to DEFINITE_FP.
+
+    Two-tier network check, so DEFINITE_TP keeps its "unambiguous
+    exfiltration" contract:
+
+    * Unambiguous library calls (`requests.`, `urlopen(`, `httpx.`,
+      `axios.`, `curl `, …) escalate on their own — their mere presence
+      on the IMDS line means a request is happening.
+    * Bare accessors (`.get(`, `.post(`, …) are ambiguous: fluent HTTP
+      clients use them (`session.get(url)`) but so do plain dict/config
+      lookups (`config.get("blocked_host", "169.254.169.254")`). A bare
+      accessor only escalates when the IMDS literal is itself URL-
+      positioned on the line (inside a URL, or followed by a `/` path or
+      `:` port). A literal sitting as a bare default value / map key is
+      NOT a request target, so it stays REAL (no false CRITICAL).
+
+    The same-line pattern-source guard is checked BEFORE the network-call
+    guards. A denylist read like `denylist.get("imds", "169.254.169.254")`
+    matches `.get(` yet plainly stores/reads a constant — when the SAME
+    line also carries a pattern-source identifier (`denylist`,
+    `_PATTERNS`, `blocked_hosts`, …) the value is a data-structure member,
+    not a request target, so DEFINITE_FP wins. Real network calls
+    (`requests.get("http://169.254.169.254/…")`) never carry a
+    denylist/pattern-source token on the same line, so they still reach
+    the DEFINITE_TP branch.
 
     Step 4 (`--extreme`): a same-line network call against the IMDS
     literal in a SOURCE-role file is unambiguous instance-metadata
@@ -265,10 +312,24 @@ def classify_rc65(ctx: Context) -> FindingVerdict:
 
     role_allows_escalation = ctx.file_role == "source"
 
-    if any(hint in ctx.line for hint in _RC65_NETWORK_CALL_HINTS):
-        return FindingVerdict.DEFINITE_TP if role_allows_escalation else FindingVerdict.REAL
+    # Pattern-source guard FIRST: a denylist/blocklist/_PATTERNS member on
+    # the same line means the IMDS literal is data, not an SSRF target —
+    # even if a generic accessor like `.get(` (an accessor-hint substring)
+    # is also present. This must precede the network-call check so an
+    # ambiguous `denylist.get("imds", "169.254.169.254")` is not escalated
+    # to DEFINITE_TP → CRITICAL.
     if any(hint in ctx.line for hint in _RC65_PATTERN_SOURCE_HINTS):
         return FindingVerdict.DEFINITE_FP
+
+    # Unambiguous HTTP-library call on the line → genuine fetch.
+    is_network_call = any(hint in ctx.line for hint in _RC65_NETWORK_CALL_HINTS)
+    # Bare accessor (.get/.post/…) only counts as a fetch when the IMDS
+    # literal is URL-positioned; a bare default value / map key is not.
+    if not is_network_call and any(hint in ctx.line for hint in _RC65_ACCESSOR_CALL_HINTS):
+        is_network_call = bool(_RC65_IMDS_IS_URL_TARGET_RE.search(ctx.line))
+    if is_network_call:
+        return FindingVerdict.DEFINITE_TP if role_allows_escalation else FindingVerdict.REAL
+
     if any(hint in line for line in ctx.surrounding_lines for hint in _RC65_PATTERN_SOURCE_HINTS):
         return FindingVerdict.DEFINITE_FP
     if ctx.file_role in ("fixture", "test"):
@@ -310,7 +371,12 @@ _RC87_MANIFEST_BASENAMES = frozenset(
         "pubspec.yaml",
         "mix.exs",
         "deno.json",
-        "bun.lock.json",
+        # Bun's text lockfile (JSONC, Bun >=1.2) carries semver version
+        # pins that match the broad RFC-1918 regex. The real basename is
+        # `bun.lock` — there is no `bun.lock.json`. (Bun's manifest itself
+        # is `package.json`, already covered above; the older `bun.lockb`
+        # is binary and never reaches this text scan.)
+        "bun.lock",
     }
 )
 

@@ -17,8 +17,12 @@ docstrings containing rule-id markers (`RC-\\d+`, `CWE-\\d+`,
 
 Per-file caching: `is_pattern_source_line(content, line_no, file_path)`
 caches the precomputed file-level context (docstring line set,
-collection-literal line set) keyed on `id(content)` so callers iterating
-over a single file's lines pay the analysis cost ONCE per file.
+collection-literal line set) keyed on a HASH of the content VALUE (not
+`id(content)`) so callers re-reading the same file content — including
+the cc-audit loop that re-reads each file once per finding — pay the
+analysis cost ONCE per distinct content. A content-value key also avoids
+the post-GC address-reuse staleness that an id()-keyed cache would suffer;
+hash collisions are caught by a stored-snapshot equality check.
 
 The function is read-only and side-effect free.
 """
@@ -387,20 +391,29 @@ class _FileContext:
         return False
 
 
-# Module-level cache. Keyed by the id() of the lines list (or the
-# original content string) so callers pay the analysis cost once per
-# file.
-_FILE_CONTEXT_CACHE: dict[int, _FileContext] = {}
+# Module-level cache. Keyed by hash(tuple(lines)) — the content VALUE,
+# NOT the transient id() of the list/str object. Keying on id() was
+# wrong on two counts: (1) the primary caller (validate_security's
+# cc-audit loop) re-reads each file's text with `read_text()` once PER
+# finding, so a fresh str/list with a new id() is built every call and
+# the cache never hit; (2) id() is reused after GC, so an id()-keyed
+# entry could be returned for an unrelated file whose freshly-allocated
+# content landed at a freed address. A hash key fixes both: identical
+# content (however many times it is re-read) hits the cache, and a
+# different file can never collide into a stale entry (the snapshot
+# equality check below guards the rare genuine hash collision). This
+# mirrors the sibling cpv_parametrize_body_predicate module.
+_FILE_CONTEXT_CACHE: dict[int, tuple[tuple[str, ...], _FileContext]] = {}
 _LAST_KEYS: list[int] = []  # FIFO of recent keys for eviction
 _MAX_CACHE = 64
 
 
-def _get_or_build_context(lines: list[str], cache_key: int) -> _FileContext:
-    ctx = _FILE_CONTEXT_CACHE.get(cache_key)
-    if ctx is not None and ctx.lines is lines:
-        return ctx
+def _get_or_build_context(lines: list[str], cache_key: int, snapshot: tuple[str, ...]) -> _FileContext:
+    cached = _FILE_CONTEXT_CACHE.get(cache_key)
+    if cached is not None and cached[0] == snapshot:
+        return cached[1]
     ctx = _FileContext(lines)
-    _FILE_CONTEXT_CACHE[cache_key] = ctx
+    _FILE_CONTEXT_CACHE[cache_key] = (snapshot, ctx)
     _LAST_KEYS.append(cache_key)
     if len(_LAST_KEYS) > _MAX_CACHE:
         oldest = _LAST_KEYS.pop(0)
@@ -440,20 +453,22 @@ def is_pattern_source_line(
     with other predicates, but unused today).
 
     The per-file context (docstring set, collection-literal set, comment
-    marker set, anchored-docstring set) is cached keyed on `id(content)`
-    so iterating a file's lines pays the analysis cost ONCE per file.
+    marker set, anchored-docstring set) is cached keyed on a HASH of the
+    content VALUE (not `id(content)`), so a file re-read multiple times —
+    e.g. the cc-audit loop that calls `read_text()` once per finding —
+    pays the analysis cost ONCE while a different file can never collide
+    into a stale entry via post-GC address reuse. A hash collision is
+    caught by comparing the stored content snapshot against the live one.
     """
     _ = file_path  # reserved for future per-extension nuance
     if isinstance(content, str):
-        # Cache by id of the raw string. Callers that pass the same
-        # content multiple times share the analysis. If they pass a new
-        # string with the same id (uncommon — would require allocation
-        # reuse), the lines-is identity check inside
-        # `_get_or_build_context` rebuilds.
         lines = content.split("\n")
-        cache_key = id(content)
     else:
         lines = content
-        cache_key = id(lines)
-    ctx = _get_or_build_context(lines, cache_key)
+    # Snapshot the content as an immutable, hashable tuple so the cache
+    # key reflects the VALUE, not the object address. str and list inputs
+    # carrying the same logical content map to the same key.
+    snapshot = tuple(lines)
+    cache_key = hash(snapshot)
+    ctx = _get_or_build_context(lines, cache_key, snapshot)
     return ctx.is_pattern_source(line_no)

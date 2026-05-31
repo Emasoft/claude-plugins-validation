@@ -345,19 +345,30 @@ Examples:
 
         new_entry = create_marketplace_entry(plugin_root)
         plugins = existing_data.get("plugins", [])
+        entry_found = False
         for plugin in plugins:
             if plugin.get("name") == new_entry["name"]:
+                entry_found = True
                 if plugin.get("checksum") == new_entry["checksum"]:
                     if args.json:
                         print(json.dumps({"needs_update": False, "reason": "checksum unchanged"}))
                     else:
                         print("No update needed: checksum unchanged")
                     return 0
+                break
 
-        if args.json:
-            print(json.dumps({"needs_update": True, "reason": "checksum changed"}))
+        # Distinguish a genuine checksum change (entry exists with a different
+        # checksum) from a brand-new plugin (no entry at all). The old code
+        # reported "checksum changed" for both, which is the wrong reason for a
+        # missing plugin — there is no prior checksum to have changed (audit #84).
+        if entry_found:
+            reason = "checksum changed"
         else:
-            print("Update needed: checksum changed")
+            reason = "plugin not yet in marketplace"
+        if args.json:
+            print(json.dumps({"needs_update": True, "reason": reason}))
+        else:
+            print(f"Update needed: {reason}")
         return 0
 
     # Perform update

@@ -218,7 +218,32 @@ def aggregate(session_dir: Path, report_path: Path | None = None) -> dict[str, A
     if not isinstance(shards, list):
         raise RuntimeError("index.json missing 'shards' list")
 
-    shard_summaries = [load_shard_status(Path(s["status_path"]), int(s["shard_id"])) for s in shards]
+    # Tolerate malformed index entries the same way load_shard_status
+    # tolerates malformed status files. A shard entry that lacks
+    # 'status_path' or 'shard_id' (hand-edited / truncated index.json,
+    # or a producer/consumer schema drift) must degrade to a ShardSummary
+    # carrying an 'error' — NOT crash the whole aggregation with a KeyError
+    # before the documented per-shard tolerance even runs. (audit MED #66)
+    shard_summaries: list[ShardSummary] = []
+    for position, s in enumerate(shards):
+        if not isinstance(s, dict):
+            shard_summaries.append(
+                ShardSummary(shard_id=position, error=f"index shard entry is not an object: {s!r}")
+            )
+            continue
+        # Fall back to the positional index when 'shard_id' is absent/non-numeric
+        # so every shard still gets a stable identifier in the report.
+        try:
+            shard_id = int(s.get("shard_id", position))
+        except (ValueError, TypeError):
+            shard_id = position
+        status_path = s.get("status_path")
+        if not status_path:
+            shard_summaries.append(
+                ShardSummary(shard_id=shard_id, error="index shard entry missing 'status_path'")
+            )
+            continue
+        shard_summaries.append(load_shard_status(Path(status_path), shard_id))
 
     body = render_report(index, shard_summaries)
 

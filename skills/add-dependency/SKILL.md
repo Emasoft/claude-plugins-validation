@@ -25,7 +25,7 @@ Adds one or more plugin dependencies to a target plugin's `plugin.json::dependen
 3. Use kebab-case names; versions accept any semver-range expression (`~1.2.0`, `^2.0`, `>=1.4`).
 4. Run the real invocation; the script writes atomically (tmp + rename) and re-runs `validate_plugin --strict`.
 5. If exit code is 3 (rollback), inspect the diff, narrow the spec, and re-try.
-6. For unversioned bare-string adds, accept the `WARNING [RC-DEP-VERSION-001]` advisory or suppress with `cpv.allow_unversioned_dependencies: true`.
+6. For unversioned bare-string adds, `validate_plugin --strict` emits a WARNING that the dependency auto-tracks the latest upstream tag. The only valid resolution is to pin a semver range (`name@@~1.2.0`); there is no config opt-out (`cpv.allow_unversioned_dependencies` was removed in TRDD-02e1672b and is now ignored with a `[RC-DEPRECATED-OPTOUT]` deprecation WARNING if present).
 
 Copy this checklist and track your progress:
 
@@ -50,7 +50,7 @@ Copy this checklist and track your progress:
 | Exit 2: `--from` source unreachable | Verify path or git URL, check network |
 | Exit 3: rollback after regression | Inspect new CRITICAL/MAJOR finding, narrow the spec, retry |
 | Exit 4: atomic write failed | Disk full or permission denied — fix and re-run |
-| WARNING RC-DEP-VERSION-001 | Pin a version OR set `cpv.allow_unversioned_dependencies: true` |
+| WARNING: unversioned dependency auto-tracks latest tag | Pin a semver range (`name@@~1.2.0`) — the only valid resolution; there is no config opt-out |
 | MAJOR cross-marketplace blocked | Add marketplace name to `marketplace.json::allowCrossMarketplaceDependenciesOn` |
 
 ## Examples

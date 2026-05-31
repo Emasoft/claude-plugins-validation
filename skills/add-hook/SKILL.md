@@ -21,7 +21,7 @@ Adds a new hook entry to a plugin's `hooks/hooks.json`. The scaffold is idempote
 ## Instructions
 
 1. Pick a valid hook event name from the canonical list.
-2. Write the command as a Python or Node delegation (the script will reject bash-only constructs).
+2. Write the command as a Python or Node delegation. `add_component.py` writes the command verbatim — it does NOT inspect or reject bash-only constructs at write time — so a bash-only command lands in `hooks/hooks.json` and is caught only later by `validate_hook`/`validate_plugin --strict` (step 5) as a MAJOR. Use Python/Node delegation up front to pass that re-validation.
 3. Run the underlying `add_component.py --type hook` invocation.
 4. The script creates `hooks/hooks.json` if missing or merges into the existing file.
 5. Re-validate via `plugin-validation-skill` to confirm cross-platform compliance.

@@ -270,16 +270,23 @@ def _has_nested_plugin_dirs(root: Path) -> bool:
 def detect_repo_shape(root: Path) -> RepoShape:
     """Classify the repo at `root` as one of the seven SHAPE_KINDS.
 
-    Detection priority (first match wins):
-      1. plugin.json + .gitmodules       → submodule-bundle
-      2. marketplace.json AND plugin.json
-            with self-entry at "./"      → marketplace-in-plugin (Layout C)
-            with plugins/<n>/ subdirs    → nested-monorepo (Layout B)
-      3. marketplace.json only           → marketplace-hub
-      4. plugin.json only                → single-plugin (Layout A)
-      5. multiple subdirs each with
-         their own .git/ + .claude-plugin → workspace-multi-git
-      6. otherwise                       → unknown
+    Detection priority (first match wins). Note marketplace.json at root
+    is evaluated BEFORE the submodule check: a repo that carries both a
+    root marketplace.json and a .gitmodules is classified by its
+    marketplace layout, with the submodules surfaced via
+    `submodule_paths` rather than turning the shape into
+    submodule-bundle.
+      1. marketplace.json + plugin.json with self-entry at "./"
+                                           → marketplace-in-plugin (Layout C)
+      2. marketplace.json with plugins/<n>/ plugin.json subdirs
+                                           → nested-monorepo (Layout B)
+      3. marketplace.json (with or without a hub-level plugin.json)
+                                           → marketplace-hub
+      4. plugin.json + .gitmodules         → submodule-bundle
+      5. plugin.json only                  → single-plugin (Layout A)
+      6. multiple subdirs each with
+         their own .git/ + .claude-plugin  → workspace-multi-git
+      7. otherwise                         → unknown
 
     The classifier is read-only — never mutates the tree, never spawns
     subprocesses (except for git remote lookups in extract_config_from_tree).

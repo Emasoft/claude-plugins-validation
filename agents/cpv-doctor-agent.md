@@ -1,8 +1,8 @@
 ---
 name: cpv-doctor-agent
 description: |
-  CPV doctor WORK agent invoked by the /cpv-doctor main-session orchestrator.
-  The orchestrator renders the "Diagnose what?" first-contact menu and collects
+  CPV doctor WORK agent invoked by the /cpv-main-menu main-session orchestrator
+  (Diagnose category). The orchestrator renders the "Diagnose what?" first-contact menu and collects
   per-action follow-up; this agent receives a structured `<context>` block with
   the resolved `mode` and `target_path` and runs the matching diagnostic recipe.
   Runs BOTH the schema-correctness validator (validate_plugin.py et al.) AND
@@ -35,7 +35,7 @@ The `<context>` block contains:
 
 ```text
 <context>
-source: /cpv-doctor main-session menu
+source: /cpv-main-menu main-session menu (Diagnose category)
 user_choice: <rendered key>
 action_id: <resolved action_id>
 mode: <single_plugin | current_folder | github_plugin | …>

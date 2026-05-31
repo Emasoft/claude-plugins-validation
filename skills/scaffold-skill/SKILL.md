@@ -39,7 +39,7 @@ Copy this checklist and track your progress:
 ## Output
 
 - A new file at `<plugin-path>/skills/<skill-name>/SKILL.md`.
-- Frontmatter follows canonical Claude Code spec: `name`, `description`, `when_to_use`, `user-invocable`, `allowed-tools` (set to a safe minimum).
+- Frontmatter emits only `name` and `description` — the minimal pair that passes `validate_plugin`. Optional fields like `when_to_use`, `user-invocable`, and `allowed-tools` are NOT scaffolded; add them by hand if the skill needs them (put a "Use when ..." trigger in the `description` so agents know when to load it).
 - The skill name must be kebab-case.
 - Existing files are NEVER overwritten unless `--force` is passed.
 
@@ -57,7 +57,8 @@ Copy this checklist and track your progress:
 
 ```bash
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" /path/to/plugin \
-  --type skill --name my-skill --description "What it does"
+  --type skill --name my-skill \
+  --description "What it does. Use when <the trigger condition that should load this skill>."
 ```
 
 After scaffolding, refresh the README so the new skill appears in the `<!-- BEGIN AUTO-COMPONENTS -->` block:
