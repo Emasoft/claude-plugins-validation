@@ -669,12 +669,13 @@ class TestBinaryScannerContract:
 
         monkeypatch.setenv("CPV_BINARY_SCAN", "0")
         monkeypatch.setenv(native._WORKER_ENV_PLUGIN_ROOT, str(tmp_path))
-        # With binary scanner off + .bin not in _SCAN_EXTENSIONS, the
-        # legacy path treats the file as ignorable (decode-error +
-        # empty content); the worker handles it gracefully.
+        # With the binary scanner off, the per-file worker falls through to
+        # the legacy text path (read_text with errors="ignore"); whatever
+        # ASCII it can decode is scanned. The worker must handle it
+        # gracefully — never crash — and always return a list.
         results = native._scan_one_file_skillaudit(target)
-        # Acceptable outcomes: empty list (unreadable), or sentinel
-        # "scanned" (read but no findings). NOT a crash.
+        # Acceptable outcomes: empty list (unreadable), real findings, or the
+        # sentinel "scanned" (read but no findings). NOT a crash.
         assert isinstance(results, list), "worker must always return a list"
 
 
