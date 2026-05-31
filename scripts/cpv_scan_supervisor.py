@@ -300,16 +300,19 @@ def _load_resume(state_path: Path, files: list) -> dict[int, ScanResult]:
     return done
 
 
-def inspect_state(state_path: str | os.PathLike) -> dict:
+def inspect_state(state_path: str | os.PathLike) -> dict[str, Any]:
     """Read-only `--inspect`: return the persisted state dict (or an `{}`-ish
     stub if absent). Pure read, spawns nothing."""
     p = Path(state_path)
     if not p.exists():
         return {"exists": False, "path": str(p)}
     try:
-        state = json.loads(p.read_text(encoding="utf-8"))
+        raw = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {"exists": True, "path": str(p), "error": "unreadable"}
+    if not isinstance(raw, dict):
+        return {"exists": True, "path": str(p), "error": "malformed"}
+    state: dict[str, Any] = raw
     state["exists"] = True
     state["path"] = str(p)
     return state
