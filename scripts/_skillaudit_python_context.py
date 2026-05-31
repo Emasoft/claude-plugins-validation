@@ -3281,7 +3281,20 @@ def _match_inside_module_data_literal(tree: ast.AST, line: int, source: str, mat
     # Walk the AST and check whether `target_const` is a descendant of
     # a module-level Assign/AnnAssign whose value is a pure-literal
     # container tree.
-    return _node_is_in_module_level_pure_data_assign(tree, target_const)
+    if not _node_is_in_module_level_pure_data_assign(tree, target_const):
+        return False
+    # Recheck 2026-05-31 (security-bypass HIGH): a module-level container is
+    # inert data ONLY if its bound name does NOT flow to a live exec / fs /
+    # net sink. ``PAYLOADS = ['bash -i >& /dev/tcp/…']; os.system(PAYLOADS[0])``
+    # parks a reverse shell in a module literal but EXECUTES it via subscript —
+    # the SAME content-threat the v2.114.0 ``_classify_call`` hardening keeps
+    # visible on the DIRECT-literal path. The sink-flow guard already existed
+    # (wired into the abs-path / SECRET_* branch) but was never called here, so
+    # the indirect container-subscript path silently suppressed REVERSE_SHELL /
+    # CRED_* / PRIVILEGE_ESC / EXFIL to info. Wire it in — this fixes BOTH
+    # callers (the non-prose-vector ``safe_literal`` suppressor AND the
+    # prose-vector ``code_fence_neutral`` demoter).
+    return not _module_container_name_flows_to_sink(tree, target_const)
 
 
 def _node_is_in_module_level_pure_data_assign(tree: ast.AST, target: ast.AST) -> bool:
