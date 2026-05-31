@@ -981,8 +981,12 @@ _DOC_ONLY_BASENAMES: frozenset[str] = frozenset(
 _DOC_ONLY_DIR_PREFIXES: tuple[str, ...] = (
     "docs/",
     "doc/",
-    "references/",
-    "reference/",
+    # SECURITY (bypass fix): `references/` and `reference/` are NOT doc-only.
+    # Anthropic Agent Skills load `skills/<name>/references/*.md` ON DEMAND —
+    # a SKILL.md that says "follow the recipe in references/x.md" makes that
+    # file part of the agent's instruction/execution surface. Treating it as
+    # inert documentation let an attacker hide an executable payload there and
+    # leave only a pointer in SKILL.md. They stay fully scanned.
     "examples/",
     "example/",
     "changelog/",
@@ -1269,7 +1273,17 @@ def _context_classifier_verdict(
         #   demote — the author MUST address them (the iron rule
         #   "validations are mandatory, fix issues don't silence them"
         #   stays for the surfaces where prose CAN reach an agent).
-        if is_doc_only and not _rule_is_secret_detection(rule_id):
+        # SECURITY (bypass fix): EXECUTION-class rules are NEVER suppressed by
+        # the doc-only heuristic, even in `docs/` / `examples/` / README. A
+        # skill/command/hook can point the agent at any in-repo file and say
+        # "run this recipe", so an executable payload (`curl … | bash`, reverse
+        # shell, `eval "$(curl …)"`, a launchd install) in a "doc" file IS
+        # reachable. It demotes to NIT (visible) instead of vanishing.
+        if (
+            is_doc_only
+            and not _rule_is_secret_detection(rule_id)
+            and rule_id not in _EXECUTION_CLASS_RULES
+        ):
             return "suppress"
         if rule_id in _INTENT_SOFT_SIGNAL_RULES:
             # Soft signals — the rule's verb / concept appears benignly
@@ -1287,8 +1301,9 @@ def _context_classifier_verdict(
         # being injected. In doc-only paths there is no agent receiving
         # the warning either — these files aren't loaded as instructions.
         # Suppress the same way safe_doc execution-class is suppressed
-        # in doc-only paths.
-        if _is_documentation_only_path(file_path):
+        # in doc-only paths — EXCEPT execution-class rules, which stay visible
+        # (demote) everywhere per the bypass fix above.
+        if _is_documentation_only_path(file_path) and rule_id not in _EXECUTION_CLASS_RULES:
             return "suppress"
         return "demote"
     if classifier_verdict == "suspect":
