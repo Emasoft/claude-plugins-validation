@@ -459,6 +459,26 @@ class TestParity:
     reason="cpv_scan_cache module not yet shipped (J1 pending)",
 )
 class TestCacheContract:
+    @pytest.fixture(autouse=True)
+    def _isolate_cache_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+        """Isolate the on-disk scan cache PER TEST.
+
+        The cache is a process-global SQLite DB resolved from
+        ``CPV_SCAN_CACHE_DIR`` (default ``~/.cache/cpv``) and is SHARED across
+        ``pytest-xdist`` workers. Without isolation, ``cache_stats()`` in this
+        worker observes a SIBLING test's concurrent write on another worker —
+        making entry-count assertions racy (observed in a v2.111.0 publish:
+        ``test_env_var_disables_cache`` asserted ``entries==0`` but a parallel
+        scan-running test had written ``entries=1`` to the shared DB). Pointing
+        each test at its own tmp dir + resetting makes the cache-contract
+        assertions hermetic without changing what they verify.
+        """
+        from cpv_scan_cache import reset_cache
+
+        monkeypatch.setenv("CPV_SCAN_CACHE_DIR", str(tmp_path / "_scan_cache"))
+        reset_cache()
+        yield
+
     def test_cache_hit_on_second_scan(self, tmp_path: Path, monkeypatch) -> None:
         """A second scan of the SAME file with the SAME bytes hits cache."""
         import cpv_skillaudit_native as native
