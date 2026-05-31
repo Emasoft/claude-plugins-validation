@@ -1298,6 +1298,72 @@ def extract_script_path(command: str, plugin_root: Path | None) -> Path | None:
 # ---------------------------------------------------------------------------
 
 
+def _is_sys_path_mutation(func: ast.expr) -> bool:
+    """True iff ``func`` is ``sys.path.insert`` / ``sys.path.append``."""
+    if not isinstance(func, ast.Attribute) or func.attr not in ("insert", "append"):
+        return False
+    inner = func.value
+    return (
+        isinstance(inner, ast.Attribute)
+        and inner.attr == "path"
+        and isinstance(inner.value, ast.Name)
+        and inner.value.id == "sys"
+    )
+
+
+def _sys_path_insert_sibling_modules(tree: ast.AST, anchors: list[Path]) -> set[str]:
+    """Module stems made importable by a literal ``sys.path.insert(0, <dir>)``
+    of a LOCAL subdir — so ``import X`` after it is a local sibling, not a
+    missing PyPI dep (issue #62):
+
+        sys.path.insert(0, str(Path(plugin_root) / "scripts" / "oauth_rotator"))
+        import supervisor   # → scripts/oauth_rotator/supervisor.py, NOT PyPI
+
+    The path is resolved by extracting the STRING-LITERAL segments from the
+    insert argument (the variable base, e.g. ``plugin_root``, is the anchor)
+    and joining them onto each candidate anchor dir. Only dirs that ACTUALLY
+    EXIST on disk in the plugin contribute module names — a genuinely-missing
+    PyPI dep has no such local dir, so it stays flagged.
+    """
+    out: set[str] = set()
+
+    def _add_dir_modules(d: Path) -> None:
+        if not d.is_dir():
+            return
+        for f in d.iterdir():
+            if f.is_file() and f.suffix == ".py":
+                out.add(f.stem)
+            elif f.is_dir() and (f / "__init__.py").exists():
+                out.add(f.name)
+
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and node.args and _is_sys_path_mutation(node.func)):
+            continue
+        path_arg = node.args[-1]  # insert(idx, path) → args[-1]; append(path) → args[-1]
+        # ast.walk yields the `/`-chain operands in REVERSE source order, so
+        # sort the literal path segments by their (line, col) position to
+        # recover the on-disk order (``…/scripts/oauth_rotator``).
+        seg_pos: list[tuple[tuple[int, int], str]] = []
+        for sub in ast.walk(path_arg):
+            if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                pos = (getattr(sub, "lineno", 0), getattr(sub, "col_offset", 0))
+                for part in sub.value.replace("\\", "/").split("/"):
+                    if part and part not in (".", ".."):
+                        seg_pos.append((pos, part))
+        seg_pos.sort()
+        segs = [s for _, s in seg_pos]
+        if not segs:
+            continue
+        for anchor in anchors:
+            cand = anchor
+            for s in segs:
+                cand = cand / s
+            _add_dir_modules(cand)  # full segment chain (source order) onto the anchor
+            for s in segs:
+                _add_dir_modules(anchor / s)  # any single segment as a subdir of the anchor
+    return out
+
+
 def detect_python_third_party_imports(script_path: Path, plugin_script_dir: Path | None = None) -> set[str]:
     """Parse a Python file with ast and return the set of third-party module
     root names it imports.
@@ -1330,6 +1396,16 @@ def detect_python_third_party_imports(script_path: Path, plugin_script_dir: Path
                 local_siblings.add(sibling.stem)
             elif sibling.is_dir() and (sibling / "__init__.py").exists():
                 local_siblings.add(sibling.name)
+
+    # Issue #62 — modules made importable by a literal `sys.path.insert(...)` of
+    # a local subdir (e.g. `import supervisor` after inserting scripts/oauth_rotator)
+    # are local siblings, NOT missing PyPI deps. Resolve against the script's own
+    # dir, the plugin script root, and the plugin root.
+    anchors: list[Path] = [script_path.parent]
+    if plugin_script_dir:
+        anchors.append(plugin_script_dir)
+        anchors.append(plugin_script_dir.parent)
+    local_siblings |= _sys_path_insert_sibling_modules(tree, anchors)
 
     third_party: set[str] = set()
     # Walk Import / ImportFrom at any depth so try/except-guarded imports

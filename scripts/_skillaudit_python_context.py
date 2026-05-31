@@ -2395,6 +2395,20 @@ def classify(
     if rule_id == "DESERIALIZATION" and _is_ruamel_yaml_safe_load(tree, source, line):
         return "safe_literal"
 
+    # Issue #60 — DESERIALIZATION FP: ``yaml.load(raw, Loader=L)`` where ``L``
+    # is (or transitively subclasses) a PyYAML SAFE loader
+    # (``SafeLoader`` / ``CSafeLoader`` / ``BaseLoader`` / ``CBaseLoader``)
+    # disables arbitrary object construction exactly as ``yaml.safe_load`` does:
+    #
+    #     class _DupLoader(yaml.SafeLoader): ...   # safe base
+    #     tree = yaml.load(raw_text, Loader=_DupLoader)   # safe
+    #
+    # The class hierarchy is resolved from the AST (intrinsic) — an unresolved
+    # Loader, or ``Loader=yaml.Loader`` / ``FullLoader`` / ``UnsafeLoader``,
+    # stays suspect.
+    if rule_id == "DESERIALIZATION" and _yaml_load_uses_safe_loader_subclass(tree, line):
+        return "safe_literal"
+
     # Issue #39 — CRED_ENV_READ FP: matched substring `credentials.json`
     # is part of a Path literal pointing at the user's OWN credential
     # store (e.g. `Path.home() / ".claude" / ".credentials.json"`).
@@ -2984,6 +2998,80 @@ def _is_ruamel_yaml_safe_load(tree: ast.AST, source: str, line: int) -> bool:
             return True
         # Other typ values ("unsafe", "full") → not safe; let the rule fire.
         return False
+    return False
+
+
+# PyYAML loaders that disable arbitrary object construction (issue #60). A
+# ``yaml.load(..., Loader=L)`` with one of these — or a subclass — is as safe
+# as ``yaml.safe_load``. ``Loader`` / ``FullLoader`` / ``UnsafeLoader`` /
+# ``CLoader`` / ``CFullLoader`` are deliberately EXCLUDED (they construct
+# arbitrary Python objects), so they stay suspect.
+_YAML_SAFE_LOADER_NAMES: Final[frozenset[str]] = frozenset(
+    {"SafeLoader", "CSafeLoader", "BaseLoader", "CBaseLoader"}
+)
+
+
+def _base_is_safe_loader(node: ast.expr) -> bool:
+    """True iff an AST node names a PyYAML safe loader — ``yaml.SafeLoader``
+    (Attribute) or a bare ``SafeLoader`` (Name), incl. the C/Base variants."""
+    if isinstance(node, ast.Attribute):
+        return node.attr in _YAML_SAFE_LOADER_NAMES
+    if isinstance(node, ast.Name):
+        return node.id in _YAML_SAFE_LOADER_NAMES
+    return False
+
+
+def _classdef_subclasses_safe_loader(tree: ast.AST, class_name: str, _depth: int = 0) -> bool:
+    """True iff the ``ClassDef`` named ``class_name`` in ``tree`` transitively
+    subclasses a PyYAML safe loader. Recurses through LOCAL base classes (a
+    base that is itself a class defined in this module); bounded depth guards
+    against cycles / pathological inheritance graphs."""
+    if _depth > 10:
+        return False
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.ClassDef) and node.name == class_name):
+            continue
+        for base in node.bases:
+            if _base_is_safe_loader(base):
+                return True
+            if isinstance(base, ast.Name) and _classdef_subclasses_safe_loader(tree, base.id, _depth + 1):
+                return True
+        return False  # found the class but no safe base
+    return False
+
+
+def _yaml_load_uses_safe_loader_subclass(tree: ast.AST, line: int) -> bool:
+    """True iff ``line`` calls ``*.load(..., Loader=L)`` where ``L`` is (or
+    transitively subclasses) a PyYAML safe loader — so the load disables
+    arbitrary object construction exactly as ``yaml.safe_load`` does and the
+    DESERIALIZATION match is a false positive (issue #60):
+
+        class _DupLoader(yaml.SafeLoader): ...
+        yaml.load(raw, Loader=_DupLoader)     # safe
+
+    Conservative: a ``Loader=`` that does not resolve to a known-safe loader
+    (or its subclass) — including ``yaml.Loader`` / ``FullLoader`` /
+    ``UnsafeLoader``, or an unresolved name — keeps the finding visible.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", None)
+        if start is None or end is None or not (start <= line <= end):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and func.attr == "load"):
+            continue
+        for kw in node.keywords:
+            if kw.arg != "Loader":
+                continue
+            val = kw.value
+            if _base_is_safe_loader(val):
+                return True  # Loader=yaml.SafeLoader / SafeLoader directly
+            if isinstance(val, ast.Name) and _classdef_subclasses_safe_loader(tree, val.id):
+                return True  # Loader=<local class subclassing a safe loader>
+            return False  # Loader= present but not safe → keep visible
     return False
 
 

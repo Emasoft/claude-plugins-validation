@@ -246,6 +246,36 @@ def _is_shell_comment_line(line: str) -> bool:
     return bool(_SHELL_COMMENT_LINE_RE.match(line))
 
 
+# Issue #61 — a line that REMOVES a launchd agent is the OPPOSITE of
+# establishing persistence. An INSTALL verb on the same line (cp / cat > /
+# tee / launchctl load|bootstrap|enable) keeps the finding VISIBLE, so a line
+# that tears down an old agent AND installs a new one is not suppressed.
+_LAUNCHAGENT_INSTALL_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:\bcp\b|\bcat\b|\btee\b|>\s*['\"]?\S*Library/Launch"
+    r"|launchctl\s+(?:load|bootstrap|enable))",
+    re.IGNORECASE,
+)
+_LAUNCHAGENT_REMOVE_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[\s;&|(=])(?:rm|unlink)\b"
+    r"|launchctl\s+(?:bootout|unload|remove|disable)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_launchagent_removal(line: str) -> bool:
+    """True iff ``line`` REMOVES a launchd LaunchAgent / LaunchDaemon (the
+    opposite of establishing persistence) — ``rm`` / ``unlink`` of a
+    ``Library/LaunchAgents|LaunchDaemons`` plist, or
+    ``launchctl bootout|unload|remove|disable``. An INSTALL / load verb on the
+    same line keeps the finding visible. (issue #61)"""
+    low = line.lower()
+    if not ("launchagents" in low or "launchdaemons" in low or "launchctl" in low):
+        return False
+    if _LAUNCHAGENT_INSTALL_RE.search(line):
+        return False  # the line also installs / loads → keep visible
+    return bool(_LAUNCHAGENT_REMOVE_RE.search(line))
+
+
 # r08 sangrokjung FP iter1 (2026-05-28) — common shell command
 # substitutions with literal-only arguments. The catalog CMD_INJECTION
 # pattern ``\$\((?:cat|ls|whoami|id|uname)\s+\S`` matches every cmdsub,
@@ -1003,6 +1033,12 @@ def classify(
         return "safe_literal"
     # A4 — bounded double-requestAnimationFrame Promise-settle (not a loop).
     if rule_id == "RESOURCE_ABUSE" and _is_bounded_promise_double_raf(line_text):
+        return "safe_literal"
+
+    # Issue #61 — removing / unloading a launchd agent is the opposite of
+    # establishing persistence; an install/load verb on the same line keeps it
+    # visible.
+    if rule_id == "PERSISTENCE" and _is_launchagent_removal(line_text):
         return "safe_literal"
 
     # r08 sangrokjung FP iter (2026-05-28) — Python embedded in a shell file.

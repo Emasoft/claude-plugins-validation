@@ -42,6 +42,7 @@ from typing import Final, Literal
 
 from _skillaudit_shell_context import (  # type: ignore[import-not-found]
     _cmdsub_is_safe_data_command,
+    _is_launchagent_removal,
     _match_inside_regex_arg_shell,
     _pipe_to_text_processor,
     _reads_sensitive_path,
@@ -1365,6 +1366,12 @@ def _certain_benign_literal(
     #     preserved: real ``sudo <command>`` shapes still fire (no prose
     #     marker match).
     if rule_id == "PRIVILEGE_ESC" and _is_sudo_in_prose_mention(line, match):
+        return True
+
+    # Issue #61 — a bash recipe that REMOVES / unloads a launchd agent (the
+    # uninstall side of an opt-in feature) is the opposite of establishing
+    # persistence. An install/load verb on the same line keeps it visible.
+    if rule_id == "PERSISTENCE" and _is_launchagent_removal(line):
         return True
 
     # (8) r01 anthropic + r02 hashicorp FP iter1 — CRED_ENV_SAFE and
