@@ -1207,6 +1207,34 @@ def is_binary_file(file_path: Path) -> bool:
         return True  # Treat unreadable files as binary
 
 
+def is_scannable_text_file(file_path: Path) -> bool:
+    """True when ``file_path`` is a TEXT file that content scanners must read.
+
+    Point 1 (v2.114.0) — CPV scans EVERY text file, regardless of its
+    extension. A malicious payload (or an accidental private-info leak) can
+    hide in ANY non-code text file — ``.info``, ``.ini``, ``.cfg``, ``.rst``,
+    ``.properties``, ``.env``, ``.desktop``, a bare extension-less ``LICENSE``
+    — that a ``SKILL.md`` / agent / command / rule references and instructs
+    the agent to read or execute. The legacy ``SCANNABLE_EXTENSIONS`` /
+    ``_SCAN_EXTENSIONS`` allowlists silently skipped every extension they
+    didn't enumerate, which is exactly the arbitrary-extension evasion
+    vector: park the payload in ``payload.info`` and the old gate never
+    looked at it.
+
+    The gate is now CONTENT-based, not suffix-based: a file is scannable iff
+    it is not binary. Binary files return ``False`` here — callers that only
+    do text-regex (private-info, absolute-path, marketplace) correctly skip
+    them (reading a binary as UTF-8 yields garbage and FP noise), while
+    callers that own a dedicated binary scanner (skillaudit) route binaries
+    separately and do NOT rely on this helper.
+
+    This STRICTLY EXPANDS coverage: every extension the old allowlists kept
+    was a text extension, so ``not is_binary_file`` is a superset of the old
+    gate plus every previously-skipped text extension.
+    """
+    return not is_binary_file(file_path)
+
+
 def should_skip_directory(dir_name: str) -> bool:
     """Check if a directory should be skipped during scanning."""
     # Direct match against SKIP_DIRS
@@ -4601,31 +4629,6 @@ def build_private_path_patterns(usernames: set[str]) -> list[tuple[re.Pattern[st
 # Pre-built patterns for default usernames
 PRIVATE_PATH_PATTERNS = build_private_path_patterns(PRIVATE_USERNAMES)
 
-# File extensions to check for private info
-SCANNABLE_EXTENSIONS = {
-    ".json",
-    ".yml",
-    ".yaml",
-    ".md",
-    ".py",
-    ".sh",
-    ".txt",
-    ".toml",
-    ".js",
-    ".ts",
-    ".jsx",
-    ".tsx",
-    ".html",
-    ".css",
-    ".xml",
-    ".ini",
-    ".cfg",
-    ".conf",
-    ".env",
-    ".gitignore",
-    ".gitmodules",
-}
-
 # Directories to skip when scanning for private info
 PRIVATE_INFO_SKIP_DIRS = {
     ".git",
@@ -6430,8 +6433,11 @@ def scan_directory_for_private_info(
             filepath = Path(dirpath) / filename
             rel_path = str(rel_dir / filename) if str(rel_dir) != "." else filename
 
-            # Check only relevant file types
-            if filepath.suffix.lower() not in SCANNABLE_EXTENSIONS:
+            # Point 1 (v2.114.0): scan EVERY text file, not just an extension
+            # allowlist. A leaked username / home path can sit in any text
+            # file (.info, .rst, LICENSE, a config) referenced by the plugin.
+            # Binary files are skipped (text-regex on a binary is garbage).
+            if not is_scannable_text_file(filepath):
                 continue
 
             files_checked += 1
@@ -6641,8 +6647,11 @@ def validate_no_absolute_paths(
             filepath = Path(dirpath) / filename
             rel_path = str(rel_dir / filename) if str(rel_dir) != "." else filename
 
-            # Check only relevant file types
-            if filepath.suffix.lower() not in SCANNABLE_EXTENSIONS:
+            # Point 1 (v2.114.0): scan EVERY text file, not just an extension
+            # allowlist. A hardcoded absolute path can sit in any text file
+            # (.info, .rst, LICENSE, a config) the plugin ships. Binary files
+            # are skipped (text-regex on a binary is garbage).
+            if not is_scannable_text_file(filepath):
                 continue
 
             # Skip CPV's own validation infrastructure — it contains path

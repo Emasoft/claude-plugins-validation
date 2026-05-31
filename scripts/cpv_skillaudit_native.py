@@ -1072,6 +1072,68 @@ def _is_documentation_only_path(file_path: str) -> bool:
     return False
 
 
+_CLASSIFIER_EXTENSIONS: tuple[str, ...] = (
+    ".py",
+    ".json",
+    ".jsonc",
+    ".md",
+    ".markdown",
+    ".yml",
+    ".yaml",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".fish",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+)
+
+
+def _shebang_language(content: str) -> str | None:
+    """Map a script's ``#!`` shebang to a context-classifier extension stem.
+
+    Point 1 (v2.114.0) — extension-less executables (git hooks, ``configure``,
+    ``runme`` …) are now scanned, but the per-language context classifiers
+    dispatch — and internally gate — on the file EXTENSION. A
+    ``#!/usr/bin/env python3`` hook with no ``.py`` suffix would otherwise miss
+    the Python classifier (which proves ``subprocess.run(...)`` without
+    ``shell=True`` benign) and its safe calls would surface as code-execution
+    findings.
+
+    Returns the classifier extension stem WITHOUT the dot — ``"py"`` /
+    ``"sh"`` / ``"ts"`` — or ``None`` when there is no recognised shebang.
+    JSON / YAML / Markdown are never shebang-dispatched (they are not
+    executable scripts).
+    """
+    if not content.startswith("#!"):
+        return None
+    first = content.split("\n", 1)[0]
+    tokens = first[2:].strip().split()
+    if not tokens:
+        return None
+    interp = tokens[0].rsplit("/", 1)[-1].lower()
+    # ``#!/usr/bin/env python3`` — the real interpreter is the first token
+    # after ``env`` that is neither a flag (``-S``) nor a ``VAR=val`` assign.
+    if interp in ("env", "env.exe"):
+        interp = ""
+        for tok in tokens[1:]:
+            if tok.startswith("-") or "=" in tok:
+                continue
+            interp = tok.rsplit("/", 1)[-1].lower()
+            break
+    if interp.startswith(("python", "pypy")):
+        return "py"
+    if interp in ("sh", "bash", "zsh", "dash", "ksh", "fish", "ash"):
+        return "sh"
+    if interp.startswith(("node", "deno", "bun", "ts-node", "tsx")):
+        return "ts"
+    return None
+
+
 def _context_classifier_verdict(
     file_path: str,
     lines: list[str],
@@ -1114,8 +1176,21 @@ def _context_classifier_verdict(
     """
     if not file_path:
         return ""
-    fp_lower = file_path.lower()
     content = "\n".join(lines)
+    fp_lower = file_path.lower()
+    # Point 1 (v2.114.0): an extension-less script (git hook, configure,
+    # runme) reaches here with no classifier-recognised extension. The
+    # per-language classifiers dispatch AND internally gate on the file
+    # extension, so recover the language from the shebang and rewrite
+    # file_path to carry a synthetic extension that BOTH the dispatch below
+    # and the classifier's own extension guard honour. Without this, a
+    # `#!/usr/bin/env python3` hook would skip the Python classifier and its
+    # benign `subprocess.run(...)` calls would surface as code-execution FPs.
+    if not fp_lower.endswith(_CLASSIFIER_EXTENSIONS):
+        _lang = _shebang_language(content)
+        if _lang is not None:
+            file_path = f"{file_path}.{_lang}"
+            fp_lower = file_path.lower()
 
     classifier_verdict: str | None = None
 
@@ -2374,10 +2449,6 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
 
 
 # Files inside a plugin tree that are worth feeding to the scanner.
-_SCAN_EXTENSIONS: frozenset[str] = frozenset(
-    {".md", ".sh", ".bash", ".zsh", ".fish", ".py", ".js", ".ts", ".mjs", ".cjs", ".json", ".yaml", ".yml", ".toml"}
-)
-
 # Directories the walker MUST skip — vendored deps / VCS / build cruft.
 _SKIP_DIRS: frozenset[str] = frozenset(
     {
@@ -2535,6 +2606,62 @@ def _is_self_artifact_copy(p: Path) -> bool:
         return False
 
 
+def _file_is_binary_for_gate(p: Path) -> bool:
+    """Best-effort text-vs-binary classification for the walker gate.
+
+    Prefers the binary scanner's own BOM-aware null-byte sniff so the
+    WALKER gate and the per-file WORKER (which uses the same detector to
+    route text-scan vs ``scan_binary``) agree on every file. Falls back to
+    the common-module null-byte check only when the binary scanner module
+    failed to import. An unreadable file is treated as binary so the text
+    path never tries to ``read_text`` it.
+    """
+    if _binary_is_binary is not None:
+        try:
+            return bool(_binary_is_binary(p))
+        except OSError:
+            return True  # unreadable → keep off the text path
+        except Exception:  # pragma: no cover — defensive
+            pass
+    try:
+        from cpv_validation_common import is_binary_file  # noqa: PLC0415
+    except ImportError:  # pragma: no cover — common module is always present
+        return False
+    return is_binary_file(p)
+
+
+def _file_is_scannable(p: Path) -> bool:
+    """Point 1 (v2.114.0): scan EVERY text file, regardless of its extension.
+
+    The legacy ``_SCAN_EXTENSIONS`` allowlist scanned only 14 code/markup
+    suffixes and silently skipped every other text file — ``.info``,
+    ``.ini``, ``.cfg``, ``.conf``, ``.rst``, ``.properties``, ``.env``, a
+    bare extension-less ``LICENSE``. A malicious actor could park the
+    payload in ``payload.info`` (or move the dangerous recipe into a
+    ``.txt``) and reference it from ``SKILL.md`` — the old gate never
+    looked at it. The gate is now CONTENT-based:
+
+    * text file  → always scanned (full heuristic + context-classifier
+      pass; an unknown extension dispatches to NO context classifier and
+      therefore runs the raw heuristic chain — the strictest path, no
+      suppression).
+    * binary file → scanned ONLY when the binary scanner is active
+      (``CPV_BINARY_SCAN`` defaults ON); the per-file worker then routes
+      it through ``scan_binary`` (string extraction + the same rule
+      catalog). With binary scanning explicitly disabled there is nothing
+      to scan a binary WITH, so it is skipped rather than decoded to
+      UTF-8 garbage and run through the text scanners (FP noise).
+
+    This strictly EXPANDS coverage: every suffix the old allowlist kept was
+    a text suffix, so the text branch is a superset, and binaries — entirely
+    skipped before unless they wore an allowlisted suffix — are now scanned
+    by the dedicated binary scanner.
+    """
+    if _file_is_binary_for_gate(p):
+        return _binary_enabled()
+    return True
+
+
 def _iter_scannable_files(plugin_root: Path) -> Iterable[Path]:
     """Yield candidate files under plugin_root, skipping vendored / build dirs
     AND any path the plugin's `.gitignore` would exclude (issue #37).
@@ -2553,7 +2680,7 @@ def _iter_scannable_files(plugin_root: Path) -> Iterable[Path]:
     SkillAudit's zero-subprocess design contract is preserved.
     """
     if not plugin_root.is_dir():
-        if plugin_root.is_file() and plugin_root.suffix.lower() in _SCAN_EXTENSIONS:
+        if plugin_root.is_file() and _file_is_scannable(plugin_root):
             yield plugin_root
         return
     # Build the gitignore predicate once — pure-Python pattern matching,
@@ -2564,7 +2691,11 @@ def _iter_scannable_files(plugin_root: Path) -> Iterable[Path]:
             continue
         if any(part in _SKIP_DIRS for part in p.parts):
             continue
-        if p.suffix.lower() not in _SCAN_EXTENSIONS:
+        # Point 1 (v2.114.0) — scan EVERY text file, not a 14-suffix
+        # allowlist. Text → always scanned; binary → scanned by the binary
+        # scanner when enabled, else skipped. Closes the arbitrary-extension
+        # evasion vector (payload parked in payload.info / a .txt recipe).
+        if not _file_is_scannable(p):
             continue
         # Issue #42 — hash-anchored skip for plugins that bundle byte-identical
         # copies of CPV's scanner catalog / context classifiers (an offline

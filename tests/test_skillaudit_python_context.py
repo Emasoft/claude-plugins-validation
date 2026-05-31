@@ -280,13 +280,24 @@ class TestUnknown:
 
 class TestEvalExec:
     def test_eval_with_literal_arg(self) -> None:
-        """eval with a pure-literal first argument is safe_literal."""
+        """A literal eval arg does NOT prove safety — the classifier defers.
+
+        v2.114.0 hardening: ``eval`` EXECUTES its argument as code, so a
+        literal string can be a malicious payload
+        (``eval("__import__('os').system('…')")``) just as easily as a benign
+        ``eval("1+1")``. A literal call SHAPE removes the injection surface
+        but NOT the content threat, so dynamic-exec rules (outside the small
+        CMD_INJECTION/SHELL_EXEC injection-surface allowlist) must NOT be
+        blanket-suppressed on a literal — the classifier defers to the
+        content rules, which keep a malicious literal and pass a benign one
+        (``eval("1+1")`` still ends non-blocking via the heuristic chain).
+        """
         import _skillaudit_python_context as ctx
 
         src = 'result = eval("1+1")\n'
         idx = _line_idx_of(src, "1+1")
         verdict = ctx.classify("scripts/test.py", src, idx, "1+1", "DYNAMIC_EVAL")
-        assert verdict == "safe_literal"
+        assert verdict == "unknown"
 
     def test_eval_with_variable_arg(self) -> None:
         """eval with a Name/variable first argument is suspect."""

@@ -2469,8 +2469,8 @@ def validate_marketplace_private_info(
             ALLOWED_DOC_PATH_PREFIXES,
             EXAMPLE_USERNAMES,
             PRIVATE_USERNAMES,
-            SCANNABLE_EXTENSIONS,
             build_private_path_patterns,
+            is_scannable_text_file,
         )
         from gitignore_filter import GitignoreFilter
     except ImportError:
@@ -2570,7 +2570,10 @@ def validate_marketplace_private_info(
         for dirpath, _dirnames, filenames in gi.walk(root_dir):
             for filename in filenames:
                 filepath = Path(dirpath) / filename
-                if filepath.suffix.lower() not in SCANNABLE_EXTENSIONS:
+                # Point 1 (v2.114.0): scan EVERY text file, not an extension
+                # allowlist — a private path can leak from any text file the
+                # marketplace ships. Binary files are skipped.
+                if not is_scannable_text_file(filepath):
                     continue
 
                 rel_dir = Path(dirpath).relative_to(root_dir)
@@ -2596,7 +2599,10 @@ def validate_marketplace_private_info(
     MARKETPLACE_ROOT_FILES = {"README.md", "LICENSE", "CHANGELOG.md"}
     for root_file_name in MARKETPLACE_ROOT_FILES:
         root_file = marketplace_dir / root_file_name
-        if root_file.is_file() and root_file.suffix.lower() in SCANNABLE_EXTENSIONS:
+        # Point 1 (v2.114.0): the extension-less LICENSE file (suffix == "")
+        # was silently skipped by the old `suffix in SCANNABLE_EXTENSIONS`
+        # gate; text-detection now scans it.
+        if root_file.is_file() and is_scannable_text_file(root_file):
             scan_file(root_file, root_file_name)
             total_files += 1
 

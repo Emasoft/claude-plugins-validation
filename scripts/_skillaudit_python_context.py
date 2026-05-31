@@ -110,6 +110,19 @@ _SHELL_CALL_FQNAMES: Final[frozenset[str]] = frozenset(
 # _confidence).
 _DYNAMIC_EXEC_FQNAMES: Final[frozenset[str]] = frozenset({"eval", "exec", "compile", "__import__"})
 
+# Rules whose ENTIRE concern is the call's INJECTION SURFACE. A fixed,
+# non-interpolated argv (``_classify_call`` → ``safe_literal``) genuinely
+# precludes injection, so a benign call SHAPE may suppress exactly these.
+# EVERY OTHER rule fires on the call ARGUMENT'S CONTENT, which this very
+# call EXECUTES — a literal ``os.system('bash -i >& /dev/tcp/…')`` is a
+# reverse shell, a literal ``os.system('cat ~/.ssh/id_rsa | nc …')`` is
+# credential exfiltration — regardless of having no injection surface. The
+# call-shape verdict must NEVER suppress those (security invariant: "never
+# silently suppress malicious code"; a literal payload is still executed).
+# Deliberately SMALL — a rule omitted here merely stays VISIBLE (over-flag),
+# never hidden.
+_CALL_SHAPE_SUPPRESSIBLE_RULES: Final[frozenset[str]] = frozenset({"CMD_INJECTION", "SHELL_EXEC"})
+
 # Sinks that execute a STRING command directly (no ``shell=True`` kwarg needed) —
 # feeding a regex-pattern string into one of these executes it. Used by the
 # re-pattern-literal suppressor to refuse suppression when the pattern is
@@ -2374,7 +2387,21 @@ def classify(
         if qualname is not None:
             verdict = _classify_call(call, qualname)
             if verdict is not None:
-                return verdict
+                # A benign call SHAPE (``safe_literal`` = literal/fixed argv,
+                # no injection surface) only exonerates INJECTION-class rules
+                # (CMD_INJECTION / SHELL_EXEC). A content-threat rule
+                # (REVERSE_SHELL / PRIVILEGE_ESC / CRED_* / DATA_EXFIL / …)
+                # fires on the literal CONTENT this call EXECUTES — a
+                # hardcoded ``os.system('bash -i >& /dev/tcp/…')`` is a
+                # reverse shell whether or not its argv is a literal. NEVER
+                # let the call-shape verdict suppress those: fall through to
+                # the heuristic chain so the threat stays visible. A
+                # ``suspect`` shape (shell=True + injection) still applies to
+                # every rule — it can only escalate, never hide.
+                if verdict == "safe_literal" and rule_id not in _CALL_SHAPE_SUPPRESSIBLE_RULES:
+                    pass  # fall through — content threat must stay visible
+                else:
+                    return verdict
         # Enclosing call exists but its qualname or shape doesn't fit
         # the known shell/exec patterns — fall through to the
         # string-literal / unknown branch.
