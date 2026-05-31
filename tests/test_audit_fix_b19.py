@@ -14,7 +14,6 @@ TWO-SIDED: the malicious local-path/formula installs are now refused
 
 from __future__ import annotations
 
-import importlib
 import sys
 import tempfile
 from pathlib import Path
@@ -27,9 +26,9 @@ import _skillaudit_yaml_context as yaml_ctx  # noqa: E402
 import add_component as ac  # noqa: E402
 import cpv_batch_planner as planner  # noqa: E402
 
-importlib.reload(yaml_ctx)
-importlib.reload(ac)
-importlib.reload(planner)
+# NOTE: do NOT importlib.reload() these process-global modules — a reload swaps
+# their function objects and breaks pickle-by-reference in later same-process
+# (serial-CI) tests. A plain import already loads the current on-disk source.
 
 
 # ---------------------------------------------------------------------------

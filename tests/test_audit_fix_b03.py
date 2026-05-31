@@ -33,7 +33,7 @@ Findings covered:
 
 from __future__ import annotations
 
-import importlib
+import py_compile
 import re
 import sys
 from pathlib import Path
@@ -368,6 +368,14 @@ def test_dedup_higher_severity_still_wins() -> None:
 
 
 def test_module_reloads_cleanly() -> None:
-    """Sanity: the edited module imports/reloads without error (catches syntax / NameError regressions)."""
-    importlib.reload(M)
+    """Sanity: the edited module compiles + exposes its public API (catches
+    syntax / NameError regressions). Uses ``py_compile`` rather than
+    ``importlib.reload(M)`` — a reload of the process-global module swaps its
+    function objects, which breaks pickle-by-reference of
+    ``_scan_one_file_skillaudit`` in later same-process (serial-CI) tests
+    (``test_skillaudit_native_parallelism::test_worker_is_pickleable``). The
+    module already imported successfully at the top of this file, so an
+    import-time NameError would have failed collection; this adds a syntax
+    re-check without touching the live module object."""
+    py_compile.compile(M.__file__, doraise=True)
     assert hasattr(M, "scan_content")
