@@ -42,7 +42,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from cpv_parametrize_body_predicate import is_parametrize_body_line
 from cpv_pattern_source_predicate import is_pattern_source_line
@@ -6043,8 +6043,31 @@ def _merge_file_scan_result(
         stats[key] = stats.get(key, 0) + delta
 
 
-def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int]:
+def scan_all_files(
+    plugin_path: Path,
+    report: ValidationReport,
+    *,
+    hard_kill_after_s: float | None = None,
+    stuck_warn_after_s: float | None = None,
+    on_event: Callable[[dict], None] | None = None,
+    state_path: Any = None,
+    resume: bool = False,
+    notify: Callable[[str], None] | None = None,
+) -> dict[str, int]:
     """Recursively scan all text files in the plugin for security issues.
+
+    Supervision (issues #52 / #56, all OPT-IN — defaults preserve the legacy
+    behaviour exactly):
+      * ``hard_kill_after_s`` — SIGKILL the worker scanning any single file that
+        runs past this wall-clock budget; that file is surfaced as a per-file
+        WARNING and the scan CONTINUES (the wedge is contained per-file, not
+        allowed to hang the whole target). Setting it forces the parallel
+        (killable) path even below ``CPV_PARALLEL_SCAN_THRESHOLD``, because the
+        serial loop runs in THIS process and cannot be killed.
+      * ``stuck_warn_after_s`` / ``on_event`` / ``notify`` — progress + stuck-
+        element observability (see ``cpv_scan_supervisor``).
+      * ``state_path`` / ``resume`` — persist per-file verdicts and resume an
+        interrupted scan mid-target.
 
     Returns a dictionary with counts of issues found by category.
 
@@ -6079,13 +6102,60 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
         "sandbox_escape_issues": 0,
     }
 
+    # Issue #56 — env-var control so operators can enable supervision on ANY
+    # scan path (validate_plugin, scan_one_target, …) WITHOUT a code change,
+    # mirroring CPV's existing CPV_SCAN_PROGRESS / CPV_MAX_SCAN_BYTES knobs.
+    # Explicit kwargs always win; env vars only fill an unset (None/False) arg.
+    if hard_kill_after_s is None:
+        _v = os.environ.get("CPV_SCAN_SKIP_STUCK_AFTER")
+        if _v:
+            try:
+                hard_kill_after_s = float(_v)
+            except ValueError:
+                hard_kill_after_s = None
+    if stuck_warn_after_s is None:
+        _v = os.environ.get("CPV_SCAN_STUCK_WARN_AFTER")
+        if _v:
+            try:
+                stuck_warn_after_s = float(_v)
+            except ValueError:
+                stuck_warn_after_s = None
+    if state_path is None:
+        state_path = os.environ.get("CPV_SCAN_STATE") or None
+    if not resume:
+        resume = bool(os.environ.get("CPV_SCAN_RESUME"))
+    if notify is None and os.environ.get("CPV_NOTIFY_ON_STUCK"):
+        from cpv_scan_supervisor import default_notifier  # noqa: PLC0415
+
+        notify = default_notifier
+    # Rich per-file progress (index/total/verdict) on the supervisor path —
+    # only when the supervisor is going to run anyway, so CPV_SCAN_PROGRESS
+    # alone keeps the lean executor + its existing `_emit_scan_progress` line.
+    if (
+        on_event is None
+        and os.environ.get("CPV_SCAN_PROGRESS")
+        and (hard_kill_after_s is not None or state_path is not None or notify is not None)
+    ):
+        from cpv_scan_supervisor import stderr_progress_printer  # noqa: PLC0415
+
+        on_event = stderr_progress_printer()
+
     files = _collect_files_for_scan(plugin_path)
     if not files:
         return stats
 
     threshold = _parallel_scan_threshold()
 
-    if len(files) < threshold:
+    # Issue #52/#56 — any supervision feature forces the parallel/killable path:
+    # the serial loop runs in THIS process and a wedged file cannot be killed.
+    _supervised = (
+        hard_kill_after_s is not None
+        or on_event is not None
+        or state_path is not None
+        or notify is not None
+    )
+
+    if len(files) < threshold and not _supervised:
         # Serial path — preserved verbatim from the pre-task-384 loop.
         # Cheaper than spawning a pool for a handful of files (where the
         # ~250ms pool-setup cost dominates the per-file scan).
@@ -6118,7 +6188,16 @@ def scan_all_files(plugin_path: Path, report: ValidationReport) -> dict[str, int
     try:
         from cpv_parallel_runner import parallel_scan  # noqa: PLC0415
 
-        scan_results = parallel_scan(files, scan_one_file_for_security)
+        scan_results = parallel_scan(
+            files,
+            scan_one_file_for_security,
+            hard_kill_after_s=hard_kill_after_s,
+            stuck_warn_after_s=stuck_warn_after_s,
+            on_event=on_event,
+            state_path=state_path,
+            resume=resume,
+            notify=notify,
+        )
     finally:
         for key, prev in saved_env.items():
             if prev is None:
@@ -6196,37 +6275,42 @@ def scan_one_target(
 ) -> dict[str, int]:
     """Public orchestrator-friendly entry point that wraps scan_all_files.
 
-    Issue #15 — orchestrators that fan `scan_all_files` out across many
-    targets (e.g. one per skill folder in a 200K-target corpus) used to
-    have to re-implement their own SIGALRM-based timeout guard around the
-    private API. This helper exposes a documented surface that does the
-    right thing by default.
+    Issue #15 / #52 — orchestrators that fan this out across many targets
+    (e.g. one per skill folder in a 200K-target corpus) get a documented
+    surface that contains a pathological file WITHOUT hanging the run.
 
     Args:
         target: Path to the plugin/skill directory to scan.
         report: Optional ValidationReport. If None, a fresh one is created.
-        timeout_seconds: Optional wall-clock timeout per target. When set,
-            installs a SIGALRM that raises ``TimeoutError`` if the scan
-            takes longer than ``timeout_seconds``. Caller is expected to
-            run in a process pool worker — SIGALRM is process-local on
-            POSIX. Pass ``None`` (default) to disable the timeout (suitable
-            when the per-file ``MAX_SCAN_BYTES`` cap is sufficient).
+        timeout_seconds: Optional PER-FILE wall-clock budget. When set, any
+            single file whose scan exceeds it is hard-killed at the OS level
+            (SIGKILL on POSIX / TerminateProcess on Windows) and surfaced as a
+            per-file WARNING in ``report``; the rest of the target still scans
+            and the call returns normally. ``None`` (default) disables the
+            budget (the per-file ``MAX_SCAN_BYTES`` size cap and the #53
+            per-line input cap still apply).
 
     Returns:
         The same stats dict shape as ``scan_all_files``.
 
-    Raises:
-        TimeoutError: when ``timeout_seconds`` is set and the scan exceeds
-            the wall-clock budget.
-
     Notes:
-        - On Windows ``signal.SIGALRM`` is not available; if
-          ``timeout_seconds`` is requested on a non-POSIX platform, the
-          helper logs a WARNING and proceeds without the timer (the per-
-          file ``MAX_SCAN_BYTES`` cap is still active).
-        - The per-file size cap (``MAX_SCAN_BYTES``, default 8 MiB) is
-          applied unconditionally — it is the primary defense against the
-          deadlock pathology and works across all platforms.
+        - Replaces the former SIGALRM guard, which could NOT preempt a wedge
+          inside the C ``re`` engine — it holds the GIL with no bytecode
+          boundary for the Python signal handler to run at, so the queued
+          ``TimeoutError`` only fired AFTER the pathological match finished.
+          The hard process-kill is regex-engine-independent AND cross-platform
+          (the old SIGALRM was POSIX-only). (#52)
+        - A wedged file no longer aborts the whole target with a raised
+          ``TimeoutError`` — it is recorded and the scan CONTINUES, which is
+          what an at-scale operator wants (the timed-out file surfaces for
+          out-of-band investigation instead of losing the in-flight verdicts).
+        - Setting ``timeout_seconds`` forces the parallel (killable) path, so a
+          single sub-pool is spawned per target. For huge fan-outs over TINY
+          targets, prefer orchestrating with
+          ``cpv_scan_supervisor.supervised_scan`` at the TARGET level (one
+          killable worker per target) over a per-target sub-pool.
+        - The per-file size cap (``MAX_SCAN_BYTES``, default 8 MiB) still
+          applies unconditionally as a cheap pre-filter.
     """
     if report is None:
         report = ValidationReport()
@@ -6234,28 +6318,10 @@ def scan_one_target(
     if timeout_seconds is None:
         return scan_all_files(target, report)
 
-    # POSIX-only signal-based timeout. Windows lacks SIGALRM.
-    import signal as _signal
-
-    if not hasattr(_signal, "SIGALRM"):
-        report.warning(
-            f"Per-target timeout requested ({timeout_seconds}s) but "
-            f"signal.SIGALRM is not available on this platform. The "
-            f"per-file MAX_SCAN_BYTES cap remains active.",
-            str(target),
-        )
-        return scan_all_files(target, report)
-
-    def _alarm_handler(_signum: int, _frame: object) -> None:
-        raise TimeoutError(f"scan_one_target({target}) exceeded {timeout_seconds}s")
-
-    prev_handler = _signal.signal(_signal.SIGALRM, _alarm_handler)
-    _signal.alarm(timeout_seconds)
-    try:
-        return scan_all_files(target, report)
-    finally:
-        _signal.alarm(0)
-        _signal.signal(_signal.SIGALRM, prev_handler)
+    # Per-file hard-kill via the killable harness (cpv_scan_supervisor); see
+    # scan_all_files' supervision args. No SIGALRM — it cannot interrupt a
+    # C-level regex; only killing the OS process can. (#52)
+    return scan_all_files(target, report, hard_kill_after_s=float(timeout_seconds))
 
 
 def scan_ide_config_files(plugin_path: Path, report: ValidationReport) -> dict[str, int]:
