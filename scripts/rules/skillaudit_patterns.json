@@ -1063,6 +1063,49 @@
         "\\bclaude\\s+mcp\\s+add\\b"
       ],
       "remediation": "A plugin must not register MCP servers programmatically with `claude mcp add`. Declare your plugin's own MCP servers in .mcp.json (which the user reviews on install) instead of adding a provider at runtime. If an additional server is genuinely required, document it in your README for the user to add themselves."
+    },
+    {
+      "id": "INSECURE_TLS",
+      "severity": "high",
+      "category": "network",
+      "name": "TLS/certificate verification disabled in code",
+      "description": "Code or a CLI invocation disables TLS certificate verification — `requests(..., verify=False)`, `ssl.CERT_NONE` / `ssl._create_unverified_context()`, Node `rejectUnauthorized: false`, `curl -k`/`--insecure`, or `wget --no-check-certificate`. Turning off cert verification exposes every HTTPS call to man-in-the-middle interception (credential/prompt/response theft, payload swapping). This complements RC-61 (which catches the ENV-VAR form NODE_TLS_REJECT_UNAUTHORIZED=0 / PYTHONHTTPSVERIFY=0); this rule catches the in-code/in-library/CLI forms RC-61 does not.",
+      "patterns": [
+        "verify\\s*=\\s*False\\b",
+        "VERIFY_SSL\\s*=\\s*False\\b",
+        "ssl\\.CERT_NONE\\b",
+        "ssl\\._create_unverified_context\\s*\\(",
+        "_create_unverified_https_context\\b",
+        "rejectUnauthorized\\s*:\\s*false\\b",
+        "curl\\s+[^\\n|]*-k\\b",
+        "curl\\s+[^\\n|]*--insecure\\b",
+        "wget\\s+[^\\n|]*--no-check-certificate\\b"
+      ],
+      "remediation": "Never disable TLS certificate verification. Remove `verify=False` / `ssl.CERT_NONE` / `rejectUnauthorized:false` / `curl -k` / `wget --no-check-certificate`. If a self-signed or internal CA is required, pin that CA explicitly (`verify='/path/to/ca.pem'`, `ca: fs.readFileSync(...)`, `curl --cacert`) instead of turning verification off entirely."
+    },
+    {
+      "id": "CREDENTIAL_DISCOVERY",
+      "severity": "high",
+      "category": "reconnaissance",
+      "name": "Credential discovery / enumeration",
+      "description": "Code or a command actively SEARCHES the filesystem for credentials, secret keys, or known credential stores — `find ... -name '*.pem'`, `find / -perm -4000` (SUID hunting), `os.walk`/`glob` over the home directory or `.ssh`/`.aws`/`.gnupg` dirs, `ls`/`find` of credential directories, or references to high-signal credential-store filenames (`wallet.dat`, `ntds.dit`, Firefox `key4.db`/`logins.json`/`cookies.sqlite`, `.git-credentials`, a Windows SAM dump). This is reconnaissance preceding credential theft. Distinct from CRED_ENV_READ (reading a specific known cred file): this rule catches the SEARCH/enumeration phase.",
+      "patterns": [
+        "find\\s+[^\\n|]*-perm\\s+-0?[24]000\\b",
+        "find\\s+[^\\n|]*-name\\s+['\\\"]?\\*?\\.(?:pem|key|p12|pfx|keystore|jks)\\b",
+        "find\\s+[^\\n|]*-name\\s+['\\\"]?(?:id_rsa|id_dsa|id_ecdsa|id_ed25519)\\b",
+        "(?:ls|find)\\s+[^\\n|]*[~/]\\.(?:ssh|aws|gnupg|kube|docker)/",
+        "os\\.walk\\s*\\([^)\\n]*(?:expanduser|Path\\.home|/home/|/Users/)",
+        "glob\\s*\\.\\s*glob\\s*\\([^)\\n]*(?:\\.ssh|\\.aws|\\.gnupg|credentials|\\*\\.pem|\\*\\.key)",
+        "Path\\.home\\s*\\(\\s*\\)\\s*\\.\\s*r?glob\\s*\\(",
+        "\\bwallet\\.dat\\b",
+        "\\bntds\\.dit\\b",
+        "\\bkey4\\.db\\b",
+        "\\bcookies\\.sqlite\\b",
+        "\\blogins\\.json\\b",
+        "\\.git-credentials\\b",
+        "\\breg\\s+save\\b[^\\n|]*\\bsam\\b"
+      ],
+      "remediation": "Remove filesystem credential-searching logic. A plugin should never enumerate `~/.ssh`, `~/.aws`, `~/.gnupg`, hunt for `*.pem`/`*.key`/`id_rsa` files, SUID binaries (`find / -perm -4000`), or read OS/browser credential stores (`wallet.dat`, `ntds.dit`, `key4.db`, `.git-credentials`). If the plugin genuinely needs a credential, accept it via an explicit, user-provided config value or environment variable scoped to the plugin — never by searching the disk for it."
     }
   ]
 }
