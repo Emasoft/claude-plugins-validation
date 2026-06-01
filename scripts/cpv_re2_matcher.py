@@ -34,8 +34,9 @@ The contract is:
   4. ``HybridMatcher`` is pickleable across the multiprocessing
      boundary — ``re2.Set`` itself is NOT pickleable (verified
      empirically against ``google-re2==1.1.20251105``), so we
-     persist only the source patterns and rebuild the Set lazily
-     after unpickling.
+     persist only the source patterns and rebuild the Set inside
+     ``__setstate__`` (eagerly, during unpickling) on the receiving
+     side.
   5. ``.scan(text)`` is safe to call from multiple threads sharing
      ONE matcher — the underlying ``RE2::Set::Match`` is a read-only
      operation on a frozen compiled object, and the fallback
@@ -239,7 +240,6 @@ class HybridMatcher:
         "_invalid",
         "_stats",
         "_force_re2_disabled",
-        "_lock",
     )
 
     def __init__(
@@ -264,10 +264,6 @@ class HybridMatcher:
 
         # Patterns that compiled neither in RE2 nor in Python re.
         self._invalid: list[InvalidPattern] = []
-
-        # Re-entrant lock guarding lazy rebuild of the RE2 Set after unpickling.
-        # scan() acquires it briefly to ensure the lazy build runs at most once.
-        self._lock = threading.Lock()
 
         self._stats = _MatcherStats(
             re2_available=self._effective_re2_available(),
@@ -460,8 +456,11 @@ class HybridMatcher:
 
         results: list[tuple[str, Any]] = []
 
-        # RE2 layer (lazy rebuild via __setstate__ has already filled
-        # _re2_set if we were unpickled).
+        # RE2 layer. ``__setstate__`` (after unpickling) and ``__init__`` both
+        # rebuild the Set eagerly via ``_build_layers``, so ``_re2_set`` is
+        # already populated by the time any thread calls ``scan`` — no lock or
+        # lazy build is needed here. ``Match`` is a read-only op on the frozen
+        # compiled Set, so concurrent ``scan`` calls on one matcher are safe.
         if self._re2_set is not None:
             try:
                 matched_indexes = self._re2_set.Match(text)
@@ -584,7 +583,6 @@ class HybridMatcher:
         self._re2_compiled_individual = {}
         self._fallback = []
         self._invalid = []
-        self._lock = threading.Lock()
         self._stats = _MatcherStats(re2_available=self._effective_re2_available())
         self._build_layers()
 

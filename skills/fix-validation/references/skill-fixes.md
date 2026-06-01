@@ -126,8 +126,8 @@ description: "Use when the user needs to ..."
 **Root cause**: A field in the frontmatter is not recognized by the Claude Code CLI.
 **Fix**:
 1. Remove unrecognized fields, or verify they are intentional
-2. Known fields for Claude Code (15 fields, aligned with skills.md v2.1.121):
-   `name`, `description`, `when_to_use`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `model`, `context`, `agent`, `hooks`, `effort`, `paths`, `shell`
+2. Known fields for Claude Code (16 fields, aligned with skills.md v2.1.152):
+   `name`, `description`, `when_to_use`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `disallowed-tools`, `model`, `context`, `agent`, `hooks`, `effort`, `paths`, `shell`
 3. New in v2.1.121: `arguments` declares named positional args used by `$<name>` substitution in skill body (space-separated string OR YAML list).
 4. Skill substitution variables: `$ARGUMENTS`, `$ARGUMENTS[N]`, `$N` (positional), `$<name>` (must match `arguments:`), `${CLAUDE_SESSION_ID}`, `${CLAUDE_EFFORT}` (v2.1.120), `${CLAUDE_SKILL_DIR}`, `${CLAUDE_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_DATA}`, `${CLAUDE_PROJECT_DIR}`. Undeclared `$<name>` refs silently expand to "" — CPV emits MAJOR.
 5. Additional enterprise/OpenSpec fields: `license`, `metadata`, `compatibility`, `version`, `author`, `mode`, `tags`
@@ -487,12 +487,12 @@ description: "Converts images to PDF format when requested."
 
 ## 5. Token Budget and Progressive Disclosure
 
-### MAJOR: SKILL.md exceeds error line threshold
+### MAJOR: SKILL.md exceeds line limit (comprehensive validator)
 
-**Error message**: `SKILL.md has {lines} lines (max 800). Must use progressive disclosure.`
+**Error message**: `SKILL.md has {lines} lines (max 500). Use progressive disclosure — move content to reference files, or split into smaller focused skills.`
 **Severity**: MAJOR
 **Source**: `validate_skill_comprehensive.py` — `validate_token_budget()`
-**Root cause**: The SKILL.md file exceeds 800 lines, consuming too many context tokens.
+**Root cause**: The SKILL.md file exceeds the 500-line structural progressive-disclosure guard (`MAX_SKILL_LINES = 500`). The comprehensive validator treats this as a hard MAJOR — there is no per-plugin override (TRDD-021250b5).
 **Fix**:
 1. Move detailed content into reference files under `references/`
 2. Keep SKILL.md as a concise overview with links to detailed files
@@ -506,29 +506,21 @@ my-skill/
     troubleshooting.md  (error handling guide)
 ```
 
-### MINOR: SKILL.md exceeds warning line threshold
+### MINOR: SKILL.md exceeds line recommendation (basic validator)
 
 **Error message**: `SKILL.md has {lines} lines (recommended: under 500). Consider moving detailed content to supporting files.`
 **Severity**: MINOR
-**Source**: Both scripts — `validate_skill_content()` / `validate_token_budget()`
-**Root cause**: The SKILL.md file exceeds 500 lines.
+**Source**: `validate_skill.py` — `validate_skill_content()`
+**Root cause**: The SKILL.md file exceeds 500 lines. The basic validator surfaces this as a MINOR recommendation; the comprehensive validator surfaces the same 500-line threshold as the MAJOR above.
 **Fix**: Same as above, but less urgent.
 
-### MAJOR: Content exceeds error word count
+### MAJOR: SKILL.md body exceeds token budget
 
-**Error message**: `Content exceeds 5000 words ({count})`
+**Error message**: `SKILL.md body is ~{N} tokens (limit 5000; {method} estimate). Split into smaller, more focused skills — move detail to reference files (the body is kept only to ~5000 tokens after auto-compaction).`
 **Severity**: MAJOR
-**Source**: `validate_skill_comprehensive.py` — `validate_token_budget()`
-**Root cause**: The body content has more than 5000 words.
-**Fix**: Move verbose content to reference files and link from SKILL.md.
-
-### MINOR: Content is lengthy
-
-**Error message**: `Content is lengthy ({count} words)`
-**Severity**: MINOR
-**Source**: `validate_skill_comprehensive.py` — `validate_token_budget()`
-**Root cause**: The body content exceeds 3500 words.
-**Fix**: Consider splitting content across reference files.
+**Source**: `validate_skill_comprehensive.py` — `validate_token_budget()` (via the shared `check_token_limit`)
+**Root cause**: The body is gated against `SKILL_BODY_TOKEN_LIMIT = 5000` **tokens** (not words). The old word-count caps (`Content exceeds 5000 words`, `Content is lengthy`) were removed in favour of this token-based gate (TRDD-021250b5); there is no per-plugin override and no separate MINOR "lengthy" tier.
+**Fix**: Move verbose content into reference files under `references/` and link from SKILL.md, or split the skill into smaller focused skills.
 
 ### MAJOR: SKILL.md has no content after frontmatter
 
@@ -684,11 +676,11 @@ references/
 
 ### MINOR: Reference file lacks table of contents
 
-**Error message**: `Reference file has {lines} lines but no table of contents (Anthropic docs: files > 100 lines should have TOC)`
+**Error message**: `Reference file has no table of contents in the first 200 characters ({lines} lines): references/{filename}`
 **Severity**: MINOR
 **Source**: `validate_skill_comprehensive.py` — `validate_reference_files()`
-**Root cause**: A reference .md file exceeds 100 lines but has no TOC section.
-**Fix**: Add a table of contents near the top of the reference file:
+**Root cause**: A reference .md file has at least `TOC_MIN_LINES` (500) lines but no TOC indicator in its first 200 characters. Files **under 500 lines** without a TOC get an INFO ("OK for short files"), not this MINOR. The TOC must be discoverable in the first 200 chars — a `## Contents` / `## Table of Contents` heading, or markdown anchor links (`- [...](#...)` / `1. [...](#...)`).
+**Fix**: Add a table of contents near the top of the reference file (within the first 200 characters):
 ```markdown
 ## Table of Contents
 - [Section 1](#section-1)
@@ -1310,12 +1302,12 @@ context: "fork"
 
 ### CRITICAL: Invalid context value
 
-**Error message**: `Invalid 'context' value: '{value}'. Valid values: {values}`
+**Error message**: `Invalid 'context' value: '{value}'. Valid values: {'fork'}`
 **Severity**: CRITICAL
 **Source**: Both scripts — `validate_context_field()`
-**Root cause**: The context value is not one of the valid options.
-**Valid values**: `fork`, `inline`, `none` (may vary by CLI version)
-**Fix**: Use a valid context value:
+**Root cause**: The context value is not the single valid option. `VALID_CONTEXT_VALUES` is `{'fork'}` — `fork` is the only accepted value. Do NOT set `context: inline` or `context: none`; both are rejected with this CRITICAL.
+**Valid values**: `fork` (the only one)
+**Fix**: Use `fork`, or omit the field entirely if the skill should run inline (the default — omitting `context` is how you get inline execution, not `context: inline`):
 ```yaml
 context: fork
 ```
@@ -1376,13 +1368,14 @@ model: "sonnet"
 
 ### MAJOR: Invalid model value
 
-**Error message**: `Invalid 'model' value: '{model}'. Valid values: {values}`
+**Error message**: `Invalid 'model' value: '{model}'. Valid: sonnet, opus, haiku, inherit, default, opusplan (optionally with [1m]), or full ID like claude-opus-4-6`
 **Severity**: MAJOR
-**Source**: `validate_skill_comprehensive.py` — `validate_model_field()`
-**Root cause**: The model value is not one of `sonnet`, `opus`, `haiku`, `inherit`.
-**Fix**: Use a valid model value:
+**Source**: `validate_skill_comprehensive.py` — `validate_model_field()` (gated by the shared `is_valid_model`)
+**Root cause**: The model value is not accepted by the shared `is_valid_model` gate. Accepted forms: the short aliases `sonnet`, `opus`, `haiku`, `inherit`, `default`, `opusplan`; any of those (or a full ID) with a `[1m]` 1M-context suffix; or a full model ID like `claude-opus-4-6` / `claude-sonnet-4-5-20251001`.
+**Fix**: Use any accepted form, e.g.:
 ```yaml
 model: sonnet
+# also valid: opus[1m], opusplan, claude-opus-4-6
 ```
 
 ### MINOR: model: haiku less reliable
@@ -1447,9 +1440,9 @@ hooks: "hooks.json"
 **Error message**: `Unknown hook event '{name}'. Valid events: PreToolUse, PostToolUse, Stop, etc.`
 **Severity**: MINOR
 **Source**: `validate_skill_comprehensive.py` — `validate_hooks_field()`
-**Root cause**: A hook event name is not recognized.
-**Valid events**: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `UserPromptSubmit`, `Notification`, `Stop`, `SubagentStart`, `SubagentStop`, `Setup`, `SessionStart`, `SessionEnd`, `PreCompact`, `TeammateIdle`, `TaskCompleted`, `ConfigChange`, `WorktreeCreate`, `WorktreeRemove`
-**Fix**: Use a valid hook event name.
+**Root cause**: A hook event name is not recognized (not in `VALID_HOOK_EVENTS`).
+**Valid events** (the full `VALID_HOOK_EVENTS` set): `ConfigChange`, `CwdChanged`, `Elicitation`, `ElicitationResult`, `FileChanged`, `InstructionsLoaded`, `MessageDisplay`, `Notification`, `PermissionDenied`, `PermissionRequest`, `PostCompact`, `PostToolBatch`, `PostToolUse`, `PostToolUseFailure`, `PreCompact`, `PreToolUse`, `SessionEnd`, `SessionStart`, `Setup`, `Stop`, `StopFailure`, `SubagentStart`, `SubagentStop`, `TaskCompleted`, `TaskCreated`, `TeammateIdle`, `UserPromptExpansion`, `UserPromptSubmit`, `WorktreeCreate`, `WorktreeRemove`
+**Fix**: Use a valid hook event name from the list above.
 
 ---
 

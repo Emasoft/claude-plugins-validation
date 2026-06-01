@@ -63,5 +63,5 @@ Output: plugin-structure-fixes §1
   > §0 — Detect canonical pipeline drift via RC-PIPELINE-DRIFT-001 · §0b — Remove legacy pipeline scripts via RC-LEGACY-PIPELINE-001 · §1 — Fix dangling script references · §2 — Migrate to whole-repo lint via cpv_lint_engine · §3 — Cross-platform Python — bash to Python, os.path to pathlib · §4 — Make publish.py idempotent — interrupted-publish recovery · §5 — Sanitize every script-input parameter against injection
 - [Marketplace Upstream Drift](references/marketplace-upstream-drift.md)
   > Name mismatch — RC-MKPL-NAME-MISMATCH · Version drift — RC-MKPL-VERSION-DRIFT · Unknown entry field — RC-MKPL-UNKNOWN-FIELD · Unknown source sub-field — RC-MKPL-UNKNOWN-SOURCE-FIELD · Source unreachable — RC-MKPL-UPSTREAM-UNREACHABLE · Description / author / keywords drift — RC-MKPL-METADATA-DRIFT · Per-batch bulk align — consolidated marketplace patch · Opt-out flags — when drift IS intentional
-- Migration only: `canonical-pipeline-migration-checklist.md` at plugin root — 82-check exit gate.
+- Migration only: the repo-root `references/canonical-pipeline-migration-checklist.md` (CPV ships it under `references/`, NOT inside this skill dir) — 82-check exit gate.
 - MCP bundling: executables go in `servers/`, referenced as `${CLAUDE_PLUGIN_ROOT}/servers/<name>` (unique names).

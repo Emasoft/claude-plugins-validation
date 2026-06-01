@@ -293,8 +293,13 @@ CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
   plugin <plugin-root> --json --strict > /tmp/triage-report.json
 ```
 
-Compute `total_findings = counts.critical + counts.major + counts.minor`
-(NIT/WARNING don't block) and the per-level `severity_mix`.
+Compute `total_findings = counts.critical + counts.major + counts.minor + counts.nit`
+and the per-level `severity_mix`. **NIT must be included**: the triage call
+above is `--strict`, under which NIT blocks (`validate_plugin.py` returns
+`EXIT_NIT`=4 via `exit_code_strict`), and the completion gate requires `NIT=0`.
+Excluding NIT here would compute `total_findings=0` for a NIT-only plugin,
+route it to Situation 1, and return `[DONE] clean` with blocking NITs unfixed.
+Only WARNING is excluded (it never blocks, even under `--strict`).
 
 **Step 2 — Compute the safe-ceiling** from this agent's `model:` frontmatter
 (absent = inherits the session model's window):

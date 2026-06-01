@@ -38,6 +38,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -761,9 +762,13 @@ def list_tracked_files_under(folder: Path, repo_root: Path) -> set[Path] | None:
 # =============================================================================
 
 # ``settings[.local].json.enabledPlugins`` keys have the form
-# ``<plugin>@<marketplace>``. Both components use a strict name charset — no
-# slashes, no ``..``, no leading/trailing dots — so once the regex matches,
-# Path component injection into the cache-dir resolver is contained.
+# ``<plugin>@<marketplace>``. The name charset forbids slashes, but it DOES
+# permit ``.`` — so ``..`` matches both groups (``..@..`` is a valid match).
+# The regex therefore does NOT by itself prevent ``..`` path-component
+# injection; containment is enforced inside ``resolve_plugin_cache_dir`` by a
+# ``resolve_within`` check on the candidate directory before it is stat'd or
+# listed. Do not remove that check on the assumption that this regex blocks
+# traversal — it does not.
 ENABLED_PLUGIN_RE: re.Pattern[str] = re.compile(r"^(?P<plugin>[A-Za-z0-9_.\-]+)@(?P<marketplace>[A-Za-z0-9_.\-]+)$")
 
 
@@ -785,9 +790,29 @@ def resolve_plugin_cache_dir(
     The returned path is confined to the ``~/.claude/plugins/cache/`` tree
     via ``resolve_within``; a symlink that escapes the cache base returns
     ``None`` instead. This defends against post-compromise enumeration.
+
+    Both ``marketplace`` and ``plugin_name`` come from ``ENABLED_PLUGIN_RE``
+    groups, whose charset permits ``.`` and therefore ``..`` — so an attacker
+    controlling ``enabledPlugins`` (e.g. ``"..@..": true``) could otherwise
+    steer ``base`` out of the cache tree. We containment-check ``base``
+    BEFORE stat'ing or listing it so the resolver never enumerates a
+    directory outside the cache (the trailing check on the picked version
+    dir alone runs too late — it fires only after ``iterdir`` already
+    listed the out-of-sandbox directory).
     """
     cache_base = Path.home() / ".claude" / "plugins" / "cache"
     base = cache_base / marketplace / plugin_name
+    # Reject ``..``-traversal (or symlink escape) on ``base`` up front, before
+    # any filesystem probe, so a hostile ``<plugin>@<marketplace>`` key cannot
+    # make the resolver stat/iterate arbitrary directories outside the cache.
+    if resolve_within(base, cache_base) is None:
+        if report is not None:
+            report.warning(
+                f"[{scope_label} {marketplace}/{plugin_name}] resolved cache "
+                "path escapes ``~/.claude/plugins/cache/`` — skipping",
+                scope_label,
+            )
+        return None
     if not base.is_dir():
         return None
     versions = [d for d in base.iterdir() if d.is_dir()]
@@ -851,6 +876,17 @@ def safe_read_text(path: Path, max_bytes: int) -> str:
     otherwise fail to parse (llm-ext EDGE-2).
     """
     st = path.stat()
+    # The size cap is only meaningful for regular files: a FIFO, character/
+    # block device, or socket reports ``st_size == 0`` yet ``read_text`` on it
+    # blocks forever (FIFO with no writer) or reads unbounded (``/dev/zero``),
+    # defeating the OOM guard this whole module exists to provide. An attacker
+    # controlling the scanned project can place such a node *inside* the repo
+    # (e.g. a FIFO named ``settings.json``), which passes the ``resolve_within``
+    # symlink-escape check in the orchestrators. Reject anything that is not a
+    # regular file as an OSError so existing ``except OSError`` handlers turn it
+    # into a sanitised CRITICAL finding rather than hanging or OOMing.
+    if not stat.S_ISREG(st.st_mode):
+        raise OSError(f"not a regular file (mode {stat.S_IFMT(st.st_mode):#o})")
     if st.st_size > max_bytes:
         raise OversizedFileError(f"file exceeds {max_bytes} byte cap ({st.st_size} bytes)")
     return path.read_text(encoding="utf-8-sig")

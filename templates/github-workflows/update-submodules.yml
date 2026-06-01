@@ -157,15 +157,23 @@ jobs:
           git push
 
       - name: Summary
+        # SECURITY: github.event.client_payload.plugin is attacker-controlled
+        # (anyone who can fire the repository_dispatch). It is passed through
+        # `env:` and referenced as a quoted shell variable — NEVER interpolated
+        # with ${{ }} directly into this `run:` block, which would allow
+        # shell-command injection (the same rule the steps above follow).
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PAYLOAD_PLUGIN: ${{ github.event.client_payload.plugin }}
         run: |
-          echo "## Submodule Update Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            echo "**Plugin:** ${{ github.event.client_payload.plugin }}" >> $GITHUB_STEP_SUMMARY
+          echo "## Submodule Update Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Trigger:** $EVENT_NAME" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$EVENT_NAME" = "repository_dispatch" ]; then
+            echo "**Plugin:** $PAYLOAD_PLUGIN" >> "$GITHUB_STEP_SUMMARY"
           fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Submodule Status" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          git submodule status >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Submodule Status" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          git submodule status >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

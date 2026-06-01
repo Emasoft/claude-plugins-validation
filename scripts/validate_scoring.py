@@ -670,10 +670,7 @@ def _build_scoring_work_units(plugin_path: Path) -> list[_ScoringWorkUnit]:
     # the legacy loop's startswith(".") guard). Sorted by name.
     skills_dir = plugin_path / "skills"
     if skills_dir.exists():
-        skill_dirs = sorted(
-            d for d in skills_dir.iterdir()
-            if d.is_dir() and not d.name.startswith(".")
-        )
+        skill_dirs = sorted(d for d in skills_dir.iterdir() if d.is_dir() and not d.name.startswith("."))
         for skill_dir in skill_dirs:
             units.append(
                 _ScoringWorkUnit(
@@ -823,10 +820,7 @@ def _run_all_validators_serial(plugin_path: Path) -> dict[str, ValidationReport]
     skills_dir = plugin_path / "skills"
     if skills_dir.exists():
         skill_report = ValidationReport()
-        skill_dirs = sorted(
-            d for d in skills_dir.iterdir()
-            if d.is_dir() and not d.name.startswith(".")
-        )
+        skill_dirs = sorted(d for d in skills_dir.iterdir() if d.is_dir() and not d.name.startswith("."))
         for skill_dir in skill_dirs:
             try:
                 skill_single_report = validate_skill(skill_dir)

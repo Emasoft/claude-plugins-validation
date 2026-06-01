@@ -3,16 +3,17 @@
 ## Contents
 
 - [Why This Pillar Exists](#why-this-pillar-exists)
-- [Workflow](#workflow)
+- [Scope](#scope)
+- [Source-Language Support](#source-language-support)
 - [Deterministic Prefilter Helper](#deterministic-prefilter-helper)
-- [Rule 1 — Sender-ID allowlist (CRITICAL)](#rule-1--sender-id-allowlist-critical)
-- [Rule 2 — Permission-relay gating (CRITICAL)](#rule-2--permission-relay-gating-critical)
-- [Rule 3 — Chat-ID-only gating (MAJOR)](#rule-3--chat-id-only-gating-major)
-- [Rule 4 — Fully gated (PASSED)](#rule-4--fully-gated-passed)
-- [Example vulnerable code](#example-vulnerable-code)
-- [Example safe code](#example-safe-code)
-- [Opus prompt template](#opus-prompt-template)
-- [Rubric contribution](#rubric-contribution)
+- [Rule 1 — Inbound Sender Gating (CRITICAL)](#rule-1--inbound-sender-gating-critical)
+- [Rule 2 — Permission-Relay Capability Gate (CRITICAL)](#rule-2--permission-relay-capability-gate-critical)
+- [Rule 3 — Room/Chat-ID-Only Gating (MAJOR)](#rule-3--roomchat-id-only-gating-major)
+- [Rule 4 — PASSED](#rule-4--passed)
+- [Opus Prompt Template](#opus-prompt-template)
+- [Integration With the A-F Rubric](#integration-with-the-a-f-rubric)
+- [Report Format](#report-format)
+- [References](#references)
 
 ## Checklist
 

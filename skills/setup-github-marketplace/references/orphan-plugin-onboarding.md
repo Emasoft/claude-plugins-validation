@@ -121,8 +121,8 @@ Remember: the user may not know which applies. If they say "I don't know", walk 
      ]
    }
    ```
-3. Validate: `uv run --with pyyaml python scripts/validate_marketplace.py <marketplace-folder> --strict`. Route above-WARNING findings to the `marketplace-fixer` agent.
-4. Validate the plugin itself is still clean: `validate_plugin.py --strict`. Route to `plugin-fixer` if needed.
+3. Validate via the launcher (NEVER call `validate_marketplace.py` directly from the cache — the environment-isolation guard refuses): `cpv-remote-validate marketplace <marketplace-folder> --strict`. Route above-WARNING findings to the `marketplace-fixer` agent.
+4. Validate the plugin itself is still clean via the same launcher: `cpv-remote-validate plugin <plugin-folder> --strict`. Route to `plugin-fixer` if needed.
 5. Emit the final instructions (local marketplace add uses the directory path, not a GitHub slug):
 
    ```

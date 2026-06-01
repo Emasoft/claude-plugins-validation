@@ -86,7 +86,7 @@ my-marketplace/
 | owner.name | string | Owner name (required within owner) |
 | plugins | array | List of plugin entries |
 
-> **Note:** The following marketplace names are reserved and must not be used: `official`, `anthropic`, `claude`, `test`, `example`, `demo`.
+> **Note:** Certain marketplace names are reserved and must not be used (the canonical names such as `claude-code-marketplace`, `anthropic-plugins`, and `agent-skills`, plus the impersonation prefixes `official-*`, `anthropic-*`, and `claude-marketplace*`). See [Reserved Marketplace Names](#reserved-marketplace-names) for the full list.
 
 ### Optional Fields
 
@@ -117,16 +117,25 @@ All `version` fields (marketplace and plugin) must follow strict semver format: 
 
 ### Reserved Marketplace Names
 
-The following marketplace names are reserved and will be rejected by the validator:
+The following exact marketplace names are reserved and rejected at CRITICAL
+(from `RESERVED_MARKETPLACE_NAMES` in `scripts/validate_marketplace.py`):
 
 | Reserved Name | Reason |
 |---------------|--------|
-| `official` | Reserved for Anthropic official marketplace |
-| `anthropic` | Reserved for Anthropic brand |
-| `claude` | Reserved for Anthropic brand |
-| `test` | Reserved to prevent accidental use in production |
-| `example` | Reserved to prevent accidental use in production |
-| `demo` | Reserved to prevent accidental use in production |
+| `claude-code-marketplace` | Mimics THE official marketplace |
+| `claude-code-plugins` | Mimics THE official marketplace |
+| `claude-plugins-official` | Mimics THE official marketplace |
+| `anthropic-marketplace` | Reserved for Anthropic brand |
+| `anthropic-plugins` | Reserved for Anthropic brand |
+| `agent-skills` | Reserved Anthropic-managed name |
+| `knowledge-work-plugins` | Reserved Anthropic-managed name |
+| `life-sciences` | Reserved Anthropic-managed name |
+
+In addition, names matching these impersonation prefix patterns are rejected at
+MAJOR (`RESERVED_MARKETPLACE_IMPERSONATION_PATTERNS`): `official-*`,
+`anthropic-*`, and `claude-marketplace*`. Bare community prefixes like
+`claude-`, `claude-code-`, or `claude-plugins-` are NOT impersonation and are
+allowed (e.g. CPV's own sibling repo `claude-plugins-validation`).
 
 ### Complete Example
 
@@ -230,7 +239,7 @@ The following marketplace names are reserved and will be rejected by the validat
 
 The `source` field can be either:
 - A **string path** (e.g. `"./my-plugin"`) for local plugin subdirectories, OR
-- An **object** with a `source` key (the discriminator) that identifies one of the five valid source types.
+- An **object** with a `source` key (the discriminator) that identifies one of the six valid source types.
 
 **Valid source types** (from `VALID_SOURCE_TYPES` in `scripts/validate_marketplace.py`):
 
@@ -239,10 +248,13 @@ The `source` field can be either:
 | `github` | Plugin hosted in its own GitHub repository |
 | `url` | Plugin distributed as a downloadable tarball |
 | `npm` | Plugin published to the npm registry |
+| `git` | Plugin cloned from an arbitrary git repository URL |
 | `git-subdir` | Plugin lives in a subdirectory of a git repository (Claude Code 2.1.69+) |
-| `settings` | Inline marketplace declared in user settings (Claude Code 2.1.80+) |
+| `directory` | Plugin in a local directory |
 
 > **NOTE:** The discriminator key inside the source object is `source`, not `type`. Writing `{"type": "github", ...}` produces a MAJOR validation error.
+>
+> **NOTE:** `settings` (and `file`, `hostPattern`, `pathPattern`) are valid only at the settings-level (`extraKnownMarketplaces`/`strictKnownMarketplaces`), NOT as a per-plugin `source` inside `marketplace.json` — using one there produces a MAJOR validation error.
 
 ### String-path Source (local)
 
@@ -344,15 +356,54 @@ Reference a subdirectory within a git repository (added in Claude Code 2.1.69):
 
 Use this when a plugin lives inside a larger monorepo rather than being the entire repository.
 
-### settings Source
+### git Source
 
-Inline marketplace declared in user settings (Claude Code 2.1.80+). Rarely used at the `marketplace.json` level — see the plugins reference for the settings-based marketplace format.
+Clone from an arbitrary git repository URL (not necessarily GitHub):
+
+```json
+{
+  "name": "my-plugin",
+  "source": {
+    "source": "git",
+    "url": "https://git.example.com/user/my-plugin.git"
+  }
+}
+```
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| source | Yes | `"settings"` |
-| name | Yes | Inline marketplace name |
-| plugins | Yes | Array of plugin entries |
+| source | Yes | `"git"` |
+| url | Yes | Git repository URL |
+| ref | No | Branch or tag name |
+| sha | No | Full 40-character commit SHA |
+
+### directory Source
+
+Reference a plugin in a local directory (the object form of a local source):
+
+```json
+{
+  "name": "my-plugin",
+  "source": {
+    "source": "directory",
+    "path": "./plugins/my-plugin"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| source | Yes | `"directory"` |
+| path | Yes | Local directory path |
+
+### settings (settings-level only — NOT a per-plugin source)
+
+`settings` is NOT a valid per-plugin `source` inside `marketplace.json`. It (and
+`file`, `hostPattern`, `pathPattern`) describes an inline marketplace declared in
+user settings under `extraKnownMarketplaces`/`strictKnownMarketplaces`. Using
+`{"source": "settings", ...}` as a plugin entry's `source` produces a MAJOR
+validation error — see the plugins reference for the settings-based marketplace
+format.
 
 ---
 
@@ -697,12 +748,12 @@ git submodule update --init --recursive
 **Wrong:**
 ```json
 {
-  "name": "official",
+  "name": "claude-code-marketplace",
   "plugins": []
 }
 ```
 
-**Fix:** Choose a unique marketplace name that is not in the reserved list (`official`, `anthropic`, `claude`, `test`, `example`, `demo`).
+**Fix:** Choose a unique marketplace name that is not a reserved name and does not match an impersonation prefix (`official-*`, `anthropic-*`, `claude-marketplace*`). See [Reserved Marketplace Names](#reserved-marketplace-names) for the full reserved list.
 
 ### Error: Missing owner Field
 
@@ -865,7 +916,7 @@ my-plugin/
 {"source": {"source": "svn"}}
 ```
 
-**Valid types:** `github`, `url`, `npm`, `git-subdir`, `settings` (plus string-path local sources starting with `./`).
+**Valid types:** `github`, `url`, `npm`, `git`, `git-subdir`, `directory` (plus string-path local sources starting with `./`). Note: `settings` is a settings-level-only source type and is NOT valid as a per-plugin `source`.
 
 ### Error: Wrong Discriminator Key (`type` instead of `source`)
 
@@ -965,7 +1016,7 @@ The `repo` field is required for `github` sources and must be in `owner/repo` fo
 - [ ] marketplace.json exists at root
 - [ ] marketplace.json is valid JSON
 - [ ] Required `name` field present
-- [ ] Marketplace name is not a reserved name (`official`, `anthropic`, `claude`, `test`, `example`, `demo`)
+- [ ] Marketplace name is not a reserved name and does not match an impersonation prefix (see [Reserved Marketplace Names](#reserved-marketplace-names))
 - [ ] Required `owner` field present with at minimum `owner.name`
 - [ ] Required `plugins` field is array
 - [ ] Marketplace name is kebab-case

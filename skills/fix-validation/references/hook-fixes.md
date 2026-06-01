@@ -29,7 +29,12 @@
 
 Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 
-## Valid Hook Events (all 18)
+## Valid Hook Events — matcher / prompt-agent support (common subset)
+
+This table is a quick reference for matcher and prompt/agent support on the
+most frequently-used events. It is NOT the complete event list — for the full
+set of valid event names see §2 below (the mirror of `VALID_HOOK_EVENTS`). The
+"Supports Matchers" column mirrors `EVENTS_WITHOUT_MATCHERS` in `validate_hook.py`.
 
 | Event | Supports Matchers | Supports Prompt/Agent Hooks |
 |-------|-------------------|-----------------------------|
@@ -39,19 +44,19 @@ Comprehensive remediation guide for all issues detected by `validate_hook.py`.
 | `PermissionRequest` | Yes | Yes |
 | `Notification` | Yes | No (command only) |
 | `PreCompact` | Yes | No (command only) |
-| `Setup` | Yes | Yes |
-| `SessionStart` | Yes | No (command only) |
+| `Setup` | Yes | No (command + mcp_tool only) |
+| `SessionStart` | Yes | No (command + mcp_tool only) |
 | `SessionEnd` | Yes | No (command only) |
 | `SubagentStart` | Yes | No (command only) |
 | `SubagentStop` | Yes | Yes |
 | `ConfigChange` | Yes | No (command only) |
 | `UserPromptSubmit` | No (ignored) | Yes |
 | `Stop` | No (ignored) | Yes |
-| `TeammateIdle` | No (ignored) | No (command only) |
+| `TeammateIdle` | No (ignored) | Yes |
 | `TaskCompleted` | No (ignored) | Yes |
 | `WorktreeCreate` | No (ignored) | No (command only) |
 | `WorktreeRemove` | No (ignored) | No (command only) |
-| `InstructionsLoaded` | No (ignored) | No (command only) |
+| `InstructionsLoaded` | Yes | No (command only) |
 
 ## Timeout Units
 
@@ -231,7 +236,7 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
 **Root cause**: An event name in the `"hooks"` object is not recognized by Claude Code.
 **Fix**:
 1. Check the event name for typos (names are case-sensitive)
-2. Valid event names are (all 28 — 27 official + Setup legacy WARNING-only):
+2. Valid event names are (all 30 — 29 official + Setup legacy WARNING-only; this list is the documentation mirror of `VALID_HOOK_EVENTS` in `scripts/cpv_validation_common.py`, the single source of truth):
    - `PreToolUse`
    - `PostToolUse`
    - `PostToolUseFailure`
@@ -261,6 +266,7 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
    - `ElicitationResult` (v2.1.76)
    - `CwdChanged` (v2.1.83)
    - `FileChanged` (v2.1.83)
+   - `MessageDisplay` (v2.1.152 — transform/hide assistant message text as displayed via `hookSpecificOutput.displayContent`)
 3. **Wrong**: `"preToolUse"`, `"pre_tool_use"`, `"PreTooluse"`
 4. **Correct**: `"PreToolUse"`
 5. **New: Fuzzy matching** — the validator now suggests corrections for misspelled events. If you see `did you mean 'PreToolUse'?` in the error message, it detected a close match. Common typos:
@@ -453,7 +459,7 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
 **Severity**: INFO
 **Root cause**: A matcher is specified for an event that does not support matchers. The matcher will be silently ignored.
 **Fix**:
-1. Events that do NOT support matchers: `UserPromptSubmit`, `Stop`, `TeammateIdle`, `TaskCompleted`, `WorktreeCreate`, `WorktreeRemove`, `InstructionsLoaded`
+1. Events that do NOT support matchers (mirrors `EVENTS_WITHOUT_MATCHERS` in `validate_hook.py`): `UserPromptSubmit`, `Stop`, `TeammateIdle`, `TaskCompleted`, `TaskCreated`, `WorktreeCreate`, `WorktreeRemove`, `CwdChanged`, `PostToolBatch`
 2. Remove the `"matcher"` field or set it to `""` for clarity:
    ```json
    {
@@ -585,16 +591,16 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
    - `SessionStart`, `Setup`
    - `mcp_tool` hooks here will report "not connected" on first run.
 
-2. **`command` + `http` + `mcp_tool`** (no `prompt` / `agent`):
+2. **`command` + `http` + `mcp_tool`** (no `prompt` / `agent`) — mirrors `HOOK_EVENTS_NO_PROMPT_OR_AGENT` in `cpv_validation_common.py`:
    - `ConfigChange`, `CwdChanged`, `Elicitation`, `ElicitationResult`,
-   - `FileChanged`, `InstructionsLoaded`, `Notification`, `PermissionDenied`,
+   - `FileChanged`, `InstructionsLoaded`, `Notification`,
    - `PostCompact`, `PreCompact`, `SessionEnd`, `StopFailure`,
-   - `SubagentStart`, `TaskCreated`, `TeammateIdle`, `WorktreeCreate`, `WorktreeRemove`
+   - `SubagentStart`, `WorktreeCreate`, `WorktreeRemove`
 
-3. **Full 5-type set** (command + http + mcp_tool + prompt + agent):
+3. **Full 5-type set** (command + http + mcp_tool + prompt + agent) — every event not in groups 1 or 2; the Stop family (`PermissionDenied`, `TeammateIdle`, `TaskCreated`) belongs HERE, not group 2 (pinned by `test_prompt_on_tier1_event_is_accepted`):
    - `PermissionRequest`, `PostToolBatch`, `PostToolUse`, `PostToolUseFailure`,
-   - `PreToolUse`, `Stop`, `SubagentStop`, `TaskCompleted`,
-   - `UserPromptExpansion`, `UserPromptSubmit`
+   - `PreToolUse`, `Stop`, `SubagentStop`, `TaskCompleted`, `TaskCreated`,
+   - `PermissionDenied`, `TeammateIdle`, `UserPromptExpansion`, `UserPromptSubmit`
 
 **Fix**:
 1. Identify which group your event belongs to.

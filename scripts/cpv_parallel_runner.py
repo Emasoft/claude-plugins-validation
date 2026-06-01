@@ -97,9 +97,7 @@ def _run_one(scan_func: Callable[[Any], list], path: Any) -> list:
     return scan_func(path)
 
 
-def _run_batch(
-    scan_func: Callable[[Any], list], paths: list[Any]
-) -> list[tuple[int, list, str | None]]:
+def _run_batch(scan_func: Callable[[Any], list], paths: list[Any]) -> list[tuple[int, list, str | None]]:
     """Top-level worker shim for ``chunk_size > 1`` (N files per task).
 
     Each file in the batch is scanned independently and produces a tuple
@@ -178,9 +176,7 @@ def parallel_scan(
           for a no-op.
     """
     if on_error not in ("collect", "raise"):
-        raise ValueError(
-            f"on_error must be 'collect' or 'raise', got {on_error!r}"
-        )
+        raise ValueError(f"on_error must be 'collect' or 'raise', got {on_error!r}")
 
     # Materialise to a list so we can index by position for order-preservation
     # AND so we don't iterate a generator twice. ``files`` is typed as
@@ -197,12 +193,7 @@ def parallel_scan(
     # wedged worker, records the file ``TIMED_OUT``, and drains the rest. This
     # path is OPT-IN, so the default per-plugin scan keeps the lean executor and
     # pays none of the manager-process overhead.
-    if (
-        hard_kill_after_s is not None
-        or on_event is not None
-        or state_path is not None
-        or notify is not None
-    ):
+    if hard_kill_after_s is not None or on_event is not None or state_path is not None or notify is not None:
         from cpv_scan_supervisor import supervised_scan  # noqa: PLC0415
 
         return supervised_scan(
@@ -258,8 +249,7 @@ def parallel_scan(
     # we catch any future refactor that breaks the invariant. Once the slot
     # is written, type-narrow to ``list[ScanResult]``.
     assert all(r is not None for r in results), (
-        "parallel_scan internal invariant: every input file must produce a "
-        "ScanResult (success, error, or timeout)"
+        "parallel_scan internal invariant: every input file must produce a ScanResult (success, error, or timeout)"
     )
     return [r for r in results if r is not None]
 
@@ -279,10 +269,7 @@ def _run_one_per_file(
     # callable; ``scan_func`` rides along as its first argument. This
     # uniformity matters when we later want to add per-task timing or
     # progress callbacks — only one submission site to change.
-    future_to_index = {
-        executor.submit(_run_one, scan_func, path): idx
-        for idx, path in enumerate(file_list)
-    }
+    future_to_index = {executor.submit(_run_one, scan_func, path): idx for idx, path in enumerate(file_list)}
 
     # Iterate futures in submission order — NOT as_completed order — so
     # that timeout_per_file gives each file its OWN deadline rather than
@@ -292,30 +279,20 @@ def _run_one_per_file(
         path = file_list[idx]
         try:
             findings = future.result(timeout=timeout_per_file)
-            results[idx] = ScanResult(
-                file_path=path, findings=findings, error=None
-            )
+            results[idx] = ScanResult(file_path=path, findings=findings, error=None)
         except FutTimeoutError:
             # Per-file timeout. The future keeps running in the worker
             # (we can't actually cancel a running task in ProcessPoolExecutor
             # — only pending ones), but we move on and the executor
             # shutdown at the end of the ``with`` block will collect it.
-            msg = (
-                f"TimeoutError: scan exceeded {timeout_per_file}s"
-                if timeout_per_file is not None
-                else "TimeoutError"
-            )
+            msg = f"TimeoutError: scan exceeded {timeout_per_file}s" if timeout_per_file is not None else "TimeoutError"
             if on_error == "raise":
                 # Cancel any still-pending futures so we shut down fast.
                 for f in future_to_index:
                     if not f.done():
                         f.cancel()
-                raise TimeoutError(
-                    f"{path}: scan exceeded {timeout_per_file}s"
-                )
-            results[idx] = ScanResult(
-                file_path=path, findings=[], error=msg
-            )
+                raise TimeoutError(f"{path}: scan exceeded {timeout_per_file}s")
+            results[idx] = ScanResult(file_path=path, findings=[], error=msg)
         except Exception as exc:
             # Any other worker-raised exception. We capture
             # ``{ExcClass}: {message}`` so callers can surface it as a
@@ -359,19 +336,12 @@ def _run_in_batches(
         end = min(start + chunk_size, len(file_list))
         batches.append((start, file_list[start:end]))
 
-    future_to_batch_meta = {
-        executor.submit(_run_batch, scan_func, paths): (start, paths)
-        for start, paths in batches
-    }
+    future_to_batch_meta = {executor.submit(_run_batch, scan_func, paths): (start, paths) for start, paths in batches}
 
     for future, (start, paths) in future_to_batch_meta.items():
         # Scale the per-file timeout to a per-batch budget. Without this
         # rescaling, a batch of 10 files would get the timeout meant for one.
-        batch_timeout = (
-            timeout_per_file * len(paths)
-            if timeout_per_file is not None
-            else None
-        )
+        batch_timeout = timeout_per_file * len(paths) if timeout_per_file is not None else None
         try:
             batch_out = future.result(timeout=batch_timeout)
             # Each tuple is (local_index, findings, error_str_or_None). The
@@ -385,29 +355,18 @@ def _run_in_batches(
                     # the original traceback (it crossed a process boundary),
                     # but the string form preserves the class + message.
                     raise RuntimeError(f"{path}: {err}")
-                results[global_idx] = ScanResult(
-                    file_path=path, findings=findings, error=err
-                )
+                results[global_idx] = ScanResult(file_path=path, findings=findings, error=err)
         except FutTimeoutError:
-            msg = (
-                f"TimeoutError: batch scan exceeded {batch_timeout}s"
-                if batch_timeout is not None
-                else "TimeoutError"
-            )
+            msg = f"TimeoutError: batch scan exceeded {batch_timeout}s" if batch_timeout is not None else "TimeoutError"
             if on_error == "raise":
                 for f in future_to_batch_meta:
                     if not f.done():
                         f.cancel()
-                raise TimeoutError(
-                    f"batch starting at {file_list[start]}: "
-                    f"scan exceeded {batch_timeout}s"
-                )
+                raise TimeoutError(f"batch starting at {file_list[start]}: scan exceeded {batch_timeout}s")
             # Mark every file in the timed-out batch with the error.
             for local_idx, path in enumerate(paths):
                 global_idx = start + local_idx
-                results[global_idx] = ScanResult(
-                    file_path=path, findings=[], error=msg
-                )
+                results[global_idx] = ScanResult(file_path=path, findings=[], error=msg)
         except Exception as exc:
             # _run_batch shouldn't raise (it catches per-file), so this path
             # only fires on a true infrastructure failure (e.g. the worker
@@ -421,9 +380,7 @@ def _run_in_batches(
             err_str = f"{type(exc).__name__}: {exc}"
             for local_idx, path in enumerate(paths):
                 global_idx = start + local_idx
-                results[global_idx] = ScanResult(
-                    file_path=path, findings=[], error=err_str
-                )
+                results[global_idx] = ScanResult(file_path=path, findings=[], error=err_str)
 
 
 def parallel_scan_aggregated(

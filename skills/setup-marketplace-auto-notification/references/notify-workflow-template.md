@@ -32,10 +32,13 @@ secret, then push. The CPV reference implementation lives at
 | `<PAT_SECRET_NAME>`   | Secret name holding the PAT                   | `MARKETPLACE_PAT` |
 | `<DEFAULT_BRANCH>`    | Plugin default branch                         | `main` |
 
-The PAT is extracted from `plugin.json` at runtime by the receiver workflow
-(see `receiver-workflow-template.md`), so the notify workflow only needs to
-pass the plugin name and commit ref in the dispatch payload. The version
-field itself is read from the plugin's own `plugin.json` by the receiver.
+The PAT is NOT carried in `plugin.json` or in the dispatch payload — it is a
+repo **secret** named `MARKETPLACE_PAT` (see `pat-secret-setup.md`) that the
+notify workflow reads as `${{ secrets.MARKETPLACE_PAT }}` to authenticate the
+cross-repo dispatch. The `version` field is what the receiver can recover from
+the plugin's own `plugin.json` (via the GitHub API) when a dispatch omits it;
+see the Payload Contract in `receiver-workflow-template.md`. Templates A and B
+below send `version` explicitly so the receiver never needs that fallback.
 
 ---
 
@@ -110,14 +113,22 @@ jobs:
             }
 
       - name: Job summary
+        # Read values from the environment rather than interpolating ${{ }}
+        # directly into the run-script — a value from plugin.json must never be
+        # spliced into the shell. MARKETPLACE_OWNER/REPO come from the workflow
+        # env: block above.
+        env:
+          PLUGIN_NAME: ${{ steps.plugin.outputs.name }}
+          PLUGIN_VERSION: ${{ steps.plugin.outputs.version }}
+          PLUGIN_REF: ${{ steps.plugin.outputs.ref }}
         run: |
           {
             echo "## Marketplace Notification"
             echo ""
-            echo "- Plugin: ${{ steps.plugin.outputs.name }}"
-            echo "- Version: ${{ steps.plugin.outputs.version }}"
-            echo "- Ref: ${{ steps.plugin.outputs.ref }}"
-            echo "- Target: ${{ env.MARKETPLACE_OWNER }}/${{ env.MARKETPLACE_REPO }}"
+            echo "- Plugin: $PLUGIN_NAME"
+            echo "- Version: $PLUGIN_VERSION"
+            echo "- Ref: $PLUGIN_REF"
+            echo "- Target: $MARKETPLACE_OWNER/$MARKETPLACE_REPO"
           } >> "$GITHUB_STEP_SUMMARY"
 ```
 

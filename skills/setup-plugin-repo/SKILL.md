@@ -75,9 +75,9 @@ Report: repo URL, VALID/INVALID + severity counts, installed workflows/hooks, sk
 - [Plugin Workflows](references/plugin-workflows.md)
   > ci.yml -- Consolidated CI (lint + validate + test) · release.yml -- GitHub Release on Tag · notify-marketplace.yml -- Marketplace Notification · Placeholder Reference · Setup Instructions
 - [Plugin Hooks and Scripts](references/plugin-hooks-and-scripts.md)
-  > pre-push Hook Template · publish.py Pipeline Template · setup-hooks.py Template · Placeholder Reference
+  > pre-push Hook Template · publish.py Pipeline Template · setup_git_hooks.py Template · Placeholder Reference
 - [Plugin Binary Builds](references/plugin-binary-builds.md)
-  > When to Add a Build Phase · build-binaries.yml — Cross-Platform Compilation Workflow · Binary Distribution Pattern · Platform Detection Wrapper · Extending the Python Pre-Push Hook · Extending publish.py for Binary Builds · Extending ci.yml for Binary Builds · Cargo Release Profile (Rust Optimization)
+  > When to Add a Build Phase · Source/Binary Separation · build-binaries.yml — Cross-Platform Compilation Workflow (FALLBACK) · Binary Distribution Pattern · Platform Detection Wrapper · Extending the Python Pre-Push Hook · Extending publish.py for Binary Builds · Extending ci.yml for Binary Builds · Cargo Release Profile (Rust Optimization) · Placeholder Reference
 - [Pipeline Rules](references/pipeline-rules.md)
   > Pre-Push Hook: The Quality Gate · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run · Post-Push CI Verification · Mega-Linter Configuration · Common Fixes Reference
 - [v2.1.80+ Plugin Features](references/v2-1-80-features.md)

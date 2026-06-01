@@ -38,7 +38,13 @@ Why a separate module instead of editing `_plugin_compute_hashes.py`:
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+# Mapping comes from collections.abc (not typing): typing.Mapping is
+# deprecated since 3.9 (PEP 585) and it is used here BOTH as a type hint
+# and at runtime in `isinstance(files, Mapping)` below — collections.abc
+# is the canonical source for both, and it matches the sibling module
+# scripts/cpv_validation_common.py so the package stays consistent.
+from collections.abc import Mapping
+from typing import Any
 
 # Schema tag — exact string a v2 manifest carries in its `format` field.
 # Bumping this constant is a breaking change; downstream verifiers branch

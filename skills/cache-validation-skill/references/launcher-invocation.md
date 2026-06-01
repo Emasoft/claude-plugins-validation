@@ -39,5 +39,9 @@ launcher with `find` — `${CLAUDE_PLUGIN_ROOT}` already resolves it.
 From a CPV development checkout (NOT the plugin cache):
 
 ```bash
-uv run --with pyyaml python scripts/validate_cache.py /path/to/plugin --strict
+uv run --with pyyaml python scripts/validate_cache.py /path/to/plugin
 ```
+
+`validate_cache.py` accepts `--verbose`/`-v`, `--json`, and `--report
+<path>`; there is no `--strict` flag (all seven CA rules are WARNING
+severity, so there is nothing for a strict mode to escalate).

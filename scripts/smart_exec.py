@@ -123,7 +123,12 @@ TOOL_DB: dict[str, ToolSpec] = {
         "native",
         package=None,
         command="xmllint",
-        docker=("alpine", ["sh", "-lc", "apk add --no-cache libxml2-utils >/dev/null && xmllint --noout"]),
+        # The inline script MUST forward the file arguments via "$@", with a
+        # "$0" placeholder ("sh") so docker_argv's appended tool_args land in
+        # $1..$n. Without "$@" the args become positional params that the
+        # `xmllint --noout` command never reads, so xmllint runs with no file
+        # and silently validates nothing.
+        docker=("alpine", ["sh", "-lc", 'apk add --no-cache libxml2-utils >/dev/null && xmllint --noout "$@"', "sh"]),
     ),
     # ---- PowerShell module tools ----
     "PSScriptAnalyzer": ToolSpec(

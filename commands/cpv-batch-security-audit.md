@@ -25,6 +25,10 @@ main session. You do NOT scan anything yourself.
 
 ## Step 0 — Resolve arguments
 
+The user supplies a target spec (required; first positional — accepts
+every shape listed above) plus an optional `--max-parallel N` (default
+8, cap 16).
+
 If no target was given, ask plain-text:
 
 ```text
@@ -34,11 +38,42 @@ Which marketplace, plugin, or list should I security-audit? Provide a path, URL,
 ## Step 1 — Build the batch plan
 
 ```bash
-BATCH_SPEC="$1"
+# Separate the positional target specs from the --max-parallel flag in a
+# single pass. We must NOT collapse to "$1": the input grammar above lists
+# a whitespace-separated LIST (`./a ./b ./c`) as a valid shape, and the
+# orchestrator's `plan` subcommand declares its inputs as `nargs="+"`, so
+# every positional must be forwarded — using only "$1" would silently
+# audit the first plugin and drop the rest.
+#
+# Both --max-parallel N (two tokens) and --max-parallel=N (one token) are
+# handled, because argparse accepts the `=` form and a user may type it.
+# Default 8; the orchestrator re-caps at 16, so a larger N is safe to pass.
+BATCH_SPECS=()
 MAX_PARALLEL=8
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --max-parallel)
+      MAX_PARALLEL="$2"
+      shift 2
+      ;;
+    --max-parallel=*)
+      MAX_PARALLEL="${1#--max-parallel=}"
+      shift
+      ;;
+    *)
+      BATCH_SPECS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ "${#BATCH_SPECS[@]}" -eq 0 ]; then
+  echo "ERROR: no target spec given to /cpv-batch-security-audit" >&2
+  exit 1
+fi
 
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
-  "$BATCH_SPEC" \
+  "${BATCH_SPECS[@]}" \
   --agent plugin-validator \
   --mode batch_security_audit \
   --max-parallel "$MAX_PARALLEL"

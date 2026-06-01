@@ -191,7 +191,11 @@ def detect_languages(plugin_root: Path) -> dict[str, Path]:
     pkg_json = _first_existing(plugin_root, JS_MARKERS)
     tsconfig = plugin_root / "tsconfig.json"
     # Check for TS: either tsconfig.json present OR any .ts file in tree.
-    # Scanning only happens when package.json is absent, to keep the fast path cheap.
+    # The .ts tree-scan runs whenever tsconfig.json is ABSENT (independent of
+    # package.json): a package.json-only project may still ship stray .ts
+    # sources, in which case the branch below adds "ts" alongside "js". When
+    # tsconfig.json IS present the scan is skipped — tsconfig alone settles
+    # the TS verdict, keeping that fast path free of a full tree walk.
     ts_source: Path | None = None
     if tsconfig.is_file():
         ts_source = tsconfig

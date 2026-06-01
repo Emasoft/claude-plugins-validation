@@ -193,12 +193,13 @@ Comprehensive remediation guide for all issues detected by `validate_security.py
 **How to fix**: Same as `../` fix above. Avoid relative traversal in any direction.
 
 ### [CRITICAL] Absolute Unix system path detected: {line}
-**Source**: `validate_security.py` — `scan_for_path_traversal()`
-**What it means**: A hardcoded absolute path to a system directory (`/usr/`, `/etc/`, `/var/`, `/tmp/`, `/opt/`, `/bin/`, `/sbin/`, `/lib/`, `/root/`) was detected.
+**Source**: `validate_security.py` — `scan_for_path_traversal()` (rule `RC-112`)
+**What it means**: A hardcoded absolute path to a system directory (`/usr/`, `/etc/`, `/opt/`, `/bin/`, `/sbin/`, `/lib/`, `/root/`) was detected. **`/var/` and `/tmp/` are deliberately NOT flagged** — the POSIX temp dir (`mktemp` default) and the macOS user-temp tree live under them and are routinely used by legitimate plugin scripts; writes into system-log dirs under `/var/` are caught by the more targeted RC-87 / RC-90 rules instead. Paths prefixed by `${CLAUDE_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_DATA}`, or `${CLAUDE_PROJECT_DIR}` are also exempt.
 **How to fix**:
 1. Use environment variables or configuration to locate system tools: `$(which tool)` is acceptable in shell scripts.
 2. Use `${CLAUDE_PLUGIN_ROOT}` for plugin-relative paths.
 3. For system binaries, use `command -v tool` or `which tool` instead of hardcoded paths.
+4. For genuine system config (proxy CA bundle, OS-managed settings), keep the path but add a comment documenting why it is required.
 
 ### [CRITICAL] Windows absolute path detected: {line}
 **Source**: `validate_security.py` — `scan_for_path_traversal()`
@@ -382,18 +383,18 @@ Findings use the **same severity** as secrets found elsewhere in the plugin — 
 
 The `is_ai_facing_markdown()` helper classifies a markdown file based on its path:
 
-- **AI-facing** (scanned): anything under `skills/`, `agents/`, `commands/`, `rules/`, `references/`, or any file named `SKILL.md`
-- **Not AI-facing** (skipped): README.md, CHANGELOG.md, LICENSE, CONTRIBUTING.md, docs/, any markdown outside the directories above
+- **AI-facing** (scanned): anything under `skills/`, `agents/`, `commands/`, `rules/`, `references/`, `output-styles/`, or any file named `SKILL.md`
+- **Not AI-facing** (skipped): README.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, LICENSE.md, anything under `docs/`, `docs_dev/`, `examples/`, `samples/`, and any other markdown outside the directories above
 
 If you see a CRITICAL or MAJOR secret/injection finding on a skill or agent markdown file, treat it as a **real** finding — the content is shipped into prompts that Claude will execute. If you see one on a README, it is still a real finding even though it is filtered from many checks — remove the hardcoded secret / path regardless of file type.
 
 ### cc-audit Integration (100+ External Rules)
 
-`check_cc_audit()` optionally runs the external `cc-audit` scanner via `npx` when it is available. It adds 100+ additional rules beyond CPV's own checks. Failure modes:
+`check_cc_audit()` optionally runs the external `cc-audit` scanner. It prefers a persistent `cc-audit` binary on `$PATH` (installed via `cpv-doctor --install-scanners` or `npm install -g @cc-audit/cc-audit`) and falls back to `npx --yes @cc-audit/cc-audit` when no persistent binary is present. It adds 100+ additional rules beyond CPV's own checks. Failure modes:
 
-- **WARNING**: `cc-audit: npx not found — 100+ additional rules skipped` — install Node.js to enable the scan.
-- **WARNING**: `cc-audit timed out after 120s` — the scan is slow on very large plugins; consider splitting the plugin or waiving the check.
-- **WARNING**: `cc-audit: npx command failed — external audit skipped` — check `npx @anthropic-ai/cc-audit` manually to see what failed.
-- **INFO**: `cc-audit scan error: ...` — informational, the scan did not complete cleanly but CPV's own checks still ran.
+- **WARNING**: `cc-audit: not found — 100+ additional security rules skipped. Run cpv-doctor --install-scanners (preferred) or npm install -g @cc-audit/cc-audit.` — neither the persistent binary nor `npx` was on `$PATH`; install the scanner to enable it.
+- **WARNING**: `cc-audit timed out after 120s — scan aborted` — the scan is slow on very large plugins; consider splitting the plugin or waiving the check.
+- **WARNING**: `cc-audit: npx command failed — external audit skipped` — the launcher binary disappeared between probe and exec; run `cc-audit check .` (or `npx --yes @cc-audit/cc-audit check .`) manually to see what failed.
+- **INFO**: `cc-audit scan error: ...` — informational (emitted on exit code 2 with no JSON), the scan did not complete cleanly but CPV's own checks still ran.
 
-These are all non-blocking — cc-audit is an optional layer on top of CPV's built-in security checks. If you want its additional coverage, ensure `npx` and network access are available in the environment.
+These are all non-blocking — cc-audit is an optional layer on top of CPV's built-in security checks. If you want its additional coverage, install the scanner (`cpv-doctor --install-scanners`) and ensure network access is available in the environment.

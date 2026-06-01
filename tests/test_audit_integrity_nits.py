@@ -168,9 +168,7 @@ def test_shim_docstring_drops_false_removed_claim(modname: str) -> None:
     """
     mod = _fresh_import(modname)
     doc = inspect.getdoc(mod) or ""
-    assert "Removed in v2.53.0" not in doc, (
-        f"{modname} docstring still makes the false past-tense removal claim"
-    )
+    assert "Removed in v2.53.0" not in doc, f"{modname} docstring still makes the false past-tense removal claim"
     # The shim is honest that it is still a live compat shim.
     assert "shim" in doc.lower(), f"{modname} docstring should describe itself as a compat shim"
 

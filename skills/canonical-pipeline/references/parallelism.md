@@ -216,24 +216,24 @@ Detection + pipeline:
 file_bytes
    │
    ▼
-is_binary?  (null byte in first 8 KB, OR printable ratio < 70 %)
+is_binary?  (UTF-8/UTF-16 BOM → text; else null byte in first 8 KB → binary)
    ├── no  ──→ text-path (unchanged from v2.103.0)
    │
-   └── yes ──→ extract_ascii(min_run=4) + extract_utf16(min_run=4)
+   └── yes ──→ extract_ascii(min_run=6) + extract_utf16(min_run=6)
                         │
                         ▼
                   scan_content over each extracted string
                         │
                         ▼
-                  decode_chain (depth ≤ 2; base64 → utf-8 → re-scan;
-                                bounded at 5 MB per intermediate buffer
+                  decode_chain (depth ≤ 3; base64 / hex / gzip / zlib → re-scan;
+                                bounded at 100 MB per decode output
                                 to defuse decode-bombs)
                         │
                         ▼
                   scan_content over each decoded string
                         │
                         ▼
-                  findings tagged binary_origin=True
+                  findings prefixed "[extracted from binary] "
 ```
 
 Coverage gain vs the v2.103.0 text-only path: every embedded payload
@@ -252,11 +252,12 @@ Env-var knob:
 
 Full reference (table of contents):
 
-- Detection heuristic (null byte + printable ratio over 8 KB sample)
-- String extractors (`extract_ascii`, `extract_utf16` for both
-  endiannesses)
-- Decode chain (base64 hot path, bounded by `max_depth=2` and
-  `max_intermediate_bytes=5_000_000`)
+- Detection heuristic (UTF-8/UTF-16 BOM → text; else null byte in the
+  first 8 KB → binary; no printable-ratio check)
+- String extractors (`extract_ascii_strings`, `extract_utf16_strings`,
+  `min_len=6`)
+- Decode chain (base64 / hex / gzip / zlib, bounded by `max_depth=3` and
+  a 100 MB per-decode-output cap)
 - Per-format payload locations (PNG `tEXt` / `iTXt` / `eXIf`, ZIP
   comments, etc.) — non-exhaustive list of where malicious authors
   hide payloads
@@ -266,7 +267,7 @@ Full reference (table of contents):
 
 ### RE2 hybrid matcher (v2.104.0+)
 
-The v2.103.0 hot path applies a list of ~490 Python regex patterns
+The v2.103.0 hot path applies the full catalog of Python regex patterns
 sequentially to every file's text. That is O(N_patterns × N_chars)
 per file. v2.104.0 replaces the sequential sweep with an RE2.Set
 automaton: every RE2-compatible pattern is compiled into a single
@@ -286,8 +287,9 @@ have:
    guarantee removes that risk class entirely.
 2. **Single-pass automaton.** RE2.Set lets us compile N patterns into
    one DFA that returns the union of all matches in one linear
-   pass. Python `re` requires N separate scans. On a 490-pattern
-   catalog the asymptotic difference is substantial.
+   pass. Python `re` requires N separate scans. On a catalog of this
+   size (486 patterns as of v2.104.0) the asymptotic difference is
+   substantial.
 
 The implementation language (C++ underneath the `google-re2` Python
 wheel) is incidental. If a pure-Python DFA matcher with the same
@@ -296,8 +298,8 @@ guarantees existed, we'd use it instead.
 Fallback chain (never skip a pattern):
 
 ```text
-HybridMatcher.search(text):
-    if google-re2 is importable AND re2_compatibility.json is loadable:
+HybridMatcher.scan(text):
+    if google-re2 is importable AND CPV_RE2_DISABLE != 1:
         set_matches = re2_set.match(text)        # RE2-compatible subset
         py_matches  = [p.search(text) for p in py_only_patterns]  # incompatible subset
         return union(set_matches, py_matches)
@@ -305,12 +307,23 @@ HybridMatcher.search(text):
         return [p.search(text) for p in all_patterns]   # pure-Python fallback
 ```
 
-The compatibility partition is decided once per release by the
-`scripts/_audit_re2_compatibility.py` tool and committed to
-`scripts/rules/re2_compatibility.json`. The publish gate (`publish.py`
-Gate 9c) verifies the audit's `catalog_sha256` matches the live
-catalog before allowing a release — prevents stale audit entries
-from making wrong "is RE2-compatible" decisions on new patterns.
+The compatibility partition is decided at runtime, per pattern, inside
+`scripts/cpv_re2_matcher.py::HybridMatcher`: each catalog pattern is fed
+to `re2.Set.Add`, and any pattern RE2 refuses (lookaround, backrefs,
+syntax it deems incompatible) is moved to the Python `re` fallback list
+for that matcher instance. The matcher rebuilds the partition every time
+it is constructed from the live catalog, so a new pattern is routed
+correctly the first time it ships — no runtime lookup of a precomputed
+table is involved.
+
+A committed audit snapshot, `scripts/rules/re2_compatibility.json`,
+records the expected classification for every pattern alongside a
+`_source_sha256` of `skillaudit_patterns.json`. It is documentation /
+test-fixture only — the matcher does not read it. The drift guard is the
+pytest `tests/test_rules_re2_compat.py`, which fails if `_source_sha256`
+no longer matches the live catalog (forcing the snapshot to be
+regenerated) and re-asserts that every "compatible" pattern still
+compiles under RE2 and every "incompatible" one still does not.
 
 A pattern is NEVER skipped silently. Every pattern either runs
 through RE2.Set (compatible subset) OR through Python `re`
@@ -331,13 +344,15 @@ Env-var knob:
 
 | Variable | Default | Effect |
 |---|---|---|
-| `CPV_RE2` | `1` (on if `google-re2` is installed; degrades gracefully if not) | Set `0` to force pure-Python path even when `google-re2` is present (debug / parity testing) |
+| `CPV_RE2_DISABLE` | `0` (RE2 on when `google-re2` is installed; degrades gracefully if not) | Set `1` to force the pure-Python path even when `google-re2` is present (debug / parity testing) |
 
 Full reference: see `binary-scanning.md` (sibling doc) and
 TRDD-40f46a83 (the v2.104.0 design spec) for the
-`HybridMatcher` API, the `re2_compatibility.json` schema, the
-publish-time catalog-drift guard, and the parity-gate test that
-synthesises a known-matching input for every pattern in the catalog.
+`HybridMatcher` API and the `re2_compatibility.json` schema. The
+`tests/test_rules_re2_compat.py` suite is the catalog-drift guard (it
+checks `_source_sha256` against the live catalog) and the parity check
+that compiles every catalog pattern under RE2 to confirm its recorded
+compatible/incompatible classification still holds.
 
 ## See also
 

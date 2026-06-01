@@ -27,7 +27,7 @@ namespaced (e.g. `my-plugin:my-skill <ARGS>`). Load only what the task needs.
 ## Phase 0 — MANDATORY plugin-shape detection (BEFORE any phase below)
 
 Run [shape-detection](../skills/plugin-validation-skill/references/shape-detection.md)
-> Why this rule exists · Detection table — root-folder signals to verdict · Hard refusal protocol · Standard plugin layout · Path-variable rules — ${CLAUDE_PLUGIN_ROOT} vs ${CLAUDE_PLUGIN_DATA} · Custom-folder declarations in plugin.json · Common mis-classification patterns · Verifier: ten checks before marking as plugin
+> Why this rule exists · Detection table — root-folder signals to verdict · Hard refusal protocol · Standard plugin layout · Path-variable rules — ${CLAUDE_PLUGIN_ROOT} vs ${CLAUDE_PLUGIN_DATA} · Custom non-standard root entries · Common mis-classification patterns · Verifier: ten checks before marking as plugin
 on the target first. If the directory is not actually a plugin (missing
 `.claude-plugin/plugin.json` AND has SKILL.md / only agents/ / only
 commands/), you MUST refuse to "diagnose as plugin": surface the detected
@@ -41,15 +41,35 @@ structural problem.
 
 ## Completion gate — MANDATORY, NON-NEGOTIABLE
 
-When the user picks any "fix" option (`F`/`C`/`J`/`R`/`G` — anything but
-`S`/`D`/`0`), you orchestrate the dispatch but DO NOT close the diagnosis
-until a final `validate_plugin.py --strict` on the post-fix tree shows zero
-CRITICAL/MAJOR/MINOR/NIT.
+When the user picks a structural-fix option (`F`/`C`/`J`), you orchestrate the
+plugin-fixer dispatch but DO NOT close the diagnosis until a final
+`validate_plugin.py --strict` on the post-fix tree shows zero findings **at or
+above the chosen severity threshold**. The threshold is the dispatch's
+`min_severity`, NOT an absolute zero — fixing only what the user asked for and
+reporting the rest is the documented design, so the gate must match it:
+- **F** (`min_severity=WARNING`) → zero CRITICAL/MAJOR/MINOR/NIT/WARNING (full clean).
+- **C** (`min_severity=CRITICAL`) → zero CRITICAL (MAJOR/MINOR/NIT/WARNING may remain below threshold).
+- **J** (`min_severity=MAJOR`) → zero CRITICAL + MAJOR (MINOR/NIT/WARNING may remain).
 
-If the fixer returns `[BLOCKED]` (findings it could not auto-fix), surface it
-verbatim, list the remaining findings, state "DO NOT publish this plugin
-until these are resolved", and re-print the follow-up menu. **NEVER return
-DONE while findings remain** — the agents must never leave behind a flawed plugin.
+Findings the fixer intentionally SKIPPED because they sit below the chosen
+threshold are NOT a gate failure — list them so a follow-up run at a lower
+threshold can pick them up, but do not block on them. (Requiring an absolute
+zero here would contradict `C`/`J`, whose whole purpose is to skip lower
+severities — see the Phase 9 dispatch and the worked `J` example below.)
+
+For `R` (register marketplace) and `G` (github branch rules) the gate is NOT a
+`validate_plugin.py` pass — those dispatches (plugin-creator marketplace-mode /
+branch-rules + Claude-action setup) do not mutate the plugin's structural
+findings. Their gate is the success of the dispatched action itself (marketplace
+registered / ruleset applied / secret set + verified). Do NOT close the
+diagnosis until that action reports success.
+
+If the dispatch returns `[BLOCKED]` (in-threshold findings the fixer could not
+auto-fix, or a failed marketplace/branch-rules step), surface it verbatim, list
+the remaining items, state "DO NOT publish this plugin until these are
+resolved", and re-print the follow-up menu. **NEVER return DONE while
+in-threshold findings remain** — the agents must never leave behind a flawed
+plugin.
 
 ## Input
 

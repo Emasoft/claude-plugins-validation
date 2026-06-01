@@ -101,9 +101,7 @@ def test_external_skip_list_malformed_json_no_crash(tmp_path):
 def test_external_skip_list_malformed_json_returns_failure_exit(tmp_path):
     """_run_subcommand surfaces the malformed-manifest failure as exit 1."""
     _write_manifest(tmp_path, "}}} totally broken")
-    rc = cpv_codemod._run_subcommand(
-        "external-skip-list", tmp_path, apply=False, min_toc_lines=50
-    )
+    rc = cpv_codemod._run_subcommand("external-skip-list", tmp_path, apply=False, min_toc_lines=50)
     assert rc == 1
 
 

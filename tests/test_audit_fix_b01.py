@@ -74,9 +74,7 @@ import validate_security as vs  # noqa: E402
 def _make_plugin(files: dict[str, str]) -> Path:
     """Create a throwaway plugin tree from {relative_path: content}."""
     root = Path(tempfile.mkdtemp(prefix="cpv_b01_"))
-    (root / "plugin.json").write_text(
-        '{"name":"t","version":"0.0.1","description":"x"}', encoding="utf-8"
-    )
+    (root / "plugin.json").write_text('{"name":"t","version":"0.0.1","description":"x"}', encoding="utf-8")
     for rel, content in files.items():
         fp = root / rel
         fp.parent.mkdir(parents=True, exist_ok=True)
@@ -196,9 +194,7 @@ class TestRc103DispositionPlacement:
         """
         root = _make_plugin({})
         rep = vs.validate_security(root)
-        idx = next(
-            i for i, r in enumerate(rep.results) if "RC-103 disposition" in r.message
-        )
+        idx = next(i for i, r in enumerate(rep.results) if "RC-103 disposition" in r.message)
         # No result added AFTER the disposition line.
         assert idx == len(rep.results) - 1, "disposition must be the final result"
 
@@ -224,9 +220,7 @@ class TestSandboxEscapeYamlBullet:
     def test_markdown_bullet_in_shell_still_suppressed(self):
         """A markdown-style doc bullet in a .sh file stays suppressed."""
         rep = vs.ValidationReport()
-        n = vs.scan_for_sandbox_escape(
-            "- this documents git push --no-verify usage\n", "scripts/notes.sh", rep
-        )
+        n = vs.scan_for_sandbox_escape("- this documents git push --no-verify usage\n", "scripts/notes.sh", rep)
         assert n == 0
 
 
@@ -245,13 +239,7 @@ class TestNegationGuardDuplicateLine:
         the old content.find(line) bug occ #2 resolved to occ #1's offset and
         the negation guard wrongly suppressed it.
         """
-        content = (
-            "# never run the following:\n"
-            f"{self.GTFO}\n"
-            "echo padding a\n"
-            "echo padding b\n"
-            f"{self.GTFO}\n"
-        )
+        content = f"# never run the following:\n{self.GTFO}\necho padding a\necho padding b\n{self.GTFO}\n"
         root = _make_plugin({"hooks/evil.sh": content})
         rep = vs.ValidationReport()
         vs.check_phase1_supply_chain_rules(root, rep)
@@ -285,9 +273,7 @@ class TestCredentialHarvestEnvSubstring:
     def test_run_env_token_does_not_suppress(self):
         """A real secret next to `run-env=prod` is no longer suppressed."""
         rep = vs.ValidationReport()
-        n = vs.scan_for_credential_harvest(
-            self.SECRET + " ; run-env=prod\n", "scripts/deploy.sh", rep
-        )
+        n = vs.scan_for_credential_harvest(self.SECRET + " ; run-env=prod\n", "scripts/deploy.sh", rep)
         assert n > 0
 
     def test_real_env_kwarg_stays_clean(self):
@@ -334,12 +320,7 @@ class TestRc76SecurityAuditRoleToken:
 class TestObfuscatedExecFenceGuard:
     """An obfuscated-exec EXAMPLE inside a markdown fence is documentation."""
 
-    FENCED_DOC = (
-        "# Notes\n\n```javascript\n"
-        'const payload = atob("ZG9jdW1lbnQ=");\n'
-        "eval(payload);\n"
-        "```\n"
-    )
+    FENCED_DOC = '# Notes\n\n```javascript\nconst payload = atob("ZG9jdW1lbnQ=");\neval(payload);\n```\n'
     REAL_JS = 'const payload = atob("ZG9jdW1lbnQ=");\neval(payload);\n'
 
     def test_fenced_doc_example_suppressed(self):
@@ -421,7 +402,7 @@ class TestRc87Phase4Intact:
         p4 = inspect.getsource(vs.check_phase4_all)
         assert "_rc87_is_semver_context(" not in p3
         assert "_rc87_is_history_doc(" not in p3
-        assert "if rule_id == \"RC-87\"" not in p3
+        assert 'if rule_id == "RC-87"' not in p3
         assert "_rc87_is_semver_context(" in p4
         assert "_rc87_is_history_doc(" in p4
 
@@ -430,14 +411,21 @@ class TestRc87Phase4Intact:
 # #135 — cc-audit step log gate must honour the persistent binary
 # ---------------------------------------------------------------------------
 class TestCcAuditLauncherGate:
-    """The cc-audit 'can run' gate matches check_cc_audit (binary OR npx)."""
+    """check_cc_audit's launcher gate honours the persistent binary OR npx.
 
-    def test_persistent_binary_counts_as_runnable(self, monkeypatch):
-        """With `cc-audit` present but no `npx`, the gate must say runnable.
+    _task_cc_audit's step-log gate is a nested closure that cannot be imported
+    in isolation, but it shares check_cc_audit's launcher resolution verbatim
+    (`shutil.which("cc-audit")` preferred, `shutil.which("npx")` fallback).
+    These tests exercise that REAL public resolution — patching the live
+    ``shutil.which`` that validate_security calls — instead of re-deriving the
+    gate expression in the test (a self-comparison proves nothing).
+    """
 
-        This mirrors the corrected gate inside _task_cc_audit
-        (`which("cc-audit") or which("npx")`) and confirms it agrees with
-        check_cc_audit's own launcher resolution.
+    def test_persistent_binary_selected_when_only_cc_audit_present(self, monkeypatch, tmp_path):
+        """With `cc-audit` present but no `npx`, check_cc_audit launches via the
+        persistent binary — the exact #135 scenario where the old `npx`-only
+        gate wrongly logged SKIPPED. We intercept subprocess.run to capture the
+        launcher argv so no real binary is spawned.
         """
         available = {"cc-audit"}  # persistent binary present, npx absent
         monkeypatch.setattr(
@@ -445,12 +433,40 @@ class TestCcAuditLauncherGate:
             "which",
             lambda name, *a, **k: ("/usr/local/bin/" + name) if name in available else None,
         )
-        gate_runnable = bool(shutil.which("cc-audit") or shutil.which("npx"))
-        cc_audit_resolves = bool(shutil.which("cc-audit") or shutil.which("npx"))
-        assert gate_runnable is True
-        assert gate_runnable == cc_audit_resolves
+        # A pre-existing config skips the `init` call, so the FIRST captured
+        # run is the `check` invocation whose launcher we assert.
+        (tmp_path / ".cc-audit.yaml").write_text("rules: []\n", encoding="utf-8")
+        captured: list[list[str]] = []
 
-    def test_neither_launcher_is_not_runnable(self, monkeypatch):
-        """With neither launcher present, the gate is not runnable."""
+        class _FakeCompleted:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, *a, **kw):  # noqa: ANN001, ANN002, ANN003
+            captured.append(list(cmd))
+            return _FakeCompleted()
+
+        monkeypatch.setattr(vs.subprocess, "run", fake_run)
+        rep = vs.ValidationReport()
+        vs.check_cc_audit(tmp_path, rep)
+
+        assert captured, "check_cc_audit never invoked the scanner"
+        launcher = captured[0]
+        # The persistent binary is the launcher — npx must NOT appear.
+        assert launcher[0] == "cc-audit"
+        assert "npx" not in launcher
+        # And it must not have emitted the not-found WARNING (it ran).
+        assert not [r for r in rep.results if r.level == "WARNING" and "cc-audit: not found" in r.message]
+
+    def test_neither_launcher_skips_with_warning(self, monkeypatch, tmp_path):
+        """With neither launcher present, check_cc_audit returns 0 and emits the
+        documented not-found WARNING (the real SKIPPED branch).
+        """
         monkeypatch.setattr(shutil, "which", lambda name, *a, **k: None)
-        assert bool(shutil.which("cc-audit") or shutil.which("npx")) is False
+        rep = vs.ValidationReport()
+        rc = vs.check_cc_audit(tmp_path, rep)
+        assert rc == 0
+        assert [r for r in rep.results if r.level == "WARNING" and "cc-audit: not found" in r.message], [
+            r.message for r in rep.results
+        ]

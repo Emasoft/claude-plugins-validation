@@ -59,11 +59,16 @@ CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
 
 ## Error Handling
 
-- **`uv` missing on PATH** — exit code 4. Install via
-  `curl -LsSf https://astral.sh/uv/install.sh | sh`.
-- **Target has no `.claude/` and no `CLAUDE.md`** — INFO + "no cached
-  content to audit".
-- **Report-path unwritable** — exit 4 + prints the bad path.
+- **`uv` missing on PATH** — the `uv run` launcher fails at the shell
+  level (exit 127, "command not found"); `remote_validation.py` never
+  runs. Install via `curl -LsSf https://astral.sh/uv/install.sh | sh`.
+- **Target does not exist** — `validate_cache.py` prints
+  `Error: <target> does not exist` and exits 1 (`EXIT_CRITICAL`).
+- **Target has no `.claude/` and no `CLAUDE.md`** — the scan returns a
+  clean report (no CA findings, no cached content to audit), exit 0.
+- **Report-path unwritable** — the report writer auto-creates the parent
+  dir, then `write_text` raises an uncaught `OSError`/`PermissionError`;
+  the process exits 1 with a traceback (e.g. a read-only filesystem).
 - **`MAIN_ROOT` empty (no git)** — the prologue's fallback handles this:
   `[ -z "${MAIN_ROOT}" ] && MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"`.
 

@@ -713,7 +713,7 @@ uv run python scripts/validate_plugin.py . --strict --json 2>/dev/null | \
   [print(b.get('message','')[:200]) for b in bad]; sys.exit(0 if not bad else 1)"
 ```
 **Pass when**: exit 0.
-**On fail**: remove or rename the unknown key. See `references/plugin-error-index.md`.
+**On fail**: remove or rename the unknown key. See `skills/fix-validation/references/plugin-error-index.md`.
 
 ---
 
@@ -800,7 +800,7 @@ uv run python scripts/validate_plugin.py . --strict --json 2>/dev/null | \
   print(f'MAJOR={m}'); sys.exit(0 if m==0 else 1)"
 ```
 **Pass when**: prints `MAJOR=0`.
-**On fail**: read the report, address each MAJOR. See `references/plugin-error-index.md`.
+**On fail**: read the report, address each MAJOR. See `skills/fix-validation/references/plugin-error-index.md`.
 
 ### CHECK-39 [MAJOR] `validate_plugin.py --strict --json` returns zero MINOR findings
 **Why**: MINORs are advisory but accumulate post-migration; ignoring them creates technical debt that the next migration agent re-flags.
@@ -1259,17 +1259,23 @@ test ! -f hooks/hooks.json || \
 **Pass when**: exit 0.
 **On fail**: open the file, fix the JSON syntax error.
 
-### CHECK-71 [MAJOR] Every event in `hooks.json.hooks` is in CC's valid 28-event set
+### CHECK-71 [MAJOR] Every event in `hooks.json.hooks` is in CC's valid 30-event set
 **Why**: A typo'd event ('PreToolUSE') is silently ignored by CC.
 **Verify**:
 ```bash
 test ! -f hooks/hooks.json || uv run python - <<'PY'
 import json, pathlib, sys
+# Keep this set in sync with the single source of truth:
+# scripts/cpv_validation_common.py::VALID_HOOK_EVENTS. It is re-hardcoded here
+# (not imported) because the snippet runs inside the *target* plugin being
+# migrated, where cpv_validation_common is not importable. A stale subset would
+# false-FAIL legitimate events (e.g. 'Setup' is legacy-but-accepted, and
+# 'MessageDisplay' is a real v2.1.152 event) — both must appear below.
 VALID = {'PreToolUse','PostToolUse','PostToolUseFailure','PostToolBatch','PermissionRequest','PermissionDenied',
          'UserPromptSubmit','UserPromptExpansion','Notification','Stop','StopFailure','SubagentStop','SubagentStart',
          'SessionStart','SessionEnd','PreCompact','PostCompact','TeammateIdle','TaskCompleted','TaskCreated',
          'ConfigChange','WorktreeCreate','WorktreeRemove','InstructionsLoaded','Elicitation','ElicitationResult',
-         'CwdChanged','FileChanged'}
+         'CwdChanged','FileChanged','Setup','MessageDisplay'}
 hj = pathlib.Path('hooks/hooks.json')
 if not hj.exists(): sys.exit(0)
 cfg = json.loads(hj.read_text())
@@ -1279,7 +1285,7 @@ sys.exit(0 if not fails else 1)
 PY
 ```
 **Pass when**: exit 0.
-**On fail**: rename the event per CPV memory's 28-event list.
+**On fail**: rename the event per CPV's `VALID_HOOK_EVENTS` 30-event list.
 
 ### CHECK-72 [BLOCKER] Every `command:` referenced by `hooks.json` resolves to an existing file
 **Why**: Issue-#21-class breakage. Migration that ports a hook to `.py` but leaves the JSON pointing at the `.sh` shadow.

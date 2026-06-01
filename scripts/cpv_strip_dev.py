@@ -601,8 +601,11 @@ def summarise_plan(plan: StripPlan) -> str:
     for i, t in enumerate(plan.targets, start=1):
         lines.append(f"  [{i}] gh repo create {t.submodule} --private  (if it doesn't already exist + is empty)")
         lines.append(f"      git clone --no-local <plugin> /tmp/cpv-strip-{uuid.uuid4().hex[:8]}/extract")
-        lines.append(f"      git filter-repo --force --subdirectory-filter {t.src} --refs main")
-        lines.append(f"      git push -u origin main  # to {t.url}")
+        # Preview MUST mirror _filter_and_push exactly: the real command
+        # rstrips the trailing slash and filters ALL refs (no --refs main),
+        # then pushes the cloned repo's detected default branch with --force.
+        lines.append(f"      git filter-repo --force --subdirectory-filter {t.src.rstrip('/')}")
+        lines.append(f"      git push -u origin <default-branch> --force  # to {t.url}")
         lines.append(f"      git submodule add {t.url} {t.submodule_path}")
     lines.append("  [N+1] git commit -m 'chore: extract dev parts to submodules (cpv strip-dev-parts)'")
     return "\n".join(lines)

@@ -16,7 +16,7 @@ Adds a new slash command to an existing plugin. The scaffold lands at `<plugin-p
 - `uv` on PATH
 - Target plugin path with `.claude-plugin/plugin.json`
 - Kebab-case command name (e.g. `my-command`)
-- Optional argument hint and allowed-tools list
+- Optional `--allowed-tools` value (the scaffolder accepts no argument-hint input — add `argument-hint` to the frontmatter by hand afterwards if needed)
 
 ## Instructions
 
@@ -39,7 +39,7 @@ Copy this checklist and track your progress:
 ## Output
 
 - A new file at `<plugin-path>/commands/<command-name>.md`.
-- Frontmatter follows canonical spec: `name`, `description`, `argument-hint` (optional), `allowed-tools` (set to a safe minimum), `user-invocable: true`.
+- Frontmatter emits exactly: `name`, `description`, `allowed-tools`, `user-invocable: true`. `allowed-tools` defaults to bare `Bash` when `--allowed-tools` is omitted — always pass a scoped value (e.g. `Bash(uv:*)`). `add_component.py` does NOT emit `argument-hint`; add it by hand afterwards if the command takes arguments.
 - Existing files are NEVER overwritten unless `--force` is passed.
 
 ## Error Handling

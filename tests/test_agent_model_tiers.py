@@ -89,8 +89,7 @@ def test_no_agent_pins_a_model() -> None:
             offenders.append(f"{agent_md.name}: model={fm['model']!r}")
     assert not offenders, (
         "These agents still pin a concrete `model:` (forbidden since v2.102.0 — it "
-        "fragments the prompt cache per CA-04; omit the field or use `model: inherit`):\n  "
-        + "\n  ".join(offenders)
+        "fragments the prompt cache per CA-04; omit the field or use `model: inherit`):\n  " + "\n  ".join(offenders)
     )
 
 
@@ -209,10 +208,7 @@ def test_cpv_menu_bridge_exists_and_no_legacy_format_menu() -> None:
     `format_menu.py` script does not.
     """
     bridge = PLUGIN_ROOT / "scripts" / "cpv_menu.py"
-    assert bridge.is_file(), (
-        f"{bridge} is the sole CPV-side menu bridge after TRDD-4de479a0 "
-        f"Phase 4 — it must exist."
-    )
+    assert bridge.is_file(), f"{bridge} is the sole CPV-side menu bridge after TRDD-4de479a0 Phase 4 — it must exist."
     legacy_script = PLUGIN_ROOT / "scripts" / "format_menu.py"
     assert not legacy_script.exists(), (
         f"{legacy_script} was safe-deleted in TRDD-4de479a0 Phase 4 and "

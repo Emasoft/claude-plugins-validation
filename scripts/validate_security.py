@@ -4182,9 +4182,7 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
     # Python docstring tracking — multi-line strings are line-bounded
     # contexts where path text is documentation, not file ops. 0-based
     # indices because the per-line loop below enumerates `range(len(lines))`.
-    py_docstring_lines: set[int] = (
-        _python_docstring_line_set(lines, one_based=False) if is_python_src else set()
-    )
+    py_docstring_lines: set[int] = _python_docstring_line_set(lines, one_based=False) if is_python_src else set()
 
     # v2.44 — for AI-facing markdown (skills, agents, commands), pre-compute
     # the spans of markdown links `[label](path)` and inline-code spans
@@ -5957,9 +5955,7 @@ def _bootstrap_security_worker_state() -> Path | None:
     return plugin_root
 
 
-def _scan_one_file_collect(
-    file_path: Path, plugin_path: Path
-) -> tuple[list[Any], dict[str, int]]:
+def _scan_one_file_collect(file_path: Path, plugin_path: Path) -> tuple[list[Any], dict[str, int]]:
     """Per-file scan body — captures findings into a fresh local report.
 
     Runs the exact same skip checks + 9 scanners as the legacy serial loop
@@ -6250,12 +6246,7 @@ def scan_all_files(
 
     # Issue #52/#56 — any supervision feature forces the parallel/killable path:
     # the serial loop runs in THIS process and a wedged file cannot be killed.
-    _supervised = (
-        hard_kill_after_s is not None
-        or on_event is not None
-        or state_path is not None
-        or notify is not None
-    )
+    _supervised = hard_kill_after_s is not None or on_event is not None or state_path is not None or notify is not None
 
     if len(files) < threshold and not _supervised:
         # Serial path — preserved verbatim from the pre-task-384 loop.
@@ -8017,9 +8008,7 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
         # quoted in docstrings explaining how a CLI flag behaves.
         # 1-based because the per-line loop below enumerates start=1.
         py_docstring_lines: set[int] = (
-            _python_docstring_line_set(content_lines, one_based=True)
-            if rel_path.lower().endswith(".py")
-            else set()
+            _python_docstring_line_set(content_lines, one_based=True) if rel_path.lower().endswith(".py") else set()
         )
         for line_no, line in enumerate(content_lines, start=1):
             if is_in_fenced_code_block(line_no - 1, fence_state):
@@ -8350,9 +8339,7 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                 continue
             for pattern in CLOUD_IMDS_PATTERNS:
                 m = pattern.search(line)
-                if m and not has_negation_guard_nearby(
-                    content, _line_abs_offset(content_lines, line_no) + m.start()
-                ):
+                if m and not has_negation_guard_nearby(content, _line_abs_offset(content_lines, line_no) + m.start()):
                     surrounding = _surrounding_lines(content_lines, line_no - 1, window=4)
                     # v2.42 — opt-in classifier path. The classifier
                     # re-uses `_rc65_is_pattern_source` semantics under
@@ -9210,7 +9197,9 @@ def validate_security(
                 ["check", "-t", "plugin", "--format", "json", "--ci"],
                 local,
             )
-            launcher_label = "cc-audit (persistent binary)" if cc_persistent else "npx @cc-audit/cc-audit (auto-fetched)"
+            launcher_label = (
+                "cc-audit (persistent binary)" if cc_persistent else "npx @cc-audit/cc-audit (auto-fetched)"
+            )
             steps.append(
                 {
                     "num": 22,

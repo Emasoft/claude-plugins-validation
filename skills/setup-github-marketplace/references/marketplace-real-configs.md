@@ -86,7 +86,7 @@ The marketplace.json lives at `.claude-plugin/marketplace.json` and defines the 
 - `owner.name` / `owner.email`: GitHub username and noreply email
 - `plugins[]`: Array of all plugins in this marketplace
 - Each plugin entry has its own `version`, `source.repo`, `repository` URL, `license`, `keywords`, and `category`
-- Valid categories: `"workflow"`, `"developer-tools"`, `"productivity"`, `"utilities"`
+- `category` is a free-text string — CPV does not enforce a taxonomy. Pick a consistent label (e.g. `"workflow"`, `"developer-tools"`, `"productivity"`, `"utilities"`, `"development"`, `"security"`) so listings stay browsable
 - `source.source` is always `"github"` for GitHub-hosted plugins
 - `source.repo` format: `"Owner/repo-name"`
 
@@ -295,6 +295,6 @@ All `<placeholder-for-...>` names used in the templates above, with descriptions
 | `<placeholder-for-plugin-description>` | One-line description of what the plugin does | `Automates code review with AI-powered analysis` |
 | `<placeholder-for-plugin-version>` | Plugin semver version | `1.2.3` |
 | `<placeholder-for-plugin-license>` | SPDX license identifier | `MIT` |
-| `<placeholder-for-plugin-category>` | Plugin category (`workflow`, `developer-tools`, `productivity`, `utilities`) | `developer-tools` |
+| `<placeholder-for-plugin-category>` | Plugin category (free-text, not enforced; e.g. `workflow`, `developer-tools`, `productivity`, `utilities`) | `developer-tools` |
 | `<placeholder-for-keyword-1>`, `<placeholder-for-keyword-2>`, etc. | Searchable tags for the plugin | `validation`, `linting` |
 | `<placeholder-for-plugin-name-2>`, `<placeholder-for-plugin-version-2>`, etc. | Same fields for additional plugin entries | (same format as above) |

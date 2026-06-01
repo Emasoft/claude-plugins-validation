@@ -123,8 +123,8 @@ is lost. Reference: <https://code.claude.com/docs/en/plugins-reference>.
 
 | Check | How |
 |---|---|
-| Bundled `node_modules/` shipped at plugin root | List `<plugin-root>/node_modules` — if it exists AND `.git` is absent (= packaged install, not dev checkout), emit MAJOR. Already-on-disk validator: `validate_plugin.py` line ~2918. The fix is a SessionStart hook that runs `npm install --prefix "$CLAUDE_PLUGIN_DATA"` once per session. |
-| Bundled `.venv/`, `venv/`, `vendor/`, `__pypackages__/` | Same rule as node_modules — language-agnostic. MAJOR. |
+| Bundled `node_modules/` shipped at plugin root | List `<plugin-root>/node_modules` — if it exists AND `.git` is absent (= packaged install, not dev checkout), emit WARNING. Already-on-disk validator: `validate_plugin.py` bundled-dep-dir scan (`bundled_dep_dirs = {"node_modules", ".venv", "venv", "vendor", "__pypackages__"}`, ~line 3714) which calls `report.warning(...)`. The fix is a SessionStart hook that runs `npm install --prefix "$CLAUDE_PLUGIN_DATA"` once per session. |
+| Bundled `.venv/`, `venv/`, `vendor/`, `__pypackages__/` | Same rule as node_modules — language-agnostic. WARNING (same `bundled_dep_dirs` scan). |
 | `package.json` / `package-lock.json` present without a SessionStart hook | Grep `hooks/hooks.json` for an `event: SessionStart` block whose `command` invokes `npm ci`, `npm install`, `pnpm install`, `bun install`, or `yarn install` AND targets `$CLAUDE_PLUGIN_DATA`. If absent, emit WARNING with the canonical hook recipe (see plugins-reference pointer below). |
 | `pyproject.toml` / `requirements.txt` present without a SessionStart hook | Same — look for `pip install --target $CLAUDE_PLUGIN_DATA/...` or `uv sync --project $CLAUDE_PLUGIN_DATA/...`. Emit WARNING. |
 | `Cargo.toml` / `go.mod` present without a SessionStart hook | Same — `cargo build --target-dir $CLAUDE_PLUGIN_DATA/...` or `go install GOPATH=$CLAUDE_PLUGIN_DATA/go ...`. Emit WARNING. |
@@ -139,8 +139,8 @@ Quote that snippet into the report when a manifest declares deps but ships no
 installer hook — do not invent a different recipe.
 
 Severity rules (Phase 6.7):
-- Bundled `node_modules/` (or any other dep dir) inside packaged install → MAJOR.
-- Code references `${CLAUDE_PLUGIN_ROOT}/<dep-dir>/` → MAJOR.
+- Bundled `node_modules/` (or any other dep dir) physically inside a packaged install → WARNING (matches `validate_plugin.py`'s `bundled_dep_dirs` scan, which emits `report.warning`; surface it at the same severity so a re-validation gate can reproduce it).
+- Code references `${CLAUDE_PLUGIN_ROOT}/<dep-dir>/` → MAJOR (this is the distinct `RC-DATA-WRONG-ROOT-001` check, ~line 3814, which emits `report.major`).
 - Code writes mutable state to `${CLAUDE_PLUGIN_ROOT}/...` → CRITICAL (already a CPV CRITICAL via `validate_hook`).
 - Manifest declares deps but no SessionStart installer hook → WARNING (advisory; some plugins legitimately bundle small `.js` shims that aren't `node_modules`).
 

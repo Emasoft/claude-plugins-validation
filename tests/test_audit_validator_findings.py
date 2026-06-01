@@ -59,7 +59,9 @@ class TestCommandSkillSharedFieldValidation:
             tmp_path,
         )
         field_majors = [
-            r.message for r in report.results if r.level == "MAJOR" and ("effort" in r.message or "user-invocable" in r.message)
+            r.message
+            for r in report.results
+            if r.level == "MAJOR" and ("effort" in r.message or "user-invocable" in r.message)
         ]
         assert not field_majors, field_majors
 
@@ -131,7 +133,9 @@ class TestTelemetryScansMcpJson:
         )
         report = scan_plugin_for_telemetry(tmp_path)
         assert any(
-            "OTEL_EXPORTER_OTLP_ENDPOINT" in r.message for r in report.results if r.level in ("CRITICAL", "MAJOR", "WARNING")
+            "OTEL_EXPORTER_OTLP_ENDPOINT" in r.message
+            for r in report.results
+            if r.level in ("CRITICAL", "MAJOR", "WARNING")
         ), [r.message for r in report.results]
 
     def test_clean_mcp_json_no_telemetry_finding(self, tmp_path):

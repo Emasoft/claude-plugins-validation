@@ -143,7 +143,20 @@ def classify_rule(rule_id: str, ctx: Context) -> FindingVerdict:
 # escalation tier (DEFINITE_TP → severity bump) is gated behind a
 # caller-controlled flag because moving CRITICAL → CRITICAL+ would
 # require new output formatting; v1 keeps it as a no-op.
-_SEVERITY_DEMOTION_ORDER = ("critical", "major", "minor", "nit", "info", "passed")
+#
+# This MUST mirror `cpv_validation_common.SEVERITY_TIERS`
+# (critical > major > minor > nit > warning > info > passed) tier-for-
+# tier: `apply_verdict`'s output is re-fed into `effective_severity`
+# (which demotes over SEVERITY_TIERS) at every classifier emit site in
+# `validate_security.py`, so a divergence makes the two ladders
+# disagree. Omitting `warning` (the prior bug) made
+# `demote_severity("nit")` jump straight to "info" — the SAME two-tier
+# jump that violated the "one tier per step" contract and was already
+# fixed for the sibling `cpv_validation_common.demote_severity`. On the
+# live path that mis-reported a LIKELY_FP-demoted NIT finding (e.g.
+# RC-87 loopback IP, declared NIT) as INFO instead of WARNING, dropping
+# it out of the WARNING-tier accounting in non-defensive source files.
+_SEVERITY_DEMOTION_ORDER = ("critical", "major", "minor", "nit", "warning", "info", "passed")
 
 
 def demote_severity(severity: str, *, steps: int = 1) -> str:

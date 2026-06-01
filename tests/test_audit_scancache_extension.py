@@ -169,10 +169,7 @@ def test_file_ext_is_a_primary_key_column() -> None:
     schema = cpv_scan_cache._SCHEMA_SQL
     assert "file_ext" in schema
     # The PRIMARY KEY clause must name all four key columns.
-    assert (
-        "PRIMARY KEY (content_hash, catalog_hash, scanner_version, file_ext)"
-        in schema
-    )
+    assert "PRIMARY KEY (content_hash, catalog_hash, scanner_version, file_ext)" in schema
 
 
 # ---------------------------------------------------------------------------
@@ -230,9 +227,7 @@ def test_scan_same_bytes_different_extension_no_collision(tmp_path: Path) -> Non
     assert md_sev == ["critical"]
 
 
-def test_scan_same_extension_different_path_is_cache_hit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_scan_same_extension_different_path_is_cache_hit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Shares a bucket (end-to-end): same content + same ext, two dirs → HIT.
 
     With a shared plugin root, ``a/foo.py`` and ``b/foo.py`` relativise
@@ -279,9 +274,7 @@ def test_scan_same_extension_different_path_is_cache_hit(
     assert _data_exfil_severity(a_result) == _data_exfil_severity(b_result)
 
 
-def test_scan_cache_disabled_still_runs_each_classifier(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_scan_cache_disabled_still_runs_each_classifier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``CPV_SCAN_CACHE=0`` is unaffected: every scan runs its own classifier.
 
     With the cache off there is no shared state to collide, so each

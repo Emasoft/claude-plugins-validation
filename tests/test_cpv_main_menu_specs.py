@@ -25,9 +25,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import print_menu  # noqa: E402
 
-SKILL_MENUS_DIR = (
-    REPO_ROOT / "skills" / "cpv-main-menu-skill" / "skill-menus"
-)
+SKILL_MENUS_DIR = REPO_ROOT / "skills" / "cpv-main-menu-skill" / "skill-menus"
 
 
 def _menu_files() -> list[Path]:
@@ -59,9 +57,7 @@ def test_each_file_is_a_valid_cms_spec(path: Path) -> None:
     assert isinstance(spec, dict), f"{path.name}: top-level must be an object"
     assert spec.get("spec_version") == 1, f"{path.name}: spec_version must be 1"
     assert spec.get("mode") == "menu", f"{path.name}: mode must be 'menu'"
-    assert isinstance(spec.get("slug"), str) and spec["slug"], (
-        f"{path.name}: slug must be a non-empty string"
-    )
+    assert isinstance(spec.get("slug"), str) and spec["slug"], f"{path.name}: slug must be a non-empty string"
     rows = spec.get("rows")
     assert isinstance(rows, list) and rows, f"{path.name}: rows must be non-empty"
     for row in rows:
@@ -94,9 +90,7 @@ def test_filename_slug_matches_embedded_slug(path: Path) -> None:
     """The ``<slug>`` in ``NN-<slug>.json`` equals the spec's ``slug`` field."""
     _, filename_slug = _parse_filename(path)
     spec = json.loads(path.read_text(encoding="utf-8"))
-    assert spec["slug"] == filename_slug, (
-        f"{path.name}: filename slug {filename_slug!r} != spec slug {spec['slug']!r}"
-    )
+    assert spec["slug"] == filename_slug, f"{path.name}: filename slug {filename_slug!r} != spec slug {spec['slug']!r}"
 
 
 def test_numeric_prefixes_are_unique() -> None:
@@ -104,9 +98,7 @@ def test_numeric_prefixes_are_unique() -> None:
     seen: dict[int, str] = {}
     for path in _menu_files():
         index, _ = _parse_filename(path)
-        assert index not in seen, (
-            f"duplicate index {index}: {seen[index]} and {path.name}"
-        )
+        assert index not in seen, f"duplicate index {index}: {seen[index]} and {path.name}"
         seen[index] = path.name
 
 
@@ -140,6 +132,4 @@ def test_entry_keys_are_contiguous_digits_then_letters() -> None:
         spec = json.loads(path.read_text(encoding="utf-8"))
         digit_keys = [int(r["key"]) for r in spec["rows"] if r["key"].isdigit() and r["key"] != "0"]
         if digit_keys:
-            assert min(digit_keys) == 1, (
-                f"{path.name}: numbered rows must start at key '1', got {sorted(digit_keys)}"
-            )
+            assert min(digit_keys) == 1, f"{path.name}: numbered rows must start at key '1', got {sorted(digit_keys)}"

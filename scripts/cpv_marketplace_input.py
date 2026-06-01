@@ -438,7 +438,13 @@ def _safe_scandir(path: Path):  # type: ignore[no-untyped-def]
     """Wrap ``os.scandir`` so the caller gets a context manager on
     every Python version. ``os.scandir`` returns an iterator that's
     also a context manager from Python 3.6+; this wrapper just
-    centralises the import + error handling."""
+    centralises the import.
+
+    No error handling is added here on purpose: every call site has
+    already confirmed ``path.is_dir()`` immediately beforehand, so a
+    surviving ``OSError`` (permission / TOCTOU race) is a genuinely
+    exceptional condition that should fail fast rather than be
+    silently swallowed into a misclassification."""
     import os
 
     return os.scandir(path)
@@ -568,6 +574,15 @@ def _expand_skill_pack(
                 metadata=metadata,
             )
         )
+    # Zero skills emitted → no per-skill cleanup_callback will ever fire, so the
+    # parent's temp clone (when this pack came from a URL clone via
+    # _resolve_single_url) would leak permanently. This is reachable: a folder
+    # passes _looks_like_skill_pack but expands empty when its only SKILL.md
+    # child is a skip-listed name (dist/build/target) or is deleted in a TOCTOU
+    # race between classification and expansion. Fire parent_cleanup now, mirroring
+    # _expand_marketplace's "no consumers registered" guard.
+    if not resolved and parent_cleanup is not None:
+        parent_cleanup()
     return resolved
 
 

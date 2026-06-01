@@ -118,5 +118,8 @@ rck-*-merge-pending.md
 # so its captured output can't trip the encoding control-character check on itself.
 /validation-report.txt
 /changelog.txt
-/reports/
-/reports_dev/
+# NOTE: `reports/` and `reports_dev/` are intentionally NOT repeated here — the
+# canonical, commented entries live above (see the "Agent/script reports" block).
+# The unanchored `reports/` / `reports_dev/` rules already match the repo-root
+# directories *and* any nested copy, so anchored `/reports/` duplicates added
+# nothing and were removed to keep a single source of truth.

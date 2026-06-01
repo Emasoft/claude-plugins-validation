@@ -55,7 +55,7 @@ Re-run the skill to resume.
 ## What is intentionally NOT in this skill
 
 - The full live extraction flow (`--auto` real-execution) lands in Sprint 2 rc3 once the engine is battle-tested. The current RC ships `--dry-run` and `--check` only, plus the publish-time allowlist enforcement.
-- `--restore` is not implemented yet (devs use `git submodule update --init --recursive dev/<target>/` directly).
+- `--restore` is not implemented yet. The submodule mounts at the SAME path as the original folder (e.g. `tests/`, not a `dev/`-prefixed path), so devs pull the content back with `git submodule update --init` directly (add `--recursive` only if the extracted folder itself contains nested submodules).
 
 ## References
 

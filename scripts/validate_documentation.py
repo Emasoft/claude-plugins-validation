@@ -173,11 +173,7 @@ def _strip_code_regions(content: str) -> str:
                 out_lines.append("")  # blank the opening fence line
                 continue
             # Inside a fence: only a same-char run >= opener length closes it.
-            if (
-                fence_char == fence_marker[0]
-                and run_len >= len(fence_marker)
-                and stripped.rstrip(fence_char) == ""
-            ):
+            if fence_char == fence_marker[0] and run_len >= len(fence_marker) and stripped.rstrip(fence_char) == "":
                 in_fence = False
                 fence_marker = ""
             out_lines.append("")  # blank every line inside / closing a fence
@@ -195,14 +191,23 @@ def _strip_code_regions(content: str) -> str:
     return "\n".join(out_lines)
 
 
-def _iter_lines_with_fence_state(content: str) -> "list[tuple[int, str, str, bool, str]]":
-    """Yield one tuple per line: ``(index, raw_line, stripped, in_fence, opener_info)``.
+def _iter_lines_with_fence_state(content: str) -> "list[tuple[int, str, str, bool, str, bool]]":
+    """Yield one tuple per line: ``(index, raw_line, stripped, in_fence, opener_info, is_opener)``.
 
     Shared CommonMark-aware fence tracker for the structural rules (9-12).
     ``in_fence`` is True for every line that is INSIDE a fenced block AND for
     the opening / closing fence lines themselves — callers decide how to treat
     each. ``opener_info`` is the text after the opening fence run on an OPENING
-    fence line (e.g. ``"python"`` for `````python``), else "".
+    fence line (e.g. ``"python"`` for `````python``), else "". ``is_opener`` is
+    True ONLY on an opening fence line.
+
+    ``is_opener`` is exported explicitly because a consumer cannot reliably
+    reconstruct opener-ness from ``in_fence`` alone: a CLOSING fence line is
+    ALSO reported with ``in_fence=True``, so the previous "opening == in_fence
+    and not prev_in_fence" heuristic missed an opener that immediately followed
+    a closer (two adjacent fenced blocks with no blank line between them) —
+    the language-tag check then silently skipped the second block. An explicit
+    transition flag fixes that at the source.
 
     Honors BOTH ``````` and ``~~~`` fences and the CommonMark
     rules that the closing fence must use the same character and be at least as
@@ -212,7 +217,7 @@ def _iter_lines_with_fence_state(content: str) -> "list[tuple[int, str, str, boo
     and ran list/table scans inside code (audit m6). Mirrors the fence logic in
     :func:`_strip_code_regions` so both paths agree.
     """
-    out: list[tuple[int, str, str, bool, str]] = []
+    out: list[tuple[int, str, str, bool, str, bool]] = []
     in_fence = False
     fence_marker = ""  # the exact opening run, e.g. "```" or "~~~~"
 
@@ -231,25 +236,21 @@ def _iter_lines_with_fence_state(content: str) -> "list[tuple[int, str, str, boo
                 in_fence = True
                 fence_marker = fence_char * run_len
                 opener_info = stripped[run_len:].strip()
-                out.append((i, line, stripped, True, opener_info))
+                out.append((i, line, stripped, True, opener_info, True))
                 continue
             # Inside a fence: only a same-char run >= opener length, with
             # nothing but the fence char on the line, closes it.
-            if (
-                fence_char == fence_marker[0]
-                and run_len >= len(fence_marker)
-                and stripped.rstrip(fence_char) == ""
-            ):
+            if fence_char == fence_marker[0] and run_len >= len(fence_marker) and stripped.rstrip(fence_char) == "":
                 in_fence = False
                 fence_marker = ""
-                out.append((i, line, stripped, True, ""))
+                out.append((i, line, stripped, True, "", False))
                 continue
             # A fence-looking line inside a fence that does NOT close it is
             # just content (still in_fence).
-            out.append((i, line, stripped, True, ""))
+            out.append((i, line, stripped, True, "", False))
             continue
 
-        out.append((i, line, stripped, in_fence, ""))
+        out.append((i, line, stripped, in_fence, "", False))
 
     return out
 
@@ -324,8 +325,7 @@ def validate_readme_exists(plugin_path: Path, report: DocumentationValidationRep
         variant = _find_readme(plugin_path)
         if variant is not None:
             report.minor(
-                f"README.md exists but uses non-canonical case ({variant.name}) "
-                "- consider renaming to README.md",
+                f"README.md exists but uses non-canonical case ({variant.name}) - consider renaming to README.md",
                 variant.name,
             )
             return True
@@ -616,7 +616,7 @@ def validate_heading_hierarchy(plugin_path: Path, report: DocumentationValidatio
     # "# shell comment" or "### deep comment" INSIDE a ```/~~~ code block is not
     # mistaken for an ATX heading, which produced spurious "hierarchy skip"
     # WARNINGs for any README documenting commented shell snippets (audit m175).
-    for i, line, _stripped, in_fence, _opener in _iter_lines_with_fence_state(content):
+    for i, line, _stripped, in_fence, _opener, _is_opener in _iter_lines_with_fence_state(content):
         if in_fence:
             continue
         # Match ATX-style headings (# Heading)
@@ -695,20 +695,22 @@ def validate_code_block_language_tags(plugin_path: Path, report: DocumentationVa
     content = readme.read_text(encoding="utf-8")
 
     issues_found = False
-    prev_in_fence = False
-    # Walk logical lines with shared CommonMark fence state (``` and ~~~). An
-    # OPENING fence is a line where in_fence flips False->True; its opener_info
-    # is the language tag. (audit m6 — the old toggle ignored ~~~.)
-    for i, _line, _stripped, in_fence, opener_info in _iter_lines_with_fence_state(content):
-        is_opening = in_fence and not prev_in_fence
-        if is_opening and not opener_info:
+    # Walk logical lines with shared CommonMark fence state (``` and ~~~). The
+    # iterator marks each OPENING fence line with ``is_opener=True`` and exposes
+    # its language tag in ``opener_info``. We rely on ``is_opener`` directly
+    # rather than the old "in_fence flips False->True" heuristic: a closing
+    # fence is ALSO reported with in_fence=True, so two adjacent code blocks
+    # (closer line immediately followed by the next opener, no blank line
+    # between) made the heuristic miss the second opener and skip its
+    # language-tag check entirely. (audit m6 — the old toggle ignored ~~~.)
+    for i, _line, _stripped, _in_fence, opener_info, is_opener in _iter_lines_with_fence_state(content):
+        if is_opener and not opener_info:
             report.warning(
                 f"Code block at line {i + 1} missing language tag",
                 "README.md",
                 i + 1,
             )
             issues_found = True
-        prev_in_fence = in_fence
 
     if not issues_found:
         report.passed("All code blocks have language tags", "README.md")
@@ -739,7 +741,7 @@ def validate_list_formatting(plugin_path: Path, report: DocumentationValidationR
     # (audit m6).
     markers_used: set[str] = set()
 
-    for _i, _line, stripped, in_fence, _opener in _iter_lines_with_fence_state(content):
+    for _i, _line, stripped, in_fence, _opener, _is_opener in _iter_lines_with_fence_state(content):
         if in_fence:
             continue
 
@@ -814,7 +816,7 @@ def validate_table_structure(plugin_path: Path, report: DocumentationValidationR
 
     # Skip lines inside fenced code (``` AND ~~~) via the shared CommonMark
     # tracker so table scans never run inside a code block (audit m6).
-    for i, _line, stripped, in_fence, _opener in _iter_lines_with_fence_state(content):
+    for i, _line, stripped, in_fence, _opener, _is_opener in _iter_lines_with_fence_state(content):
         if in_fence:
             continue
 

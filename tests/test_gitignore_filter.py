@@ -66,11 +66,12 @@ def test_is_ignored_directory_pattern(tmp_path: Path) -> None:
 def test_is_ignored_doublestar(tmp_path: Path) -> None:
     """Pattern **/dist matches 'dist' at any depth.
 
-    NOTE: The current is_path_gitignored implementation uses substring matching
-    (f'/{suffix}' in f'/{rel_path}') for **/X patterns, which means 'distfile'
-    also matches because '/dist' is a substring of '/a/b/distfile'. This is a
-    known limitation — real git would NOT match 'distfile'. The test documents
-    the actual behavior.
+    As of v2.101.2 the matcher is backed by ``pathspec`` (gitwildmatch),
+    a hard dependency (pyproject.toml pins ``pathspec>=0.12.1``), so the
+    matching follows git's real ``**/X`` semantic: ``**/dist`` matches a
+    path component named exactly ``dist`` at any depth, and does NOT
+    spuriously match an unrelated sibling like ``README.md``. (The old
+    hand-rolled substring matcher that could over-match has been removed.)
     """
     gitignore = tmp_path / ".gitignore"
     gitignore.write_text("**/dist\n", encoding="utf-8")

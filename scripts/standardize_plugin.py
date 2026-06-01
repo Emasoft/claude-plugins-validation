@@ -189,10 +189,7 @@ def _gitignore_line_covers_entry(entry: str, line: str) -> bool:
     candidates = [entry]
     if entry.endswith("/"):
         candidates.append(entry.rstrip("/"))  # "dist/" should match "dist*"
-    return any(
-        fnmatch.fnmatch(cand, pattern) or fnmatch.fnmatch(cand, pattern.rstrip("/"))
-        for cand in candidates
-    )
+    return any(fnmatch.fnmatch(cand, pattern) or fnmatch.fnmatch(cand, pattern.rstrip("/")) for cand in candidates)
 
 
 def audit_gitignore(plugin_path: Path) -> list[AuditItem]:
@@ -1204,9 +1201,7 @@ def fix_missing_files(
     if not dry_run and gitignore_path.exists():
         content = gitignore_path.read_text(encoding="utf-8")
         active_lines = [
-            stripped
-            for raw in content.splitlines()
-            if (stripped := raw.strip()) and not stripped.startswith("#")
+            stripped for raw in content.splitlines() if (stripped := raw.strip()) and not stripped.startswith("#")
         ]
         missing = []
         for entry in REQUIRED_GITIGNORE_ENTRIES:

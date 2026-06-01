@@ -379,7 +379,7 @@ class TestSurface8ExternalScanners:
 
     def test_set_when_all_six_on_path(self, auth):
         """All 6 scanners detected on PATH → SET."""
-        scanners = {"fclones", "cc-audit", "trufflehog", "semgrep", "tirith", "cisco-skill-scanner"}
+        scanners = {"fclones", "cc-audit", "trufflehog", "semgrep", "tirith", "skill-scanner"}
 
         def _which(name):
             return f"/usr/local/bin/{name}" if name in scanners else None

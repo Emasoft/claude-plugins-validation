@@ -13,14 +13,6 @@
   - 3.1 Full Pipeline Validation
   - 3.2 Component-Level Validation
 - 4. Auto-Setup
-
-## Checklist
-
-- [ ] 3-repo architecture understood (CPV + plugin + marketplace)
-- [ ] Marketplace repo has marketplace.json + CI + update-submodules workflow
-- [ ] Plugin repo has plugin.json + CI + notify-marketplace + publish.py
-- [ ] `MARKETPLACE_PAT` secret set on plugin repo
-- [ ] Full pipeline validation run via `cpv-remote-validate`
   - 4.1 Automatic Setup Script
   - 4.2 Manual Setup Steps
 - 5. Troubleshooting
@@ -30,6 +22,14 @@
 - 6. Scoring System
   - 6.1 Category Weights
   - 6.2 Grade Calculation
+
+## Checklist
+
+- [ ] 3-repo architecture understood (CPV + plugin + marketplace)
+- [ ] Marketplace repo has marketplace.json + CI + update-submodules workflow
+- [ ] Plugin repo has plugin.json + CI + notify-marketplace + publish.py
+- [ ] `MARKETPLACE_PAT` secret set on plugin repo
+- [ ] Full pipeline validation run via `cpv-remote-validate`
 
 ---
 
@@ -108,7 +108,7 @@ uv run python scripts/validate_marketplace_pipeline.py /path/to/marketplace --ve
 # - Submodule health score
 # - Workflow presence and correctness
 # - Version sync status
-# - Overall syntactic score (0-100) with tier (PASS/CONDITIONAL_PASS/FAIL)
+# - Overall weighted score (0-100) with letter grade (A-F, see Section 6.2)
 ```
 
 ### 3.2 Component-Level Validation

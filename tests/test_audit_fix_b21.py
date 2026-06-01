@@ -229,14 +229,10 @@ def _gitignore_status(tmp_path: Path, gitignore_body: str) -> dict[str, str]:
         (".coverage", ".coverage_html/"),
     ],
 )
-def test_audit_gitignore_substring_decoy_is_not_a_pass(
-    tmp_path: Path, entry: str, decoy_line: str
-) -> None:
+def test_audit_gitignore_substring_decoy_is_not_a_pass(tmp_path: Path, entry: str, decoy_line: str) -> None:
     """MALICIOUS side: a substring-collision line must NOT mark the entry present."""
     status = _gitignore_status(tmp_path, decoy_line + "\n")
-    assert status[entry] == "WARN", (
-        f"{decoy_line!r} falsely satisfied required entry {entry!r} (false PASS)"
-    )
+    assert status[entry] == "WARN", f"{decoy_line!r} falsely satisfied required entry {entry!r} (false PASS)"
 
 
 @pytest.mark.parametrize(
@@ -273,17 +269,13 @@ def test_gitignore_audit_and_fix_agree(tmp_path: Path) -> None:
     d.mkdir(parents=True, exist_ok=True)
     (d / ".gitignore").write_text(".env.example\n", encoding="utf-8")
 
-    audit_missing = {
-        it.name for it in sp.audit_gitignore(d) if it.status != "PASS"
-    }
+    audit_missing = {it.name for it in sp.audit_gitignore(d) if it.status != "PASS"}
     assert ".env" in audit_missing
 
     content = (d / ".gitignore").read_text(encoding="utf-8")
     active = [s.strip() for s in content.splitlines() if s.strip() and not s.strip().startswith("#")]
     fix_missing = {
-        e
-        for e in sp.REQUIRED_GITIGNORE_ENTRIES
-        if not any(sp._gitignore_line_covers_entry(e, ln) for ln in active)
+        e for e in sp.REQUIRED_GITIGNORE_ENTRIES if not any(sp._gitignore_line_covers_entry(e, ln) for ln in active)
     }
     assert ".env" in fix_missing, "fix path disagrees with audit on .env"
 

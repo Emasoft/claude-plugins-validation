@@ -289,19 +289,26 @@ def run_cpv(plugin_root: Path) -> CpvReport:
     env = {
         **os.environ,
         # Skip the GitHub-anchored integrity check — audit fixtures are
-        # ephemeral and don't have a matching upstream tag.
+        # ephemeral and don't have a matching upstream tag. This is also
+        # the ONLY network round-trip validate_plugin.py makes, so skipping
+        # it keeps the audit run fully offline.
         "CPV_SKIP_GITHUB_INTEGRITY": "1",
         "PLUGIN_SKIP_GITHUB_INTEGRITY": "1",
-        # Avoid sending live network requests during the audit run.
-        "CPV_OFFLINE": "1",
-        "PLUGIN_OFFLINE": "1",
     }
+    # cwd MUST be the CPV repo root so `uv run` resolves CPV's project
+    # environment (which has validate_plugin.py's deps). Without it, `uv`
+    # would search upward from the *caller's* CWD — and the audit is often
+    # launched from a fixture dir or /tmp, where it would find no CPV
+    # pyproject.toml and fail or build a deps-less ephemeral env. The repo
+    # root is validate_plugin.py's grandparent (<root>/scripts/validate_plugin.py).
+    repo_root = _validate_plugin_script().parents[1]
     proc = subprocess.run(
         ["uv", "run", "python", str(_validate_plugin_script()), str(plugin_root), "--strict", "--json", "--no-color"],
         capture_output=True,
         text=True,
         check=False,
         env=env,
+        cwd=str(repo_root),
         timeout=300,
     )
     payload = _slice_json_object(proc.stdout)

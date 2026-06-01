@@ -104,11 +104,7 @@ class TestWalkYamlListItemPaths:
 
     def test_sibling_key_in_list_item_is_sibling_not_nested(self) -> None:
         """``uses:`` after ``- name:`` is a sibling of ``name`` within entry [0]."""
-        src = (
-            "jobs:\n  build:\n    steps:\n"
-            "      - name: checkout\n"
-            "        uses: actions/checkout\n"
-        )
+        src = "jobs:\n  build:\n    steps:\n      - name: checkout\n        uses: actions/checkout\n"
         paths = self._paths(src)
         assert paths[4] == ("jobs", "build", "steps", "[0]", "name")
         # Original bug nested this under 'name': (..., '[0]', 'name', 'uses').
@@ -116,11 +112,7 @@ class TestWalkYamlListItemPaths:
 
     def test_second_list_entry_gets_index_one(self) -> None:
         """The second ``- name:`` is list entry [1], not stuck at [0]."""
-        src = (
-            "jobs:\n  build:\n    steps:\n"
-            "      - name: a\n"
-            "      - name: b\n"
-        )
+        src = "jobs:\n  build:\n    steps:\n      - name: a\n      - name: b\n"
         paths = self._paths(src)
         assert paths[4] == ("jobs", "build", "steps", "[0]", "name")
         # Original bug kept this at [0] because popping the [0] frame dropped
@@ -288,10 +280,7 @@ class TestRegisterInSkillsMenu:
 
     def test_fresh_table_when_section_has_none(self) -> None:
         """No table in the section → a fresh header+row table is created."""
-        cat = (
-            "---\nname: the-skills-menu\n---\n\n"
-            "## Plugin Skills\n\nIntro prose, no table yet.\n\n## Other\n"
-        )
+        cat = "---\nname: the-skills-menu\n---\n\n## Plugin Skills\n\nIntro prose, no table yet.\n\n## Other\n"
         modified, out = self._run(cat, "first")
         assert modified is True
         assert "| 1 | (uncategorised) | `first`" in out

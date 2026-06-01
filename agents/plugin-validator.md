@@ -68,6 +68,11 @@ Use `${CLAUDE_PLUGIN_ROOT}` (set by Claude Code at agent-invocation time) — it
 Every report path follows `$MAIN_ROOT/reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`. Compose the path with this prologue before running any validator:
 
 ```bash
+# TARGET_PATH is the element being validated (plugin / skill / hook / …).
+# Set it FIRST — SLUG derives from it, so an unset TARGET_PATH would produce
+# a slug-less "$TS-.md" filename AND decouple the report name from the path
+# actually scanned. The run commands below MUST validate "$TARGET_PATH" too.
+TARGET_PATH="/path/to/plugin"   # ← replace with the real target before running
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
 else
@@ -83,14 +88,15 @@ Then run any of these (substitute the matching `<component>` — each script get
 
 ```bash
 # Full plugin validation (component: validate_plugin)
-CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml python "$LAUNCHER" plugin /path/to/plugin --report "$MAIN_ROOT/reports/validate_plugin/$TS-$SLUG.md"
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml python "$LAUNCHER" plugin "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_plugin/$TS-$SLUG.md"
 
-# Per-component validators (one component per script — never lump them into one folder)
-uv run --with pyyaml python "$LAUNCHER" skill          /path/to/skill --report "$MAIN_ROOT/reports/validate_skill/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" hook           /path/to/hooks.json --report "$MAIN_ROOT/reports/validate_hook/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" mcp            /path/to/plugin --report "$MAIN_ROOT/reports/validate_mcp/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" marketplace    /path/to/marketplace --report "$MAIN_ROOT/reports/validate_marketplace/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" xref           /path/to/plugin --report "$MAIN_ROOT/reports/validate_xref/$TS-$SLUG.md"
+# Per-component validators (one component per script — never lump them into one folder).
+# Every command validates "$TARGET_PATH" so the report SLUG matches the path scanned.
+uv run --with pyyaml python "$LAUNCHER" skill          "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_skill/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" hook           "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_hook/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" mcp            "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_mcp/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" marketplace    "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_marketplace/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" xref           "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_xref/$TS-$SLUG.md"
 # `xref` includes ghost-agent dispatch detection (TRDD-25b9be90):
 #   * RC-GHOST-DISPATCH-001 (CRITICAL) — Task() / subagent_type references an
 #     agent that doesn't exist (built-in / in-plugin / user-scope). Runtime
@@ -101,8 +107,8 @@ uv run --with pyyaml python "$LAUNCHER" xref           /path/to/plugin --report 
 #     `other-plugin:agent` — verified at runtime, not at validate time.
 # Since v2.91.0, validate_plugin also invokes xref as part of the main pipeline,
 # so these findings surface in `cpv-validate-plugin` reports without a separate xref run.
-uv run --with pyyaml python "$LAUNCHER" docs           /path/to/plugin --report "$MAIN_ROOT/reports/validate_documentation/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" security       /path/to/plugin --report "$MAIN_ROOT/reports/validate_security/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" docs           "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_documentation/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" security       "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_security/$TS-$SLUG.md"
 # `security` is the most comprehensive checker — in-process AI/security rule packs PLUS five
 # external scanners (v2.48: gitleaks dropped, trufflehog covers the same detectors with
 # parallel-safe concurrency): cc-audit (npx → persistent), tirith (PATH/docker/nix),
@@ -115,18 +121,18 @@ uv run --with pyyaml python "$LAUNCHER" security       /path/to/plugin --report 
 # .claude-plugin/ precondition for flat skill packs. Env knobs: `CPV_NO_TIRITH_INSTALL=1`,
 # `CPV_NO_FCLONES_INSTALL=1`, `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>`. Run
 # `cpv-doctor --install-scanners` to pre-install every external scanner.
-uv run --with pyyaml python "$LAUNCHER" rules          /path/to/plugin --report "$MAIN_ROOT/reports/validate_rules/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" enterprise     /path/to/plugin --report "$MAIN_ROOT/reports/validate_enterprise/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" encoding       /path/to/plugin --report "$MAIN_ROOT/reports/validate_encoding/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" scoring        /path/to/plugin --report "$MAIN_ROOT/reports/validate_scoring/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" command        /path/to/plugin --report "$MAIN_ROOT/reports/validate_command/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" agent          /path/to/plugin --report "$MAIN_ROOT/reports/validate_agent/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" lsp            /path/to/plugin --report "$MAIN_ROOT/reports/validate_lsp/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" lint           /path/to/plugin --report "$MAIN_ROOT/reports/lint/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" rules          "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_rules/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" enterprise     "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_enterprise/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" encoding       "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_encoding/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" scoring        "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_scoring/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" command        "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_command/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" agent          "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_agent/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" lsp            "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_lsp/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" lint           "$TARGET_PATH" --report "$MAIN_ROOT/reports/lint/$TS-$SLUG.md"
 
 # Scope validators (validate .claude/ + .mcp.json + CLAUDE.md under a project path)
-uv run --with pyyaml python "$LAUNCHER" project-scope  /path/to/project --report "$MAIN_ROOT/reports/validate_project_scope/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" local-scope    /path/to/project --report "$MAIN_ROOT/reports/validate_local_scope/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" project-scope  "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_project_scope/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" local-scope    "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_local_scope/$TS-$SLUG.md"
 ```
 
 ## Batch modes (TRDD-3dcbb37c)

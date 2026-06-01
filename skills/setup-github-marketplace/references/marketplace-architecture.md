@@ -115,7 +115,7 @@ This requires a `MARKETPLACE_PAT` secret with cross-repo permissions.
 
 ### Step 4: Marketplace Receives Dispatch
 
-The marketplace repository's `update-plugins.yml` workflow is triggered by the `repository_dispatch` event with `event_type: plugin-updated`.
+The marketplace repository's `update-submodules.yml` workflow is triggered by the `repository_dispatch` event with `event_type: plugin-updated`.
 
 ### Step 5: GitHub API Version Fetch
 
@@ -331,7 +331,7 @@ marketplace-repo/
 │   └── marketplace.json            # Central plugin registry (hub)
 ├── .github/
 │   └── workflows/
-│       ├── update-plugins.yml      # Receives plugin-updated dispatch events
+│       ├── update-submodules.yml   # Receives plugin-updated dispatch events
 │       └── validate-marketplace.yml # CI validation on push/PR
 ├── scripts/
 │   ├── sync_marketplace_versions.py # Fetches plugin.json via GitHub API, updates marketplace.json
@@ -368,7 +368,7 @@ plugin-repo/
 
 | Event Type | Source | Target | Trigger |
 |------------|--------|--------|---------|
-| `plugin-updated` | Plugin repo (`notify-marketplace.yml`) | Marketplace repo (`update-plugins.yml`) | Push to main with plugin file changes |
+| `plugin-updated` | Plugin repo (`notify-marketplace.yml`) | Marketplace repo (`update-submodules.yml`) | Push to main with plugin file changes |
 
 #### plugin-updated Payload
 
@@ -386,7 +386,7 @@ plugin-repo/
 
 | Event Type | Source | Target | Trigger |
 |------------|--------|--------|---------|
-| `workflow_dispatch` | Manual (GitHub UI or `gh workflow run`) | Marketplace repo (`update-plugins.yml`) | Manual sync trigger |
+| `workflow_dispatch` | Manual (GitHub UI or `gh workflow run`) | Marketplace repo (`update-submodules.yml`) | Manual sync trigger |
 
 Used for manual re-synchronization when automatic dispatch fails or when adding a new plugin for the first time.
 

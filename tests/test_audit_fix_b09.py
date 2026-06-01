@@ -154,9 +154,7 @@ def test_uv_lock_deletion_is_not_auto_committed(tmp_path: Path) -> None:
     # Delete the lockfile (unstaged deletion → porcelain " D uv.lock").
     (repo / "uv.lock").unlink()
     assert (
-        subprocess.run(
-            ["git", "status", "--porcelain"], cwd=repo, check=True, capture_output=True, text=True
-        ).stdout
+        subprocess.run(["git", "status", "--porcelain"], cwd=repo, check=True, capture_output=True, text=True).stdout
         == " D uv.lock\n"
     ), "precondition: porcelain reports an unstaged deletion"
 
@@ -182,9 +180,7 @@ def test_uv_lock_staged_deletion_is_not_auto_committed(tmp_path: Path) -> None:
     # Stage the deletion → porcelain "D  uv.lock" (D in the X/staged column).
     _git(repo, "rm", "-q", "uv.lock")
     assert (
-        subprocess.run(
-            ["git", "status", "--porcelain"], cwd=repo, check=True, capture_output=True, text=True
-        ).stdout
+        subprocess.run(["git", "status", "--porcelain"], cwd=repo, check=True, capture_output=True, text=True).stdout
         == "D  uv.lock\n"
     ), "precondition: porcelain reports a staged deletion"
 

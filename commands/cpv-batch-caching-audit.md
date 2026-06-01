@@ -80,12 +80,15 @@ for plugin_index in group:
         Run Phase 1 (Audit) of your standard cache workflow ONLY —
         skip Phase 2 (Fix), Phase 3 (Re-validate), and Phase 4
         (Broader refactor). Write per-plugin status JSON to
-        `status_path` with:
+        `status_path` with the canonical batch_audit schema (see
+        agents/cache-optimizer-agent.md). Audit-only, so set `after`
+        equal to `before`:
 
           {
             "status_symbol": "✓" | "✗" | "⚠",
             "status_label": "clean" | "findings" | "warning-only",
-            "counts": {"critical": N, "major": N, "minor": N, "nit": N, "warning": N},
+            "before": {"critical": N, "major": N, "minor": N, "nit": N, "warning": N},
+            "after":  {"critical": N, "major": N, "minor": N, "nit": N, "warning": N},
             "report_path": "<abs-path-to-cache-audit-report>",
             "notes": "<short summary, e.g. 0 CA-01, 2 CA-04>"
           }

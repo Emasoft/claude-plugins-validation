@@ -56,7 +56,7 @@ uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py"
 | `validate_plugin.py` | Validate plugin passes all 190+ rules | launcher: `plugin` |
 | `validate_marketplace.py` | Validate marketplace structure | launcher: `marketplace` |
 | `validate_security.py` | Security scan (5 external scanners + AI rules) | launcher: `security` |
-| `validate_cache.py` | Prompt-cache invalidation audit (CA-01..CA-06) | launcher: `cache` |
+| `validate_cache.py` | Prompt-cache invalidation audit (CA-01..CA-07) | launcher: `cache` |
 | `manage_github_validate.py` | Validate a GitHub plugin/marketplace without installing | launcher: `github` |
 | `bump_version.py` | Bump plugin version (patch/minor/major) | direct |
 | `manage_doctor.py` | Health-check + `--install-scanners` for all 5 external scanners + fclones | launcher: `doctor` or direct (`--install-scanners` only) |

@@ -36,7 +36,7 @@ from cpv_menu import (  # noqa: E402
 # A real, minimal menu_write.py that honours the contract: read spec arg, echo
 # it to queue/last-spec.json (so tests can assert what cpv_menu sent), write
 # <ts>-<plugin>-<slug>.menu.md, print the queue path. Real I/O, no mocking.
-_STUB_MENU_WRITE = '''\
+_STUB_MENU_WRITE = """\
 import json, sys, time
 from pathlib import Path
 
@@ -47,7 +47,7 @@ qdir.mkdir(parents=True, exist_ok=True)
 menu = qdir / f"{time.time_ns():020d}-{spec['plugin']}-{spec['slug']}.menu.md"
 menu.write_text("RENDERED MENU\\n", encoding="utf-8")
 print(menu)
-'''
+"""
 
 # A stub that always fails, to prove cpv_menu surfaces non-zero exits.
 _STUB_FAILING = 'import sys\nprint("boom", file=sys.stderr)\nsys.exit(3)\n'
@@ -215,6 +215,7 @@ class TestCliStdinMode:
         monkeypatch.setattr("sys.stdin", _StringStdin(spec_json))
 
         import io
+
         out = io.StringIO()
         monkeypatch.setattr("sys.stdout", out)
 
@@ -263,6 +264,7 @@ class TestCliStdinMode:
         monkeypatch.setattr(cpv_menu, "_default_cache_base", lambda: cache)
 
         import io
+
         out = io.StringIO()
         monkeypatch.setattr("sys.stdout", out)
 

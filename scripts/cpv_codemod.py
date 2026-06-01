@@ -66,6 +66,13 @@ VENDORED_DIR_NAMES = frozenset(
     }
 )
 
+# Single source of truth for the backup directory name. Used both to CREATE
+# backups (_backup_dir) and to EXCLUDE the backup tree from the markdown walk
+# (_walk_markdown) — otherwise a second --apply run would descend into the
+# mirrored .md files under a prior run's backup and re-process them, breaking
+# the documented idempotency contract.
+_BACKUP_DIR_NAME = ".cpv-codemod-backup"
+
 
 def _read_gitmodules(plugin_root: Path) -> set[str]:
     """Return submodule paths declared in .gitmodules (relative to plugin_root)."""
@@ -94,10 +101,20 @@ def _is_vendored(rel_path: Path, submodule_paths: set[str]) -> bool:
 
 
 def _walk_markdown(plugin_root: Path) -> Iterable[Path]:
-    """Yield every .md file under plugin_root, skipping vendored subtrees."""
+    """Yield every .md file under plugin_root, skipping vendored subtrees.
+
+    Also skips this tool's own backup tree (``.cpv-codemod-backup/``): the
+    backup mirrors the source layout, so the mirrored ``.md`` files would
+    otherwise be re-walked (and re-backed-up) on a later ``--apply`` run,
+    violating the idempotency contract. Matching on a path *component*
+    (not the file basename) is required because backed-up files keep their
+    original names (e.g. ``SKILL.md``), so a basename check never fires.
+    """
     submodules = _read_gitmodules(plugin_root)
     for path in sorted(plugin_root.rglob("*.md")):
         rel = path.relative_to(plugin_root)
+        if _BACKUP_DIR_NAME in rel.parts:
+            continue
         if _is_vendored(rel, submodules):
             continue
         yield path
@@ -107,7 +124,7 @@ def _walk_markdown(plugin_root: Path) -> Iterable[Path]:
 def _backup_dir(plugin_root: Path) -> Path:
     """Per-run backup directory under .cpv-codemod-backup/<timestamp>/."""
     ts = datetime.now(tz=timezone.utc).astimezone().strftime("%Y%m%d_%H%M%S%z")
-    return plugin_root / ".cpv-codemod-backup" / ts
+    return plugin_root / _BACKUP_DIR_NAME / ts
 
 
 def _backup_file(file_path: Path, plugin_root: Path, backup_root: Path) -> None:
@@ -262,9 +279,30 @@ def _apply_add_toc(text: str, min_lines: int = 50) -> str:
     toc_block = "\n".join(toc_lines)
 
     # Insert after the H1 line (first '# ' heading) if present, else at top.
+    # The scan tracks fenced code blocks so a '# comment' line inside a
+    # leading code fence is never mistaken for the document H1 — otherwise
+    # the TOC block would be inserted in the MIDDLE of that fence, corrupting
+    # it. The heading-collection loop above is already fence-aware; this loop
+    # must match it.
     out = list(lines)
     insert_at = 0
+    scan_in_fence = False
+    scan_fence_marker = ""
     for i, line in enumerate(out):
+        stripped = line.lstrip()
+        is_fence_toggle = False
+        for marker in ("```", "~~~"):
+            if stripped.startswith(marker):
+                if not scan_in_fence:
+                    scan_in_fence = True
+                    scan_fence_marker = marker
+                elif scan_fence_marker == marker:
+                    scan_in_fence = False
+                    scan_fence_marker = ""
+                is_fence_toggle = True
+                break
+        if scan_in_fence or is_fence_toggle:
+            continue
         if line.startswith("# ") and not line.startswith("## "):
             insert_at = i + 1
             # Skip the blank line right after the H1 too.
@@ -374,9 +412,7 @@ def _apply_external_skip_list(plugin_root: Path, *, apply: bool) -> SkipListResu
         raw = manifest.read_text(encoding="utf-8")
         data = json.loads(raw)
     except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
-        return SkipListResult(
-            changed=False, ok=False, summary=f"Cannot read .claude-plugin/plugin.json: {exc}"
-        )
+        return SkipListResult(changed=False, ok=False, summary=f"Cannot read .claude-plugin/plugin.json: {exc}")
     detected: set[str] = set()
     submodules = _read_gitmodules(plugin_root)
     detected.update(submodules)
@@ -389,9 +425,7 @@ def _apply_external_skip_list(plugin_root: Path, *, apply: bool) -> SkipListResu
     existing = set(cpv_block.get("exclude_paths", []))
     new = sorted(existing | detected)
     if new == sorted(existing):
-        return SkipListResult(
-            changed=False, ok=True, summary=f"All {len(detected)} vendored paths already excluded"
-        )
+        return SkipListResult(changed=False, ok=True, summary=f"All {len(detected)} vendored paths already excluded")
     cpv_block["exclude_paths"] = new
     new_raw = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
     if new_raw == raw:
@@ -409,9 +443,7 @@ def _apply_external_skip_list(plugin_root: Path, *, apply: bool) -> SkipListResu
     backup_root = _backup_dir(plugin_root)
     _backup_file(manifest, plugin_root, backup_root)
     manifest.write_text(new_raw, encoding="utf-8")
-    return SkipListResult(
-        changed=True, ok=True, summary=f"Added {added} vendored path(s) to cpv.exclude_paths"
-    )
+    return SkipListResult(changed=True, ok=True, summary=f"Added {added} vendored path(s) to cpv.exclude_paths")
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -464,9 +496,10 @@ def _run_subcommand(
         return 0 if result.ok else 1
     backup_root = _backup_dir(plugin_root)
     files_touched = 0
+    # The backup tree (.cpv-codemod-backup/) is excluded inside
+    # _walk_markdown — by path component, not basename — so no extra
+    # guard is needed here.
     for md_path in _walk_markdown(plugin_root):
-        if md_path.name.startswith(".cpv-codemod-backup"):
-            continue
         if _process_file(
             md_path,
             plugin_root,

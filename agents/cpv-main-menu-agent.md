@@ -183,10 +183,14 @@ prompt: |
     never as a substitute for the initial suggestion.
   - Wait for explicit approval (`yes` / `ok` / `go` / `approved` /
     similar) before running anything. NEVER auto-execute.
-  - Route the approved action through the standard CPV launcher
-    (`uv run python ${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py
-    <alias> <args>`) — never improvise a one-off bash command when a
-    CPV recipe exists.
+  - Route the approved action through the standard CPV launcher, using
+    the canonical spelling verbatim — bare `python` (remote_validation.py
+    self-isolates its env at import, so `uv run` is not needed) and the
+    path double-quoted (CLAUDE_PLUGIN_ROOT may contain spaces):
+    `python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" <alias>
+    <args>`. Never improvise a one-off bash command when a CPV recipe
+    exists, and never use an alternative spelling (per the launcher rule
+    below).
   - After execution, print 3-line summary + report path, then ask
     `Anything else?` and continue the dialog.
   - End the chat ONLY when the user types `done`, `exit`, `bye`, `0`,

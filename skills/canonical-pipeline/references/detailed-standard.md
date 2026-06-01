@@ -29,7 +29,7 @@
 | `.gitignore` | YES | Must include `.claude/`, `.tldr/`, `llm_externalizer_output/` |
 | `README.md` | YES | Must have `<!--BADGES-START-->` / `<!--BADGES-END-->` markers |
 | `cliff.toml` | YES | git-cliff changelog configuration |
-| `scripts/publish.py` | YES | 10-stage release pipeline + --gate mode + --install-hook |
+| `scripts/publish.py` | YES | 11-stage release pipeline + --gate mode + --install-hook |
 | `git-hooks/pre-push` | YES | Thin bash delegator to `publish.py --gate` |
 | `CHANGELOG.md` | YES | Auto-generated changelog |
 | `LICENSE` | YES | License file (MIT recommended) |
@@ -92,19 +92,22 @@ Called by the pre-push hook. Runs quality checks only, no version bump or push:
 ### Install mode (`--install-hook`)
 Self-installs `git-hooks/pre-push` into `.git/hooks/` and sets `core.hooksPath`.
 
-### Publish mode (`--patch`/`--minor`/`--major`)
-The 10-stage release pipeline:
+### Publish mode (`--patch`/`--minor`/`--major`, or no flag for auto-bump)
+The 11-stage release pipeline (all fail-fast — any non-zero exit aborts).
+A leading stage 0 ("bypass guard": reject `CPV_SKIP_*` / `SKIP_*` /
+`NO_VERIFY` env vars) runs before stage 1 but is not counted among the 11:
 
 1. **Pre-flight checks**: Clean working tree
 2. **Lint**: `uv run ruff check scripts/`
-3. **Validate plugin**: `--strict` (blocks on CRITICAL/MAJOR/MINOR/NIT)
+3. **Validate plugin**: `uvx cpv-remote-validate plugin . --strict` (blocks on CRITICAL/MAJOR/MINOR/NIT)
 4. **Run tests**: `uv run pytest tests/ -q`
-5. **Version consistency**: Check all version sources match (plugin.json, pyproject.toml)
-6. **Bump version**: Update plugin.json, pyproject.toml, `__version__` vars
-7. **Update README badge**: Replace `version-X.Y.Z-blue` with new version
-8. **Generate changelog**: `git-cliff -o CHANGELOG.md` (if git-cliff installed)
-9. **Commit, tag, push**: `git commit`, `git tag vX.Y.Z`, `git push --tags`
-10. **GitHub release**: `gh release create vX.Y.Z` (if gh CLI installed)
+5. **Marketplace-registration check**: Layout A — notify workflow + PAT secret + remote registration; Layout B — run from marketplace root + nested plugin listed
+6. **Version consistency**: Check all version sources match (plugin.json, pyproject.toml)
+7. **Bump version**: Update plugin.json, pyproject.toml, `__version__` vars
+8. **Update README badge**: Replace `version-X.Y.Z-blue` with new version
+9. **Generate changelog**: `git-cliff -o CHANGELOG.md` (if git-cliff installed)
+10. **Commit, tag, push**: `git commit`, `git tag vX.Y.Z`, `git push --tags`
+11. **GitHub release**: `gh release create vX.Y.Z` (if gh CLI installed)
 
 ## Marketplace Standard
 

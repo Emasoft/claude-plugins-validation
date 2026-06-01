@@ -896,15 +896,22 @@ def validate_effort_field(frontmatter: dict[str, Any], filename: str, report: Ag
     if effort_val.lower() in {"max", "xhigh"}:
         model = frontmatter.get("model", "")
         model_str = str(model).lower() if model else ""
-        if model_str and "opus" not in model_str:
+        # ``inherit`` resolves to the parent/session model AT RUNTIME, exactly
+        # like an ABSENT model field — it MAY be Opus, so we cannot prove it
+        # wrong statically. Treat it as the same uncertain (WARNING) case, not
+        # a hard MAJOR: emitting MAJOR here calls a valid `model: inherit`
+        # agent invalid (TRDD-021250b5 — CPV never calls a valid agent invalid).
+        model_is_opus_uncertain = not model_str or model_str == "inherit"
+        if not model_is_opus_uncertain and "opus" not in model_str:
             report.major(
                 f"effort: {effort_val} requires an Opus model, but model is '{model}'. "
                 "Use effort: high for non-Opus models, or set model: opus.",
                 rel_path,
             )
-        elif not model_str:
+        elif model_is_opus_uncertain:
+            field_note = "No 'model' field set" if not model_str else "model: inherit resolves at runtime"
             report.warning(
-                f"effort: {effort_val} only works with Opus models. No 'model' field set — "
+                f"effort: {effort_val} only works with Opus models. {field_note} — "
                 "this agent will fail if the session uses a non-Opus model. "
                 "Consider adding 'model: opus' or using effort: high.",
                 rel_path,
@@ -1238,16 +1245,14 @@ def validate_example_blocks(content: str, filename: str, report: AgentValidation
     # never calls a valid agent invalid (TRDD-021250b5).
     if example_count == 0:
         report.warning(
-            f"No <example> blocks found (recommended: at least {MIN_EXAMPLE_BLOCKS} "
-            "for trigger quality; not required)",
+            f"No <example> blocks found (recommended: at least {MIN_EXAMPLE_BLOCKS} for trigger quality; not required)",
             filename,
         )
         return
 
     if example_count < MIN_EXAMPLE_BLOCKS:
         report.warning(
-            f"Only {example_count} <example> block(s) found "
-            f"(recommended: at least {MIN_EXAMPLE_BLOCKS}; not required)",
+            f"Only {example_count} <example> block(s) found (recommended: at least {MIN_EXAMPLE_BLOCKS}; not required)",
             filename,
         )
     else:
@@ -1542,9 +1547,7 @@ def validate_agents_directory(agents_dir: Path) -> list[AgentValidationReport]:
         # Normal path: scan_one_agent returns [report]. Unpack the single
         # element. If the harness ever returns something else here it's a
         # contract violation — assert loudly during development.
-        assert len(sr.findings) == 1, (
-            f"scan_one_agent must return exactly one report, got {len(sr.findings)}"
-        )
+        assert len(sr.findings) == 1, f"scan_one_agent must return exactly one report, got {len(sr.findings)}"
         reports.append(sr.findings[0])
 
     return reports

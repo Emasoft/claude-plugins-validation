@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Registers a new MCP server in a plugin's `.mcp.json`. The default transport is stdio (executable spawned per session). HTTP transport is also supported via the `--http-url` flag. The server's `command` MUST be cross-platform — invoke it via `node`, `python3`, `uv run`, or `npx` so it runs identically on Linux, macOS, and Windows. A bare relative shell-script command is rejected with a CRITICAL finding. Loaded by `cpv-main-menu-agent` via the Create → Add MCP server menu branch.
+Registers a new MCP server in a plugin's `.mcp.json`. The default transport is stdio (executable spawned per session). HTTP transport is also supported via the `--http-url` flag. The server's `command` MUST be cross-platform — invoke it via `node`, `python3`, `uv run`, or `npx` so it runs identically on Linux, macOS, and Windows. A bare relative shell-script command (e.g. `./run.sh`) is a portability footgun: `validate_mcp` flags a relative file path that omits `${CLAUDE_PLUGIN_ROOT}` as a MINOR finding, and a `.sh` entry point will not run on Windows at all — always wrap it in a cross-platform interpreter. Loaded by `cpv-main-menu-agent` via the Create → Add MCP server menu branch.
 
 ## Prerequisites
 
@@ -47,7 +47,7 @@ Copy this checklist and track your progress:
 | Error | Resolution |
 |-------|------------|
 | MAJOR: server name collision across sources | Remove the duplicate from one source — prefer `.mcp.json` |
-| CRITICAL: bare shell-script command | Rewrite as `node` / `python3` / `uv run` invocation |
+| MINOR: relative command path missing `${CLAUDE_PLUGIN_ROOT}` (bare shell script) | Rewrite as a cross-platform `node` / `python3` / `uv run` invocation |
 | MAJOR: reserved name `workspace` | Pick a different server name |
 | Server fails to start at runtime | Test the command manually; check executable permissions on bundled scripts |
 
@@ -59,10 +59,12 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" /path/to/my-plugin \
   --type mcp --name todo \
   --command 'node "${CLAUDE_PLUGIN_ROOT}/servers/todo/index.js"'
 
-# Python MCP server (stdio)
+# Python MCP server (stdio) — `--with mcp` injects the MCP SDK from PyPI into
+# the ephemeral env. Do NOT pass `--with sqlite3`: sqlite3 ships in the Python
+# stdlib and has no PyPI distribution, so `--with sqlite3` fails to resolve.
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" /path/to/my-plugin \
   --type mcp --name db \
-  --command 'uv run --with sqlite3 python "${CLAUDE_PLUGIN_ROOT}/servers/db/server.py"'
+  --command 'uv run --with mcp python "${CLAUDE_PLUGIN_ROOT}/servers/db/server.py"'
 
 # HTTP transport (uncommon — only for remote services)
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" /path/to/my-plugin \

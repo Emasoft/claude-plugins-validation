@@ -30,6 +30,7 @@ all `<placeholder-for-...>` values with your actual configuration before use.
 | `<placeholder-for-marketplace-dir>` | Local path to marketplace repo root | push-plugins.sh |
 | `<placeholder-for-cpv-subdir>` | Relative path from repo root to CPV install | pre-commit-hook.py |
 | `<placeholder-for-submodule-names>` | Comma-separated list of submodule names | setup-hooks.py |
+| `<placeholder-for-validation-plugin-name>` | CPV plugin name as it appears in the plugin cache (e.g. `claude-plugins-validation`) | pre-push-hook.py, push-plugins.sh |
 
 ---
 
@@ -664,10 +665,21 @@ def find_cpv_dir() -> Path | None:
     cache_base = Path.home() / ".claude" / "plugins" / "cache" / "<placeholder-for-marketplace-owner>" / "<placeholder-for-validation-plugin-name>"
     if not cache_base.is_dir():
         return None
-    # Get latest version directory by sorting version strings
+
+    def version_key(d: Path) -> tuple[int, ...]:
+        # Sort version dir names numerically, not lexically. A plain string
+        # sort orders "2.9.0" AFTER "2.115.0" (because '9' > '1'), which would
+        # pick an OLDER CPV as "latest". Parsing each dot-separated segment to
+        # an int reproduces `sort -V` semantics without a packaging dependency;
+        # non-numeric segments fall back to 0 so a malformed dir can't crash.
+        parts: list[int] = []
+        for seg in d.name.split("."):
+            parts.append(int(seg) if seg.isdigit() else 0)
+        return tuple(parts)
+
     versions = sorted(
         [d for d in cache_base.iterdir() if d.is_dir()],
-        key=lambda d: d.name,
+        key=version_key,
     )
     if not versions:
         return None
@@ -1462,17 +1474,54 @@ def detect_license(repo_root: Path) -> tuple[str, str]:
     return license_type, text
 
 
+def _plugin_author(plugin: dict) -> str:
+    """Normalize a plugin 'author' (str or {'name': ...} dict) to a display string."""
+    author = plugin.get("author", "")
+    if isinstance(author, dict):
+        return author.get("name", "")
+    return str(author)
+
+
+def _plugin_repo_link(plugin: dict) -> str:
+    """Build the Repository cell as a markdown link.
+
+    A plugin's location lives in 'repository' (a URL string) or, more commonly,
+    in 'source' — which is either a path string ('./x'), a GitHub object
+    ({'source': 'github', 'repo': 'owner/name'}), or a URL object
+    ({'source': 'url', 'url': '...'}). Return a '[text](url)' link when a URL
+    is available, otherwise the bare source text, otherwise an empty cell.
+    """
+    repository = plugin.get("repository", "")
+    if isinstance(repository, str) and repository:
+        return f"[Link]({repository})"
+
+    source = plugin.get("source", "")
+    if isinstance(source, dict):
+        repo = source.get("repo", "")
+        if source.get("source") == "github" and repo:
+            return f"[{repo}](https://github.com/{repo})"
+        url = source.get("url", "")
+        if url:
+            return f"[Link]({url})"
+    elif isinstance(source, str) and source:
+        return source
+    return ""
+
+
 def build_plugin_table_rows(plugins: list[dict]) -> str:
     """Build markdown table rows from the plugins array.
 
-    Each row: | Name | Version | Description |
+    Each row matches the template header column order:
+    | Name | Description | Version | Author | Repository |
     """
     rows: list[str] = []
     for plugin in plugins:
         name = plugin.get("name", "unknown")
-        version = plugin.get("version", "0.0.0")
         description = plugin.get("description", "")
-        rows.append(f"| {name} | {version} | {description} |")
+        version = plugin.get("version", "0.0.0")
+        author = _plugin_author(plugin)
+        repo_link = _plugin_repo_link(plugin)
+        rows.append(f"| {name} | {description} | {version} | {author} | {repo_link} |")
     return "\n".join(rows)
 
 

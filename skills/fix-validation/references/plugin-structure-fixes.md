@@ -174,7 +174,7 @@ root cause, and step-by-step fix instructions.
 **Root cause**: A field in plugin.json is not part of the known Claude Code plugin spec. This is not blocking — custom fields are allowed — but should be documented.
 **Fix**:
 1. If the field is needed by your plugin scripts, add a comment in README.md explaining its purpose.
-2. If it is a typo, correct it. Known fields (aligned with plugins-reference.md v2.1.121) are: `name`, `$schema` (v2.1.120), `version`, `description`, `author`, `homepage`, `repository`, `license`, `keywords`, `commands`, `agents`, `skills`, `hooks`, `mcpServers`, `outputStyles`, `themes` (v2.1.118), `lspServers`, `monitors` (v2.1.105), `userConfig`, `channels`, `dependencies`.
+2. If it is a typo, correct it. Known fields (the exact `known_fields` set in `validate_plugin.py`) are: `name`, `$schema` (v2.1.120), `version`, `description`, `author`, `homepage`, `repository`, `license`, `keywords`, `commands`, `agents`, `skills`, `hooks`, `mcpServers`, `outputStyles`, `themes` (v2.1.118), `lspServers`, `monitors` (v2.1.105), `userConfig` (v2.1.80), `channels` (v2.1.85), `dependencies` (v2.1.110), `defaultEnabled` (v2.1.154 — ship disabled when false), `experimental` (v2.1.129 — preferred wrapper for opt-in features like `themes`/`monitors`), and `cpv` (the CPV-managed `cpv.strip` config block emitted by the generator).
 3. If it is truly unused, remove it.
 
 ### MAJOR: Field 'repository' must be a string URL
@@ -323,15 +323,21 @@ root cause, and step-by-step fix instructions.
    ```
 2. Only `hooks`, `mcpServers`, and `lspServers` may use inline objects.
 
-### CRITICAL: Redundant default-path declaration (string)
+### CRITICAL / MINOR: Redundant default-path declaration (string)
 
-**Error message**: `Field '<key>' points to '<default_path>' which is auto-discovered by Claude Code. This causes a malformed manifest error and the plugin will not load. Remove it from plugin.json — only non-standard paths need explicit declaration.`
-**Severity**: CRITICAL
+**Severity depends on the field** (verified empirically 2026-04-18). `validate_plugin.py` splits this check by whether pointing at the default actually breaks loading:
+
+- **`hooks` → CRITICAL** (`"hooks": "./hooks/"`, the directory): CC's manifest validator rejects the default-directory form with `hooks: Invalid input` and the **plugin will not load**.
+  **Error message**: `Field 'hooks' points to './hooks/' which Claude Code rejects with `hooks: Invalid input` — the plugin will not load. Remove it from plugin.json — only non-standard paths need explicit declaration.`
+- **`commands` / `skills` / `outputStyles` → MINOR** (redundancy nudge, harmless — this was previously CRITICAL and was a false positive; CC accepts these and the docs even endorse the array form): the field is simply redundant because CC auto-discovers the folder anyway.
+  **Error message**: `Field '<key>' points to '<default_path>' which Claude Code auto-discovers anyway. This declaration is redundant. Remove the field from plugin.json (the default folder is scanned automatically).`
+- **`agents` → handled by the dedicated agents-folder check below** (a folder path in `agents` is ALWAYS rejected — see "`agents` field contains a folder path"). The redundant-default check skips `agents` so the richer message wins.
+
 **File**: `.claude-plugin/plugin.json`
-**Root cause**: Claude Code auto-discovers standard directories (`commands/`, `agents/`, `skills/`, `hooks/`) at the plugin root. Declaring them in the manifest causes Claude Code to reject the manifest as malformed — the plugin **will not load** and an "invalid manifest file" error is shown.
+**Root cause**: Claude Code auto-discovers the standard directories (`commands/`, `agents/`, `skills/`, `hooks/`, `output-styles/`) at the plugin root. For `hooks`, naming the default directory breaks loading; for the others it is merely redundant.
 **Fix**:
-1. Remove the redundant field from `plugin.json`. For example, remove `"commands": "./commands/"`, `"skills": "./skills/"`, `"hooks": "./hooks/"`, etc.
-2. Only declare these fields when pointing to a **non-standard** location (e.g., `"commands": "./src/my-commands/"`).
+1. For `hooks` (CRITICAL): remove `"hooks": "./hooks/"` from `plugin.json` — the default `hooks/hooks.json` is loaded automatically.
+2. For `commands` / `skills` / `outputStyles` (MINOR): removing the redundant field is recommended but not required; only declare these when pointing to a **non-standard** location (e.g., `"commands": "./src/my-commands/"`).
 3. Minimal correct manifest:
    ```json
    {
@@ -340,23 +346,20 @@ root cause, and step-by-step fix instructions.
      "description": "My plugin"
    }
    ```
-4. Auto-discovered defaults that must NOT be declared:
+4. Default paths per field (the `auto_discovered_defaults` map): `commands` → `./commands/`, `agents` → `./agents/`, `skills` → `./skills/`, `hooks` → `./hooks/`, `outputStyles` → `./output-styles/`. Only `hooks` in this set is in `breaks_loading_when_default`.
 
-   | Field | Default path | Action |
-   |-------|-------------|--------|
-   | commands | `./commands/` | Remove from manifest |
-   | agents | `./agents/` | Remove from manifest |
-   | skills | `./skills/` | Remove from manifest |
-   | hooks | `./hooks/` | Remove from manifest |
+### CRITICAL / MINOR: Redundant default-path declaration (array)
 
-### CRITICAL: Redundant default-path declaration (array)
+Same severity split as the string form, but the field is an **array of items inside** the default directory (e.g., `"commands": ["./commands/cmd-a.md", "./commands/cmd-b.md"]`).
 
-**Error message**: `Field '<key>' lists files inside '<default_path>' which is auto-discovered by Claude Code. This causes a malformed manifest error and the plugin will not load. Remove it from plugin.json.`
-**Severity**: CRITICAL
+- **`hooks` → CRITICAL**: `Field 'hooks' lists items inside './hooks/' which Claude Code rejects with `hooks: Invalid input` — the plugin will not load. Remove it from plugin.json.`
+- **`commands` / `skills` / `outputStyles` → MINOR**: `Field '<key>' lists items inside '<default_path>' which Claude Code auto-discovers anyway. This is redundant. Remove the field from plugin.json (or include only items OUTSIDE the default folder).`
+- **`agents` → handled by the dedicated agents-folder check below.**
+
 **File**: `.claude-plugin/plugin.json`
-**Root cause**: The manifest lists individual files inside a standard auto-discovered directory (e.g., `"commands": ["./commands/cmd-a.md", "./commands/cmd-b.md"]`). Claude Code rejects this as a malformed manifest — the plugin **will not load**.
 **Fix**:
-1. Remove the field entirely from `plugin.json`:
+1. For `hooks` (CRITICAL): remove the field entirely.
+2. For `commands` / `skills` / `outputStyles` (MINOR): the items inside the default folder are auto-discovered, so the list is redundant — remove it, or keep ONLY entries that point **outside** the default folder.
    ```diff
    {
      "name": "my-plugin",
@@ -364,8 +367,6 @@ root cause, and step-by-step fix instructions.
      "version": "1.0.0"
    }
    ```
-2. All files inside `commands/`, `agents/`, `skills/`, and `hooks/` are auto-discovered.
-3. Only use explicit file lists when referencing files **outside** the default directories.
 
 ### MAJOR: `agents` field contains a folder path
 
@@ -399,7 +400,7 @@ This is a **publish-and-break** scenario. Your plugin will install but the agent
 
 ### MAJOR: `hooks` points at the default file (cascading MCP failure)
 
-**Error message**: `Field 'hooks' points to './hooks/hooks.json' which Claude Code already auto-loads by convention. At runtime this triggers 'Duplicate hooks file detected' AND the cascading 'hook-load-failed' error DISABLES this plugin's MCP servers (silent partial failure — `claude plugin validate` does not catch it). ...`
+**Error message**: `Field 'hooks' contains '<path>' which resolves to the auto-discovered 'hooks/hooks.json' default. At runtime this triggers 'Duplicate hooks file detected' AND the cascading 'hook-load-failed' error DISABLES this plugin's MCP servers (silent partial failure — `claude plugin validate` does not catch it). Fix: remove the 'hooks' field from plugin.json (the default file is loaded automatically), or point it at a NON-default path like './hooks/extra.json'.`
 **Severity**: MAJOR
 **File**: `.claude-plugin/plugin.json`
 **Root cause**: Empirically verified 2026-04-18 (test: `cpv-hooks-doublefire-test`). When `plugin.json` has `"hooks": "./hooks/hooks.json"` (or `"hooks/hooks.json"`), CC's runtime debug log shows:
@@ -520,13 +521,13 @@ Since v2.23.1, CPV automatically suppresses this warning when the directory IS r
 
 ### MINOR: settings.json unrecognized key
 
-**Error message**: `settings.json: unrecognized key '<key>' — supported plugin settings: agent`
+**Error message**: `settings.json: unrecognized key '<key>' — supported plugin settings: agent, extraKnownMarketplaces, strictKnownMarketplaces, subagentStatusLine`
 **Severity**: MINOR
 **File**: `settings.json`
-**Root cause**: The plugin-shipped `settings.json` contains a key that is not recognized as a valid plugin setting. Currently, only `"agent"` is supported.
+**Root cause**: The plugin-shipped `settings.json` contains a key that is not in CPV's `recognized_keys` set. The recognized plugin-level settings are `agent`, `extraKnownMarketplaces` (v2.1.80 inline-marketplace declaration), `strictKnownMarketplaces` (admin-managed scope — also MAJOR-checked separately), and `subagentStatusLine` (plugin-scoped status-line override).
 **Fix**:
 1. Remove or rename the unrecognized key.
-2. The only supported plugin setting key is `agent`:
+2. Use one of the recognized keys, e.g.:
    ```json
    {
      "agent": "my-custom-agent"
@@ -806,11 +807,11 @@ tools: [Read, Agent]
 
 ### WARNING: Legacy agent frontmatter fields
 
-**Error message**: `Field '<capabilities|context|agent|user-invocable|system-prompt>' is legacy and may not be honored`
+**Error message**: `Field '<capabilities|context|agent|user-invocable|system-prompt>' is not in the current sub-agents spec (v2.1.98). It may be legacy/extended. Verify it still works with your installed Claude Code version.` (each field emits its own message)
 **Severity**: WARNING
 **File**: `agents/<filename>.md`
-**Source**: `validate_agent.py`
-**Root cause**: The following fields are accepted but not part of the current agent spec as of v2.8.2+:
+**Source**: `validate_agent.py` — `validate_capabilities_field()`, `validate_context_field()`, `validate_agent_field()`, `validate_user_invocable_field()`, `validate_system_prompt_field()` (each calls `report.warning()`)
+**Root cause**: The following fields are accepted but not part of the current sub-agents spec (v2.1.98):
 - `capabilities` — superseded by `tools`
 - `context` — only meaningful in some enterprise configurations
 - `agent` — meaningful only with `context: fork`
@@ -1591,13 +1592,13 @@ These errors can appear for any text file scanned across the plugin:
 |-------|-------|
 | **Script** | `validate_plugin.py` |
 | **Severity** | MAJOR |
-| **Messages** | `userConfig.KEY missing required 'title' field`, `userConfig.KEY missing required 'type' field`, `userConfig.KEY.type must be one of ['boolean','directory','file','number','string']`, `userConfig.KEY.sensitive must be a boolean`, `userConfig.KEY.default type (...) does not match declared type (...)` |
+| **Messages** | `'userConfig.<key>' missing required sub-field 'title' (spec requires type, title, description)` (likewise for `'type'` / `'description'`), `'userConfig.<key>.type' = '...' is not a valid type (expected one of: ['boolean', 'directory', 'file', 'number', 'string'])`, `'userConfig.<key>.sensitive' must be a boolean, got <type>`, `'userConfig.<key>.default' type (...) does not match declared type (...)` |
 
 **Root Cause:** Claude Code's runtime Zod schema enforces stricter rules than the public docs suggest:
 - `title` is REQUIRED (string) — missing title fails install with `userConfig.<key>.title: Invalid input: expected string, received undefined`
 - `type` is REQUIRED and must be exactly one of `"string" | "number" | "boolean" | "directory" | "file"` — missing/invalid type fails install with `userConfig.<key>.type: Invalid option: expected one of "string"|"number"|"boolean"|"directory"|"file"`
 - `"integer"`, `"array"`, `"object"` (listed in some docs / JSON Schema) are NOT accepted by the runtime
-- `description` (string) is optional but recommended
+- `description` (string) is **REQUIRED** per spec (plugins-reference.md:473, "Required: Yes"). CPV's `validate_userconfig` enforces all three of `type`, `title`, `description` via its `required_sub` set — omitting `description` produces the MAJOR `'userConfig.<key>' missing required sub-field 'description'`.
 - `sensitive` (boolean) is optional; `true` routes the value to the system keychain
 - `default` (optional) must match the declared `type` — bool is rejected when `type="number"` even though bool is a Python int subclass
 
@@ -1752,16 +1753,16 @@ Valid frontmatter fields: `name`, `description`, `keep-coding-instructions` (boo
 
 These rules fire only when both `.claude-plugin/plugin.json` AND `.claude-plugin/marketplace.json` exist at the SAME repo root (Layout C). They cross-validate the two manifests against each other.
 
-### CRITICAL: Layout C self-entry name does not match plugin.json name
+### MAJOR: Layout C marketplace.json has no self-reference for plugin.json.name
 
 | Field | Value |
 |-------|-------|
 | **Script** | `validate_plugin.py::validate_layout_c_consistency` |
-| **Severity** | CRITICAL |
-| **Message** | `Layout C: self-entry name 'X' does not match plugin.json.name 'Y'` |
+| **Severity** | MAJOR |
+| **Message** | `Layout C: plugin.json declares name='X' but marketplace.json's plugins[] does not list a self-reference with that name. Add `{name: 'X', source: './'}` to marketplace.json's plugins array, or remove marketplace.json if this is meant to be a plain plugin.` |
 | **Category** | architecture |
 
-**Fix:** Decide which name is canonical (usually `plugin.json.name`) and update the other file to match. The marketplace.json self-entry MUST have the same `name` as `plugin.json.name`.
+**Fix:** Add a self-reference entry to `marketplace.json`'s `plugins[]` whose `name` matches `plugin.json.name` (or remove `marketplace.json` if this is meant to be a plain plugin, not Layout C).
 
 ```json
 // .claude-plugin/plugin.json
@@ -1775,15 +1776,15 @@ These rules fire only when both `.claude-plugin/plugin.json` AND `.claude-plugin
 }
 ```
 
-### CRITICAL: Layout C self-entry source is not "./"
+### MAJOR: Layout C self-entry source is not "./"
 
 | Field | Value |
 |-------|-------|
 | **Script** | `validate_plugin.py::validate_layout_c_consistency` |
-| **Severity** | CRITICAL |
-| **Message** | `Layout C self-entry source is 'X', expected './'` |
+| **Severity** | MAJOR |
+| **Message** | `Layout C: marketplace.json's self-reference for plugin 'X' has source=...; must be './' (relative) so install resolves to the same repo. Other source types would re-clone the repository.` |
 
-**Fix:** The self-entry's source MUST be exactly `"./"` (or the equivalent `{"source": "directory", "path": "./"}` object form).
+**Fix:** The self-entry's source MUST be `"./"` (or the bare `"."`). Any other source type re-clones the repo at install time.
 
 ```json
 // WRONG
@@ -1793,20 +1794,21 @@ These rules fire only when both `.claude-plugin/plugin.json` AND `.claude-plugin
 { "name": "my-plugin", "source": "./" }
 ```
 
-### MAJOR: Layout C version drift between manifests
+### MINOR: Layout C version drift between the two manifests
 
 | Field | Value |
 |-------|-------|
 | **Script** | `validate_plugin.py::validate_layout_c_consistency` |
-| **Severity** | MAJOR |
-| **Message** | `Layout C version mismatch: plugin.json=X, marketplace.json.metadata=Y, self-entry=Z` |
+| **Severity** | MINOR |
+| **Message** | `Layout C: plugin.json version 'X' differs from marketplace.json plugins[<name>].version 'Y'. Bump both together to keep installation metadata consistent.` |
 
-**Fix:** Bump all three version slots to the same value. The standard `publish.py` from `generate_plugin_repo.py --self-marketplace` does this atomically. If you edited one manifest by hand, edit the other(s) to match.
+**Fix:** The check compares two slots — `plugin.json.version` and the self-entry's `plugins[<self>].version` — and only fires when BOTH are set and differ. Bump both to the same value (the standard `publish.py` from `generate_plugin_repo.py --self-marketplace` does this atomically).
 
-Three slots that MUST agree:
+Two slots that MUST agree:
 - `.claude-plugin/plugin.json` → `version`
-- `.claude-plugin/marketplace.json` → `metadata.version`
-- `.claude-plugin/marketplace.json` → `plugins[N].version` (the self-entry, where source=="./")
+- `.claude-plugin/marketplace.json` → `plugins[N].version` (the self-entry, where `name == plugin.json.name`)
+
+> Note: `marketplace.json` → `metadata.version` is NOT part of this specific cross-check (the metadata-version slot is validated elsewhere). Keep it in sync too as good practice, but `validate_layout_c_consistency` only diffs the two slots above.
 
 For the canonical fix recipe and migration paths, see [layout-c-migration.md](../../migrate-marketplace-architecture/references/layout-c-migration.md).
 
@@ -1820,8 +1822,8 @@ For the canonical fix recipe and migration paths, see [layout-c-migration.md](..
 |-------|-------|
 | **Script** | `validate_command.py` |
 | **Severity** | WARNING |
-| **Message** | `Command name '<name>' collides with a built-in Claude Code slash command` |
-| **Common collisions** | `clear`, `compact`, `config`, `cost`, `doctor`, `exit`, `help`, `init`, `loop`, `model`, `permissions`, `plan`, `release`, `release-notes`, `resume`, `reload-plugins`, `restart`, `review`, `status`, `theme`, `ultrareview`, `usage` |
+| **Message** | `Command name '<name>' collides with a built-in Claude Code slash command. Users typing /<name> get the built-in; the plugin's command is only reachable via the namespaced form /<plugin>:<name>. Consider renaming.` |
+| **Common collisions** (must each be present in `BUILTIN_SLASH_COMMANDS`) | `clear`, `compact`, `config`, `context`, `cost`, `doctor`, `exit`, `help`, `init`, `loop`, `mcp`, `model`, `permissions`, `plugin`, `release-notes`, `resume`, `review`, `security-review`, `skills`, `status`, `theme`, `ultrareview`, `usage` |
 
 **Why it matters:** When the user types `/clear` (or whatever name), Claude Code dispatches to the built-in handler — your plugin's command is shadowed and never runs. Even worse, the user can't reach it any other way unless they uninstall the colliding plugin.
 

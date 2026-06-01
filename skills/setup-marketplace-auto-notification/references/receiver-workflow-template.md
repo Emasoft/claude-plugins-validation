@@ -11,7 +11,7 @@
 ## Checklist
 
 - [ ] Decide layout (A = hub-only, B = nested monorepo)
-- [ ] Copy the matching receiver template into marketplace's `.github/workflows/update-submodules.yml`
+- [ ] Copy the matching receiver template into marketplace's `.github/workflows/update-plugin-version.yml`
 - [ ] Replace placeholders
 - [ ] Verify payload contract matches what plugin's notify workflow sends
 - [ ] Test with a dummy dispatch before going live
@@ -41,7 +41,11 @@ marketplace repo and must be able to bypass branch protection.
 ## Layout A Receiver
 
 Use this when each plugin lives in its own GitHub repo and the marketplace
-references it as `{"source": "github", "repo": "owner/plugin"}`. The
+references it with the canonical **nested** source object
+`{"name": "...", "source": {"source": "github", "repo": "owner/plugin"}}`.
+(The flat form `{"source": "github", "repo": "..."}` with a top-level `repo`
+sibling is rejected by CPV's validator as `RC-MKPL-UNKNOWN-FIELD` — and the
+parser below reads `source.repo`, so it requires the nested object.) The
 receiver fetches `.claude-plugin/plugin.json` from the plugin repo via the
 GitHub API and writes the `version` field into `marketplace.json`.
 
@@ -102,6 +106,18 @@ jobs:
             echo "No plugin name in payload; aborting." >&2
             exit 1
           fi
+          # SECURITY: both PLUGIN and VERSION originate from the dispatch
+          # client_payload (untrusted) and later land in a commit message via
+          # ${{ steps.target.outputs.* }} interpolation. Constrain them to safe
+          # shapes here so a crafted payload cannot inject into that run-script.
+          if [[ ! "$PLUGIN" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+            echo "Plugin name '$PLUGIN' is not a valid plugin slug; aborting." >&2
+            exit 1
+          fi
+          if [[ -n "$VERSION" && ! "$VERSION" =~ ^[0-9A-Za-z.+-]+$ ]]; then
+            echo "Version '$VERSION' has unexpected characters; aborting." >&2
+            exit 1
+          fi
           echo "plugin=$PLUGIN"   >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -134,6 +150,13 @@ jobs:
           VERSION=$(gh api "repos/$OWNER_REPO/contents/.claude-plugin/plugin.json" --jq '.content' \
             | base64 -d \
             | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))")
+          # SECURITY: this version is read from a remote plugin.json (the plugin
+          # author controls it) and is interpolated into a commit message later,
+          # so constrain it to a safe shape before exporting it.
+          if [[ -n "$VERSION" && ! "$VERSION" =~ ^[0-9A-Za-z.+-]+$ ]]; then
+            echo "Fetched version '$VERSION' has unexpected characters; aborting." >&2
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Update marketplace.json
@@ -167,6 +190,12 @@ jobs:
           PY
 
       - name: Commit and push if changed
+        env:
+          # Pass interpolated values through the environment instead of
+          # splicing ${{ }} directly into the run-script — a crafted plugin
+          # name or version would otherwise inject into this shell command.
+          PLUGIN: ${{ steps.target.outputs.plugin }}
+          VERSION: ${{ steps.target.outputs.version || steps.fetch.outputs.version }}
         run: |
           set -euo pipefail
           if git diff --quiet -- .claude-plugin/marketplace.json; then
@@ -174,7 +203,7 @@ jobs:
             exit 0
           fi
           git add .claude-plugin/marketplace.json
-          git commit -m "chore: bump ${{ steps.target.outputs.plugin }} to ${{ steps.target.outputs.version || steps.fetch.outputs.version }} [skip ci]"
+          git commit -m "chore: bump $PLUGIN to $VERSION [skip ci]"
           for attempt in 1 2 3; do
             if git push; then exit 0; fi
             git pull --rebase origin <DEFAULT_BRANCH>
@@ -236,12 +265,29 @@ jobs:
             echo "No plugin name; aborting." >&2
             exit 1
           fi
+          # SECURITY: $PLUGIN comes from the dispatch client_payload, so treat it
+          # as untrusted. Reject anything that is not a plain plugin name (lower-
+          # case letters, digits, hyphen) BEFORE it reaches a path or Python — a
+          # value like "x'); __import__('os').system('…'); #" would otherwise
+          # break out of the open('…') string literal below and run code in this
+          # runner, which holds MARKETPLACE_PAT with write access.
+          if [[ ! "$PLUGIN" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+            echo "Plugin name '$PLUGIN' is not a valid plugin slug; aborting." >&2
+            exit 1
+          fi
           FILE="plugins/$PLUGIN/.claude-plugin/plugin.json"
           if [[ ! -f "$FILE" ]]; then
             echo "Plugin file $FILE not found; aborting." >&2
             exit 1
           fi
-          VERSION=$(python3 -c "import json; print(json.load(open('$FILE'))['version'])")
+          # Pass the path via the environment (FILE=) instead of string-
+          # interpolating it into the -c program, so the value can never be
+          # parsed as Python source even if validation above ever changed.
+          VERSION=$(FILE="$FILE" python3 -c "import json, os; print(json.load(open(os.environ['FILE']))['version'])")
+          if [[ -n "$VERSION" && ! "$VERSION" =~ ^[0-9A-Za-z.+-]+$ ]]; then
+            echo "Version '$VERSION' has unexpected characters; aborting." >&2
+            exit 1
+          fi
           echo "plugin=$PLUGIN"   >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -269,6 +315,12 @@ jobs:
           PY
 
       - name: Commit if changed
+        env:
+          # Pass via env, not ${{ }} interpolation in the run-script, so a
+          # crafted version string from the local plugin.json cannot inject
+          # into this shell command.
+          PLUGIN: ${{ steps.resolve.outputs.plugin }}
+          VERSION: ${{ steps.resolve.outputs.version }}
         run: |
           set -euo pipefail
           if git diff --quiet -- .claude-plugin/marketplace.json; then
@@ -276,7 +328,7 @@ jobs:
             exit 0
           fi
           git add .claude-plugin/marketplace.json
-          git commit -m "chore: sync ${{ steps.resolve.outputs.plugin }} to ${{ steps.resolve.outputs.version }} [skip ci]"
+          git commit -m "chore: sync $PLUGIN to $VERSION [skip ci]"
           git push
 ```
 

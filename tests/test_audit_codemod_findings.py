@@ -203,12 +203,7 @@ _PARAM_BODY = (
 # Line 4 (the literal) is inside the parametrize body.
 _PARAM_BODY_INSIDE_LINE = 4
 
-_NO_PARAM = (
-    "import os\n"
-    "\n"
-    "def helper():\n"
-    "    return os.getcwd()\n"
-)
+_NO_PARAM = "import os\n\ndef helper():\n    return os.getcwd()\n"
 
 
 class TestParametrizeCacheCorrectness:

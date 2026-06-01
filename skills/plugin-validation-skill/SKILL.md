@@ -54,7 +54,7 @@ Validates Claude Code plugins against 190+ structural and quality rules covering
   > Plugin components reference · Plugin installation scopes · Plugin manifest schema · Plugin caching and file resolution · Plugin directory structure · CLI commands reference · Debugging and development tools · Distribution and versioning reference · See also
 - [Skills Reference](references/skills-reference.md) — official skills doc; consult when Phase 0 detects "this is a SKILL"
 - [Shape Detection](references/shape-detection.md) — Phase 0 detection table + hard-refusal protocol
-  > Why this rule exists · Detection table — root-folder signals to verdict · Hard refusal protocol · Standard plugin layout · Path-variable rules — ${CLAUDE_PLUGIN_ROOT} vs ${CLAUDE_PLUGIN_DATA} · Custom-folder declarations in plugin.json · Common mis-classification patterns · Verifier: ten checks before marking as plugin
+  > Why this rule exists · Detection table — root-folder signals to verdict · Hard refusal protocol · Standard plugin layout · Path-variable rules — ${CLAUDE_PLUGIN_ROOT} vs ${CLAUDE_PLUGIN_DATA} · Custom non-standard root entries · Common mis-classification patterns · Verifier: ten checks before marking as plugin
 - [Validation Checklist](references/validation-checklist.md)
   > 1. Plugin Manifest Checklist · 2. Plugin Structure Checklist · 3. Hook Configuration Checklist · 4. Skill Validation Checklist · 5. MCP Server Checklist · 6. Marketplace Checklist · 7. Agent Checklist · 8. LSP Server Checklist · 9. Script and Code Quality Checklist · 10. Pre-Release Final Checklist · 11. Validation Commands
 - [Plugin Structure](references/plugin-structure.md)

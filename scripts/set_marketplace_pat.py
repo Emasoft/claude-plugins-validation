@@ -14,8 +14,11 @@ used ``echo "$MARKETPLACE_PAT" | gh secret set MARKETPLACE_PAT`` which is
    ``zsh`` / ``bash`` / Windows PowerShell variations — especially when
    invoked from a subprocess with ``stdin=devnull``.
 
-The correct invocation is ``gh secret set NAME --repo OWNER/REPO --body "$VALUE"``.
-This script wraps that and enforces it.
+The correct invocation pipes the value on stdin: ``gh secret set NAME --repo
+OWNER/REPO`` with the value fed via stdin (gh reads stdin when ``--body`` is
+omitted). This avoids both the trailing-newline footgun and exposing the token
+on argv (``ps -ef`` / ``/proc/<pid>/cmdline``). This script wraps that and
+enforces it.
 
 Usage::
 
@@ -27,9 +30,9 @@ Behavior:
     - Reads the PAT value from ``$MARKETPLACE_PAT`` in the environment.
     - If not set, prints a clear error and exits 2 (do NOT prompt — the
       caller decides whether to interactively create a token).
-    - For each repository, runs ``gh secret set MARKETPLACE_PAT --repo <repo>
-      --body "$MARKETPLACE_PAT"`` and verifies the secret afterwards with
-      ``gh secret list``.
+    - For each repository, runs ``gh secret set MARKETPLACE_PAT --repo <repo>``
+      with the PAT piped on stdin (no ``--body`` flag, so gh reads stdin) and
+      verifies the secret afterwards with ``gh secret list``.
     - Never prints the PAT value, not even a prefix. Length check only.
 
 Exit codes:
@@ -104,13 +107,22 @@ def _secret_exists(gh: str, repo: str, secret_name: str) -> bool:
 
 
 def _set_secret(gh: str, repo: str, secret_name: str, value: str) -> int:
-    """Set the secret via stdin (--body-file -). Never uses argv (which is
-    visible to other users via /proc/<pid>/cmdline or `ps -ef`). Never logs
-    value. The trailing newline strip on the gh side eliminates the
-    echo-pipe footgun (echo adds a newline → "Bad credentials" at push time).
+    """Set the secret by piping the value on stdin. ``gh secret set`` reads
+    the value from standard input when ``--body`` is OMITTED (per its own
+    help: "-b, --body string  The value for the secret (reads from standard
+    input if not specified)"). We deliberately do NOT pass the value on argv
+    — argv is visible to other users via /proc/<pid>/cmdline or `ps -ef`, so
+    the token would leak. Never logs the value.
+
+    NOTE: ``gh secret set`` has no ``--body-file`` flag (that is a git/other-
+    tool idiom); passing it makes gh exit with "unknown flag: --body-file".
+    The correct stdin form is simply to leave ``--body`` off and provide the
+    value via ``input=``. gh strips the trailing newline itself, which also
+    eliminates the echo-pipe footgun (echo adds a newline → "Bad credentials"
+    at push time).
     """
     r = subprocess.run(
-        [gh, "secret", "set", secret_name, "--repo", repo, "--body-file", "-"],
+        [gh, "secret", "set", secret_name, "--repo", repo],
         input=value,
         capture_output=True,
         text=True,

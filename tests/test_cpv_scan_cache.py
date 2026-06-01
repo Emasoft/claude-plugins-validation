@@ -283,29 +283,21 @@ def test_reset_cache_drops_every_entry() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    os.name == "nt", reason="POSIX-only mode bits — Windows uses ACLs"
-)
+@pytest.mark.skipif(os.name == "nt", reason="POSIX-only mode bits — Windows uses ACLs")
 def test_cache_file_has_0600_mode(isolated_cache_env: Path) -> None:
     """The SQLite file mode must be 0o600 after the first write."""
     put_cached_findings("c", "cat", "v1", [{"x": 1}])
     cache_path = isolated_cache_env / cpv_scan_cache._CACHE_FILENAME
     file_mode = stat.S_IMODE(os.stat(cache_path).st_mode)
-    assert file_mode == 0o600, (
-        f"Expected 0o600 on cache file but got 0o{file_mode:o}"
-    )
+    assert file_mode == 0o600, f"Expected 0o600 on cache file but got 0o{file_mode:o}"
 
 
-@pytest.mark.skipif(
-    os.name == "nt", reason="POSIX-only mode bits — Windows uses ACLs"
-)
+@pytest.mark.skipif(os.name == "nt", reason="POSIX-only mode bits — Windows uses ACLs")
 def test_cache_parent_dir_has_0700_mode(isolated_cache_env: Path) -> None:
     """The parent dir mode must be 0o700 after first resolution."""
     put_cached_findings("c", "cat", "v1", [{"x": 1}])
     dir_mode = stat.S_IMODE(os.stat(isolated_cache_env).st_mode)
-    assert dir_mode == 0o700, (
-        f"Expected 0o700 on cache dir but got 0o{dir_mode:o}"
-    )
+    assert dir_mode == 0o700, f"Expected 0o700 on cache dir but got 0o{dir_mode:o}"
 
 
 # ---------------------------------------------------------------------------
@@ -381,9 +373,7 @@ def test_corrupt_findings_non_list_returns_none(isolated_cache_env: Path) -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_location_chain_priority_1_explicit_dir(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_location_chain_priority_1_explicit_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """CPV_SCAN_CACHE_DIR wins over everything else."""
     target = tmp_path / "explicit_wins"
     monkeypatch.setenv("CPV_SCAN_CACHE_DIR", str(target))
@@ -394,9 +384,7 @@ def test_location_chain_priority_1_explicit_dir(
     assert not (tmp_path / "cpd_loser" / cpv_scan_cache._CACHE_FILENAME).exists()
 
 
-def test_location_chain_priority_2_claude_plugin_data(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_location_chain_priority_2_claude_plugin_data(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """CLAUDE_PLUGIN_DATA wins when CPV_SCAN_CACHE_DIR is absent."""
     monkeypatch.delenv("CPV_SCAN_CACHE_DIR", raising=False)
     target = tmp_path / "cpd_dir"
@@ -406,9 +394,7 @@ def test_location_chain_priority_2_claude_plugin_data(
     assert (target / cpv_scan_cache._CACHE_FILENAME).exists()
 
 
-def test_location_chain_priority_3_dot_claude_plugins_data(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_location_chain_priority_3_dot_claude_plugins_data(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """~/.claude/plugins/data/... wins when nothing higher is set."""
     monkeypatch.delenv("CPV_SCAN_CACHE_DIR", raising=False)
     monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
@@ -420,20 +406,11 @@ def test_location_chain_priority_3_dot_claude_plugins_data(
 
     put_cached_findings("c", "cat", "v1", [{"x": 1}])
 
-    expected = (
-        fake_home
-        / ".claude"
-        / "plugins"
-        / "data"
-        / "claude-plugins-validation"
-        / cpv_scan_cache._CACHE_FILENAME
-    )
+    expected = fake_home / ".claude" / "plugins" / "data" / "claude-plugins-validation" / cpv_scan_cache._CACHE_FILENAME
     assert expected.exists()
 
 
-def test_location_chain_priority_4_xdg_cache_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_location_chain_priority_4_xdg_cache_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """XDG_CACHE_HOME/cpv wins after the dot-claude path.
 
     We make the dot-claude path UNWRITABLE so the resolver falls
@@ -469,9 +446,7 @@ def test_location_chain_priority_4_xdg_cache_home(
         os.chmod(dot_claude_parent, 0o700)
 
 
-def test_location_chain_priority_5_github_runner_temp(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_location_chain_priority_5_github_runner_temp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """GITHUB_ACTIONS=true + RUNNER_TEMP → the GHA cache file lands there.
 
     Higher-priority candidates are nudged into unwritable state so the
@@ -517,9 +492,7 @@ def test_location_chain_priority_5_github_runner_temp(
 # ---------------------------------------------------------------------------
 
 
-def test_cpv_scan_cache_eq_0_disables_get_and_put(
-    monkeypatch: pytest.MonkeyPatch, isolated_cache_env: Path
-) -> None:
+def test_cpv_scan_cache_eq_0_disables_get_and_put(monkeypatch: pytest.MonkeyPatch, isolated_cache_env: Path) -> None:
     """``CPV_SCAN_CACHE=0`` → get always None, put is no-op."""
     # Seed an entry while cache is on.
     put_cached_findings("c1", "cat", "v1", _sample_findings())
@@ -642,10 +615,7 @@ def test_concurrent_writers_dont_corrupt(isolated_cache_env: Path) -> None:
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
 
-    threads = [
-        threading.Thread(target=worker, args=(i,), name=f"writer-{i}")
-        for i in range(n_threads)
-    ]
+    threads = [threading.Thread(target=worker, args=(i,), name=f"writer-{i}") for i in range(n_threads)]
     for t in threads:
         t.start()
     for t in threads:
@@ -657,9 +627,7 @@ def test_concurrent_writers_dont_corrupt(isolated_cache_env: Path) -> None:
     for i in range(n_threads):
         for j in range(per_thread):
             key = f"t{i}-i{j}"
-            assert get_cached_findings(key, "cat", "v1") == [
-                {"tid": i, "j": j}
-            ], f"Lost entry for {key}"
+            assert get_cached_findings(key, "cat", "v1") == [{"tid": i, "j": j}], f"Lost entry for {key}"
 
 
 # ---------------------------------------------------------------------------
@@ -721,12 +689,8 @@ def test_all_candidates_unwritable_collapses_to_noop(
             assert get_cached_findings("c", "cat", "v1") is None
 
         # The "no writable" INFO message fired at least once.
-        no_writable_records = [
-            r for r in caplog.records if "no writable cache location" in r.message
-        ]
-        assert len(no_writable_records) >= 1, (
-            "Expected the warned-once INFO log to fire when no path is writable"
-        )
+        no_writable_records = [r for r in caplog.records if "no writable cache location" in r.message]
+        assert len(no_writable_records) >= 1, "Expected the warned-once INFO log to fire when no path is writable"
     finally:
         # Restore perms so pytest tmp_path teardown can clean up.
         for d in [blocked_parent, cpd_blocked, fake_home, xdg_blocked]:

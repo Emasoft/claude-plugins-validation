@@ -13,7 +13,7 @@ plain folders into "plugins" that publish but install to nothing.
 - [Hard refusal protocol](#hard-refusal-protocol)
 - [Standard plugin layout](#standard-plugin-layout)
 - [Path-variable rules — ${CLAUDE_PLUGIN_ROOT} vs ${CLAUDE_PLUGIN_DATA}](#path-variable-rules--claude_plugin_root-vs-claude_plugin_data)
-- [Custom-folder declarations in plugin.json](#custom-folder-declarations-in-pluginjson)
+- [Custom non-standard root entries](#custom-non-standard-root-entries)
 - [Common mis-classification patterns](#common-mis-classification-patterns)
 - [Verifier: ten checks before marking as plugin](#verifier-ten-checks-before-marking-as-plugin)
 
@@ -143,8 +143,13 @@ my-plugin/
 Top-level files at plugin root that AREN'T in this list are
 non-standard. Two failure modes apply:
 
-- A folder/file appears at root and is NOT declared in
-  `cpv.allow_root_dirs` → CRITICAL "non-standard root entry".
+- A folder appears at root and is NOT recognised by CPV (not a known
+  component dir, not referenced by the manifest, not gitignored, not a
+  vendoring/submodule dir) → MAJOR `[RC-NONSTD-DIR-001]`
+  "non-standard directory". CPV no longer honors a plugin-declared
+  `cpv.allow_root_dirs` opt-out (removed in TRDD-02e1672b — a plugin
+  must not be able to self-exempt). See [Custom non-standard root
+  entries](#custom-non-standard-root-entries) for how to legitimise one.
 - A standard folder is MISSING for components the manifest
   references → CRITICAL "promised component not found".
 
@@ -179,31 +184,41 @@ content:
 CPV emits MAJOR `[RC-DATA-WRONG-ROOT-001]` for the cache-relative
 case and `[RC-PATH-RELATIVE-001]` (planned) for `./` / `~/` forms.
 
-## Custom-folder declarations in plugin.json
+## Custom non-standard root entries
 
-A plugin MAY use folders outside the standard list, but EVERY
-non-standard folder at root MUST be declared:
+A plugin MAY use folders outside the standard list, but a non-standard
+folder at root is reported as MAJOR `[RC-NONSTD-DIR-001]` unless CPV
+can recognise it as legitimate.
 
-```json
-{
-  "name": "my-plugin",
-  "cpv": {
-    "allow_root_dirs": ["fixtures/", "examples/", "data/"]
-  }
-}
-```
+> **The `cpv.allow_root_dirs` / `cpv.allow_root_files` self-declaration
+> opt-outs were REMOVED (TRDD-02e1672b).** A plugin must not be able to
+> exempt its own directories from CPV's checks — a malicious author
+> could otherwise self-allow arbitrary content. A `cpv.allow_root_dirs`
+> key still present in plugin.json now emits a one-release deprecation
+> WARNING (`[RC-DEPRECATED-OPTOUT]`) and is IGNORED. `cpv.allow_root_files`
+> was never honored.
 
-Without the declaration, CPV emits CRITICAL. The rule exists because
-silent custom layouts are the #1 source of "the plugin published but
-installs to nothing" — the install pipeline only ever knows about
-the standard component dirs.
+CPV recognises a non-standard root folder as legitimate (no MAJOR) when
+ANY of these hold — these are CPV's OWN logic, not author-controlled:
 
-The same rule applies to non-standard FILES at root: any file that
-isn't `LICENSE` / `CHANGELOG.md` / `README.md` / `.gitignore` /
-`pyproject.toml` / `package.json` / `Cargo.toml` / `go.mod` /
-`.python-version` / `.markdownlint.json` / `.mega-linter.yml` /
-`cliff.toml` / `settings.json` / `.mcp.json` / `.lsp.json` MUST be
-covered by `cpv.allow_root_files` or it triggers MAJOR.
+1. It is a built-in known component dir (skills/agents/commands/hooks/
+   scripts/monitors/themes/output-styles/bin, plus `.claude-plugin/`).
+2. A manifest entry references it via `${CLAUDE_PLUGIN_ROOT}/<dir>/...`
+   (MCP, LSP, hook, or monitor command). The manifest reference is the
+   self-documentation that the folder is intentional.
+3. It is gitignored — the plugin excludes it from distribution, so it
+   cannot cause an empty install (research material, local builds,
+   fixtures the publish pipeline never ships).
+4. It is a vendoring/submodule root (`external/`, `vendor/`,
+   `third_party/`, `node_modules/`, anything listed in `.gitmodules`,
+   or a subdirectory named after the plugin itself).
+
+So the correct way to legitimise a custom folder is to pick one of the
+four above — reference it from the manifest if a component uses it, or
+gitignore it if it is dev-only — NOT to declare an allow-list. The rule
+exists because silent custom layouts are the #1 source of "the plugin
+published but installs to nothing" — the install pipeline only ever
+loads from the standard component dirs.
 
 ## Common mis-classification patterns
 
@@ -242,8 +257,12 @@ sanity checks before declaring the directory "definitely a plugin":
 6. No `references/<name>.md` at root (skill-reference shape).
 7. No path inside skill/agent/command/hook content uses `./`, `~/`,
    or absolute non-`${CLAUDE_PLUGIN_ROOT}` paths to local files.
-8. Every non-standard root entry is in `cpv.allow_root_dirs` /
-   `cpv.allow_root_files`.
+8. Every non-standard root folder is legitimised by CPV's own logic —
+   a known component dir, a manifest reference, a `.gitignore` entry, or
+   a vendoring/submodule root (see [Custom non-standard root
+   entries](#custom-non-standard-root-entries)); a plugin-declared
+   `cpv.allow_root_dirs` allow-list is NOT honored (removed,
+   TRDD-02e1672b).
 9. Every cross-reference to another agent/skill in this plugin uses
    the `<plugin-name>:<component>` form (no bare name).
 10. Manifest's `marketplace`, `repository`, `homepage` URLs point at

@@ -61,8 +61,12 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           COMMIT_SHA: ${{ github.sha }}
         run: |
-          echo "name=$REPO_NAME" >> $GITHUB_OUTPUT
-          echo "ref=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          # Quote $GITHUB_OUTPUT (shellcheck SC2086): the path is set by the
+          # runner and is whitespace-free on GitHub-hosted runners, but a
+          # self-hosted runner with a space in its workspace path would break
+          # an unquoted redirect. Matches the quoting in gen_notify_marketplace_yml.
+          echo "name=$REPO_NAME" >> "$GITHUB_OUTPUT"
+          echo "ref=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Trigger marketplace update
         uses: peter-evans/repository-dispatch@5fc4efd1a4797ddb68ffd0714a238564e4cc0e6f # v4.0.0
@@ -83,9 +87,18 @@ jobs:
           PLUGIN_NAME: ${{ steps.plugin.outputs.name }}
           PLUGIN_REF: ${{ steps.plugin.outputs.ref }}
         run: |
-          echo "## Marketplace Notification" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Triggered update in ${{ env.MARKETPLACE_OWNER }}/${{ env.MARKETPLACE_REPO }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- Plugin: $PLUGIN_NAME" >> $GITHUB_STEP_SUMMARY
-          echo "- Commit: $PLUGIN_REF" >> $GITHUB_STEP_SUMMARY
+          # Single grouped redirect with a quoted target (shellcheck SC2129 +
+          # SC2086): one open of the step-summary file instead of six, and the
+          # path is quoted so a whitespace-containing runner workspace can't
+          # break it. MARKETPLACE_OWNER/REPO are read from the workflow-level
+          # shell env (set in the top-level env: block) rather than re-
+          # interpolated as GitHub expressions, keeping the run-script free of
+          # raw expression interpolation. Mirrors gen_notify_marketplace_yml.
+          {
+            echo "## Marketplace Notification"
+            echo ""
+            echo "Triggered update in $MARKETPLACE_OWNER/$MARKETPLACE_REPO"
+            echo ""
+            echo "- Plugin: $PLUGIN_NAME"
+            echo "- Commit: $PLUGIN_REF"
+          } >> "$GITHUB_STEP_SUMMARY"

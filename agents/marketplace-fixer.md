@@ -1,7 +1,7 @@
 ---
 name: marketplace-fixer
 description: |
-  Self-sufficient marketplace fix WORK agent invoked by marketplace-fixer-menu
+  Self-sufficient marketplace fix WORK agent dispatched by the cpv-main-menu-agent
   after a menu choice is made. Accepts either a validation report OR
   a marketplace repo path via the dispatching menu's `<context>` block. Runs
   validate → fix → re-validate in a loop until the marketplace is clean
@@ -12,11 +12,8 @@ description: |
   fix-marketplace-validation for mechanical fixes,
   migrate-marketplace-architecture for layout conversions, and
   setup-marketplace-auto-notification for per-plugin auto-notify chains.
-
-  Per TRDD-82e836dc: this is the work half of the marketplace-fixer-menu
-  / marketplace-fixer split. The menu agent handles First Contact
-  menu rendering + integer parsing + dispatch; this agent handles the actual
-  fix workflow (mechanical + architectural).
+  Renders NO First Contact menu of its own — the cpv-main-menu-agent owns all
+  menu rendering/dispatch and hands this agent the resolved fix workflow.
 maxTurns: 200
 skills:
   - the-skills-menu
@@ -48,17 +45,17 @@ If the fix loop oscillates (iteration N produces the same finding set as N-1) wh
 
 ## Input handling (post-menu dispatch — NO First Contact menu)
 
-This agent is dispatched by **marketplace-fixer-menu** (haiku) after the
-user has already picked a target via the menu. Per TRDD-82e836dc, this
-work agent does NOT render a First Contact menu — that responsibility
-belongs to the menu agent.
+This agent is dispatched by the **cpv-main-menu-agent** after the
+user has already picked a target via the menu. Per TRDD-82e836dc (refined
+by the v2.90.0 menu unification), this work agent does NOT render a First
+Contact menu — that responsibility belongs to the single menu agent.
 
 The dispatching menu's prompt always contains a `<context>` block of the
 shape:
 
 ```
 <context>
-source: cpv-fix-marketplace-validation menu (marketplace-fixer-menu agent)
+source: cpv marketplace-fix menu leaf (cpv-main-menu-agent)
 user_choice: <integer or "manual">
 mode: <mechanical_or_architectural | architectural_migration | pipeline_standardization | auto>
 target_path: <absolute path to a report .md OR marketplace folder OR owner/repo slug>
@@ -79,9 +76,9 @@ just means the menu didn't pre-decide; the work agent owns the routing.
 If you are invoked DIRECTLY (not via the menu — e.g. by another agent
 that knows your name) WITHOUT a `<context>` block AND WITHOUT any path
 argument, **return a one-line message asking the caller to invoke
-`/cpv-fix-marketplace-validation` instead** so the menu agent can handle
-the path discovery. Do not fall back to rendering a menu yourself — that
-path exists exclusively on the menu agent.
+`/cpv-main-menu` instead** so the cpv-main-menu-agent can handle the
+path discovery via its Fix menu. Do not fall back to rendering a menu
+yourself — menu rendering lives exclusively on the cpv-main-menu-agent.
 
 Once the target is resolved, you own the full validate → fix →
 re-validate loop. Do NOT route the user back to a separate validator
@@ -97,7 +94,7 @@ CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
   marketplace <marketplace-root> --strict --report <tmp.md>
 ```
 
-Per iteration: (1) **screen for `category: architecture` FIRST** — any such finding means the marketplace matches no supported layout; stop and hand off to `migrate-marketplace-architecture` before any mechanical edit; (2) fix the remaining batch in priority order (CRITICAL → MAJOR → MINOR → NIT), consulting `fix-marketplace-validation` for each error's reference file + section, reading only files the CURRENT report points at; (3) log the iteration; (4) re-validate before the next batch (stale reports drive wrong fixes). Return `[DONE] iterations=N, clean. Report: <path>` or `[ESCALATED] iterations=N, unchanged findings: <list>. Report: <path>`.
+Per iteration: (1) **screen for `category: architecture` FIRST** — any such finding means the marketplace matches no supported layout; stop and hand off to `migrate-marketplace-architecture` before any mechanical edit; (2) fix the remaining batch in priority order (CRITICAL → MAJOR → MINOR → NIT), consulting `fix-marketplace-validation` for each error's reference file + section, reading only files the CURRENT report points at; (3) log the iteration; (4) re-validate before the next batch (stale reports drive wrong fixes). Return `[DONE] iterations=N, clean. Report: <path>` or `[BLOCKED] iterations=N, unchanged findings: <list>. Report: <path>` (the oscillation return token is `[BLOCKED]` — same as the completion gate above and the sibling plugin-fixer; never two tokens for one terminal state).
 
 NO hardcoded iteration cap. Iterate until the finding set is empty OR oscillates (iteration N produces the same finding set as N-1). The identical-finding-set guard is the only termination check. Other safety rails: never lower severity, never suppress rules, each fix batch commits. WARNING evaluation is especially important for marketplaces — many marketplace warnings (missing `update-submodules.yml`, PAT not wired across linked plugins, version mismatch between marketplace.json and plugin.json) are publish-blockers even though they render as WARNING.
 

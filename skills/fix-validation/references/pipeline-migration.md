@@ -14,10 +14,12 @@
 
 ## §0 — Detect canonical pipeline drift via `[RC-PIPELINE-DRIFT-001]`
 
-`validate_plugin.py::validate_canonical_pipeline_drift` (v2.66.0) emits a
-single consolidated **`[WARNING] [RC-PIPELINE-DRIFT-001] Plugin pipeline differs
-from the canonical CPV standard in: <file1>, <file2>, …`** when any of these
-files drifts from the canonical `gen_*` template:
+`validate_plugin.py::validate_canonical_pipeline_drift` (v2.66.0) emits one
+WARNING **per drifted file** — **`[WARNING] [RC-PIPELINE-DRIFT-001] Plugin
+pipeline differs from the canonical CPV standard in <file>. <recommendation>`**
+followed by an embedded unified diff (canonical → plugin) — for each of these
+files (`validate_plugin.py::_CANONICAL_PIPELINE_FILES`) that drifts from its
+canonical `gen_*` template:
 
 ```
 scripts/publish.py
@@ -28,6 +30,7 @@ git-hooks/pre-push
 .github/workflows/notify-marketplace.yml
 cliff.toml
 .mega-linter.yml
+.markdownlint.json
 ```
 
 These files are pure infrastructure — plugin authors are NOT expected to

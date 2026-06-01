@@ -26,9 +26,26 @@ BOLD = "\033[1m"
 NC = "\033[0m"
 
 
-def is_rebase_in_progress(git_dir: str) -> bool:
-    """Return True if a rebase is in progress — skip hook."""
-    return os.path.isdir(os.path.join(git_dir, "rebase-merge")) or os.path.isdir(os.path.join(git_dir, "rebase-apply"))
+def is_rebase_in_progress() -> bool:
+    """Return True if a rebase is in progress — skip hook.
+
+    Resolve the rebase state dirs via ``git rev-parse --git-path`` rather than
+    hand-joining ``<repo_root>/.git``: in a linked worktree (and in a submodule)
+    ``.git`` is a *file* pointing elsewhere, so ``<repo_root>/.git/rebase-merge``
+    never exists and the hook would fail to skip during a worktree rebase. The
+    git-path query returns the correct absolute location in every layout.
+    """
+    for state_dir in ("rebase-merge", "rebase-apply"):
+        try:
+            path = subprocess.check_output(
+                ["git", "rev-parse", "--git-path", state_dir],
+                text=True,
+            ).strip()
+        except subprocess.CalledProcessError:
+            return False
+        if path and os.path.isdir(path):
+            return True
+    return False
 
 
 def find_scripts_dir(repo_root: str) -> str | None:
@@ -64,8 +81,7 @@ def main() -> int:
         print(f"{RED}ERROR: Not inside a git repository{NC}")
         return 1
 
-    git_dir = os.path.join(repo_root, ".git")
-    if is_rebase_in_progress(git_dir):
+    if is_rebase_in_progress():
         print(f"{YELLOW}Rebase in progress — skipping pre-push hook{NC}")
         return 0
 

@@ -384,10 +384,7 @@ def _format_markdown_table(rows: list[dict[str, object]]) -> str:
         n_runs = len(cast(list[float], row["runs"]))
         speedup = baseline / wall if wall > 0 else float("inf")
         short = cast(str, row["short"])
-        body += (
-            f"| {short} | {cache_str} | {re2_str} | {binary_str} | "
-            f"{wall:.2f} s | {n_runs} | {speedup:.2f}× |\n"
-        )
+        body += f"| {short} | {cache_str} | {re2_str} | {binary_str} | {wall:.2f} s | {n_runs} | {speedup:.2f}× |\n"
     return header + body
 
 
@@ -433,75 +430,80 @@ def _compose_report(
         re2_str = "ON" if env_args["re2_enabled"] else "OFF"
         binary_str = "ON" if env_args["binary_scan"] else "OFF"
         lines.append(
-            f"- **{row['label']}** — cache={cache_str}, RE2={re2_str}, "
-            f"binary={binary_str}. {row['description']}"
+            f"- **{row['label']}** — cache={cache_str}, RE2={re2_str}, binary={binary_str}. {row['description']}"
         )
-    lines.extend([
-        "",
-        "## Results",
-        "",
-        table,
-        "",
-        "## Speedup summary",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Results",
+            "",
+            table,
+            "",
+            "## Speedup summary",
+            "",
+        ]
+    )
     for row in rows:
         wall = cast(float, row["wall_median"])
         speedup = baseline / wall if wall > 0 else float("inf")
         lines.append(f"- **{row['label']}** — {wall:.2f} s — {speedup:.2f}× vs A")
-    lines.extend([
-        "",
-        "## Per-run distribution",
-        "",
-        "Median is robust against one-off outliers (a transient subprocess",
-        "delay, GC pause, OS scheduling jitter). Below are the raw wall times",
-        f"for each of the {runs_per_phase} runs per phase.",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Per-run distribution",
+            "",
+            "Median is robust against one-off outliers (a transient subprocess",
+            "delay, GC pause, OS scheduling jitter). Below are the raw wall times",
+            f"for each of the {runs_per_phase} runs per phase.",
+            "",
+        ]
+    )
     for row in rows:
         runs = cast(list[float], row["runs"])
         run_str = ", ".join(f"{t:.2f}" for t in runs)
         exit_code = row.get("last_exit_code", "n/a")
         lines.append(f"- **{row['short']}**: {run_str} s (last exit={exit_code})")
-    lines.extend([
-        "",
-        "## What to look at",
-        "",
-        "- **A vs B-warm**: the cache win on a re-scan of an unchanged tree.",
-        "  Expect a large ratio (5–50×) — the cache should short-circuit every",
-        "  per-file scanner call.",
-        "- **A vs B-cold**: the cache overhead on a first scan. Expect ~1.0×",
-        "  (or slightly negative) — cache misses still pay the full scan",
-        "  cost AND a small overhead to populate the cache. This is the",
-        "  break-even point that justifies the cache architecture: any",
-        "  subsequent re-scan amortises it.",
-        "- **B-cold vs C**: the RE2 hybrid-matcher win on cold-cache scan.",
-        "  Expect 2–5× when google-re2 is available; ~1.0× when the report",
-        "  notes the Python re fallback.",
-        "- **C vs D**: the binary-scan ADDITION. Expect D to be ~10–30% slower",
-        "  than C (binary scan ADDS work), but D ADDS coverage (binary files",
-        "  are scanned for embedded secrets / known-bad blobs). The trade-off",
-        "  is more accurate findings for a small wall-time cost.",
-        "",
-        "## Methodology notes",
-        "",
-        "- Each phase is a fresh `uv run python scripts/validate_security.py <path>`",
-        "  subprocess. Wall time is inclusive of `uv run` startup",
-        "  (typically 0.5–1.0 s).",
-        "- `PLUGIN_SKIP_GITHUB_INTEGRITY=1` is set so the integrity-check",
-        "  network round-trip doesn't dominate the small per-phase times.",
-        "- `NO_COLOR=1` is set so ANSI escapes don't skew captured stdout size.",
-        "- All phases run against the same plugin tree. The plugin is not",
-        "  modified between phases.",
-        f"- {runs_per_phase} runs per phase; the table shows the MEDIAN, the",
-        "  Per-run section shows the raw distribution.",
-        f"- `--clear-cache` was {'ON' if clear_cache_each else 'OFF'} for non-warm phases.",
-        "- The B-warm phase intentionally does NOT clear the cache —",
-        "  that's the entire point of measuring warm-cache performance.",
-        "- Non-zero exit codes are normal (real plugins have findings).",
-        "  The benchmark cares about wall time, not findings count.",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## What to look at",
+            "",
+            "- **A vs B-warm**: the cache win on a re-scan of an unchanged tree.",
+            "  Expect a large ratio (5–50×) — the cache should short-circuit every",
+            "  per-file scanner call.",
+            "- **A vs B-cold**: the cache overhead on a first scan. Expect ~1.0×",
+            "  (or slightly negative) — cache misses still pay the full scan",
+            "  cost AND a small overhead to populate the cache. This is the",
+            "  break-even point that justifies the cache architecture: any",
+            "  subsequent re-scan amortises it.",
+            "- **B-cold vs C**: the RE2 hybrid-matcher win on cold-cache scan.",
+            "  Expect 2–5× when google-re2 is available; ~1.0× when the report",
+            "  notes the Python re fallback.",
+            "- **C vs D**: the binary-scan ADDITION. Expect D to be ~10–30% slower",
+            "  than C (binary scan ADDS work), but D ADDS coverage (binary files",
+            "  are scanned for embedded secrets / known-bad blobs). The trade-off",
+            "  is more accurate findings for a small wall-time cost.",
+            "",
+            "## Methodology notes",
+            "",
+            "- Each phase is a fresh `uv run python scripts/validate_security.py <path>`",
+            "  subprocess. Wall time is inclusive of `uv run` startup",
+            "  (typically 0.5–1.0 s).",
+            "- `PLUGIN_SKIP_GITHUB_INTEGRITY=1` is set so the integrity-check",
+            "  network round-trip doesn't dominate the small per-phase times.",
+            "- `NO_COLOR=1` is set so ANSI escapes don't skew captured stdout size.",
+            "- All phases run against the same plugin tree. The plugin is not",
+            "  modified between phases.",
+            f"- {runs_per_phase} runs per phase; the table shows the MEDIAN, the",
+            "  Per-run section shows the raw distribution.",
+            f"- `--clear-cache` was {'ON' if clear_cache_each else 'OFF'} for non-warm phases.",
+            "- The B-warm phase intentionally does NOT clear the cache —",
+            "  that's the entire point of measuring warm-cache performance.",
+            "- Non-zero exit codes are normal (real plugins have findings).",
+            "  The benchmark cares about wall time, not findings count.",
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -561,10 +563,7 @@ def main(argv: list[str] | None = None) -> int:
         "--runs",
         type=int,
         default=3,
-        help=(
-            "Number of timing runs per phase (default: 3). The wall time "
-            "reported is the MEDIAN across runs."
-        ),
+        help=("Number of timing runs per phase (default: 3). The wall time reported is the MEDIAN across runs."),
     )
     parser.add_argument(
         "--clear-cache",
@@ -648,15 +647,17 @@ def main(argv: list[str] | None = None) -> int:
             )
             run_times.append(wall)
             last_exit_code = exit_code
-        rows.append({
-            "short": phase["short"],
-            "label": phase["label"],
-            "env_args": phase["env_args"],
-            "description": phase["description"],
-            "wall_median": _median(run_times),
-            "runs": run_times,
-            "last_exit_code": last_exit_code,
-        })
+        rows.append(
+            {
+                "short": phase["short"],
+                "label": phase["label"],
+                "env_args": phase["env_args"],
+                "description": phase["description"],
+                "wall_median": _median(run_times),
+                "runs": run_times,
+                "last_exit_code": last_exit_code,
+            }
+        )
 
     # Print results to stdout.
     print(f"\n{'=' * 70}")

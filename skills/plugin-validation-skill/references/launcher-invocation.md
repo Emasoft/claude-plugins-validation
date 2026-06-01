@@ -50,7 +50,7 @@ Do NOT search for the launcher with `find`, do NOT browse
 | `marketplace` | validate_marketplace.py | marketplace.json structural check |
 | `security` | validate_security.py | security scan + 5 external scanners + fclones dedup |
 | `cache` | validate_cache.py | prompt-cache invalidation audit (CA-01..CA-06) |
-| `hook` | validate_hook.py | hook config validation (28 events, 5 types) |
+| `hook` | validate_hook.py | hook config validation (30 events, 5 types) |
 | `agent` | validate_agent.py | agent definition validation |
 | `command` | validate_command.py | command definition validation |
 | `mcp` | validate_mcp.py | MCP server config validation |

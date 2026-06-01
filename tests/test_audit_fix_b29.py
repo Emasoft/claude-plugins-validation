@@ -74,22 +74,14 @@ class TestCA06SameLine:
     def test_read_plus_unrelated_write_is_not_flagged(self, tmp_path: Path) -> None:
         """Reading CLAUDE.md on one line and writing an unrelated file on another must NOT trigger CA-06."""
         script = tmp_path / "fp.sh"
-        script.write_text(
-            "#!/usr/bin/env bash\n"
-            "cat CLAUDE.md | head -5\n"
-            'echo "session started" > /tmp/myplugin.log\n'
-        )
+        script.write_text('#!/usr/bin/env bash\ncat CLAUDE.md | head -5\necho "session started" > /tmp/myplugin.log\n')
         findings = vc._collect_hook_for_fork_unsafe(script, "PreCompact", tmp_path)
         assert findings == [], f"CA-06 false positive on file-level coincidence: {findings}"
 
     def test_single_line_write_to_prefix_is_flagged_with_line_number(self, tmp_path: Path) -> None:
         """A genuine single-line append to CLAUDE.md must trigger CA-06 and report the offending line."""
         script = tmp_path / "real.sh"
-        script.write_text(
-            "#!/usr/bin/env bash\n"
-            "echo step1\n"
-            'echo "extra context" >> CLAUDE.md\n'
-        )
+        script.write_text('#!/usr/bin/env bash\necho step1\necho "extra context" >> CLAUDE.md\n')
         findings = vc._collect_hook_for_fork_unsafe(script, "PreCompact", tmp_path)
         assert len(findings) == 1
         assert findings[0].level == "WARNING"
@@ -100,11 +92,7 @@ class TestCA06SameLine:
     def test_commented_prefix_write_is_ignored(self, tmp_path: Path) -> None:
         """A commented-out write to CLAUDE.md must not trigger CA-06 (comment lines are skipped)."""
         script = tmp_path / "commented.sh"
-        script.write_text(
-            "#!/usr/bin/env bash\n"
-            '# echo "x" >> CLAUDE.md   (disabled)\n'
-            "true\n"
-        )
+        script.write_text('#!/usr/bin/env bash\n# echo "x" >> CLAUDE.md   (disabled)\ntrue\n')
         findings = vc._collect_hook_for_fork_unsafe(script, "PreCompact", tmp_path)
         assert findings == []
 
@@ -214,40 +202,30 @@ class TestLspExternalRefValidation:
     def test_external_string_ref_field_is_validated(self, tmp_path: Path) -> None:
         """An external config referenced by a `lspServers` string with a bad `command` must be flagged."""
         (tmp_path / "extras").mkdir()
-        (tmp_path / "extras" / "lsp.json").write_text(
-            json.dumps({"pyls": {"command": 12345, "args": ["--stdio"]}})
-        )
+        (tmp_path / "extras" / "lsp.json").write_text(json.dumps({"pyls": {"command": 12345, "args": ["--stdio"]}}))
         _write_plugin(
             tmp_path,
             {"name": "x", "version": "1.0.0", "lspServers": "./extras/lsp.json"},
         )
         report = vl.validate_plugin_lsp(tmp_path)
-        cmd_findings = [
-            r for r in report.results if "command" in r.message.lower() and r.level == "CRITICAL"
-        ]
+        cmd_findings = [r for r in report.results if "command" in r.message.lower() and r.level == "CRITICAL"]
         assert cmd_findings, "external-ref LSP config bad 'command' field escaped validation"
 
     def test_external_array_ref_field_is_validated(self, tmp_path: Path) -> None:
         """An external config referenced by a `lspServers` array entry must be field-validated too."""
         (tmp_path / "extras").mkdir()
-        (tmp_path / "extras" / "lsp.json").write_text(
-            json.dumps({"gopls": {"command": False}})
-        )
+        (tmp_path / "extras" / "lsp.json").write_text(json.dumps({"gopls": {"command": False}}))
         _write_plugin(
             tmp_path,
             {"name": "x", "version": "1.0.0", "lspServers": ["./extras/lsp.json"]},
         )
         report = vl.validate_plugin_lsp(tmp_path)
-        cmd_findings = [
-            r for r in report.results if "command" in r.message.lower() and r.level == "CRITICAL"
-        ]
+        cmd_findings = [r for r in report.results if "command" in r.message.lower() and r.level == "CRITICAL"]
         assert cmd_findings, "array-ref LSP config bad 'command' field escaped validation"
 
     def test_redundant_default_ref_validated_exactly_once(self, tmp_path: Path) -> None:
         """A redundant `lspServers: ".lsp.json"` must field-validate the file exactly once (no double-report)."""
-        (tmp_path / ".lsp.json").write_text(
-            json.dumps({"pyls": {"command": 999, "args": ["--stdio"]}})
-        )
+        (tmp_path / ".lsp.json").write_text(json.dumps({"pyls": {"command": 999, "args": ["--stdio"]}}))
         _write_plugin(
             tmp_path,
             {"name": "x", "version": "1.0.0", "lspServers": ".lsp.json"},
@@ -255,8 +233,7 @@ class TestLspExternalRefValidation:
         report = vl.validate_plugin_lsp(tmp_path)
         cmd_findings = [r for r in report.results if "command" in r.message.lower()]
         assert len(cmd_findings) == 1, (
-            f"redundant default ref must validate once, got {len(cmd_findings)}: "
-            f"{[r.message for r in cmd_findings]}"
+            f"redundant default ref must validate once, got {len(cmd_findings)}: {[r.message for r in cmd_findings]}"
         )
 
     def test_valid_external_ref_has_no_command_finding(self, tmp_path: Path) -> None:
@@ -270,11 +247,7 @@ class TestLspExternalRefValidation:
             {"name": "x", "version": "1.0.0", "lspServers": "./extras/lsp.json"},
         )
         report = vl.validate_plugin_lsp(tmp_path)
-        bad = [
-            r
-            for r in report.results
-            if "command" in r.message.lower() and r.level in ("CRITICAL", "MAJOR")
-        ]
+        bad = [r for r in report.results if "command" in r.message.lower() and r.level in ("CRITICAL", "MAJOR")]
         assert bad == [], f"valid external LSP config produced spurious command findings: {bad}"
 
 
@@ -377,10 +350,7 @@ class TestFrontmatterMarkerCounting:
         report = CommandValidationReport()
         ok = validate_file_format("No markers at all", report, "bad.md")
         assert ok is False
-        assert any(
-            r.level == "CRITICAL" and "Missing YAML frontmatter markers" in r.message
-            for r in report.results
-        )
+        assert any(r.level == "CRITICAL" and "Missing YAML frontmatter markers" in r.message for r in report.results)
 
     def test_unclosed_frontmatter_not_rescued_by_body_rule(self) -> None:
         """An unclosed frontmatter must not be rescued to >=2 by a body `---`; it stays < 2 -> CRITICAL (guard)."""
@@ -389,10 +359,7 @@ class TestFrontmatterMarkerCounting:
         report = CommandValidationReport()
         ok = validate_file_format(content, report, "unclosed.md")
         assert ok is False
-        assert any(
-            r.level == "CRITICAL" and "Missing YAML frontmatter markers" in r.message
-            for r in report.results
-        )
+        assert any(r.level == "CRITICAL" and "Missing YAML frontmatter markers" in r.message for r in report.results)
 
 
 # ---------------------------------------------------------------------------
@@ -424,9 +391,7 @@ class TestJsonUnicodeScope:
         assert check_json_unicode("not json at all {{{", "readme.md", report) is True
         assert report.results == []
 
-    def test_unicode_class_error_is_reported_as_major(
-        self, monkeypatch: Any
-    ) -> None:
+    def test_unicode_class_error_is_reported_as_major(self, monkeypatch: Any) -> None:
         """When the decode error wording IS unicode-class, the check reports MAJOR (the discriminator).
 
         CPython's stdlib ``json`` never emits a "unicode"/"utf"-worded
@@ -444,14 +409,10 @@ class TestJsonUnicodeScope:
         report = EncodingValidationReport()
         result = check_json_unicode('{"broken": true}', "data.json", report)
         assert result is False
-        assert any(
-            r.level == "MAJOR" and "JSON Unicode error" in r.message for r in report.results
-        )
+        assert any(r.level == "MAJOR" and "JSON Unicode error" in r.message for r in report.results)
         assert report.stats["unicode_issues"] >= 1
 
-    def test_non_unicode_decode_error_is_not_reported(
-        self, monkeypatch: Any
-    ) -> None:
+    def test_non_unicode_decode_error_is_not_reported(self, monkeypatch: Any) -> None:
         """When the decode error wording is NOT unicode-class, the check stays silent (no double-report).
 
         This is the reachable real-world path: a plain syntax error. The function

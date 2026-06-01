@@ -78,7 +78,7 @@ CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
 
 <example>
 user: Validate my-skill with strict mode
-assistant: [Runs: uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" skill ./my-skill --strict --verbose --report "$MAIN_ROOT/reports/validate_skill/20260421_183012+0200-my-skill.md"]
+assistant: [Runs: CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" skill ./my-skill --strict --verbose --report "$MAIN_ROOT/reports/validate_skill/20260421_183012+0200-my-skill.md"]
 Skill Validation: FAIL (major)
   CRITICAL:0 | MAJOR:1 | MINOR:2 | PASSED:15
   Report: reports/validate_skill/20260421_183012+0200-my-skill.md

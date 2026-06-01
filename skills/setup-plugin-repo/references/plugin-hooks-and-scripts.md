@@ -3,7 +3,7 @@
 ## Table of Contents
 - [pre-push Hook Template](#pre-push-hook-template)
 - [publish.py Pipeline Template](#publishpy-pipeline-template)
-- [setup-hooks.py Template](#setup-hookspy-template)
+- [setup_git_hooks.py Template](#setup_git_hookspy-template)
 - [Placeholder Reference](#placeholder-reference)
 
 > For plugins with compiled binaries, see [`plugin-binary-builds.md`](plugin-binary-builds.md) for adding build phases to the pre-push hook and publish pipeline.
@@ -12,7 +12,7 @@
 
 - [ ] Install pre-push hook via `publish.py --install-hook`
 - [ ] Copy `publish.py` template into `scripts/`
-- [ ] Copy `setup-hooks.py` into `scripts/`
+- [ ] Copy `setup_git_hooks.py` into `scripts/`
 - [ ] Replace all placeholders
 - [ ] Verify hooks fire by attempting a bad commit
 
@@ -38,6 +38,7 @@ Exit codes from <placeholder-for-validate-script>:
   1 - CRITICAL issues found (blocks push)
   2 - MAJOR issues found (blocks push)
   3 - MINOR issues found (blocks push)
+  4 - NIT issues found (blocks push under --strict, which this hook passes)
 
 Strict mode (default): ALL non-zero exit codes block push.
 """
@@ -186,7 +187,10 @@ def main() -> int:
     ve = run_script(python_cmd, repo_root / "scripts" / "<placeholder-for-validate-script>",
                     [".", "--verbose", "--strict"], cwd=repo_root)
     if ve != 0:
-        labels = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR"}
+        # --strict (passed above) makes the validator exit 4 on NIT-only findings,
+        # so the label map must cover 4 — otherwise a NIT-only block prints the
+        # opaque "exit 4" instead of "NIT".
+        labels = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}
         cprint(f"{RED}BLOCKED: {labels.get(ve, f'exit {ve}')} issues found{NC}")
         return 1
 
@@ -287,17 +291,19 @@ in `check_version_consistency()`.
 
 ---
 
-## setup-hooks.py Template
+## setup_git_hooks.py Template
 
 Installs git hooks from `git-hooks/` into `.git/hooks/` and makes them executable.
 
-Save as `scripts/setup-hooks.py`:
+Save as `scripts/setup_git_hooks.py` (the canonical name the README troubleshooting
+and `pipeline-rules.md` both reference — keep the underscore spelling so a downstream
+plugin's docs and its actual script filename never drift apart):
 
 ```python
 #!/usr/bin/env python3
 """Install git hooks from git-hooks/ into .git/hooks/.
 
-Usage: uv run python scripts/setup-hooks.py
+Usage: uv run python scripts/setup_git_hooks.py
 """
 
 from __future__ import annotations
@@ -363,10 +369,10 @@ mkdir -p git-hooks
 # Copy pre-push template above into git-hooks/pre-push
 
 # 2. Save publish and setup scripts
-# Copy templates above into scripts/publish.py and scripts/setup-hooks.py
+# Copy templates above into scripts/publish.py and scripts/setup_git_hooks.py
 
 # 3. Install hooks
-uv run python scripts/setup-hooks.py
+uv run python scripts/setup_git_hooks.py
 
 # 4. Test with dry-run
 uv run python scripts/publish.py --patch --dry-run

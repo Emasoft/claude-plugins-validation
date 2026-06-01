@@ -24,7 +24,7 @@ Implements TRDD-793ac32a — exploits Claude Code's no-recurse-submodules shallo
 
 1. Run `--dry-run` first to confirm extraction plan + safety preflight passes.
 2. Run `--check` in CI to fail if dev parts have leaked back into MAIN.
-3. Choose extraction mode: interactive (default), `--auto`, or `--dry-run`.
+3. Choose mode: `--dry-run` (preview + safety preflight), `--check` (CI gate), or `--auto` (live execution). Running with NO mode flag is preview-only — the engine prints the plan and a NOTE telling you to pass `--auto`, then exits without touching GitHub or git history (no interactive mode ships in this RC).
 4. Per-target overrides via `--extract <path>/` (default: `tests/`).
 5. For each strip operation, the engine writes `.cpv-strip-state.json` for resume on crash.
 6. After successful strip, devs use `git submodule update --init` to pull content back.
@@ -34,7 +34,7 @@ Copy this checklist and track your progress:
 - [ ] `--dry-run` reviewed
 - [ ] Safety preflight passes (working tree clean, on branch, no stash)
 - [ ] Per-target paths confirmed
-- [ ] Real run executed (`--auto` or interactive)
+- [ ] Real run executed (`--auto`)
 - [ ] `.gitmodules` URL allowlist satisfied
 - [ ] Devs notified: `git submodule update --init` needed
 
@@ -68,10 +68,11 @@ uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_strip_dev.py" /path/to/my-plugi
 # CI gate: fail if dev parts leaked back into MAIN repo
 uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_strip_dev.py" /path/to/my-plugin --check
 
-# Interactive (default) — prompts at each major step
+# No mode flag — preview only (prints the plan, then exits with a NOTE
+# to pass --auto; never creates repos or rewrites history)
 uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_strip_dev.py" /path/to/my-plugin
 
-# Non-interactive — apply the standard rules with no prompts
+# Live execution — apply the standard rules with no prompts
 uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_strip_dev.py" /path/to/my-plugin --auto
 ```
 

@@ -225,7 +225,7 @@ def _format_table(rows: list[dict]) -> str:
     correctly in any Markdown viewer.
     """
     header = "| Phase | Wall time (s) | Speedup vs Phase A |\n"
-    sep =    "|-------|---------------|--------------------|\n"
+    sep = "|-------|---------------|--------------------|\n"
     body = ""
     baseline = rows[0]["wall"]
     for row in rows:
@@ -309,6 +309,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # Fail fast on a non-positive --runs: the median computation below
+    # indexes into the sorted run-times list, so an empty list (runs<=0)
+    # would raise IndexError instead of giving the operator a clear error.
+    if args.runs < 1:
+        print(f"Error: --runs must be >= 1 (got {args.runs})", file=sys.stderr)
+        return 1
+
     plugin_root = Path(args.plugin_path).resolve()
     if not plugin_root.is_dir():
         print(f"Error: {plugin_root} is not a directory", file=sys.stderr)
@@ -384,12 +391,14 @@ def main() -> int:
         else:
             mid = len(sorted_times) // 2
             median_wall = (sorted_times[mid - 1] + sorted_times[mid]) / 2.0
-        rows.append({
-            "label": phase["label"],
-            "wall": median_wall,
-            "exit_code": last_exit_code,
-            "runs": run_times,
-        })
+        rows.append(
+            {
+                "label": phase["label"],
+                "wall": median_wall,
+                "exit_code": last_exit_code,
+                "runs": run_times,
+            }
+        )
 
     # Print the results table.
     print(f"\n{'═' * 70}")
@@ -448,9 +457,7 @@ def _compose_report(
     baseline = rows[0]["wall"]
     final_speedup = baseline / rows[-1]["wall"] if rows[-1]["wall"] > 0 else float("inf")
     inner_speedup = baseline / rows[1]["wall"] if rows[1]["wall"] > 0 else float("inf")
-    outer_contribution = (
-        rows[1]["wall"] / rows[-1]["wall"] if rows[-1]["wall"] > 0 else float("inf")
-    )
+    outer_contribution = rows[1]["wall"] / rows[-1]["wall"] if rows[-1]["wall"] > 0 else float("inf")
 
     timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
     lines = [

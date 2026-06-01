@@ -177,9 +177,7 @@ class TestHookScriptNoDoubleExtraction:
         """A single 'command' hook yields its script path exactly once."""
         hooks = {
             "hooks": {
-                "PreToolUse": [
-                    {"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"}]}
-                ]
+                "PreToolUse": [{"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/foo.py"}]}]
             }
         }
         result = extract_script_paths_from_hooks(hooks)
@@ -226,13 +224,7 @@ class TestVersionSyncRobustFrontmatter:
         Pre-fix content.find('---', 3) stopped at the value's '---', dropping
         the version source entirely (mismatch silently hidden).
         """
-        skill_md = (
-            "---\n"
-            'description: "use --- as a separator in docs"\n'
-            "version: 2.0.0\n"
-            "---\n"
-            "Body.\n"
-        )
+        skill_md = '---\ndescription: "use --- as a separator in docs"\nversion: 2.0.0\n---\nBody.\n'
         root = tmp_path / "demo"
         self._make_plugin(root, plugin_version="1.0.0", skill_frontmatter=skill_md)
 

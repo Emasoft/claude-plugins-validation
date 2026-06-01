@@ -92,7 +92,7 @@ Copy this checklist and track your progress:
 
 ## MCP Server Bundling
 
-Place bundled MCP executables in `servers/`, reference as `${CLAUDE_PLUGIN_ROOT}/servers/<name>`. Unique names per server. See `empirical-loading-bugs.md` for footguns.
+Place bundled MCP executables in `servers/`, reference as `${CLAUDE_PLUGIN_ROOT}/servers/<name>`. Unique names per server. See `skills/fix-validation/references/empirical-loading-bugs.md` for footguns.
 
 ## Token Optimization
 

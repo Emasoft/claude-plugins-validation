@@ -205,9 +205,13 @@ def fetch_latest_check_contexts(owner: str, repo: str) -> list[str]:
     """Return check contexts actually reported on the target repo's default branch.
 
     Queries `/repos/{owner}/{repo}/commits/HEAD/check-runs` and extracts the
-    distinct check-run names. The names returned by that endpoint already
-    match the 'workflow_name / job_name' format that the ruleset
-    required_status_checks rule expects.
+    distinct check-run names. Those names are the bare job *display names*
+    (the `name:` field on each job) — NOT 'workflow_name / job_name' — which
+    is exactly the form the ruleset required_status_checks rule matches
+    against (see the module-level note on DEFAULT_*_CHECK_CONTEXTS). This
+    result is used only as a --dry-run diagnostic so the user can compare the
+    live names against the hardcoded defaults; it is never wired straight
+    into the applied ruleset.
 
     Returns an empty list when:
       - no check-runs have reported yet (fresh repo, pre-first-CI)
@@ -537,7 +541,14 @@ def apply_ruleset(
         sys.stderr.write(f"stderr: {result.stderr}\n")
         sys.exit(1)
 
-    parsed = json.loads(result.stdout)
+    # Guard the parse like every other json.loads in this module: a gh exit 0
+    # with a non-JSON body (proxy banner, truncated stream) would otherwise
+    # crash apply with a raw traceback instead of a clean, actionable error.
+    try:
+        parsed = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        sys.stderr.write(f"ERROR: {method} {endpoint} returned non-JSON output: {exc}\n")
+        sys.exit(1)
     if not isinstance(parsed, dict):
         sys.stderr.write(f"ERROR: unexpected response shape from {method} {endpoint}\n")
         sys.exit(1)

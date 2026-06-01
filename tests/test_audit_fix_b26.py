@@ -267,7 +267,7 @@ class TestShellEchoStringOppositeQuote:
 
         # Double-quoted display string that contains a ' — the sudo token is
         # display text, so the suppressor must recognise it as INSIDE.
-        line = "echo \"it's easy: sudo apt install foo\""
+        line = 'echo "it\'s easy: sudo apt install foo"'
         assert _match_inside_shell_echo_string(line, "sudo apt install foo") is True
 
     def test_double_quote_inside_single_quoted_string_is_inside(self) -> None:
@@ -284,7 +284,7 @@ class TestShellEchoStringOppositeQuote:
         line = "sudo apt install foo"
         assert _match_inside_shell_echo_string(line, "sudo apt install foo") is False
         # echo of an unrelated string, with the real sudo AFTER it.
-        line2 = "echo \"banner\" && sudo apt install foo"
+        line2 = 'echo "banner" && sudo apt install foo'
         assert _match_inside_shell_echo_string(line2, "sudo apt install foo") is False
 
 

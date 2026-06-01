@@ -336,8 +336,28 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 _restore(pj, bak)
                 return 3
-            summary = report.get("summary", {})
-            new_blocking = int(summary.get("CRITICAL", 0)) + int(summary.get("MAJOR", 0))
+            # validate_plugin.py --json emits {"exit_code", "counts": {...},
+            # "results": [...]} where `counts` uses LOWERCASE level keys
+            # (critical, major, …) — see validate_plugin.print_json(). The
+            # previous code read report["summary"]["CRITICAL"], which never
+            # exists in that schema, so .get() always returned the {}/0 default
+            # and new_blocking was permanently 0 — the rollback-on-regression
+            # safety check was dead code that accepted EVERY merge. Read the
+            # real key/casing instead.
+            counts = report.get("counts")
+            if not isinstance(counts, dict):
+                # FAIL-CLOSED (same contract as the non-parseable-report branch
+                # above): a report without the expected `counts` block is a
+                # schema we don't understand, so we cannot confirm the edit is
+                # safe — roll back rather than silently accept it.
+                print(
+                    f"ERROR: validation report missing the 'counts' block (exit code {result.returncode}); "
+                    "cannot confirm safety — rolling back.",
+                    file=sys.stderr,
+                )
+                _restore(pj, bak)
+                return 3
+            new_blocking = int(counts.get("critical", 0)) + int(counts.get("major", 0))
             if new_blocking > 0:
                 print(
                     "ERROR: merged dependencies introduced CRITICAL/MAJOR findings; rolling back.",

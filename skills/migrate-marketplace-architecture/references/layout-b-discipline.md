@@ -13,6 +13,7 @@
 - [Single Atomic Commit](#single-atomic-commit)
 - [Tag the Marketplace](#tag-the-marketplace)
 - [Verification](#verification)
+- [Rollback Recipe](#rollback-recipe)
 
 ## Checklist
 
@@ -23,7 +24,6 @@
 - [ ] Single atomic commit for the whole migration
 - [ ] Marketplace tagged (single-tag-per-release discipline)
 - [ ] Verification: `validate_marketplace.py --strict` clean
-- [Rollback Recipe](#rollback-recipe)
 
 ---
 

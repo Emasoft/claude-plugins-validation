@@ -13,6 +13,9 @@ contract every classifier honours:
   productivity plugin is TP.
 * RC-65 — IMDS literal in a denylist set is FP; same literal in a
   network call is TP.
+* RC-76 — stemmed prompt-injection co-occurrence in source code /
+  shell scripts is FP (the stems are vocabulary); the same stems in
+  agent-doc / skill-body prose the model executes are TP.
 * RC-87 — RFC-1918 / loopback IP inside a package-manager dep version
   is FP; same shape in a runtime path is TP.
 * RC-93 — ≥30 contiguous spaces inside a markdown table row is FP;
@@ -562,10 +565,17 @@ def load_plugin_meta(plugin_root: Path) -> dict:
     return {}
 
 
+# Every registered classifier is part of the public surface. RC-76 was
+# added after the original five and must be listed here too — otherwise a
+# `from cpv_fp_classifier_rules import *` (or any `__all__`-driven
+# introspection) silently omits it while importing its siblings. The
+# registry side-effect still binds RC-76 at import time, so dispatch via
+# `classify_rule` works regardless; this keeps the declared API consistent.
 __all__ = [
     "classify_rc21",
     "classify_rc22",
     "classify_rc65",
+    "classify_rc76",
     "classify_rc87",
     "classify_rc93",
     "load_plugin_meta",

@@ -1085,7 +1085,12 @@ def _re_compile_wrapper_names(tree: ast.AST) -> frozenset[str]:
         if not isinstance(ret, ast.Call):
             continue
         f = ret.func
-        if not (isinstance(f, ast.Attribute) and f.attr == "compile" and isinstance(f.value, ast.Name) and f.value.id == "re"):
+        if not (
+            isinstance(f, ast.Attribute)
+            and f.attr == "compile"
+            and isinstance(f.value, ast.Name)
+            and f.value.id == "re"
+        ):
             continue
         if ret.args and isinstance(ret.args[0], ast.Name) and ret.args[0].id == first_param:
             names.add(node.name)
@@ -1099,11 +1104,7 @@ def _is_re_pattern_call_or_wrapper(node: ast.AST, wrapper_names: frozenset[str])
     ``re.compile(r"…")`` for regex-pattern-literal suppression."""
     if _is_re_module_pattern_call(node):
         return True
-    return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id in wrapper_names
-    )
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in wrapper_names
 
 
 def _re_literal_feeds_exec_sink(tree: ast.AST, target: ast.Constant) -> bool:
@@ -1122,8 +1123,17 @@ def _re_literal_feeds_exec_sink(tree: ast.AST, target: ast.Constant) -> bool:
         qn = _node_qualname(node.func)
         if qn is None:
             continue
-        # The pattern Constant must live inside one of the sink's positional args.
-        if not any(sub is target for arg in node.args for sub in ast.walk(arg)):
+        # The pattern Constant must live inside the sink's positional args OR a
+        # keyword-arg value. ``subprocess.run``/``Popen`` accept the command as
+        # ``args=`` by keyword and ``os.system``/``os.popen`` accept it as
+        # ``command=`` — ``subprocess.run(args=re.compile(r"…").pattern,
+        # shell=True)`` executes the pattern just like the positional form, so a
+        # positional-only scan was a false-negative (an executed pattern stayed
+        # suppressed). Mirrors the args+kwargs scan of
+        # ``_path_literal_feeds_fs_or_exec_sink`` / ``_module_container_name_flows_to_sink``.
+        in_args = any(sub is target for arg in node.args for sub in ast.walk(arg))
+        in_kwargs = any(sub is target for kw in node.keywords for sub in ast.walk(kw.value))
+        if not (in_args or in_kwargs):
             continue
         if qn in _STRING_CMD_EXEC_FQNAMES:
             return True
@@ -1145,19 +1155,52 @@ def _re_literal_feeds_exec_sink(tree: ast.AST, target: ast.Constant) -> bool:
 # (open/read/write/delete the path, or send it over the network).
 _FS_NET_SINK_FQNAMES: Final[frozenset[str]] = frozenset(
     {
-        "open", "io.open", "os.open", "os.fdopen",
-        "os.remove", "os.unlink", "os.rmdir", "os.removedirs",
-        "os.rename", "os.replace", "os.truncate", "os.chmod",
-        "os.chown", "os.mkdir", "os.makedirs", "os.scandir",
-        "os.listdir", "os.stat", "os.lstat", "os.readlink", "os.symlink",
-        "os.link", "os.access", "os.walk", "os.chdir",
-        "pathlib.Path", "Path",
-        "shutil.copy", "shutil.copy2", "shutil.copyfile", "shutil.copytree",
-        "shutil.move", "shutil.rmtree", "shutil.copyfileobj",
-        "requests.get", "requests.post", "requests.put", "requests.delete",
-        "requests.head", "requests.patch", "requests.request",
-        "httpx.get", "httpx.post", "httpx.request",
-        "urllib.request.urlopen", "urlopen",
+        "open",
+        "io.open",
+        "os.open",
+        "os.fdopen",
+        "os.remove",
+        "os.unlink",
+        "os.rmdir",
+        "os.removedirs",
+        "os.rename",
+        "os.replace",
+        "os.truncate",
+        "os.chmod",
+        "os.chown",
+        "os.mkdir",
+        "os.makedirs",
+        "os.scandir",
+        "os.listdir",
+        "os.stat",
+        "os.lstat",
+        "os.readlink",
+        "os.symlink",
+        "os.link",
+        "os.access",
+        "os.walk",
+        "os.chdir",
+        "pathlib.Path",
+        "Path",
+        "shutil.copy",
+        "shutil.copy2",
+        "shutil.copyfile",
+        "shutil.copytree",
+        "shutil.move",
+        "shutil.rmtree",
+        "shutil.copyfileobj",
+        "requests.get",
+        "requests.post",
+        "requests.put",
+        "requests.delete",
+        "requests.head",
+        "requests.patch",
+        "requests.request",
+        "httpx.get",
+        "httpx.post",
+        "httpx.request",
+        "urllib.request.urlopen",
+        "urlopen",
     }
 )
 
@@ -1203,10 +1246,10 @@ def _outermost_pure_literal_container(tree: ast.AST, target: ast.AST) -> ast.AST
         if isinstance(n, (ast.List, ast.Tuple, ast.Set)):
             return all(_is_pure(e) for e in n.elts)
         if isinstance(n, ast.Dict):
-            return all(
-                (k is None or _is_pure(k)) and _is_pure(v)
-                for k, v in zip(n.keys, n.values, strict=False)
-            ) and None not in n.keys  # **unpack → impure
+            return (
+                all((k is None or _is_pure(k)) and _is_pure(v) for k, v in zip(n.keys, n.values, strict=False))
+                and None not in n.keys
+            )  # **unpack → impure
         return False
 
     parents: dict[int, ast.AST] = {}
@@ -1897,11 +1940,37 @@ def _match_inside_re_pattern_literal(tree: ast.AST, line: int, source: str, matc
 # every rule in their own attack vocabulary.
 _METADATA_FIELD_NAMES: Final[frozenset[str]] = frozenset(
     {
-        "id", "rule_id", "ruleid", "name", "title", "label", "description",
-        "desc", "summary", "severity", "category", "owasp", "owasp_asi",
-        "cwe", "cwe_id", "references", "reference", "remediation",
-        "mitigation", "message", "note", "notes", "reason", "rationale",
-        "explanation", "help", "hint", "doc", "docs", "tags", "tag",
+        "id",
+        "rule_id",
+        "ruleid",
+        "name",
+        "title",
+        "label",
+        "description",
+        "desc",
+        "summary",
+        "severity",
+        "category",
+        "owasp",
+        "owasp_asi",
+        "cwe",
+        "cwe_id",
+        "references",
+        "reference",
+        "remediation",
+        "mitigation",
+        "message",
+        "note",
+        "notes",
+        "reason",
+        "rationale",
+        "explanation",
+        "help",
+        "hint",
+        "doc",
+        "docs",
+        "tags",
+        "tag",
     }
 )
 
@@ -1941,6 +2010,7 @@ def _match_is_identifier_fragment(tree: ast.AST, source: str, line: int, match: 
             return False
         if isinstance(node, ast.Constant) and isinstance(node.value, str) and match in node.value:
             return False
+
     def _is_word(ch: str) -> bool:
         return bool(ch) and (ch.isalnum() or ch == "_")
 
@@ -2054,11 +2124,29 @@ def _match_inside_slug_string(tree: ast.AST, line: int, source: str, match: str)
 # readable and does not trip CPV's own invisible-unicode self-scan.
 _INVISIBLE_CODEPOINTS: Final[frozenset[int]] = frozenset(
     {
-        0x200B, 0x200C, 0x200D, 0x200E, 0x200F,  # zero-width + LRM/RLM
-        0x2060, 0x2061, 0x2062, 0x2063, 0x2064,  # word-joiner + invisible math
-        0x202A, 0x202B, 0x202C, 0x202D, 0x202E,  # bidi embedding/override
-        0x2066, 0x2067, 0x2068, 0x2069,          # bidi isolates
-        0xFEFF, 0x00AD, 0x180E, 0x061C,          # BOM, soft-hyphen, MVS, ALM
+        0x200B,
+        0x200C,
+        0x200D,
+        0x200E,
+        0x200F,  # zero-width + LRM/RLM
+        0x2060,
+        0x2061,
+        0x2062,
+        0x2063,
+        0x2064,  # word-joiner + invisible math
+        0x202A,
+        0x202B,
+        0x202C,
+        0x202D,
+        0x202E,  # bidi embedding/override
+        0x2066,
+        0x2067,
+        0x2068,
+        0x2069,  # bidi isolates
+        0xFEFF,
+        0x00AD,
+        0x180E,
+        0x061C,  # BOM, soft-hyphen, MVS, ALM
     }
 )
 
@@ -2958,9 +3046,7 @@ def _line_is_safe_internal_assignment(tree: ast.AST, line: int, line_text: str) 
 _RUAMEL_SAFE_TYPES: Final[frozenset[str]] = frozenset({"rt", "safe", "base"})
 
 
-def _deepest_enclosing_function(
-    tree: ast.AST, line: int
-) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+def _deepest_enclosing_function(tree: ast.AST, line: int) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
     """Return the deepest ``FunctionDef`` / ``AsyncFunctionDef`` whose source
     range covers ``line``, or ``None`` when ``line`` is at module level.
 
@@ -2985,9 +3071,7 @@ def _deepest_enclosing_function(
     return enclosing
 
 
-def _function_locally_binds(
-    func: ast.FunctionDef | ast.AsyncFunctionDef, name: str
-) -> bool:
+def _function_locally_binds(func: ast.FunctionDef | ast.AsyncFunctionDef, name: str) -> bool:
     """True iff ``func`` introduces a LOCAL binding for ``name`` in its own
     scope — a parameter, an ``import name`` / ``from m import name`` (incl.
     ``as name`` aliases), or an assignment target.
@@ -3078,9 +3162,7 @@ def _is_ruamel_yaml_safe_load(tree: ast.AST, source: str, line: int) -> bool:
     #    that merely reuses the name elsewhere (audit MED #36; the
     #    docstring already promises "same enclosing scope").
     enclosing_func = _deepest_enclosing_function(tree, line)
-    enclosing_func_nodes = (
-        frozenset(map(id, ast.walk(enclosing_func))) if enclosing_func is not None else frozenset()
-    )
+    enclosing_func_nodes = frozenset(map(id, ast.walk(enclosing_func))) if enclosing_func is not None else frozenset()
     module_body_ids = frozenset(map(id, tree.body)) if isinstance(tree, ast.Module) else frozenset()
     # A LOCAL binding of ``receiver_name`` inside the enclosing function
     # (``import yaml`` / ``from m import yaml`` / ``yaml = …`` / a ``yaml``
@@ -3156,9 +3238,7 @@ def _is_ruamel_yaml_safe_load(tree: ast.AST, source: str, line: int) -> bool:
 # as ``yaml.safe_load``. ``Loader`` / ``FullLoader`` / ``UnsafeLoader`` /
 # ``CLoader`` / ``CFullLoader`` are deliberately EXCLUDED (they construct
 # arbitrary Python objects), so they stay suspect.
-_YAML_SAFE_LOADER_NAMES: Final[frozenset[str]] = frozenset(
-    {"SafeLoader", "CSafeLoader", "BaseLoader", "CBaseLoader"}
-)
+_YAML_SAFE_LOADER_NAMES: Final[frozenset[str]] = frozenset({"SafeLoader", "CSafeLoader", "BaseLoader", "CBaseLoader"})
 
 
 def _base_is_safe_loader(node: ast.expr) -> bool:
@@ -3546,9 +3626,20 @@ def _module_container_name_flows_to_sink(tree: ast.AST, target: ast.AST) -> bool
         if not _contains(val, target):
             continue
         bound = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+        # Collect EVERY bound Name in each target subtree — not just a top-level
+        # ``Name``. A destructuring target (``(A, B) = ([...], [...])`` /
+        # ``[A, *B] = (...)``) binds names INSIDE a Tuple/List/Starred, which a
+        # top-level-only check missed → the sink guard saw no bound name and
+        # failed open, so ``os.system(A[0])`` after such an unpack silently
+        # suppressed the reverse shell. Walking the target subtree binds A and B
+        # conservatively (over-keeps-visible: any of them reaching a sink keeps
+        # the finding). ``_node_is_in_module_level_pure_data_assign`` already
+        # matches the same destructuring assign (its value is the pure outer
+        # container), so both functions now agree on which assigns qualify.
         for tnode in bound:
-            if isinstance(tnode, ast.Name):
-                names.add(tnode.id)
+            for sub in ast.walk(tnode):
+                if isinstance(sub, ast.Name):
+                    names.add(sub.id)
     if not names:
         return False
 

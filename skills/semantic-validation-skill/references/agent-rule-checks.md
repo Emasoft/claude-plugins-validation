@@ -9,7 +9,7 @@
 
 **Purpose:** Reference for the `semantic-validator` agent (model: opus[1m], explicit opt-in). Originally specified 7 LLM-only checks. Per the user's "code first if accuracy permits" rule, **5 of the 7 were re-evaluated and reclassified as fully programmatic** (Phase B handles them). Only **RC-49 (partial) and RC-77** remain truly agent-class because they need LLM judgment that regex cannot replicate without losing accuracy.
 
-**Companion file:** `security-threat-catalog.md` — the broader 19-category threat-model context that this agent loads BEFORE running the per-rule checks below.
+**Companion files:** the broader 19-category threat-model context that this agent loads BEFORE running the per-rule checks below is split across four categorical references in this folder — `prompt-injection-rules.md` (CAT-01–05, 11, 13, 14), `concealment-and-multilingual-rules.md` (CAT-06, 07, 17, 18, 19), `mcp-and-capability-rules.md` (CAT-08, 09, 10), `exfil-and-autonomy-rules.md` (CAT-12, 15, 16).
 
 **Token-economy rule (HARD):** per `~/.claude/rules/use-llm-externalizer.md` — never call the LLM if no prefilter hit. CPV's regex tier handles >95% of cases for free. The 2 remaining agent-class checks are the ≤5% residue that needs judgment.
 
@@ -495,7 +495,7 @@ qualixar/skillfortify (5-tier verdict scheme), agentaudit-dev/agentaudit-cli VER
 
 ## Aggregating findings into the A-F rubric
 
-The semantic-validator agent maintains the existing 7-criterion A-F rubric (defined in `agents/semantic-validator.md`). The 7 agent-class checks above are NOT new criteria — they CONTRIBUTE findings to the existing **Pillar: Security Threat Catalog** (a security-focused criterion already established in `security-threat-catalog.md`).
+The semantic-validator agent maintains the existing 7-criterion A-F rubric (defined in `agents/semantic-validator.md`). The 7 agent-class checks above are NOT new criteria — they CONTRIBUTE findings to the existing **Pillar: Security Threat Catalog** (a security-focused criterion whose 19-category threat model is documented across the four categorical references in this folder: `prompt-injection-rules.md`, `concealment-and-multilingual-rules.md`, `mcp-and-capability-rules.md`, `exfil-and-autonomy-rules.md`).
 
 Mapping:
 

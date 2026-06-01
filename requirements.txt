@@ -2,5 +2,9 @@
 # Install with: pip install -r requirements.txt
 #           or: uv pip install -r requirements.txt
 
-# YAML parsing for agent/skill frontmatter
-pyyaml>=6.0
+# YAML parsing for agent/skill frontmatter.
+# Floor MUST match the authoritative pyproject.toml [project.dependencies]
+# entry (single source of truth); pyproject pins >=6.0.3, so the convenience
+# `pip install -r requirements.txt` path must not allow an older, unsupported
+# pyyaml (6.0.0-6.0.2) to satisfy this file.
+pyyaml>=6.0.3

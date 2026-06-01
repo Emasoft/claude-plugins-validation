@@ -186,22 +186,56 @@ def run_with_retry(
     `print_cmd=True` prints the command before the FIRST attempt (handy
     when wrapping a previously-print-and-run helper).
     """
+    # Fail fast on a nonsensical budget rather than silently returning None.
+    # A bare `assert` at the tail would vanish under `python -O` and let the
+    # function return None (violating the declared CompletedProcess return),
+    # so validate explicitly — matching git_with_retry's ValueError idiom.
+    if max_attempts < 1:
+        raise ValueError(f"max_attempts must be >= 1, got {max_attempts}")
     if timeout is None:
         timeout = DEFAULT_TIMEOUT_SEC
     if print_cmd:
         print(f"  $ {' '.join(cmd)}")
 
     last_result: subprocess.CompletedProcess[str] | None = None
+    # A per-attempt timeout is the canonical symptom of a stalled network
+    # transfer (hung git push / stuck gh API call) — exactly what this module
+    # exists to survive. subprocess.run raises TimeoutExpired instead of
+    # returning a non-zero CompletedProcess, so without this handling a single
+    # stall would escape uncaught and burn ZERO of the retry budget. Treat it
+    # as a transient failure: retry up to max_attempts, then re-raise the
+    # timeout (fail-fast — never swallow it into a fake "success").
     for attempt in range(1, max_attempts + 1):
-        result = subprocess.run(
-            cmd,
-            cwd=cwd,
-            env=env,
-            check=False,
-            capture_output=capture_output,
-            text=text,
-            timeout=timeout,
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=cwd,
+                env=env,
+                check=False,
+                capture_output=capture_output,
+                text=text,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            if attempt < max_attempts:
+                if on_retry is not None:
+                    # No CompletedProcess exists on timeout; synthesize a
+                    # placeholder (returncode 124 = the conventional SIGTERM-
+                    # by-timeout code) so the callback signature still holds.
+                    on_retry(
+                        attempt,
+                        subprocess.CompletedProcess(cmd, 124, stdout=None, stderr=None),
+                    )
+                else:
+                    print(
+                        f"  [retry {attempt}/{max_attempts}] transient: timed out after {timeout:g}s",
+                        file=sys.stderr,
+                    )
+                time.sleep(backoff)
+                continue
+            # Budget exhausted on a timeout — propagate the real cause so the
+            # caller sees TimeoutExpired, not a swallowed/fake result.
+            raise
         if result.returncode == 0:
             return result
         last_result = result
@@ -226,15 +260,22 @@ def run_with_retry(
                 )
             time.sleep(backoff)
 
-    if check and last_result is not None and last_result.returncode != 0:
-        raise subprocess.CalledProcessError(
-            last_result.returncode,
-            cmd,
-            output=last_result.stdout,
-            stderr=last_result.stderr,
-        )
-    assert last_result is not None
-    return last_result
+    # If the loop ended on a non-zero CompletedProcess, handle it here.
+    if last_result is not None:
+        if check and last_result.returncode != 0:
+            raise subprocess.CalledProcessError(
+                last_result.returncode,
+                cmd,
+                output=last_result.stdout,
+                stderr=last_result.stderr,
+            )
+        return last_result
+    # Unreachable: with max_attempts >= 1 the loop either returns a result,
+    # breaks with last_result set, or re-raises TimeoutExpired on the final
+    # attempt. Raise explicitly (not a bare `assert`, which `-O` strips) so any
+    # future refactor that breaks this invariant fails loudly instead of
+    # returning None against the declared CompletedProcess return type.
+    raise AssertionError("run_with_retry produced no result despite max_attempts >= 1")
 
 
 # ── gh / git convenience wrappers ────────────────────────────────────────────

@@ -265,11 +265,7 @@ class TestParity:
         assert passed_p is True
         sig_s = _findings_signature(report_s)
         sig_p = _findings_signature(report_p)
-        assert sig_s == sig_p, (
-            f"Serial vs parallel finding signatures diverge:\n"
-            f"  serial: {sig_s}\n"
-            f"  parallel: {sig_p}"
-        )
+        assert sig_s == sig_p, f"Serial vs parallel finding signatures diverge:\n  serial: {sig_s}\n  parallel: {sig_p}"
 
     def test_serial_and_parallel_produce_identical_findings_polyglot(self, tmp_path: Path) -> None:
         """5-language fixture — the realistic case where order
@@ -471,9 +467,7 @@ class TestOrderDeterminism:
         ref = signatures[0]
         for idx, sig in enumerate(signatures[1:], start=1):
             assert sig == ref, (
-                f"Run {idx} produced a different finding order than run 0.\n"
-                f"  run 0: {ref}\n"
-                f"  run {idx}: {sig}"
+                f"Run {idx} produced a different finding order than run 0.\n  run 0: {ref}\n  run {idx}: {sig}"
             )
 
     def test_finding_order_stable_across_5_serial_runs(self, tmp_path: Path) -> None:
@@ -561,7 +555,5 @@ class TestOrderDeterminism:
             sig_s = _findings_signature(report_s)
             sig_p = _findings_signature(report_p)
             assert sig_s == sig_p, (
-                f"Trial {trial}: serial vs parallel signatures diverge.\n"
-                f"  serial: {sig_s}\n"
-                f"  parallel: {sig_p}"
+                f"Trial {trial}: serial vs parallel signatures diverge.\n  serial: {sig_s}\n  parallel: {sig_p}"
             )

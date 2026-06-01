@@ -141,11 +141,11 @@ The single entry in `marketplace.json.plugins[]` for Layout C MUST satisfy:
 | `description` | Recommended. Usually mirrors `plugin.json.description`. |
 | `category`, `homepage`, `license`, `author` | Encouraged for discovery. Use `AskUserQuestion` to gather. |
 
-CPV's `validate_layout_c_consistency` checks rules 1, 2, and 3. If any of these drift, validation fails with a CRITICAL category=architecture finding.
+CPV's `validate_layout_c_consistency` checks rules 1, 2, and 3. A missing self-entry (rule 1) or a wrong `source` (rule 2) is a MAJOR finding (would break install); a version mismatch (rule 3) is a MINOR finding (soft drift). In `--strict` mode any of these block the run.
 
 ### Name and version synchronization
 
-This is the single most fragile invariant in Layout C. Whenever EITHER manifest changes, BOTH must change in the same commit. The standard `publish.py` for Layout C handles this — but if a contributor edits one manifest by hand without the other, CPV emits a CRITICAL on the next validation run.
+This is the single most fragile invariant in Layout C. Whenever EITHER manifest changes, BOTH must change in the same commit. The standard `publish.py` for Layout C handles this — but if a contributor edits one manifest by hand without the other, CPV flags the drift on the next validation run (MAJOR for a name/source mismatch, MINOR for a version mismatch).
 
 To enforce the invariant:
 - Add a pre-commit hook that aborts when `plugin.json` is staged without `marketplace.json` (or vice versa) when the changed field is `name` or `version`. The standard CPV pre-push hook also catches this on push.
@@ -165,7 +165,7 @@ The Layout C `publish.py` differs from Layout A or B in two ways:
 1. The bump function modifies BOTH `.claude-plugin/plugin.json::version` AND `.claude-plugin/marketplace.json::metadata.version` AND `.claude-plugin/marketplace.json::plugins[N].version` (the self-entry).
 2. There is exactly ONE tag per release (matching the new version), and ONE git push that carries both manifests.
 
-Use the template at `scripts/generate_plugin_repo.py::PUBLISH_PY_TEMPLATE_LAYOUT_C` (added in v2.33.0+; for older CPV versions, hand-adapt the standard template).
+Scaffold the publish.py with `scripts/generate_plugin_repo.py` — its `gen_publish_py()` emits a single unified publish pipeline, and the Layout C three-location version sync is performed by `update_self_marketplace_json()` (bumps both `metadata.version` and the `source: "./"` self-entry's version) alongside `update_python_versions()` (bumps `plugin.json` + `pyproject.toml`). Pass `--self-marketplace` when generating so the Layout C marketplace.json is emitted too.
 
 ### Single Atomic Commit
 
@@ -176,7 +176,7 @@ git add .claude-plugin/plugin.json .claude-plugin/marketplace.json scripts/publi
 git commit -m "chore: migrate to Layout C (marketplace-in-plugin)"
 ```
 
-Never split the manifest creation from the publish.py update — a half-migrated repo trips CPV's category=architecture rule.
+Never split the manifest creation from the publish.py update — a half-migrated repo trips CPV's `validate_layout_c_consistency` check (MAJOR for a missing self-entry or wrong `source`).
 
 ### Tag the Repository
 

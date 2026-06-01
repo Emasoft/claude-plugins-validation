@@ -57,6 +57,41 @@ def _coerce_scalar(raw: str) -> Any:
     return s
 
 
+def _strip_comment(value: str) -> str:
+    """Strip a trailing ``# comment`` from a scalar token, honoring quotes.
+
+    A YAML comment starts at the first ``#`` that is BOTH outside any quoted
+    token AND preceded by whitespace (a ``#`` at column 0 of the value region
+    also begins a comment, matching pyyaml — ``key: # c`` yields a null value).
+    A ``#`` inside ``'...'`` / ``"..."`` is ordinary text, and a ``#`` glued to
+    preceding non-space text (``foo#c``) is NOT a comment.
+
+    This replaces the previous ``re.search(r"\\s+#", value)`` strip, which was
+    quote-blind: it ate the ``#`` inside a quoted scalar (``desc: 'a # b'``
+    became ``"'a"``) and never ran on block-list items at all (so a ``tags:``
+    item with a trailing comment kept the comment text). Both diverged from
+    pyyaml; routing every scalar through this one helper is the single source
+    of truth that keeps the fallback parser matching pyyaml on the supported
+    subset.
+    """
+    quote: str | None = None
+    prev_ws = True  # column 0 counts as preceded-by-whitespace for a leading '#'
+    for idx, ch in enumerate(value):
+        if quote is not None:
+            if ch == quote:
+                quote = None
+            prev_ws = False
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            prev_ws = False
+            continue
+        if ch == "#" and prev_ws:
+            return value[:idx].rstrip()
+        prev_ws = ch in (" ", "\t")
+    return value.rstrip()
+
+
 def _split_inline_items(body: str, raw: str) -> list[str]:
     """Split an inline-list body on top-level commas, honoring quotes.
 
@@ -106,6 +141,26 @@ def _parse_inline_list(raw: str) -> list[Any]:
     if not body:
         return []
     return [_coerce_scalar(item) for item in _split_inline_items(body, raw)]
+
+
+def _split_trailing_blanks(block_lines: list[str]) -> tuple[list[str], int]:
+    """Split block-scalar lines into ``(content_lines, trailing_blank_count)``.
+
+    ``content_lines`` runs through the LAST non-empty line (interior blanks are
+    kept); ``trailing_blank_count`` is the number of empty lines after it. An
+    all-blank block yields ``([], len(block_lines))``. Used by the literal
+    (``|``) path so chomping (strip / clip / keep) can be applied to the
+    trailing-blank count rather than baked into the joined body — matching how
+    the folded (``>``) path already consumes ``_fold_block_lines``'s trailing
+    count.
+    """
+    last_content = -1
+    for idx, ln in enumerate(block_lines):
+        if ln != "":
+            last_content = idx
+    if last_content == -1:
+        return [], len(block_lines)
+    return block_lines[: last_content + 1], len(block_lines) - (last_content + 1)
 
 
 def _fold_block_lines(block_lines: list[str]) -> tuple[str, int]:
@@ -183,11 +238,9 @@ def safe_load(text: str) -> dict[str, Any] | None:
             raise YAMLError(f"missing ``:`` separator: {line!r}")
         key = key.strip()
         rest = rest.lstrip()
-        # Strip trailing comment from inline value (only when the ``#`` is
-        # preceded by whitespace, to avoid eating ``#`` inside strings).
-        cmt = re.search(r"\s+#", rest)
-        if cmt:
-            rest = rest[: cmt.start()].rstrip()
+        # Strip a trailing ``# comment`` from the inline value, honoring quotes
+        # (a ``#`` inside ``'...'``/``"..."`` is data, not a comment).
+        rest = _strip_comment(rest)
 
         # Block scalar: ``key: >`` (folded) or ``key: |`` (literal)
         if rest in (">", "|", ">-", "|-", ">+", "|+"):
@@ -227,16 +280,23 @@ def safe_load(text: str) -> dict[str, Any] | None:
                     if joined and not joined.endswith("\n"):
                         joined += "\n"
             else:
-                # Literal (``|``): preserve every line break verbatim.
-                joined = "\n".join(block_lines)
-                if chomp_strip:
-                    joined = joined.rstrip("\n")
-                elif chomp_keep:
-                    if not joined.endswith("\n"):
-                        joined += "\n"
-                else:  # default: clip — single trailing newline (YAML 1.2 default)
-                    if joined and not joined.endswith("\n"):
-                        joined += "\n"
+                # Literal (``|``): preserve every interior line break verbatim,
+                # but handle TRAILING blank lines via the chomp indicator — not
+                # by joining them into the body. The previous ``"\n".join(...)``
+                # folded trailing blanks into the body string, which conflated
+                # content newlines with trailing-blank newlines and diverged from
+                # pyyaml for ``|`` (clip must collapse N trailing blanks to one
+                # ``\n``) and ``|+`` (keep emits the body's own final ``\n`` plus
+                # one ``\n`` per trailing blank). Splitting first matches pyyaml
+                # across every blank-line / chomp combination (verified).
+                content_lines, trailing_blanks = _split_trailing_blanks(block_lines)
+                body = "\n".join(content_lines)
+                if chomp_strip:  # strip: drop ALL trailing newlines
+                    joined = body
+                elif chomp_keep:  # keep: body's final ``\n`` + one per trailing blank
+                    joined = ("\n" * trailing_blanks) if not body else (body + "\n" * (trailing_blanks + 1))
+                else:  # clip — exactly one trailing newline (YAML 1.2 default)
+                    joined = (body + "\n") if body else ""
             result[key] = joined
             continue
 
@@ -257,7 +317,10 @@ def safe_load(text: str) -> dict[str, Any] | None:
                 ls = lst.strip()
                 if not ls.startswith("- "):
                     raise YAMLError(f"expected ``- item`` continuation for {key!r}, got: {lst!r}")
-                items.append(_coerce_scalar(ls[2:]))
+                # A block-list item carries the same trailing-comment semantics
+                # as an inline scalar (``- a  # note`` -> ``a``); strip it before
+                # coercion so the result matches pyyaml.
+                items.append(_coerce_scalar(_strip_comment(ls[2:])))
                 saw_list = True
                 j += 1
             result[key] = items if saw_list else None

@@ -282,9 +282,7 @@ def test_n_workers_default_uses_cpu_count(monkeypatch, tmp_files):
 def test_chunk_size_greater_than_one_batches_files(many_tmp_files):
     """``chunk_size=10`` → 100 files arrive as 10 batches; order is still
     preserved; per-file findings are still individually returned."""
-    results = parallel_scan(
-        many_tmp_files, scan_return_index_finding, chunk_size=10
-    )
+    results = parallel_scan(many_tmp_files, scan_return_index_finding, chunk_size=10)
     assert len(results) == 100
     assert [r.findings[0]["idx"] for r in results] == list(range(100))
     for r, p in zip(results, many_tmp_files):
@@ -295,9 +293,7 @@ def test_chunk_size_greater_than_one_batches_files(many_tmp_files):
 def test_chunk_size_greater_than_one_with_per_file_errors(tmp_files):
     """Batched mode still isolates per-file errors within a batch — a
     raising file in batch position 0 doesn't kill positions 1..N."""
-    results = parallel_scan(
-        tmp_files, scan_raise_for_even_index, chunk_size=4
-    )
+    results = parallel_scan(tmp_files, scan_raise_for_even_index, chunk_size=4)
     assert len(results) == 10
     for i, r in enumerate(results):
         if i % 2 == 0:
@@ -320,9 +316,7 @@ def test_chunk_size_zero_or_negative_rejected():
 def test_invalid_on_error_rejected():
     """Unknown ``on_error`` value is a programming error → ``ValueError``."""
     with pytest.raises(ValueError, match="on_error"):
-        parallel_scan(
-            [Path("x")], scan_return_path_name, on_error="ignore"
-        )
+        parallel_scan([Path("x")], scan_return_path_name, on_error="ignore")
 
 
 def test_unpickleable_callable_raises_clear_error(tmp_files):
@@ -340,11 +334,7 @@ def test_unpickleable_callable_raises_clear_error(tmp_files):
     # Make sure it's actually a serialization-related failure, not a logic
     # bug pretending to be one.
     msg = str(excinfo.value) + type(excinfo.value).__name__
-    assert (
-        "pickle" in msg.lower()
-        or "local object" in msg.lower()
-        or "attribute" in msg.lower()
-    )
+    assert "pickle" in msg.lower() or "local object" in msg.lower() or "attribute" in msg.lower()
 
 
 def test_empty_findings_list_is_not_an_error(tmp_files):
@@ -371,14 +361,10 @@ def test_parallel_scan_aggregated_end_to_end(tmp_files):
     """``parallel_scan_aggregated`` runs the scan and applies the aggregator
     to the resulting ScanResult list. Verifies both the count aggregator
     and a dict aggregator that depends on input order."""
-    total = parallel_scan_aggregated(
-        tmp_files, scan_returns_multiple, aggregate_count_findings
-    )
+    total = parallel_scan_aggregated(tmp_files, scan_returns_multiple, aggregate_count_findings)
     assert total == 10 * 3  # 10 files * 3 findings each
 
-    mapping = parallel_scan_aggregated(
-        tmp_files, scan_return_path_name, aggregate_to_dict
-    )
+    mapping = parallel_scan_aggregated(tmp_files, scan_return_path_name, aggregate_to_dict)
     assert list(mapping.keys()) == [p.name for p in tmp_files]
     for p in tmp_files:
         assert mapping[p.name] == [{"name": p.name}]

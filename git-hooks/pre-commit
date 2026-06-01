@@ -17,19 +17,39 @@ import subprocess
 import sys
 from pathlib import Path
 
-# ANSI color codes, disabled on Windows without color support
-_COLORS_SUPPORTED = (
-    os.name != "nt"
-    or os.environ.get("ANSICON") is not None
-    or os.environ.get("WT_SESSION") is not None  # Windows Terminal
-    or "xterm" in os.environ.get("TERM", "").lower()
-)
+# ---------------------------------------------------------------------------
+# ANSI color helpers (disabled on Windows unless colorama is available)
+# ---------------------------------------------------------------------------
+# Kept identical to git-hooks/pre-push so both hooks behave the same way:
+# honor NO_COLOR, gate on isatty() (so piped/redirected commit output and
+# GUI git clients that capture hook output don't get raw escape sequences),
+# and use colorama on Windows rather than sniffing terminal env vars.
 
-RED = "\033[0;31m" if _COLORS_SUPPORTED else ""
-YELLOW = "\033[1;33m" if _COLORS_SUPPORTED else ""
-GREEN = "\033[0;32m" if _COLORS_SUPPORTED else ""
-BLUE = "\033[0;34m" if _COLORS_SUPPORTED else ""
-NC = "\033[0m" if _COLORS_SUPPORTED else ""
+
+def _colors_supported() -> bool:
+    """Return True when the terminal likely supports ANSI escape codes."""
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.name == "nt":
+        # On Windows, try to enable ANSI support via colorama
+        try:
+            import colorama  # noqa: F811
+
+            colorama.init()
+            return True
+        except ImportError:
+            return False
+    # Unix-like systems: support ANSI if stdout is a terminal
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+
+_USE_COLOR = _colors_supported()
+
+RED = "\033[0;31m" if _USE_COLOR else ""
+YELLOW = "\033[1;33m" if _USE_COLOR else ""
+GREEN = "\033[0;32m" if _USE_COLOR else ""
+BLUE = "\033[0;34m" if _USE_COLOR else ""
+NC = "\033[0m" if _USE_COLOR else ""  # No Color
 
 # Patterns that identify plugin-related files
 PLUGIN_PATTERNS = [

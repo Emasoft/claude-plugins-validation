@@ -39,11 +39,11 @@ tools:
 ---
 ```
 
-Validator: `scripts/cpv_validation_common.py:287` — `Monitor` is included in the valid tools set.
+Validator: `scripts/cpv_validation_common.py` — `Monitor` is a member of the `VALID_TOOLS` set.
 
 ## userConfig (plugin.json)
 
-User-configurable values prompted at plugin enable time. Keys must be valid identifiers (`^[a-zA-Z_][a-zA-Z0-9_]*$`). Each entry should declare a `description` (MINOR if missing) and may set `sensitive: true` to mark secrets.
+User-configurable values prompted at plugin enable time. Keys must be valid identifiers (`^[a-zA-Z_][a-zA-Z0-9_]*$`). Per the v2.1.121 spec, every entry **requires** three sub-fields — `type`, `title`, and `description` (CPV emits a MAJOR for each missing one). `type` must be one of `string`, `number`, `boolean`, `directory`, `file`. Optional sub-fields: `sensitive` (mark secrets), `required`, `default`, `multiple` (string only), `min`/`max` (number only).
 
 ```json
 {
@@ -51,10 +51,14 @@ User-configurable values prompted at plugin enable time. Keys must be valid iden
   "version": "1.0.0",
   "userConfig": {
     "API_TOKEN": {
+      "type": "string",
+      "title": "API token",
       "description": "API token used to authenticate with the upstream service",
       "sensitive": true
     },
     "REGION": {
+      "type": "string",
+      "title": "Deployment region",
       "description": "Deployment region (e.g. us-east-1)"
     }
   }
@@ -63,7 +67,7 @@ User-configurable values prompted at plugin enable time. Keys must be valid iden
 
 Access values in hooks/MCP/LSP string substitutions via `${user_config.KEY}`. Each key is also exported as `CLAUDE_PLUGIN_OPTION_<KEY>` (see below).
 
-Validator: `scripts/validate_plugin.py:283-302`.
+Validator: `scripts/validate_plugin.py` — `validate_user_config_structure()`.
 
 ## channels (plugin.json)
 
@@ -88,13 +92,13 @@ Channel declarations for message injection. Each entry needs a `server` field th
 }
 ```
 
-Validator: `scripts/validate_plugin.py:303-327`.
+Validator: `scripts/validate_plugin.py` — `validate_channels_structure()`.
 
 ## CLAUDE_PLUGIN_OPTION_<KEY> env vars
 
 For every key in `userConfig`, Claude Code auto-exports an env var named `CLAUDE_PLUGIN_OPTION_<KEY>` (uppercase, starts with a letter). Non-sensitive values can be interpolated into skill body text, hook scripts, and MCP config as `${CLAUDE_PLUGIN_OPTION_REGION}`.
 
-The pattern is enforced by CPV: `^CLAUDE_PLUGIN_OPTION_[A-Z][A-Z0-9_]*$` — the env var whitelist in `scripts/cpv_validation_common.py:335-346` matches any name fitting that shape, so no manual whitelisting is needed.
+The pattern is enforced by CPV: `^CLAUDE_PLUGIN_OPTION_[A-Z][A-Z0-9_]*$` — the env var whitelist (`PLUGIN_ENV_VAR_PATTERNS` in `scripts/cpv_validation_common.py`) matches any name fitting that shape, so no manual whitelisting is needed.
 
 Example usage inside a SKILL.md:
 
@@ -127,7 +131,7 @@ v2.1.80 lets teams declare small marketplaces inline in `settings.json` (NOT in 
 
 Notes:
 - `source: "settings"` is for the MARKETPLACE entry itself, not individual plugins.
-- Per-plugin source can still be `github`, `url`, `npm`, `git-subdir`, or `settings`.
+- Per-plugin source must be a real fetchable source — a relative path (`./path`), `github`, `url`, `git-subdir`, or `npm`. `settings` is a marketplace-level-only source type and is rejected if used at the per-plugin level.
 
 ## managed-settings.d/ drop-in directory
 

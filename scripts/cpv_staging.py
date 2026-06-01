@@ -38,6 +38,7 @@ Pairs with `cpv_dedup.py` (dedup logic) and `cpv_install_scanners.py`
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import subprocess
@@ -197,9 +198,12 @@ def stage_target(
             skipped_reasons=skipped,
         )
     except OSError as exc:
-        # EXDEV (errno 18 on Linux, 17 on macOS) — cross-filesystem link.
-        # Bail to COPY or SYMLINK based on size budget.
-        if exc.errno not in {18, 17}:  # not cross-fs; re-raise
+        # EXDEV (errno 18 on BOTH Linux and macOS) — cross-filesystem link.
+        # Bail to COPY or SYMLINK based on size budget. Any other errno
+        # (EEXIST=17, EPERM, EACCES, ...) is a genuine fault and MUST
+        # propagate (fail-fast); masking it as cross-fs would silently
+        # COPY/SYMLINK the whole tree to paper over a real error.
+        if exc.errno != errno.EXDEV:  # not cross-fs; re-raise
             cleanup_staging(stage_root)
             raise
 
@@ -331,7 +335,10 @@ def _hardlink_file(s: Path, d: Path, *, raise_first_exdev: bool) -> int:
             os.link(s, d)
             return st.st_size
         except OSError as exc:
-            if raise_first_exdev and exc.errno in {17, 18}:
+            # Every os.link failure re-raises so stage_target can decide.
+            # EXDEV (18, both Linux+macOS) is the cross-fs signal it acts on;
+            # other errnos (EEXIST=17, EPERM, ...) propagate as genuine faults.
+            if raise_first_exdev and exc.errno == errno.EXDEV:
                 raise  # cross-fs detected; caller will switch mode
             raise
     return 0  # not regular file, not symlink — skip
@@ -515,7 +522,11 @@ def stage_marketplace(
             files, bytes_, _per_plugin_skipped = hardlink_tree(plugin_dir, target_in_stage)
             mode = StageMode.HARDLINK
         except OSError as exc:
-            if exc.errno not in {17, 18}:  # not cross-fs — record + skip plugin
+            # Only EXDEV (18, both Linux+macOS) means cross-fs. Any other
+            # errno (EEXIST=17, EPERM, ...) is a real per-plugin fault: record
+            # it and skip this plugin rather than mis-triggering the cross-fs
+            # copy/symlink fallback.
+            if exc.errno != errno.EXDEV:  # not cross-fs — record + skip plugin
                 skipped_reasons.append(f"{plugin_dir}: {exc!r}")
                 continue
             # Cross-fs: fall back to copy or symlink based on plugin tree size.

@@ -38,24 +38,13 @@ PLUGIN_CREATOR = REPO_ROOT / "agents" / "plugin-creator.md"
 BATCH_CACHE_OPT = REPO_ROOT / "commands" / "cpv-batch-caching-optimize.md"
 BATCH_FIX = REPO_ROOT / "commands" / "cpv-batch-fix.md"
 SCAFFOLD_SKILL = REPO_ROOT / "skills" / "scaffold-skill" / "SKILL.md"
-MKPL_GUIDE = (
-    REPO_ROOT
-    / "skills"
-    / "setup-github-marketplace"
-    / "references"
-    / "marketplace-setup-guide.md"
-)
-SCRIPT_TEMPLATES = (
-    REPO_ROOT
-    / "skills"
-    / "setup-github-marketplace"
-    / "references"
-    / "script-templates.md"
-)
+MKPL_GUIDE = REPO_ROOT / "skills" / "setup-github-marketplace" / "references" / "marketplace-setup-guide.md"
+SCRIPT_TEMPLATES = REPO_ROOT / "skills" / "setup-github-marketplace" / "references" / "script-templates.md"
 ADD_COMPONENT = REPO_ROOT / "scripts" / "add_component.py"
 
 
 # ---- #29: no hardcoded iteration cap in plugin-creator completion gate ----
+
 
 def test_plugin_creator_has_no_hardcoded_iteration_cap() -> None:
     """plugin-creator.md must not carry a 'hard cap N iterations' fix-loop ceiling."""
@@ -75,6 +64,7 @@ def test_plugin_creator_uses_oscillation_only_termination() -> None:
 
 # ---- #21: /cpv-cache-optimize is a ghost; real entry is /cpv-main-menu ----
 
+
 def test_batch_cache_optimize_has_no_ghost_command() -> None:
     """The batch cache-optimize command must not reference the non-existent /cpv-cache-optimize."""
     text = BATCH_CACHE_OPT.read_text(encoding="utf-8")
@@ -92,6 +82,7 @@ def test_batch_cache_optimize_points_at_real_entry_point() -> None:
 
 
 # ---- #166: cpv-batch-fix reuses Step 0 plan; only ONE orchestrator plan call ----
+
 
 def test_batch_fix_invokes_orchestrator_plan_exactly_once() -> None:
     """Only Step 0 may run `cpv_batch_orchestrator.py plan`; the fan-out reuses it.
@@ -116,6 +107,7 @@ def test_batch_fix_marketplace_path_reuses_step0_plan() -> None:
 
 
 # ---- #24 + #110: scaffold-skill example + Output match reality ----
+
 
 def test_scaffold_skill_example_includes_use_when_trigger() -> None:
     """The example --description must carry the 'Use when' trigger the skill mandates."""
@@ -158,6 +150,7 @@ def test_skill_template_really_emits_only_name_and_description() -> None:
 
 
 # ---- HIGH + #113: marketplace-setup-guide references real templates only ----
+
 
 def test_marketplace_guide_has_no_ghost_script_names() -> None:
     """The guide must not reference update_marketplace_metadata.py or setup_git_hooks.py."""

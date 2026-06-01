@@ -60,7 +60,9 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -191,8 +193,6 @@ def _extract_archive(src: Path, sandbox: Path) -> Path:
     dest = sandbox / "target"
     dest.mkdir()
     if src.suffix.lower() == ".zip":
-        import zipfile
-
         with zipfile.ZipFile(src) as zf:
             # Refuse zips with path traversal entries.
             for name in zf.namelist():
@@ -200,13 +200,24 @@ def _extract_archive(src: Path, sandbox: Path) -> Path:
                     raise RuntimeError(f"archive contains unsafe path: {name!r}")
             zf.extractall(dest)
     else:
-        import tarfile
-
         with tarfile.open(src) as tf:
+            # Fast, clear pre-check for the obvious traversal shape. This only
+            # covers member NAMES — it does NOT catch symlink/hardlink members
+            # whose linkname escapes the sandbox, nor device/special files.
             for member in tf.getmembers():
                 if member.name.startswith("/") or ".." in Path(member.name).parts:
                     raise RuntimeError(f"archive contains unsafe path: {member.name!r}")
-            tf.extractall(dest)
+            # filter="data" (Python 3.12+, which this project requires) is the
+            # authoritative guard: it rejects absolute/traversing linknames,
+            # special files, and out-of-tree extraction that the name-only loop
+            # above misses — critical because this scanner extracts UNTRUSTED
+            # archives into the sandbox. Mirrors cpv_management_common.py:564.
+            # Re-raise FilterError as RuntimeError so a malicious tar fails the
+            # same way as the zip path and is reported as exit 2 by main().
+            try:
+                tf.extractall(dest, filter="data")
+            except tarfile.FilterError as exc:
+                raise RuntimeError(f"archive contains unsafe entry: {exc}") from exc
     # If the archive contains a single top-level directory, descend into it.
     entries = list(dest.iterdir())
     if len(entries) == 1 and entries[0].is_dir():
@@ -250,12 +261,59 @@ def _run_validate_plugin(root: Path, *, marketplace_only: bool = False) -> tuple
     if marketplace_only:
         cmd.append("--marketplace-only")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, check=False)
-    summary: dict[str, Any] = {}
+
+    # validate_plugin.py has early-exit error paths (path-not-found, "this is a
+    # marketplace not a plugin", SKILL.md-at-root, etc.) that print to stderr
+    # and exit non-zero WITHOUT emitting JSON. An empty/garbage stdout therefore
+    # means the validator could not complete — it must NOT be reported as
+    # "CLEAN / safe to install". Map it to exit 2 (the documented usage/internal
+    # error code) and surface the diagnostics so _print_report shows the failure.
+    if not result.stdout.strip():
+        return 2, {
+            "error": "validate_plugin produced no JSON output (likely a usage/shape error)",
+            "raw_stderr": result.stderr.strip(),
+        }
     try:
-        summary = json.loads(result.stdout) if result.stdout.strip() else {}
+        raw = json.loads(result.stdout)
     except json.JSONDecodeError:
-        summary = {"raw_stdout": result.stdout, "raw_stderr": result.stderr}
-    return result.returncode, summary
+        return 2, {
+            "error": "validate_plugin emitted unparseable JSON",
+            "raw_stdout": result.stdout,
+            "raw_stderr": result.stderr.strip(),
+        }
+
+    # validate_plugin emits counts under "counts" and per-issue records under
+    # "results" with an uppercase "level". Normalise to this scanner's canonical
+    # shape ("summary" counts + lowercase-"severity" "findings") so _print_report
+    # renders the inline top-5 findings for plugin/marketplace targets exactly
+    # as it does for the native-skillaudit skill/loose path. Without this, the
+    # BLOCKED report for a plugin would silently list zero findings.
+    counts = raw.get("counts", {}) if isinstance(raw.get("counts"), dict) else {}
+    findings = [
+        {
+            "severity": str(r.get("level", "")).lower(),
+            "rule_id": "validate_plugin",
+            "category": str(r.get("level", "")).lower(),
+            "message": r.get("message", ""),
+            "file": r.get("file"),
+            "line": r.get("line"),
+        }
+        for r in raw.get("results", [])
+        if isinstance(r, dict)
+    ]
+    summary: dict[str, Any] = {"summary": counts, "findings": findings}
+
+    # Derive the exit code from the CRITICAL/MAJOR counts — NOT from
+    # result.returncode. validate_plugin's exit code is multi-valued
+    # (MAJOR=2, MINOR=3, NIT=4 under --strict), which collides with this
+    # scanner's documented contract (0=clean, 1=CRITICAL/MAJOR, 2=usage error):
+    # passing it through verbatim would mis-report a MAJOR plugin as exit 2
+    # ("usage error") and a NIT-only plugin as a non-zero "blocked". The
+    # install decision is purely about CRITICAL/MAJOR, matching the native path.
+    crit = int(counts.get("critical", 0) or 0)
+    major = int(counts.get("major", 0) or 0)
+    rc = 0 if (crit == 0 and major == 0) else 1
+    return rc, summary
 
 
 def _run_native_skillaudit(root: Path, *, kind: str) -> tuple[int, dict[str, Any]]:
@@ -289,6 +347,23 @@ def _run_native_skillaudit(root: Path, *, kind: str) -> tuple[int, dict[str, Any
 
 
 def _print_report(label: str, kind: str, summary: dict[str, Any]) -> None:
+    # The validator could not produce a verdict (e.g. it errored out before
+    # emitting JSON). Never render this as CLEAN — that would falsely tell the
+    # user the target is safe. Report it as an explicit scan error (exit 2).
+    if summary.get("error"):
+        print()
+        print(f"  Pre-install scan: {label}")
+        print(f"  Kind:             {kind}")
+        print("  VERDICT:          ERROR — could not complete scan")
+        print(f"  Reason:           {summary['error']}")
+        stderr = summary.get("raw_stderr")
+        if stderr:
+            print(f"  Details:          {stderr}")
+        print()
+        print("  DO NOT INSTALL — the scan did not finish; treat as unsafe until it does.")
+        print()
+        return
+
     counts = summary.get("summary") or summary.get("counts") or {}
     crit = counts.get("critical", 0)
     major = counts.get("major", 0)
@@ -350,7 +425,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         try:
             root, label = _fetch_target(args.target, sandbox)
-        except (FileNotFoundError, RuntimeError) as exc:
+        except (OSError, RuntimeError, tarfile.TarError, zipfile.BadZipFile) as exc:
+            # Any failure to fetch/stage the target — missing path, permission
+            # error, failed clone/curl, or a CORRUPT/malicious archive — is a
+            # fetch error, not a finding. OSError covers shutil copy/copytree
+            # failures (shutil.Error and FileNotFoundError are OSError
+            # subclasses); tarfile.TarError / zipfile.BadZipFile are NOT, so they
+            # are listed explicitly. Map all of them to the documented exit 2
+            # instead of crashing with a traceback on untrusted input.
             print(f"Error: {exc}", file=sys.stderr)
             return 2
 

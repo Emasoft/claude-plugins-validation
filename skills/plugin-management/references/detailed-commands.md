@@ -13,6 +13,7 @@
 - [Creation & Publishing](#creation--publishing)
 - [Flags](#flags)
 - [Plugin Variables](#plugin-variables)
+- [Notes](#notes)
 
 ## Checklist
 
@@ -21,7 +22,6 @@
 - [ ] Select the correct scope (user / project / local / managed)
 - [ ] Run the command as documented
 - [ ] Verify via `claude plugin list`
-- [Notes](#notes)
 
 ## Local Install / Update / Uninstall
 
@@ -77,8 +77,10 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_github_validate.py" --marketplace o
 ```bash
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_github_validate.py" --audit-plugin owner/repo
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_github_validate.py" --audit-marketplace owner/repo
-skill-audit ./plugin/ -v
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_security.py" ./plugin/ -v
 ```
+
+The local audit is CPV's NATIVE scanner (`validate_security.py`, which runs the in-process skillaudit Check 27 plus the full security validator) — CPV deliberately replaced the old external `skill-audit` pip tool, which silently skipped the scan when absent. From the plugin cache, use the launcher form instead: `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" security ./plugin/ -v`.
 
 Checks: prompt injection, secrets (TruffleHog), shell issues (ShellCheck), code vulnerabilities (Semgrep).
 
@@ -136,7 +138,7 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_plugin.py" <path> --fix [--mar
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/standardize_marketplace.py" <path> --fix
 ```
 
-Related commands: `/cpv-create-local-plugin`, `/cpv-create-local-marketplace`, `/cpv-publish-a-plugin-as-github-repo`, `/cpv-create-a-github-marketplace`, `/cpv-publish-a-plugin-to-a-github-marketplace`, `/cpv-standardize`.
+Interactive entry point: `/cpv-main-menu` → **Create** (scaffold plugin / marketplace / skill / agent / command / hook / MCP) and the publishing flows route through it (it dispatches the plugin-creator agent). The individual `/cpv-create-*` / `/cpv-publish-*` / `/cpv-standardize` slash commands were consolidated into `/cpv-main-menu` and no longer exist.
 
 ## Flags
 

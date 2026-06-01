@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-caching-optimize
-description: "Fleet-wide parallel cache fix. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. One cache-optimizer-agent per plugin runs Phase 1 audit + Phase 2 fix + Phase 3 re-validate; Phase 4 broader refactor SKIPPED (run the cache-optimizer-agent on a single plugin to opt in). Use when applying CA-01..CA-06 fixes across many plugins. Trigger with /cpv-batch-caching-optimize."
+description: "Fleet-wide parallel cache fix. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. One cache-optimizer-agent per plugin runs Phase 1 audit + Phase 2 fix + Phase 3 re-validate; Phase 4 broader refactor SKIPPED (run the cache-optimizer-agent on a single plugin to opt in). Use when applying CA-01..CA-07 fixes across many plugins. Trigger with /cpv-batch-caching-optimize."
 user-invocable: true
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
@@ -100,7 +100,7 @@ Assistant: /cpv-batch-caching-optimize /path/a /path/b /path/c
 ## Resources
 
 - TRDD-3dcbb37c — full design
-- `skills/cache-validation-skill/SKILL.md` — CA-01..CA-06 pattern catalog
+- `skills/cache-validation-skill/SKILL.md` — CA-01..CA-07 pattern catalog
 - `commands/cpv-batch-caching-optimize.md` — orchestrator body (in this plugin)
 - `commands/cpv-batch-caching-audit.md` — sibling read-only audit command (in this plugin)
 - Sibling batch skills: `cpv-batch-validate`,

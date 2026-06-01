@@ -87,14 +87,17 @@ will change, and determine every occurrence of the pattern you must fix.
 **Write summary to:**
 
 ```text
-$MAIN_ROOT/reports/cpv-spark/output-{timestamp}.md
+$MAIN_ROOT/reports/cpv-spark/{timestamp}-{slug}.md
 ```
 
 Per `~/.claude/rules/agent-reports-location.md`, resolve `$MAIN_ROOT` via
 `git worktree list | head -n1 | awk '{print $1}'` so worktree sessions
 still write to the main repo root. The timestamp MUST be local time +
 GMT offset via `date +%Y%m%d_%H%M%S%z` (compact `±HHMM` form, never
-`±HH:MM`).
+`±HH:MM`). The timestamp comes FIRST (so the folder lex-sorts
+chronologically, matching CPV's own `report_timestamp()`-based path
+builder and every sibling agent); `{slug}` is a short task-descriptive
+summary, never a fixed literal.
 
 ## Output File Format
 
@@ -163,7 +166,7 @@ assistant: Bounded single-file fix — exactly cpv-spark's lane.
 [Reads README.md around line 413; inspects the block — slash-command syntax]
 [Adds the `text` language tag to the opening fence, same turn]
 [Re-runs validate_documentation.py: the WARNING is gone, no new finding]
-[DONE] fix-readme-langtag — 1 warning cleared. Report: reports/cpv-spark/output-20260525_142210+0200.md
+[DONE] fix-readme-langtag — 1 warning cleared. Report: reports/cpv-spark/20260525_142210+0200-fix-readme-langtag.md
 </example>
 
 <example>
@@ -175,5 +178,5 @@ without re-reading.
 [For each path the orchestrator listed: reads the file, locates the dead
 backtick ref, repoints or removes it in the same turn, then lints]
 [Re-validates the 4 files: 0 findings remain]
-[DONE] batch-shard-3 — 4 MINOR findings cleared across 4 files. Report: reports/cpv-spark/output-20260525_144705+0200.md
+[DONE] batch-shard-3 — 4 MINOR findings cleared across 4 files. Report: reports/cpv-spark/20260525_144705+0200-batch-shard-3.md
 </example>

@@ -80,7 +80,7 @@ The top-level `hooks` key must be an object whose keys are event names and value
 
 ## 2. Valid Hook Events
 
-There are **27 valid hook events**:
+There are **30 valid hook events**:
 
 | Event | Has Matcher | Description |
 |-------|-------------|-------------|
@@ -111,6 +111,9 @@ There are **27 valid hook events**:
 | FileChanged | Yes | When watched files change (v2.1.83, command-only). Matcher: filename/basename pattern |
 | TaskCreated | No | When a task is created via TaskCreate tool (v2.1.84, command-only) |
 | PermissionDenied | Yes | When auto mode classifier denies a tool call (v2.1.89). Matcher: tool name. Output: `{retry: true}` to allow model retry |
+| UserPromptExpansion | Yes | When a slash command or MCP prompt expands (v2.1.121 era). Matcher: command/skill name |
+| PostToolBatch | No | After a parallel tool batch resolves (v2.1.121 era) |
+| MessageDisplay | No | Transform or hide assistant message text as displayed (v2.1.152). Output: `hookSpecificOutput.displayContent` |
 
 ### Events With Matchers
 
@@ -127,11 +130,13 @@ These events support tool-specific or context-specific matchers:
 - InstructionsLoaded (session_start, nested_traversal, path_glob_match, include, compact)
 - Elicitation, ElicitationResult (MCP server name)
 - FileChanged (filename/basename pattern)
+- UserPromptExpansion (command/skill name)
 - Setup (legacy)
 
 ### Events Without Matchers
 
-These events fire globally and do not support matchers:
+These events fire globally and do not support matchers (a matcher field is
+silently ignored):
 
 - UserPromptSubmit
 - Stop
@@ -141,27 +146,42 @@ These events fire globally and do not support matchers:
 - WorktreeCreate
 - WorktreeRemove
 - CwdChanged
+- PostToolBatch
+- MessageDisplay
 
-### Command-Only Events
+### Events That Restrict Hook Types
 
-These events only support hook type `"command"` or `"http"` — `"prompt"` and `"agent"` types are not valid for them:
+`"prompt"` and `"agent"` hook types synthesize/dispatch a model response and so
+are only valid for events that fire AFTER MCP servers connect. The type matrix
+has three tiers (this mirrors the validator's single source of truth in
+`cpv_validation_common.py::hook_types_allowed_for_event`):
+
+**Tier 3 — only `"command"` and `"mcp_tool"`** (fire BEFORE MCP servers connect,
+so `"http"` is also excluded):
+
+- SessionStart
+- Setup
+
+**Tier 2 — `"command"`, `"http"`, and `"mcp_tool"`** (NOT `"prompt"` / `"agent"`):
 
 - PreCompact
 - PostCompact
 - Notification
 - ConfigChange
-- SessionStart
 - SessionEnd
 - SubagentStart
-- TeammateIdle
+- StopFailure
 - WorktreeCreate
 - WorktreeRemove
 - Elicitation
 - ElicitationResult
 - CwdChanged
 - FileChanged
-- TaskCreated
 - InstructionsLoaded
+
+All other events (tool events, UserPromptSubmit, and the Stop family — Stop,
+SubagentStop, PermissionDenied, TeammateIdle, TaskCreated) accept the full
+5-type set, `"prompt"` and `"agent"` included.
 
 ### Example for Each Event
 
@@ -275,7 +295,7 @@ Common tools that can be matched:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| type | Yes | Hook type: "command", "http", "prompt", or "agent" |
+| type | Yes | Hook type: "command", "http", "mcp_tool", "prompt", or "agent" |
 | matcher | No | Tool name or regex to filter which invocations trigger this hook |
 | description | No | Human-readable description of what this hook does |
 | if | No | Conditional execution using permission rule syntax (v2.1.85). Hook only fires when the condition matches. |
@@ -350,7 +370,7 @@ Evaluates a prompt with an LLM. Use `$ARGUMENTS` placeholder for hook input JSON
 | statusMessage | No | Message shown in UI during hook execution |
 | once | No | If true, runs only once per session (skill/agent hooks only) |
 
-Note: Prompt type hooks are not valid for command-only events.
+Note: Prompt type hooks are not valid for the Tier 2 / Tier 3 events listed under [Events That Restrict Hook Types](#events-that-restrict-hook-types).
 
 ### Agent Type
 
@@ -374,7 +394,7 @@ Runs an inline agent (subagent) as a hook:
 | statusMessage | No | Message shown in UI during hook execution |
 | once | No | If true, runs only once per session (skill/agent hooks only) |
 
-Note: Agent type hooks are not valid for command-only events.
+Note: Agent type hooks are not valid for the Tier 2 / Tier 3 events listed under [Events That Restrict Hook Types](#events-that-restrict-hook-types).
 
 ---
 
@@ -681,9 +701,9 @@ Timeout is in **seconds**. A value over 1000 is almost certainly a mistake (woul
 
 - [ ] hooks.json is valid JSON
 - [ ] Top-level `hooks` key is an object (not an array)
-- [ ] All event names are valid (18 allowed)
+- [ ] All event names are valid (see [§2 Valid Hook Events](#2-valid-hook-events) for the full list)
 - [ ] Matchers only used with matcher-supporting events
-- [ ] Command-only events (PreCompact, Notification) use only type "command"
+- [ ] Type-restricted events (see [Events That Restrict Hook Types](#events-that-restrict-hook-types)) do not use `"prompt"` / `"agent"` (and Tier 3 events also avoid `"http"`)
 - [ ] All scripts use `${CLAUDE_PLUGIN_ROOT}` paths
 - [ ] All referenced scripts exist
 - [ ] All scripts are executable (`chmod +x`)

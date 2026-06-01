@@ -383,14 +383,19 @@ iconv -f UTF-32BE -t UTF-8 <path> > <path>.tmp && mv <path>.tmp <path>
 
 **Root cause:** A line in the file matches one of the secret detection patterns. The actual secret content is masked in the report (truncated to 40 characters).
 
-### 4.1 Complete SECRET_PATTERNS Reference
+### 4.1 SECRET_PATTERNS Reference
+
+The authoritative, always-current list is `SECRET_PATTERNS` in
+`scripts/cpv_validation_common.py` — read it there if you need the exact live
+regex. The table below mirrors the current patterns (kept in sync with the
+code) so you can map a finding to its rule without opening the source:
 
 | # | Pattern (regex) | Secret Type |
 |---|---|---|
-| 1 | `AKIA[0-9A-Z]{16}` | AWS Access Key |
-| 2 | `-----BEGIN (RSA\|DSA\|EC\|OPENSSH )?PRIVATE KEY-----` | Private Key |
-| 3 | `ghp_[a-zA-Z0-9]{36}` | GitHub Personal Access Token |
-| 4 | `sk-[a-zA-Z0-9]{20,}` | API Key (sk-... format) |
+| 1 | `\b(?:AKIA\|ASIA\|AGPA\|AIDA\|AROA\|ANPA\|ANVA)[0-9A-Z]{16}` | AWS Access Key (7-prefix family) |
+| 2 | `-----BEGIN (RSA\|DSA\|EC\|OPENSSH \|PGP )?PRIVATE KEY-----` | Private Key |
+| 3 | `\b(?:ghp\|gho\|ghu\|ghs\|ghr)_[a-zA-Z0-9]{36,}\b` | GitHub Personal Access Token (5-prefix family) |
+| 4 | `\bsk-(?!proj-test\|test-)[a-zA-Z0-9]{20,}\b` | API Key (sk-... format) |
 | 5 | `xox[baprs]-[0-9a-zA-Z-]+` | Slack Token |
 | 6 | `github_pat_[a-zA-Z0-9_]{22,}` | GitHub Fine-Grained Personal Access Token |
 | 7 | `AIza[0-9A-Za-z\-_]{35}` | Google API Key |
@@ -398,11 +403,16 @@ iconv -f UTF-32BE -t UTF-8 <path> > <path>.tmp && mv <path>.tmp <path>
 | 9 | `pk_live_[a-zA-Z0-9]{24,}` | Stripe Publishable Key |
 | 10 | `sk-ant-[a-zA-Z0-9\-_]{80,}` | Anthropic API Key |
 | 11 | `npm_[a-zA-Z0-9]{36}` | npm Access Token |
-| 12 | `://[^:\s]+:[^@\s]+@[^\s]+` | Database Connection String with Credentials |
+| 12 | `\b(?:postgres(?:ql)?\|mysql\|mariadb\|mongodb(?:\+srv)?\|redis...\|jdbc:[a-z0-9]+\|...)://[^:/\s]+:[^@\s]+@[^\s]+` (scheme-anchored, v2.100.2 / issue #34) | Database Connection String with Credentials |
 | 13 | `SG\.[a-zA-Z0-9\-_]{22}\.[a-zA-Z0-9\-_]{43}` | SendGrid API Key |
-| 14 | `api[_-]?key['\"]?\s*[:=]\s*['\"](?!\$[\{A-Z_])[^'\"]{20,}['\"]` (case-insensitive) | Generic API Key |
+| 14 | `api[_-]?key['\"]?\s*[:=]\s*['\"](?!\$[\{A-Z_]\|CLAUDE_PLUGIN_OPTION_\|process\.env\.\|OPENAI_API_KEY\|...\|<\|\{)[^'\"]{20,}['\"]` (case-insensitive) | Generic API Key |
 | 15 | `eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}` | JWT Token |
 | 16 | `aws_secret_access_key\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{40}` (case-insensitive) | AWS Secret Access Key |
+| 17 | `-----BEGIN PGP PRIVATE KEY BLOCK-----` | PGP Private Key |
+| 18 | `sk-[A-Za-z0-9]{20,}T3BlbkFJ[A-Za-z0-9]{20,}` | OpenAI API Key (with T3BlbkFJ fingerprint) |
+| 19 | `\bglpat-[A-Za-z0-9_-]{20,}\b` | GitLab Personal Access Token |
+| 20 | `\bAKID[A-Za-z0-9]{32,}\b` | Tencent Cloud SecretId |
+| 21 | `\bhf_[A-Za-z]{32,}\b` | Hugging Face Token |
 
 ### 4.2 Fix Procedure
 

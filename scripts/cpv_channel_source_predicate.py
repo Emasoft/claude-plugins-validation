@@ -74,16 +74,22 @@ class PrefilterVerdict:
 def _load_plugin_manifest(plugin_root: Path) -> dict | None:
     """Read ``.claude-plugin/plugin.json`` defensively.
 
-    Never raises — returns None on missing file, malformed JSON, or
-    permission errors. The pillar is informational; a broken plugin
-    gets caught by the syntactic validator and we must not double-fail.
+    Never raises — returns None on missing file, malformed JSON,
+    non-UTF-8 bytes, or permission errors. The pillar is informational;
+    a broken plugin gets caught by the syntactic validator and we must
+    not double-fail.
     """
     manifest_path = plugin_root / ".claude-plugin" / "plugin.json"
     if not manifest_path.is_file():
         return None
     try:
+        # ``ValueError`` covers ``UnicodeDecodeError`` (a subclass) raised
+        # when a corrupt/malicious plugin.json contains non-UTF-8 bytes.
+        # Without it the decode would propagate and crash the prefilter,
+        # breaking the documented "never raises on malformed input"
+        # contract that the semantic-validator relies on.
         text = manifest_path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, ValueError):
         return None
     try:
         data = json.loads(text)
@@ -180,6 +186,8 @@ def resolve_channel_server_sources(plugin_root: Path) -> list[Path]:
         return []
     out: list[Path] = []
     seen: set[Path] = set()
+    # Resolve the plugin root once for the containment checks below.
+    root_resolved = plugin_root.resolve()
     for entry in channels:
         if not isinstance(entry, dict):
             continue
@@ -201,11 +209,21 @@ def resolve_channel_server_sources(plugin_root: Path) -> list[Path]:
         # against path-traversal attacks (e.g. dot-dot-slash sequences
         # pointing at sensitive files) in malicious plugin.json args.
         try:
-            candidate.relative_to(plugin_root.resolve())
+            candidate.relative_to(root_resolved)
         except ValueError:
             continue
         # Prefer src/ over dist/ when only src/ exists.
         candidate = _coerce_dist_path_to_src(candidate)
+        # Re-validate AFTER coercion: the dist/->src/ swap is a string
+        # substitution that does not re-check containment, so a malicious
+        # plugin whose src/ (or build/, lib/) directory is a SYMLINK
+        # pointing outside the plugin root could otherwise smuggle an
+        # arbitrary file past the guard above. Resolve the coerced path's
+        # real target and confirm it still lives under the plugin root.
+        try:
+            candidate.resolve().relative_to(root_resolved)
+        except ValueError:
+            continue
         if candidate.is_file() and candidate not in seen:
             out.append(candidate)
             seen.add(candidate)
@@ -419,7 +437,16 @@ def _classify_one_source(
         text = source_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
-    rel = str(source_path.relative_to(plugin_root))
+    # ``source_path`` is absolute (resolved by ``resolve_channel_server_sources``),
+    # so the relative-path computation must use the RESOLVED plugin root —
+    # otherwise a relative ``plugin_root`` (e.g. ``Path("some/plugin")``) makes
+    # ``relative_to`` raise ``ValueError`` and crash the prefilter, breaking the
+    # "never raises on malformed input" contract. Fall back to the bare filename
+    # if the path is somehow not under the root (it always is post-resolution).
+    try:
+        rel = str(source_path.relative_to(plugin_root.resolve()))
+    except ValueError:
+        rel = source_path.name
     language = _detect_language(source_path)
 
     forwards = find_channel_forward_calls(text, language=language)

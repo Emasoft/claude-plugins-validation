@@ -117,7 +117,9 @@ Please confirm your choice.
 
 4. **BACKUP** - Before making any changes:
    ```bash
-   git add -A && git commit -m "Backup before plugin validation fixes"
+   # Stage only already-tracked modifications (-u), never `-A`/`.`: wildcard
+   # staging can sweep untracked secrets/PII into the backup commit.
+   git add -u && git commit -m "Backup before plugin validation fixes"
    ```
 
 5. **FIX** - Apply only the approved fixes
@@ -138,14 +140,15 @@ Please confirm your choice.
 # 1. Check for uncommitted changes
 git status
 
-# 2. If uncommitted changes exist, stash them
-git stash push -m "Pre-validation stash $(date +%Y%m%d-%H%M%S)"
-
-# 3. Create a backup commit
-git add -A
+# 2. Create a backup commit that CAPTURES the current in-flight edits.
+#    Stage only tracked modifications (-u): `-A`/`.` could sweep untracked
+#    secrets/PII into the backup. Do NOT `git stash` first — stashing empties
+#    the working tree, so the commit below would have nothing to record and the
+#    rollback target would not contain your in-flight work.
+git add -u
 git commit -m "Backup before plugin validation fixes - $(date +%Y%m%d-%H%M%S)"
 
-# 4. Record the commit hash for rollback
+# 3. Record the commit hash for rollback
 BACKUP_COMMIT=$(git rev-parse HEAD)
 echo "Backup commit: $BACKUP_COMMIT"
 ```
@@ -153,15 +156,13 @@ echo "Backup commit: $BACKUP_COMMIT"
 ### After Making Changes
 
 ```bash
-# If fixes successful, commit
-git add -A
+# If fixes successful, commit (stage only tracked changes — never `-A`/`.`)
+git add -u
 git commit -m "Fix plugin validation issues: [list issues fixed]"
 
-# If fixes caused problems, rollback
+# If fixes caused problems, roll back to the backup commit created above.
+# This restores the in-flight edits that the backup commit captured.
 git reset --hard $BACKUP_COMMIT
-
-# If stash was used, restore
-git stash pop
 ```
 
 ### Rollback Instructions Template
@@ -169,15 +170,11 @@ git stash pop
 ```
 Changes have been applied. If you encounter issues:
 
-To undo ALL changes:
+To undo ALL changes (restores the backup commit's snapshot of your edits):
   git reset --hard [BACKUP_COMMIT_HASH]
 
 To see what was changed:
   git diff [BACKUP_COMMIT_HASH]..HEAD
-
-To restore any stashed changes:
-  git stash list
-  git stash pop
 ```
 
 ---
@@ -200,11 +197,16 @@ fi
 
 ```bash
 python3 -c "
-import yaml
+import sys, yaml
 with open('/path/to/file.md') as f:
     content = f.read()
     if content.startswith('---'):
         end = content.find('---', 3)
+        # A missing closing '---' (end == -1) means the frontmatter is truncated
+        # — exactly the corruption this check exists to catch. Fail instead of
+        # slicing content[3:-1] and silently parsing the body as YAML.
+        if end == -1:
+            sys.exit('CORRUPTION DETECTED: frontmatter has no closing ---')
         yaml.safe_load(content[3:end])
         print('Frontmatter valid')
 "
@@ -263,7 +265,7 @@ ruff check /path/to/script.py
 
 ### Marketplace Publishing Checklist
 
-- [ ] 1. Run marketplace validation with --github-deploy flag
+- [ ] 1. Run `validate_marketplace.py <path> --strict` (GitHub-deployment checks run automatically; there is no `--github-deploy` flag)
 - [ ] 2. Verify main README.md has all required sections
 - [ ] 3. Check each plugin subfolder has README.md
 - [ ] 4. Search for placeholder content ([TODO], [INSERT], etc.)
@@ -288,7 +290,7 @@ ruff check /path/to/script.py
 
 | Issue | Fix |
 |-------|-----|
-| Invalid event type | Use valid event from 18 allowed types |
+| Invalid event type | Use valid event from the 30 allowed types (see `hook-validation.md` for the canonical list) |
 | Script not found | Use `${CLAUDE_PLUGIN_ROOT}/scripts/name.sh` |
 | Script not executable | Run `chmod +x scripts/*.sh` |
 | Invalid matcher | Use tool name or valid regex |

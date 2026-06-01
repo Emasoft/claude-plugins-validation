@@ -286,8 +286,24 @@ def fix_missing_files(marketplace_dir: Path, data: dict, dry_run: bool) -> list[
     name = data.get("name", "my-marketplace")
     owner = data.get("owner", {})
     owner_name = owner.get("name", "Unknown") if isinstance(owner, dict) else "Unknown"
-    description = data.get("metadata", {}).get("description", f"{name} marketplace")
-    plugins = data.get("plugins", [])
+    # `metadata` is not type-checked by validate_marketplace_json, so a valid-JSON
+    # marketplace.json with `"metadata": "some string"` would crash a naive
+    # `.get("metadata", {}).get(...)` with AttributeError. Guard the type like `owner` above.
+    metadata = data.get("metadata", {})
+    description = (
+        metadata.get("description", f"{name} marketplace") if isinstance(metadata, dict) else f"{name} marketplace"
+    )
+    raw_plugins = data.get("plugins", [])
+    if not isinstance(raw_plugins, list):
+        # validate_marketplace_json already emitted an ERROR for a non-list `plugins`;
+        # here we just avoid iterating a non-list below (e.g. a dict would yield keys).
+        raw_plugins = []
+    # Keep only dict entries: validate_marketplace_json emits an ERROR for a
+    # non-dict plugin entry but still returns it inside `data`, so a malformed
+    # marketplace.json like {"plugins": ["a-string"]} reaches here intact.
+    # Both the github_owner loop below and `_readme(...)` (which does p["name"])
+    # would crash on a str/int entry — filter once at this boundary.
+    plugins = [p for p in raw_plugins if isinstance(p, dict)]
 
     # Infer github_owner from the first plugin repo, or fall back to owner_name
     github_owner = owner_name.lower().replace(" ", "-")

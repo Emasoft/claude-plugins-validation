@@ -27,7 +27,13 @@ orchestrator body lives in this plugin's
 
 - `claude-plugins-validation` plugin installed (provides
   `scripts/validate_security.py`, the universal input resolver,
-  and the `plugin-validator` agent).
+  `scripts/cpv_menu.py` (the claude-menu-system bridge), and the
+  `plugin-validator` agent).
+- `claude-menu-system` plugin installed — the slash command emits the
+  status table via its Stop-hook (through `scripts/cpv_menu.py`).
+  Declared as a hard dependency in CPV's `plugin.json`; `cpv_menu.py`
+  fails fast with an install hint if missing (there is no inline
+  fallback renderer — TRDD-4de479a0).
 - The five external scanners installed (cc-audit, tirith,
   trufflehog, semgrep, Cisco AI Defense skill-scanner) — each
   self-skips when its binary is unreachable, so partial coverage
@@ -50,15 +56,22 @@ table — every shape is supported identically.
    ```
 3. The command dispatches one `plugin-validator` subagent per plugin
    in `batch_security_audit` mode (each runs `validate_security`
-   only) and aggregates the per-plugin status JSONs into a single
-   Unicode-bordered status table.
-4. The user gets the final status table + a one-line summary
+   only) and aggregates the per-plugin status JSONs into a CMS-shaped
+   status-table spec, queued via `scripts/cpv_menu.py`. The
+   claude-menu-system Stop hook emits the Unicode-bordered table
+   post-turn via `systemMessage` (zero token cost — never enters the
+   agent transcript). NEVER print the table inline.
+4. The user gets the final status table (emitted by the Stop hook) +
+   a one-line summary
    (`DONE: plugins=N clean=X findings=Y warning-only=Z`).
 5. If any plugin has findings, suggest `/cpv-batch-fix <same spec>`.
 
 ## Output
 
-- Unicode-bordered status table (one row per plugin).
+- Unicode-bordered status table (one row per plugin), queued via
+  `scripts/cpv_menu.py` and emitted post-turn by the claude-menu-system
+  Stop hook through `systemMessage` (zero token cost — never enters the
+  agent transcript).
 - One-line DONE summary.
 - Per-plugin `validate_security` reports under
   `$MAIN_ROOT/reports/validate_security/<ts±tz>-<plugin>.md`.

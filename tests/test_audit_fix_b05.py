@@ -70,12 +70,7 @@ class TestTimeSensitiveSkipsCodeBlocks:
 
     def test_prose_after_fence_still_scanned(self):
         """Guard: fence state toggles off correctly — prose AFTER the block is scanned."""
-        body = (
-            "```\n"
-            "code line with no temporal token\n"
-            "```\n"
-            "Released after January 2024 in prose.\n"
-        )
+        body = "```\ncode line with no temporal token\n```\nReleased after January 2024 in prose.\n"
         report = ComprehensiveSkillReport()
         validate_time_sensitive_info(body, report)
         assert any("stale" in r.message for r in report.results)
@@ -131,17 +126,17 @@ class TestDynamicContextBangAdjacency:
         """
         report = ValidationReport(skill_path="test")
         validate_dynamic_context("Run ! `ls -la` to list files.", report)
-        assert not any(
-            "dynamic context injection" in r.message for r in report.results
-        ), "space-separated bang must not be counted as valid dynamic context"
+        assert not any("dynamic context injection" in r.message for r in report.results), (
+            "space-separated bang must not be counted as valid dynamic context"
+        )
 
     def test_correct_syntax_counted_as_valid_context(self):
         """Guard: the correct adjacent form IS still recognised as valid dynamic context."""
         report = ValidationReport(skill_path="test")
         validate_dynamic_context("Run !`ls -la` to list files.", report)
-        assert any(
-            "dynamic context injection" in r.message for r in report.results
-        ), "correct '!`cmd`' form must still be recognised"
+        assert any("dynamic context injection" in r.message for r in report.results), (
+            "correct '!`cmd`' form must still be recognised"
+        )
 
 
 class TestTriggerWithMessageSeverityMatch:
@@ -166,9 +161,9 @@ class TestTriggerWithMessageSeverityMatch:
         frontmatter = {"description": "Trigger with the phrase do-the-thing."}
         report = ValidationReport(skill_path="test")
         validate_description_field(frontmatter, "body text", report, strict_mode=True)
-        assert any(
-            r.level == "MAJOR" and "Use when" in r.message for r in report.results
-        ), "missing 'Use when ...' must still be a MAJOR finding"
+        assert any(r.level == "MAJOR" and "Use when" in r.message for r in report.results), (
+            "missing 'Use when ...' must still be a MAJOR finding"
+        )
 
 
 class TestWindowsPathEscapeExemptionPerMatch:
@@ -178,17 +173,17 @@ class TestWindowsPathEscapeExemptionPerMatch:
         """'\\drive\\folder' beside a benign '\\t' is flagged (line-level exemption was a FN)."""
         report = ValidationReport(skill_path="test")
         validate_path_formats("Edit config at \\drive\\folder and print \\t tab.\n", report)
-        assert any(
-            "Windows-style path" in r.message for r in report.results
-        ), "genuine backslash path must not be suppressed by an unrelated escape on the line"
+        assert any("Windows-style path" in r.message for r in report.results), (
+            "genuine backslash path must not be suppressed by an unrelated escape on the line"
+        )
 
     def test_pure_escape_line_stays_clean(self):
         """Guard: a line with ONLY string escapes (no path) is not flagged (no false positive)."""
         report = ValidationReport(skill_path="test")
         validate_path_formats("Use \\n for a newline and \\t for a tab.\n", report)
-        assert not any(
-            "Windows-style path" in r.message for r in report.results
-        ), "escape-only line must not be flagged as a Windows path"
+        assert not any("Windows-style path" in r.message for r in report.results), (
+            "escape-only line must not be flagged as a Windows path"
+        )
 
     def test_plain_path_no_escapes_flagged(self):
         """Guard: a plain backslash path with no escapes is still flagged."""

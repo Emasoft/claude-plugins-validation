@@ -167,14 +167,7 @@ def _candidate_paths() -> list[Path]:
         candidates.append(Path(cpd).expanduser() / _CACHE_FILENAME)
 
     # 3. uvx user with Claude Code: per-plugin data dir under ~/.claude.
-    candidates.append(
-        Path.home()
-        / ".claude"
-        / "plugins"
-        / "data"
-        / "claude-plugins-validation"
-        / _CACHE_FILENAME
-    )
+    candidates.append(Path.home() / ".claude" / "plugins" / "data" / "claude-plugins-validation" / _CACHE_FILENAME)
 
     # 4. uvx CLI without Claude Code: XDG cache dir.
     xdg = os.environ.get("XDG_CACHE_HOME")
@@ -236,9 +229,7 @@ def _resolve_cache_path() -> Path | None:
 
     if not _NO_WRITABLE_WARNED:
         _NO_WRITABLE_WARNED = True
-        _LOG.info(
-            "cpv_scan_cache: no writable cache location found; caching disabled"
-        )
+        _LOG.info("cpv_scan_cache: no writable cache location found; caching disabled")
     return None
 
 
@@ -359,6 +350,40 @@ def _wipe_and_recreate(path: Path) -> sqlite3.Connection | None:
         return None
 
 
+def _delete_entry(
+    path: Path,
+    content_hash: str,
+    catalog_hash: str,
+    scanner_version: str,
+    file_ext: str,
+) -> None:
+    """Best-effort DELETE of a single quadruple-keyed row.
+
+    Used by ``get_cached_findings`` when it reads back a corrupt/poisoned
+    entry (non-decodable JSON, a non-list value, or a list with a non-dict
+    element). Every such branch MUST purge the offending row — not merely
+    return ``None`` for this call — so the next run rescans from scratch
+    instead of repeatedly decoding the same poison on every lookup, and so
+    the corrupt row never lingers behind a same-key MISS. Swallows every
+    sqlite error because the cache is best-effort: a failed purge just means
+    the bad row survives until the next ``put`` overwrites it, which is no
+    worse than the pre-purge state.
+    """
+    try:
+        conn = _open_connection(path)
+        conn.execute(
+            "DELETE FROM scan_cache "
+            "WHERE content_hash = ? "
+            "AND catalog_hash = ? "
+            "AND scanner_version = ? "
+            "AND file_ext = ?",
+            (content_hash, catalog_hash, scanner_version, file_ext),
+        )
+        conn.close()
+    except sqlite3.Error:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -438,25 +463,18 @@ def get_cached_findings(
     except (TypeError, ValueError):
         # Stored a non-decodable string somehow — treat as corrupted
         # entry and discard it from the cache, not just from this call.
-        try:
-            conn2 = _open_connection(path)
-            conn2.execute(
-                "DELETE FROM scan_cache "
-                "WHERE content_hash = ? "
-                "AND catalog_hash = ? "
-                "AND scanner_version = ? "
-                "AND file_ext = ?",
-                (content_hash, catalog_hash, scanner_version, file_ext),
-            )
-            conn2.close()
-        except sqlite3.Error:
-            pass
+        _delete_entry(path, content_hash, catalog_hash, scanner_version, file_ext)
         return None
 
     # The schema doesn't enforce a list type — defensive check so a
     # malicious or accidentally-stored non-list doesn't leak into the
-    # caller's findings-handling code.
+    # caller's findings-handling code. Purge the offending row (same as the
+    # non-decodable-JSON and non-dict-element paths) so the next run rescans
+    # from scratch rather than re-decoding the same non-list value on every
+    # lookup. Without the purge this branch was the ONLY corruption path that
+    # left the poison in place, diverging from its siblings.
     if not isinstance(findings, list):
+        _delete_entry(path, content_hash, catalog_hash, scanner_version, file_ext)
         return None
 
     # Per-element shape check (audit MINOR #9). The consumer skips
@@ -467,19 +485,7 @@ def get_cached_findings(
     # above) and return None so the next run rescans from scratch rather
     # than trusting a corrupt/poisoned entry.
     if not all(isinstance(e, dict) for e in findings):
-        try:
-            conn3 = _open_connection(path)
-            conn3.execute(
-                "DELETE FROM scan_cache "
-                "WHERE content_hash = ? "
-                "AND catalog_hash = ? "
-                "AND scanner_version = ? "
-                "AND file_ext = ?",
-                (content_hash, catalog_hash, scanner_version, file_ext),
-            )
-            conn3.close()
-        except sqlite3.Error:
-            pass
+        _delete_entry(path, content_hash, catalog_hash, scanner_version, file_ext)
         return None
 
     return findings

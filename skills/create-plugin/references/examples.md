@@ -17,5 +17,6 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_plugin_repo.py" /tmp/my-plugin \
 
 ```bash
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/generate_marketplace_repo.py" /tmp/my-mkt \
-  --name my-marketplace --owner-name "My Org" --github-owner MyGitHub
+  --name my-marketplace --owner-name "My Org" \
+  --description "My plugin marketplace" --github-owner MyGitHub
 ```

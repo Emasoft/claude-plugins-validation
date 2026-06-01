@@ -469,9 +469,7 @@ class TestInvariants:
                 continue
             head = mod.split(".")[0]
             allowed_heads = {a.split(".")[0] for a in allowed} | {"__future__"}
-            assert head in allowed_heads, (
-                f"binary scanner must not import non-stdlib '{mod}' — pure-stdlib iron rule"
-            )
+            assert head in allowed_heads, f"binary scanner must not import non-stdlib '{mod}' — pure-stdlib iron rule"
 
     def test_no_subprocess_no_network(self) -> None:
         """No subprocess. No socket. No urllib. Same iron-rule envelope
@@ -505,9 +503,7 @@ class TestInvariants:
             r"\bsocket\.socket\s*\(",
             r"\brequests\.",
         ):
-            assert not _re.search(forbidden, code), (
-                f"binary scanner code must not use '{forbidden}'"
-            )
+            assert not _re.search(forbidden, code), f"binary scanner code must not use '{forbidden}'"
 
     def test_binary_prefix_is_visible_constant(self) -> None:
         """BINARY_PREFIX is a public constant the caller can rely on. The

@@ -463,7 +463,9 @@ def validate_rules_directory(
     all_content: list[str] = []
     if _rules_parallel_enabled() and len(units) > 1:
         scan_results = parallel_scan(
-            units, _scan_one_rule_file, chunk_size=32  # type: ignore[arg-type]
+            units,
+            _scan_one_rule_file,  # type: ignore[arg-type]
+            chunk_size=32,
         )
     else:
         # Serial fallback: synthesize the same ScanResult shape so the

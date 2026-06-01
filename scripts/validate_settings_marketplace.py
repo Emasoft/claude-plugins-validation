@@ -457,11 +457,22 @@ def validate_settings_marketplace_file(
         report.critical(f"settings.json path is not a regular file: {settings_path}", file_label)
         return report
 
-    # Parse JSONC (settings.json supports comments + trailing commas)
+    # Parse JSONC (settings.json supports comments + trailing commas).
+    # `load_jsonc` reads the file before parsing, so a read failure
+    # (PermissionError on a stat-readable-but-content-unreadable file, or a
+    # TOCTOU race where the file vanishes after the is_file() check above)
+    # surfaces as OSError. Catch it alongside the parse errors so this public
+    # validator keeps its fail-soft contract — every failure mode produces a
+    # CRITICAL finding instead of raising into callers (validate_plugin /
+    # manage_doctor) that invoke it without their own try/except. Mirrors
+    # validate_project_scope._load_json_or_report, which already catches OSError.
     try:
         data = load_jsonc(settings_path)
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         report.critical(f"settings.json: JSON parse error: {e}", file_label)
+        return report
+    except OSError as e:
+        report.critical(f"settings.json: read failed ({type(e).__name__})", file_label)
         return report
 
     if not isinstance(data, dict):

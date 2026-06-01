@@ -175,7 +175,7 @@ Or as an object form:
 1. **Both manifests at repo root** — `.claude-plugin/plugin.json` AND `.claude-plugin/marketplace.json` MUST coexist at the same `.claude-plugin/` directory. CPV emits CRITICAL if either is missing in a Layout C scenario.
 2. **`name` MUST match** between `plugin.json.name` and the self-entry's `name` field. CPV's `validate_layout_c_consistency` enforces this.
 3. **`source` MUST be `"./"`** (or its object form `{"source": "directory", "path": "./"}`). Any other value is not Layout C — it is something else broken.
-4. **`version` MUST be synced** in three places: `plugin.json.version`, `marketplace.json.metadata.version`, and the self-entry's `version`. The standard Layout C `publish.py` bumps all three atomically. CPV emits MAJOR on drift.
+4. **`version` MUST be synced** in three places: `plugin.json.version`, `marketplace.json.metadata.version`, and the self-entry's `version`. The standard Layout C `publish.py` bumps all three atomically. CPV's `validate_layout_c_consistency` cross-checks the self-entry's `version` against `plugin.json.version` and emits MINOR on drift.
 5. **Single tag per release** — one `vX.Y.Z` tag covers the whole repo (both manifests).
 6. **Single CHANGELOG** — `git-cliff` generates one history covering both the plugin's changes and the marketplace registration.
 7. **No auto-notify needed** — there is no separate marketplace repo to notify; both manifests live in this repo and are pushed together.
