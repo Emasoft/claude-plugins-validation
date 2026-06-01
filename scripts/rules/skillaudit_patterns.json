@@ -1057,14 +1057,12 @@
       "id": "CLAUDE_CLI_UNAUTHORIZED_INSTALL",
       "severity": "high",
       "category": "supply_chain",
-      "name": "claude plugin/marketplace/mcp install from plugin code",
-      "description": "A plugin or hook programmatically invokes `claude plugin install`, `claude plugin marketplace add`, or `claude mcp add` — installing plugins, registering marketplaces, or adding MCP servers without the user's explicit choice. This is a supply-chain / unauthorized-install vector (especially from an untrusted marketplace). Documenting the install command in a README for the user to run is fine; a hook/script running it autonomously is not.",
+      "name": "claude mcp add — autonomous MCP-server registration from plugin code",
+      "description": "A plugin or hook programmatically invokes `claude mcp add`, registering an MCP server (a tool provider) without the user's explicit choice — a tool-injection / data-exfil-endpoint vector. Plugins declare their own MCP servers via .mcp.json; running `claude mcp add` at runtime registers an EXTRA provider behind the user's back. (Plugin/marketplace install authorization — `claude plugin install` / `marketplace add` — is handled plugin-wide by validate_plugin's unauthorized-install-combo check, which only flags a SPECIFIC marketplace-add paired with a SPECIFIC plugin-install, since installing from an already-trusted marketplace is authorized.) Documenting the command in a README is fine; a hook/script running it autonomously is not.",
       "patterns": [
-        "\\bclaude\\s+plugin\\s+install\\b",
-        "\\bclaude\\s+plugin\\s+marketplace\\s+add\\b",
         "\\bclaude\\s+mcp\\s+add\\b"
       ],
-      "remediation": "A plugin must not install other plugins, add marketplaces, or register MCP servers programmatically (claude plugin install / marketplace add / mcp add). These are explicit user decisions. If your plugin depends on another component, document it in your README for the user to install themselves, ideally from a trusted/official marketplace."
+      "remediation": "A plugin must not register MCP servers programmatically with `claude mcp add`. Declare your plugin's own MCP servers in .mcp.json (which the user reviews on install) instead of adding a provider at runtime. If an additional server is genuinely required, document it in your README for the user to add themselves."
     }
   ]
 }

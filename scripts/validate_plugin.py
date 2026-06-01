@@ -505,8 +505,7 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
             # SSOT: emit the non-dict-entry MAJOR here (the inline block that
             # used to own it was removed in v2.106 to stop double-counting).
             report.major(
-                f"'userConfig.{key}' must be an object with 'title' and 'type', "
-                f"got {type(entry).__name__}",
+                f"'userConfig.{key}' must be an object with 'title' and 'type', got {type(entry).__name__}",
                 ".claude-plugin/plugin.json",
             )
             continue
@@ -3501,6 +3500,182 @@ EXPECTED_GITIGNORE_CATEGORIES: list[tuple[list[str], str, str]] = [
 ]
 
 
+# ── Plugin-wide unauthorized-install detection (v2.116.1, GitHub issue #64) ──
+# Authorized-install model (maintainer spec): ADDING a marketplace to Claude
+# Code IS the user's trust decision, so installing a SPECIFIC plugin from an
+# already-trusted marketplace is authorized and must NOT be flagged. The
+# UNAUTHORIZED pattern is a plugin that — anywhere across its OWN files
+# (scripts, skills, hooks, instructions; possibly SPLIT across files to evade a
+# per-file scan) — BOTH (a) adds a SPECIFIC marketplace AND (b) installs a
+# SPECIFIC plugin. That combination expands the user's trusted-source set
+# without an explicit user decision. Universal / templated procedures (a generic
+# installer using ${VARS} / <placeholders>, naming no concrete marketplace +
+# plugin) are NOT a security issue. POTENTIAL finding (MAJOR) — not proof of
+# malice; the reviewer checks context and scans the target plugin.
+_MKT_ADD_RE = re.compile(r"\bclaude\s+plugin\s+marketplace\s+add\s+([^\s;&|]+)")
+_PLUGIN_INSTALL_RE = re.compile(r"\bclaude\s+plugin\s+install\s+([^\s;&|]+)")
+_INSTALL_SCAN_EXTS = {".sh", ".bash", ".zsh", ".py", ".js", ".mjs", ".cjs", ".ts", ".md", ".markdown", ".json", ".txt"}
+_INSTALL_SCAN_SKIP_DIRS = {
+    "__pycache__", "node_modules", "dist", "build", "target", ".git", ".eggs", ".venv",
+    # test/fixture trees are dev-only — never loaded/executed by the harness at
+    # runtime, and routinely contain example install commands as test data.
+    "tests", "test", "__tests__", "fixtures",
+}
+_INSTALL_REF_PLACEHOLDERS = {
+    "NAME",
+    "PLUGIN",
+    "MARKETPLACE",
+    "URL",
+    "PATH",
+    "PLUGIN_NAME",
+    "MARKETPLACE_NAME",
+    "REPO",
+    "OWNER/REPO",
+    "DIR",
+    "PLUGIN@MARKETPLACE",
+    "MY-PLUGIN",
+    "MY-MARKETPLACE",
+}
+
+
+def _install_ref_is_specific(ref: str) -> bool:
+    """True iff ``ref`` names a CONCRETE marketplace/plugin — not a shell
+    variable, a ``<placeholder>``, a flag, a filesystem-path placeholder, or a
+    documentation EXAMPLE token (``my-plugin``, ``owner/x``, ``foo``,
+    ``my-plugin@my-plugin``). A templated / universal / illustrative installer
+    is not a security issue; only a concrete marketplace+plugin pair is."""
+    ref = ref.strip().strip("\"'`")
+    if not ref or ref.startswith("-"):
+        return False
+    # shell/template variable or angle/brace placeholder → universal
+    if any(ch in ref for ch in ("$", "<", ">", "{", "}", "%", "*")):
+        return False
+    if ref in {".", "./", "..", "...", "…"}:
+        return False
+    if ref.upper() in _INSTALL_REF_PLACEHOLDERS:
+        return False
+    ref_l = ref.lower()
+    # filesystem-path placeholders (`/absolute/path/to/...`, `path/to/x`, `~/...`)
+    if "path/to" in ref_l or ref_l.startswith(("/absolute", "/path", "~/", "./", "../")):
+        return False
+    # `owner/...` is the canonical docs placeholder for "your GitHub owner"
+    if ref_l.startswith("owner/"):
+        return False
+    # self-referential template like `my-plugin@my-plugin` / `lint-checker@lint-checker`
+    if "@" in ref:
+        left, right = ref.split("@", 1)
+        if left and left == right:
+            return False
+    # the bare plugin/marketplace NAME (after stripping @marketplace and owner/)
+    name_part = ref_l.split("@", 1)[0].rsplit("/", 1)[-1]
+    _EXAMPLE_PREFIXES = ("my-", "your-", "some-", "sample-", "example", "test-", "demo-", "placeholder", "foo", "bar", "baz")
+    if name_part.startswith(_EXAMPLE_PREFIXES):
+        return False
+    if name_part in {"foo", "bar", "baz", "example", "plugin", "name", "tool", "marketplace"}:
+        return False
+    return True
+
+
+def _own_plugin_name(plugin_root: Path) -> str:
+    """This plugin's own `name` from .claude-plugin/plugin.json (or "")."""
+    try:
+        data = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        name = data.get("name", "")
+        return name.strip() if isinstance(name, str) else ""
+    except (OSError, ValueError):
+        return ""
+
+
+def _combo_path_is_autonomous(rel: str) -> bool:
+    """True iff ``rel`` is a surface where a marketplace-add/plugin-install runs
+    AUTONOMOUSLY — executable code (.sh/.py/.js/.mjs/.cjs/.ts), a hooks/MCP config
+    command, or an AGENT-LOADED instruction file (SKILL.md, CLAUDE.md, AGENTS.md,
+    or anything under agents/ commands/ output-styles/ .claude/rules/). Human-read
+    DOCUMENTATION (README, CHANGELOG, design/, references/, docs/, examples/, and
+    any other loose .md) is excluded: an install command there is an example or a
+    user-run install guide, not autonomous execution, so it must not pair into the
+    combo. This is the same instruction-loadable-vs-documentation split the
+    skillaudit classifier uses."""
+    rl = rel.replace("\\", "/").lower()
+    segs = rl.split("/")
+    base = segs[-1]
+    ext = ("." + base.rsplit(".", 1)[-1]) if "." in base else ""
+    if ext in {".sh", ".bash", ".zsh", ".py", ".js", ".mjs", ".cjs", ".ts"}:
+        return True
+    if base == "hooks.json" or base.endswith(".mcp.json"):
+        return True
+    if ext in {".md", ".markdown"}:
+        if base in {"skill.md", "claude.md", "agents.md"}:
+            return True
+        if any(s in segs for s in ("agents", "commands", "output-styles")):
+            return True
+        if "rules" in segs and ".claude" in segs:
+            return True
+        return False  # README / design/ / references/ / docs/ / loose .md → documentation
+    return False
+
+
+def _check_unauthorized_install_combo(plugin_root: Path, report: ValidationReport) -> None:
+    """Flag the plugin-wide marketplace-add + plugin-install combo (see block
+    comment above). Fires only when BOTH a specific marketplace-add AND a
+    specific plugin-install of a DIFFERENT plugin exist in AUTONOMOUS surfaces
+    (executable code or agent-loaded instructions) anywhere in the plugin.
+
+    SELF-BOOTSTRAP EXEMPTION: a plugin documenting/running the install of
+    ITSELF (`claude plugin install <this-plugin>@<mkt>` next to
+    `marketplace add <mkt>`) is the canonical, benign first-install path — the
+    user runs it and thereby makes the trust decision. Only installing a
+    DIFFERENT plugin is the trust-expansion case this rule targets."""
+    own_name = _own_plugin_name(plugin_root)
+    mkt_adds: list[tuple[str, int, str]] = []
+    plugin_installs: list[tuple[str, int, str]] = []
+    for dirpath, dirnames, filenames in os.walk(plugin_root):
+        dirnames[:] = [
+            d for d in dirnames if d not in _INSTALL_SCAN_SKIP_DIRS and not _is_python_venv(Path(dirpath) / d)
+        ]
+        for fn in filenames:
+            if Path(fn).suffix.lower() not in _INSTALL_SCAN_EXTS:
+                continue
+            p = Path(dirpath) / fn
+            rel = str(p.relative_to(plugin_root))
+            if not _combo_path_is_autonomous(rel):
+                continue
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for i, line in enumerate(text.splitlines(), 1):
+                for m in _MKT_ADD_RE.finditer(line):
+                    if _install_ref_is_specific(m.group(1)):
+                        mkt_adds.append((rel, i, m.group(1).strip("\"'`")))
+                for m in _PLUGIN_INSTALL_RE.finditer(line):
+                    ref = m.group(1).strip("\"'`")
+                    if not _install_ref_is_specific(ref):
+                        continue
+                    # Self-bootstrap exemption: installing THIS plugin (name before
+                    # the optional @marketplace) is the benign first-install path.
+                    installed_name = ref.split("@", 1)[0]
+                    if own_name and installed_name == own_name:
+                        continue
+                    plugin_installs.append((rel, i, ref))
+    if mkt_adds and plugin_installs:
+        ma, pi = mkt_adds[0], plugin_installs[0]
+        report.major(
+            "Potential unauthorized install: this plugin BOTH adds a specific "
+            f"marketplace (`{ma[2]}` at {ma[0]}:{ma[1]}) AND installs a specific "
+            f"plugin (`{pi[2]}` at {pi[0]}:{pi[1]}). Adding a marketplace is the "
+            "user's trust decision; a plugin that adds a marketplace AND installs "
+            "from it expands the trusted-source set without explicit user consent "
+            "(the two steps may be split across files to evade per-file scanning). "
+            "This is a POTENTIAL issue, NOT proof of malice — review the context "
+            "and SCAN the target plugin before trusting it. If your plugin only "
+            "needs an already-trusted marketplace, drop the `marketplace add`; if "
+            "it is a generic installer, use templated names (no specific "
+            "marketplace+plugin pair).",
+            f"{ma[0]}:{ma[1]}",
+        )
+
+
 def _check_stale_user_settings_local(report: ValidationReport) -> None:
     """Warn if ~/.claude/settings.local.json exists — it should not be at user level.
 
@@ -5863,10 +6038,7 @@ def _run_cache_audit_separate(plugin_root: Path, main_report_path: str | None, r
         tmp_cache_path.write_text(buffer.getvalue())
         os.replace(tmp_cache_path, cache_path)
         if warning_count:
-            pointer = (
-                f"Cache audit: {warning_count} WARNING(s) (CA-01..CA-06, non-blocking) — "
-                f"see {cache_path}"
-            )
+            pointer = f"Cache audit: {warning_count} WARNING(s) (CA-01..CA-06, non-blocking) — see {cache_path}"
         else:
             pointer = f"Cache audit: clean (0 cache-discipline warnings) — see {cache_path}"
     else:
@@ -5907,8 +6079,7 @@ def main() -> int:
             "This is the main entry point. It orchestrates all 17 sub-validators.\n"
             "Security: the in-process pass is the native skillaudit port (mandatory,\n"
             "in-process). The full validate_security 27-Check suite is a separate\n"
-            "standalone CLI run by the publish pipeline / `cpv-validate-security`.\n\n"
-            + launcher_epilog("plugin")
+            "standalone CLI run by the publish pipeline / `cpv-validate-security`.\n\n" + launcher_epilog("plugin")
         ),
     )
     parser.add_argument(
@@ -6256,6 +6427,8 @@ def main() -> int:
     # ---------------------------------------------------------------------
     # Check for stale ~/.claude/settings.local.json — should not exist at user level
     _check_stale_user_settings_local(report)
+    # Plugin-wide unauthorized-install combo (specific marketplace-add + specific plugin-install)
+    _check_unauthorized_install_combo(plugin_root, report)
     # Language detection feeds lockfile detection — must remain serial.
     detected_languages = validate_project_languages(plugin_root, report)
     validate_lockfiles(plugin_root, report, detected_languages)

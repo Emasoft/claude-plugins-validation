@@ -1,13 +1,13 @@
 {
   "_schema_version": 1,
-  "_generated_at": "2026-06-01T16:28:33.545781Z",
+  "_generated_at": "2026-06-01T16:55:03.199926Z",
   "_source": "scripts/rules/skillaudit_patterns.json",
-  "_source_sha256": "da0044f54262c32c4cf34f46afa010632be179429f99b2c2d21883fe42fb6bbf",
+  "_source_sha256": "fa92f57b2020dbef12a4b33e078ee06b1bc2ac6798b52ee9164440c4bc7840dc",
   "_re2_version": "unknown",
   "_audit_mode": "re2_available",
   "_summary": {
-    "total": 506,
-    "compatible": 498,
+    "total": 504,
+    "compatible": 496,
     "incompatible": 8,
     "rules_total": 56,
     "rules_compatible": 50,
@@ -447,8 +447,8 @@
     },
     "CLAUDE_CLI_UNAUTHORIZED_INSTALL": {
       "compatible": true,
-      "patterns_total": 3,
-      "patterns_compatible": 3,
+      "patterns_total": 1,
+      "patterns_compatible": 1,
       "patterns_incompatible": [],
       "reason": null
     }
