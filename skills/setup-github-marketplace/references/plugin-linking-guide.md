@@ -182,8 +182,10 @@ git push
 ```bash
 cd /path/to/marketplace-repo
 
-# For each plugin in marketplace.json, fetch its latest version from GitHub
-for PLUGIN in $(jq -r '.plugins[] | "\(.source.owner)/\(.source.repo)"' .claude-plugin/marketplace.json); do
+# For each plugin in marketplace.json, fetch its latest version from GitHub.
+# `.source.repo` already holds the full "owner/repo" string (there is no
+# separate `.source.owner` field), so it is used directly as the gh api repo.
+for PLUGIN in $(jq -r '.plugins[] | .source.repo' .claude-plugin/marketplace.json); do
   NAME=$(basename "$PLUGIN")
   LATEST=$(gh api "repos/$PLUGIN/contents/.claude-plugin/plugin.json" \
     --jq '.content' | base64 -d | jq -r '.version')

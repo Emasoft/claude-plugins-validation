@@ -69,16 +69,44 @@ What should I batch-validate? Provide an absolute path, a GitHub URL (https://gi
 Resolve `$CLAUDE_PLUGIN_ROOT` and run the orchestrator's plan subcommand:
 
 ```bash
-BATCH_SPEC="$1"   # first positional arg from /cpv-batch-validate
-# Parse the advertised --max-parallel N flag; default 8. The orchestrator
-# itself re-caps the value at 16, so passing a larger N is safe.
+# Separate the positional target specs from the --max-parallel flag in a
+# single pass. We must NOT collapse to "$1": the input grammar above lists
+# a whitespace-separated LIST (`./a ./b ./c`) as a valid shape, and the
+# orchestrator's `plan` subcommand declares its inputs as `nargs="+"`, so
+# every positional must be forwarded — using only "$1" would silently
+# validate the first plugin and drop the rest.
+#
+# Both --max-parallel N (two tokens) and --max-parallel=N (one token) are
+# handled, because argparse accepts the `=` form and a user may type it;
+# the old `grep -A1 | tail` parse returned the literal `--max-parallel=N`
+# for the `=` form and crashed argparse's type=int. Default 8; the
+# orchestrator re-caps at 16, so a larger N is safe to pass.
+BATCH_SPECS=()
 MAX_PARALLEL=8
-if printf '%s\n' "$@" | grep -q -- '--max-parallel'; then
-  MAX_PARALLEL="$(printf '%s\n' "$@" | grep -A1 -- '--max-parallel' | tail -n1)"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --max-parallel)
+      MAX_PARALLEL="$2"
+      shift 2
+      ;;
+    --max-parallel=*)
+      MAX_PARALLEL="${1#--max-parallel=}"
+      shift
+      ;;
+    *)
+      BATCH_SPECS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ "${#BATCH_SPECS[@]}" -eq 0 ]; then
+  echo "ERROR: no target spec given to /cpv-batch-validate" >&2
+  exit 1
 fi
 
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
-  "$BATCH_SPEC" \
+  "${BATCH_SPECS[@]}" \
   --agent plugin-validator \
   --mode batch_validate \
   --max-parallel "$MAX_PARALLEL"

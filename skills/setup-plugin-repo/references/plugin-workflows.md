@@ -77,7 +77,11 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        # Plain `uv sync` — the pyproject.toml template keeps dev tooling in
+        # [project].dependencies, so there is no `dev` extra. `--extra dev` here
+        # would abort CI with "Extra `dev` is not defined". Add it back only if
+        # you split the tooling into [project.optional-dependencies.dev].
+        run: uv sync
 
       - name: Run plugin validation (remote CPV, --strict)
         # Fetches CPV from GitHub via uvx so downstream plugins do not need
@@ -114,7 +118,11 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        # Plain `uv sync` — the pyproject.toml template keeps dev tooling in
+        # [project].dependencies, so there is no `dev` extra. `--extra dev` here
+        # would abort CI with "Extra `dev` is not defined". Add it back only if
+        # you split the tooling into [project.optional-dependencies.dev].
+        run: uv sync
 
       - name: Run tests
         run: |

@@ -293,29 +293,66 @@ def classify(
 
     line = line_idx + 1  # 1-based
 
-    # Find the deepest path covering this line.
-    best_path: tuple[str, ...] = ()
+    # Collect EVERY string-value path covering this line, then keep only
+    # the minimal-span set. A single source line routinely holds more than
+    # one string value — the canonical hooks shape
+    # ``{"type": "command", "command": "<payload>"}`` puts the literal
+    # value ``"command"`` (of the SAFE-keyed ``type``) and the genuinely
+    # dangerous ``command`` payload on the SAME line. (For valid JSON every
+    # string value is single-line — ``json.dumps`` escapes embedded
+    # newlines — so these ties are span-0 and pervasive, not rare.)
+    #
+    # The old code picked the FIRST minimal-span path it walked and
+    # classified only that one. Because ``json.loads`` preserves source
+    # order and ``type`` precedes ``command`` in that canonical shape, the
+    # SAFE ``type`` path always won the tie → ``safe_schema`` → the
+    # consumer SUPPRESSED a real CMD_INJECTION in a hook command. That
+    # silently defeated this module's own iron rule ("DANGEROUS wins over
+    # SAFE; keep the finding visible"). Fix: classify ALL minimal-span
+    # covering paths and let DANGEROUS win across the whole line, exactly
+    # as ``_classify_key`` already does across the segments of one path.
+    covering: list[tuple[str, ...]] = []
     best_span = float("inf")
     for path, start_line, end_line in _walk_with_lines(parsed, cleaned):
         if start_line <= line <= end_line:
             span = end_line - start_line
             if span < best_span:
-                best_path = path
                 best_span = span
+                covering = [path]
+            elif span == best_span:
+                covering.append(path)
 
-    if not best_path:
+    if not covering:
         return "unknown"
+
+    # DANGEROUS-precedence across every minimal-span covering path: if ANY
+    # such path is a DANGEROUS key, the whole line is suspect.
+    generic: Literal["safe_schema", "suspect", "unknown"] = "unknown"
+    for path in covering:
+        verdict = _classify_key(path)
+        if verdict == "suspect":
+            generic = "suspect"
+            break
+        if verdict == "safe_schema":
+            generic = "safe_schema"
+
+    # Iron rule first: a real DANGEROUS path on the matched line wins over
+    # any SAFE override below. Returning early here is what stops a payload
+    # from being masked just because a benign string value shares its line.
+    if generic == "suspect":
+        return "suspect"
 
     # r08 sangrokjung FP iter1 (2026-05-28) — Claude Code permission glob
     # check. settings.json's permissions.allow/ask/deny arrays contain
     # glob-pattern strings (Bash(rm -rf *), Read(<sensitive-path>), etc.)
     # that are DECLARATIONS of which tool calls are allowed/denied, NOT
     # invocations. Scanning them as REGEX_DOS/FS_WRITE/PRIVILEGE_ESC/
-    # CMD_INJECTION is provably false. Walk the parsed structure to find
-    # the value at best_path and check shape.
-    value_at_path = _resolve_value(parsed, best_path)
-    if isinstance(value_at_path, str) and _is_claude_code_permission_glob(best_path, value_at_path):
-        return "safe_schema"
+    # CMD_INJECTION is provably false. Checked only after the iron-rule
+    # pass above proved no covering path is dangerous.
+    for path in covering:
+        value_at_path = _resolve_value(parsed, path)
+        if isinstance(value_at_path, str) and _is_claude_code_permission_glob(path, value_at_path):
+            return "safe_schema"
 
     # r07 FP iter (2026-05-28) — CROSS_TOOL_ACCESS on an LLM-API field NAME
     # (``context_window`` / ``system_prompt`` / …) inside a JSON value — a
@@ -325,14 +362,20 @@ def classify(
     if rule_id == "CROSS_TOOL_ACCESS" and _is_api_field_name_json(match):
         return "safe_schema"
 
-    return _classify_key(best_path)
+    return generic
 
 
 _API_FIELD_NAMES_JSON: Final[frozenset[str]] = frozenset(
     {
-        "context_window", "context_window_size", "current_usage",
-        "system_prompt", "system_message", "full_context",
-        "conversation_history", "message_history", "chat_history",
+        "context_window",
+        "context_window_size",
+        "current_usage",
+        "system_prompt",
+        "system_message",
+        "full_context",
+        "conversation_history",
+        "message_history",
+        "chat_history",
     }
 )
 

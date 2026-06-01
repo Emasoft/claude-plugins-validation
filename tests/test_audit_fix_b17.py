@@ -121,9 +121,7 @@ def test_plugin_manager_critical_rule_carves_out_manage_plugin() -> None:
         (ln for ln in text.splitlines() if ln.startswith("**CRITICAL**")),
         "",
     )
-    assert "manage_plugin.py" in crit_para, (
-        "the CRITICAL paragraph itself must mention the manage_plugin.py exception."
-    )
+    assert "manage_plugin.py" in crit_para, "the CRITICAL paragraph itself must mention the manage_plugin.py exception."
     assert re.search(r"NO launcher alias", crit_para, re.IGNORECASE), (
         "the CRITICAL paragraph must state manage_plugin.py has NO launcher alias."
     )
@@ -132,9 +130,7 @@ def test_plugin_manager_critical_rule_carves_out_manage_plugin() -> None:
 def test_plugin_manager_install_example_uses_manage_plugin_directly() -> None:
     """Example 1 (install) must keep its direct manage_plugin.py call (now consistent)."""
     text = _read("plugin-manager.md")
-    assert "manage_plugin.py" in text, (
-        "plugin-manager.md lost the manage_plugin.py install example."
-    )
+    assert "manage_plugin.py" in text, "plugin-manager.md lost the manage_plugin.py install example."
 
 
 def test_remote_validation_has_no_manage_plugin_alias_supports_the_carveout() -> None:

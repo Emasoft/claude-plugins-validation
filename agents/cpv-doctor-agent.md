@@ -9,7 +9,8 @@ description: |
   nine deep design-correctness recipes (D1..D9): shape detection, command
   coverage audit, skill invocability audit, design-conflict scan,
   manifest/marketplace consistency, canonical-pipeline presence,
-  README/CONTRIBUTING coverage, cross-reference integrity. Findings land in a
+  README/CONTRIBUTING coverage, cross-reference integrity, the-skills-menu
+  adoption. Findings land in a
   single report under $MAIN_ROOT/reports/plugin-diagnoser/. Free-form
   "Ask the doctor" mode routes the user's description to a diagnostic dialog.
 maxTurns: 100
@@ -53,7 +54,7 @@ Skills are a global library: the `Skill()` tool can invoke ANY installed skill. 
 | Situation | Action |
 |---|---|
 | Run the schema-correctness validator (always) | `Skill({skill: "claude-plugins-validation:plugin-validation-skill"})` |
-| Mode is `cache_cleanup` / `cache_optimize` | `Skill({skill: "claude-plugins-validation:cache-validation-skill"})` |
+| Mode is `cache_cleanup` | `Skill({skill: "claude-plugins-validation:cache-validation-skill"})` (cache *optimization* is a separate agent — `cache_optimize` routes to `cache-optimizer-agent`, never to the doctor) |
 | Mode is `canonical-pipeline check` | `Skill({skill: "claude-plugins-validation:canonical-pipeline"})` |
 | Findings exceed `plugin-fixer.model`'s safe ceiling (~15-25 opus, ~50-75 opus[1m]) | Append the `— recommend-batch-fix` token to your return line (see Big-plugin handoff) |
 
@@ -74,7 +75,8 @@ Set `PLUGIN_SKIP_GITHUB_INTEGRITY=1` and `CPV_SKIP_GITHUB_INTEGRITY=1` when scan
 | `project_scope` / `local_scope` | `validate_project_scope.py` / `validate_local_scope.py <target>` |
 | `user_scope` | `validate_local_scope.py ~/.claude` |
 | `single_skill` | `validate_skill_comprehensive.py <target>` |
-| `single_agent`/`single_hook`/`single_mcp`/`single_monitor`/`single_output_style`/`single_lsp` | matching per-component validator (validate_agent.py, validate_hook.py, …) |
+| `single_agent`/`single_hook`/`single_mcp`/`single_lsp` | matching per-component validator: `validate_agent.py` / `validate_hook.py` / `validate_mcp.py` / `validate_lsp.py` `<target>` |
+| `single_monitor`/`single_output_style` | `validate_plugin.py <containing-plugin-root> --strict` — monitors and output-styles have NO standalone validator script; they are checked by `validate_plugin.py`'s manifest sub-checks (`validate_monitors_entries`, `validate_output_styles`), so diagnose the whole containing plugin |
 | `cache_cleanup`, `install_scanners`, `auto_fix_orphans`, `quick_health_check`, `dependency_tree`, `add_dependencies` | bypass schema pass → `manage_doctor.py` / `add_dependencies.py` |
 | `ask_doctor_freeform`, `ask_about_findings` | bypass; free-form dialogue |
 

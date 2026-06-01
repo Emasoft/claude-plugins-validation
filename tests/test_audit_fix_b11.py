@@ -87,9 +87,9 @@ def test_monitors_string_form_keeps_dotslash_prefix_check() -> None:
     root = _plugin_with({"name": "p", "version": "1.0.0", "description": "x", "monitors": "monitors.json"})
     report = vp.ValidationReport()
     vp.validate_manifest(root, report)
-    assert any(
-        "must start with './'" in m and "monitors" in m for m in _majors(report)
-    ), "lost the ./-prefix check for the monitors path-string form"
+    assert any("must start with './'" in m and "monitors" in m for m in _majors(report)), (
+        "lost the ./-prefix check for the monitors path-string form"
+    )
 
 
 def test_monitors_string_form_keeps_traversal_check() -> None:
@@ -97,25 +97,23 @@ def test_monitors_string_form_keeps_traversal_check() -> None:
     root = _plugin_with({"name": "p", "version": "1.0.0", "description": "x", "monitors": "./../evil.json"})
     report = vp.ValidationReport()
     vp.validate_manifest(root, report)
-    assert any(
-        "path-traversal" in m and "monitors" in m for m in _majors(report)
-    ), "lost the traversal check for the monitors path-string form"
+    assert any("path-traversal" in m and "monitors" in m for m in _majors(report)), (
+        "lost the traversal check for the monitors path-string form"
+    )
 
 
 def test_other_path_fields_list_checks_unaffected() -> None:
     """Non-monitors path_fields (commands) keep the generic string-path checks (guard)."""
-    root = _plugin_with(
-        {"name": "p", "version": "1.0.0", "description": "x", "commands": ["nodotslash.md", 123]}
-    )
+    root = _plugin_with({"name": "p", "version": "1.0.0", "description": "x", "commands": ["nodotslash.md", 123]})
     report = vp.ValidationReport()
     vp.validate_manifest(root, report)
     majors = _majors(report)
-    assert any(
-        "must be a string path" in m and "commands" in m for m in majors
-    ), "commands list non-string element should still MAJOR"
-    assert any(
-        "must start with './'" in m and "commands" in m for m in majors
-    ), "commands list ./-prefix check should still fire"
+    assert any("must be a string path" in m and "commands" in m for m in majors), (
+        "commands list non-string element should still MAJOR"
+    )
+    assert any("must start with './'" in m and "commands" in m for m in majors), (
+        "commands list ./-prefix check should still fire"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -160,9 +158,9 @@ def test_channels_bogus_server_caught_with_dotfile_mcp() -> None:
     manifest = {"mcpServers": "./.mcp.json", "channels": [{"server": "NONEXISTENT"}]}
     report = vp.ValidationReport()
     vp.validate_channels_structure(manifest, root, report)
-    assert any(
-        "NONEXISTENT" in m and "does not match" in m for m in _majors(report)
-    ), "bogus channel server slipped through (dotfile mcp config was silently skipped)"
+    assert any("NONEXISTENT" in m and "does not match" in m for m in _majors(report)), (
+        "bogus channel server slipped through (dotfile mcp config was silently skipped)"
+    )
 
 
 def test_channels_valid_server_clean_with_dotfile_mcp() -> None:
@@ -186,9 +184,9 @@ def test_monitors_dotfile_contents_validated() -> None:
     )
     report = vp.ValidationReport()
     vp.validate_monitors_entries({"monitors": "./.monitors.json"}, root, report)
-    assert any(
-        "missing required 'command'" in m for m in _majors(report)
-    ), "monitors dotfile contents silently skipped (lstrip mangled the dotfile name)"
+    assert any("missing required 'command'" in m for m in _majors(report)), (
+        "monitors dotfile contents silently skipped (lstrip mangled the dotfile name)"
+    )
 
 
 def test_monitors_nondotfile_contents_validated_control() -> None:
@@ -228,14 +226,7 @@ def test_locate_run_body_duplicate_first_line_distinct_lines() -> None:
 
 def test_locate_run_body_single_block_unchanged() -> None:
     """A single run: block still reports its correct line (no off-by-one regression)."""
-    content = (
-        "jobs:\n"
-        "  a:\n"
-        "    steps:\n"
-        "      - run: |\n"
-        "          echo only\n"
-        "          ls x.sh\n"
-    )
+    content = "jobs:\n  a:\n    steps:\n      - run: |\n          echo only\n          ls x.sh\n"
     blocks = vp._collect_run_blocks(content)
     assert [ln for _, ln in blocks] == [5], f"single block line wrong: {blocks}"
 
@@ -258,9 +249,9 @@ def test_userconfig_description_is_required() -> None:
     manifest = {"name": "p", "userConfig": {"api_token": {"type": "string", "title": "API token"}}}
     report = vp.ValidationReport()
     vp.validate_user_config_structure(manifest, report)
-    assert any(
-        "missing required sub-field 'description'" in m for m in _majors(report)
-    ), "userConfig.description must be enforced as required"
+    assert any("missing required sub-field 'description'" in m for m in _majors(report)), (
+        "userConfig.description must be enforced as required"
+    )
 
 
 def test_userconfig_with_description_clean() -> None:

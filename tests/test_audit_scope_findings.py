@@ -148,9 +148,7 @@ class TestFinding14DocstringSignature:
 class TestFinding8GitFailureSentinel:
     """A transient git-probe failure returns no-git, not local."""
 
-    def test_git_probe_failure_returns_no_git(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_git_probe_failure_returns_no_git(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """When the ls-files probe returns None, scope is 'no-git'.
 
         The transient-failure branch is reached by forcing the ls-files
@@ -165,33 +163,25 @@ class TestFinding8GitFailureSentinel:
         # no-.git-ancestor check and exercising the probe-failure branch.
         monkeypatch.setattr(cc_scope_rules, "resolve_within", lambda p, r: p)
         monkeypatch.setattr(cc_scope_rules, "is_git_ignored", lambda p, r: False)
-        monkeypatch.setattr(
-            cc_scope_rules, "_relative_to_root", lambda p, r: Path("ext")
-        )
+        monkeypatch.setattr(cc_scope_rules, "_relative_to_root", lambda p, r: Path("ext"))
         monkeypatch.setattr(cc_scope_rules, "_run_git", lambda *a, **k: None)
 
         scope = classify_folder_scope(folder, tmp_path)
         assert scope == "no-git"
 
-    def test_git_probe_failure_is_not_local(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_git_probe_failure_is_not_local(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """The probe-failure branch must NOT be the old 'local' value."""
         folder = tmp_path / "ext"
         folder.mkdir()
         monkeypatch.setattr(cc_scope_rules, "resolve_within", lambda p, r: p)
         monkeypatch.setattr(cc_scope_rules, "is_git_ignored", lambda p, r: False)
-        monkeypatch.setattr(
-            cc_scope_rules, "_relative_to_root", lambda p, r: Path("ext")
-        )
+        monkeypatch.setattr(cc_scope_rules, "_relative_to_root", lambda p, r: Path("ext"))
         monkeypatch.setattr(cc_scope_rules, "_run_git", lambda *a, **k: None)
 
         scope = classify_folder_scope(folder, tmp_path)
         assert scope != "local"
 
-    def test_real_untracked_folder_still_local(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_real_untracked_folder_still_local(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A genuine untracked folder (git WORKS, returns empty) stays local.
 
         This is the other side of the discriminator: only a *failed* probe
@@ -204,28 +194,20 @@ class TestFinding8GitFailureSentinel:
         ok = subprocess.CompletedProcess(args=["git"], returncode=0, stdout="", stderr="")
         monkeypatch.setattr(cc_scope_rules, "resolve_within", lambda p, r: p)
         monkeypatch.setattr(cc_scope_rules, "is_git_ignored", lambda p, r: False)
-        monkeypatch.setattr(
-            cc_scope_rules, "_relative_to_root", lambda p, r: Path("ext")
-        )
+        monkeypatch.setattr(cc_scope_rules, "_relative_to_root", lambda p, r: Path("ext"))
         monkeypatch.setattr(cc_scope_rules, "_run_git", lambda *a, **k: ok)
 
         scope = classify_folder_scope(folder, tmp_path)
         assert scope == "local"
 
-    def test_real_tracked_folder_still_project(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_real_tracked_folder_still_project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A folder with tracked files (git WORKS, lists output) stays project."""
         folder = tmp_path / "ext"
         folder.mkdir()
-        ok = subprocess.CompletedProcess(
-            args=["git"], returncode=0, stdout="ext/a.md\n", stderr=""
-        )
+        ok = subprocess.CompletedProcess(args=["git"], returncode=0, stdout="ext/a.md\n", stderr="")
         monkeypatch.setattr(cc_scope_rules, "resolve_within", lambda p, r: p)
         monkeypatch.setattr(cc_scope_rules, "is_git_ignored", lambda p, r: False)
-        monkeypatch.setattr(
-            cc_scope_rules, "_relative_to_root", lambda p, r: Path("ext")
-        )
+        monkeypatch.setattr(cc_scope_rules, "_relative_to_root", lambda p, r: Path("ext"))
         monkeypatch.setattr(cc_scope_rules, "_run_git", lambda *a, **k: ok)
 
         scope = classify_folder_scope(folder, tmp_path)

@@ -513,7 +513,16 @@ def main(argv: list[str] | None = None) -> int:
     # Plugin params (from CLI args)
     if not args.name:
         return _fail(args, out_json, code=1, msg="--name is required")
-    _validate_name(args.name)
+    # JSON mode promises a single machine-readable object on stdout for EVERY
+    # failure path (see module docstring). `_validate_name` raises a bare
+    # SystemExit whose message only reaches stderr, so route the name-format
+    # check through `_fail` when `--json` is set to keep that contract — the
+    # exit code stays 1 either way. Human mode keeps the SystemExit so the
+    # interactive UX (and test_invalid_name_exits_1) is unchanged.
+    if not _NAME_RE.match(args.name):
+        if args.json_mode:
+            return _fail(args, out_json, code=1, msg=f"plugin name must match {_NAME_RE.pattern}; got {args.name!r}")
+        _validate_name(args.name)
     if not args.target:
         return _fail(args, out_json, code=1, msg="target directory is required")
 

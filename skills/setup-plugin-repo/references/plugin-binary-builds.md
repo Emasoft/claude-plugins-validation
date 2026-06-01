@@ -2,13 +2,15 @@
 
 ## Table of Contents
 - [When to Add a Build Phase](#when-to-add-a-build-phase)
-- [build-binaries.yml — Cross-Platform Compilation Workflow](#build-binariesyml--cross-platform-compilation-workflow)
+- [Source/Binary Separation](#sourcebinary-separation)
+- [build-binaries.yml — Cross-Platform Compilation Workflow (FALLBACK)](#build-binariesyml--cross-platform-compilation-workflow-fallback)
 - [Binary Distribution Pattern](#binary-distribution-pattern)
 - [Platform Detection Wrapper](#platform-detection-wrapper)
 - [Extending the Python Pre-Push Hook](#extending-the-python-pre-push-hook)
 - [Extending publish.py for Binary Builds](#extending-publishpy-for-binary-builds)
 - [Extending ci.yml for Binary Builds](#extending-ciyml-for-binary-builds)
 - [Cargo Release Profile (Rust Optimization)](#cargo-release-profile-rust-optimization)
+- [Placeholder Reference](#placeholder-reference)
 
 ## Checklist
 
@@ -37,7 +39,9 @@ Also check `hooks.json` and hook scripts for references to binaries that must be
 
 If any compiled component is found, add a build step **before** the validate/test steps in:
 - `git-hooks/pre-push` (local builds — current platform only)
-- `scripts/publish.py` (release builds — current platform only, all targets via cross-compilation)
+- `scripts/publish.py` (release builds — current platform only by default; a
+  plugin MAY additionally cross-compile all targets locally via a custom
+  `build_all.py`, see the PSS "Build flow" below)
 
 ## Source/Binary Separation
 

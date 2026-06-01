@@ -142,12 +142,7 @@ class TestRc55RetryOrientation:
     def test_unbounded_retry_with_break_on_success_fires(self):
         """while True + immediate retry-on-error + break-on-success → abuse, fires."""
         code = (
-            "while True:\n"
-            "    try:\n"
-            "        requests.get(u)\n"
-            "        break\n"
-            "    except Exception:\n"
-            "        continue\n"
+            "while True:\n    try:\n        requests.get(u)\n        break\n    except Exception:\n        continue\n"
         )
         assert detect_mcp_unbounded_retry(code), (
             "an unbounded retry-on-error loop is a rate-limit-abuse vector even when it "
@@ -160,14 +155,7 @@ class TestRc55RetryOrientation:
 
     def test_give_up_after_error_is_bounded_and_clean(self):
         """break INSIDE except = terminate on first failure → bounded, no finding."""
-        code = (
-            "while True:\n"
-            "    try:\n"
-            "        requests.get(u)\n"
-            "        x = 1\n"
-            "    except Exception:\n"
-            "        break\n"
-        )
+        code = "while True:\n    try:\n        requests.get(u)\n        x = 1\n    except Exception:\n        break\n"
         assert not detect_mcp_unbounded_retry(code)
 
     def test_backoff_sleep_before_continue_is_clean(self):

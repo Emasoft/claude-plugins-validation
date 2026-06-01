@@ -144,10 +144,13 @@ If the upstream fetcher returns a non-200 (network down, repo private without au
   // FIXME — upstream plugin.json could not be fetched at scaffold time.
   // Replace this placeholder with the exact value from
   // <source-url>/.claude-plugin/plugin.json's "name" field, then
-  // re-run validate_marketplace.py --strict --cross-validate-upstream.
+  // re-run validate_marketplace.py --strict (upstream cross-validation
+  // runs unconditionally — there is no flag to toggle it).
   "name": "<UPSTREAM_PLUGIN_JSON_NAME_HERE>",
-  "source": "github",
-  "repo": "owner/repo"
+  "source": {
+    "source": "github",
+    "repo": "owner/repo"
+  }
 }
 ```
 

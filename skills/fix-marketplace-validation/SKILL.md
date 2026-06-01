@@ -58,8 +58,8 @@ If no matching section is found for an error message, search by error-message ke
 **Input:** `[MAJOR] marketplace.json not found`
 **Output:** marketplace-error-index → `validate_marketplace.py` → marketplace-fixes §1 → create file with required structure.
 
-**Input:** `[MINOR] cliff.toml missing keepachangelog template`
-**Output:** marketplace-error-index → `validate_marketplace_pipeline.py` → marketplace-fixes §5 → scaffold cliff.toml with the canonical template.
+**Input:** `[MAJOR] update-submodules.yml not found`
+**Output:** marketplace-error-index → `validate_marketplace_pipeline.py` → marketplace-fixes §5 → scaffold the workflow with the canonical template.
 
 ## Resources
 

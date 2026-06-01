@@ -26,7 +26,7 @@ Findings keyed by DOC-NN, appended under `## Design-correctness findings`.
 
 ### D1 — Shape detection (is the target what it claims to be?)
 
-- Has `SKILL.md` at root but no `.claude-plugin/plugin.json` → `DOC-001 [MINOR] target looks like a bare skill, not a plugin — consider /cpv-pack-components`.
+- Has `SKILL.md` at root but no `.claude-plugin/plugin.json` → `DOC-001 [MINOR] target looks like a bare skill, not a plugin — consider /pack-components`.
 - Has `.claude-plugin/marketplace.json` inside a plugin (Layout C) → `DOC-002 [WARNING] marketplace-in-plugin (Layout C) detected — verify the self-entry name/version match plugin.json`.
 - Parent dir containing N plugin children → `DOC-003 [INFO] parent directory with N plugin children — diagnosing each in turn`.
 

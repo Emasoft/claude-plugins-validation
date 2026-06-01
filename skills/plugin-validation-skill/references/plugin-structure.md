@@ -113,9 +113,9 @@ my-plugin/
 | repository | string | Source repository URL |
 | license | string | SPDX license identifier |
 | keywords | array | Tags for discovery |
-| agents | array | Array of agent .md file paths |
-| skills | string | Path to skills directory |
-| hooks | string | Path to additional hooks file |
+| agents | string or array | One `.md` file path, or an array of `.md` file paths (never a folder) |
+| skills | string or array | Path(s) to extra skill directories (added to default `skills/`) |
+| hooks | string or array or object | Path(s) to additional hooks file, or inline hook config |
 
 ### Fields to Avoid
 
@@ -138,7 +138,7 @@ path (e.g., `"commands": "./src/my-commands/"`).
 
 If agents are in the standard `agents/` directory, do NOT declare them — they are auto-discovered.
 
-Only use the `agents` field when pointing to a non-standard location, and it MUST be an array of file paths:
+Only use the `agents` field when pointing to a non-standard location. Its value must point to `.md` **file** paths — either an array of paths (recommended) or a single path string. It must NEVER be a directory/folder path: Claude Code's manifest validator rejects any folder path here with the cryptic error `agents: Invalid input` (and at runtime silently drops the agents).
 
 ```json
 {
@@ -149,10 +149,17 @@ Only use the `agents` field when pointing to a non-standard location, and it MUS
 }
 ```
 
+A single `.md` file as a string is also valid:
+```json
+{
+  "agents": "./custom-agents/my-agent.md"
+}
+```
+
 NOT a directory path:
 ```json
 {
-  "agents": "./custom-agents/"  // WRONG — must be array of file paths
+  "agents": "./custom-agents/"  // WRONG — folder path; list specific .md files instead
 }
 ```
 

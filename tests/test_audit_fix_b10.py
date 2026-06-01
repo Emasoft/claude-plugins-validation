@@ -267,8 +267,6 @@ def test_valid_json_no_plugins_flags_major(tmp_path):
     report = PipelineValidationReport(marketplace_path=mp)
     validate_marketplace_structure(mp, report)
     cat = report.categories["marketplace_structure"]
-    assert any(
-        r.level == "MAJOR" and "No plugins found in marketplace.json" in r.message for r in cat.results
-    )
+    assert any(r.level == "MAJOR" and "No plugins found in marketplace.json" in r.message for r in cat.results)
     # And no resurrected dead PASSED line.
     assert not any(r.message == "Submodule entries present" for r in cat.results)

@@ -148,14 +148,7 @@ def test_guard_158_history_md_still_detected(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 def test_fix_175_heading_inside_fence_not_flagged(tmp_path: Path) -> None:
     """An ATX-looking comment inside a code fence is not a hierarchy skip."""
-    md = (
-        "# Top\n\n"
-        "```bash\n"
-        "# shell comment, not a heading\n"
-        "### deep comment inside the fence\n"
-        "```\n\n"
-        "## Section two\n"
-    )
+    md = "# Top\n\n```bash\n# shell comment, not a heading\n### deep comment inside the fence\n```\n\n## Section two\n"
     (tmp_path / "README.md").write_text(md, encoding="utf-8")
     report = vd.DocumentationValidationReport()
     vd.validate_heading_hierarchy(tmp_path, report)
@@ -240,7 +233,9 @@ def test_guard_165_malformed_frontmatter_still_critical(tmp_path: Path) -> None:
 
 def test_guard_165_valid_frontmatter_passes(tmp_path: Path) -> None:
     """Well-formed frontmatter still produces the 'Valid YAML frontmatter' PASS."""
-    skill = _write_skill(tmp_path, "---\nname: foo\ndescription: A real description here. Use when testing.\n---\n\nBody text.\n")
+    skill = _write_skill(
+        tmp_path, "---\nname: foo\ndescription: A real description here. Use when testing.\n---\n\nBody text.\n"
+    )
     report = vs.validate_skill(skill)
     assert any("Valid YAML frontmatter" in m for m in _levels(report, "PASSED"))
 

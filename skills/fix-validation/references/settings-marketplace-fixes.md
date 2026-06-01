@@ -92,11 +92,11 @@ NOTE: `settings.json` uses **plain JSON**, not JSONC. Comments are not allowed.
 
 ## 2. extraKnownMarketplaces Entry Issues
 
-### INFO: EXTRA_KNOWN_MARKETPLACES block is empty
+### INFO: extraKnownMarketplaces block is empty
 
-**Error message**: `EXTRA_KNOWN_MARKETPLACES block is empty`
+**Error message**: `extraKnownMarketplaces: block is empty`
 **Severity**: INFO
-**Source**: `validate_settings_marketplace.py` — L262
+**Source**: `validate_settings_marketplace.py` — `validate_extra_known_marketplaces()`
 
 **Root cause**: The `extraKnownMarketplaces` key exists but has no entries.
 
@@ -104,33 +104,34 @@ NOTE: `settings.json` uses **plain JSON**, not JSONC. Comments are not allowed.
 
 ---
 
-### MAJOR: Marketplace entry missing 'name'
+### MINOR: Marketplace entry key is not kebab-case
 
-**Error message**: `extraKnownMarketplaces.<id>: missing required 'name' field`
-**Severity**: MAJOR
-**Source**: `validate_settings_marketplace.py` — L212
+**Error message**: `extraKnownMarketplaces.<id>: name '<id>' should be kebab-case (lowercase, digits, hyphens)`
+**Severity**: MINOR
+**Source**: `validate_settings_marketplace.py` — `validate_extra_known_marketplaces()`
 
-**Root cause**: Each entry under `extraKnownMarketplaces` must include a `name` field that identifies the marketplace for the UI and logs.
+**Root cause**: A marketplace entry has NO separate `name` field — the entry's *key* under `extraKnownMarketplaces` IS the marketplace identifier. That key must be kebab-case.
 
-**Fix**: Add the `name` field:
+**Fix**: Rename the entry key to lowercase letters, digits, and hyphens:
 ```json
 {
   "extraKnownMarketplaces": {
-    "my-mp": {
-      "name": "My Marketplace",
+    "my-marketplace": {
       "source": { "source": "github", "repo": "emasoft/claude-plugins" }
     }
   }
 }
 ```
 
+NOTE: The `name` field shown in some examples below is optional decoration; the validator never requires it on a marketplace entry. (A `name` field IS required on each *plugin* inside an inline `settings` marketplace — see §3.5.)
+
 ---
 
 ### MAJOR: Marketplace entry missing 'source'
 
-**Error message**: `extraKnownMarketplaces.<id>: missing required 'source' field`
+**Error message**: `extraKnownMarketplaces.<id>: missing required 'source' object`
 **Severity**: MAJOR
-**Source**: `validate_settings_marketplace.py` — L226
+**Source**: `validate_settings_marketplace.py` — `validate_extra_known_marketplaces()`
 
 **Root cause**: Each marketplace entry must have a `source` object that declares how Claude Code should fetch the marketplace.
 
@@ -151,6 +152,9 @@ Each marketplace entry's `source` must be an object whose `source` key is one of
 | `settings` | `name`, `plugins` | **Inline marketplace** defined directly in this settings.json (v2.1.80) |
 | `git` | `url` | Generic git URL (less common than github — use for self-hosted) |
 | `directory` | `path` | **Dev only** — local filesystem path |
+| `file` | `path` | Absolute path to a `marketplace.json` file (v2.1.98+) — machine-local |
+| `hostPattern` | `hostPattern` | Regex matching a marketplace host (v2.1.98+) |
+| `pathPattern` | `pathPattern` | Regex matching a filesystem path for self-hosted git (v2.1.98+) |
 
 ---
 
@@ -308,11 +312,70 @@ The `path` is interpreted relative to the repository root after cloning.
 
 ---
 
+### 3.9 Source type `file` **[v2.1.98+]**
+
+**Error pattern**: `extraKnownMarketplaces.<id>.source: source type 'file' missing required field(s): path`
+**Error pattern**: `extraKnownMarketplaces.<id>.source.path: must be a string, got <type>`
+
+**Root cause**: Points at an **absolute path** to a `marketplace.json` file on the local machine. Like `directory`, it is machine-local and emits a WARNING advising against shipping it in a plugin settings snippet.
+
+**Fix**:
+```json
+{
+  "source": {
+    "source": "file",
+    "path": "/Users/me/marketplaces/hub/.claude-plugin/marketplace.json"
+  }
+}
+```
+
+---
+
+### 3.10 Source type `hostPattern` **[v2.1.98+]**
+
+**Error pattern**: `extraKnownMarketplaces.<id>.source: source type 'hostPattern' missing required field(s): hostPattern`
+**Error pattern**: `extraKnownMarketplaces.<id>.source.hostPattern: must be a string, got <type>`
+**Error pattern**: `extraKnownMarketplaces.<id>.source.hostPattern: invalid regex '<value>' — <error>` (MINOR)
+
+**Root cause**: The `hostPattern` value is a **regex** matched against a marketplace host. An invalid regex compiles to nothing and silently never matches.
+
+**Fix**:
+```json
+{
+  "source": {
+    "source": "hostPattern",
+    "hostPattern": "^github\\.example\\.com$"
+  }
+}
+```
+
+---
+
+### 3.11 Source type `pathPattern` **[v2.1.98+]**
+
+**Error pattern**: `extraKnownMarketplaces.<id>.source: source type 'pathPattern' missing required field(s): pathPattern`
+**Error pattern**: `extraKnownMarketplaces.<id>.source.pathPattern: must be a string, got <type>`
+**Error pattern**: `extraKnownMarketplaces.<id>.source.pathPattern: invalid regex '<value>' — <error>` (MINOR)
+
+**Root cause**: The `pathPattern` value is a **regex** matched against a filesystem path (self-hosted git). An invalid regex silently never matches.
+
+**Fix**:
+```json
+{
+  "source": {
+    "source": "pathPattern",
+    "pathPattern": "^/srv/git/.*\\.git$"
+  }
+}
+```
+
+---
+
 ### 3.8 Unknown source type
 
-**Error pattern**: `extraKnownMarketplaces.<id>.source: unknown source type '<type>' (valid: directory, git, git-subdir, github, npm, settings, url)`
+**Error pattern**: `extraKnownMarketplaces.<id>.source: unknown source type '<type>' (valid: directory, file, git, git-subdir, github, hostPattern, npm, pathPattern, settings, url)`
 
-**Fix**: Use one of the valid types from §3.1–3.7. Common typos:
+**Fix**: Use one of the valid types from §3.1–3.11. Common typos:
 - `"git-hub"` → `"github"`
 - `"tarball"` → `"url"`
 - `"subdir"` → `"git-subdir"`
@@ -328,9 +391,9 @@ The `path` is interpreted relative to the repository root after cloning.
 | Target file | `settings.json` | `marketplace.json` |
 | Top-level key | `extraKnownMarketplaces` | `plugins` |
 | Scope | Per-**marketplace** source entries | Per-**plugin** source entries |
-| Valid source types | `github`, `url`, `git-subdir`, `npm`, `settings`, `git`, `directory` | `github`, `url`, `npm`, `git-subdir`, `directory` |
+| Valid source types | `github`, `url`, `git-subdir`, `npm`, `settings`, `git`, `directory`, `file`, `hostPattern`, `pathPattern` | `github`, `url`, `npm`, `git`, `git-subdir`, `directory` |
 | `settings` source type | **Supported** (inline marketplace) | Not valid |
-| `git` source type | **Supported** (generic git URL) | Not valid |
+| `git` source type | **Supported** (generic git URL) | Accepted as a CPV-only alias for `url` (emits a NIT nudging to `url`) |
 | Per-plugin field checks | Not performed | Performed (name, version, tags, author, …) |
 
 **When to run which validator**:

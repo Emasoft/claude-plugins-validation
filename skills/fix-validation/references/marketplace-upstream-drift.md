@@ -186,16 +186,21 @@ without warning. Document them at the top of marketplace.json:
 ### Symptom
 
 The `source` block has a sub-field NOT in the allowlist for its `source`
-type. Example: a `github` source MUST be one of `{source, repo, ref}` —
+type. Example: a `github` source MUST be one of `{source, repo, ref, skipLfs}` —
 adding `branch` or `tag` causes the install resolver to ignore it.
 
 ### Fix recipe — per source type
 
+The allowed sub-fields below mirror `validate_marketplace.py::_KNOWN_SOURCE_FIELDS_BY_TYPE`
+(the source of truth). `skipLfs` (v2.1.153) is a boolean that skips Git LFS
+downloads during clone/update and is valid ONLY on `github` and `git` sources —
+do NOT strip it during a fix.
+
 | `source.source` | Allowed sub-fields                                | Common mistake                                |
 |-----------------|---------------------------------------------------|-----------------------------------------------|
-| `github`        | `source`, `repo`, `ref`                          | Using `branch` or `tag` → switch to `ref`     |
+| `github`        | `source`, `repo`, `ref`, `skipLfs`               | Using `branch` or `tag` → switch to `ref`     |
 | `url`           | `source`, `url`                                  | Adding `repo` → use `github` source instead   |
-| `git`           | `source`, `url`, `ref`, `subdir`                | Pin via `ref`, not `commit` or `sha`          |
+| `git`           | `source`, `url`, `ref`, `subdir`, `skipLfs`      | Pin via `ref`, not `commit` or `sha`          |
 | `git-subdir`    | `source`, `url`, `subdir`, `ref`, `path`        | `subdir` is canonical; `path` accepted as compat |
 | `npm`           | `source`, `package`, `version`                  | `tag` not supported — use `version`           |
 | `directory`     | `source`, `path`                                 | Layout-B nested plugin; never use `repo`      |

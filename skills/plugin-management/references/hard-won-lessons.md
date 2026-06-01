@@ -28,7 +28,7 @@
 - Checkov CKV2_ prefix
 - pytest exit code 5
 - __init__.py no shebang
-- Repository field required
+- Repository field optional
 - validate_marketplace paths
 - git config user setup
 - README sections required
@@ -50,7 +50,7 @@
 13. **Checkov uses `CKV2_` prefix** for GitHub Actions (not `CKV_`).
 14. **pytest exit code 5 = no tests collected** — OK for fresh plugins.
 15. **`__init__.py` files do NOT need shebangs** — validator excludes them.
-16. **Marketplace entries MUST include `repository` field** — without it, MAJOR validation error.
+16. **`repository` is an OPTIONAL marketplace plugin-entry field** — omitting it emits only a non-blocking WARNING (it does not affect the exit code or the VALID/INVALID verdict). Add it as publishing hygiene so users can find the upstream repo, but a spec-compliant marketplace that omits it is still valid.
 17. **`validate_marketplace.py` accepts both paths** — `marketplace.json` at root or `.claude-plugin/`.
 18. **Set `git config user.name/email`** before committing in /tmp directories.
 19. **Marketplace README needs Uninstall + Troubleshooting sections** — validator blocks on missing.

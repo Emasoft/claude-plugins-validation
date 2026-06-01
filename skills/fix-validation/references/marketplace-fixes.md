@@ -234,7 +234,7 @@ For the pipeline validator, the `version` field is also required:
 | **Message** | `Marketplace name '<name>' is reserved and cannot be used` |
 | **Category** | `marketplace` |
 
-**Root Cause:** The name matches one of the reserved names: `claude-code-marketplace`, `claude-code-plugins`, `claude-plugins-official`, `anthropic-marketplace`, `anthropic-plugins`, `agent-skills`, `life-sciences`.
+**Root Cause:** The name matches one of the reserved names (per `validate_marketplace.py::RESERVED_MARKETPLACE_NAMES`): `claude-code-marketplace`, `claude-code-plugins`, `claude-plugins-official`, `anthropic-marketplace`, `anthropic-plugins`, `agent-skills`, `knowledge-work-plugins`, `life-sciences`.
 
 **Fix:** Choose a different, non-reserved marketplace name.
 
@@ -503,7 +503,7 @@ These errors come from `validate_plugin_entry()`, `validate_local_path()`, `vali
 | **Message** | `Plugin '<id>' has unknown field: <field>` |
 | **Category** | `plugin` |
 
-**Root Cause:** The plugin entry contains a field not in the known set (`name`, `source`, `version`, `description`, `path`, `repository`, `author`, `tags`, `keywords`, `license`, `category`, `dependencies`, `enabled`, `strict`, `homepage`, `commands`, `agents`, `skills`, `hooks`, `mcpServers`, `lspServers`, `outputStyles`).
+**Root Cause:** The plugin entry contains a field not in the known set. The known set is `validate_marketplace.py::REQUIRED_PLUGIN_FIELDS | OPTIONAL_PLUGIN_FIELDS` (the source of truth — consult it if this list has drifted): `name`, `source`, `version`, `description`, `path`, `repository`, `author`, `tags`, `keywords`, `license`, `category`, `dependencies`, `enabled`, `defaultEnabled`, `strict`, `homepage`, `commands`, `agents`, `skills`, `hooks`, `mcpServers`, `lspServers`, `outputStyles`, `userConfig`, `channels`, `monitors`, `themes`, `$schema`.
 
 **Fix:** Remove the unknown field or check for typos. This is informational only.
 
@@ -904,9 +904,9 @@ git submodule update --init --recursive
 | **Severity** | MAJOR |
 | **Message** | `Plugin '<id>' has invalid source type: <source>` |
 | **Category** | `plugin` |
-| **Suggestion** | Valid source types: github, npm, pip, url or relative path (./path) |
+| **Suggestion** | Valid source types: github, git, git-subdir, npm, url or relative path (./path) |
 
-**Root Cause:** The `source` string is not one of the valid types (`github`, `url`, `npm`, `pip`) and does not start with `./` or `../`.
+**Root Cause:** The `source` string is not one of the valid types (`github`, `git`, `git-subdir`, `npm`, `url`) and does not start with `./` or `../`.
 
 **Fix:** Use a valid source value:
 ```json
@@ -949,7 +949,7 @@ or:
 | **Severity** | MAJOR |
 | **Message** | `Plugin '<id>' source missing 'source' field` |
 | **Category** | `plugin` |
-| **Suggestion** | Add source: github, npm, pip, url |
+| **Suggestion** | Add source: github, git, git-subdir, npm, url |
 
 **Root Cause:** When `source` is an object, it must contain an inner `source` key to indicate the type.
 
@@ -973,9 +973,9 @@ or:
 | **Severity** | MAJOR |
 | **Message** | `Plugin '<id>' has invalid source type: <type>` |
 | **Category** | `plugin` |
-| **Suggestion** | Valid source types: github, npm, pip, url |
+| **Suggestion** | Valid source types: github, git, git-subdir, npm, url |
 
-**Root Cause:** The `source.source` value is not one of `github`, `url`, `npm`, `pip`.
+**Root Cause:** The `source.source` value is not one of `github`, `git`, `git-subdir`, `npm`, `url`.
 
 **Fix:** Use a valid source type string.
 
@@ -990,11 +990,13 @@ or:
 | **Message** | `Plugin '<id>' with source type '<type>' requires '<field>'` |
 | **Category** | `plugin` |
 
-**Root Cause:** Source-specific required fields are missing:
+**Root Cause:** Source-specific required fields are missing (per `validate_marketplace.py::SOURCE_REQUIRED_FIELDS`):
 - `github` requires `repo`
 - `url` requires `url`
 - `npm` requires `package`
-- `pip` requires `package`
+- `git` requires `url`
+- `git-subdir` requires `url` and `path`
+- `directory` requires `path`
 
 **Fix for github:**
 ```json
@@ -1016,12 +1018,13 @@ or:
 }
 ```
 
-**Fix for pip:**
+**Fix for git-subdir:**
 ```json
 {
   "source": {
-    "source": "pip",
-    "package": "package-name"
+    "source": "git-subdir",
+    "url": "https://example.com/monorepo.git",
+    "path": "plugins/my-plugin"
   }
 }
 ```

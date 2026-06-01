@@ -1,6 +1,6 @@
 """Tests for J6 — google-re2 install path + scaffolded scan-cache restore step.
 
-Three slices of behavior pinned here:
+Four slices of behavior pinned here:
 
 1. ``cpv_install_scanners.ensure_google_re2()`` follows the same contract as
    every other ``ensure_*`` helper: idempotent on second call, respects the
@@ -299,8 +299,7 @@ class TestPyprojectOptionalPerformanceDep:
         assert "google-re2" in block, "google-re2 must be declared inside [project.optional-dependencies]"
         # Lower bound: anything semver-shaped >=1.0 is fine, but we want a pin.
         assert ">=1." in block or ">= 1." in block, (
-            "google-re2 must have an explicit >=1.x version lower bound, "
-            "not a bare unversioned reference"
+            "google-re2 must have an explicit >=1.x version lower bound, not a bare unversioned reference"
         )
 
     def test_performance_is_parseable_toml(self, pyproject_content: str) -> None:
@@ -339,9 +338,7 @@ class TestGenCiYmlScanCacheBlock:
 
     def test_cache_step_path_is_cpv_cache(self, ci_yml: str) -> None:
         """The cached path must be ~/.cache/cpv (scan-cache root)."""
-        assert "path: ~/.cache/cpv" in ci_yml, (
-            "actions/cache step must persist ~/.cache/cpv across runs"
-        )
+        assert "path: ~/.cache/cpv" in ci_yml, "actions/cache step must persist ~/.cache/cpv across runs"
 
     def test_cache_key_uses_self_hashes_file(self, ci_yml: str) -> None:
         """Cache key must include hashFiles('**/.cpv-self-hashes.json')."""
@@ -349,9 +346,7 @@ class TestGenCiYmlScanCacheBlock:
         assert "hashFiles('**/.cpv-self-hashes.json')" in ci_yml, (
             "cache key must be busted whenever CPV's self-hashes file changes"
         )
-        assert "cpv-scan-cache-" in ci_yml, (
-            "cache key must follow the cpv-scan-cache-<os>-<hash> namespace"
-        )
+        assert "cpv-scan-cache-" in ci_yml, "cache key must follow the cpv-scan-cache-<os>-<hash> namespace"
 
     def test_cache_step_has_restore_keys_fallback(self, ci_yml: str) -> None:
         """restore-keys must offer a same-OS fallback for first-warm-cache hits."""
@@ -365,9 +360,7 @@ class TestGenCiYmlScanCacheBlock:
         """The cache restore must be ordered BEFORE the validation run step."""
         cache_idx = ci_yml.index("Restore CPV scan-cache")
         run_idx = ci_yml.index("Run plugin validation")
-        assert cache_idx < run_idx, (
-            "the Restore CPV scan-cache step must come BEFORE Run plugin validation"
-        )
+        assert cache_idx < run_idx, "the Restore CPV scan-cache step must come BEFORE Run plugin validation"
 
     def test_ci_yml_parses_as_valid_yaml(self, ci_yml: str) -> None:
         """The whole generated workflow must round-trip through yaml.safe_load."""
@@ -400,9 +393,7 @@ class TestGenCiYmlScanCacheBlock:
         # Test job must NOT have inherited a cache step (only validate gets it).
         test_steps = jobs["test"].get("steps", [])
         test_cache_steps = [s for s in test_steps if isinstance(s, dict) and "actions/cache" in s.get("uses", "")]
-        assert test_cache_steps == [], (
-            "actions/cache step must be confined to validate job, not test job"
-        )
+        assert test_cache_steps == [], "actions/cache step must be confined to validate job, not test job"
 
     def test_ci_yml_cache_step_uses_sha_pin(self, ci_yml: str) -> None:
         """actions/cache must be pinned to a full 40-char commit SHA (security)."""
@@ -410,6 +401,4 @@ class TestGenCiYmlScanCacheBlock:
 
         # Match `uses: actions/cache@<40-hex>` — SHA pin form.
         sha_pattern = re.compile(r"uses:\s*actions/cache@[a-f0-9]{40}")
-        assert sha_pattern.search(ci_yml) is not None, (
-            "actions/cache must be SHA-pinned (40-char hex), not tag-pinned"
-        )
+        assert sha_pattern.search(ci_yml) is not None, "actions/cache must be SHA-pinned (40-char hex), not tag-pinned"

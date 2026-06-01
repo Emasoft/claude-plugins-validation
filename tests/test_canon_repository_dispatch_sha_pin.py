@@ -63,9 +63,7 @@ GOOD_V400_SHA = "5fc4efd1a4797ddb68ffd0714a238564e4cc0e6f"
 # "MUST exist" assertions below will fail — which is the correct
 # behaviour, since the gh-actions rule requires SHA pins for
 # third-party actions.
-SHA_PIN_RE = re.compile(
-    r"peter-evans/repository-dispatch@(?P<sha>[0-9a-f]{40})\s*#\s*(?P<tag>\S+)"
-)
+SHA_PIN_RE = re.compile(r"peter-evans/repository-dispatch@(?P<sha>[0-9a-f]{40})\s*#\s*(?P<tag>\S+)")
 
 
 def test_canon_template_does_not_ship_broken_sha() -> None:
@@ -114,8 +112,7 @@ def test_generator_does_not_ship_broken_sha() -> None:
     assert matches, "generator missing repository-dispatch SHA pin"
     for m in matches:
         assert m.group("sha") != BROKEN_V401_SHA, (
-            f"generate_plugin_repo.py still emits broken v4.0.1 SHA "
-            f"{BROKEN_V401_SHA!r} (match: {m.group(0)!r})"
+            f"generate_plugin_repo.py still emits broken v4.0.1 SHA {BROKEN_V401_SHA!r} (match: {m.group(0)!r})"
         )
 
 
@@ -126,8 +123,7 @@ def test_generator_uses_good_v400_sha() -> None:
     assert matches, "generator missing repository-dispatch SHA pin"
     for m in matches:
         assert m.group("sha") == GOOD_V400_SHA, (
-            f"generate_plugin_repo.py pinned to {m.group('sha')!r}, "
-            f"expected v4.0.0 SHA {GOOD_V400_SHA!r}"
+            f"generate_plugin_repo.py pinned to {m.group('sha')!r}, expected v4.0.0 SHA {GOOD_V400_SHA!r}"
         )
 
 
@@ -144,6 +140,5 @@ def test_canon_setup_uv_sha_is_unrelated_to_v810_breakage() -> None:
     setup_uv_re = re.compile(r"astral-sh/setup-uv@(?P<sha>[0-9a-f]{40})")
     for m in setup_uv_re.finditer(text):
         assert m.group("sha") != broken_v810_sha, (
-            "generate_plugin_repo.py emits the broken v8.1.0 setup-uv "
-            "SHA — that SHA is unavailable to GHA codeload."
+            "generate_plugin_repo.py emits the broken v8.1.0 setup-uv SHA — that SHA is unavailable to GHA codeload."
         )

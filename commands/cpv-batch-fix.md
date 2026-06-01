@@ -101,15 +101,28 @@ SHARD_SIZE=30   # or user override
 MAX_PARALLEL=8  # or user override
 MIN_SEVERITY=minor  # or user override
 
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_planner.py" \
+PLANNER_JSON="$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_planner.py" \
   "$PLUGIN_PATH" \
   --shard-size "$SHARD_SIZE" \
   --max-parallel "$MAX_PARALLEL" \
-  --min-severity "$MIN_SEVERITY"
+  --min-severity "$MIN_SEVERITY")"
+
+# CRITICAL: the per-shard planner creates its OWN session dir
+# (${TMPDIR}/cpv-batch/<ts>/) holding index.json + shard-*.status.json —
+# this is NOT the same dir as the orchestrator's Step-0 `plan` call
+# (${TMPDIR}/cpv-batch/<ts>-<agent>/, which holds plan.json). Overwrite
+# SESSION_DIR here with the PLANNER's session_dir so Step 3's aggregator
+# (which requires index.json) reads the correct directory. Parse with a
+# real JSON loader — the planner prints indent=2 pretty JSON, so grep/sed
+# would be fragile.
+SESSION_DIR=$(echo "$PLANNER_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_dir"])')
+INDEX_PATH=$(echo "$PLANNER_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["index_path"])')
+SHARD_COUNT=$(echo "$PLANNER_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["shard_count"])')
 ```
 
-The planner prints a JSON summary to stdout. Capture it. Read the
-``index_path`` and ``shard_count`` fields.
+The planner prints a JSON summary to stdout. The capture above reads the
+``session_dir``, ``index_path``, and ``shard_count`` fields (and resets
+``SESSION_DIR`` to the planner's dir for Step 3's aggregator).
 
 If ``shard_count`` is `0`, the plugin has no actionable findings — reply
 plain-text:
@@ -129,22 +142,16 @@ claude-menu-system Stop hook. Build a CMS-shaped status_table spec
 inline — one row per shard — and write it to a tempfile, then hand
 the path to ``cpv_menu.py``:
 
+Read the planner's index from ``$INDEX_PATH`` (captured in Step 1 — it
+resolves to ``$SESSION_DIR/index.json``). Each entry in its ``shards[]``
+array carries ``shard_id``, ``file_count``, ``finding_count``, and
+``manifest_path`` (shape defined by ``scripts/cpv_batch_planner.py``).
+Map one shard per CMS ``status_table`` row — ``status: pending`` is the
+right enum for queued rows — then write the spec to a tempfile and hand
+the path to ``cpv_menu.py``:
+
 ```bash
 PLAN_SPEC="/tmp/cpv-batch-fix-shard-plan-$$.json"
-python3 - "$PLAN_SPEC" <<'PY'
-import json, sys
-from pathlib import Path
-# Read the planner index from $SESSION_DIR/index.json. The shape of
-# each shard entry is defined by scripts/cpv_batch_planner.py; map
-# (shard_id, file count, finding count, manifest path) into the CMS
-# status_table row shape (label/status/notes). ``status: pending`` is
-# the right enum for queued rows.
-index = json.loads(Path(sys.argv[1].replace("-plan-", "-index-")).read_text())  # placeholder — orchestrator substitutes
-PY
-# In practice the orchestrator (you, the model) builds the JSON
-# directly from the planner output rather than running an inline
-# Python heredoc. The canonical inline build is:
-
 cat > "$PLAN_SPEC" <<EOF
 {
   "spec_version": 1,
@@ -154,7 +161,7 @@ cat > "$PLAN_SPEC" <<EOF
   "title": "Batch plan",
   "row_header": "Shard",
   "rows": [
-    /* one row per shard from index.json:
+    /* one row per shard from \$INDEX_PATH (= \$SESSION_DIR/index.json):
        { "label": "shard-1 (5 files / 27 findings)",
          "status": "pending",
          "notes": "/tmp/.../shard-1.manifest.json" } */

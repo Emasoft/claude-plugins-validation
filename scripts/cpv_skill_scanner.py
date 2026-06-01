@@ -324,8 +324,10 @@ def report_findings(
     """
     if not result.invoked:
         # Scanner was unavailable or timed out: surface as INFO so the
-        # operator knows external coverage was missing for this run.
-        # ValidationReport.info() takes (message, file=None) — no `line`.
+        # operator knows external coverage was missing for this run. No source
+        # line is passed because this is a run-level diagnostic, not a
+        # finding anchored to a file line (info() does accept an optional
+        # line for findings that have one — see the loop below).
         report.info(
             f"Cisco skill-scanner skipped — {result.skipped_reason}",
             "<external-scanner>",
@@ -344,7 +346,15 @@ def report_findings(
             continue
         message = f"[cisco {finding.rule_id}] {finding.message}".strip()
         if finding.severity == "info":
-            # ValidationReport.info() doesn't accept a line number.
+            # info() is called with (message, file) only — NOT because it
+            # rejects a line (the real ValidationReport.info() does accept an
+            # optional ``line``), but to stay compatible with duck-typed
+            # report objects whose info() omits the line parameter. Cisco
+            # info-severity findings are run-level/coverage notes where the
+            # source line carries little value, so dropping it is acceptable.
+            # (Unifying this with the getattr path below would let info
+            # findings keep their line, but requires every duck-typed report
+            # to accept the 3-arg info() — see cross-file finding.)
             report.info(message, rel_file)
         else:
             method = getattr(report, finding.severity, None) or report.minor

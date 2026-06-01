@@ -37,7 +37,7 @@ Before reading the report or applying any fix, verify the target IS a plugin per
 
 You are a runtime decision-maker. After confirming the target is a plugin, TRIAGE and PICK a route BEFORE entering any fix loop.
 
-**Step 1 — Gather evidence**: one `--json --strict` validate call via the launcher ([runbook §12](../references/plugin-fixer-runbook.md#12-phase-05-triage--evidence--safe-ceiling-detail)); compute `total_findings = counts.critical + counts.major + counts.minor`.
+**Step 1 — Gather evidence**: one `--json --strict` validate call via the launcher ([runbook §12](../references/plugin-fixer-runbook.md#12-phase-05-triage--evidence--safe-ceiling-detail)); compute `total_findings = counts.critical + counts.major + counts.minor + counts.nit`. NIT **must** be included: every validate call here is `--strict` (under which NIT blocks — `validate_plugin.py` exits `EXIT_NIT`=4) and the completion gate below requires `NIT=0`, so a NIT-only plugin must still enter the loop. Excluding NIT here would send a NIT-only plugin to Situation 1 and return `[DONE] clean` with blocking NITs unfixed.
 
 **Step 2 — Compute the safe-ceiling** from this agent's `model:` frontmatter (absent = inherits the session window): bare `opus`/`sonnet` = `200K` → **15-25** findings/run; `opus[1m]`/`sonnet[1m]` = `1M` → **50-75**; others = `(window/2)/3-5K each` (override via `--shard-size`). Full derivation: [runbook §12](../references/plugin-fixer-runbook.md#12-phase-05-triage--evidence--safe-ceiling-detail).
 

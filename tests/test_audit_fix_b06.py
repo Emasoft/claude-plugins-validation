@@ -169,7 +169,7 @@ def test_ruamel_same_scope_module_is_suppressed() -> None:
 def test_ruamel_func_local_instance_is_suppressed() -> None:
     """A ruamel instance created and used inside the same function stays
     suppressed."""
-    src = "def read(f):\n    y = YAML(typ=\"safe\")\n    return y.load(f)\n"
+    src = 'def read(f):\n    y = YAML(typ="safe")\n    return y.load(f)\n'
     assert pyctx._is_ruamel_yaml_safe_load(ast.parse(src), src, 3) is True
 
 

@@ -56,10 +56,10 @@ Primary fix guide: [marketplace-fixes.md](marketplace-fixes.md)
 | Submodule initialization (`git submodule update --init --recursive`) | marketplace-fixes §4 |
 | Marketplace README.md existence and required sections | marketplace-fixes §1 (README subsection) |
 | Marketplace placeholder content / Troubleshooting topics | marketplace-fixes §1 (README subsection) |
-| Marketplace private-info scan (leaked paths) **[NEW]** (L1554–L1692) | marketplace-fixes §7 |
-| Dangerous inline Python in workflows **[NEW]** (L1866–L1884) | marketplace-fixes §5 |
-| GitHub-source validation — plugin `repository` field required **[NEW]** (L1732–L1790) | marketplace-fixes §2 |
-| Architecture / nested-monorepo restructure 7-signal WARNING **[NEW]** (L2299) | See §3 below |
+| Marketplace private-info scan (leaked paths) (`validate_marketplace_private_info`) | marketplace-fixes §7 |
+| Dangerous inline Python in workflows (`validate_workflow_inline_python`) | marketplace-fixes §5 |
+| GitHub-source validation — plugin `repository` field required (`validate_github_source_required`) | marketplace-fixes §2 |
+| Architecture / nested-monorepo restructure 7-signal WARNING (`_recommend_cpv_restructure`) | See §3 below |
 
 ---
 
@@ -124,7 +124,7 @@ Primary fix guide: [marketplace-fixes.md](marketplace-fixes.md)
 
 Primary fix guide: [marketplace-fixes.md](marketplace-fixes.md) **§9 — Architecture / Marketplace Layout Migration**
 
-When a Layout-B marketplace (nested plugins via `source: directory` or `source: "./path"`) has at least 3 of the following 7 non-CPV signals, `validate_marketplace.py` emits a single WARNING at line 2299 with `category: architecture`. Each signal has its own per-warning mechanical fix in marketplace-fixes §9.
+When a Layout-B marketplace (nested plugins via `source: directory` or `source: "./path"`) has at least 3 of the following 7 non-CPV signals, `validate_marketplace.py::_recommend_cpv_restructure` emits a single WARNING with `category: architecture`. Each signal has its own per-warning mechanical fix in marketplace-fixes §9.
 
 | # | Signal | Fix guide section |
 |---|---|---|

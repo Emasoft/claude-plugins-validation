@@ -99,6 +99,22 @@ class TokenUsage:
         return self.input_tokens + self.output_tokens + self.cache_creation_input_tokens + self.cache_read_input_tokens
 
 
+def _usage_int(usage: dict[str, object], key: str) -> int:
+    """Return ``usage[key]`` as an int, or 0 for missing/null/non-int values.
+
+    The transcript is JSON from Claude Code, but a truncated or hand-crafted
+    transcript can carry ``null`` (or a string) where an int is expected.
+    ``usage.get(key, 0)`` only defaults a MISSING key — a present ``null`` would
+    propagate ``None`` into ``int += None`` and raise TypeError past the
+    OSError-only handler below. Coercing here keeps the parser tolerant of a
+    malformed value exactly as it already tolerates a missing one (bool is a
+    subclass of int and is intentionally rejected — a usage count is never a
+    boolean).
+    """
+    val = usage.get(key, 0)
+    return val if isinstance(val, int) and not isinstance(val, bool) else 0
+
+
 def parse_transcript(path: str | Path) -> TokenUsage:
     """Parse a JSONL transcript and sum token usage from all assistant messages."""
     result = TokenUsage()
@@ -130,18 +146,21 @@ def parse_transcript(path: str | Path) -> TokenUsage:
                     seen_ids.add(mid)
 
                 usage = msg.get("usage", {})
-                if not usage:
+                # Mirror the msg/dict guard above: a non-dict (or empty) usage
+                # has no token counts to add. A non-dict that is truthy (e.g. a
+                # stray string) would otherwise AttributeError on .get below.
+                if not isinstance(usage, dict) or not usage:
                     continue
 
-                result.input_tokens += usage.get("input_tokens", 0)
-                result.output_tokens += usage.get("output_tokens", 0)
-                result.cache_creation_input_tokens += usage.get("cache_creation_input_tokens", 0)
-                result.cache_read_input_tokens += usage.get("cache_read_input_tokens", 0)
+                result.input_tokens += _usage_int(usage, "input_tokens")
+                result.output_tokens += _usage_int(usage, "output_tokens")
+                result.cache_creation_input_tokens += _usage_int(usage, "cache_creation_input_tokens")
+                result.cache_read_input_tokens += _usage_int(usage, "cache_read_input_tokens")
                 result.message_count += 1
 
                 model = msg.get("model", "unknown")
                 model_counts[model] = model_counts.get(model, 0) + 1
-    except (OSError, IOError) as e:
+    except OSError as e:
         print(f"Warning: Could not read transcript: {e}", file=sys.stderr)
 
     # Most-used model

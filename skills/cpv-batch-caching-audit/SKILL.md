@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-caching-audit
-description: "Fleet-wide read-only cache audit. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. One cache-optimizer-agent per plugin runs Phase 1 only — detects CA-01..CA-06 prompt-cache invalidation patterns, no fixes. Use when surveying cache-invalidation findings across many plugins without applying changes. Trigger with /cpv-batch-caching-audit."
+description: "Fleet-wide read-only cache audit. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. One cache-optimizer-agent per plugin runs Phase 1 only — detects CA-01..CA-07 prompt-cache invalidation patterns, no fixes. Use when surveying cache-invalidation findings across many plugins without applying changes. Trigger with /cpv-batch-caching-audit."
 user-invocable: true
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
@@ -11,8 +11,8 @@ argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 
 Read-only parallel cache audit. Runs Phase 1 (Audit) of the
 cache-optimizer-agent workflow across every plugin in the user's
-input spec — detecting the six documented prompt-cache invalidation
-patterns (CA-01..CA-06) per plugin without applying fixes. Apply
+input spec — detecting the seven documented prompt-cache invalidation
+patterns (CA-01..CA-07) per plugin without applying fixes. Apply
 fixes later with `/cpv-batch-caching-optimize` (which uses the same
 input grammar).
 
@@ -87,7 +87,7 @@ Assistant: /cpv-batch-caching-audit /path/a /path/b /path/c
 ## Resources
 
 - TRDD-3dcbb37c — full design
-- `skills/cache-validation-skill/SKILL.md` — CA-01..CA-06 pattern catalog
+- `skills/cache-validation-skill/SKILL.md` — CA-01..CA-07 pattern catalog
 - `commands/cpv-batch-caching-audit.md` — orchestrator body (in this plugin)
 - `commands/cpv-batch-caching-optimize.md` — sibling fix-mode command (in this plugin)
 - Sibling batch skills: `cpv-batch-validate`,

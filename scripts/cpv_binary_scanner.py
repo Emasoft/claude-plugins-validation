@@ -140,6 +140,22 @@ _DECODE_MAX_RESULTS = 1000  # max surfaced text variants
 # it's noise).
 _MIN_DECODE_INPUT = 8
 
+# Per-line regex-match input cap (ReDoS guard). MIRRORS
+# ``cpv_skillaudit_native._MAX_SCAN_LINE`` — kept as a LOCAL constant
+# (not imported) because this module is deliberately stdlib-only and
+# stays usable when ``cpv_skillaudit_native`` can't be imported (see
+# ``_load_default_catalog``'s ImportError fallback). The binary scanner's
+# raison d'être is large minified bundles / polyglots whose extracted
+# ASCII runs and decoded payloads are a SINGLE multi-megabyte "line" (the
+# extractors exclude newlines, so a minified file collapses to one run).
+# Running the plain-``re`` catalog over such a line is the exact
+# catastrophic-backtracking hazard the text path bounds. Truncation
+# affects MATCHING ONLY: reported ``line`` / ``lineContent`` are unchanged,
+# and a real short token (secret/URL/path) still matches within the first
+# _MAX_SCAN_LINE chars. If the two constants ever diverge, the text path's
+# value is canonical.
+_MAX_SCAN_LINE = 2000
+
 # ASCII printable-run minimum length. The classic "strings" tool defaults
 # to 4; we use 6 to suppress noise from things like 4-byte ELF section
 # names ("BLOB", "TEXT", "DATA", etc.) while still catching tokens / URLs
@@ -169,9 +185,7 @@ _ZLIB_FIRST_BYTE = 0x78
 
 # Base64 alphabet. We use a charset test rather than a regex so we can
 # scan large inputs without exhausting backtrack budget.
-_BASE64_CHARS = frozenset(
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
-)
+_BASE64_CHARS = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
 _BASE64_MIN_LEN = 16  # below this, false-positive rate is too high
 
 # Hex alphabet.
@@ -604,7 +618,13 @@ def _run_catalog_on_text(
         rule_desc = rule.get("description", "")
         for pat in compiled_pats:
             for i, line in enumerate(lines):
-                m = pat.search(line)
+                # ReDoS guard: bound the regex INPUT to _MAX_SCAN_LINE so the
+                # worst case is linear in that constant regardless of pattern
+                # shape (extracted binary runs / decoded payloads are routinely
+                # one multi-MB line). The full `line` is still used for
+                # `lineContent` reporting below, so truncation never changes
+                # what the triager sees — only what `re` has to chew through.
+                m = pat.search(line if len(line) <= _MAX_SCAN_LINE else line[:_MAX_SCAN_LINE])
                 if not m:
                     continue
                 matched_text = m.group(0)
@@ -699,18 +719,24 @@ def scan_binary(
 
     # Read the bytes. Two paths: chunked for huge files, one-shot for
     # normal files. Both honour _PER_FILE_MEMORY_CAP.
+    truncated_msg: str | None = None
     try:
         if size >= _STREAM_THRESHOLD:
             data = _read_streaming(path)
             if len(data) >= _PER_FILE_MEMORY_CAP:
-                # Visible WARNING — the truncation is intentional and
-                # safe, but the agent should know coverage was partial.
-                _LOG.warning(
-                    "binary_scanner: %s truncated to %s bytes (over %s cap)",
-                    rel_path,
-                    _PER_FILE_MEMORY_CAP,
-                    _PER_FILE_MEMORY_CAP,
+                # Coverage was partial — the read stopped at the cap. The
+                # iron rule (module docstring) is that a truncated read MUST
+                # surface a visible WARNING *finding*, not just a log line:
+                # downstream CPV consumers read the returned list, never the
+                # Python logger, so a log-only warning would be a silent skip
+                # of everything past the cap. Defer the append until `findings`
+                # exists so the WARNING is returned even when the (partial)
+                # scan produces zero catalog matches.
+                truncated_msg = (
+                    f"Binary file truncated to {_PER_FILE_MEMORY_CAP} bytes "
+                    f"(over per-file memory cap) — scan coverage is partial: {path}"
                 )
+                _LOG.warning("binary_scanner: %s", truncated_msg)
         else:
             data = path.read_bytes()
     except PermissionError as exc:
@@ -727,6 +753,8 @@ def scan_binary(
         return []
 
     findings: list[dict[str, Any]] = []
+    if truncated_msg is not None:
+        findings.append(_warning_finding(truncated_msg, rel_path, rule_id="BINARY_SCAN_TRUNCATED"))
 
     # 1. ASCII strings.
     try:

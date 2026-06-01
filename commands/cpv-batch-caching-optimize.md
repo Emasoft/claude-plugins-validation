@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-caching-optimize
-description: Fan out cache-optimizer-agent across every plugin in a marketplace, a list of plugins, or a single plugin and APPLY the cache-invalidation fixes (CA-01..CA-06). Accepts local paths and GitHub URLs. One cache-optimizer-agent per plugin in batch_fix mode (Phase 1 audit + Phase 2 fix + Phase 3 re-validate; Phase 4 broader refactor SKIPPED in batch mode to avoid per-plugin user prompts). Parallel main-session dispatch (default 8, cap 16).
+description: Fan out cache-optimizer-agent across every plugin in a marketplace, a list of plugins, or a single plugin and APPLY the cache-invalidation fixes (CA-01..CA-07). Accepts local paths and GitHub URLs. One cache-optimizer-agent per plugin in batch_fix mode (Phase 1 audit + Phase 2 fix + Phase 3 re-validate; Phase 4 broader refactor SKIPPED in batch mode to avoid per-plugin user prompts). Parallel main-session dispatch (default 8, cap 16).
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---
@@ -8,7 +8,7 @@ user-invocable: true
 # /cpv-batch-caching-optimize — Apply cache-invalidation fixes across many plugins
 
 For users who maintain a marketplace and want to apply the
-cache-invalidation pattern fixes (CA-01..CA-06) across every
+cache-invalidation pattern fixes (CA-01..CA-07) across every
 plugin in one pass, this command fans out one `cache-optimizer-agent`
 per plugin in **`batch_fix`** mode. Each agent runs Phase 1 (Audit)
 → Phase 2 (Fix) → Phase 3 (Re-validate) on its assigned plugin and
@@ -177,5 +177,5 @@ opt-in via the interactive single-plugin cache flow under
 
 - TRDD-3dcbb37c §1-5 — full design
 - `agents/cache-optimizer-agent.md` — `batch_fix` mode contract
-- `skills/cache-validation-skill/SKILL.md` — CA-01..CA-06 pattern catalog
+- `skills/cache-validation-skill/SKILL.md` — CA-01..CA-07 pattern catalog
 - `commands/cpv-batch-caching-audit.md` — sibling read-only audit command

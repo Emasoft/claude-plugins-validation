@@ -29,9 +29,12 @@
 #
 # SECURITY NOTES
 # --------------
-# - Restricted to a hardcoded allowlist of trusted bot logins. Random
-#   bots cannot trigger the auto-merge path even if they obtain push
-#   access to a fork.
+# - Restricted to a hardcoded allowlist of trusted bot logins, matched
+#   against the PR AUTHOR (``github.event.pull_request.user.login``) —
+#   not ``github.actor``, which reflects whoever pushed the latest
+#   commit and is spoofable as a trust boundary. Random bots cannot
+#   trigger the auto-merge path, and the job is additionally pinned to
+#   the canonical upstream repo so forks cannot reuse it.
 # - Uses the default ``GITHUB_TOKEN`` with explicit scopes — no PAT, no
 #   long-lived secret. Dependabot PRs run with read-only tokens by
 #   default, so we set ``permissions:`` at the workflow level to grant
@@ -63,13 +66,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # Allowlist of trusted bot logins. Add new bots here as needed —
-    # never expand to a wildcard / "any bot" check, because forks can
-    # impersonate arbitrary user-supplied actor names on workflow runs
-    # initiated from PRs.
+    # never expand to a wildcard / "any bot" check.
+    #
+    # The gate keys on github.event.pull_request.user.login (the PR
+    # AUTHOR), NOT github.actor. github.actor is "whoever triggered the
+    # most recent event" — on a `synchronize` it becomes the identity
+    # that pushed the latest commit, so it is BOTH (a) spoofable as a
+    # trust boundary (an attacker can make Dependabot the last actor via
+    # `@dependabot recreate`, flipping github.actor to dependabot[bot] on
+    # a PR they influenced — the confused-deputy / CWE-441 pattern) and
+    # (b) wrong for normal use (a maintainer pushing a fix onto a
+    # Dependabot branch makes github.actor the maintainer, silently
+    # skipping auto-merge). The PR author login is the non-spoofable
+    # identity GitHub's own auto-merge example checks.
+    #
+    # github.repository pins the job to the canonical upstream repo so a
+    # fork that inherits this workflow file does not auto-merge Dependabot
+    # PRs inside the fork's own context.
     if: >-
+      github.repository == 'Emasoft/claude-plugins-validation' &&
       contains(fromJSON('[
         "dependabot[bot]"
-      ]'), github.actor)
+      ]'), github.event.pull_request.user.login)
     steps:
       - name: Enable auto-merge (squash) on the PR
         run: |

@@ -240,6 +240,34 @@ def add_command(plugin: Path, name: str, description: str, allowed_tools: str, *
     return 0
 
 
+def _load_json_object(path: Path) -> dict:
+    """Read an existing JSON config file that MUST hold a top-level object.
+
+    Returns ``{}`` when the file is absent or empty. Mirrors
+    ``add_dependencies._read_plugin_json`` so every add-* CLI fails the same,
+    legible way instead of a raw traceback:
+
+    * a malformed file raises ``SystemExit`` with the decoder error (without
+      this, ``json.loads`` leaks a cryptic ``JSONDecodeError`` traceback);
+    * a well-formed-but-non-object file (``[]`` / ``null`` / ``"str"`` /
+      ``42``) raises ``SystemExit`` BEFORE the caller's ``data.setdefault(...)``
+      would crash with an opaque ``AttributeError`` and (worse) leave the
+      config un-mutated with no actionable message.
+    """
+    if not path.is_file():
+        return {}
+    text = path.read_text(encoding="utf-8")
+    if not text.strip():
+        return {}
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"  [add] {path} is malformed JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise SystemExit(f"  [add] {path} top-level must be a JSON object, got {type(data).__name__}")
+    return data
+
+
 def add_hook(plugin: Path, event: str, command: str) -> int:
     """Append a new hook entry to hooks/hooks.json (creating the file
     if needed). Idempotent: skips if an identical entry already exists.
@@ -248,10 +276,7 @@ def add_hook(plugin: Path, event: str, command: str) -> int:
     hooks_json = hooks_dir / "hooks.json"
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
-    if hooks_json.is_file():
-        data = json.loads(hooks_json.read_text(encoding="utf-8") or "{}")
-    else:
-        data = {}
+    data = _load_json_object(hooks_json)
 
     events = data.setdefault("hooks", {})
     event_list = events.setdefault(event, [])
@@ -272,10 +297,11 @@ def add_hook(plugin: Path, event: str, command: str) -> int:
 def add_mcp(plugin: Path, name: str, command: str, http_url: str) -> int:
     """Add an entry to .mcp.json (creating it if needed). Idempotent."""
     mcp = plugin / ".mcp.json"
-    if mcp.is_file():
-        data = json.loads(mcp.read_text(encoding="utf-8") or "{}")
-    else:
-        data = {"mcpServers": {}}
+    # `setdefault("mcpServers", {})` below creates the key when missing, so an
+    # empty {} from _load_json_object is equivalent to the old {"mcpServers": {}}
+    # seed — but now a malformed/non-object .mcp.json fails legibly instead of
+    # crashing on `.setdefault`.
+    data = _load_json_object(mcp)
 
     servers = data.setdefault("mcpServers", {})
     if name in servers:

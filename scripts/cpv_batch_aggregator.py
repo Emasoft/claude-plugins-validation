@@ -58,7 +58,25 @@ def load_index(session_dir: Path) -> dict[str, Any]:
     index_path = session_dir / "index.json"
     if not index_path.exists():
         raise FileNotFoundError(f"index.json not found in session dir: {session_dir}")
-    parsed: dict[str, Any] = json.loads(index_path.read_text())
+    # A truncated / half-written / hand-edited index.json must degrade to the
+    # CLI's clean "error: ..." + exit-1 path (main() catches RuntimeError),
+    # NOT escape as a bare JSONDecodeError/AttributeError traceback. This
+    # mirrors load_shard_status's own JSONDecodeError + non-dict guards and
+    # honours the module's documented tolerance contract: the producer
+    # (cpv_batch_planner) writes index.json non-atomically, so a concurrent
+    # read can legitimately observe a partial file. (audit recheck)
+    try:
+        raw = index_path.read_text()
+    except (UnicodeDecodeError, OSError) as exc:
+        raise RuntimeError(f"index.json unreadable: {exc}") from exc
+    try:
+        parsed: dict[str, Any] = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"index.json is not valid JSON: {exc}") from exc
+    # json.loads can return any JSON type; the annotation above is only a hint.
+    # Guard before .get() so a top-level list/str/number can't AttributeError.
+    if not isinstance(parsed, dict):
+        raise RuntimeError(f"index.json is not a JSON object (got {type(parsed).__name__})")
     # Surface a producer/consumer schema drift instead of silently misreading
     # an index this aggregator doesn't understand. Warn (don't reject): a
     # dev CLI should still attempt a best-effort merge, and the fields this
@@ -227,9 +245,7 @@ def aggregate(session_dir: Path, report_path: Path | None = None) -> dict[str, A
     shard_summaries: list[ShardSummary] = []
     for position, s in enumerate(shards):
         if not isinstance(s, dict):
-            shard_summaries.append(
-                ShardSummary(shard_id=position, error=f"index shard entry is not an object: {s!r}")
-            )
+            shard_summaries.append(ShardSummary(shard_id=position, error=f"index shard entry is not an object: {s!r}"))
             continue
         # Fall back to the positional index when 'shard_id' is absent/non-numeric
         # so every shard still gets a stable identifier in the report.
@@ -239,9 +255,7 @@ def aggregate(session_dir: Path, report_path: Path | None = None) -> dict[str, A
             shard_id = position
         status_path = s.get("status_path")
         if not status_path:
-            shard_summaries.append(
-                ShardSummary(shard_id=shard_id, error="index shard entry missing 'status_path'")
-            )
+            shard_summaries.append(ShardSummary(shard_id=shard_id, error="index shard entry missing 'status_path'"))
             continue
         shard_summaries.append(load_shard_status(Path(status_path), shard_id))
 

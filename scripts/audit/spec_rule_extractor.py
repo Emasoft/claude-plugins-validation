@@ -70,6 +70,31 @@ _MUST_PATTERNS = (
     re.compile(r"[^.\n]{0,80}\bFORBIDDEN\b[^.\n]{0,160}", re.IGNORECASE),
 )
 
+
+def _modal_marker_pattern(marker: str) -> re.Pattern[str]:
+    """Build a word-bounded, case-insensitive matcher for one obligation modal.
+
+    Word boundaries (`\\b...\\b`) are required so the matcher mirrors how
+    `_MUST_PATTERNS` detects an obligation. A plain ``marker in sentence``
+    substring test misfires on words that merely embed a modal
+    ("MUSTARD"⊃"MUST", "SHOULDER"⊃"SHOULD") and would mis-tag a SHOULD-rule
+    as MUST. The intra-phrase space in "MUST NOT" / "SHOULD NOT" becomes `\\s+`
+    so the phrase is still recognised if a direct caller passes non-normalised
+    whitespace. Each whitespace-split token is re.escape'd independently and
+    rejoined with `\\s+` — version-proof, unlike relying on re.escape's
+    (Python-version-dependent) treatment of a literal space.
+    """
+    body = r"\s+".join(re.escape(tok) for tok in marker.split())
+    return re.compile(rf"\b{body}\b", re.IGNORECASE)
+
+
+# Modal matchers in strongest-first precedence order, so "MUST NOT" is checked
+# before the bare "MUST" it contains (likewise "SHOULD NOT" before "SHOULD").
+_MODAL_MARKERS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (marker, _modal_marker_pattern(marker))
+    for marker in ("MUST NOT", "SHOULD NOT", "FORBIDDEN", "REQUIRED", "MUST", "SHOULD")
+)
+
 # Indexed CPV rule keywords used to coarsely tag a spec rule with a LIKELY
 # related CPV check. A keyword hit is weak evidence (the subject word appears
 # in the obligation sentence) — far from proof of full coverage — so the
@@ -207,10 +232,16 @@ def fetch_page(page: SpecPage, *, timeout: float = 30.0) -> str:
 
 
 def _classify_modal(sentence: str) -> str:
-    """Return the strongest obligation modal present in `sentence`."""
-    up = sentence.upper()
-    for marker in ("MUST NOT", "SHOULD NOT", "FORBIDDEN", "REQUIRED", "MUST", "SHOULD"):
-        if marker in up:
+    """Return the strongest obligation modal present in `sentence`.
+
+    Uses word-boundary matching (via `_MODAL_MARKERS`) — NOT a substring test.
+    A naive ``"MUST" in sentence`` misclassifies any sentence containing a word
+    that merely embeds a modal (e.g. "mustard"→MUST, "shoulder"→SHOULD), which
+    would tag a SHOULD-rule as MUST. Markers are checked strongest-first so
+    "MUST NOT" wins over the bare "MUST" it contains.
+    """
+    for marker, pattern in _MODAL_MARKERS:
+        if pattern.search(sentence):
             return marker
     return "SHOULD"
 

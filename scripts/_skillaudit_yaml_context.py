@@ -302,8 +302,7 @@ def classify(
             # (``curl ... | bash``, ``eval "$(...)"``) stay visible via the
             # guards inside the shell helpers.
             if rule_id == "CMD_INJECTION" and (
-                _cmdsub_is_safe_data_command(line, match)
-                or _pipe_to_text_processor(line, match)
+                _cmdsub_is_safe_data_command(line, match) or _pipe_to_text_processor(line, match)
             ):
                 return "safe_literal"
             if _has_known_safe_ci_pattern(line):

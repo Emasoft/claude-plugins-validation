@@ -77,7 +77,7 @@ Never force-push or rewrite history. Forward-only commits.
 - [Pre-Migration Audit](references/pre-migration-audit.md)
   > Working Tree Cleanliness · Plugin Inventory Collection · Plugin Manifest Validation · Already-Migrated Detection · Name Collision Detection · Disk Space Check · GitHub Auth Check · MARKETPLACE_PAT Env Check · Audit Report Format
 - [Interrogation Playbook](references/interrogation-playbook.md)
-  > Purpose · Target layout selection · GitHub owner and visibility (Layout A only) · Primary author consolidation (Layout B only) · Per-plugin metadata · Guest contributor handling · Final confirmation
+  > Purpose · Target layout selection · GitHub owner and visibility (Layout A only) · Primary author consolidation (Layout B only) · Per-plugin metadata · Guest contributor handling · Final confirmation · After each question
 - [Layout A Migration](references/layout-a-migration.md)
   > Pre-Flight Checks · Per-Plugin Subtree Split · Per-Plugin Repo Creation · CPV Canonicalization · Per-Plugin Tagging · Per-Plugin Auto-Notify Setup · Marketplace.json Rewrite · Cleanup Commit · Verification · Rollback Recipe
 - [Layout B Discipline](references/layout-b-discipline.md)

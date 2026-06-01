@@ -138,9 +138,7 @@ def _arm_integrity_mismatch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     # hash for.
     plugin_root = tmp_path / "plugin"
     (plugin_root / ".claude-plugin").mkdir(parents=True)
-    (plugin_root / ".claude-plugin" / "plugin.json").write_text(
-        '{"name": "x", "version": "9.9.9"}', encoding="utf-8"
-    )
+    (plugin_root / ".claude-plugin" / "plugin.json").write_text('{"name": "x", "version": "9.9.9"}', encoding="utf-8")
     tracked = plugin_root / "scripts" / "real_file.py"
     tracked.parent.mkdir(parents=True)
     tracked.write_text("print('hello')\n", encoding="utf-8")
@@ -165,14 +163,11 @@ def test_mismatch_with_fail_false_does_not_memoize_success(
     result = pvh.verify_self_integrity(plugin_root, fail_on_mismatch=False, quiet=True)
     assert result is False, "a hash mismatch must return False"
     assert pvh._VERIFIED_THIS_PROCESS is False, (
-        "a FAILED verification must not be memoized as success — otherwise a "
-        "subsequent strict gate would be bypassed"
+        "a FAILED verification must not be memoized as success — otherwise a subsequent strict gate would be bypassed"
     )
 
 
-def test_strict_gate_after_failed_probe_still_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
-) -> None:
+def test_strict_gate_after_failed_probe_still_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     """A strict gate after a failed soft probe must still detect the tamper.
 
     This is the concrete bypass that setting the flag on mismatch would create:

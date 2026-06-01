@@ -50,7 +50,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   --max-parallel "$MAX_PARALLEL"
 ```
 
-Print the initial status table.
+Capture the orchestrator's stdout (``PLAN``, ``STATUS_TABLE``,
+``SESSION_DIR``, ``PLUGIN_COUNT``, ``DISPATCH_GROUPS``) — Step 2 needs
+the plan to read `plan.plugins` / `plan.session_dir`, and Steps 3-4 need
+`$SESSION_DIR/plan.json` for `emit-status`. Queue the initial status
+table for the claude-menu-system Stop hook (emitted post-turn via
+``systemMessage`` — zero token cost, NEVER printed inline by the
+orchestrator):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$STATUS_TABLE"
+```
+
+NEVER print the menu inline; the CMS Stop hook emits via systemMessage at
+turn end.
 
 ## Step 2 — Dispatch one doctor per project, same-turn
 
@@ -108,11 +121,40 @@ for plugin_index in group:
     )
 ```
 
-## Step 3 — Mid-batch status refresh + Step 4 — Final summary
+## Step 3 — Mid-batch status refresh
 
-Same as the read-only diagnose command. After every project
-returns, list any pending fixes per project so the user can
-choose which to apply.
+Queue the live status table via the orchestrator's ``emit-status``
+subcommand (aggregates every per-project status JSON, hands the CMS
+spec to ``cpv_menu`` — Stop hook emits at turn end):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \
+  emit-status "$SESSION_DIR/plan.json"
+```
+
+NEVER print the menu inline; the CMS Stop hook emits via systemMessage at
+turn end. End the turn after this call.
+
+## Step 4 — Final summary
+
+After every project has reported:
+
+1. Queue the final status table (same call as Step 3).
+
+2. Print a one-line summary inline (text, not a menu). This is a
+   same-turn **fix** command, so the summary uses the fix vocabulary
+   (`fixed` / `partial` / `failed`) that matches the per-project
+   `status_label`:
+
+   ```text
+   DONE: projects=N clean=X fixed=Y partial=Z failed=W. Pending fixes: P. Reports under {session_dir}/.
+   ```
+
+3. If any project has `pending_fixes`, list them per project so the
+   user can choose which to apply (the unsafe-MAJOR / unsafe-MINOR
+   recipes the doctor recorded without applying).
+
+End the turn. The CMS Stop hook emits the final table via systemMessage.
 
 ## Why a same-turn variant?
 

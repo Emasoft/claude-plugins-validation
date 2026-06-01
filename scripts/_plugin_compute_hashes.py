@@ -144,17 +144,33 @@ def _git_tracked_files(plugin_root: Path) -> set[str] | None:
     import subprocess
 
     try:
+        # `-z` is mandatory, not cosmetic:
+        #   * It disables `core.quotePath`, so a tracked file with a
+        #     non-ASCII name (e.g. `café.md`) is emitted as raw bytes
+        #     instead of the default octal-escaped, double-quote-wrapped
+        #     form (`"caf\303\251.md"`). A quoted name would not match the
+        #     real file in `compute_manifest` (`is_file()` → False) and the
+        #     shipped file would be silently LEFT UNHASHED — exactly the
+        #     "one unhashed shipped file is a poisoning vector" failure the
+        #     exhaustive manifest exists to prevent — while
+        #     `_detect_added_files` would simultaneously raise a spurious
+        #     integrity CRITICAL for the same file.
+        #   * NUL termination also makes a filename containing a newline
+        #     parse correctly; the previous `.splitlines()` split such a
+        #     path into two bogus entries.
+        # Read raw bytes (no text=True) and decode UTF-8 so the result is
+        # locale-independent — git stores paths as bytes and the on-disk
+        # names round-trip through pathlib as UTF-8.
         result = subprocess.run(
-            ["git", "-C", str(plugin_root), "ls-files"],
+            ["git", "-C", str(plugin_root), "ls-files", "-z"],
             capture_output=True,
-            text=True,
             timeout=30,
             check=False,
         )
         if result.returncode != 0:
             return None
-        # ls-files emits POSIX-separated paths, one per line.
-        return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+        decoded = result.stdout.decode("utf-8", errors="surrogateescape")
+        return {entry for entry in decoded.split("\0") if entry}
     except (OSError, subprocess.SubprocessError):
         return None
 

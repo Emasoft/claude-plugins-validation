@@ -190,12 +190,14 @@ def _attribute_chain(node: ast.AST) -> tuple[str, ...] | None:
 
 
 def _is_source_call(call: ast.Call) -> str | None:
-    """Return a human description if `call` is a taint source, else None."""
+    """Return a human description if `call` is a taint source, else None.
+
+    ``input`` is matched by the TAINT_SOURCES membership test above —
+    ``("input",)`` is a member — so no separate ``input`` branch is needed.
+    """
     chain = _attribute_chain(call.func)
     if chain and chain in TAINT_SOURCES:
         return ".".join(chain) + "(...)"
-    if chain and chain[:1] == ("input",) and len(chain) == 1:
-        return "input(...)"
     return None
 
 

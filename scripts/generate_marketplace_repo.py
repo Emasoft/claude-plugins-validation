@@ -707,7 +707,7 @@ split_commits = false
 # regex for preprocessing the commit messages
 commit_preprocessors = [
   # Replace issue numbers
-  {{ pattern = '\\((\\ w+\\s)?#([0-9]+)\\)', replace = "([#${{2}}](https://github.com/{github_owner}/{name}/issues/${{2}}))" }},
+  {{ pattern = '\\((\\w+\\s)?#([0-9]+)\\)', replace = "([#${{2}}](https://github.com/{github_owner}/{name}/issues/${{2}}))" }},
   # Remove trailing whitespace
   {{ pattern = '\\s+$', replace = "" }},
 ]

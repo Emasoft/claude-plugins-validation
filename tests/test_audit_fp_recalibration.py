@@ -142,6 +142,6 @@ class TestAgentMcpToolHookAccepted:
             encoding="utf-8",
         )
         report = validate_agent(agent)
-        assert any(
-            r.level == "MAJOR" and "Invalid hook type" in r.message for r in report.results
-        ), "an unknown hook type must still be rejected"
+        assert any(r.level == "MAJOR" and "Invalid hook type" in r.message for r in report.results), (
+            "an unknown hook type must still be rejected"
+        )

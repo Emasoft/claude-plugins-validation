@@ -154,9 +154,11 @@ disable-model-invocation: true
 | **Required** | No |
 | **Purpose** | Override model for skill execution |
 
+**Valid Values**: short alias (`opus`, `sonnet`, `haiku`, `inherit`, `default`, `opusplan`), optionally `[1m]` for 1M context; or a full ID `claude-(opus|sonnet|haiku)-<digit>...` (e.g. `claude-opus-4-6`). Legacy forms like `claude-3-opus` are NOT accepted by the validator.
+
 **Example**:
 ```yaml
-model: claude-3-opus
+model: claude-opus-4-6
 ```
 
 ### argument-hint

@@ -15,7 +15,7 @@
 - [ ] Every field in the emitted entry appears in the allowlist below
 - [ ] No `scope`, `private`, `published`, `requires`, `archived` fields anywhere
 - [ ] If the user requests an unknown field, the agent REFUSES and points at this file
-- [ ] If the validator's allowlist drifts from this file, the architectural test will fail
+- [ ] This file never recommends a field the validator rejects — the one-way subset-ratchet test fails if it does (see [Self-Consistency With the Validator](#self-consistency-with-the-validator))
 
 ## The Allowlist
 
@@ -108,28 +108,43 @@ The closed allowlist is part of the contract.
 This allowlist matches CPV v2.32.0's understanding of `plugin-marketplaces.md` as of 2026-05-11. Anthropic may add fields in future Claude Code releases. The flow for adopting a new field:
 
 1. Anthropic ships a new official field (e.g. `licenseUrl` in some hypothetical v2.2.x).
-2. CPV adds it to the validator's `OPTIONAL_PLUGIN_FIELDS` constant.
-3. CPV's architectural test `test_contract_known_fields_match_validator_allowlist` (TRDD §8.1) fails because this allowlist is now out of sync.
-4. Patch this file to add the field, ship a new CPV release.
-5. The test passes again, the contract is updated for all agents.
+2. CPV adds it to the validator's `OPTIONAL_PLUGIN_FIELDS` constant. The
+   subset-ratchet test still passes — the validator accepting MORE than this
+   contract recommends is the allowed direction, so this step does not, on its
+   own, force a change here.
+3. Decide whether agents should be allowed to emit the new field. If yes,
+   add it to the [Allowlist](#the-allowlist) above in the same release.
+4. Ship the CPV release. The contract now recommends the field for all agents.
 
-The test prevents drift FROM the contract TO the validator and vice versa. Either side updating without the other = test failure = patch required.
+The ratchet only fires in ONE direction: if this file ever recommends a field the validator REJECTS (and it is not grandfathered into `_KNOWN_CONTRACT_DRIFT_FIELDS`), the test fails. The reverse — the validator gaining a field this file lacks — is allowed and does not fail the test, so keep this file in step with the validator deliberately rather than relying on the ratchet to force it.
 
 ## Self-Consistency With the Validator
 
-The architectural test in TRDD-962fdc55 §8.1 (`test_contract_known_fields_match_validator_allowlist`) is the load-bearing self-consistency check:
+The architectural test `test_contract_known_fields_match_validator_allowlist`
+(in `tests/test_marketplace_authoring_contract.py`) is the load-bearing
+self-consistency check. It is a ONE-WAY subset ratchet, not a bidirectional
+equality check:
 
 ```python
 def test_contract_known_fields_match_validator_allowlist():
-    from scripts.validate_marketplace import (
-        REQUIRED_PLUGIN_FIELDS, OPTIONAL_PLUGIN_FIELDS,
-    )
-    validator_fields = REQUIRED_PLUGIN_FIELDS | OPTIONAL_PLUGIN_FIELDS
+    from validate_marketplace import _KNOWN_MARKETPLACE_ENTRY_FIELDS
     contract_fields = _parse_contract_known_fields()    # parses this file
-    assert contract_fields == validator_fields
+    validator_fields = set(_KNOWN_MARKETPLACE_ENTRY_FIELDS)
+    # The contract must never recommend a field the validator rejects.
+    # Four pre-existing drift fields are grandfathered in (see below).
+    new_drift = (contract_fields - validator_fields) - _KNOWN_CONTRACT_DRIFT_FIELDS
+    assert not new_drift
 ```
 
-If you patch the allowlist in this file without patching `validate_marketplace.py` (or vice versa), the test fails. That is intentional — drift is a self-inconsistency bug, treated with the same severity as a runtime bug.
+The check is intentionally directional: the validator may accept MORE fields
+than this contract recommends (it auto-accepts any plugin-manifest field per
+`plugin-marketplaces.md`), but this contract must NEVER recommend a field the
+validator would reject. So adding a field to `validate_marketplace.py` does
+NOT fail the test; only adding a validator-rejected field to THIS file does.
+Four fields (`alwaysLoad`, `headersHelper`, `claude_versions`, `platforms`)
+are pre-existing drift, grandfathered into the test's
+`_KNOWN_CONTRACT_DRIFT_FIELDS` allowlist so they do not fail it; new drift
+outside that set is a real bug and breaks the build.
 
 The parser `_parse_contract_known_fields()` reads the [Allowlist](#the-allowlist) section and extracts identifiers from the code block. Keep the format machine-parseable: one field per line, identifier first, dash-space separator.
 

@@ -83,7 +83,11 @@ Forward the skill's report verbatim. The report includes:
 
 Do not enter a post-action menu. The migration is a one-shot operation.
 If the user wants to validate the migrated plugin, they can run
-`/cpv-validate-plugin <plugin-path>` or `/cpv-doctor` directly.
+`/cpv-batch-validate <plugin-path>` directly, or open `/cpv-main-menu`
+for the full validate / doctor / fix navigation. (There is no
+standalone `/cpv-validate-plugin` or `/cpv-doctor` slash command after
+the v2.90.0 menu unification — validation and the health-check are
+reached through those two entry points.)
 
 ## Flags
 

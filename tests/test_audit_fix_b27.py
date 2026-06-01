@@ -207,8 +207,7 @@ class TestRepoShapePriorityOrder:
         )
         self._write(
             tmp_path / ".claude-plugin" / "marketplace.json",
-            '{"name": "demo-mp", "owner": {"name": "x"}, '
-            '"plugins": [{"name": "demo", "source": "./"}]}',
+            '{"name": "demo-mp", "owner": {"name": "x"}, "plugins": [{"name": "demo", "source": "./"}]}',
         )
         self._write(
             tmp_path / ".gitmodules",

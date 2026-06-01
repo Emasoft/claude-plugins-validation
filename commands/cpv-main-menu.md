@@ -23,11 +23,13 @@ long menus).
 ## How it works
 
 1. You invoke `/cpv-main-menu`.
-2. The orchestrator builds a menu spec and queues it via
-   `scripts/cpv_menu.py`, then ENDS its turn. The `claude-menu-system`
-   plugin's Stop hook emits the rendered menu via the hook JSON
-   `systemMessage` field — so the menu is shown to you but NEVER enters
-   the agent's transcript (zero token cost regardless of menu size).
+2. The orchestrator queues a pre-baked menu spec via
+   `scripts/print_menu.py` (by its fixed index — e.g. `print_menu.py
+   fixed 5` for the top-level menu), then ENDS its turn. The
+   `claude-menu-system` plugin's Stop hook emits the rendered menu via
+   the hook JSON `systemMessage` field — so the menu is shown to you but
+   NEVER enters the agent's transcript (zero token cost regardless of
+   menu size).
 3. You reply with the row key (number or letter) → orchestrator drills
    into the chosen sub-menu spec (queued the same way).
 4. You reply with the leaf key → orchestrator asks for any required
@@ -58,8 +60,9 @@ within the `cpv-main-menu-skill`. The skill is loaded automatically.
 
 ## Top-level menu (canonical layout — v2.90.0)
 
-The orchestrator queues this menu spec via `cpv_menu.py` and ends the
-turn. The Stop hook emits it via `systemMessage`. Cancel/Exit is key `0`:
+The orchestrator queues this menu spec via `print_menu.py fixed 5` (the
+pre-baked `skill-menus/05-main.json`) and ends the turn. The Stop hook
+emits it via `systemMessage`. Cancel/Exit is key `0`:
 
 - **1 — Validate** — Check that a plugin / marketplace / component is well-formed
 - **2 — Fix** — Auto-fix issues that a previous validation found
@@ -91,14 +94,15 @@ The fixed key→action map for the top-level menu:
 
 ## Workflow (the orchestrator MUST follow this exact sequence)
 
-1. **Run the top-level menu's heredoc recipe** from `menu-tree.md` §3.0
-   (single Bash tool call: `python cpv_menu.py - >/dev/null <<'JSON' … JSON`).
-   Then END THE TURN. **Emit ZERO chat text** — no "queued", no "Stop
-   hook will emit", no "menu will appear", no narration of any kind.
-   The menu IS the entire user-visible output. NEVER print the menu
-   inline. NEVER use the Write or Edit tool to stage the spec — the
-   heredoc passes JSON over stdin, which is exactly why this design is
-   silent.
+1. **Run the top-level menu's recipe** from `menu-tree.md` §3.0 (single
+   Bash tool call: export `CPV_SKILL_MENUS_DIR` to the skill's
+   `skill-menus/` dir, then `python "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py"
+   fixed 5 >/dev/null 2>&1`). Then END THE TURN. **Emit ZERO chat text** —
+   no "queued", no "Stop hook will emit", no "menu will appear", no
+   narration of any kind. The menu IS the entire user-visible output.
+   NEVER print the menu inline. NEVER use the Write or Edit tool to stage
+   a spec — `print_menu.py` loads the pre-baked spec by index, which is
+   exactly why this design is silent and the Bash card stays tiny.
 2. **Wait** for the user's next message. Parse the key (number or letter,
    case-insensitive).
 3. **On `0` at any level** → respond with a single line `Cancelled — no
@@ -137,14 +141,14 @@ The fixed key→action map for the top-level menu:
 - It does NOT print menus inline. The Stop hook emits via `systemMessage`
   post-turn, so menus stay out of the agent transcript and the prompt
   cache. There is NO inline fallback — if `claude-menu-system` is not
-  installed, `cpv_menu.py` fails fast with an install hint (per
+  installed, `print_menu.py` fails fast with an install hint (per
   TRDD-4de479a0, no-legacy rule).
 
 ## Examples
 
 <example>
 user: /cpv-main-menu
-assistant: [Queues top-level menu spec via cpv_menu.py and ends the turn. The CMS Stop hook emits the menu (11 rows including `0 — Cancel / Exit`) via systemMessage.]
+assistant: [Queues top-level menu spec via `print_menu.py fixed 5` and ends the turn. The CMS Stop hook emits the menu (11 rows including `0 — Cancel / Exit`) via systemMessage.]
 user: 1
 assistant: [Queues §3.1 Validate sub-menu spec; Stop hook emits the menu including `B — Back` and `0 — Cancel / Exit`.]
 user: 1

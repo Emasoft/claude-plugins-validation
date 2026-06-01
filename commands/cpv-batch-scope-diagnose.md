@@ -60,10 +60,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
 ```
 
 Capture the orchestrator's stdout (``PLAN``, ``STATUS_TABLE``,
-``SESSION_DIR``, ``PLUGIN_COUNT``, ``DISPATCH_GROUPS``). Queue the
-initial status table for the claude-menu-system Stop hook (emitted
-post-turn via ``systemMessage`` — zero token cost, NEVER printed
-inline by the orchestrator):
+``SESSION_DIR``, ``PLUGIN_COUNT``, ``DISPATCH_GROUPS``). You MUST bind
+each into a shell variable from its ``KEY:`` line — the very next
+command below references `$STATUS_TABLE`, and Steps 3-4 reference
+`$SESSION_DIR/plan.json` for `emit-status`. If `$SESSION_DIR` is left
+unbound it expands to the empty string and `emit-status "/plan.json"`
+crashes (file not found). Queue the initial status table for the
+claude-menu-system Stop hook (emitted post-turn via ``systemMessage`` —
+zero token cost, NEVER printed inline by the orchestrator):
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$STATUS_TABLE"

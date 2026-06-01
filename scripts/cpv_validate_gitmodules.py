@@ -63,6 +63,13 @@ _ALLOWED_SCHEMES: frozenset[str] = frozenset({"https", "git+ssh", "ssh"})
 # exfiltration user. Anything with a password (`user:secret@`) or a username
 # other than `git` is still rejected.
 _USERINFO_CAPTURE_RE = re.compile(r"://([^/@]+)@")
+# SCP-shaped SSH (`user@host:owner/repo.git`) carries its userinfo with NO
+# `://`, so _USERINFO_CAPTURE_RE above (which anchors on `://`) misses it
+# entirely — that let a non-`git` SCP user (e.g. `attacker@github.com:…`)
+# slip past the userinfo guard while the `ssh://attacker@…` form was
+# correctly rejected. Git treats a URL as SCP-shaped when a `:` appears
+# before the first `/`; capture the user segment before that `@host:`.
+_SCP_USERINFO_CAPTURE_RE = re.compile(r"^([^/@:]+)@[^/]+:")
 # The only userinfo permitted: the literal, secret-free git SSH user.
 _ALLOWED_SSH_USER: str = "git"
 
@@ -191,7 +198,13 @@ def _validate_url_shape(url: str) -> tuple[bool, str]:
         return False, "URL is empty"
     if _FORBIDDEN_CHARS_RE.search(url):
         return False, "URL contains backslash or newline"
-    userinfo_match = _USERINFO_CAPTURE_RE.search(url)
+    # Userinfo guard for BOTH URL forms:
+    #   * scheme form  `ssh://user@host/…`        → _USERINFO_CAPTURE_RE
+    #   * SCP form     `user@host:owner/repo.git` → _SCP_USERINFO_CAPTURE_RE
+    # The SCP form has no password slot (`:` separates host from path, not
+    # user from secret), so only the username is checkable there; the scheme
+    # form can also embed a password (`user:secret@`), which is rejected.
+    userinfo_match = _USERINFO_CAPTURE_RE.search(url) or _SCP_USERINFO_CAPTURE_RE.search(url)
     if userinfo_match is not None:
         userinfo = userinfo_match.group(1)
         # The canonical SSH URL form is `ssh://git@host/…`; `git` is a fixed,

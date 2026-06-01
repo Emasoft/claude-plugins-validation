@@ -25,7 +25,7 @@
 Q1: How many plugins will live in this marketplace?
 ├── 1 plugin only?  → Layout C (self-marketplace-in-plugin), single self-entry, source: "./"
 └── 2+ plugins
-    ├── Are all plugins in the SAME GitHub repo?  → Layout B (nested monorepo), source: relative-path
+    ├── Are all plugins in the SAME GitHub repo?  → Layout B (nested monorepo), local source: "./plugins/<name>" string (or "directory" dict)
     └── Different repos                            → Layout A (hub-and-spoke), source: github / url
 ```
 
@@ -54,20 +54,22 @@ The agent walks this tree by asking the user, in order. No layout is chosen befo
 ```json
 {
   "name": "foo-plugin",
-  "source": "github",
-  "repo": "owner/foo-plugin",
+  "source": {
+    "source": "github",
+    "repo": "owner/foo-plugin"
+  },
   "description": "Foo plugin for Claude Code"
 }
 ```
 
-(No `version` field — see [version-strategy](version-strategy.md).)
+`source` is a NESTED object — `repo` lives INSIDE it. A flat sibling `repo` (`{"source": "github", "repo": "..."}`) is rejected MAJOR `RC-MKPL-UNKNOWN-FIELD`. See [source-shape](source-shape.md#source-github). (No `version` field — see [version-strategy](version-strategy.md).)
 
 ## Layout B — Nested Monorepo
 
 **Shape on disk:**
 - 1 repo: `mkpl/` containing `.claude-plugin/marketplace.json` + `plugins/foo/`, `plugins/bar/`, …
 - Each plugin lives in `plugins/<name>/`, with its own `.claude-plugin/plugin.json`.
-- Marketplace entries use `source: relative-path`, pointing at `./plugins/<name>`.
+- Marketplace entries use a local source pointing at `./plugins/<name>` — the bare relative-path string `"source": "./plugins/<name>"`, or the nested `directory` dict `{"source": "directory", "path": "./plugins/<name>"}`. (There is no `relative-path` dict type.)
 
 **Default for:** multi-plugin sets that share a release cadence, a single maintainer, or shared infrastructure (CI, lint config, scripts).
 
@@ -87,10 +89,11 @@ The agent walks this tree by asking the user, in order. No layout is chosen befo
 {
   "name": "foo-plugin",
   "version": "1.0.0",
-  "source": "relative-path",
-  "path": "./plugins/foo-plugin"
+  "source": "./plugins/foo-plugin"
 }
 ```
+
+The local source is the bare relative-path STRING `"./plugins/foo-plugin"` — there is NO `relative-path` dict type, and a top-level sibling `path` field is rejected. The equivalent nested form is the `directory` dict `{"source": "directory", "path": "./plugins/foo-plugin"}`. See [source-shape](source-shape.md#source-relative-path).
 
 (`version` REQUIRED — local source — see [version-strategy](version-strategy.md).)
 

@@ -152,21 +152,30 @@ context: fork
 
 ### agent Field
 
-Associates the skill with a specific agent type.
+Selects which subagent type runs the skill when `context: fork` is set.
+Without `context: fork` the field has no effect (CPV emits MAJOR).
+
+Built-in subagent types (from Claude Code's sub-agents reference — this
+is the set CPV's `BUILTIN_AGENT_TYPES` recognises):
 
 | Value | Description |
 |-------|-------------|
-| `api-coordinator` | API coordination tasks |
-| `test-engineer` | Testing-focused tasks |
-| `deploy-agent` | Deployment tasks |
-| `debug-specialist` | Debugging tasks |
-| `code-reviewer` | Code review tasks |
+| `Explore` | Read-only codebase exploration |
+| `Plan` | Planning / design tasks |
+| `general-purpose` | Default; general task execution |
+| `statusline-setup` | Status-line configuration |
+| `Claude Code Guide` | Built-in guidance agent |
+
+Any value that is NOT one of these is treated as a **custom** agent from
+`.claude/agents/` — CPV emits an INFO note (not an error), since the
+custom agent may legitimately exist in the consuming project.
 
 ```yaml
 ---
 name: api-testing
 description: API testing skill
-agent: test-engineer
+context: fork
+agent: Explore
 ---
 ```
 
@@ -196,7 +205,7 @@ tags:
   - quality
 user-invocable: true
 context: fork
-agent: test-engineer
+agent: Plan
 ---
 ```
 
@@ -430,14 +439,17 @@ context: fork  # Valid value
 ---
 ```
 
-### Error: Invalid agent Value
+### Error: `agent` Without `context: fork`
 
-**Wrong:**
+The `agent` field only takes effect when `context: fork` is set; CPV
+emits MAJOR when `agent` is present without it.
+
+**Wrong (agent has no effect):**
 ```yaml
 ---
 name: my-skill
 description: Description
-agent: general  # Invalid value
+agent: Explore   # MAJOR — no effect without context: fork
 ---
 ```
 
@@ -446,7 +458,8 @@ agent: general  # Invalid value
 ---
 name: my-skill
 description: Description
-agent: test-engineer  # Valid value
+context: fork
+agent: Explore   # built-in type; a custom .claude/agents/ name is also allowed (INFO)
 ---
 ```
 

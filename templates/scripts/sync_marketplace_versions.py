@@ -104,12 +104,30 @@ def sync_versions(marketplace_path: Path, dry_run: bool = False, verbose: bool =
         if not plugin_name:
             continue
 
-        # Determine plugin directory
+        # Determine plugin directory.
+        # A marketplace plugin `source` is either a relative-path string
+        # ("./plugins/foo") or a dict for an external source type
+        # (github/url/npm/git/git-subdir) or the on-disk "directory" type.
+        # Only locally-checked-out plugins have a plugin.json this script can
+        # read, so resolve the on-disk path from string sources and from the
+        # "directory" dict; every other dict source has no local submodule and
+        # is skipped (without this guard, source.startswith() would raise
+        # AttributeError on the first dict source and abort the whole sync).
         source = plugin.get("source", f"./{plugin_name}")
-        if source.startswith("./"):
-            plugin_dir = marketplace_dir / source[2:]
-        else:
-            plugin_dir = marketplace_dir / plugin_name
+        local_path: str | None = None
+        if isinstance(source, str):
+            local_path = source[2:] if source.startswith("./") else source
+        elif isinstance(source, dict) and source.get("source") == "directory":
+            dir_path = source.get("path")
+            if isinstance(dir_path, str):
+                local_path = dir_path[2:] if dir_path.startswith("./") else dir_path
+
+        if local_path is None:
+            if verbose:
+                print(f"  [SKIP] {plugin_name}: non-local source (nothing to sync)")
+            continue
+
+        plugin_dir = marketplace_dir / local_path
 
         if not plugin_dir.exists():
             if verbose:

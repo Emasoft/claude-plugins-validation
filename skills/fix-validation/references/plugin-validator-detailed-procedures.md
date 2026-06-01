@@ -215,8 +215,9 @@ jobs:
 ### Phase 4: Git Hooks Installation
 ```
 □ 4.1 Run: uv run python scripts/setup_git_hooks.py
+       (installs ONLY pre-push — the project deliberately does NOT use pre-commit; HOOKS = ["pre-push"])
 □ 4.2 Verify .git/hooks/pre-push exists and is executable
-□ 4.3 Verify .git/hooks/pre-push exists and is executable
+□ 4.3 Verify it is the CPV pre-push hook (head of file shows "Pre-push hook for claude-plugins-validation"), not a stale/foreign hook
 □ 4.4 For submodules: check .git/modules/*/hooks/
 ```
 
@@ -337,7 +338,7 @@ uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py"
 
 ```bash
 uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" validate_marketplace_pipeline /path/to/marketplace --verbose
-uv run python scripts/setup_marketplace_automation.py /path/to/marketplace --setup-all
+uv run python scripts/setup_marketplace_automation.py --marketplace-dir /path/to/marketplace --full
 # Test with small change and push
 ```
 

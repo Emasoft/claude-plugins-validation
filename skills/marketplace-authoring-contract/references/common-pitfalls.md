@@ -13,7 +13,7 @@
 
 ## Checklist
 
-- [ ] Run `validate_marketplace.py --strict --cross-validate-upstream` against the draft entry — every pitfall has a finding code
+- [ ] Run `validate_marketplace.py --strict` against the draft entry — upstream cross-validation runs unconditionally (no flag), and every pitfall has a finding code
 - [ ] If the validator reports a pitfall, apply the auto-fix recipe in that pitfall's section below
 - [ ] If the recipe does not apply, fix manually and re-validate
 

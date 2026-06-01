@@ -39,7 +39,7 @@ tools:
 ---
 ```
 
-Validator: `scripts/cpv_validation_common.py:287`.
+Validator: the `VALID_TOOLS` allowlist in `scripts/cpv_validation_common.py` (the `Monitor` entry). Referenced by name rather than line number because line numbers drift on every edit.
 
 ## userConfig (plugin.json)
 
@@ -47,11 +47,11 @@ User-configurable values prompted at plugin enable time. Keys must be valid iden
 
 - **`title`** (string) — **REQUIRED**. Missing title fails install with `userConfig.<key>.title: Invalid input: expected string, received undefined`
 - **`type`** (string) — **REQUIRED**, must be exactly one of `"string" | "number" | "boolean" | "directory" | "file"`. Missing/invalid type fails install with `userConfig.<key>.type: Invalid option: expected one of "string"|"number"|"boolean"|"directory"|"file"`. Note: `"integer"`, `"array"`, `"object"` are NOT accepted by the runtime.
-- **`description`** (string) — optional but recommended
+- **`description`** (string) — **REQUIRED** per the spec (`plugins-reference.md:473`, "Required: Yes"). CPV's `validate_user_config` (the `required_sub = {type, title, description}` set) emits a MAJOR for a missing `description`, which blocks `--strict` validation. Always include it.
 - **`sensitive`** (boolean) — optional; set `true` for secrets so they are routed to the system keychain instead of `CLAUDE_PLUGIN_OPTION_*` expansion
 - **`default`** — optional; when present must match the declared `type`
 
-Authoring rule: when scaffolding a new userConfig entry, ALWAYS include both `title` and `type`. Inferring `type` from the field name:
+Authoring rule: when scaffolding a new userConfig entry, ALWAYS include all three required sub-fields — `title`, `type`, and `description`. Inferring `type` from the field name:
 
 | Field-name pattern | Recommended `type` |
 |---|---|
@@ -85,6 +85,7 @@ Authoring rule: when scaffolding a new userConfig entry, ALWAYS include both `ti
     },
     "ENABLE_CACHE": {
       "title": "Enable cache",
+      "description": "Cache upstream responses to disk between runs",
       "type": "boolean",
       "default": true
     }
@@ -119,7 +120,7 @@ Channel declarations for message injection. Each channel has a required `server`
 }
 ```
 
-Validator: `scripts/validate_plugin.py:303-327`.
+Validator: `validate_channels_structure` in `scripts/validate_plugin.py`.
 
 ## CLAUDE_PLUGIN_OPTION_<KEY> env vars
 
@@ -147,7 +148,7 @@ Use in SKILL.md bodies, hook scripts, and MCP args:
 Default workspace: `${CLAUDE_PLUGIN_OPTION_WORKSPACE_DIR}`.
 ```
 
-Validator: `scripts/cpv_validation_common.py:335-346`.
+Validator: the `CLAUDE_PLUGIN_OPTION_<KEY>` env-name whitelist (the `^CLAUDE_PLUGIN_OPTION_[A-Z][A-Z0-9_]*$` allowlist pattern) in `scripts/cpv_validation_common.py`.
 
 ## Inline marketplace (settings.json)
 

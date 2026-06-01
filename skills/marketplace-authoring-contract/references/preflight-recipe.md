@@ -128,13 +128,17 @@ PLUGIN_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/validate_marketplace.py \
     <mkpl-path> --strict
 ```
 
-Three possible outcomes:
+The validator exit code is SEVERITY-GRADED, not a binary 0/1: `0` = clean,
+`1` = CRITICAL, `2` = MAJOR, `3` = MINOR, `4` = NIT (NIT only blocks under
+`--strict`; WARNING/INFO never block). Any non-zero code means at least one
+finding at that severity (or higher) is present. Diff the findings against the
+step-1 baseline to decide which case applies:
 
 | Validator exit | Meaning | Agent action |
 |---|---|---|
-| `0` — VALID | No findings, all checks pass | Declare done. |
-| `1` — INVALID with new findings | The agent's edit introduced a regression | Re-enter step 2, fix the new finding, re-emit. Do NOT ship. |
-| `1` — INVALID with same findings as baseline | The agent's edit did not address pre-existing issues, but did not regress | If the pre-existing finding is in scope for this flow, fix it now; otherwise log for the user. |
+| `0` — VALID | No blocking findings | Declare done. |
+| non-zero (`1`/`2`/`3`/`4`) with findings NOT in the baseline | The agent's edit introduced a regression | Re-enter step 2, fix the new finding, re-emit. Do NOT ship. |
+| non-zero (`1`/`2`/`3`/`4`) with the SAME findings as the baseline | The agent's edit did not address pre-existing issues, but did not regress | If the pre-existing finding is in scope for this flow, fix it now; otherwise log for the user. |
 
 Step 4 is the safety net. TRDD-c0ee9543 Phase F adds a hook that REQUIRES step 4 before any agent declares "done" — but in practice, the agent should run it proactively without waiting for the hook.
 

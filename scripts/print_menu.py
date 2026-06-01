@@ -156,8 +156,7 @@ def assemble_dynamic_spec(
     norm.sort(key=lambda e: e["label"].casefold())
 
     rows: list[dict[str, str]] = [
-        {"key": str(i), "action_id": e["action_id"], "label": e["label"]}
-        for i, e in enumerate(norm, start=1)
+        {"key": str(i), "action_id": e["action_id"], "label": e["label"]} for i, e in enumerate(norm, start=1)
     ]
     rows.append(dict(_PATH_OPTION))
     for opt in extra_options or []:
@@ -311,9 +310,7 @@ def _cli_dynamic(args: list[str]) -> dict:
     if not isinstance(entries, list):
         raise ValueError(f"dynamic 'entries' must be a list, got {type(entries).__name__}")
     if extra_options is not None and not isinstance(extra_options, list):
-        raise ValueError(
-            f"dynamic 'extra_options' must be a list, got {type(extra_options).__name__}"
-        )
+        raise ValueError(f"dynamic 'extra_options' must be a list, got {type(extra_options).__name__}")
 
     return assemble_dynamic_spec(
         entries, extra_options=extra_options, header=header, footer=footer, slug=slug or "dynamic"

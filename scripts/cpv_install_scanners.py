@@ -84,7 +84,9 @@ def _silent_run(argv: list[str], timeout: int = _INSTALL_TIMEOUT_SECONDS) -> boo
 def _local_bin_dir() -> Path:
     """The cross-platform user-local bin dir.
 
-    macOS / Linux: ``~/.local/bin`` (XDG-friendly; Cargo also installs here).
+    macOS / Linux: ``~/.local/bin`` (XDG-friendly; the GitHub-release download
+    path installs here). NOTE: ``cargo install`` does NOT use this dir — it
+    writes to ``$CARGO_HOME/bin`` (handled by ``_ensure_cargo_bin_on_path``).
     Windows: ``%USERPROFILE%\\.local\\bin`` (mirrors the Unix layout for
     consistency; we add it to ``os.environ['PATH']`` for the current process).
     """
@@ -103,6 +105,24 @@ def _ensure_local_bin_on_path() -> None:
     current = os.environ.get("PATH", "")
     if bin_dir not in current.split(os.pathsep):
         os.environ["PATH"] = bin_dir + os.pathsep + current
+
+
+def _ensure_cargo_bin_on_path() -> None:
+    """Prepend ``$CARGO_HOME/bin`` (default ``~/.cargo/bin``) to ``PATH``.
+
+    ``cargo install`` writes the built binary to ``$CARGO_HOME/bin`` — NOT to
+    ``~/.local/bin``. When cargo itself was installed via a distro/Homebrew
+    package (so the ``cargo`` executable lives in ``/usr/bin`` or
+    ``/opt/homebrew/bin`` and ``shutil.which("cargo")`` succeeds without
+    ``~/.cargo/bin`` ever being on PATH), a freshly ``cargo install``-ed
+    binary would be invisible to the subsequent ``shutil.which()`` probe and
+    the install would be reported as a false negative. Surfacing the cargo
+    bin dir here mirrors what ``ensure_trufflehog`` does for ``$GOPATH/bin``.
+    """
+    cargo_bin = str(Path(os.environ.get("CARGO_HOME", str(Path.home() / ".cargo"))) / "bin")
+    current = os.environ.get("PATH", "")
+    if cargo_bin not in current.split(os.pathsep):
+        os.environ["PATH"] = cargo_bin + os.pathsep + current
 
 
 # ── fclones (the dedup helper used as the first step of every CPV scan) ──
@@ -193,6 +213,10 @@ def _install_fclones_via_cargo() -> None:
     """Cross-platform fallback: ``cargo install fclones`` if cargo is present."""
     if shutil.which("cargo"):
         _silent_run(["cargo", "install", "fclones"])
+        # cargo writes to $CARGO_HOME/bin, which is not necessarily on PATH
+        # when cargo itself was distro/Homebrew-installed — surface it so the
+        # caller's shutil.which("fclones") probe can see the new binary.
+        _ensure_cargo_bin_on_path()
 
 
 def _download_fclones_github_release() -> bool:
@@ -320,10 +344,20 @@ def _extract_fclones_binary(archive_path: Path, dest_dir: Path) -> bool:
     try:
         if suffix == ".zip":
             with zipfile.ZipFile(archive_path) as zf:
-                for zip_name in zf.namelist():
-                    base = Path(zip_name).name
+                # Iterate ZipInfo (not namelist) so we can skip directory
+                # entries: a release ZIP laid out as ``fclones-0.x.y/fclones.exe``
+                # also contains the directory entry ``fclones-0.x.y/`` whose
+                # basename ("fclones-0.x.y") ALSO starts with "fclones". Without
+                # the is_dir() guard we'd match that first, stream its 0 bytes,
+                # install a bogus empty file under the wrong name, and return
+                # before ever reaching the real binary. Mirrors the tar branch's
+                # ``tar_member.isfile()`` check below.
+                for zinfo in zf.infolist():
+                    if zinfo.is_dir():
+                        continue
+                    base = Path(zinfo.filename).name
                     if base.lower().startswith("fclones"):
-                        with zf.open(zip_name) as zsrc:
+                        with zf.open(zinfo) as zsrc:
                             return _atomic_install_binary(zsrc, dest_dir / base)
         else:  # .tar.gz / .tgz
             with tarfile.open(archive_path, "r:gz") as tf:

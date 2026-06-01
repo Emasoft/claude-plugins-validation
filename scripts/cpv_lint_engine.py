@@ -63,11 +63,28 @@ from cpv_validation_common import (
 )
 from gitignore_filter import GitignoreFilter
 
-# markdownlint-cli2 finding shape: "<path>.md:<line>[:<col>] <severity> MD<NNN>".
+# markdownlint-cli2 finding shape: "<path>.md[x]:<line>[:<col>] <severity> MD<NNN>".
 # Anything that does not match (uv installer chatter "Resolving dependencies",
 # "Resolved, downloaded and extracted N", "Saved lockfile", etc.) is NOT a
 # markdownlint finding and must not leak through as a NIT report entry.
-_MARKDOWNLINT_FINDING_RE = re.compile(r"\.md:\d+(?::\d+)?\s+(?:error|warning|info)\s+MD\d+")
+#
+# The extension alternation MUST cover every suffix `detect_languages`
+# buckets into "markdown" — that is `*.md` AND `*.mdx` (see the collect()
+# call below). A bare `\.md:` anchor silently DROPPED every finding on a
+# `.mdx` file (the char after ".md" is "x", not ":"), so markdownlint
+# complaints about `.mdx` sources never reached the report when any `.md`
+# finding also surfaced (the raw-output safety net only fires when NOTHING
+# matched). `\.mdx?:` matches both `.md:` and `.mdx:`; keep it in sync with
+# the markdown collect() patterns if a new markdown suffix is ever added.
+_MARKDOWNLINT_FINDING_RE = re.compile(r"\.mdx?:\d+(?::\d+)?\s+(?:error|warning|info)\s+MD\d+")
+
+# ruff concise finding shape: "<path>:<line>[:<col>]: <code> <message>".
+# Group 1 captures the full path (non-greedy up to the ":<line>[:<col>]:"
+# suffix), so a Windows drive letter ("C:\\…") stays attached to its path
+# instead of being shorn off at the first colon, and prose lines that happen
+# to contain a colon but no ":<line>:" suffix (ruff's own summary text) never
+# masquerade as a file. The numeric suffix is the discriminator.
+_RUFF_CONCISE_FINDING_RE = re.compile(r"^(.+?):\d+(?::\d+)?:\s")
 
 # Display labels for `[REPO LINT][PYTHON]` style section headers when
 # the engine is invoked from validate_plugin.py — kept short so the
@@ -370,8 +387,17 @@ def lint_python(
     else:
         errors_by_file: dict[str, int] = {}
         for line in (result.stdout or "").splitlines():
-            if line and ":" in line:
-                file_part = line.split(":", 1)[0].strip()
+            # ruff --output-format=concise emits "<path>:<line>[:<col>]: <code> …".
+            # Splitting on the FIRST ":" mis-grouped Windows absolute paths
+            # ("C:\\…\\foo.py" -> bucket "C") and turned any colon-bearing
+            # summary line ("warning: …") into a bogus file bucket. Anchor on
+            # the ":<line>[:<col>]:" suffix instead: the path is everything
+            # before it, the leading numeric group is what distinguishes a real
+            # finding from prose (a Windows drive's ":" is followed by "\\", not
+            # a digit), so non-finding lines are skipped outright.
+            m = _RUFF_CONCISE_FINDING_RE.match(line)
+            if m:
+                file_part = m.group(1).strip()
                 if file_part:
                     errors_by_file[file_part] = errors_by_file.get(file_part, 0) + 1
         for file_path_str, count in sorted(errors_by_file.items()):
@@ -540,16 +566,44 @@ def lint_javascript(
         report.passed(f"eslint passed for {len(files)} JS/TS file(s)")
         return True
 
+    # eslint exited non-zero. With --format=json it normally prints a JSON
+    # ARRAY of per-file results on stdout. Two non-finding failure shapes are
+    # possible and must NOT be swallowed as "clean":
+    #   * empty stdout (e.g. a broken eslint.config / flat-config error that
+    #     eslint writes to stderr and exits 2) — previously fell through to
+    #     `data = []`, looped over nothing, and returned True, hiding the
+    #     failure (same silent-failure class fixed for markdownlint, issue #20);
+    #   * non-JSON stdout — already handled below.
+    if not (result.stdout or "").strip():
+        err = (result.stderr or "").strip()
+        report.major(
+            "eslint exited non-zero "
+            f"(rc={result.returncode}) with no JSON output — "
+            f"likely a config/runtime error: {err[:200] or 'see logs'}"
+        )
+        return False
+
     try:
-        data = json.loads(result.stdout) if result.stdout else []
+        data = json.loads(result.stdout)
     except json.JSONDecodeError:
         report.major("eslint: produced non-JSON output — see logs")
         return False
 
+    # eslint --format=json always yields a top-level array; guard against a
+    # foreign/garbled payload (e.g. a JSON object) so iterating it can't raise
+    # AttributeError and crash the whole parallel lint_repo run.
+    if not isinstance(data, list):
+        report.major("eslint: unexpected JSON shape (expected an array) — see logs")
+        return False
+
     ok = True
     for file_result in data:
+        if not isinstance(file_result, dict):
+            continue
         rel = _relpath(repo_root, file_result.get("filePath", ""))
         for msg in file_result.get("messages", []):
+            if not isinstance(msg, dict):
+                continue
             severity = msg.get("severity", 1)
             text = msg.get("message", "Unknown issue")
             line = msg.get("line", 0) or None
@@ -1248,7 +1302,6 @@ def lint_powershell(
         )
         return not strict_missing_tools
 
-    ok = True
     for f in files:
         rel = _relpath(repo_root, str(f))
         try:
@@ -1268,8 +1321,15 @@ def lint_powershell(
             stripped = line.strip()
             if stripped:
                 report.minor(f"PSScriptAnalyzer: {stripped}", rel)
-                ok = False
-    return ok
+    # Return True: this linter only ever adds MINOR findings (plus PASSED /
+    # WARNING). Per the module/`lint_repo` contract — "returns True iff no
+    # MAJOR/CRITICAL finding was added … MINOR/WARNING findings do not flip
+    # the return value" — the body used to flip an `ok` flag to False on a
+    # MINOR, which made the standalone CLI exit 1 on a MINOR-only run, treating
+    # a non-blocking PSScriptAnalyzer nit as a hard lint failure. This matches
+    # the lint_css / lint_html / lint_sql fix (audit MED #15); the missing-tool
+    # path above still returns False in strict mode via `return not strict…`.
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -1320,11 +1380,16 @@ _DISPATCH: dict[str, Callable[..., bool]] = {
 # accidentally hit a stale ruff entry.
 _LANG_LINTER_ARGS: dict[str, list[str]] = {
     # Ruff flags from lint_python — keep in sync with the ruff_cmd
-    # invocation. mypy is auxiliary and runs only on scripts/, but
-    # we don't bother modelling it here: a mypy version bump still
-    # invalidates via the scanner_version field on a separate
-    # cache key, AND mypy findings are MINOR (non-blocking) so a
-    # stale cached "no mypy issues" outcome is conservative.
+    # invocation. The python cache key's scanner_version tracks RUFF
+    # ONLY (_PRIMARY_TOOL["python"] == "ruff" → _build_cache_key uses
+    # get_scanner_version("ruff")); the auxiliary type-checker
+    # (mypy / pyright) version is deliberately NOT modelled in the key.
+    # That is safe because type-checker findings are emitted as MINOR /
+    # INFO (never MAJOR/CRITICAL), so a stale cached "no type issues"
+    # outcome can never flip a VALID verdict to INVALID — it is always
+    # conservative. (Editing the type-checker CONFIG still invalidates
+    # via _config_fingerprint, which folds pyrightconfig.json / mypy.ini
+    # / [tool.mypy] / [tool.pyright] content into the key — issue #58.)
     "python": ["check", "--select=E,F,W,I", "--ignore=E501,E402", "--output-format=concise"],
     "javascript": ["--format=json"],
     "shell": ["-f", "json", "-x"],
@@ -1341,6 +1406,50 @@ _LANG_LINTER_ARGS: dict[str, list[str]] = {
     "toml": [],  # stdlib tomllib — scanner_version="stdlib"
     "powershell": ["-Settings", "PSGallery"],
 }
+
+# WARNING-message fragments that mark a NON-DETERMINISTIC outcome — one that
+# is NOT a function of the cached inputs (file contents + tool version), so it
+# must never be written to the scanner cache. If it were cached, a transient
+# failure would masquerade as a durable "clean" result for the full cache TTL
+# (up to 30 days), and the affected files would silently go UNLINTED until
+# their content or the tool's version changed — hiding real lint errors.
+#
+# Two transient classes, both emitted ONLY by this module:
+#   1. "<tool> timed out …" — every linter's `subprocess.TimeoutExpired`
+#      handler emits a WARNING and returns True/ok. A timeout is a property of
+#      machine load at run time, not of the source bytes; re-running on an idle
+#      box typically succeeds. Caching it pins a passing verdict on files that
+#      were never actually linted.
+#   2. "… possible binary or environment issue" — markdownlint exited non-zero
+#      but produced no parseable output (broken binary / bad env), which is
+#      likewise unrelated to the file content being scanned.
+#
+# A "missing tool" WARNING (soft mode / Windows shellcheck) and "No TOML parser
+# available" are deliberately NOT in this set: tool absence is already captured
+# by scanner_version ("unknown" / "stdlib-pyX.Y"), so the cache key self-heals
+# the moment the tool appears — those WARNINGs are deterministic given the key
+# and remain cacheable.
+_NON_CACHEABLE_WARNING_MARKERS: tuple[str, ...] = (
+    "timed out",
+    "possible binary or environment issue",
+)
+
+
+def _report_has_non_cacheable_outcome(report: ValidationReport) -> bool:
+    """True if ``report`` carries a transient (non-deterministic) finding.
+
+    Such an outcome must not be cached — see ``_NON_CACHEABLE_WARNING_MARKERS``.
+    Only WARNING-level findings are inspected because every transient marker
+    above is emitted at WARNING level; scoping to WARNING avoids a false match
+    on a legitimate MAJOR/MINOR message that happened to contain a fragment.
+    """
+    for r in report.results:
+        if r.level != "WARNING":
+            continue
+        msg = r.message
+        if any(marker in msg for marker in _NON_CACHEABLE_WARNING_MARKERS):
+            return True
+    return False
 
 
 def _replay_results_into_report(
@@ -1638,7 +1747,14 @@ def lint_repo(
         # warm runs. Serialise the findings via to_dict() so the
         # cache entry is pure JSON. put() is best-effort: if the
         # write fails, the next run simply re-misses and re-scans.
-        if cache_key is not None:
+        #
+        # Do NOT cache a NON-DETERMINISTIC outcome (a timeout, or a
+        # markdownlint binary/env failure): those depend on run-time
+        # conditions, not on the cached inputs, so caching them would
+        # pin a transient skip as a durable "clean" result for the full
+        # cache TTL and leave the affected files silently unlinted until
+        # their content or the tool version changed. Recompute next run.
+        if cache_key is not None and not _report_has_non_cacheable_outcome(local_report):
             try:
                 serialised = [r.to_dict() for r in local_report.results]
                 cache.put(

@@ -162,7 +162,10 @@ node_modules/
 
 # Rust
 target/
-Cargo.lock  # Remove this line for binary plugins (commit Cargo.lock for reproducible builds)
+# Remove the next line for binary plugins (commit Cargo.lock for reproducible builds).
+# .gitignore has NO inline comments: a `#` only starts a comment at column 0, so a
+# trailing `# ...` on a pattern line becomes part of the pattern and silently breaks it.
+Cargo.lock
 ```
 
 ### Notes
@@ -261,7 +264,12 @@ claude plugin update <placeholder-for-plugin-name>@<placeholder-for-marketplace-
 ```bash
 uv venv --python <placeholder-for-python-version>
 source .venv/bin/activate
-uv pip install -e ".[dev]"
+# The pyproject.toml template above keeps the dev tooling (mypy/pytest/ruff/…)
+# in [project].dependencies, so a plain `-e .` installs everything. There is no
+# `[dev]` extra to request — `-e ".[dev]"` would fail with "Extra `dev` is not
+# defined". Add a `[project.optional-dependencies.dev]` table first if you split
+# them out.
+uv pip install -e .
 ```
 
 ### Testing

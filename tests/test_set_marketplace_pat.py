@@ -8,7 +8,8 @@ The core invariants under test:
 2. Rejects malformed ``OWNER/REPO`` arguments (exit 4).
 3. Rejects PAT values with whitespace or newlines (copy-paste damage).
 4. Never uses stdin-pipe / echo form — always calls
-   ``gh secret set NAME --repo OWNER/REPO --body VALUE``.
+   ``gh secret set NAME --repo OWNER/REPO`` with the value fed via stdin
+   (input=), so the secret never appears on argv.
 5. Never prints the PAT value anywhere (stdout / stderr / combined).
 6. ``--verify-only`` calls only ``gh secret list`` and never ``set``.
 7. Handles ``gh`` not installed (exit 3) and ``gh auth status`` failure.
@@ -211,13 +212,13 @@ class TestGhInvocationShape:
             assert "MARKETPLACE_PAT" in args
             assert "--repo" in args
             assert "owner/repo" in args
-            # The secret is passed via stdin (--body-file -) NOT --body, so
-            # the value never appears in argv (which is visible to other users
-            # via /proc/<pid>/cmdline or `ps -ef`).
-            assert "--body-file" in args
-            body_file_idx = args.index("--body-file")
-            assert args[body_file_idx + 1] == "-"
+            # The secret is passed via stdin (input=), NOT on argv: `gh secret
+            # set` reads the value from stdin when --body is OMITTED (gh 2.x has
+            # no --body-file flag for `secret set`). The value therefore never
+            # appears in argv (visible to other users via /proc/<pid>/cmdline or
+            # `ps -ef`).
             assert "--body" not in args
+            assert "--body-file" not in args
             # The value MUST be passed via input=, never as a positional arg.
             assert set_call.kwargs.get("input") == "ghp_value"
             assert "ghp_value" not in args
@@ -264,31 +265,29 @@ class TestGhInvocationShape:
                         f"line {getattr(node, 'lineno', '?')}"
                     )
 
-    def test_script_uses_body_file_stdin_form(self):
-        """The script must use --body-file - + input= (stdin) so the secret
-        value is NEVER on argv (which is visible to other users via
-        /proc/<pid>/cmdline or `ps -ef`). The previous --body form was a
-        secret-leak vulnerability — fixed in v2.65.2."""
+    def test_script_uses_stdin_input_form(self):
+        """The script must feed the secret via stdin (input=value) with NO
+        --body / --body-file on argv, so the value is NEVER on argv (visible to
+        other users via /proc/<pid>/cmdline or `ps -ef`). `gh secret set` reads
+        the value from stdin when --body is omitted; gh 2.x has no --body-file
+        flag for `secret set` (passing it errors "unknown flag"). The plain
+        --body argv form was the original secret-leak vulnerability."""
         source = SCRIPT_PATH.read_text(encoding="utf-8")
-        # Must use --body-file with the - sentinel (stdin)
-        assert '"--body-file"' in source
-        # AND pass the value via input= (stdin) so it never enters argv
+        # Must pass the value via input= (stdin) so it never enters argv
         assert "input=value" in source
-        # The plain --body argv form (which leaks via /proc) must not appear
-        # in executable code. (Docstrings may still mention it as historical
-        # context, so we check only that the literal "--body"-with-comma
-        # form (an argv element) is absent — note this also excludes the
-        # --body-file form via the trailing comma.)
-        # Find non-docstring uses of "--body" without "-file":
+        # Neither --body nor --body-file may appear as an argv element in
+        # executable code (docstrings/comments may mention them as historical
+        # context, so we scan only non-docstring/comment lines).
         lines = source.splitlines()
         for i, line in enumerate(lines, 1):
             stripped = line.strip()
             if stripped.startswith(('"', "'", "#")):
                 continue  # docstring or comment
-            if '"--body"' in line:
+            if '"--body"' in line or '"--body-file"' in line:
                 raise AssertionError(
-                    f'Line {i} uses "--body" argv form (secret leaks via /proc/<pid>/cmdline). '
-                    f'Use "--body-file", "-" + input=value instead.'
+                    f"Line {i} uses a --body/--body-file argv form (secret leaks via "
+                    f"/proc/<pid>/cmdline, and --body-file is not a valid `gh secret set` "
+                    f"flag). Omit --body and pass the value via input=value instead."
                 )
 
 

@@ -9,6 +9,7 @@
 - [Per-plugin metadata](#per-plugin-metadata)
 - [Guest contributor handling](#guest-contributor-handling)
 - [Final confirmation](#final-confirmation)
+- [After each question](#after-each-question)
 
 ## Checklist
 

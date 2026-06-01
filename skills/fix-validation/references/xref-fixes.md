@@ -44,11 +44,13 @@ Comprehensive remediation guide for all issues detected by `validate_xref.py`.
 
 ## 2. Task() Agent Reference Issues
 
-### [MAJOR] Task() references non-existent agent '{ref_agent}'
+### [CRITICAL] Task() references non-existent agent '{ref_agent}'
 **Source**: `validate_xref.py` — `validate_agent_task_refs()`
-**What it means**: An agent `.md` file contains a `subagent_type` field referencing an agent name that has no matching `agents/{ref_agent}.md` file.
+**Message** (verbatim): `[RC-GHOST-DISPATCH-001] Task() references non-existent agent '{ref_agent}' — runtime will silently no-op`
+**Severity**: CRITICAL (ghost-dispatch — the runtime silently no-ops the spawn)
+**What it means**: An agent `.md` file contains a `subagent_type` dispatch referencing an agent name that resolves neither to an `agents/{ref_agent}.md` file, a built-in, nor (as a NIT) a cross-plugin agent. A dynamic/variable `subagent_type` is a MINOR instead; a fuzzy case/separator match is a NIT.
 **How to fix**:
-1. Check the spelling of `ref_agent` in the `subagent_type` field — it is case-sensitive.
+1. Check the spelling of `ref_agent` in the `subagent_type` field — matching is case/separator-insensitive (v2.1.140), so prefer the canonical kebab-case form.
 2. If the agent should exist, create `agents/{ref_agent}.md` with the appropriate agent definition.
 3. If the reference is stale, remove or update the `subagent_type` field in the offending agent file.
 4. Run `ls agents/` to see all available agent names.
@@ -65,13 +67,15 @@ Comprehensive remediation guide for all issues detected by `validate_xref.py`.
 
 ## 3. Subagent_type Matching Issues
 
-### [MAJOR] subagent_type '{ref_agent}' has no matching agents/{ref_agent}.md
+### [CRITICAL] subagent_type '{ref_agent}' has no matching agents/{ref_agent}.md
 **Source**: `validate_xref.py` — `validate_subagent_type_matching()`
-**What it means**: A `subagent_type` value found in any `.md` file across the plugin does not match any agent filename in `agents/`.
+**Message** (verbatim): `[RC-GHOST-DISPATCH-001] subagent_type '{ref_agent}' has no matching agents/{ref_agent}.md — runtime will silently no-op`
+**Severity**: CRITICAL (ghost-dispatch — the runtime silently no-ops the spawn)
+**What it means**: A `subagent_type` value found in any `.md` file across the plugin resolves to no agent filename in `agents/`, no built-in, and no cross-plugin agent. A dynamic/variable value is a MINOR; a fuzzy case/separator match is a NIT.
 **How to fix**:
 1. Locate all `subagent_type:` fields that reference `{ref_agent}` (check commands, agents, and other `.md` files).
 2. Either create `agents/{ref_agent}.md` or correct the `subagent_type` value to match an existing agent.
-3. Agent names are the filename stem (without `.md`) and are matched case-sensitively.
+3. Agent names are the filename stem (without `.md`); matching is case/separator-insensitive (v2.1.140), so prefer the canonical kebab-case form.
 
 ---
 
@@ -99,19 +103,23 @@ Comprehensive remediation guide for all issues detected by `validate_xref.py`.
 
 ### [CRITICAL] Command references non-existent agent '{ref_agent}' - BREAKING
 **Source**: `validate_xref.py` — `validate_command_agent_refs()`
-**What it means**: A command `.md` file has a `subagent_type` value that references an agent which does not exist in `agents/`. This will cause the command to fail at runtime.
+**Message** (verbatim): `[RC-GHOST-DISPATCH-001] Command references non-existent agent '{ref_agent}' — runtime will silently no-op (BREAKING)`
+**What it means**: A command `.md` file has a structured `subagent_type` dispatch referencing an agent that exists neither in `agents/` nor as a built-in. At runtime the dispatch silently no-ops.
 **How to fix**:
 1. Open the offending command file in `commands/`.
 2. Correct the `subagent_type` value to match an agent that exists in `agents/`.
 3. If the agent is missing, create `agents/{ref_agent}.md` with the appropriate definition.
 
-### [MAJOR] Command mentions unknown agent '{ref_agent}'
+### [WARNING] Command prose mentions a possible agent name '{ref_agent}'
 **Source**: `validate_xref.py` — `validate_command_agent_refs()`
-**What it means**: A command file contains a spawn/invoke pattern referencing an agent name that is neither in `agents/` nor a recognized built-in type (`basic`, `task`, `explore`, `scout`, `oracle`, `haiku`, `sonnet`, `opus`).
+**Message** (verbatim): `Command prose mentions a possible agent name '{ref_agent}' that is not a known agent (heuristic — ignore if this is ordinary prose, not a dispatch)`
+**Severity**: WARNING (advisory, non-blocking — this is a prose heuristic, NOT the structured-dispatch CRITICAL above)
+**What it means**: A command file contains spawn/invoke *prose* mentioning an agent name that is neither in `agents/` nor a recognized built-in. The built-in set is `BUILTIN_AGENTS = {general-purpose, explore, plan, statusline-setup}` — exactly those four. (The older list that included `basic`, `task`, `scout`, `oracle`, and the model names `haiku`/`sonnet`/`opus` was wrong and has been removed; those are NOT built-in agent types.)
 **How to fix**:
-1. Check the agent name for typos.
-2. If it is a custom agent, create the corresponding `agents/{ref_agent}.md`.
-3. If it is a built-in type, verify you are using one of the recognized names listed above.
+1. If this is ordinary English prose (e.g. "use the browser agent"), ignore it — it is non-blocking.
+2. If it IS a real dispatch, check the agent name for typos.
+3. If it is a custom agent, create the corresponding `agents/{ref_agent}.md`.
+4. If you meant a built-in, use one of `general-purpose`, `explore`, `plan`, `statusline-setup`.
 
 ### [MINOR] Could not read command file: {error}
 **Source**: `validate_xref.py` — `validate_command_agent_refs()`
@@ -179,7 +187,7 @@ Comprehensive remediation guide for all issues detected by `validate_xref.py`.
 ## 8. File Read Issues
 
 ### [MINOR] Cannot read file: {rel_path} ({error})
-**Source**: `validate_xref.py` — `scan_all_files()` (via xref context)
+**Source**: `validate_security.py` and `validate_encoding.py` — their `scan_all_files()` paths (NOT `validate_xref.py`; `scan_all_files` lives in `validate_security.py`). The xref validator's own per-file read failures surface as the distinct messages `Could not read agent file:` (§2), `Could not read command file:` (§5), and `Could not parse hooks file:` (§7).
 **What it means**: A file was found during scanning but could not be read due to permissions or I/O errors.
 **How to fix**:
 1. Check file permissions: `ls -la {rel_path}`.

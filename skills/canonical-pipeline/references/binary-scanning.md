@@ -105,7 +105,7 @@ legitimate use case stacks 4+ encodings.
 
 Concatenate all extracted strings (from every depth) into a single
 synthetic "extracted text" buffer and feed it to the existing
-`cpv_skillaudit_native.scan_content` pipeline. All 50 rules / 489 patterns
+`cpv_skillaudit_native.scan_content` pipeline. All 50 rules / 486 patterns
 fire normally — prompt-injection NL patterns, hardcoded-secret regexes,
 suspicious-URL detectors, the lot.
 
@@ -126,7 +126,7 @@ finding:
 
 | Case | Finding severity | Note |
 |---|---|---|
-| File > 100 MB | INFO + scan completes | Chunked streaming in 4 MB windows; total memory bounded to one window |
+| File > 100 MB | INFO + scan completes | Read in 4 MB I/O chunks accumulated into one buffer; bounded by the 1 GB per-file memory cap (truncated past the cap with a WARNING) |
 | Permission denied | **WARNING** | Never skipped silently — a file the scanner cannot read is a file an attacker may have hidden |
 | Zero-byte | INFO | "No findings (empty file)" — recorded so a reviewer can confirm the file is actually empty |
 | High-entropy random bytes (no extractable strings ≥ 6 chars) | INFO | "No extractable strings — likely encrypted / compressed / random" |
@@ -134,10 +134,14 @@ finding:
 | Recursion-depth-3 hit (still encoded after 3 layers) | INFO | "Decode chain stopped at depth 3 — deeper nesting treated as opaque payload" |
 | Decoder error mid-stream (invalid base64 padding, corrupt gzip) | INFO | The decoder error itself becomes a finding so the reviewer can investigate why a string that LOOKED encoded did not decode |
 
-The chunked-streaming guarantee for > 100 MB files means CPV never loads
-a multi-gigabyte payload entirely into memory — string extraction
-operates on a sliding 4 MB window with a 64-byte carry-over so strings
-that straddle a chunk boundary still get captured.
+Files at or above 100 MB are read through a 4 MB chunked I/O loop
+(`_read_streaming`) that accumulates into one buffer bounded by a
+per-file memory cap of **1 GB** (`_PER_FILE_MEMORY_CAP`); smaller files
+are read in one shot. String extraction then runs over the whole
+accumulated buffer, so there is no chunk-boundary straddle to bridge. A
+file whose contents exceed the 1 GB cap is truncated at the cap and a
+`BINARY_SCAN_TRUNCATED` **WARNING** finding is emitted recording that the
+scan coverage past the cap is partial — never a silent skip.
 
 ## Env-var
 
@@ -207,7 +211,7 @@ v2.103.x and earlier:
   `EVAL_OBFUSCATION` rule fires regardless of how the dropper packages
   itself.
 
-The total rule catalog (50 rules / 489 patterns) is unchanged — v2.104.0
+The total rule catalog (50 rules / 486 patterns) is unchanged — v2.104.0
 only widens the INPUT surface those rules see.
 
 ## Performance characteristics
@@ -226,8 +230,9 @@ only widens the INPUT surface those rules see.
   the v2.103.0 fan-out automatically. A repo with 200 binaries on an
   8-core host finishes binary scanning in roughly `200 × 30 ms / 7` ≈
   860 ms wall time.
-- **Memory** — bounded to one 4 MB chunk per worker for files > 100 MB;
-  smaller files load fully (still well under 100 MB per worker).
+- **Memory** — bounded per worker by the 1 GB `_PER_FILE_MEMORY_CAP`:
+  files ≥ 100 MB are read in 4 MB I/O chunks but accumulated into one
+  buffer (truncated at the cap with a WARNING); smaller files load fully.
 
 The benchmark script `scripts/cpv_validate_benchmark.py` records the
 binary-scan contribution as its own component breakdown row so a future

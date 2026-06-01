@@ -58,9 +58,7 @@ class TestPlannerMainExceptionSurface:
         plugin = _minimal_plugin(tmp_path / "plug")
         report = tmp_path / "report.json"
         _write_report(report, [{"level": "MAJOR", "message": "m", "file": "a.md", "line": 1}])
-        rc = planner.main(
-            [str(plugin), "--report", str(report), "--session-dir", str(tmp_path / "sess")]
-        )
+        rc = planner.main([str(plugin), "--report", str(report), "--session-dir", str(tmp_path / "sess")])
         assert rc == 0
         out = capsys.readouterr().out
         assert json.loads(out)  # stdout is valid JSON plan output
@@ -92,9 +90,7 @@ class TestPlannerMainExceptionSurface:
         _write_report(report, [{"level": "MAJOR", "message": "m", "file": "a.md", "line": 1}])
         blocker = tmp_path / "blocker"
         blocker.write_text("not a dir")
-        rc = planner.main(
-            [str(plugin), "--report", str(report), "--session-dir", str(blocker / "sub")]
-        )
+        rc = planner.main([str(plugin), "--report", str(report), "--session-dir", str(blocker / "sub")])
         assert rc == 1
         err = capsys.readouterr().err
         assert "error:" in err
@@ -236,9 +232,7 @@ class TestAggregatorSchemaVersion:
     def test_matching_index_loads_without_warning(self, tmp_path: Path, capsys: Any) -> None:
         sess = tmp_path / "sess"
         sess.mkdir()
-        (sess / "index.json").write_text(
-            json.dumps({"schema_version": aggregator.SCHEMA_VERSION, "shards": []})
-        )
+        (sess / "index.json").write_text(json.dumps({"schema_version": aggregator.SCHEMA_VERSION, "shards": []}))
         aggregator.load_index(sess)
         assert "schema_version" not in capsys.readouterr().err
 

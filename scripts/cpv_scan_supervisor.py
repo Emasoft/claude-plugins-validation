@@ -188,18 +188,33 @@ def stderr_progress_printer() -> Callable[[dict], None]:
             )
         elif typ == EVENT_STUCK:
             print(
-                f"[cpv-scan w{ev.get('worker')}] WARNING: file {i}/{n} stuck "
-                f">{ev.get('elapsed_s')}s: {path}",
+                f"[cpv-scan w{ev.get('worker')}] WARNING: file {i}/{n} stuck >{ev.get('elapsed_s')}s: {path}",
                 file=sys.stderr,
                 flush=True,
             )
         elif typ == EVENT_KILLED:
-            print(
-                f"[cpv-scan w{ev.get('worker')}] SIGKILL file {i}/{n} after "
-                f"{ev.get('elapsed_s')}s — marked TIMED_OUT, respawning worker: {path}",
-                file=sys.stderr,
-                flush=True,
-            )
+            # EVENT_KILLED covers TWO distinct outcomes that must NOT print the
+            # same line: a watchdog timeout (we SIGKILLed the worker, file →
+            # TIMED_OUT, `elapsed_s` present) vs. a worker that crashed on its
+            # own (no SIGKILL was issued, file → WORKER_DIED, no `elapsed_s`).
+            # The previous single message claimed "SIGKILL ... after Nones —
+            # marked TIMED_OUT" for the crash case too, which is wrong on all
+            # three counts and misleads anyone debugging a segfault. Branch on
+            # the `reason` field both sites already set.
+            if ev.get("reason") == "died":
+                print(
+                    f"[cpv-scan w{ev.get('worker')}] DIED   file {i}/{n} — worker exited before "
+                    f"producing a result, marked WORKER_DIED, respawning worker: {path}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            else:
+                print(
+                    f"[cpv-scan w{ev.get('worker')}] SIGKILL file {i}/{n} after "
+                    f"{ev.get('elapsed_s')}s — marked TIMED_OUT, respawning worker: {path}",
+                    file=sys.stderr,
+                    flush=True,
+                )
         elif typ == EVENT_RESUMED:
             print(f"[cpv-scan] resume: skipping already-scanned {i}/{n}: {path}", file=sys.stderr, flush=True)
 
@@ -254,9 +269,17 @@ def _append_result_record(state_path: Path | None, record: dict) -> None:
         return
     try:
         state_path.parent.mkdir(parents=True, exist_ok=True)
+        # ``record`` now carries the actual findings list (so resume can restore
+        # it faithfully), which — unlike the previous integer count — may contain
+        # something ``json`` cannot encode if a scan_func yields an exotic
+        # finding object. Catch the serialization errors too (TypeError /
+        # ValueError) so a non-encodable finding degrades to "this file is not
+        # recorded for resume" instead of crashing the whole scan; persistence
+        # is best-effort, exactly like cpv_scan_cache.put_cached_findings.
+        payload = json.dumps(record, ensure_ascii=False)
         with _results_jsonl(state_path).open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except OSError:
+            fh.write(payload + "\n")
+    except (OSError, TypeError, ValueError):
         pass
 
 
@@ -292,9 +315,17 @@ def _load_resume(state_path: Path, files: list) -> dict[int, ScanResult]:
                 continue
             if str(rec.get("path")) != str(files[idx]):
                 continue
+            # `findings` is the actual list persisted by `_persist_finished`.
+            # Guard the type: a record written by an OLDER build stored an
+            # integer COUNT here, and a hand-edited sidecar could hold anything
+            # — only a genuine list is a valid `ScanResult.findings`, so any
+            # other shape degrades to [] rather than poisoning the result with a
+            # non-list value that would break downstream `len()` / iteration.
+            raw_findings = rec.get("findings")
+            findings = raw_findings if isinstance(raw_findings, list) else []
             done[idx] = ScanResult(
                 file_path=files[idx],
-                findings=rec.get("findings") or [],
+                findings=findings,
                 error=rec.get("error"),
             )
     except (OSError, ValueError):
@@ -384,7 +415,13 @@ def supervised_scan(
 
     pending = [(i, files[i]) for i in range(n) if i not in seen]
     if not pending:
-        return [r if r is not None else ScanResult(files[i], [], "WORKER_DIED: not scanned") for i, r in enumerate(out)]
+        # Use the canonical "WorkerDied:" sentinel (matching the other two
+        # not-scanned sites below) so `_verdict` classifies it as WORKER_DIED.
+        # The OUTPUT label is "WORKER_DIED"; the ERROR sentinel that maps to it
+        # is "WorkerDied" — `_verdict` matches `error.startswith("WorkerDied")`.
+        # Writing the label into the error string would fall through to the
+        # generic "ERROR" verdict instead.
+        return [r if r is not None else ScanResult(files[i], [], "WorkerDied: not scanned") for i, r in enumerate(out)]
 
     started_at = time.time()
 
@@ -397,7 +434,16 @@ def supervised_scan(
                 "index": idx,
                 "path": str(files[idx]),
                 "verdict": _verdict(res.findings, res.error),
-                "findings": len(res.findings),
+                # Persist the ACTUAL findings list (not just its length) so a
+                # later `resume` run restores the file's true result. Storing
+                # only the count made every resumed file come back with empty
+                # findings → a file that originally HAD findings was
+                # reconstructed as CLEAN (a false negative in a security
+                # validator), and `_load_resume` put the integer count where a
+                # list was expected (a type violation). `findings_count` is kept
+                # as a separate human-readable field for `--inspect` of the JSONL.
+                "findings": list(res.findings),
+                "findings_count": len(res.findings),
                 "error": res.error,
                 "duration_s": round(dur, 4) if dur is not None else None,
             },
@@ -495,7 +541,13 @@ def supervised_scan(
                         started_seen.add(cur_idx)
                         _emit(
                             on_event,
-                            {"type": EVENT_START, "index": cur_idx, "total": n, "path": str(files[cur_idx]), "worker": wid},
+                            {
+                                "type": EVENT_START,
+                                "index": cur_idx,
+                                "total": n,
+                                "path": str(files[cur_idx]),
+                                "worker": wid,
+                            },
                         )
 
                 # Dead worker (crashed mid-scan, e.g. segfault) → record + respawn.
@@ -508,7 +560,14 @@ def supervised_scan(
                         seen.add(idx)
                         _emit(
                             on_event,
-                            {"type": EVENT_KILLED, "index": idx, "total": n, "path": str(files[idx]), "worker": wid, "reason": "died"},
+                            {
+                                "type": EVENT_KILLED,
+                                "index": idx,
+                                "total": n,
+                                "path": str(files[idx]),
+                                "worker": wid,
+                                "reason": "died",
+                            },
                         )
                         _persist_finished(idx, res, None)
                     workers.pop(wid, None)
@@ -529,7 +588,14 @@ def supervised_scan(
                     warned.add((wid, idx))
                     _emit(
                         on_event,
-                        {"type": EVENT_STUCK, "index": idx, "total": n, "path": str(files[idx]), "elapsed_s": round(elapsed, 2), "worker": wid},
+                        {
+                            "type": EVENT_STUCK,
+                            "index": idx,
+                            "total": n,
+                            "path": str(files[idx]),
+                            "elapsed_s": round(elapsed, 2),
+                            "worker": wid,
+                        },
                     )
                     _safe_notify(notify, f"cpv scan: file {idx + 1}/{n} stuck >{int(elapsed)}s — {files[idx]}")
 
@@ -544,7 +610,15 @@ def supervised_scan(
                     seen.add(idx)
                     _emit(
                         on_event,
-                        {"type": EVENT_KILLED, "index": idx, "total": n, "path": str(files[idx]), "elapsed_s": round(elapsed, 2), "worker": wid, "reason": "timeout"},
+                        {
+                            "type": EVENT_KILLED,
+                            "index": idx,
+                            "total": n,
+                            "path": str(files[idx]),
+                            "elapsed_s": round(elapsed, 2),
+                            "worker": wid,
+                            "reason": "timeout",
+                        },
                     )
                     _persist_finished(idx, res, elapsed)
                     workers.pop(wid, None)

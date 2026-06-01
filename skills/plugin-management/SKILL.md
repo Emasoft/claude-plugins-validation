@@ -72,7 +72,7 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/manage_plugin.py" --enable my-plugin --sco
   > Local Install / Update / Uninstall · Enable / Disable (with smart name resolution and scope) · Validate (190+ rules) · Security Audit · List / Search / Doctor · Marketplace · Remote Plugins (GitHub marketplaces) · Version Bump · Creation & Publishing · Flags · Plugin Variables · Notes
   > Note: that reference shows the **direct** `validate_plugin.py ./plugin/` form, which works only from a CPV **dev checkout** (it imports `yaml` + sibling modules off `sys.path`). From the plugin cache use the launcher form in step 5 above (`remote_validation.py plugin ./plugin/`).
 - [Hard-Won Lessons](references/hard-won-lessons.md) — 19 lessons from real publish runs
-  > uv run --with pyyaml · gh secret --body flag · Update notify-marketplace.yml · MARKETPLACE_PAT env var · Strip ANSI codes · grep -oE not -oP · Standardize exit code 1 · author.email check · CI uv sync --extra dev · Update notify before push · Local dry-run · Verify CI after push · Checkov CKV2_ prefix · pytest exit code 5 · __init__.py no shebang · Repository field required · validate_marketplace paths · git config user setup · README sections required
+  > uv run --with pyyaml · gh secret --body flag · Update notify-marketplace.yml · MARKETPLACE_PAT env var · Strip ANSI codes · grep -oE not -oP · Standardize exit code 1 · author.email check · CI uv sync --extra dev · Update notify before push · Local dry-run · Verify CI after push · Checkov CKV2_ prefix · pytest exit code 5 · __init__.py no shebang · Repository field optional (non-blocking WARNING) · validate_marketplace paths · git config user setup · README sections required
 
 ## Token Optimization
 

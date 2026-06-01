@@ -15,7 +15,7 @@
 | `hook` | `hooks/hooks.json` | `hooks/hooks.json` |
 | `mcp` | `.mcp.json` | `.mcp.json` |
 | `lsp` | `.lsp.json` | `.lsp.json` |
-| `monitor` | monitor JSON config | monitor JSON config |
+| `monitor` | `monitors/monitors.json` | `monitors/monitors.json` |
 | `output-style` | `output-styles/*.md` | `output-styles/<name>.md` |
 
 ## Marketplace integration

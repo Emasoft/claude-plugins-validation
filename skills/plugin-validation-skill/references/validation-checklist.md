@@ -104,31 +104,50 @@ jq . .claude-plugin/plugin.json && echo "✓ Valid JSON"
 
 ### Event Types
 
-Only these 18 event types are valid:
+The canonical event list (30 valid events, with the authoritative
+per-event "Has Matcher" column) lives in
+[Hook Validation §2 Valid Hook Events](hook-validation.md#2-valid-hook-events),
+which mirrors the validator's single source of truth
+(`cpv_validation_common.py::VALID_HOOK_EVENTS` plus
+`validate_hook.py::EVENTS_WITH_MATCHERS` / `EVENTS_WITHOUT_MATCHERS`).
+Do NOT re-derive the list here — match-status below is a quick
+checklist, not a second source of truth.
+
+Matcher-supporting events:
 
 - [ ] `PreToolUse` (supports matcher)
 - [ ] `PostToolUse` (supports matcher)
 - [ ] `PostToolUseFailure` (supports matcher)
 - [ ] `PermissionRequest` (supports matcher)
-- [ ] `UserPromptSubmit` (NO matcher)
+- [ ] `PermissionDenied` (supports matcher)
 - [ ] `Notification` (supports matcher)
-- [ ] `Stop` (NO matcher)
-- [ ] `SubagentStop` (NO matcher)
-- [ ] `SubagentStart` (NO matcher)
 - [ ] `SessionStart` (supports matcher)
-- [ ] `SessionEnd` (NO matcher)
+- [ ] `SessionEnd` (supports matcher)
+- [ ] `SubagentStart` (supports matcher)
+- [ ] `SubagentStop` (supports matcher)
 - [ ] `PreCompact` (supports matcher)
+- [ ] `PostCompact` (supports matcher)
 - [ ] `Setup` (supports matcher)
+- [ ] `ConfigChange` (supports matcher)
+- [ ] `StopFailure` (supports matcher)
+- [ ] `InstructionsLoaded` (supports matcher)
+- [ ] `Elicitation` (supports matcher)
+- [ ] `ElicitationResult` (supports matcher)
+- [ ] `FileChanged` (supports matcher)
+- [ ] `UserPromptExpansion` (supports matcher)
+
+Events that do NOT support matchers (matcher field is silently ignored):
+
+- [ ] `UserPromptSubmit` (NO matcher)
+- [ ] `Stop` (NO matcher)
 - [ ] `TeammateIdle` (NO matcher)
 - [ ] `TaskCompleted` (NO matcher)
-- [ ] `ConfigChange` (NO matcher)
+- [ ] `TaskCreated` (NO matcher)
 - [ ] `WorktreeCreate` (NO matcher)
 - [ ] `WorktreeRemove` (NO matcher)
-- [ ] `InstructionsLoaded` (NO matcher)
 - [ ] `CwdChanged` (NO matcher)
-- [ ] `FileChanged` (NO matcher)
-- [ ] `TaskCreated` (NO matcher)
-- [ ] All events are from the valid set of 27 events (including CwdChanged, FileChanged, TaskCreated, PermissionDenied, StopFailure, Elicitation, ElicitationResult, PostCompact, InstructionsLoaded, TeammateIdle, TaskCompleted, ConfigChange, WorktreeCreate, WorktreeRemove)
+- [ ] `PostToolBatch` (NO matcher)
+- [ ] `MessageDisplay` (NO matcher)
 
 ### Matcher Configuration
 
@@ -138,13 +157,12 @@ Only these 18 event types are valid:
 
 ### Hook Definitions
 
-- [ ] Each hook has `type` field ("command", "http", "prompt", or "agent")
+- [ ] Each hook has `type` field — one of the 5 valid types: "command", "http", "mcp_tool", "prompt", or "agent" (`mcp_tool` added v2.1.118)
 - [ ] Command hooks have `command` field
 - [ ] Command paths use `${CLAUDE_PLUGIN_ROOT}`
 - [ ] Prompt hooks have `prompt` field
 - [ ] Optional `timeout` is reasonable (default: 60)
-- [ ] Hook type is "command", "prompt", or "agent" (agent is new)
-- [ ] COMMAND_ONLY_EVENTS (Setup, PreCompact, Notification) use type "command" only
+- [ ] Type-restricted events do NOT use `"prompt"`/`"agent"` — see [Hook Validation §"Events That Restrict Hook Types"](hook-validation.md#events-that-restrict-hook-types). Tier 3 (`SessionStart`, `Setup`) accept only `"command"`/`"mcp_tool"`; Tier 2 (`PreCompact`, `PostCompact`, `Notification`, `ConfigChange`, `SessionEnd`, `SubagentStart`, `StopFailure`, `WorktreeCreate`, `WorktreeRemove`, `Elicitation`, `ElicitationResult`, `CwdChanged`, `FileChanged`, `InstructionsLoaded`) also exclude `"prompt"`/`"agent"`
 - [ ] Timeout values are in seconds (not milliseconds) — warn if >1000
 - [ ] Command hooks: "statusMessage" field (if present) is a string
 - [ ] Prompt/Agent hooks: "model" field (if present) is a non-empty string
@@ -194,12 +212,8 @@ jq . hooks/hooks.json && echo "✓ Valid JSON"
 ### Claude Code Specific Fields
 
 - [ ] `context` value is `fork` if present (only valid value)
-- [ ] `agent` value is valid if present:
-  - `api-coordinator`
-  - `test-engineer`
-  - `deploy-agent`
-  - `debug-specialist`
-  - `code-reviewer`
+- [ ] `agent` present only alongside `context: fork` (otherwise MAJOR — the field has no effect)
+- [ ] `agent` value is a built-in subagent type — `Explore`, `Plan`, `general-purpose`, `statusline-setup`, `Claude Code Guide` — OR a custom agent from `.claude/agents/` (a non-built-in name is INFO, not an error)
 - [ ] `user-invocable` is `true` or `false` (if present)
 
 ### Skill Content
@@ -324,7 +338,7 @@ uv run python scripts/validate_mcp.py /path/to/plugin
 | Plugin from npm | Object | `"source": {"source": "npm", "package": "@org/plugin"}` |
 | Plugin from URL | Object | `"source": {"source": "url", "url": "https://.../plugin.tar.gz"}` |
 
-**Note:** Inside the source object the discriminator key is `source` (not `type`). Valid values: `github`, `url`, `npm`, `git-subdir`, `settings`.
+**Note:** Inside the source object the discriminator key is `source` (not `type`). Valid per-plugin values: `github`, `url`, `npm`, `git`, `git-subdir`, `directory` (plus a string `./path` for local sources). `settings` (and `file`, `hostPattern`, `pathPattern`) are settings-level-only sources — using one as a per-plugin `source` is a MAJOR validation error.
 
 ### **CRITICAL: Git Submodules / Local Plugins**
 

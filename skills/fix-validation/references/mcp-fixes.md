@@ -183,24 +183,25 @@ Comprehensive remediation guide for all issues detected by `validate_mcp.py`.
 }
 ```
 
-### MINOR: Server name format
+### MAJOR: Reserved server name
 
-**Error message**: `Server name '{server_name}' should be alphanumeric with hyphens/underscores`
-**Severity**: MINOR
-**Root cause**: The server name does not match the expected pattern `^[a-zA-Z][a-zA-Z0-9_-]*$`. It may start with a digit, contain spaces, or include special characters.
+**Error message**: `MCP server name '{server_name}' is reserved by Claude Code (v2.1.128) — this server will be silently skipped at load time. Rename it (for example '{server_name}-tools' or '{server_name}-bridge').`
+**Severity**: MAJOR
+**Root cause**: The server name is in `validate_mcp.py::RESERVED_MCP_SERVER_NAMES` (currently `workspace`, reserved by Claude Code since v2.1.128). Claude Code silently skips a server declared under a reserved name at load time — the plugin still reports as installed but produces no tools from that server.
 **Fix**:
-1. Rename the server to start with a letter and contain only alphanumeric characters, hyphens, or underscores:
-   - Wrong: `"123server"`, `"my server"`, `"my.server"`
-   - Correct: `"my-server"`, `"myServer"`, `"my_server_v2"`
+1. Rename the server to a non-reserved name. The validator's own suggestion appends `-tools` / `-bridge`:
+   - Wrong: `"workspace"`
+   - Correct: `"workspace-tools"`, `"workspace-bridge"`
+2. Update every reference to the old server name (other config sources, docs).
 
 ### WARNING: Unknown field in server config
 
 **Error message**: `Unknown field '{key}' in server {server_name}`
 **Severity**: WARNING
-**Root cause**: The server configuration contains a field not in the known set: `command`, `args`, `env`, `cwd`, `type`, `url`, `headers`, `timeout`, `oauth`.
+**Root cause**: The server configuration contains a field not in the known set (`validate_mcp.py::KNOWN_SERVER_FIELDS` is the source of truth): `command`, `args`, `env`, `cwd`, `type`, `url`, `headers`, `headersHelper`, `timeout`, `oauth`, `alwaysLoad`.
 **Fix**:
 1. Check for typos in the field name (e.g., `arguments` instead of `args`, `environment` instead of `env`).
-2. Remove the unknown field if it is not needed, or verify it is a valid extension field for your MCP client.
+2. Remove the unknown field if it is not needed, or verify it is a valid extension field for your MCP client. Note `headersHelper` (v2.1.85 — a script that emits headers) and `alwaysLoad` (v2.1.121 — when true, all tools skip tool-search deferral) are recognized; do NOT strip them.
 3. Known fields reference:
 ```json
 {

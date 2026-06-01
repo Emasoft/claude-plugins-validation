@@ -48,26 +48,25 @@ jobs:
         run: uv run pytest tests/ -v
 
       - name: Generate changelog
-        id: changelog
         run: |
-          # Get the previous tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-
-          if [ -z "$PREV_TAG" ]; then
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" HEAD)
-          else
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..HEAD)
-          fi
-
           # Prefer the curated CHANGELOG.md when present — publish.py keeps
           # it in lockstep with conventional commits via git-cliff, and the
-          # body is more useful than a flat git log.
+          # body is more useful than a flat git log. Only fall back to a
+          # generated git-log changelog when CHANGELOG.md is absent, so the
+          # git-log work (and its failure modes) is skipped in the common
+          # case where the curated file exists.
           if [ -f "CHANGELOG.md" ]; then
             cp CHANGELOG.md changelog.txt
           else
-            echo "$CHANGELOG" > changelog.txt
+            # No curated changelog: synthesize one from commits since the
+            # previous tag (or the whole history if this is the first tag).
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            if [ -z "$PREV_TAG" ]; then
+              git log --pretty=format:"- %s (%h)" HEAD > changelog.txt
+            else
+              git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD" > changelog.txt
+            fi
           fi
-          echo "changelog_file=changelog.txt" >> $GITHUB_OUTPUT
 
       - name: Create or update GitHub Release (idempotent)
         # Idempotent shell flow — replaces softprops/action-gh-release which

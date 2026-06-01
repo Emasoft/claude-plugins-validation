@@ -40,7 +40,7 @@ The pre-push hook is the **keystone of the entire pipeline**. It runs 4 gates in
 | 3. Validate | `validate_plugin.py . --strict` | CRITICAL, MAJOR, MINOR, NIT (exit codes 1-4) |
 | 4. Tests | `pytest tests/ -q` | Any test failure |
 
-**Only WARNINGs (exit code 5+) pass through.** Everything else blocks.
+**Only WARNINGs (and INFO/PASSED) pass through** — these exit 0. CRITICAL/MAJOR/MINOR exit 1/2/3, and under `--strict` NIT exits 4. WARNING never blocks, even in `--strict`. Everything that yields a non-zero exit blocks.
 
 ## Fix-All Mandate
 
@@ -70,13 +70,13 @@ Use `grep -oE` (extended regex), NOT `grep -oP` (Perl regex — unavailable on m
 
 ## GitHub Secrets
 
-Always use `--body` flag:
+Prefer the canonical helper — it enforces the correct, secure invocation:
 ```bash
-gh secret set MARKETPLACE_PAT --repo <owner>/<repo> --body "$MARKETPLACE_PAT"
+uv run python scripts/set_marketplace_pat.py <owner>/<repo>
 ```
-Piping via `echo | gh secret set` does NOT work reliably.
+It reads the value from `$MARKETPLACE_PAT` and feeds it to `gh secret set` on **stdin with `--body` omitted**. Do NOT pass the token via `--body "$MARKETPLACE_PAT"`: that exposes the secret on the process command line (`ps -ef` / `/proc/<pid>/cmdline`). And do NOT use `echo "$MARKETPLACE_PAT" | gh secret set`: `echo` appends a trailing newline that gets stored inside the secret, producing a malformed Authorization header (`401 Bad credentials`).
 
-Check if the env var exists first: `test -n "$MARKETPLACE_PAT"`
+Check the env var exists first: `test -n "$MARKETPLACE_PAT"`
 
 ## CI Workflow Dependencies
 

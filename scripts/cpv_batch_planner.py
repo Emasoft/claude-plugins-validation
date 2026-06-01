@@ -20,13 +20,16 @@ Usage::
 
 Options:
 
-    --shard-size N        max findings per shard (default 30)
+    --shard-size N        max findings per shard (default 15)
     --max-parallel N      cap concurrent shards (default 8, max 16)
     --session-dir PATH    output dir (default /tmp/cpv-batch/<ts>/)
     --min-severity LEVEL  drop findings below this floor (default minor)
     --report PATH         use existing JSON validation report instead of
                           running validate_plugin.py
-    --no-color            forwarded to validate_plugin.py
+
+(``validate_plugin.py`` is always invoked with ``--no-color`` so its JSON
+output is never polluted by ANSI escapes; there is no planner CLI flag for
+this — it is unconditional.)
 
 Output:
 

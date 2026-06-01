@@ -635,19 +635,32 @@ def validate_supporting_files(skill_path: Path, report: ValidationReport) -> Non
         if link_target.startswith(("http://", "https://", "mailto:")):
             continue
 
-        # Skip anchors
+        # Skip pure in-page anchors
         if link_target.startswith("#"):
             continue
 
+        # Strip a trailing `#fragment` before the existence check. A link like
+        # `[API](references/api.md#section)` points at a SECTION inside a real
+        # local file — the `#section` part is a heading anchor, not part of the
+        # filename, so `skill_path / "references/api.md#section"` never exists
+        # and would raise a false "Referenced file not found" MAJOR. Mirrors
+        # validate_skill_comprehensive.py (which does the same split) so the
+        # lightweight and comprehensive validators agree on anchored links.
+        file_ref = link_target.split("#", 1)[0] if "#" in link_target else link_target
+        if not file_ref:
+            # Target was just `file.md#...` with an empty path before `#` —
+            # already handled by the pure-anchor skip above, but guard anyway.
+            continue
+
         # Check if referenced file exists
-        ref_path = skill_path / link_target
+        ref_path = skill_path / file_ref
         if not ref_path.exists():
             report.major(
-                f"Referenced file not found: {link_target}",
+                f"Referenced file not found: {file_ref}",
                 "SKILL.md",
             )
         else:
-            report.passed(f"Referenced file exists: {link_target}", "SKILL.md")
+            report.passed(f"Referenced file exists: {file_ref}", "SKILL.md")
 
 
 def validate_skill(skill_path: Path) -> SkillValidationReport:

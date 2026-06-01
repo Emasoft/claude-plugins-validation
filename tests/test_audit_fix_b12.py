@@ -115,9 +115,7 @@ class TestSourceShapeContract:
         return results
 
     def _has_unknown_field(self, results, field: str) -> bool:
-        return any(
-            "RC-MKPL-UNKNOWN-FIELD" in r.message and f"'{field}'" in r.message for r in results
-        )
+        return any("RC-MKPL-UNKNOWN-FIELD" in r.message and f"'{field}'" in r.message for r in results)
 
     def test_repo_url_package_are_not_top_level_entry_fields(self):
         """repo/url/package/ref must live inside source, never as siblings."""
@@ -231,9 +229,7 @@ class TestCacheOptimizerAgentReferences:
         # a present-tense "dispatched by cache-optimizer-menu" claim.
         for line in text.splitlines():
             if "cache-optimizer-menu" in line:
-                assert "former" in line or "removed" in line, (
-                    f"stale live-dispatcher claim still present: {line!r}"
-                )
+                assert "former" in line or "removed" in line, f"stale live-dispatcher claim still present: {line!r}"
 
     def test_phase4_example_does_not_use_askuserquestion(self):
         """The Phase-4 example honors the NEVER-AskUserQuestion rule."""
@@ -242,6 +238,4 @@ class TestCacheOptimizerAgentReferences:
         for line in text.splitlines():
             if line.strip().startswith("[Phase 4:") and "AskUserQuestion" in line:
                 # Allowed ONLY if it is the negative form ("NEVER AskUserQuestion").
-                assert "NEVER AskUserQuestion" in line, (
-                    f"Phase-4 example contradicts the NEVER rule: {line!r}"
-                )
+                assert "NEVER AskUserQuestion" in line, f"Phase-4 example contradicts the NEVER rule: {line!r}"

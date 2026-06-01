@@ -59,7 +59,9 @@ are rejected.
    `/cpv-batch-scope-diagnose-and-fix` for the same-turn variant
    OR the doctor's per-project interactive flow (dispatch the
    `cpv-doctor-agent` on that single project; the non-interactive
-   one-shot equivalent is the `cpv-doctor <one project>` CLI).
+   one-shot equivalent is the `cpv-doctor` CLI run from inside that
+   project folder — it scopes to the active `CLAUDE_PROJECT_DIR`
+   and takes no positional project-path argument).
 
 ## Output
 

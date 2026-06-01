@@ -77,17 +77,16 @@ def test_concise_arrow_ssrf_is_kept_visible(line: str) -> None:
     )
     # Guard that would have caught the original bug at the helper level.
     assert tsctx._line_is_function_definition(line) is False, (
-        f"_line_is_function_definition must not treat an inlined outbound HTTP "
-        f"call as a benign definition: {line!r}"
+        f"_line_is_function_definition must not treat an inlined outbound HTTP call as a benign definition: {line!r}"
     )
 
 
 # --- HIGH (benign side): real definitions / local invokes stay SUPPRESSED ----
 
 BENIGN_FUNCTION_DEFS = [
-    "async handleRequest(request) {",      # async method definition
-    "server.handleRequest(request);",      # local-method invocation
-    "function handleRequest(request) {",   # named function definition
+    "async handleRequest(request) {",  # async method definition
+    "server.handleRequest(request);",  # local-method invocation
+    "function handleRequest(request) {",  # named function definition
     "const handler = async (req) => { return 1 }",  # block-body arrow, no net on sig line
 ]
 
@@ -106,8 +105,8 @@ def test_real_function_definitions_stay_suppressed(line: str) -> None:
 # the leading-dot method-call path; the fix's negative lookbehind must NOT
 # steal them back into the "visible" bucket.
 BENIGN_LIBRARY_METHOD_ARROWS = [
-    "const fetchUser = (id) => client.users.fetch(id)",   # Discord.js
-    "const g = (id) => guild.members.fetch(id)",          # Discord.js
+    "const fetchUser = (id) => client.users.fetch(id)",  # Discord.js
+    "const g = (id) => guild.members.fetch(id)",  # Discord.js
 ]
 
 
@@ -127,10 +126,7 @@ def test_block_body_arrow_with_fetch_on_separate_line_unchanged() -> None:
     body line was already correctly kept visible (``unknown``) and must stay
     that way — the fix only targets the concise (single-line) form."""
     block = "const handler = async (req) => {\n  return fetch(req.query.url)\n}"
-    assert (
-        tsctx.classify("server.ts", block, 1, "fetch(req.query.url)", "SSRF_ADVANCED")
-        == "unknown"
-    )
+    assert tsctx.classify("server.ts", block, 1, "fetch(req.query.url)", "SSRF_ADVANCED") == "unknown"
 
 
 # --- LOW (#142): dead pattern[3] removed -------------------------------------
@@ -147,8 +143,7 @@ def test_function_def_res_has_no_dead_pattern() -> None:
     reintroduce dead code, so this guard pins the count.
     """
     assert len(tsctx._FUNCTION_DEF_RES) == 3, (
-        "expected exactly 3 function-definition patterns (dead pattern[3] removed); "
-        f"got {len(tsctx._FUNCTION_DEF_RES)}"
+        f"expected exactly 3 function-definition patterns (dead pattern[3] removed); got {len(tsctx._FUNCTION_DEF_RES)}"
     )
 
 

@@ -30,9 +30,7 @@ from cpv_validation_common import (  # noqa: E402
 )
 
 # The exact set of legal Level values (mirrors the Literal in cpv_validation_common).
-KNOWN_LEVELS: frozenset[str] = frozenset(
-    {"CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING", "INFO", "PASSED"}
-)
+KNOWN_LEVELS: frozenset[str] = frozenset({"CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING", "INFO", "PASSED"})
 
 
 def _replay_single(entry: dict[str, object]) -> ValidationReport:

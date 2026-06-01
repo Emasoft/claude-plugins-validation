@@ -1402,11 +1402,7 @@ def _context_classifier_verdict(
         # "run this recipe", so an executable payload (`curl … | bash`, reverse
         # shell, `eval "$(curl …)"`, a launchd install) in a "doc" file IS
         # reachable. It demotes to NIT (visible) instead of vanishing.
-        if (
-            is_doc_only
-            and not _rule_is_secret_detection(rule_id)
-            and rule_id not in _EXECUTION_CLASS_RULES
-        ):
+        if is_doc_only and not _rule_is_secret_detection(rule_id) and rule_id not in _EXECUTION_CLASS_RULES:
             return "suppress"
         if rule_id in _INTENT_SOFT_SIGNAL_RULES:
             # Soft signals — the rule's verb / concept appears benignly

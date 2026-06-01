@@ -24,11 +24,15 @@ CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
 
 ## Why the launcher is mandatory
 
-`validate_skill_comprehensive.py` refuses direct invocation from the
-plugin cache via `check_remote_execution_guard()`. The launcher
-(`remote_validation.py`) sets up environment isolation BEFORE importing
-the validator, so the **target plugin's** `pyproject.toml` /
-`.mypy.ini` / stale `cpv_validation_common.py` cannot interfere.
+The launcher (`remote_validation.py`) sets up environment isolation
+BEFORE importing `validate_skill_comprehensive.py`, so the **target
+plugin's** `pyproject.toml` / `.mypy.ini` / stale
+`cpv_validation_common.py` cannot interfere. Concretely it forces CPV's
+own `scripts/` dir to the front of `sys.path`, writes a clean temporary
+mypy config, strips `MYPYPATH` / `PYTHONPATH`, and sets
+`CPV_REMOTE_VALIDATION=1` — all at import time, before the validator
+module is loaded. Running the validator directly from the plugin cache
+skips that setup, so the target's local config can shadow CPV's modules.
 
 The semantic-validator runs the syntactic baseline FIRST (cheap, ~95% of
 issues) before paying for opus-driven semantic evaluation.

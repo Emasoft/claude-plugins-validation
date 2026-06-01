@@ -37,7 +37,9 @@ tools:
 ---
 ```
 
-Validator: `scripts/cpv_validation_common.py:287`.
+Validator: `Monitor` is in the valid-agent-tools allowlist in
+`scripts/cpv_validation_common.py` (so an agent may declare it under
+`tools:` without tripping the unknown-tool check).
 
 ## userConfig (plugin.json)
 
@@ -90,7 +92,7 @@ User-configurable values prompted at plugin enable time. Keys must be valid iden
 
 Values are readable from hook/MCP/LSP configs via `${user_config.API_ENDPOINT}`, and (non-sensitive only) as `CLAUDE_PLUGIN_OPTION_API_ENDPOINT`.
 
-Validator: `scripts/validate_plugin.py` — `validate_manifest` enforces the 5-type whitelist and required-`title`/`type` fields.
+Validator: `scripts/validate_plugin.py` — `validate_user_config_structure` enforces the 5-type whitelist (`USER_CONFIG_TYPE_ENUM`) and the required-`title`/`type` fields.
 
 ## channels (plugin.json)
 
@@ -115,7 +117,7 @@ Channel declarations for message injection. Each entry's `server` field MUST mat
 }
 ```
 
-Validator: `scripts/validate_plugin.py:303-327` — cross-checks `channels[].server` against `mcpServers` keys and raises MAJOR on mismatch.
+Validator: `validate_channels_structure` in `scripts/validate_plugin.py` — cross-checks `channels[].server` against `mcpServers` keys and raises MAJOR on mismatch.
 
 ## CLAUDE_PLUGIN_OPTION_<KEY> env vars
 
@@ -138,7 +140,8 @@ Default region: `${CLAUDE_PLUGIN_OPTION_REGION}`.
 
 Sensitive keys are omitted from the env var expansion for safety.
 
-Validator: `scripts/cpv_validation_common.py:335-346`.
+Validator: the `PLUGIN_ENV_VAR_PATTERNS` allowlist in
+`scripts/cpv_validation_common.py` matches `^CLAUDE_PLUGIN_OPTION_[A-Z][A-Z0-9_]*$`.
 
 ## Inline marketplace (settings.json)
 

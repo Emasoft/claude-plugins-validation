@@ -200,9 +200,7 @@ _OWN_API_KEY_FRAGMENTS: Final[frozenset[str]] = frozenset(
 )
 
 
-_PROCESS_ENV_RE: Final[re.Pattern[str]] = re.compile(
-    r"process\.env\.(?P<name>[A-Z][A-Z0-9_]*)"
-)
+_PROCESS_ENV_RE: Final[re.Pattern[str]] = re.compile(r"process\.env\.(?P<name>[A-Z][A-Z0-9_]*)")
 
 _REGEX_LITERAL_RE: Final[re.Pattern[str]] = re.compile(
     # Naïve JS-regex-literal recognizer — ``/.../[gimsuy]*``. False
@@ -218,10 +216,10 @@ _REGEX_LITERAL_RE: Final[re.Pattern[str]] = re.compile(
 _TEST_FIXTURE_MARKERS: Final[tuple[re.Pattern[str], ...]] = tuple(
     re.compile(p)
     for p in (
-        r"\bwriteFileSync\b",       # creating a test file on disk
-        r"\bcreateClient\b",        # MCP test client setup
-        r"\bcleanDir\b",            # test directory teardown
-        r"\btmpDir\b",              # tmp-dir convention
+        r"\bwriteFileSync\b",  # creating a test file on disk
+        r"\bcreateClient\b",  # MCP test client setup
+        r"\bcleanDir\b",  # test directory teardown
+        r"\btmpDir\b",  # tmp-dir convention
         r"\b__tests__\b",
         r"\bvitest\b",
         r"\bjest\b",
@@ -245,7 +243,14 @@ _HIJACK_VAR_INJECTION_RE: Final[re.Pattern[str]] = re.compile(
     r"NODE_OPTIONS|PYTHONSTARTUP|PYTHONPATH|PERL5LIB|RUBYLIB|"
     r"GIT_SSH_COMMAND|GIT_EDITOR|GIT_PROXY_COMMAND|"
     r"CLASSPATH|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS|"
-    r"BASH_ENV|ENV)\s*=",
+    r"BASH_ENV|ENV|PATH)"
+    # The var name may be followed by a quote/bracket closer before ``=`` so
+    # BOTH the dotted form (``process.env.LD_PRELOAD = x``) AND the bracket
+    # form (``os.environ["LD_PRELOAD"] = x`` / ``process.env["PATH"] = x``)
+    # are recognised. Without the optional ``["']`` / ``]`` closer the bracket
+    # form slipped past and a hijack-var injection in a test file was wrongly
+    # suppressed (this matcher gates the ENV_INJECTION keep-visible paths).
+    r"""["'\]]{0,2}\s*=""",
     re.IGNORECASE,
 )
 
@@ -560,8 +565,20 @@ def _ssrf_url_is_static_literal(line: str, match: str) -> bool:
 
     A never-benign host (cloud-metadata / file:// / gopher:// / link-local) is
     NEVER a safe static literal — see ``_SSRF_NEVER_BENIGN_HOST_RE`` (CRITICAL #2).
+    A *deceptive* look-alike host is also never safe even when fully static:
+    ``http://127.0.0.1@evil.com`` (loopback is userinfo; evil.com is the host)
+    and ``http://127.0.0.1.evil.com`` / ``http://localhost.attacker.net`` (the
+    loopback token is only the leftmost label of a public domain) are
+    hardcoded exfiltration targets disguised as localhost. "It's a static
+    literal" does not make them benign — the fixed destination IS the threat.
     """
     if _SSRF_NEVER_BENIGN_HOST_RE.search(match):
+        return False
+    # A static literal whose host only LOOKS like loopback but is really a
+    # public exfil domain (userinfo bypass / subdomain bypass) must stay
+    # visible — a fixed deceptive destination is not "not attacker-controlled",
+    # it is a baked-in egress to the attacker.
+    if _contains_deceptive_loopback_host(match):
         return False
     idx = line.find(match)
     if idx < 0:
@@ -686,8 +703,21 @@ _GENERIC_ENV_ASSIGN_RE: Final[re.Pattern[str]] = re.compile(
 
 def _is_generic_env_assignment(line: str, match: str) -> bool:
     """True iff the line is a generic ``process.env.X =`` / ``os.environ[X] =``
-    assignment that does NOT target a known hijack variable."""
-    if _DANGEROUS_ENV_VARS_RE.search(line):
+    assignment that does NOT target a known hijack variable.
+
+    The dangerous-var gate consults BOTH ``_DANGEROUS_ENV_VARS_RE`` (matches a
+    hijack-var NAME anywhere, so it also covers the bracket form
+    ``os.environ["LD_PRELOAD"] = …``) AND the authoritative
+    ``_is_hijack_var_injection`` / ``_HIJACK_VAR_INJECTION_RE`` (the SAME set
+    the blanket-suppress fall-through uses). They MUST agree: without the
+    second check, vars present only in ``_HIJACK_VAR_INJECTION_RE`` —
+    ``BASH_ENV``, bare ``ENV``, ``GIT_EDITOR``, ``GIT_PROXY_COMMAND``,
+    ``JAVA_TOOL_OPTIONS``, ``_JAVA_OPTIONS``, ``DYLD_INSERT_LIBRARIES`` — would
+    be let through the blanket block (correctly treated as dangerous) and then
+    RE-SUPPRESSED here, hiding a genuine runtime-hijack injection in a test
+    file (security false-negative). Over-keeping a benign env-restore visible
+    is the safe direction (iron rule)."""
+    if _DANGEROUS_ENV_VARS_RE.search(line) or _is_hijack_var_injection(line):
         return False
     return bool(_GENERIC_ENV_ASSIGN_RE.search(line) or _GENERIC_ENV_ASSIGN_RE.search(match))
 
@@ -752,9 +782,7 @@ _FUNCTION_DEF_RES: Final[tuple[re.Pattern[str], ...]] = (
         r"[A-Za-z_$][\w$]*\s*\([^)]*\)\s*\{"
     ),
     # const / let / var = (args) =>
-    re.compile(
-        r"^\s*(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"
-    ),
+    re.compile(r"^\s*(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"),
 )
 # NOTE: the former 4th pattern (``obj.method(`` method-call-on-object) was
 # removed — it was dead code. ``_line_is_function_definition`` never iterated
@@ -854,7 +882,23 @@ def _is_test_unicode_assertion(source: str, line_idx: int, line: str) -> bool:
     if raw_count + escape_count < 1:
         return False
     # Line must look like a test assertion / expectation / build-up
-    if not any(kw in line for kw in ("assert", "expect", "test", "it(", "should", "equal", "deepEqual", "config", "mergeConfig", "barFilled", "describe(", "result =")):
+    if not any(
+        kw in line
+        for kw in (
+            "assert",
+            "expect",
+            "test",
+            "it(",
+            "should",
+            "equal",
+            "deepEqual",
+            "config",
+            "mergeConfig",
+            "barFilled",
+            "describe(",
+            "result =",
+        )
+    ):
         return False
     # Surrounding ±10 lines must mention Unicode/bidi/zero-width vocab
     # (relaxed window since test fixtures span more lines)
@@ -868,11 +912,22 @@ def _is_test_unicode_assertion(source: str, line_idx: int, line: str) -> bool:
 # r10-final FP iter (2026-05-28) — LLM-API field-name vocabulary
 _API_FIELD_NAMES_DOCS: Final[frozenset[str]] = frozenset(
     {
-        "context_window", "system_prompt", "system_message",
-        "full_context", "conversation_history", "message_history",
-        "chat_history", "max_tokens", "max_output_tokens",
-        "temperature", "top_p", "top_k", "stop_sequences",
-        "tool_use", "tool_choice", "tool_results",
+        "context_window",
+        "system_prompt",
+        "system_message",
+        "full_context",
+        "conversation_history",
+        "message_history",
+        "chat_history",
+        "max_tokens",
+        "max_output_tokens",
+        "temperature",
+        "top_p",
+        "top_k",
+        "stop_sequences",
+        "tool_use",
+        "tool_choice",
+        "tool_results",
     }
 )
 
@@ -886,9 +941,20 @@ def _is_api_field_name_match(line: str, match: str) -> bool:
 
 
 _DOC_OR_CONFIG_PATH_PATTERNS: Final[tuple[str, ...]] = (
-    "readme", "changelog", "claude.md", "claude.readme",
-    "/docs/", "/doc/", "/references/", "/reference/", "/examples/",
-    "package.json", "/specs/", "/spec/", "/wiki/", "/standards/",
+    "readme",
+    "changelog",
+    "claude.md",
+    "claude.readme",
+    "/docs/",
+    "/doc/",
+    "/references/",
+    "/reference/",
+    "/examples/",
+    "package.json",
+    "/specs/",
+    "/spec/",
+    "/wiki/",
+    "/standards/",
     ".md",
 )
 
@@ -972,24 +1038,31 @@ def _line_is_function_definition(source_line: str) -> bool:
     has no preceding `.` so the method-invocation rule does NOT fire).
     """
     stripped = source_line.lstrip()
-    # First, check the "method call on object" pattern — but ONLY accept
-    # when the method name is NOT one of the network calls (fetch, axios,
-    # http.get) because ``something.fetch(...)`` could be a third-party
-    # HTTP client wrapper. The plain network names are still caught.
+    # A concise-body arrow that inlines a GLOBAL outbound HTTP call
+    # (``const h = (req) => fetch(req.query.url)``) is a real SSRF surface,
+    # NOT a benign definition — the dangerous call shares the signature line.
+    # This veto MUST run FIRST, before the method-call-on-object check below:
+    # if a benign local method call also appears on the same line (e.g.
+    # ``(req) => logger.info(req.url) || fetch(req.query.target)``), the
+    # method-call loop would otherwise return True and suppress SSRF_ADVANCED,
+    # hiding the genuine global ``fetch`` (security false-negative). The
+    # ``(?<![.\w$])`` lookbehind keeps this scoped to GLOBAL fetch/axios/
+    # http.get/request — library-client method calls (``users.fetch(id)``)
+    # have a leading dot and do NOT match, so they still fall through to be
+    # suppressed by the method-call path. A block-body arrow ``=> { ... }``
+    # has no network call on the signature line, so it does not match here.
+    if _ARROW_BODY_GLOBAL_HTTP_RE.search(stripped):
+        return False
+    # Then, the "method call on object" pattern — but ONLY accept when the
+    # method name is NOT one of the network calls (fetch, axios, http.get)
+    # because ``something.fetch(...)`` could be a third-party HTTP client
+    # wrapper. The plain network names are still caught.
     method_call_re = re.compile(r"\b[A-Za-z_$][\w$]*\.([A-Za-z_$][\w$]*)\s*\(")
     for m in method_call_re.finditer(stripped):
         method_name = m.group(1)
         if method_name in ("fetch", "axios", "get", "post", "put", "delete", "patch", "request"):
             continue  # Could be a wrapped HTTP call; don't suppress
         return True
-    # A concise-body arrow that inlines a GLOBAL outbound HTTP call
-    # (``const h = (req) => fetch(req.query.url)``) is a real SSRF surface,
-    # NOT a benign definition — the dangerous call shares the signature line.
-    # Refuse to classify it as a function definition so SSRF_ADVANCED stays
-    # visible. (A block-body arrow ``=> { ... }`` has no network call on the
-    # signature line, so it does not match this guard.)
-    if _ARROW_BODY_GLOBAL_HTTP_RE.search(stripped):
-        return False
     # Then, check the function-definition shapes
     return any(p.match(stripped) for p in _FUNCTION_DEF_RES)
 
@@ -1096,15 +1169,15 @@ def _line_is_library_method_call(source_line: str, match: str) -> bool:
 # internet and are commonly used for local dev tooling.
 _LOOPBACK_PRIVATE_IP_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:"
-    r"127\.\d{1,3}\.\d{1,3}\.\d{1,3}"        # 127.0.0.0/8 loopback
-    r"|0\.0\.0\.0"                           # 0.0.0.0 wildcard
-    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"        # 10.0.0.0/8 private
-    r"|192\.168\.\d{1,3}\.\d{1,3}"           # 192.168.0.0/16 private
+    r"127\.\d{1,3}\.\d{1,3}\.\d{1,3}"  # 127.0.0.0/8 loopback
+    r"|0\.0\.0\.0"  # 0.0.0.0 wildcard
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"  # 10.0.0.0/8 private
+    r"|192\.168\.\d{1,3}\.\d{1,3}"  # 192.168.0.0/16 private
     r"|172\.(?:1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3}"  # 172.16-31.0.0/12 private
-    r"|169\.254\.\d{1,3}\.\d{1,3}"           # 169.254.0.0/16 link-local (CAUTION: cloud metadata!)
-    r"|::1\b|\[::1\]"                        # IPv6 loopback
-    r"|fc[0-9a-f]{2}:|fd[0-9a-f]{2}:"        # IPv6 ULA (private)
-    r"|fe80::"                               # IPv6 link-local
+    r"|169\.254\.\d{1,3}\.\d{1,3}"  # 169.254.0.0/16 link-local (CAUTION: cloud metadata!)
+    r"|::1\b|\[::1\]"  # IPv6 loopback
+    r"|fc[0-9a-f]{2}:|fd[0-9a-f]{2}:"  # IPv6 ULA (private)
+    r"|fe80::"  # IPv6 link-local
     r"|localhost\b"
     r")",
     re.IGNORECASE,
@@ -1116,11 +1189,32 @@ _CLOUD_METADATA_RE: Final[re.Pattern[str]] = re.compile(
     r"169\.254\.169\.254|metadata\.google|fd00:ec2::254|metadata\.azure",
     re.IGNORECASE,
 )
+# A loopback/private token is DECEPTIVE (NOT a genuine local host) when it is
+# immediately followed by ``@`` — it is the URL *userinfo* and the real host
+# is whatever comes after the ``@`` (``http://127.0.0.1@evil.com/`` connects
+# to evil.com) — or by ``.<letter>`` — it is the leftmost label of a longer
+# public domain (``127.0.0.1.evil.com`` / ``localhost.attacker.net`` resolve
+# via the attacker's DNS). These are classic SSRF / exfil-allowlist bypasses,
+# so the finding MUST stay visible, not be suppressed as "just localhost".
+_DECEPTIVE_LOOPBACK_SUFFIX_RE: Final[re.Pattern[str]] = re.compile(r"@|\.[A-Za-z]")
+
+
+def _contains_deceptive_loopback_host(text: str) -> bool:
+    """True iff ``text`` contains a loopback/private token that is actually a
+    DECEPTIVE host (userinfo before ``@``, or the leftmost label of a longer
+    public domain). Shared by ``_line_has_loopback_or_private_ip`` and the
+    SSRF static-literal check so both refuse to certify a disguised egress
+    target (``127.0.0.1@evil.com`` / ``localhost.attacker.net``) as benign."""
+    for m in _LOOPBACK_PRIVATE_IP_RE.finditer(text):
+        if _DECEPTIVE_LOOPBACK_SUFFIX_RE.match(text, m.end()):
+            return True
+    return False
 
 
 def _line_has_loopback_or_private_ip(source_line: str) -> bool:
-    """True iff ``source_line`` contains a loopback / RFC1918 private /
-    link-local IP literal, AND NOT a cloud-metadata endpoint.
+    """True iff ``source_line`` references a GENUINE loopback / RFC1918
+    private / link-local IP host, AND NOT a cloud-metadata endpoint, AND NOT
+    a deceptive look-alike host (userinfo / subdomain bypass).
 
     Loopback (127.x), private (10.x, 192.168.x, 172.16-31.x), and
     IPv6 ULA/link-local addresses cannot reach the public internet.
@@ -1130,11 +1224,21 @@ def _line_has_loopback_or_private_ip(source_line: str) -> bool:
       - ``http://localhost:3000/api/...`` — local dev API
       - ``192.168.1.X`` — home network device
 
-    Iron rule check: cloud metadata endpoints (169.254.169.254,
-    metadata.google.internal) are EXCLUDED from the suppression
-    because they ARE attacker-reachable from cloud VMs.
+    Iron rule checks (KEEP visible, do NOT suppress):
+      - cloud metadata endpoints (169.254.169.254, metadata.google.internal)
+        ARE attacker-reachable from cloud VMs;
+      - a deceptive look-alike host — ``127.0.0.1@evil.com`` (the IP is
+        userinfo; evil.com is the real host) or ``127.0.0.1.evil.com`` /
+        ``localhost.attacker.net`` (the loopback token is only the leftmost
+        label of a public domain) — is a real egress target disguised as
+        loopback. Matching the IP substring anywhere on the line is NOT
+        enough; it must be the actual host.
     """
     if _CLOUD_METADATA_RE.search(source_line):
+        return False
+    # A deceptive look-alike host anywhere on the line (``127.0.0.1@evil.com``
+    # / ``localhost.attacker.net``) is a real egress target → keep visible.
+    if _contains_deceptive_loopback_host(source_line):
         return False
     return bool(_LOOPBACK_PRIVATE_IP_RE.search(source_line))
 
@@ -1207,9 +1311,7 @@ def _ssrf_call_arg_is_relative_path(source_line: str) -> bool:
 # with no shell — this is the RECOMMENDED way to AVOID shell injection.
 # The only injection surfaces are ``shell: true`` in the options or a
 # shell-interpreter first arg ('sh'/'bash'/'zsh' '-c'); both stay visible.
-_NONSHELL_SPAWN_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b(?:spawn|spawnSync|execFile|execFileSync|fork)\s*\("
-)
+_NONSHELL_SPAWN_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:spawn|spawnSync|execFile|execFileSync|fork)\s*\(")
 _SPAWN_SHELL_INTERP_FIRST_ARG_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:spawn|spawnSync|execFile|execFileSync|fork)\s*\(\s*"
     r"['\"`](?:/(?:usr/)?bin/)?(?:sh|bash|zsh|dash|ksh|fish)['\"`]"
@@ -1323,9 +1425,7 @@ def _is_versionish_regex_quantifier(match: str) -> bool:
 # a primitive) to a computed global property — e.g. a CDP page-binding
 # callback ``window[BINDING+'_resolve'] = (id,r)=>{…}`` — does not load
 # external code and is not a supply-chain vector.
-_BENIGN_GLOBAL_ASSIGN_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?:window|globalThis|self|global)\s*\[[^\]]+\]\s*="
-)
+_BENIGN_GLOBAL_ASSIGN_RE: Final[re.Pattern[str]] = re.compile(r"(?:window|globalThis|self|global)\s*\[[^\]]+\]\s*=")
 _EXTERNAL_CODE_LOAD_RE: Final[re.Pattern[str]] = re.compile(
     r"\beval\s*\(|\bfetch\s*\(|\baxios\b|\brequire\s*\(|\bimport\s*\(|"
     r"new\s+Function|\batob\s*\(|document\.write|\.innerHTML\b|https?://|"
@@ -1576,9 +1676,7 @@ def classify(
         if is_test:
             if _window_has_test_fixture_marker(source, line_idx, span=25):
                 return "safe_literal"
-            if _line_is_string_array_element(line) and _window_has_test_fixture_marker(
-                source, line_idx, span=50
-            ):
+            if _line_is_string_array_element(line) and _window_has_test_fixture_marker(source, line_idx, span=50):
                 return "safe_literal"
         return "unknown"
 
@@ -1737,7 +1835,12 @@ def classify(
     # 10.x.x.x). Loopback / private IPs cannot reach the public internet
     # and are commonly used for local dev tooling (Chrome DevTools
     # Protocol on 127.0.0.1:9222, local API server on 192.168.x.x).
-    if rule_id in ("NET_SUSPICIOUS", "CMD_INJECTION", "SSRF_PATTERN", "URL_RAW_IP") and _line_has_loopback_or_private_ip(line):
+    if rule_id in (
+        "NET_SUSPICIOUS",
+        "CMD_INJECTION",
+        "SSRF_PATTERN",
+        "URL_RAW_IP",
+    ) and _line_has_loopback_or_private_ip(line):
         return "safe_literal"
 
     # r10-final FP iter (2026-05-28) — SHELL_EXEC on library-method
@@ -1772,9 +1875,7 @@ def classify(
     return "unknown"
 
 
-_ARRAY_ELEMENT_RE: Final[re.Pattern[str]] = re.compile(
-    r"^\s*['\"`].*['\"`]\s*,?\s*$"
-)
+_ARRAY_ELEMENT_RE: Final[re.Pattern[str]] = re.compile(r"^\s*['\"`].*['\"`]\s*,?\s*$")
 
 
 def _line_is_string_array_element(line: str) -> bool:

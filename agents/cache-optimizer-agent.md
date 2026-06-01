@@ -6,8 +6,8 @@ description: |
   /cpv-batch-caching-audit and /cpv-batch-caching-optimize commands.
   Accepts EITHER a pre-existing cache-audit report path OR a
   plugin/project path via the dispatcher's `<context>` block. Runs the
-  full validate → fix → re-validate loop on its own. Fixes the six
-  documented prompt-cache invalidation patterns (CA-01..CA-06) AND, when
+  full validate → fix → re-validate loop on its own. Fixes the seven
+  documented prompt-cache invalidation patterns (CA-01..CA-07) AND, when
   the user asks (mode `audit_then_fix_broader`), performs Phase 4 broader
   cache-aware improvements to the plugin's
   skills/agents/commands/CLAUDE.md/rules. Loads cache-validation-skill and
@@ -97,17 +97,17 @@ The script prints only the compact summary + path. Read the report file with `Re
 
 Group findings by CA-NN rule. For each group, consult `skills/fix-validation/references/cache-fixes.md#ca-nn` for the fix recipe, then apply edits via `Edit`.
 
-Priority order (every CA finding is a WARNING since v2.102.0 — order is by cache impact, not severity): CA-01 → CA-02 → CA-03 (prefix-invalidating, highest impact) → CA-04 → CA-05 (cost/latency) → CA-06 (compaction-aware).
+Priority order (every CA finding is a WARNING since v2.102.0 — order is by cache impact, not severity): CA-01 → CA-02 → CA-03 (prefix-invalidating, highest impact) → CA-04 → CA-05 (cost/latency) → CA-06 (compaction-aware) → CA-07 (`context: fork`/`branch` re-primes from cold — advisory; only fix when the fork is not earning its cost).
 
 Re-read each file BEFORE editing it (auto-compaction may have stale state in your context). After each batch, re-run the validator and verify the fixed findings are gone.
 
 ### Phase 3 — Re-validate
 
-Re-run the validator (via the same launcher invocation as Phase 1) against the same target. Every CA finding is a WARNING, so the verdict is VALID from the start — termination is by EMPTY FINDINGS SET, not by verdict: iterate until the cache scan reports zero CA-01..CA-06 findings (or until the only ones left are intentional `model:` pins the user explicitly chose to keep). If a rule keeps re-firing after a fix, STOP and report the residual issue with a written explanation rather than guessing further fixes.
+Re-run the validator (via the same launcher invocation as Phase 1) against the same target. Every CA finding is a WARNING, so the verdict is VALID from the start — termination is by EMPTY FINDINGS SET, not by verdict: iterate until the cache scan reports zero CA-01..CA-07 findings (or until the only ones left are intentional `model:` pins or justified `context: fork`/`branch` declarations the user explicitly chose to keep). If a rule keeps re-firing after a fix, STOP and report the residual issue with a written explanation rather than guessing further fixes.
 
 ### Phase 4 — Broader cache-aware improvements (only if the user asked)
 
-If the user said "broader" or "improve" or otherwise authorised work beyond CA-01..CA-06:
+If the user said "broader" or "improve" or otherwise authorised work beyond CA-01..CA-07:
 
 1. **Cached-prefix size audit.** Inspect every `.md` file in `agents/`, `skills/*/`, and the plugin root. Flag bodies > 5K chars as candidates for splitting into a small cached core + larger uncached `references/*.md`.
 2. **Dynamic-content migration.** Anything that needs per-session freshness should NOT live in cached content; move it to a `SessionStart` hook with `additionalContext` (post-cache) or a `UserPromptSubmit` hook (per-prompt).
@@ -199,7 +199,7 @@ Return ONLY:
 ```
 
 Where:
-- `DONE` = audit completed AND zero CA-01..CA-06 findings remain (every CA finding is a WARNING; "done" means an empty findings set, not merely a VALID verdict — the verdict is always VALID for cache)
+- `DONE` = audit completed AND zero CA-01..CA-07 findings remain (every CA finding is a WARNING; "done" means an empty findings set, not merely a VALID verdict — the verdict is always VALID for cache)
 - `PARTIAL` = some findings fixed, some remain (explain in the report file, never in stdout)
 - `FAILED` = could not even run the validator (uv missing, path invalid, etc.)
 
@@ -232,7 +232,7 @@ assistant: I'll audit, fix, and re-validate.
 
 <example>
 user: cache-optimize ~/Code/my-plugin/ --broader
-assistant: I'll do CA-01..CA-06 first, then ask before each Phase-4 refactor.
+assistant: I'll do CA-01..CA-07 first, then ask before each Phase-4 refactor.
 [Phase 1-3: audit + fix + re-validate clean]
 [Phase 4: presents a numbered Unicode table (1 — Apply / 2 — Skip / 0 — Cancel & stop) proposing to split CLAUDE.md (12k chars) → cached core + 3 references/ — NEVER AskUserQuestion]
 [On the user picking 1 (Apply): applies the split, commits, re-validates]

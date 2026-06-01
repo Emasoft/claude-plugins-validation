@@ -205,13 +205,15 @@ Claude Code's marketplace refresh follows this flow for any layout:
 3. For each plugin entry in `plugins: [...]`:
    - **Layout A**: fetch the plugin's OWN source (the `{"source": "github", ...}` reference) → read that repo's `.claude-plugin/plugin.json` → show that version
    - **Layout B**: resolve the relative `"./plugins/<name>"` inside the ALREADY-FETCHED marketplace repo → read `plugins/<name>/.claude-plugin/plugin.json` → show that version
+   - **Layout C**: resolve the self-reference `"./"` against the ALREADY-FETCHED repo root → read that root's `.claude-plugin/plugin.json` → show that version (same directory-resolution path as Layout B, just pointing at the repo root instead of a subfolder)
 4. When the user runs `/reload-plugins` or Claude Code refreshes, the same flow re-runs and picks up new versions
 
-The key insight: **in both layouts, Claude Code ultimately reads `plugin.json` to get the plugin's version.** In Layout A it finds that file in the plugin's own repo; in Layout B it finds it inside a subdirectory of the marketplace repo. Both work.
+The key insight: **in all three layouts, Claude Code ultimately reads `plugin.json` to get the plugin's version.** In Layout A it finds that file in the plugin's own repo; in Layout B it finds it inside a subdirectory of the marketplace repo; in Layout C it finds it at the marketplace repo's own root. All three work.
 
 **For version updates to propagate**:
 - **Layout A**: push a new tag on the plugin's OWN repo → Claude Code refreshes the marketplace → for the changed plugin, it re-fetches the plugin repo → picks up the new `plugin.json` version
 - **Layout B**: edit `plugins/<name>/plugin.json`, push a new tag on the MARKETPLACE repo → Claude Code refreshes the marketplace → re-reads `plugins/<name>/plugin.json` → picks up the new version
+- **Layout C**: edit the root `.claude-plugin/plugin.json` (and keep `marketplace.json.plugins[<self>].version` in sync), push a new tag on the repo → Claude Code refreshes → re-reads the root `plugin.json` → picks up the new version
 
 In Layout B, the marketplace repo's tag and version are what triggers Claude Code's refresh, but the actual plugin version shown to users is the one in the nested `plugin.json`.
 
@@ -229,6 +231,11 @@ In Layout B, the marketplace repo's tag and version are what triggers Claude Cod
 - You want one atomic release that touches multiple plugins at once
 - You want one pull request to update many plugins in lock-step
 - Simpler onboarding: `git clone` one repo and you have everything
+
+**Choose Layout C (marketplace-in-plugin) when:**
+- The *primary* shape is a single self-contained plugin that should also be marketplace-installable from its own repo (no separate hub repo)
+- You want the same `claude plugin marketplace add <repo>` + `claude plugin install <name>@<marketplace>` flow third-party plugins use, without a two-step setup
+- See the "When NOT to use Layout C" subsection above for the cases that should fall back to A or B instead
 
 **The agent defaults to suggesting Layout A** (hub-and-spoke) when creating a new marketplace, because it's the more scalable pattern for multi-author projects. But if the user explicitly prefers Layout B, the agent must support it fully without argument.
 

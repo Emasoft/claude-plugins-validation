@@ -58,16 +58,16 @@ Runs only when `plugin.json.channels` is non-empty AND plugin ships MCP server s
 
 Load [channel-source-security](references/channel-source-security.md):
 - Why This Pillar Exists
-- Workflow
+- Scope
+- Source-Language Support
 - Deterministic Prefilter Helper
-- Rule 1 — Sender-ID allowlist (CRITICAL)
-- Rule 2 — Permission-relay gating (CRITICAL)
-- Rule 3 — Chat-ID-only gating (MAJOR)
-- Rule 4 — Fully gated (PASSED)
-- Example vulnerable code
-- Example safe code
-- Opus prompt template
-- Rubric contribution
+- Rule 1 — Inbound Sender Gating (CRITICAL)
+- Rule 2 — Permission-Relay Capability Gate (CRITICAL)
+- Rule 3 — Room/Chat-ID-Only Gating (MAJOR)
+- Rule 4 — PASSED
+- Opus Prompt Template
+- Integration With the A-F Rubric
+- Report Format
 
 ## Conditional Pillar: AI Content Layer Threats (4 categorical files)
 

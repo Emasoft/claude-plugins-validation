@@ -55,7 +55,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   --max-parallel "$MAX_PARALLEL"
 ```
 
-Print the initial status table.
+Capture the orchestrator's stdout (``PLAN``, ``STATUS_TABLE``,
+``SESSION_DIR``, ``PLUGIN_COUNT``, ``DISPATCH_GROUPS``). `$SESSION_DIR`
+is required by Steps 3 and 4 (`emit-status "$SESSION_DIR/plan.json"`),
+so you MUST bind it here from the `SESSION_DIR:` line. Queue the
+initial status table for the claude-menu-system Stop hook (emitted
+post-turn via ``systemMessage`` — zero token cost, NEVER printed
+inline by the orchestrator):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$STATUS_TABLE"
+```
+
+NEVER print menu inline; the CMS Stop hook emits via systemMessage at
+turn end.
 
 ## Step 2 — Dispatch one doctor per project
 

@@ -99,11 +99,13 @@ When migrating to/from Layout C:
 
 ### Example 1 — fresh Layout A entry (correct)
 
-```json
+```jsonc
 {
   "name": "foo-plugin",
-  "source": "github",
-  "repo": "owner/foo-plugin",
+  "source": {                         // NESTED object — see source-shape.md
+    "source": "github",
+    "repo": "owner/foo-plugin"
+  },
   "description": "Foo plugin for Claude Code"
 }
 ```
@@ -112,12 +114,14 @@ No `version` field. Resolver pulls upstream tag at install.
 
 ### Example 2 — fresh Layout A entry (WRONG — PIT-002)
 
-```json
+```jsonc
 {
   "name": "foo-plugin",
   "version": "1.0.0",                 // ← drift bomb
-  "source": "github",
-  "repo": "owner/foo-plugin"
+  "source": {
+    "source": "github",
+    "repo": "owner/foo-plugin"
+  }
 }
 ```
 
@@ -125,12 +129,13 @@ The agent set `version: "1.0.0"` at scaffold time. Upstream releases `v1.0.1`, `
 
 ### Example 3 — Layout B entry (correct)
 
-```json
+```jsonc
 {
   "name": "foo-plugin",
   "version": "1.0.0",                 // REQUIRED for local sources
-  "source": "relative-path",
-  "path": "./plugins/foo-plugin"
+  "source": "./plugins/foo-plugin"    // bare relative-path STRING (or the
+                                      // `directory` dict — see source-shape.md;
+                                      // there is no `relative-path` dict type)
 }
 ```
 
@@ -160,13 +165,23 @@ plugin.json declares "1.4.2". Either drop the version field
 sources).
 ```
 
-The plugin-fixer recipe is mechanical:
+The plugin-fixer recipe is mechanical. `entry["source"]` is a NESTED dict for
+remote types (`{"source": "github", …}`) and a bare relative-path STRING for
+local types (`"./plugins/foo"`), so read the discriminator from the right place:
 
 ```python
-if entry["source"] in {"github", "url", "git", "git-subdir", "npm"}:
-    del entry["version"]    # DROP
+src = entry["source"]
+# Local sources are the string shorthand ("./…") or the `directory` dict.
+# Remote sources are dicts whose inner "source" names the type.
+if isinstance(src, str):
+    source_type = "directory" if src.startswith("./") else src
 else:
-    entry["version"] = upstream_plugin_json["version"]    # SYNC
+    source_type = src.get("source")
+
+if source_type in {"github", "url", "git", "git-subdir", "npm"}:
+    del entry["version"]    # DROP (remote — field is decorative drift-bait)
+else:
+    entry["version"] = upstream_plugin_json["version"]    # SYNC (local)
 ```
 
 Never bump independently. Never "round up to the next minor". Never guess.

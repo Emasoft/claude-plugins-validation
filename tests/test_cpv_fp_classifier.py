@@ -94,10 +94,16 @@ class TestRegistry:
 
 class TestDemoteSeverity:
     def test_one_step_demotion(self) -> None:
+        # The ladder mirrors cpv_validation_common.SEVERITY_TIERS tier-for-tier:
+        # critical > major > minor > nit > warning > info > passed. `warning`
+        # sits between `nit` and `info` (omitting it was the prior bug fixed in
+        # both demote_severity implementations), so nit demotes to warning and
+        # warning demotes to info — never the two-tier nit→info jump.
         assert demote_severity("critical") == "major"
         assert demote_severity("major") == "minor"
         assert demote_severity("minor") == "nit"
-        assert demote_severity("nit") == "info"
+        assert demote_severity("nit") == "warning"
+        assert demote_severity("warning") == "info"
         assert demote_severity("info") == "passed"
 
     def test_clamps_at_bottom(self) -> None:
@@ -106,11 +112,16 @@ class TestDemoteSeverity:
         assert demote_severity("passed", steps=10) == "passed"
 
     def test_unknown_severity_passes_through(self) -> None:
-        assert demote_severity("warning") == "warning"
+        # A severity name that is NOT a ladder tier is returned unchanged.
+        # ("warning" is a real tier — see test_one_step_demotion — so it is
+        # NOT a valid stand-in for an unknown severity here.)
+        assert demote_severity("bogus-severity") == "bogus-severity"
 
     def test_multi_step(self) -> None:
+        # 7-tier ladder: critical(0) major(1) minor(2) nit(3) warning(4) info(5)
+        # passed(6). critical+2 → minor; critical+4 → warning.
         assert demote_severity("critical", steps=2) == "minor"
-        assert demote_severity("critical", steps=4) == "info"
+        assert demote_severity("critical", steps=4) == "warning"
 
 
 class TestApplyVerdict:

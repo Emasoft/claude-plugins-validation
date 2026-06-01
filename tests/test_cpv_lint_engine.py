@@ -13,7 +13,7 @@ test_lint_files_gitignore, test_lint_files_strict_mode). Coverage:
 from __future__ import annotations
 
 import os
-import subprocess
+import shutil
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -868,7 +868,11 @@ class TestLintRepoOrchestration:
 
 class TestRealToolSmoke:
     @pytest.mark.skipif(
-        subprocess.run(["which", "ruff"], capture_output=True).returncode != 0,
+        # shutil.which is the portable stdlib PATH probe used everywhere else
+        # in this suite. The previous form spawned `which` as a subprocess at
+        # collection time, which raises FileNotFoundError on Windows (no `which`
+        # binary) and crashes module collection rather than skipping the test.
+        shutil.which("ruff") is None,
         reason="ruff not on PATH for smoke test",
     )
     def test_ruff_executes_against_clean_python_file(self, tmp_path: Path) -> None:

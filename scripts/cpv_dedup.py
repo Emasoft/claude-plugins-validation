@@ -264,6 +264,17 @@ def _extract_group_members(group: object) -> list[Path]:
     else:
         return []
 
+    # Guard against a malformed `files` value that is iterable but not a
+    # sequence of entries — e.g. ``{"files": "some/path"}``. Without this,
+    # ``for entry in raw`` would iterate the STRING character-by-character
+    # and fabricate one-character ``Path("s")``, ``Path("o")`` … members.
+    # Those bogus paths would then flow into ``apply_dedup`` (a deletion
+    # routine), so we fail safe: anything that is not a list/tuple of
+    # entries yields no members. Real ``fclones --format json`` always
+    # emits ``files`` as a JSON array, so this never affects valid output.
+    if not isinstance(raw, (list, tuple)):
+        return []
+
     members: list[Path] = []
     for entry in raw:
         path: str | None = None

@@ -258,10 +258,13 @@ def run_bench(rule_filter: str | None = None) -> tuple[list[BenchResult], int]:
 
         exemplars = parse_corpus(corpus_file)
         result = BenchResult(rule_id=rule_id)
-        # RC-22 needs a clipboard-claim plugin meta to exercise the FP path.
-        # For now we run two passes: clipboard-claim and not. Tests cover
-        # both paths exhaustively; the bench just cares about per-exemplar
-        # default behaviour, so we use empty plugin_meta.
+        # Base plugin_meta is intentionally empty: the only domain-aware
+        # rule (RC-22) drives its FP path from per-exemplar `**Plugin
+        # meta:**` blocks parsed into `Exemplar.plugin_meta`, which
+        # `_build_context` prefers over this default. So a single pass
+        # exercises both the clipboard-domain (meta present) and
+        # non-domain (meta absent) cases straight from the corpus; the
+        # exhaustive two-path coverage lives in the RC-22 unit tests.
         plugin_meta: dict = {}
         for ex in exemplars:
             ctx = _build_context(ex, plugin_meta)

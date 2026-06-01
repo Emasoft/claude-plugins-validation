@@ -6,9 +6,18 @@ on:
   pull_request:
     branches: [main, master]
 
+# Least-privilege: this workflow only checks out and validates — it never
+# writes to the repo — so the read-only contents scope is sufficient. Without
+# an explicit block the job would inherit the repo-default token scope (often
+# read-write), violating the least-privilege principle for CI.
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
+    # Bound the run so a hung step can't burn the 360-minute default budget.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,9 +87,12 @@ jobs:
                   FAILED=1
                 fi
               else
-                # Basic validation without validator script
+                # Basic validation without validator script.
+                # Pass the path as argv (quoted "$plugin") so a submodule name
+                # containing quotes can't break out of — or inject into — the
+                # Python -c source string. The path is data, never code.
                 if [ -f "$plugin/.claude-plugin/plugin.json" ]; then
-                  python -c "import json; json.load(open('$plugin/.claude-plugin/plugin.json'))" && echo "✓ $plugin: plugin.json valid"
+                  python -c "import json,sys; json.load(open(sys.argv[1]))" "$plugin/.claude-plugin/plugin.json" && echo "✓ $plugin: plugin.json valid"
                 else
                   echo "✗ $plugin: plugin.json not found"
                   FAILED=1

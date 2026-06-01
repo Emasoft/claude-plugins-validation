@@ -269,10 +269,10 @@ The plugin table is bounded by HTML comments that act as sentinels:
 
 ```bash
 # From the marketplace repository root
-python scripts/generate_readme.py
+python scripts/generate-readme.py
 
 # With explicit paths
-python scripts/generate_readme.py --template templates/README-marketplace.md --output README.md
+python scripts/generate-readme.py --template templates/README-marketplace.md --output README.md
 ```
 
 ### When It Runs Automatically

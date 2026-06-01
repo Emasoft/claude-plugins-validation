@@ -71,13 +71,23 @@ _PARAMETRIZE_DECORATOR_RE: Final[re.Pattern[str]] = re.compile(
 # memory address) is what prevents the post-GC address-reuse staleness
 # bug: a different file whose content reuses a freed address now produces
 # a different hash and never collides into the wrong entry.
+#
+# The cache is bounded by `_MAX_CACHE` with FIFO eviction (mirrors the
+# sibling cpv_pattern_source_predicate module). Without a bound, a batch
+# run that scans thousands of distinct files would accumulate one entry
+# per unique content forever — each entry pins a full tuple-of-lines
+# snapshot, so the dict would grow without limit and leak memory for the
+# lifetime of the process.
 _LINE_SET_CACHE: dict[int, tuple[tuple[str, ...], frozenset[int]]] = {}
+_CACHE_KEY_FIFO: list[int] = []  # insertion order of keys, for eviction
+_MAX_CACHE: Final[int] = 64
 
 
 def clear_cache() -> None:
     """Drop the per-content cache. Call between batch runs to avoid
     cross-test memory accumulation."""
     _LINE_SET_CACHE.clear()
+    _CACHE_KEY_FIFO.clear()
 
 
 def _strip_string_and_comment(line: str) -> str:
@@ -163,9 +173,14 @@ def compute_parametrize_body_lines(
     Notes:
         - The line containing `)` that BALANCES the decorator's `(` is
           included as part of the body.
-        - Nested parens / brackets / braces are tracked with a single
-          counter — strings and comments are stripped first to avoid
-          false-balancing.
+        - Only round parens `(` / `)` are counted — the decorator's
+          OUTERMOST delimiter is always the `parametrize(` paren, and any
+          `[...]` list or `{...}` dict argument nests strictly inside it,
+          so tracking paren balance alone exactly locates where the call
+          ends. Brackets/braces never affect paren balance, so they are
+          intentionally NOT counted. Strings and comments are stripped
+          first so a `(`/`)` inside a string literal can't false-balance
+          the counter.
         - When the parametrize body is split across many lines (50+),
           the entire span is included.
     """
@@ -240,45 +255,86 @@ def _scan_line_for_triple(
     line: str,
     current: str | None,
 ) -> tuple[str, str | None]:
-    """Scan `line` for triple-quoted string toggles.
+    r"""Scan `line` for triple-quoted string toggles.
 
     Returns ``(line_without_triple_content, new_state)``.
 
     If ``current`` is not None, lines inside an open triple-quoted region
     are blanked out so paren-counting doesn't trigger inside docstrings.
-    Best-effort: same approach as the pattern-source-predicate's
-    ``_compute_docstring_lines``. Edge cases (single-line triple-quoted
-    spans) are handled by replacing the whole match with spaces.
+    Single-line triple-quoted spans are blanked in full.
+
+    Correctness note (why this is a real lexer, not a bare substring
+    scan): a triple-quote run that appears INSIDE a regular single- or
+    double-quoted string literal -- e.g. a string whose content happens
+    to contain three apostrophes -- or inside a `#` comment is NOT a
+    triple-quote delimiter. If such a run were treated as a triple-quote
+    opener, the open `state` would leak past the closing line of the
+    string into the rest of the file; subsequent lines (including the
+    closing paren/bracket of a `parametrize(` call and the following
+    `def` / test body) would then be blanked, the paren counter would
+    never balance, and arbitrary non-body lines would be mis-flagged as
+    parametrize-body lines -- a security-relevant false-negative that
+    silently suppresses real findings after the construct. To prevent
+    that, this scanner tracks regular-string and comment context the same
+    way `_strip_string_and_comment` does, and only toggles triple-quote
+    state on a delimiter seen in genuine code context. Regular strings are
+    passed through verbatim so the downstream `_strip_string_and_comment`
+    pass still strips them exactly as before.
     """
     out: list[str] = []
     i = 0
     n = len(line)
     state = current
     while i < n:
-        # Already inside a triple-quoted string.
+        # Already inside a triple-quoted string: blank everything until
+        # the matching closing delimiter.
         if state is not None:
             if line.startswith(state, i):
                 state = None
-                out.append(" ")
-                out.append(" ")
-                out.append(" ")
+                out.append("   ")
                 i += 3
                 continue
             out.append(" ")
             i += 1
             continue
-        # Not inside — check for opener.
-        for delim in ('"""', "'''"):
-            if line.startswith(delim, i):
-                state = delim
-                out.append(" ")
-                out.append(" ")
-                out.append(" ")
-                i += 3
-                break
-        else:
-            out.append(line[i])
+        c = line[i]
+        # Unquoted `#` starts a comment: the rest of the line is not code,
+        # so a `'''`/`"""` in it must NOT open a triple-quoted region.
+        # Pass the comment through verbatim — `_strip_string_and_comment`
+        # blanks it for paren-counting.
+        if c == "#":
+            out.append(line[i:])
+            break
+        # Triple-quote opener (checked before the single/double check
+        # because `"""` starts with `"`).
+        if line.startswith('"""', i) or line.startswith("'''", i):
+            state = line[i : i + 3]
+            out.append("   ")
+            i += 3
+            continue
+        # Regular single/double-quoted string: consume it to its closing
+        # quote honoring `\` escapes, passing the characters through
+        # unchanged. This stops any `'''`/`"""` *inside* the string from
+        # being misread as a triple-quote delimiter. An unterminated
+        # string (line continuation / partially-edited buffer) simply
+        # runs to end-of-line without toggling triple-quote state.
+        if c == "'" or c == '"':
+            quote = c
+            out.append(c)
             i += 1
+            while i < n:
+                ch = line[i]
+                if ch == "\\" and i + 1 < n:
+                    out.append(line[i : i + 2])
+                    i += 2
+                    continue
+                out.append(ch)
+                i += 1
+                if ch == quote:
+                    break
+            continue
+        out.append(c)
+        i += 1
     return "".join(out), state
 
 
@@ -310,5 +366,15 @@ def is_parametrize_body_line(
     # Cache miss, or a (rare) hash collision with different content —
     # recompute and overwrite with the snapshot that actually applies.
     body_lines = compute_parametrize_body_lines(content)
+    is_new_key = cache_key not in _LINE_SET_CACHE
     _LINE_SET_CACHE[cache_key] = (snapshot, body_lines)
+    if is_new_key:
+        # Track insertion order only for genuinely new keys; a
+        # collision-overwrite reuses an existing key and must NOT be
+        # re-appended (that would put a duplicate in the FIFO and evict a
+        # still-live entry one slot early).
+        _CACHE_KEY_FIFO.append(cache_key)
+        while len(_LINE_SET_CACHE) > _MAX_CACHE and _CACHE_KEY_FIFO:
+            oldest = _CACHE_KEY_FIFO.pop(0)
+            _LINE_SET_CACHE.pop(oldest, None)
     return line_no in body_lines

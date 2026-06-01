@@ -132,8 +132,8 @@ Rule files are plain Markdown files placed in a plugin's `rules/` directory. The
 
 ## 4. Frontmatter Issues
 
-### [WARNING] Unknown frontmatter field '{key}' in rule file — only 'paths' is recognized by Claude Code.
-**Source**: `validate_rules.py` — `_validate_frontmatter()`
+### [MINOR] Unknown frontmatter field '{key}' in rule file — only 'paths' is recognized by Claude Code.
+**Source**: `validate_rules.py` — `_validate_frontmatter()` (emitted via `report.minor()`, so a typo of `paths:` stays visible)
 **What it means**: The rule file's frontmatter contains a field that Claude Code does not recognize. Only the `paths` field is documented as a recognized frontmatter field for rule files. Unknown fields are silently ignored by Claude Code.
 **How to fix**:
 1. Remove the unknown field from the frontmatter if it serves no purpose.

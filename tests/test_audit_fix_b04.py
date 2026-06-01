@@ -115,9 +115,7 @@ def test_finding11_all_five_fields_present_in_known_set():
 def test_finding43_no_all_hooks_valid_when_major_present():
     """A MAJOR finding for an event must suppress the 'All hooks valid' PASSED line."""
     report = HookValidationReport(hook_path="hooks.json")
-    event_config = [
-        {"matcher": "Bash", "hooks": [{"type": "command", "command": "/tmp/cpv_b04_missing/foo.py"}]}
-    ]
+    event_config = [{"matcher": "Bash", "hooks": [{"type": "command", "command": "/tmp/cpv_b04_missing/foo.py"}]}]
     validate_event_hooks("PreToolUse", event_config, _FAKE_ROOT, report)
     has_major = any(r.level == "MAJOR" for r in report.results)
     said_all_valid = any(r.level == "PASSED" and "All hooks valid" in r.message for r in report.results)

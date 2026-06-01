@@ -1,4 +1,4 @@
-# Cache-Audit Fixes (CA-01..CA-06, validate_cache.py — v2.27.0+)
+# Cache-Audit Fixes (CA-01..CA-07, validate_cache.py — v2.27.0+)
 
 ## Table of Contents
 
@@ -21,11 +21,11 @@
 
 ## Overview
 
-The Anthropic prompt cache caches the rendered system-prompt prefix (CLAUDE.md content + cached agent/skill bodies + settings-derived blocks). The cache is invalidated whenever any byte in that prefix changes. CPV's cache-audit rules catch six patterns that silently break caching, force expensive re-renders, or fork the cached prompt into many distinct cache keys (one per session).
+The Anthropic prompt cache caches the rendered system-prompt prefix (CLAUDE.md content + cached agent/skill bodies + settings-derived blocks). The cache is invalidated whenever any byte in that prefix changes. CPV's cache-audit rules catch seven patterns that silently break caching, force expensive re-renders, or fork the cached prompt into many distinct cache keys (one per session).
 
-These six rules are inexpensive to fix. The cost of NOT fixing them is paid every prompt: a 200K-token system-prompt cache miss costs ~10x normal token-rate vs a hit.
+These seven rules are inexpensive to fix. The cost of NOT fixing them is paid every prompt: a 200K-token system-prompt cache miss costs ~10x normal token-rate vs a hit.
 
-Since v2.102.0 EVERY cache finding (CA-01..CA-06) is reported at **WARNING** severity — a cache miss costs tokens/latency but never makes a plugin invalid. `validate_plugin` CALLS the cache validator as a separate step that writes its OWN report (the main report carries only a one-line pointer to it); the standalone `cpv-cache-optimize` audit/fix commands remain the way to act on these findings. The fixer applies these fixes only when the user asks to fix WARNING-level findings too.
+Since v2.102.0 EVERY cache finding (CA-01..CA-07) is reported at **WARNING** severity — a cache miss costs tokens/latency but never makes a plugin invalid. `validate_plugin` CALLS the cache validator as a separate step that writes its OWN report (the main report carries only a one-line pointer to it); the standalone `cpv-cache-optimize` audit/fix commands remain the way to act on these findings. The fixer applies these fixes only when the user asks to fix WARNING-level findings too.
 
 ## CA-01 — Static prefix violation in cached content
 

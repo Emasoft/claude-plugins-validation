@@ -565,11 +565,7 @@ def _secret_hit_is_placeholder(matched_text: str, line: str) -> bool:
        the line, not just the token, because real fixtures put the marker
        beside the value (`API_KEY="your-api-key-here"`).
     """
-    return (
-        matched_text in KNOWN_EXAMPLE_SECRETS
-        or is_placeholder_secret(matched_text)
-        or is_placeholder_secret(line)
-    )
+    return matched_text in KNOWN_EXAMPLE_SECRETS or is_placeholder_secret(matched_text) or is_placeholder_secret(line)
 
 
 def validate_security(content: str, filename: str, report: CommandValidationReport) -> None:
@@ -769,7 +765,11 @@ def validate_commands_directory(commands_dir: Path) -> list[CommandValidationRep
         report.critical(f"Not a directory: {commands_dir}")
         return [report]
 
-    command_files = sorted(commands_dir.glob("*.md"))
+    # Case-insensitive .md match — Path.glob("*.md") is case-sensitive on POSIX,
+    # so files named Cmd.MD / foo.Md would be silently skipped on Linux/macOS even
+    # though validate_command() itself accepts them (it compares suffix.lower()).
+    # Mirrors validate_agent.validate_agents_directory so the two validators agree.
+    command_files = sorted(p for p in commands_dir.iterdir() if p.is_file() and p.suffix.lower() == ".md")
 
     if not command_files:
         report = CommandValidationReport(command_path=str(commands_dir))
@@ -919,11 +919,15 @@ def main() -> int:
         print(f"Error: {path} does not exist", file=sys.stderr)
         return 1
 
-    # Verify content type — must be .md file or directory containing .md files
-    if path.is_file() and path.suffix != ".md":
+    # Verify content type — must be .md file or directory containing .md files.
+    # Case-insensitive suffix check, consistent with validate_command() (which
+    # compares suffix.lower()) and validate_agent.main(); without it a directly
+    # passed Cmd.MD is rejected here even though the validator would accept it,
+    # and a directory holding only .MD files is wrongly reported as empty.
+    if path.is_file() and path.suffix.lower() != ".md":
         print(f"Error: {path} is not a Markdown (.md) command file", file=sys.stderr)
         return 1
-    if path.is_dir() and not list(path.glob("*.md")):
+    if path.is_dir() and not any(p.suffix.lower() == ".md" for p in path.iterdir() if p.is_file()):
         print(f"Error: No command definition files (.md) found in {path}", file=sys.stderr)
         return 1
 

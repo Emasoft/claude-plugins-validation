@@ -541,9 +541,7 @@ class TestGeneratedWorkflowHardening:
         # A 40-hex SHA pin (not a bare @v4 tag) must be present.
         import re
 
-        assert re.search(r"astral-sh/setup-uv@[0-9a-f]{40}", text), (
-            "setup-uv must be pinned to a 40-char commit SHA"
-        )
+        assert re.search(r"astral-sh/setup-uv@[0-9a-f]{40}", text), "setup-uv must be pinned to a 40-char commit SHA"
 
     def test_update_catalog_workflow_has_permissions(self):
         """update-catalog.yml needs contents:write (it pushes README) — but declared, not omitted."""

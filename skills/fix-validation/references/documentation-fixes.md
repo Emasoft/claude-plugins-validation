@@ -26,9 +26,9 @@ Comprehensive remediation guide for all issues detected by `validate_documentati
 
 ## 1. README Existence Issues
 
-### [CRITICAL] README.md is missing at plugin root
+### [WARNING] README.md is missing at plugin root
 **Source**: `validate_documentation.py` — `validate_readme_exists()`
-**What it means**: No `README.md` file was found at the plugin's root directory. This is a required file for every plugin.
+**What it means**: No `README.md` file was found at the plugin's root directory. A missing README is a documentation-quality matter, not runtime breakage — a README-less plugin still loads and is VALID-with-a-warning (per the TRDD-021250b5 severity principle). You should still add one for discoverability.
 **How to fix**:
 1. Create `README.md` in the plugin root directory.
 2. At minimum include: a title (`# Plugin Name`), a description paragraph, an `## Installation` section, and a `## Usage` section.
@@ -47,9 +47,9 @@ Comprehensive remediation guide for all issues detected by `validate_documentati
    Describe how to use the plugin here.
    ```
 
-### [MINOR] README.md exists but uses lowercase (readme.md) - consider using README.md
+### [MINOR] README.md exists but uses non-canonical case (e.g. readme.md / Readme.md) - consider renaming to README.md
 **Source**: `validate_documentation.py` — `validate_readme_exists()`
-**What it means**: A `readme.md` file exists (lowercase) but the standard convention is `README.md` (uppercase). This may cause issues on case-sensitive filesystems and with some tooling.
+**What it means**: A README file exists under a non-canonical case-variant (e.g. `readme.md`, `Readme.md`) but the standard convention is `README.md` (all uppercase). This may cause issues on case-sensitive filesystems and with some tooling.
 **How to fix**:
 1. Rename the file: `git mv readme.md README.md`
 2. Commit the rename: `git commit -m "fix: rename readme.md to README.md"`
@@ -58,7 +58,7 @@ Comprehensive remediation guide for all issues detected by `validate_documentati
 
 ## 2. README Content Section Issues
 
-### [MAJOR] README missing installation section (## Installation, ## Getting Started, ## Setup, or ## Quick Start)
+### [WARNING] README missing installation section (## Installation, ## Getting Started, ## Setup, or ## Quick Start)
 **Source**: `validate_documentation.py` — `validate_installation_section()`
 **What it means**: The README does not contain any heading that serves as an installation guide. Users cannot determine how to install or set up the plugin.
 **How to fix**:
@@ -69,7 +69,7 @@ Comprehensive remediation guide for all issues detected by `validate_documentati
    - `## Quick Start`
 2. Include step-by-step instructions for installing the plugin.
 
-### [MAJOR] README missing usage section (## Usage, ## Examples, or ## How to Use)
+### [WARNING] README missing usage section (## Usage, ## Examples, or ## How to Use)
 **Source**: `validate_documentation.py` — `validate_usage_section()`
 **What it means**: The README does not contain any heading that shows how to use the plugin.
 **How to fix**:
@@ -85,7 +85,7 @@ Comprehensive remediation guide for all issues detected by `validate_documentati
 **How to fix**:
 1. Add a title as the very first line of the README: `# Your Plugin Name`
 
-### [MAJOR] README missing description section after title (add content between # Title and first ## section)
+### [WARNING] README missing description section after title (add content between # Title and first ## section)
 **Source**: `validate_documentation.py` — `validate_description_section()`
 **What it means**: The README has a title and sections but no description paragraph between the title and the first `##` section. Users cannot quickly understand what the plugin does.
 **How to fix**:
@@ -129,7 +129,7 @@ Comprehensive remediation guide for all issues detected by `validate_documentati
 
 ## 4. CHANGELOG Issues
 
-### [MINOR] CHANGELOG.md is recommended for tracking version history
+### [WARNING] CHANGELOG.md is recommended for tracking version history
 **Source**: `validate_documentation.py` — `validate_changelog_exists()`
 **What it means**: No changelog file was found. A changelog helps users understand what changed between versions. Accepted filenames: `CHANGELOG.md`, `changelog.md`, `CHANGES.md`, `HISTORY.md`.
 **How to fix**:
@@ -149,7 +149,7 @@ Comprehensive remediation guide for all issues detected by `validate_documentati
 
 ## 5. Heading Hierarchy Issues
 
-### [MINOR] Heading hierarchy skip: level {current_level} to level {new_level} (line {line_num})
+### [WARNING] Heading hierarchy skip: level {current_level} to level {new_level} (line {line_num})
 **Source**: `validate_documentation.py` — `validate_heading_hierarchy()`
 **What it means**: The README jumps heading levels (e.g., goes from `##` directly to `####`), skipping `###`. This creates an inconsistent document structure that may confuse readers and tools.
 **How to fix**:
@@ -174,7 +174,7 @@ Comprehensive remediation guide for all issues detected by `validate_documentati
 2. Add a closing ` ``` ` at the end of the code block.
 3. Use a markdown linter or preview to visually confirm the fix.
 
-### [MINOR] Code block at line {line_num} missing language tag
+### [WARNING] Code block at line {line_num} missing language tag
 **Source**: `validate_documentation.py` — `validate_code_block_language_tags()`
 **What it means**: A code fence (` ``` `) does not specify a language for syntax highlighting. This reduces readability and prevents syntax highlighting in editors and on GitHub.
 **How to fix**:
@@ -195,7 +195,7 @@ Comprehensive remediation guide for all issues detected by `validate_documentati
 
 ## 7. List Formatting Issues
 
-### [MINOR] Inconsistent list markers used: {markers} (prefer using one consistently)
+### [WARNING] Inconsistent list markers used: {markers} (prefer using one consistently)
 **Source**: `validate_documentation.py` — `validate_list_formatting()`
 **What it means**: The README uses multiple different unordered list markers (`-`, `*`, `+`) in the same document. Consistent formatting improves readability.
 **How to fix**:
@@ -207,7 +207,7 @@ Comprehensive remediation guide for all issues detected by `validate_documentati
 
 ## 8. Table Structure Issues
 
-### [MINOR] Table separator row has {sep_cols} columns, header has {header_cols} (line {line_num})
+### [WARNING] Table separator row has {sep_cols} columns, header has {header_cols} (line {line_num})
 **Source**: `validate_documentation.py` — `validate_table_structure()`
 **What it means**: The separator row (the `|---|---|` line) in a markdown table has a different number of columns than the header row. This renders incorrectly in many markdown renderers.
 **How to fix**:
@@ -220,7 +220,7 @@ Comprehensive remediation guide for all issues detected by `validate_documentati
    | data  | data  | data  |
    ```
 
-### [MINOR] Table row has {row_cols} columns, header has {header_cols} (line {line_num})
+### [WARNING] Table row has {row_cols} columns, header has {header_cols} (line {line_num})
 **Source**: `validate_documentation.py` — `validate_table_structure()`
 **What it means**: A data row in a markdown table has a different number of columns than the header row. This causes misaligned or broken table rendering.
 **How to fix**:

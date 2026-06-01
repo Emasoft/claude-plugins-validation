@@ -391,7 +391,14 @@ _GITHUB_URL_RE = re.compile(
     )
     (?P<owner>[^/]+)                   # owner segment
     /
-    (?P<repo>[^/.]+?)                  # repo segment (lazy: stop before .git)
+    (?P<repo>[^/]+?)                   # repo segment (lazy; dots ARE allowed —
+                                       #   GitHub repos like `user.github.io`
+                                       #   or `socket.io` contain dots. The
+                                       #   trailing `.git` is stripped by the
+                                       #   optional suffix below, NOT by
+                                       #   excluding '.' from the name, which
+                                       #   would drop every dotted repo and
+                                       #   diverge from publish.py.)
     (?:\.git)?                         # optional .git suffix
     /?                                 # optional trailing slash
     $
@@ -412,7 +419,15 @@ def parse_owner_repo_from_remote(url: str) -> tuple[str, str] | None:
     m = _GITHUB_URL_RE.match(url.strip())
     if not m:
         return None
-    return m.group("owner"), m.group("repo")
+    repo = m.group("repo")
+    # A path segment that is ENTIRELY ".git" is not a valid repo name — the
+    # ".git" is a suffix to strip, never the name itself (GitHub forbids a repo
+    # literally named ".git"). publish.py returns None here because stripping
+    # the suffix leaves an empty repo; mirror that so the degenerate
+    # ".../owner/.git" input does not parse as repo=".git".
+    if not repo or repo == ".git":
+        return None
+    return m.group("owner"), repo
 
 
 def _git_remote_url(root: Path) -> str | None:

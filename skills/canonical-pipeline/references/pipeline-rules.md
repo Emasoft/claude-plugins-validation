@@ -13,6 +13,9 @@
 - [Binary Plugins](#binary-plugins)
 - [README Requirements](#readme-requirements)
 - [Pre-Publish Local Dry-Run](#pre-publish-local-dry-run)
+- [Post-Push CI Verification](#post-push-ci-verification)
+- [Mega-Linter Configuration](#mega-linter-configuration)
+- [Common Fixes Reference](#common-fixes-reference)
 
 ## Checklist
 
@@ -23,9 +26,6 @@
 - [ ] Plugin scripts are all Python (no ad-hoc shell)
 - [ ] README has install/update/uninstall sections
 - [ ] Dry-run passes before the first real publish
-- [Post-Push CI Verification](#post-push-ci-verification)
-- [Mega-Linter Configuration](#mega-linter-configuration)
-- [Common Fixes Reference](#common-fixes-reference)
 
 These rules MUST be followed by every agent, command, and skill that creates, publishes, standardizes, or fixes a plugin repository.
 
@@ -40,7 +40,10 @@ The pre-push hook is the **keystone of the entire pipeline**. It runs 4 gates in
 | 3. Validate | `validate_plugin.py . --strict` | CRITICAL, MAJOR, MINOR, NIT (exit codes 1-4) |
 | 4. Tests | `pytest tests/ -q` | Any test failure |
 
-**Only WARNINGs (exit code 5+) pass through.** Everything else blocks.
+**Only WARNING/INFO/PASSED findings pass through** — those map to exit
+code 0 under both `--strict` and non-strict. CRITICAL/MAJOR/MINOR/NIT
+map to exit codes 1-4 (NIT blocks only under `--strict`) and fail the
+gate. There is no exit code 5; WARNING never blocks.
 
 ## Fix-All Mandate
 

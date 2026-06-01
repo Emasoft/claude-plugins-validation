@@ -1,6 +1,6 @@
 ---
 name: cpv-pre-install-scan
-description: Scan any skill / plugin / marketplace for security threats BEFORE installing it. Runs the MANDATORY native skillaudit scanner (50 rules / 489 patterns) + the full CPV security pipeline in a sandboxed tmp dir — never writes to ~/.claude/plugins/cache/. Use it before `claude plugin install`, before adding a remote skill, or any time you're about to run untrusted code.
+description: Scan any skill / plugin / marketplace for security threats BEFORE installing it. Runs the MANDATORY native skillaudit scanner (50 rules / 486 patterns) + the full CPV security pipeline in a sandboxed tmp dir — never writes to ~/.claude/plugins/cache/. Use it before `claude plugin install`, before adding a remote skill, or any time you're about to run untrusted code.
 argument-hint: <target> — local path, GitHub URL, owner/repo slug, or archive
 ---
 
@@ -15,7 +15,7 @@ The scanner runs all of:
 
 * The full CPV security pipeline (27 in-process checks + 5 external
   scanners when available)
-* The **MANDATORY** native skillaudit rule catalog (50 rules / 489
+* The **MANDATORY** native skillaudit rule catalog (50 rules / 486
   patterns across 21 threat categories — credential theft, data
   exfiltration, prompt injection, MCP schema poisoning, A2A attacks,
   obfuscation, supply-chain, container escape, persistence, crypto

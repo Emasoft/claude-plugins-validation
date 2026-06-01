@@ -79,9 +79,7 @@ def _extract_func_source(module_src: str, func_name: str) -> str:
 def test_local_marketplace_emits_local_mode_pre_push_hook(tmp_path: Path) -> None:
     """github_owner='' -> .githooks/pre-push is the local-mode hook."""
     target = tmp_path / "local-mp"
-    rc = gmr.generate_marketplace_repo(
-        target, "local-mp", "Me", "desc", github_owner="", add_plugins=[], dry_run=False
-    )
+    rc = gmr.generate_marketplace_repo(target, "local-mp", "Me", "desc", github_owner="", add_plugins=[], dry_run=False)
     assert rc == 0
     hook = (target / ".githooks" / "pre-push").read_text(encoding="utf-8")
     assert "local mode" in hook
@@ -93,9 +91,7 @@ def test_local_marketplace_emits_local_mode_pre_push_hook(tmp_path: Path) -> Non
 def test_github_marketplace_emits_hub_and_spoke_pre_push_hook(tmp_path: Path) -> None:
     """github_owner set -> .githooks/pre-push is the strict hub-and-spoke hook."""
     target = tmp_path / "gh-mp"
-    rc = gmr.generate_marketplace_repo(
-        target, "gh-mp", "Me", "desc", github_owner="me", add_plugins=[], dry_run=False
-    )
+    rc = gmr.generate_marketplace_repo(target, "gh-mp", "Me", "desc", github_owner="me", add_plugins=[], dry_run=False)
     assert rc == 0
     hook = (target / ".githooks" / "pre-push").read_text(encoding="utf-8")
     assert "hub-and-spoke" in hook
@@ -124,9 +120,7 @@ def test_local_hook_accepts_relative_string_source_end_to_end(tmp_path: Path) ->
         ghooks.mkdir()
         hook_file = ghooks / "pre-push"
         hook_file.write_text(hook_src)
-        return subprocess.run(
-            [sys.executable, str(hook_file)], capture_output=True, text=True, input=""
-        ).returncode
+        return subprocess.run([sys.executable, str(hook_file)], capture_output=True, text=True, input="").returncode
 
     assert _run(local_hook) == 0  # corrected behavior
     assert _run(hub_hook) == 1  # guard: the wrong hook would have blocked
@@ -198,17 +192,11 @@ def _simulate_push_block(push_succeeds: bool) -> int:
 
     wf = gmr._update_catalog_workflow("demo")
     doc = yaml.safe_load(wf)
-    step = next(
-        s
-        for s in doc["jobs"]["update-readme"]["steps"]
-        if s.get("name") == "Commit and push"
-    )
+    step = next(s for s in doc["jobs"]["update-readme"]["steps"] if s.get("name") == "Commit and push")
     run = step["run"]
     run = run.replace("${{ github.event.repository.default_branch }}", "main")
     run = run.replace("git add README.md", "true")
-    run = run.replace(
-        'git commit -m "docs: regenerate plugin catalog from marketplace.json"', "true"
-    )
+    run = run.replace('git commit -m "docs: regenerate plugin catalog from marketplace.json"', "true")
     run = run.replace("git push", "true" if push_succeeds else "false")
     run = run.replace("git pull --rebase origin main", "true")
     return subprocess.run(["bash", "-c", run], capture_output=True, text=True).returncode
@@ -316,10 +304,7 @@ def test_stage_gh_release_success_returns_normally(tmp_path: Path) -> None:
 
 def test_stage_gh_release_already_exists_is_idempotent_success(tmp_path: Path) -> None:
     """gh 'already_exists' -> treated as success (idempotent re-run)."""
-    assert (
-        _run_stage_gh_release(1, "HTTP 422: Validation Failed (already_exists)", tmp_path)
-        == "ok"
-    )
+    assert _run_stage_gh_release(1, "HTTP 422: Validation Failed (already_exists)", tmp_path) == "ok"
 
 
 def test_stage_gh_release_genuine_failure_aborts(tmp_path: Path) -> None:
@@ -349,9 +334,7 @@ def test_plugin_in_remote_marketplace_string_source_skip_is_intentional() -> Non
     exec(compile(ast.parse(src), "<reg>", "exec"), ns)
     f = ns["_plugin_in_remote_marketplace"]
     string_src = {"plugins": [{"name": "p", "source": "./plugins/p"}]}
-    github_src = {
-        "plugins": [{"name": "p", "source": {"source": "github", "repo": "o/p"}}]
-    }
+    github_src = {"plugins": [{"name": "p", "source": {"source": "github", "repo": "o/p"}}]}
     # Intentional: string source never matches a remote slug.
     assert f(string_src, "p", "o/p") is False
     assert f(string_src, "p", None) is False

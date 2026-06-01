@@ -49,9 +49,12 @@ for "debugging" — use `printf '%s\n' "${#MARKETPLACE_PAT}"` instead.
 ### Step 2: If the token IS set — push it to both repos non-interactively
 
 **Preferred: use the dedicated helper script.** `scripts/set_marketplace_pat.py`
-enforces the correct `gh secret set --body "$VALUE"` form, never prints the
-token (so it cannot leak into Claude Code transcripts, shell history, or log
-files), validates repo arguments, rejects malformed PATs (whitespace /
+feeds the PAT to `gh secret set NAME --repo OWNER/REPO` on **stdin** (no `--body`
+flag) — the most secure form, because the value never appears on the process
+command line where `ps -ef` or `/proc/<pid>/cmdline` could leak it, and `gh`
+strips the trailing newline itself so there is no echo-pipe footgun. It never
+prints the token (so it cannot leak into Claude Code transcripts, shell history,
+or log files), validates repo arguments, rejects malformed PATs (whitespace /
 newlines from copy-paste), and runs verification automatically.
 
 ```bash
@@ -69,8 +72,11 @@ uv run python scripts/set_marketplace_pat.py --verify-only \
 #### Manual fallback — `gh secret set --body`
 
 If (and only if) the helper script is unavailable (e.g., setting a *different*
-secret name, or working outside the CPV repo), the only correct manual form
-uses the `--body` / `-b` flag to pass the value directly as an argument:
+secret name, or working outside the CPV repo), the simplest correct manual form
+uses the `--body` / `-b` flag to pass the value directly as an argument. It is
+newline-safe (unlike the `echo`/here-string pipes forbidden below). Note that
+the helper script's stdin form is *more* secure — see the caveat after the
+verify block — but `--body` is acceptable for a one-shot interactive set:
 
 ```bash
 # Silence xtrace in case `set -x` is active so the value is not traced
@@ -85,8 +91,12 @@ gh secret list --repo "<MARKETPLACE_OWNER>/<MARKETPLACE_REPO>" | grep -q '^MARKE
 ```
 
 `-b` is the short form; `--body` is the long form — they are identical. Both
-take the value as an argv parameter, which keeps the token out of stdin and
-out of the shell's history expansion.
+take the value as an argv parameter, which avoids the shell's history expansion
+and the trailing-newline footgun. The one tradeoff: a value on argv is briefly
+visible to other local users via `ps -ef` / `/proc/<pid>/cmdline`. That is why
+the helper script feeds the value on stdin instead (no argv exposure). For a
+one-shot interactive set on a single-user machine `--body` is fine; in CI or on
+a shared host, prefer the helper's stdin form.
 
 **Forbidden patterns** — these are WRONG and cause real outages. Reject them
 on sight and do not emit them yourself:
@@ -97,7 +107,10 @@ on sight and do not emit them yourself:
 - `gh secret set MARKETPLACE_PAT <<< "$MARKETPLACE_PAT"` — here-string also
   appends a newline on most shells; same failure mode.
 - `printf "$MARKETPLACE_PAT" | gh secret set ...` — same category; even if
-  `printf` avoids the newline, stdin-driven `gh secret set` is still fragile.
+  `printf` avoids the newline, a *shell pipe* into `gh secret set` is fragile
+  across `sh`/`zsh`/`bash`/PowerShell. (The helper script avoids this by using
+  Python's `subprocess(input=...)`, which is a controlled, deterministic stdin —
+  not a shell pipe.)
 - Any invocation that writes the token value to stdout, stderr, a log file,
   the git fix log, or the Claude Code conversation transcript.
 

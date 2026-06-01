@@ -56,8 +56,12 @@ Bypass / opt-out
 1. ``CPV_SKIP_UPSTREAM_CROSS_CHECK=1`` env var skips ALL Phase B cross-checks.
 2. ``<marketplace>/.claude-plugin/.cpv-no-upstream-check`` (zero-byte file)
    skips Phase B for the whole marketplace.
-3. ``"_cpv_skip_upstream_check": true`` on a marketplace entry skips it for
-   that entry only. (Handled by the caller in validate_marketplace.py.)
+
+There is deliberately NO per-entry opt-out: the former
+``"_cpv_skip_upstream_check": true`` entry flag was REMOVED in TRDD-02e1672b
+(a marketplace entry must not be able to self-exempt from cross-validation),
+and any ``_``-prefixed entry field now trips RC-MKPL-UNKNOWN-FIELD in
+validate_marketplace.py Phase A.
 
 Gate 0 of ``publish.py`` REJECTS ``CPV_SKIP_UPSTREAM_CROSS_CHECK`` so a
 release can never ship without the cross-check.
@@ -138,11 +142,12 @@ def _truthy_env(value: str | None) -> bool:
 def cross_validate_enabled(marketplace_dir: Path | None) -> bool:
     """Return False when ANY opt-out mechanism is in effect.
 
-    Three mechanisms checked here:
+    Two mechanisms checked here:
       1. CPV_SKIP_UPSTREAM_CROSS_CHECK=1 (whole-CI bypass)
       2. <marketplace>/.claude-plugin/.cpv-no-upstream-check (per-marketplace)
-    The per-entry opt-out (`_cpv_skip_upstream_check`) is checked by the
-    caller because it's keyed off the entry dict, not the marketplace path.
+    There is NO per-entry opt-out — the former `_cpv_skip_upstream_check`
+    entry flag was removed in TRDD-02e1672b (see `entry_skips_cross_check`,
+    which now returns False unconditionally).
     """
     if _truthy_env(os.environ.get("CPV_SKIP_UPSTREAM_CROSS_CHECK")):
         return False
@@ -529,9 +534,12 @@ def _make_name_drift(entry_value: Any, upstream_value: Any, entry_label: str) ->
         ),
         suggestion=(
             f"Align the marketplace entry name with upstream: change "
-            f"name={entry_value!r} → name={upstream_value!r}, OR add "
-            f'"_cpv_skip_upstream_check": true on this entry if the '
-            "name divergence is intentional (brand-vs-canonical alias)."
+            f"name={entry_value!r} → name={upstream_value!r}. There is NO "
+            "marketplace-side opt-out for this check (the former "
+            "`_cpv_skip_upstream_check` per-entry flag was removed in "
+            "TRDD-02e1672b and any `_`-prefixed field now trips "
+            "RC-MKPL-UNKNOWN-FIELD) — if the divergence is a deliberate "
+            "brand-vs-canonical alias, rename one side so they match."
         ),
     )
 
@@ -703,8 +711,11 @@ def main(argv: list[str] | None = None) -> int:
     for entry in plugins:
         if not isinstance(entry, dict):
             continue
+        # entry_skips_cross_check() is a shim that always returns False
+        # (the per-entry opt-out was removed in TRDD-02e1672b); the call is
+        # kept as the single hook a future *safe* skip mechanism would use.
         if entry_skips_cross_check(entry):
-            print(f"{entry.get('name', '<?>')}: skipped (_cpv_skip_upstream_check)")
+            print(f"{entry.get('name', '<?>')}: skipped (per-entry cross-check opt-out)")
             continue
         upstream = fetch_upstream_plugin_json(entry, marketplace_dir=marketplace_dir)
         if upstream is None:

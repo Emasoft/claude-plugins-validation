@@ -1,6 +1,6 @@
 # Complete Skill Validation Rules Reference
 
-This document contains all 190+ validation rules extracted from multiple validation frameworks.
+This document contains all 190+ validation rules extracted from multiple validation frameworks; the 13 tables below enumerate 168 core rules (see the per-category counts in the Summary).
 
 ## Table of Contents
 
@@ -13,17 +13,17 @@ This document contains all 190+ validation rules extracted from multiple validat
 - [7. Path Format Rules (6 rules)](#7-path-format-rules)
 - [8. Resource Reference Rules (8 rules)](#8-resource-reference-rules)
 - [9. Allowed-Tools Rules (10 rules)](#9-allowed-tools-rules)
-
-## Checklist
-
-- [ ] Identify the rule category the finding belongs to (1-9)
-- [ ] Open the matching section
-- [ ] Apply the rule's remediation to SKILL.md
-- [ ] Re-run `validate_skill.py --strict`
 - [10. 8+1 Pillars Rules (18 rules)](#10-81-pillars-rules)
 - [11. Progressive Disclosure Rules (12 rules)](#11-progressive-disclosure-rules)
 - [12. Content Quality Rules (15 rules)](#12-content-quality-rules)
 - [13. Agent-Specific Rules (22 rules)](#13-agent-specific-rules)
+
+## Checklist
+
+- [ ] Identify the rule category the finding belongs to (1-13)
+- [ ] Open the matching section
+- [ ] Apply the rule's remediation to SKILL.md
+- [ ] Re-run `validate_skill.py --strict`
 
 ---
 
@@ -58,8 +58,8 @@ This document contains all 190+ validation rules extracted from multiple validat
 | F10 | `license` field required (enterprise) | MAJOR | Enterprise |
 | F11 | Field whitelist: only 6 fields allowed (OpenSpec strict) | MAJOR | OpenSpec |
 | F12 | Extended fields allowed in Claude Code mode | INFO | Claude Code |
-| F13 | Unknown fields generate warning | INFO | Claude Code |
-| F14 | Deprecated fields (`when_to_use`) generate warning | MINOR | Nixtla |
+| F13 | Unknown fields generate warning (non-strict mode emits WARNING severity) | WARNING | Claude Code |
+| F14 | Deprecated fields generate warning (DEPRECATED_FIELDS set; currently empty — `when_to_use` is a supported field, NOT deprecated) | MINOR | Nixtla |
 | F15 | `context` field must be "fork" if present | CRITICAL | Claude Code |
 | F16 | `agent` field requires `context: fork` | MAJOR | Claude Code |
 | F17 | `user-invocable` must be boolean | CRITICAL | Claude Code |

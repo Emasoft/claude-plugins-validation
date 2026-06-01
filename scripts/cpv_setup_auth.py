@@ -89,15 +89,20 @@ STATUS_NA: str = "N/A"
 SCRIPTS_DIR: Path = Path(__file__).resolve().parent
 REPO_ROOT: Path = SCRIPTS_DIR.parent
 
-# The 6 external scanners cpv_install_scanners can install. Names match the
-# binary names ``shutil.which`` will resolve to.
+# The 6 external scanners cpv_install_scanners can install. Names MUST match the
+# binary names ``shutil.which`` resolves to AND the keys of
+# ``cpv_install_scanners.install_all_scanners()`` — the Cisco AI-Defense tool
+# installs a shim named ``skill-scanner`` (via ``uv tool install
+# cisco-ai-skill-scanner``), NOT ``cisco-skill-scanner``. Using the wrong name
+# here made ``check_external_scanners`` report the Cisco scanner perpetually
+# missing even when installed (it would never reach SET / 6-of-6).
 EXTERNAL_SCANNER_NAMES: tuple[str, ...] = (
     "fclones",
     "cc-audit",
     "trufflehog",
     "semgrep",
     "tirith",
-    "cisco-skill-scanner",
+    "skill-scanner",
 )
 
 # Required surfaces in --strict mode. These three are load-bearing for any

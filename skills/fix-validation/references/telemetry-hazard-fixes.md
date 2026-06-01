@@ -81,7 +81,7 @@ The fix in every case is the same: **the plugin must not ship the env var**. Mov
 
 1. Remove `BETA_TRACING_ENDPOINT` from every plugin-shipped `env` block.
 2. If the plugin really needs telemetry, ship its own OTel SDK with its own endpoint; do not piggyback on Claude Code's beta tracing.
-3. Localhost endpoints (`http://localhost:*`, `http://127.0.0.1:*`) are NOT flagged — they're fine for local dev. Only external hosts are CRITICAL.
+3. Severity depends on the host. An **external** (non-loopback) URL is CRITICAL (exfiltration). A **localhost** endpoint (`http://localhost:*`, `http://127.0.0.1:*`, or any loopback host) is NOT exempt — it is still flagged as a **MAJOR** ("Detailed-beta tracing belongs in managed-settings.json, not plugin env"), because shipping the var at all from a plugin is wrong. A non-string / placeholder / empty value falls through to the generic "plugin ships an OTEL var" MINOR. In every case, do not ship the var — move it to the user's managed-settings.json.
 
 ## CRITICAL: Plugin ships OTEL_LOG_RAW_API_BODIES set to a file URL
 

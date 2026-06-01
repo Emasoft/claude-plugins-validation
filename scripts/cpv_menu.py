@@ -52,11 +52,7 @@ from pathlib import Path
 _CMS_MARKETPLACE = "emasoft-plugins"
 _CMS_PLUGIN = "claude-menu-system"
 
-_INSTALL_HINT = (
-    "Install it:\n"
-    "  claude plugin install Emasoft/claude-menu-system@emasoft-plugins\n"
-    "  /reload-plugins"
-)
+_INSTALL_HINT = "Install it:\n  claude plugin install Emasoft/claude-menu-system@emasoft-plugins\n  /reload-plugins"
 
 
 class MenuSystemUnavailable(RuntimeError):
@@ -98,8 +94,7 @@ def resolve_cms_root(cache_base: Path | None = None) -> Path:
     if not base.is_dir():
         raise MenuSystemUnavailable(
             f"claude-menu-system is not installed (looked in {base}). CPV renders "
-            f"menus via that plugin's Stop-hook emitter and has no inline fallback.\n"
-            + _INSTALL_HINT
+            f"menus via that plugin's Stop-hook emitter and has no inline fallback.\n" + _INSTALL_HINT
         )
     usable = [d for d in base.iterdir() if d.is_dir() and (d / "scripts" / "menu_write.py").is_file()]
     if not usable:
@@ -192,7 +187,15 @@ def _cli(argv: list[str]) -> int:
             spec = json.loads(sys.stdin.read())
         else:
             spec = json.loads(Path(source).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        # Valid JSON that is not an object (a list/number/string/bool/null) would
+        # otherwise reach ``write_menu``'s ``{**spec, ...}`` and crash with a raw
+        # ``TypeError``/``AttributeError`` traceback (exit 1). Reject it here at the
+        # untrusted-input boundary with the same clean message + exit code as the
+        # sibling bridge ``print_menu._cli_raw``. ``json.JSONDecodeError`` is a
+        # ``ValueError`` subclass, so the except below already covers this raise.
+        if not isinstance(spec, dict):
+            raise ValueError("spec must be a JSON object")
+    except (OSError, ValueError) as exc:
         label = "<stdin>" if source == "-" else source
         print(f"cpv_menu: cannot read spec {label}: {exc}", file=sys.stderr)
         return 2

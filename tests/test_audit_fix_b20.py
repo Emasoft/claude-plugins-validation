@@ -36,7 +36,14 @@ from cpv_fp_classifier import (  # noqa: E402
 )
 
 
-def _rc(rule_id: str, line: str, *, surrounding: tuple[str, ...] | None = None, role: str = "source", path: str = "scripts/x.py") -> Context:
+def _rc(
+    rule_id: str,
+    line: str,
+    *,
+    surrounding: tuple[str, ...] | None = None,
+    role: str = "source",
+    path: str = "scripts/x.py",
+) -> Context:
     return Context(
         rule_id=rule_id,
         matched_text="169.254.169.254",

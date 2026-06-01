@@ -137,7 +137,9 @@ def _cms_status(symbol: str) -> str:
     return _CMS_STATUS_FOR_SYMBOL.get(symbol, _CMS_DEFAULT_STATUS)
 
 
-def _row_notes(label: str, plugin_kind: str, source_url: str | None, abs_path: str, extra_note: str | None = None) -> str:
+def _row_notes(
+    label: str, plugin_kind: str, source_url: str | None, abs_path: str, extra_note: str | None = None
+) -> str:
     """Build the ``notes`` cell text.
 
     CPV rolls the free-form ``status_label`` plus the kind plus the
@@ -230,9 +232,24 @@ def _new_session_dir(agent_type: str, base: Path | None = None) -> Path:
     # the session dir name is unambiguous across machines / timezones, and
     # use a single strftime read so date-time and offset can't straddle midnight.
     ts = time.strftime("%Y%m%d_%H%M%S%z")
-    sd = base / f"{ts}-{agent_type}"
-    sd.mkdir(parents=True, exist_ok=True)
-    return sd
+    base.mkdir(parents=True, exist_ok=True)
+    # The timestamp is only second-granular, so two batches of the SAME agent
+    # started within one wall-clock second would resolve to the same path.
+    # With exist_ok=True that silently MERGES both batches into one dir — the
+    # second plan.json overwrites the first and their per-plugin status files
+    # intermix (data corruption). Claim the dir atomically with exist_ok=False
+    # and, only on the rare collision, append a short numeric suffix so each
+    # batch keeps a private session dir while the documented "<ts>-<agent>"
+    # format is preserved in the common case.
+    candidate = base / f"{ts}-{agent_type}"
+    suffix = 1
+    while True:
+        try:
+            candidate.mkdir(exist_ok=False)
+            return candidate
+        except FileExistsError:
+            candidate = base / f"{ts}-{agent_type}-{suffix}"
+            suffix += 1
 
 
 def make_plan(
@@ -338,6 +355,15 @@ def aggregate_status(
             try:
                 d = json.loads(per_status.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
+                d = {}
+            # A subagent's status file is untrusted: it may be valid JSON yet
+            # not an object (``null``, a bare string, a list, a number — none
+            # of which raise JSONDecodeError). The ``d.get(...)`` calls below
+            # would then raise AttributeError and abort aggregation for the
+            # WHOLE batch (every other plugin's row is lost). Treat any
+            # non-dict payload as "no status yet", same as a missing/malformed
+            # file, so one bad agent never breaks the rest of the table.
+            if not isinstance(d, dict):
                 d = {}
         else:
             d = {}

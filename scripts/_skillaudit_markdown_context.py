@@ -534,9 +534,7 @@ _DOC_ONLY_DIR_PREFIXES_MD: Final[tuple[str, ...]] = (
     "spec/",
     "specifications/",
 )
-_INSTRUCTION_LOADABLE_BASENAMES_MD: Final[frozenset[str]] = frozenset(
-    {"skill.md", "claude.md", "agents.md"}
-)
+_INSTRUCTION_LOADABLE_BASENAMES_MD: Final[frozenset[str]] = frozenset({"skill.md", "claude.md", "agents.md"})
 
 
 def _is_documentation_only_path_md(file_path: str) -> bool:
@@ -924,21 +922,39 @@ _SECURITY_DOC_VOCAB_RE: Final[re.Pattern[str]] = re.compile(
     r"prefer\s+(?:to|instead)|use\s+instead:|use\s+(?:parameterized|prepared))",
     re.IGNORECASE,
 )
-_SECURITY_DOC_FILE_PATTERNS: Final[tuple[str, ...]] = (
-    "security", "audit", "review", "scan", "vulnerability", "vulnerab",
-    "compliance", "secure", "harden", "redaction", "redact",
-)
 
 
-def _match_in_security_review_doc(line: str, lines: list[str], line_idx: int) -> bool:
+def _match_in_security_review_doc(
+    line: str,
+    lines: list[str],
+    line_idx: int,
+    fence_state: tuple[int, int, str] | None,
+) -> bool:
     """True iff an execution/injection-class match is in a markdown
-    document that shows attack patterns as documentation/education.
+    document that QUOTES attack patterns as documentation/education
+    (markdown box-drawing table rows, ``Before:`` / ``Bad:`` labels, CWE
+    references, etc.) — a "bad example" being *described*, not executed.
 
-    Two cumulative signals:
-      1. The file path contains security/audit/review/vulnerability vocab
-         OR the surrounding ±5 lines contain CWE/OWASP/Before:/Bad:/etc.
-      2. The matched line is markdown prose (not inside a bash fence)
+    Signals (both required):
+      1. The surrounding ±5 lines contain explicit documentation vocab
+         (CWE / OWASP / ``Before:`` / ``Bad:`` / ``remediation:`` / ✗ / …).
+      2. The matched line is NOT inside an EXECUTABLE-language fence
+         (```bash / ```sh / ```pwsh / …). A command quoted in prose, a
+         table cell, inline-code, or a non-executable fence is inert
+         documentation; the SAME command inside a live ```bash fence is
+         something the agent would actually RUN — suppressing it there
+         would hide a real threat (iron rule). Because this discriminator
+         returns ``safe_literal`` → full SUPPRESS in the dispatcher, the
+         executable-fence carve-out is mandatory: without it a real
+         ``curl … | bash`` / reverse shell inside a ```bash block in an
+         instruction-loadable SKILL.md would be silently dropped whenever
+         any nearby line happened to mention "security review" /
+         "remediation:" / a ✓ checkbox.
     """
+    # Signal 2: never suppress inside a live executable fence — the
+    # heuristic chain (bash-fence uplift) must keep deciding there.
+    if fence_state is not None and fence_state[2] in _EXECUTABLE_LANGS:
+        return False
     lo = max(0, line_idx - 5)
     hi = min(len(lines), line_idx + 6)
     window = "\n".join(lines[lo:hi])
@@ -1029,8 +1045,9 @@ def _is_bearer_token_placeholder(line: str, match: str) -> bool:
         return True
     # Heuristic: contains placeholder keywords like "your", "example",
     # "placeholder", "token" as a substring, AND is not a real JWT/key shape
-    if any(kw in value for kw in ("your", "example", "placeholder", "redacted", "..."))\
-            and not re.match(r"^[A-Za-z0-9+/=._-]{32,}$", value):
+    if any(kw in value for kw in ("your", "example", "placeholder", "redacted", "...")) and not re.match(
+        r"^[A-Za-z0-9+/=._-]{32,}$", value
+    ):
         return True
     return False
 
@@ -1067,9 +1084,15 @@ def _is_cli_option_enum_pipe(line: str, match: str) -> bool:
 # here and stay visible.
 _MD_API_FIELD_NAMES: Final[frozenset[str]] = frozenset(
     {
-        "context_window", "system_prompt", "system_message", "full_context",
-        "conversation_history", "message_history", "chat_history",
-        "current_usage", "context_window_size",
+        "context_window",
+        "system_prompt",
+        "system_message",
+        "full_context",
+        "conversation_history",
+        "message_history",
+        "chat_history",
+        "current_usage",
+        "context_window_size",
     }
 )
 
@@ -1226,9 +1249,30 @@ def _is_emoji_codepoint(cp: int) -> bool:
         or 0x1F1E6 <= cp <= 0x1F1FF
         or cp
         in {
-            0xFE0F, 0xFE0E, 0x2640, 0x2642, 0x2695, 0x2696, 0x2708, 0x2764,
-            0x2122, 0x2139, 0x203C, 0x2049, 0x2934, 0x2935, 0x3030, 0x303D,
-            0x3297, 0x3299, 0x24C2, 0x261D, 0x270A, 0x270B, 0x270C, 0x270D,
+            0xFE0F,
+            0xFE0E,
+            0x2640,
+            0x2642,
+            0x2695,
+            0x2696,
+            0x2708,
+            0x2764,
+            0x2122,
+            0x2139,
+            0x203C,
+            0x2049,
+            0x2934,
+            0x2935,
+            0x3030,
+            0x303D,
+            0x3297,
+            0x3299,
+            0x24C2,
+            0x261D,
+            0x270A,
+            0x270B,
+            0x270C,
+            0x270D,
         }
     )
 
@@ -1263,11 +1307,19 @@ def _certain_benign_literal(
     line: str,
     lines: list[str],
     line_idx: int,
+    fence_state: tuple[int, int, str] | None,
     match: str,
     rule_id: str,
 ) -> bool:
     """Return True iff ``match`` is a 100%-certain-benign shape that must
     be SUPPRESSED regardless of fence/prose context.
+
+    ``fence_state`` is the matched line's entry from ``_build_fence_map``
+    (``None`` outside any fence, else ``(start, end, lang)``). Most
+    discriminators here are context-independent and ignore it; the
+    security-review-doc discriminator uses it to refuse suppression
+    inside a live executable fence (where the agent would actually run
+    the command — suppressing there would hide a real threat).
 
     Each branch is self-guarded so the same surface carrying a real
     threat is NOT suppressed. See the module section header above.
@@ -1322,32 +1374,28 @@ def _certain_benign_literal(
     #     execute it. Iron rule preserved: same patterns OUTSIDE
     #     warning context (e.g. a real ``chmod 777`` in a real install
     #     script) still fire.
-    if (
-        rule_id
-        in {
-            "FS_WRITE",
-            "PRIVILEGE_ESC",
-            "CMD_INJECTION",
-            "SHELL_EXEC",
-            "PATH_TRAVERSAL",
-            "SSRF_PATTERN",
-            "SSRF_ADVANCED",
-            "XXE_INJECTION",
-            "DESERIALIZATION",
-            "REGEX_DOS",
-            "INSECURE_CRYPTO",
-            "REVERSE_SHELL",
-            "OBFUSCATION",
-            "CONTAINER_ESCAPE",
-            "ENV_INJECTION",
-            "SSTI",
-            "TOOL_SHADOW",
-            "URL_RAW_IP",
-            "NET_SUSPICIOUS",
-            "TIME_BOMB",
-        }
-        and _match_in_warning_context(line, lines, line_idx)
-    ):
+    if rule_id in {
+        "FS_WRITE",
+        "PRIVILEGE_ESC",
+        "CMD_INJECTION",
+        "SHELL_EXEC",
+        "PATH_TRAVERSAL",
+        "SSRF_PATTERN",
+        "SSRF_ADVANCED",
+        "XXE_INJECTION",
+        "DESERIALIZATION",
+        "REGEX_DOS",
+        "INSECURE_CRYPTO",
+        "REVERSE_SHELL",
+        "OBFUSCATION",
+        "CONTAINER_ESCAPE",
+        "ENV_INJECTION",
+        "SSTI",
+        "TOOL_SHADOW",
+        "URL_RAW_IP",
+        "NET_SUSPICIOUS",
+        "TIME_BOMB",
+    } and _match_in_warning_context(line, lines, line_idx):
         return True
 
     # (6) r01 anthropic FP iter1 — ``sudo apt-get install ...`` and
@@ -1523,7 +1571,9 @@ def _certain_benign_literal(
     #     purposes. Markdown box-drawing table rows
     #     (``│ CWE-79 │ innerHTML = userInput │``), ``Before: db.query(...)``
     #     labels, and ``Bad: exec(userInput)`` examples are doc context.
-    if rule_id in _EXECUTION_CLASS_RULES_MD and _match_in_security_review_doc(line, lines, line_idx):
+    #     ``fence_state`` makes the discriminator refuse to suppress inside
+    #     a live executable fence (where the command would actually run).
+    if rule_id in _EXECUTION_CLASS_RULES_MD and _match_in_security_review_doc(line, lines, line_idx, fence_state):
         return True
 
     # (10c) r10-final FP iter (2026-05-28) — INTENT_DESTRUCTIVE_INTENT
@@ -1592,13 +1642,15 @@ def classify(
     line = lines[line_idx]
     fence_state = fence_map[line_idx]
 
-    # 100%-certain-benign discriminators (TRDD-ef3fc7d8) run FIRST and
+    # 100%-certain-benign discriminators (TRDD-ef3fc7d8) run FIRST. Most
     # are context-independent — a provably-benign shape is benign in
     # prose, in a recognised fence, or in an indented (unrecognised)
     # fence. ``safe_literal`` → SUPPRESS in the dispatcher. Each branch
     # is self-guarded (see ``_certain_benign_literal``), so a real
-    # threat wearing the same surface still surfaces.
-    if _certain_benign_literal(line, lines, line_idx, match, rule_id):
+    # threat wearing the same surface still surfaces. ``fence_state`` is
+    # passed so the security-review-doc branch can decline to suppress
+    # an execution-class match inside a live executable fence.
+    if _certain_benign_literal(line, lines, line_idx, fence_state, match, rule_id):
         return "safe_literal"
 
     if fence_state is None:
@@ -1757,23 +1809,23 @@ def classify(
 _OFFICIAL_INSTALL_HOSTS: Final[frozenset[str]] = frozenset(
     {
         "raw.githubusercontent.com",  # github raw — vast majority of OSS installers
-        "astral.sh",                  # uv / ruff
-        "get.docker.com",             # docker
-        "sh.rustup.rs",               # rust
-        "deb.nodesource.com",         # node debian
-        "rpm.nodesource.com",         # node rpm
-        "get.pnpm.io",                # pnpm
-        "fnm.vercel.app",             # fnm
-        "nodejs.org",                 # node official
+        "astral.sh",  # uv / ruff
+        "get.docker.com",  # docker
+        "sh.rustup.rs",  # rust
+        "deb.nodesource.com",  # node debian
+        "rpm.nodesource.com",  # node rpm
+        "get.pnpm.io",  # pnpm
+        "fnm.vercel.app",  # fnm
+        "nodejs.org",  # node official
         "install.python-poetry.org",  # poetry
-        "bun.sh",                     # bun
-        "deno.land",                  # deno
-        "sh.brew.dev",                # brew alt
-        "raw.github.com",             # legacy github raw
-        "starship.rs",                # starship
-        "ohmyz.sh",                   # oh-my-zsh
-        "get.k3s.io",                 # k3s
-        "github.com",                 # github release tarballs
+        "bun.sh",  # bun
+        "deno.land",  # deno
+        "sh.brew.dev",  # brew alt
+        "raw.github.com",  # legacy github raw
+        "starship.rs",  # starship
+        "ohmyz.sh",  # oh-my-zsh
+        "get.k3s.io",  # k3s
+        "github.com",  # github release tarballs
     }
 )
 
