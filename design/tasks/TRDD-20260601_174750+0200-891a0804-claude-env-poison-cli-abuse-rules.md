@@ -1,9 +1,9 @@
 ---
 trdd-id: 891a0804-0bdf-4a42-9ff5-5c658618311f
 title: SkillAudit rules — Claude env-var poisoning + plugin-system / CLI abuse detection
-status: in-progress
+status: completed
 created: 2026-06-01T17:47:50+0200
-updated: 2026-06-01T17:47:50+0200
+updated: 2026-06-01T19:12:17+0200
 ---
 
 # TRDD-891a0804 — Claude env-var poisoning + CLI-abuse detection rules
@@ -119,3 +119,39 @@ or `claude mcp add` (programmatic install/registration from a plugin = supply-ch
 
 - `reports/env-poison-feature/ground-truth.md` (authoritative var lists + CLI).
 - Existing rule template: `ENV_INJECTION` (skillaudit_patterns.json:790).
+
+## v2.116.0 shipped, then v2.116.1 refinement — plugin-wide install-combo
+
+v2.116.0 shipped all six rules + the env-file flow detector (validated against
+the live ai-maestro-plugin source: 0 false positives). The maintainer then
+refined the **install-authorization** model:
+
+> Adding a marketplace IS the user's trust decision, so installing a SPECIFIC
+> plugin from an already-trusted marketplace is AUTHORIZED. Flag only when the
+> plugin — anywhere across its files (possibly SPLIT to evade per-file scanning)
+> — BOTH adds a SPECIFIC marketplace AND installs a SPECIFIC (other) plugin.
+> Universal/templated procedures are not a security issue.
+
+v2.116.1 implements this as a **plugin-wide** check
+(`validate_plugin._check_unauthorized_install_combo`), and NARROWS the per-file
+`CLAUDE_CLI_UNAUTHORIZED_INSTALL` rule to `claude mcp add` only (autonomous
+MCP-server registration). The combo fires only when BOTH a specific
+marketplace-add AND a specific non-self plugin-install exist in AUTONOMOUS
+surfaces. FP-iteration (each found scanning CPV itself, then fixed):
+
+1. **Self-bootstrap exemption** — installing THIS plugin (name from
+   plugin.json) is the benign first-install path; exempt.
+2. **Documentation exclusion** — README / design/ / references/ / docs/ and
+   loose `.md` are human-read guides/examples, not autonomous execution. Only
+   executable code (.sh/.py/.js/.mjs/.cjs/.ts), hooks/MCP configs, and
+   AGENT-LOADED instructions (SKILL.md, agents/, commands/, .claude/rules/,
+   CLAUDE.md) count (`_combo_path_is_autonomous`).
+3. **tests/ + fixtures/ excluded** — dev-only, never harness-loaded.
+4. **Example/placeholder tokens excluded** (`_install_ref_is_specific`):
+   `my-*` / `your-*` / `owner/*` / `foo` / `X@X` self-referential /
+   `path/to` / `${VARS}` / `<placeholders>` are illustrative, not concrete
+   targets.
+
+Result: CPV self-scan 0/0/0/0; ai-maestro-plugin 0 findings; the real
+`marketplace add https://evil + install evil@evil` (incl. split across hooks or
+SKILL.md) fires MAJOR. Tests in tests/test_claude_env_poison_cli_abuse.py.
