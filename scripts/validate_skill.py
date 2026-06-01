@@ -174,6 +174,30 @@ def validate_name_field(frontmatter: dict[str, Any], skill_dir_name: str, report
     validate_component_name(name, "skill", report, directory_name=skill_dir_name if "name" in frontmatter else None)
 
 
+# TR3 (SkillSpector port, TRDD-de582146 / proposal TRDD-b0c85371): catch-all
+# "trigger baiting" phrases in a skill description. A skill claiming to fire on
+# EVERYTHING activates in unintended contexts and shadows other skills. These are
+# anchored to genuinely-unscoped phrasings — a legitimately broad-but-scoped
+# description ("use for any Python task") does NOT match, because the catch-all
+# nouns here (request/message/prompt/query/everything/anything) signal
+# "fires on every interaction" rather than a bounded domain. Advisory (WARNING),
+# never blocking — over-broad activation is a quality/shadowing concern, not a
+# security failure.
+_CATCHALL_TRIGGER_RE: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\buse (?:this|it) for (?:everything|anything)\b",
+        r"\bfor (?:any and all|all and any)\b",
+        r"\b(?:on|for) every (?:request|message|prompt|query|input|interaction)s?\b",
+        r"\bfor (?:all|any|every) (?:requests?|messages?|prompts?|queries|user inputs?|questions?)\b",
+        r"\bwhenever (?:the )?user (?:says?|asks?|types?|sends?|writes?) (?:anything|something|a message)\b",
+        r"\balways use this (?:skill|tool|command)\b",
+        r"\b(?:matches|triggers|activates) on (?:everything|anything|all|any)\b",
+        r"\bno matter what (?:the user )?(?:says|asks|wants|does)\b",
+    )
+)
+
+
 def validate_description_field(frontmatter: dict[str, Any], body: str, report: ValidationReport) -> None:
     """Validate the 'description' frontmatter field."""
     if "description" not in frontmatter:
@@ -215,6 +239,16 @@ def validate_description_field(frontmatter: dict[str, Any], body: str, report: V
         "Description",
         "Shorten it — a long description dilutes the trigger signal.",
     )
+
+    for rx in _CATCHALL_TRIGGER_RE:
+        if rx.search(desc):
+            report.warning(
+                "Description uses a catch-all activation phrase — an overly-broad "
+                "trigger makes the skill activate in unintended contexts and can shadow "
+                "other skills. Scope the description to the skill's specific purpose.",
+                "SKILL.md",
+            )
+            break
 
     report.passed("'description' field present", "SKILL.md")
 

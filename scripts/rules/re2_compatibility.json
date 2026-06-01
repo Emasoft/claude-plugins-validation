@@ -1,13 +1,13 @@
 {
   "_schema_version": 1,
-  "_generated_at": "2026-06-01T19:36:38.744649Z",
+  "_generated_at": "2026-06-01T21:06:02.464676Z",
   "_source": "scripts/rules/skillaudit_patterns.json",
-  "_source_sha256": "ccdded7601323f049efb13be8bc0e76c80d1c7a1e80e3ea0f714372dd5c5b4b8",
+  "_source_sha256": "ba23231247edaa332c1e5fc39abcfa9cedafbdcd459bc4e845f61693f4f7d329",
   "_re2_version": "unknown",
   "_audit_mode": "re2_available",
   "_summary": {
-    "total": 527,
-    "compatible": 519,
+    "total": 532,
+    "compatible": 524,
     "incompatible": 8,
     "rules_total": 58,
     "rules_compatible": 52,
@@ -79,8 +79,8 @@
     },
     "PRIVILEGE_ESC": {
       "compatible": true,
-      "patterns_total": 6,
-      "patterns_compatible": 6,
+      "patterns_total": 8,
+      "patterns_compatible": 8,
       "patterns_incompatible": [],
       "reason": null
     },
@@ -107,8 +107,8 @@
     },
     "REVERSE_SHELL": {
       "compatible": true,
-      "patterns_total": 8,
-      "patterns_compatible": 8,
+      "patterns_total": 11,
+      "patterns_compatible": 11,
       "patterns_incompatible": [],
       "reason": null
     },

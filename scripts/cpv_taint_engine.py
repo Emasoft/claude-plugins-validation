@@ -458,6 +458,7 @@ def _analyze_stmt(
         sink_desc = _is_sink_call(node)
         if sink_desc:
             _check_sink_args(node, sink_desc, state, findings)
+        _check_dynamic_getattr(node, state, findings)
 
 
 def _process_assignment(
@@ -614,6 +615,51 @@ def _check_sink_args(
                         line=call.lineno,
                     )
                 )
+
+
+# Dynamic-attribute sinks (AST7, SkillSpector port — TRDD-de582146 / proposal
+# TRDD-b0c85371). ``getattr``/``setattr``/``delattr`` are sinks ONLY through their
+# SECOND argument (the attribute NAME). A tainted attribute name is dynamic
+# dispatch controlled by untrusted input — the classic ``getattr(os, user_input)``
+# → ``os.system`` gadget. A LITERAL name (``getattr(o, "method", default)``) — the
+# overwhelmingly common, benign shape — never fires, because the taint must reach
+# arg[1] as a non-constant tainted value. This is why it lives in the taint engine,
+# not as a regex: a bare ``getattr\(`` pattern would false-positive on every
+# defensive attribute lookup.
+_DYNAMIC_ATTR_BUILTINS: frozenset[str] = frozenset({"getattr", "setattr", "delattr"})
+
+
+def _check_dynamic_getattr(
+    call: ast.Call,
+    state: _TaintState,
+    findings: list[TaintFinding],
+) -> None:
+    """Flag ``getattr/setattr/delattr(obj, <tainted name>)`` — dynamic attribute
+    access whose attribute NAME (arg[1]) is attacker-controlled."""
+    if not (isinstance(call.func, ast.Name) and call.func.id in _DYNAMIC_ATTR_BUILTINS):
+        return
+    if len(call.args) < 2:
+        return
+    name_arg = call.args[1]
+    # A literal attribute name cannot be attacker-controlled — the benign,
+    # ubiquitous shape (getattr(o, "x", default)). Never fires.
+    if isinstance(name_arg, ast.Constant):
+        return
+    for nm in _passthrough_tainted_names(name_arg):
+        taint = state.lookup(nm)
+        if taint:
+            src, hops = taint
+            findings.append(
+                TaintFinding(
+                    rule_id="RC-73" if hops == 1 else "RC-74",
+                    source=src,
+                    sink=f"{call.func.id}(obj, <tainted attr name>)",
+                    var_name=nm,
+                    hop_count=hops,
+                    line=call.lineno,
+                )
+            )
+            return
 
 
 # -----------------------------------------------------------------------------

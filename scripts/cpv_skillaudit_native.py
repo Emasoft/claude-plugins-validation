@@ -1925,6 +1925,58 @@ def _detect_invisible_unicode(lines: list[str]) -> list[dict[str, Any]]:
     return findings
 
 
+# MP2 (SkillSpector port, TRDD-de582146 / proposal TRDD-b0c85371): context-window
+# stuffing — a short MULTI-char unit (2-20 chars) repeated >=20 times in a row.
+# The ``(?!\2)`` guard forces the unit's 2nd char to differ from its 1st, so
+# single-char runs (``====``, ``----``, ``####``) — legitimate separators/rules —
+# never match. This is a DETECTOR (Python ``re``), NOT a catalog rule, so the
+# google-re2 hybrid-matcher limit on lookahead/backreference does not apply.
+_REPEATED_TOKEN_RE: re.Pattern[str] = re.compile(r"((\S)(?!\2).{1,19}?)\1{20,}")
+# Lines longer than this are not worth the backtracking risk; MAX_FILE_BYTES
+# already caps total content, this caps a single pathological line.
+_REPEATED_TOKEN_MAX_LINE = 100_000
+
+
+def _detect_repeated_token_padding(lines: list[str]) -> list[dict[str, Any]]:
+    """Detect repeated-token context-stuffing / padding (MP2).
+
+    A skill that repeats a short token hundreds of times can displace the
+    system prompt / safety instructions or exhaust the context window. Pure
+    punctuation/separator units (no alphanumeric char) are excluded so wide
+    markdown table-separator rows and ASCII-art borders never false-positive.
+    """
+    findings: list[dict[str, Any]] = []
+    for i, line in enumerate(lines):
+        if len(line) < 40 or len(line) > _REPEATED_TOKEN_MAX_LINE:
+            continue
+        m = _REPEATED_TOKEN_RE.search(line)
+        if not m:
+            continue
+        unit = m.group(1)
+        # Pure-punctuation repeats (table separators, ===/--- borders) are benign.
+        if not any(c.isalnum() for c in unit):
+            continue
+        reps = len(m.group(0)) // max(1, len(unit))
+        findings.append(
+            {
+                "ruleId": "CONTEXT_STUFFING",
+                "severity": "medium",
+                "category": "evasion",
+                "name": "Repeated-token context stuffing",
+                "description": (
+                    f"A short unit ({unit[:20]!r}) is repeated ~{reps} times consecutively "
+                    "— a context-window-stuffing / padding technique that can displace "
+                    "safety instructions or exhaust the model's context window."
+                ),
+                "line": i + 1,
+                "lineContent": line.strip()[:200],
+                "match": (unit[:20] + ("…" if len(unit) > 20 else "")),
+                "suppressed": False,
+            }
+        )
+    return findings
+
+
 # ────────────────────────────────────────────────────────────────────────
 # Intent patterns (natural language)
 # ────────────────────────────────────────────────────────────────────────
@@ -2700,6 +2752,7 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
     secondary_findings.extend(_detect_secrets(lines))
     secondary_findings.extend(_detect_env_file_poison(lines))
     secondary_findings.extend(_detect_invisible_unicode(lines))
+    secondary_findings.extend(_detect_repeated_token_padding(lines))
     secondary_findings.extend(_decode_and_scan_base64(lines))
     secondary_findings.extend(_decode_and_scan_escapes(lines))
 

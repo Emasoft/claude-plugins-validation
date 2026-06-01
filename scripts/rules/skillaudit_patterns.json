@@ -171,9 +171,11 @@
         "setuid",
         "setgid",
         "chown\\s+root",
-        "/etc/shadow"
+        "/etc/shadow",
+        "\\bpkexec\\b",
+        "\\bdoas\\s"
       ],
-      "remediation": "Remove all privilege escalation attempts (sudo, chmod +s, setuid, chown root). Skills should operate with minimal permissions. If elevated access is needed, document it as a requirement and let the user grant it explicitly."
+      "remediation": "Remove all privilege escalation attempts (sudo, pkexec, doas, chmod +s, setuid, chown root). Skills should operate with minimal permissions. If elevated access is needed, document it as a requirement and let the user grant it explicitly."
     },
     {
       "id": "CRYPTO_THEFT",
@@ -241,7 +243,10 @@
         "perl.*socket.*INET.*exec",
         "socat.*exec.*sh",
         "mkfifo.*/tmp/.*nc",
-        "php.*fsockopen.*sh"
+        "php.*fsockopen.*sh",
+        "New-Object\\s+System\\.Net\\.Sockets\\.TCPClient",
+        "(?:>&|<>|>)\\s*/dev/tcp/",
+        "TCPSocket\\.(?:new|open)\\b[^\\n]*(?:exec|/bin/(?:ba)?sh|system)"
       ],
       "remediation": "Remove all reverse shell code immediately. There is no legitimate reason for a skill to establish a reverse shell connection. This is a critical indicator of malicious intent."
     },
