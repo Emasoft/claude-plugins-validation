@@ -1,12 +1,48 @@
 ---
 trdd-id: b0c85371-37bf-430b-baf7-9f51562c533f
 title: SkillSpector deferred cherry-picks — proposals needing a judgment call
-status: proposal
+status: completed
 created: 2026-06-01T21:48:19+0200
-updated: 2026-06-01T21:48:19+0200
+updated: 2026-06-01T23:22:51+0200
 ---
 
 # TRDD-b0c85371 — SkillSpector deferred cherry-picks (proposals)
+
+## ⏵ IMPLEMENTED (2026-06-01, v2.118.0) — "do everything deferred"
+
+The maintainer greenlit implementing all deferred items. Each was built in its
+DEFENSIBLE, FP-resistant form (the reason each was deferred), with two-sided tests
+in `tests/test_skillspector_port_phase2.py` (29 tests):
+
+1. **TR1 → TR3** (catch-all skill-description baiting): NOT the FP-prone hook-matcher
+   form. Added `_CATCHALL_TRIGGER_RE` advisory **WARNING** in
+   `validate_skill.validate_description_field` — anchored catch-all phrases only
+   ("use this for everything", "on every request", "whenever the user says anything").
+   Scoped descriptions ("for any Python task") do NOT fire.
+2. **LP2** (wildcard/blanket permission): the `allow:["*"]` shape is dubious Claude
+   Code syntax (NOT added — would be a dead check). Implemented the REAL gap:
+   `defaultMode: "bypassPermissions"` in a plugin-shipped settings file (RC-62 only
+   reads plugin.json) → WARNING in BOTH `_flag_permissions_default_mode[_local]`.
+3. **AST7** (taint-gated dynamic getattr): `_check_dynamic_getattr` in
+   `cpv_taint_engine.py` — `getattr/setattr/delattr(obj, <tainted name>)` fires
+   RC-73/74; a LITERAL attr name never fires (taint-gated, not regex).
+4. **MP2** (context-stuffing): `_detect_repeated_token_padding` detector
+   (`CONTEXT_STUFFING`, medium/evasion) using SkillSpector's exact lookahead+backref
+   regex — legal in a Python DETECTOR (the re2 limit was only for the catalog). The
+   `(?!\2)` guard + a pure-punctuation exclusion mean separators / wide table rows
+   never fire.
+5. **PRIVILEGE_ESC** += `\bpkexec\b`, `\bdoas\s` (re2-safe).
+6. **REVERSE_SHELL** += PowerShell `New-Object …TCPClient`, `/dev/tcp/` redirect
+   variants, Ruby `TCPSocket.new…exec` (re2-safe). mkfifo + PHP fsockopen were
+   already covered.
+
+re2_compatibility.json regenerated (527→532 patterns via the enhanced
+`scripts_dev/regen_re2_compat.py` existing-rule-extension path). All shipped in
+v2.118.0.
+
+---
+
+## (Original proposal text below — kept for the rationale that drove the defensible forms)
 
 **Filename:** `design/proposals/TRDD-20260601_214819+0200-b0c85371-skillspector-deferred-checks.md`
 **Tracked in:** this repo (design/proposals/ is git-tracked)

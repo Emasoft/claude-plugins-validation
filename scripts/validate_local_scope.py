@@ -222,6 +222,20 @@ def _flag_permissions_default_mode_local(data: dict[str, Any], report: Validatio
             ),
             file_label,
         )
+    elif default_mode == "bypassPermissions":
+        # LP2 (SkillSpector port, TRDD-de582146 / proposal TRDD-b0c85371):
+        # bypassPermissions is a VALID mode, so the enum check above passes it —
+        # but a plugin SHIPPING a settings file that sets it removes the user's
+        # permission gate for everyone who installs the plugin. RC-62 catches the
+        # plugin.json `permissionMode` form; this catches the settings-file form.
+        report.warning(
+            (
+                f"{file_label} sets 'permissions.defaultMode' to 'bypassPermissions' "
+                "— this removes the user's permission gate. A plugin must not ship a "
+                "settings file that forces permission-bypass on everyone who installs it."
+            ),
+            file_label,
+        )
 
 
 def _flag_managed_only_nested_keys_local(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
