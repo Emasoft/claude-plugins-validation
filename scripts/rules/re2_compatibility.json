@@ -1,16 +1,16 @@
 {
   "_schema_version": 1,
-  "_generated_at": "2026-05-28T00:46:07.426502Z",
+  "_generated_at": "2026-06-01T16:28:33.545781Z",
   "_source": "scripts/rules/skillaudit_patterns.json",
-  "_source_sha256": "2e0edc5ed2e8ba8d1e74d37f398c51987d1443607dc4c33d4db5b43596d935dc",
+  "_source_sha256": "da0044f54262c32c4cf34f46afa010632be179429f99b2c2d21883fe42fb6bbf",
   "_re2_version": "unknown",
   "_audit_mode": "re2_available",
   "_summary": {
-    "total": 486,
-    "compatible": 478,
+    "total": 506,
+    "compatible": 498,
     "incompatible": 8,
-    "rules_total": 50,
-    "rules_compatible": 44,
+    "rules_total": 56,
+    "rules_compatible": 50,
     "rules_incompatible": 6
   },
   "rules": {
@@ -196,10 +196,10 @@
         {
           "index": 7,
           "pattern": "HKEY.*\\Run",
-          "reason": "invalid escape sequence: \\\\R"
+          "reason": "invalid escape sequence: \\R"
         }
       ],
-      "reason": "1 pattern(s) incompatible: invalid escape sequence: \\\\R"
+      "reason": "1 pattern(s) incompatible: invalid escape sequence: \\R"
     },
     "CROSS_TOOL_ACCESS": {
       "compatible": true,
@@ -391,10 +391,10 @@
         {
           "index": 11,
           "pattern": "\\u200b|\\u200c|\\u200d|\\u2060|\\ufeff|\\u00ad",
-          "reason": "invalid escape sequence: \\\\u"
+          "reason": "invalid escape sequence: \\u"
         }
       ],
-      "reason": "1 pattern(s) incompatible: invalid escape sequence: \\\\u"
+      "reason": "1 pattern(s) incompatible: invalid escape sequence: \\u"
     },
     "TOOL_CONFUSION": {
       "compatible": true,
@@ -407,6 +407,48 @@
       "compatible": true,
       "patterns_total": 12,
       "patterns_compatible": 12,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "CLAUDE_RESERVED_ENV_POISON": {
+      "compatible": true,
+      "patterns_total": 6,
+      "patterns_compatible": 6,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "CLAUDE_AUTH_ENV_OVERRIDE": {
+      "compatible": true,
+      "patterns_total": 5,
+      "patterns_compatible": 5,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "CLAUDE_SAFETY_ENV_TAMPER": {
+      "compatible": true,
+      "patterns_total": 3,
+      "patterns_compatible": 3,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "CLAUDE_CLI_TOKEN_THEFT": {
+      "compatible": true,
+      "patterns_total": 1,
+      "patterns_compatible": 1,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "CLAUDE_CLI_PERMISSION_BYPASS": {
+      "compatible": true,
+      "patterns_total": 2,
+      "patterns_compatible": 2,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "CLAUDE_CLI_UNAUTHORIZED_INSTALL": {
+      "compatible": true,
+      "patterns_total": 3,
+      "patterns_compatible": 3,
       "patterns_incompatible": [],
       "reason": null
     }
