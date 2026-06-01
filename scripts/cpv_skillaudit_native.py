@@ -1226,6 +1226,21 @@ def _context_classifier_verdict(
         return ""
     content = "\n".join(lines)
     fp_lower = file_path.lower()
+    # CLAUDE_CLI_UNAUTHORIZED_INSTALL — effect-based carve-out (v2.116.0,
+    # validated against the ai-maestro-plugin source). Documenting an install /
+    # marketplace-add / mcp-add command in MARKDOWN is the universal, benign way
+    # a plugin tells users how to install it (every plugin's README/SKILL/
+    # references do this: `claude plugin install foo@bar --scope local`). A
+    # markdown file cannot itself execute the command — the THREAT is an
+    # EXECUTABLE hook/script (.sh/.py/.mjs/.cjs/hooks.json) running it
+    # autonomously, which is NOT markdown and so still fires LIVE. Suppress this
+    # ONE rule in markdown to keep legitimate install docs at zero findings.
+    # (The dangerous CLI rules — CLAUDE_CLI_TOKEN_THEFT /
+    # CLAUDE_CLI_PERMISSION_BYPASS — are intentionally NOT carved out: a doc that
+    # tells the user to run `claude setup-token` / `--dangerously-skip-permissions`
+    # stays visible.)
+    if rule_id == "CLAUDE_CLI_UNAUTHORIZED_INSTALL" and fp_lower.endswith((".md", ".markdown")):
+        return "suppress"
     # Point 1 (v2.114.0): an extension-less script (git hook, configure,
     # runme) reaches here with no classifier-recognised extension. The
     # per-language classifiers dispatch AND internally gate on the file
@@ -2298,6 +2313,225 @@ def _detect_secrets(lines: list[str]) -> list[dict[str, Any]]:
 
 
 # ────────────────────────────────────────────────────────────────────────
+# Env-file poisoning FLOW detector (GitHub issue #64 + env-poison mandate).
+#
+# The per-pattern rules (CLAUDE_RESERVED_ENV_POISON etc. in
+# skillaudit_patterns.json) catch the DIRECT form — a literal
+# `export CLAUDE_PLUGIN_DATA=` / `process.env.CLAUDE_PLUGIN_DATA =`. They MISS
+# the indirected real-world form (issue #64 / the codex plugin), where the
+# reserved name is a string literal that flows through a variable into a
+# DYNAMIC export written to $CLAUDE_ENV_FILE:
+#
+#     const PLUGIN_DATA_ENV = "CLAUDE_PLUGIN_DATA";
+#     fs.appendFileSync(process.env.CLAUDE_ENV_FILE, `export ${name}=${v}\n`);
+#     appendEnvVar(PLUGIN_DATA_ENV, ...);   // ← poisons the reserved var
+#
+# This detector fires only on the conjunction of THREE signals so the
+# false-positive rate stays near zero:
+#   S1  the file writes to $CLAUDE_ENV_FILE (an env-file write sink), AND
+#   S2  it writes a DYNAMIC `export <var>=` (a templated/variable export that
+#       can carry ANY name — a literal `export MYPLUGIN_FOO=bar` does NOT
+#       match, so a plugin writing only its own namespaced vars is clean), AND
+#   S3  a reserved / auth / toggle CLAUDE_*|ANTHROPIC_* name appears as a
+#       quoted string LITERAL in the same file (a bare `process.env.X` READ is
+#       not a quoted literal, so pure reads do not match).
+# Anchored at the SINK line (the env-file write call) so the context
+# classifier never mistakes it for a benign bare string literal and suppresses
+# it. CLAUDE_ENV_FILE itself is excluded from S3 — it is the sink target,
+# present in every match; the direct pattern rule covers `export CLAUDE_ENV_FILE=`.
+_ENV_POISON_RESERVED_FLOW = (
+    "CLAUDE_PLUGIN_ROOT",
+    "CLAUDE_PLUGIN_DATA",
+    "CLAUDE_PROJECT_DIR",
+    "CLAUDE_EFFORT",
+    "CLAUDE_CODE_REMOTE",
+    "CLAUDECODE",
+)
+_ENV_POISON_AUTH_FLOW = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_AWS_API_KEY",
+    "ANTHROPIC_FOUNDRY_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+    "CLAUDE_CODE_OAUTH_SCOPES",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "ANTHROPIC_BASE_URL",
+)
+_ENV_POISON_TOGGLE_FLOW = (
+    "DISABLE_TELEMETRY",
+    "DO_NOT_TRACK",
+    "DISABLE_AUTOUPDATER",
+    "DISABLE_ERROR_REPORTING",
+    "DISABLE_FEEDBACK_COMMAND",
+    "CLAUDE_CODE_CERT_STORE",
+    "CLAUDE_CODE_PLUGIN_CACHE_DIR",
+    "CLAUDE_CODE_PLUGIN_SEED_DIR",
+)
+_ENV_FILE_SINK_RE = re.compile(
+    r"(?:appendFileSync|writeFileSync|writeSync|appendFile|writeFile|createWriteStream)\s*\([^;\n]*CLAUDE_ENV_FILE"
+    r"|open\s*\([^)\n]*CLAUDE_ENV_FILE"
+    r"|>>?\s*[\"']?\$?\{?CLAUDE_ENV_FILE"
+)
+
+
+def _env_poison_family(name: str) -> tuple[str, str, str] | None:
+    """Classify a resolved variable NAME into (rule_id, severity, category),
+    or None if it is not a reserved/auth/toggle Claude Code variable.
+    CLAUDE_ENV_FILE is intentionally NOT reserved here — it is the sink target,
+    present in every match; the direct pattern rule covers `export CLAUDE_ENV_FILE=`."""
+    if name in _ENV_POISON_AUTH_FLOW:
+        return ("CLAUDE_AUTH_ENV_OVERRIDE", "critical", "credential_theft")
+    if name in _ENV_POISON_RESERVED_FLOW:
+        return ("CLAUDE_RESERVED_ENV_POISON", "high", "persistence")
+    if name in _ENV_POISON_TOGGLE_FLOW or name.startswith("CLAUDE_CODE_DISABLE_"):
+        return ("CLAUDE_SAFETY_ENV_TAMPER", "high", "persistence")
+    return None
+
+
+def _env_poison_resolve_ident(ident: str, content: str) -> set[str]:
+    """Resolve an identifier (or a quoted literal passed as an arg) to the set
+    of string values it can hold, by scanning its bindings in `content`:
+    `const X = "VAL"`, `X = "VAL"`, `X: "VAL"`, `X = 'VAL'`. A NAME passed
+    directly as a quoted literal resolves to itself."""
+    qlit = re.match(r"""^\s*['"]([A-Za-z_]\w*)['"]\s*$""", ident)
+    if qlit:
+        return {qlit.group(1)}
+    out: set[str] = set()
+    # Bindings, quoted (JS/TS/Python: const X = "VAL", X: "VAL") OR unquoted
+    # (bash: NAME=VAL). RHS must be a bare identifier-shaped name; resolving to a
+    # non-reserved name is harmless (it just will not classify).
+    for bm in re.finditer(
+        r"(?:const|let|var\s+)?\b" + re.escape(ident) + r"\s*[:=]\s*['\"]?([A-Za-z_]\w*)['\"]?",
+        content,
+    ):
+        out.add(bm.group(1))
+    return out
+
+
+def _detect_env_file_poison(lines: list[str]) -> list[dict[str, Any]]:
+    """Detect $CLAUDE_ENV_FILE poisoning by EFFECTS-AWARE FLOW ANALYSIS.
+
+    Rather than excluding reads / per-command ``env:{}`` by a blunt skip, this
+    traces which variable NAMES actually FLOW INTO an ``export <name>=`` that is
+    written to the GLOBAL session env (``$CLAUDE_ENV_FILE``) and fires only when
+    a resolved name is a reserved/auth/toggle Claude Code variable. Excluded BY
+    PROVEN EFFECT (not by pattern):
+
+    * a bare READ (``process.env.X`` / ``os.environ.get("X")``) never reaches an
+      ``export <name>=`` position, so it never enters ``flow_tokens``;
+    * a per-command ``env:{}`` block is plugin.json/hooks.json config, not a
+      write to ``$CLAUDE_ENV_FILE`` — no env-file sink, so the function returns
+      early;
+    * a plugin's OWN namespaced export resolves to a namespaced name
+      (``MYPLUGIN_*``), which ``_env_poison_family`` rejects.
+
+    Multiple corroborating signals are required before a finding is emitted:
+    (1) an env-file write sink exists; (2) a name token flows into an
+    ``export <name>=`` payload — directly, via an identifier binding, or via a
+    writer helper whose exported parameter is fed a reserved name at a call
+    site (the codex shape); (3) the resolved name classifies as
+    reserved/auth/toggle. The finding is anchored at the env-file sink line so
+    the context classifier treats it as executable code, never a bare literal."""
+    content = "\n".join(lines)
+    if "CLAUDE_ENV_FILE" not in content or not _ENV_FILE_SINK_RE.search(content):
+        return []
+
+    # flow_tokens: names/identifiers that become the `<name>` of an env-file export.
+    # kind "literal" → already a final NAME; "ident" → resolve via bindings.
+    flow_tokens: list[tuple[str, str]] = []
+
+    # (1) Every `export <TOKEN>=` anywhere: TOKEN is a literal NAME, a
+    #     ${IDENT}/$IDENT/{IDENT} interpolation, or %s/%(x)s (skip the latter —
+    #     unresolvable). Only meaningful because an env-file sink exists (guard above).
+    for m in re.finditer(r"export\s+(?:\$\{?([A-Za-z_]\w*)\}?|\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))\s*=", content):
+        ident = m.group(1) or m.group(2)
+        if ident:
+            flow_tokens.append(("ident", ident))
+        elif m.group(3):
+            flow_tokens.append(("literal", m.group(3)))
+
+    # (2) Writer-helper indirection (the codex shape): a function whose body
+    #     writes to $CLAUDE_ENV_FILE and exports one of its PARAMS
+    #     (`export ${param}=`). At every call site the param receives the real
+    #     name — resolve param-position → call-arg. ~1.5k-char body window
+    #     covers the small lifecycle hooks this pattern appears in.
+    for fdef in re.finditer(
+        r"function\s+([A-Za-z_]\w*)\s*\(([^)]*)\)"
+        r"|(?:const|let|var)\s+([A-Za-z_]\w*)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>"
+        r"|def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)",
+        content,
+    ):
+        fname = fdef.group(1) or fdef.group(3) or fdef.group(5)
+        params_str = fdef.group(2) or fdef.group(4) or fdef.group(6) or ""
+        if not fname:
+            continue
+        params = [p.strip().split("=")[0].split(":")[0].strip().lstrip("*") for p in params_str.split(",") if p.strip()]
+        body = content[fdef.end() : fdef.end() + 1500]
+        if not _ENV_FILE_SINK_RE.search(body):
+            continue
+        # `export ${param}=` (shell/JS template) OR `export {param}=` (Python f-string).
+        for em in re.finditer(r"export\s+(?:\$\{?|\{)([A-Za-z_]\w*)\}?\s*=", body):
+            pname = em.group(1)
+            if pname in params:
+                pidx = params.index(pname)
+                for call in re.finditer(re.escape(fname) + r"\s*\(([^)]*)\)", content):
+                    args = [a.strip() for a in call.group(1).split(",") if a.strip()]
+                    if pidx < len(args):
+                        flow_tokens.append(("ident", args[pidx]))
+
+    # Resolve every token to concrete NAME values, then classify.
+    resolved: set[str] = set()
+    for kind, tok in flow_tokens:
+        if kind == "literal":
+            resolved.add(tok)
+        else:
+            resolved |= _env_poison_resolve_ident(tok, content)
+
+    families = {}
+    for name in resolved:
+        fam = _env_poison_family(name)
+        if fam:
+            families[name] = fam
+    if not families:
+        return []
+
+    # Highest severity wins (critical > high). Pick the offending var name.
+    def _rank(fam: tuple[str, str, str]) -> int:
+        return {"critical": 2, "high": 1}.get(fam[1], 0)
+
+    var, (rule_id, sev, cat) = max(families.items(), key=lambda kv: _rank(kv[1]))
+
+    sink_line, sink_text = 1, ""
+    for i, line in enumerate(lines):
+        if _ENV_FILE_SINK_RE.search(line):
+            sink_line, sink_text = i + 1, line.strip()[:200]
+            break
+
+    return [
+        {
+            "ruleId": rule_id,
+            "severity": sev,
+            "category": cat,
+            "name": "Env-file poisoning: reserved/auth/toggle var flows into $CLAUDE_ENV_FILE",
+            "description": (
+                f"Flow analysis shows the Claude Code variable '{var}' flows into an "
+                "`export <name>=` written to $CLAUDE_ENV_FILE (the global session env). "
+                f"'{var}' is set per-plugin/per-session by the harness; exporting it "
+                "session-wide clobbers it for every other plugin and any long-lived "
+                "process that inherits it (GitHub issue #64). Write only your own "
+                "plugin-namespaced variables to $CLAUDE_ENV_FILE — never a reserved "
+                "CLAUDE_* / ANTHROPIC_* / safety-toggle name. Reading these vars is fine."
+            ),
+            "line": sink_line,
+            "lineContent": sink_text,
+            "match": (sink_text or var)[:80],
+            "suppressed": False,
+        }
+    ]
+
+
+# ────────────────────────────────────────────────────────────────────────
 # Public dataclasses
 # ────────────────────────────────────────────────────────────────────────
 
@@ -2464,6 +2698,7 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
     secondary_findings.extend(_analyze_urls(lines))
     secondary_findings.extend(_analyze_intent(lines, cb_map))
     secondary_findings.extend(_detect_secrets(lines))
+    secondary_findings.extend(_detect_env_file_poison(lines))
     secondary_findings.extend(_detect_invisible_unicode(lines))
     secondary_findings.extend(_decode_and_scan_base64(lines))
     secondary_findings.extend(_decode_and_scan_escapes(lines))

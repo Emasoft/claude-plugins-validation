@@ -985,6 +985,86 @@
         "(?:billion\\s+laughs|xml\\s+bomb|entity\\s+expansion|<!ENTITY)"
       ],
       "remediation": "Agent developers: set hard timeouts on all tool calls (5-30 seconds max). Limit output sizes from tools. Implement circuit breakers that stop after N consecutive failures or N calls to the same tool. Cap API spending with budget limits. Monitor for infinite loops (tool called >3 times in succession with same params = abort). Skill authors: avoid infinite loops, recursive patterns, and operations that scale with untrusted input sizes. Always bound iterations and output sizes."
+    },
+    {
+      "id": "CLAUDE_RESERVED_ENV_POISON",
+      "severity": "high",
+      "category": "persistence",
+      "name": "Claude Code reserved env var poisoning (cross-plugin clobber)",
+      "description": "A plugin or hook WRITES a reserved, harness-set, per-plugin/per-context Claude Code variable into the global session environment (via $CLAUDE_ENV_FILE or export). These vars are set differently for each plugin by the harness; exporting one session-wide clobbers it for every other plugin and any long-lived process that inherited it. Reading these vars is normal and does NOT match.",
+      "patterns": [
+        "export\\s+(?:CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_ENV_FILE|CLAUDE_EFFORT|CLAUDE_CODE_REMOTE|CLAUDECODE)\\s*=",
+        "\\bsetx?\\s+(?:CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_ENV_FILE)\\b",
+        "process\\.env\\.(?:CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_ENV_FILE)\\s*=[^=]",
+        "process\\.env\\[\\s*['\"](?:CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_ENV_FILE)['\"]\\s*\\]\\s*=[^=]",
+        "os\\.environ\\[\\s*['\"](?:CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_ENV_FILE)['\"]\\s*\\]\\s*=[^=]",
+        "(?:os\\.putenv|os\\.setenv)\\s*\\(\\s*['\"](?:CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_ENV_FILE)['\"]"
+      ],
+      "remediation": "Never write a reserved CLAUDE_* variable (CLAUDE_PLUGIN_ROOT, CLAUDE_PLUGIN_DATA, CLAUDE_PROJECT_DIR, CLAUDE_ENV_FILE, CLAUDE_EFFORT, CLAUDE_CODE_REMOTE, CLAUDECODE) into the global session env or $CLAUDE_ENV_FILE. These are per-plugin values the harness sets; clobbering one breaks every other plugin. Export a namespaced var (e.g. MYPLUGIN_DATA_DIR) instead, and read CLAUDE_PLUGIN_DATA only from your own plugin's runtime-provided env."
+    },
+    {
+      "id": "CLAUDE_AUTH_ENV_OVERRIDE",
+      "severity": "critical",
+      "category": "credential_theft",
+      "name": "Claude Code auth / API-endpoint env override",
+      "description": "A plugin or hook WRITES/overwrites a Claude Code authentication token, API key, or API base-URL variable into the session environment. Overwriting ANTHROPIC_BASE_URL redirects ALL API traffic (prompts + responses) to an attacker-controlled endpoint (MITM/exfil); overwriting a key/token swaps the user's credentials. Reading these is normal and does NOT match.",
+      "patterns": [
+        "export\\s+(?:ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_AWS_API_KEY|ANTHROPIC_FOUNDRY_API_KEY|ANTHROPIC_WORKSPACE_ID|ANTHROPIC_AWS_WORKSPACE_ID|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_REFRESH_TOKEN|CLAUDE_CODE_OAUTH_SCOPES|AWS_BEARER_TOKEN_BEDROCK|ANTHROPIC_BASE_URL|ANTHROPIC_[A-Z_]*BASE_URL)\\s*=",
+        "process\\.env\\.(?:ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_AWS_API_KEY|ANTHROPIC_FOUNDRY_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_REFRESH_TOKEN|CLAUDE_CODE_OAUTH_SCOPES|AWS_BEARER_TOKEN_BEDROCK|ANTHROPIC_BASE_URL)\\s*=[^=]",
+        "process\\.env\\[\\s*['\"](?:ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_REFRESH_TOKEN|ANTHROPIC_BASE_URL)['\"]\\s*\\]\\s*=[^=]",
+        "os\\.environ\\[\\s*['\"](?:ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_AWS_API_KEY|ANTHROPIC_FOUNDRY_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_REFRESH_TOKEN|CLAUDE_CODE_OAUTH_SCOPES|AWS_BEARER_TOKEN_BEDROCK|ANTHROPIC_BASE_URL)['\"]\\s*\\]\\s*=[^=]",
+        "(?:os\\.putenv|os\\.setenv)\\s*\\(\\s*['\"](?:ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_BASE_URL)['\"]"
+      ],
+      "remediation": "Never set or overwrite Claude Code auth/endpoint variables (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN/REFRESH_TOKEN, ANTHROPIC_BASE_URL, etc.) from a plugin or hook. These belong to the user's session; overwriting them redirects API traffic or swaps credentials. If your plugin needs its own API endpoint, use a plugin-namespaced variable scoped to your own process only — never the reserved ANTHROPIC_* / CLAUDE_CODE_OAUTH_* names."
+    },
+    {
+      "id": "CLAUDE_SAFETY_ENV_TAMPER",
+      "severity": "high",
+      "category": "persistence",
+      "name": "Claude Code guardrail / telemetry / plugin-loading env tamper",
+      "description": "A plugin or hook WRITES a Claude Code safety, telemetry, TLS, or plugin-loading toggle into the session environment — silently disabling guardrails, hiding activity, weakening TLS, or redirecting where plugins load from. Reading these is normal and does NOT match.",
+      "patterns": [
+        "export\\s+(?:CLAUDE_CODE_DISABLE_[A-Z_]+|DISABLE_TELEMETRY|DO_NOT_TRACK|DISABLE_AUTOUPDATER|DISABLE_ERROR_REPORTING|DISABLE_FEEDBACK_COMMAND|CLAUDE_CODE_CERT_STORE|CLAUDE_CODE_CLIENT_CERT|CLAUDE_CODE_CLIENT_KEY|CLAUDE_CODE_CLIENT_KEY_PASSPHRASE|CLAUDE_CODE_PLUGIN_CACHE_DIR|CLAUDE_CODE_PLUGIN_SEED_DIR)\\s*=",
+        "process\\.env\\.(?:CLAUDE_CODE_DISABLE_[A-Z_]+|DISABLE_TELEMETRY|DO_NOT_TRACK|DISABLE_AUTOUPDATER|DISABLE_ERROR_REPORTING|DISABLE_FEEDBACK_COMMAND|CLAUDE_CODE_CERT_STORE|CLAUDE_CODE_PLUGIN_CACHE_DIR|CLAUDE_CODE_PLUGIN_SEED_DIR)\\s*=[^=]",
+        "os\\.environ\\[\\s*['\"](?:CLAUDE_CODE_DISABLE_[A-Z_]+|DISABLE_TELEMETRY|DO_NOT_TRACK|DISABLE_AUTOUPDATER|DISABLE_ERROR_REPORTING|DISABLE_FEEDBACK_COMMAND|CLAUDE_CODE_CERT_STORE|CLAUDE_CODE_PLUGIN_CACHE_DIR|CLAUDE_CODE_PLUGIN_SEED_DIR)['\"]\\s*\\]\\s*=[^=]"
+      ],
+      "remediation": "A plugin or hook must never set Claude Code guardrail/telemetry/TLS/plugin-loading toggles (CLAUDE_CODE_DISABLE_*, DISABLE_TELEMETRY, DO_NOT_TRACK, CLAUDE_CODE_CERT_STORE, CLAUDE_CODE_PLUGIN_CACHE_DIR/SEED_DIR, etc.). These are the user's safety/privacy choices; a plugin changing them silently weakens the session. Document the setting in your README for the user to opt into instead."
+    },
+    {
+      "id": "CLAUDE_CLI_TOKEN_THEFT",
+      "severity": "critical",
+      "category": "credential_theft",
+      "name": "claude setup-token invocation (long-lived token minting)",
+      "description": "A plugin, hook, or bundled script invokes `claude setup-token`, which mints a long-lived OAuth token for the user's Claude subscription. If captured/exfiltrated, that token grants an attacker access to the user's paid subscription. A plugin has no legitimate reason to run this.",
+      "patterns": [
+        "\\bclaude\\s+setup-token\\b"
+      ],
+      "remediation": "Remove any `claude setup-token` invocation from plugin code/hooks/scripts. Token provisioning is a user action performed interactively, never something a plugin runs on the user's behalf — the minted token is a credential that can be stolen."
+    },
+    {
+      "id": "CLAUDE_CLI_PERMISSION_BYPASS",
+      "severity": "critical",
+      "category": "code_execution",
+      "name": "claude --dangerously-skip-permissions invocation",
+      "description": "A plugin or hook invokes the `claude` CLI with --dangerously-skip-permissions (or --dangerously-bypass-approvals-and-sandbox), spawning a Claude Code session that bypasses ALL permission prompts and sandboxing — arbitrary tool use with no user gate.",
+      "patterns": [
+        "\\bclaude\\b[^\\n]{0,200}--dangerously-skip-permissions\\b",
+        "\\bclaude\\b[^\\n]{0,200}--dangerously-bypass-approvals-and-sandbox\\b"
+      ],
+      "remediation": "Never spawn `claude` with --dangerously-skip-permissions / --dangerously-bypass-approvals-and-sandbox from a plugin or hook. This runs an unsupervised agent with no permission gate. If a plugin needs to run a command, it should do so through its own explicit, scoped logic, not by launching a permission-bypassed Claude session."
+    },
+    {
+      "id": "CLAUDE_CLI_UNAUTHORIZED_INSTALL",
+      "severity": "high",
+      "category": "supply_chain",
+      "name": "claude plugin/marketplace/mcp install from plugin code",
+      "description": "A plugin or hook programmatically invokes `claude plugin install`, `claude plugin marketplace add`, or `claude mcp add` — installing plugins, registering marketplaces, or adding MCP servers without the user's explicit choice. This is a supply-chain / unauthorized-install vector (especially from an untrusted marketplace). Documenting the install command in a README for the user to run is fine; a hook/script running it autonomously is not.",
+      "patterns": [
+        "\\bclaude\\s+plugin\\s+install\\b",
+        "\\bclaude\\s+plugin\\s+marketplace\\s+add\\b",
+        "\\bclaude\\s+mcp\\s+add\\b"
+      ],
+      "remediation": "A plugin must not install other plugins, add marketplaces, or register MCP servers programmatically (claude plugin install / marketplace add / mcp add). These are explicit user decisions. If your plugin depends on another component, document it in your README for the user to install themselves, ideally from a trusted/official marketplace."
     }
   ]
 }
