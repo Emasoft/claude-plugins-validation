@@ -1,16 +1,16 @@
 {
   "_schema_version": 1,
-  "_generated_at": "2026-06-01T16:55:03.199926Z",
+  "_generated_at": "2026-06-01T19:36:38.744649Z",
   "_source": "scripts/rules/skillaudit_patterns.json",
-  "_source_sha256": "fa92f57b2020dbef12a4b33e078ee06b1bc2ac6798b52ee9164440c4bc7840dc",
+  "_source_sha256": "ccdded7601323f049efb13be8bc0e76c80d1c7a1e80e3ea0f714372dd5c5b4b8",
   "_re2_version": "unknown",
   "_audit_mode": "re2_available",
   "_summary": {
-    "total": 504,
-    "compatible": 496,
+    "total": 527,
+    "compatible": 519,
     "incompatible": 8,
-    "rules_total": 56,
-    "rules_compatible": 50,
+    "rules_total": 58,
+    "rules_compatible": 52,
     "rules_incompatible": 6
   },
   "rules": {
@@ -449,6 +449,20 @@
       "compatible": true,
       "patterns_total": 1,
       "patterns_compatible": 1,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "INSECURE_TLS": {
+      "compatible": true,
+      "patterns_total": 9,
+      "patterns_compatible": 9,
+      "patterns_incompatible": [],
+      "reason": null
+    },
+    "CREDENTIAL_DISCOVERY": {
+      "compatible": true,
+      "patterns_total": 14,
+      "patterns_compatible": 14,
       "patterns_incompatible": [],
       "reason": null
     }

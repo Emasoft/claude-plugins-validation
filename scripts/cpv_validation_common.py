@@ -7687,7 +7687,16 @@ def validate_md_urls(
     # "Dead URL" WARNING (issue: dead-URL false-positives, 2026-05-09).
     url_re = re.compile(r"https?://[^\s\)\]\"'<>`]+")
 
-    # Create SSL context once, outside the loop
+    # Create SSL context once, outside the loop.
+    # NOTE: cert verification is DELIBERATELY relaxed here — this is a
+    # liveness HEAD probe ("does this documented URL still resolve/respond"),
+    # NOT a channel that carries any secret or trusts the response body. A
+    # MITM could at most make a dead link look alive, which only suppresses a
+    # low-stakes "Dead URL" WARNING. CPV's own INSECURE_TLS skillaudit rule
+    # (added v2.117.0) flags `ssl.CERT_NONE` in third-party plugins where it
+    # WOULD matter (real data over the channel); this single first-party
+    # liveness-prober is the documented exception, SHA-recognised as a CPV
+    # self-artifact during self-scan.
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
