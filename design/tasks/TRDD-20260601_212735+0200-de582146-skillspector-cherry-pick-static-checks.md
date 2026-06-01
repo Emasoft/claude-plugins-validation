@@ -1,9 +1,9 @@
 ---
 trdd-id: de582146-76f9-47ea-817e-3fb44fb4997b
 title: Cherry-pick SkillSpector static-check ideas — reimplement well in CPV
-status: in-progress
+status: completed
 created: 2026-06-01T21:27:35+0200
-updated: 2026-06-01T21:48:19+0200
+updated: 2026-06-01T22:15:27+0200
 ---
 
 # TRDD-de582146 — Cherry-pick SkillSpector static checks, reimplement well in CPV
