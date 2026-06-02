@@ -2413,6 +2413,30 @@ def _rc87_is_semver_context(line: str, file_path: str) -> bool:
     return False
 
 
+# Issue #67 — a security PLUGIN's pattern library is full of regex SIGNATURES
+# (``re.compile(r"…--insecure…")``, ``re.compile(r"10\.\d+…")``) — the detector's
+# own needles, never live args/commands. A code/CLI-shape RC rule (RC-46
+# security-disabling arg, RC-87 RFC-1918 IP) matching the CONTENT of such a regex
+# is the "validator scanning a validator" meta-false-positive. The FN-safe
+# discriminator: the match sits inside a RAW-STRING literal (``r"…"``). Raw strings
+# are the regex convention; a REAL CLI arg is a normal string (``"--no-sandbox"``),
+# never a raw string — so this skip cannot hide a genuine live argument.
+_RAW_STRING_SPAN_RE = re.compile(r"""(?<![\w'"])[rR][bBfF]?(['"])(?:\\.|(?!\1).)*\1""")
+
+
+def _match_inside_raw_string(line: str, col: int) -> bool:
+    """True iff column ``col`` of ``line`` falls inside a Python raw-string literal."""
+    for m in _RAW_STRING_SPAN_RE.finditer(line):
+        if m.start() <= col < m.end():
+            return True
+    return False
+
+
+# RC rules whose code/CLI shape, when matched inside a raw-string regex signature,
+# is the detector's needle (data) rather than a live use.
+_DETECTOR_SIGNATURE_SKIP_RULES: frozenset[str] = frozenset({"RC-46", "RC-87"})
+
+
 _TEST_PATH_RE = re.compile(
     r"(?:"
     r"(?:^|/)tests?/"  # /test/ or /tests/ segment
@@ -7932,6 +7956,10 @@ def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
                     continue
                 if has_negation_guard_nearby(content, _line_abs_offset(content_lines, line_no) + m.start()):
                     continue
+                # Issue #67 — RC-87 RFC-1918 IP matching the CONTENT of a raw-string
+                # regex signature is the detector's needle, not a live hardcoded IP.
+                if rule_id in _DETECTOR_SIGNATURE_SKIP_RULES and _match_inside_raw_string(line, m.start()):
+                    continue
                 # v2.42 — opt-in classifier path for RC-87.
                 if _CLASSIFIER_ACTIVE and rule_id == "RC-87":
                     surrounding = _surrounding_lines(content_lines, line_no - 1, window=4)
@@ -8026,6 +8054,11 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                 if not m:
                     continue
                 if has_negation_guard_nearby(content, _line_abs_offset(content_lines, line_no) + m.start()):
+                    continue
+                # Issue #67 — RC-46 (and RC-87, in the phase-4 loop) matching the
+                # CONTENT of a raw-string regex signature is the detector's needle,
+                # not a live arg. FN-safe: a real CLI arg is a normal string, never raw.
+                if rule_id in _DETECTOR_SIGNATURE_SKIP_RULES and _match_inside_raw_string(line, m.start()):
                     continue
                 # v2.42 — opt-in classifier path for rules with a registered
                 # classifier (RC-22, RC-93 in this loop). When active, the
