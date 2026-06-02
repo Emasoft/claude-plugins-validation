@@ -1251,6 +1251,20 @@ def _context_classifier_verdict(
     if _ig_base.endswith("ignore") and 0 <= line_idx < len(lines):
         if lines[line_idx].lstrip().startswith("#"):
             return "suppress"
+    # FS_WRITE is a SKILL host-filesystem-safety heuristic — it flags writes that
+    # could touch the USER's machine. A Dockerfile / Containerfile / compose file
+    # writes only inside the CONTAINER image layer / container tmpfs, sandboxed away
+    # from the host (that is the whole point of a Dockerfile). So FS_WRITE is
+    # categorically inapplicable there, on every line incl. comments (issue #68:
+    # FS_WRITE fired on a `.Dockerfile` comment + `cp … $HOME/.bashrc` inside the
+    # image). FN-safe: a Dockerfile that pulls + runs a remote payload is
+    # SUPPLY_CHAIN / CMD_INJECTION, NOT FS_WRITE — those still fire here.
+    if rule_id == "FS_WRITE" and (
+        _ig_base in {"dockerfile", "containerfile"}
+        or _ig_base.endswith(".dockerfile")
+        or (_ig_base.startswith(("docker-compose", "compose")) and _ig_base.endswith((".yml", ".yaml")))
+    ):
+        return "suppress"
     # Point 1 (v2.114.0): an extension-less script (git hook, configure,
     # runme) reaches here with no classifier-recognised extension. The
     # per-language classifiers dispatch AND internally gate on the file
