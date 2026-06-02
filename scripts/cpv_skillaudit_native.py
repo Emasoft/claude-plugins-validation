@@ -1241,6 +1241,16 @@ def _context_classifier_verdict(
     # stays visible.)
     if rule_id == "CLAUDE_CLI_UNAUTHORIZED_INSTALL" and fp_lower.endswith((".md", ".markdown")):
         return "suppress"
+    # Ignore-files (.gitignore / .dockerignore / .npmignore / .eslintignore /
+    # .prettierignore / .cursorignore …) are NON-EXECUTABLE — git/npm/docker read
+    # them as path-glob lists, nothing runs from them. A ``#`` comment line in one
+    # is inert prose; a substring like ``process.argv`` / ``process.env`` / a path
+    # token there is documentation, not reconnaissance (issue #65: ENV_RECON fired
+    # on a ``.gitignore`` comment). Suppress matches on comment lines of *ignore files.
+    _ig_base = fp_lower.rsplit("/", 1)[-1]
+    if _ig_base.endswith("ignore") and 0 <= line_idx < len(lines):
+        if lines[line_idx].lstrip().startswith("#"):
+            return "suppress"
     # Point 1 (v2.114.0): an extension-less script (git hook, configure,
     # runme) reaches here with no classifier-recognised extension. The
     # per-language classifiers dispatch AND internally gate on the file
@@ -1779,6 +1789,25 @@ def _detect_structural_read_to_net(lines: list[str], cb_map: list[bool]) -> list
 
 _URL_RE = re.compile(r'https?://[^\s"\'<>\])}]+', re.IGNORECASE)
 _RAW_IP_RE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
+# Bare ``IP:port`` (with or without an http(s):// scheme) — used by the raw-IP
+# endpoint detector that replaces NET_SUSPICIOUS's blanket IP:port regex
+# (GitHub issue #65/#67: loopback/private dev endpoints were false-flagged).
+_IP_PORT_RE = re.compile(r"(?<![\w.])(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):\d{1,5}\b")
+
+
+def _is_private_or_loopback_ip(host: str) -> bool:
+    """True for loopback / RFC1918-private / link-local IPv4+IPv6 (incl. cloud
+    metadata 169.254.x). These are dev/internal endpoints — a raw IP there is
+    not a reputation risk, so URL_RAW_IP / the IP:port net signal must not fire
+    on them (issue #65/#67: ``http://127.0.0.1:9222``, ``http://10.x``, ``::1``).
+    """
+    import ipaddress  # std lib, local import
+
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_private or ip.is_link_local
 
 
 def _analyze_urls(lines: list[str]) -> list[dict[str, Any]]:
@@ -1821,7 +1850,7 @@ def _analyze_urls(lines: list[str]) -> list[dict[str, Any]]:
                             "suppressed": False,
                         }
                     )
-            if _RAW_IP_RE.match(hostname):
+            if _RAW_IP_RE.match(hostname) and not _is_private_or_loopback_ip(hostname):
                 findings.append(
                     {
                         "ruleId": "URL_RAW_IP",
@@ -1836,6 +1865,45 @@ def _analyze_urls(lines: list[str]) -> list[dict[str, Any]]:
                     }
                 )
     return findings
+
+
+def _detect_public_ip_endpoint(lines: list[str]) -> list[dict[str, Any]]:
+    """Flag a raw ``IP:port`` endpoint (a possible C2 / hardcoded backend) — but
+    ONLY for PUBLIC IPs. This replaces NET_SUSPICIOUS's blanket
+    ``\\d+\\.\\d+\\.\\d+\\.\\d+:\\d+`` regex, which false-flagged every
+    ``127.0.0.1:9222`` / ``10.x`` / ``192.168.x`` dev endpoint (issue #65/#67).
+    """
+    findings: list[dict[str, Any]] = []
+    for i, line in enumerate(lines):
+        for m in _IP_PORT_RE.finditer(line):
+            host = m.group(1)
+            # Must be a syntactically valid public IPv4 (each octet 0-255 — the
+            # regex alone accepts 999.999.999.999) AND not private/loopback.
+            if not _valid_ipv4(host) or _is_private_or_loopback_ip(host):
+                continue
+            findings.append(
+                {
+                    "ruleId": "NET_SUSPICIOUS",
+                    "severity": "medium",
+                    "category": "network",
+                    "name": "Raw public IP:port endpoint",
+                    "description": f"Hardcoded public IP:port endpoint: {m.group(0)} (possible C2 / hardcoded backend)",
+                    "line": i + 1,
+                    "lineContent": line.strip()[:200],
+                    "match": m.group(0)[:100],
+                    "suppressed": False,
+                }
+            )
+    return findings
+
+
+def _valid_ipv4(host: str) -> bool:
+    import ipaddress  # std lib, local import
+
+    try:
+        return isinstance(ipaddress.ip_address(host), ipaddress.IPv4Address)
+    except ValueError:
+        return False
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -2748,6 +2816,7 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
     secondary_findings: list[dict[str, Any]] = []
     secondary_findings.extend(_detect_structural_read_to_net(lines, cb_map))
     secondary_findings.extend(_analyze_urls(lines))
+    secondary_findings.extend(_detect_public_ip_endpoint(lines))
     secondary_findings.extend(_analyze_intent(lines, cb_map))
     secondary_findings.extend(_detect_secrets(lines))
     secondary_findings.extend(_detect_env_file_poison(lines))

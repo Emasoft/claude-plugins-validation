@@ -131,6 +131,16 @@ _DYNAMIC_EXEC_FQNAMES: Final[frozenset[str]] = frozenset({"eval", "exec", "compi
 # never hidden.
 _CALL_SHAPE_SUPPRESSIBLE_RULES: Final[frozenset[str]] = frozenset({"CMD_INJECTION", "SHELL_EXEC"})
 
+# Config shapes whose occurrence INSIDE a string/bytes literal is PROVABLY data,
+# never a live config — so suppression carries ZERO false-negative risk. Issue
+# #65/#67: ``"…verify=False / --insecure…"`` is a TLS-bypass SIGNATURE / description
+# string in a security plugin's pattern library, NOT a live ``verify=False`` kwarg
+# (that exists only as real code, never inside a quoted string). Deliberately does
+# NOT include CMD_INJECTION / SHELL_EXEC — those are FLOW-SENSITIVE (a string CAN be
+# a payload that reaches a sink: ``f"…"`` → ``shell=True``), so the existing
+# AST-flow logic owns them (data string → demote-visible, sink-flowing → keep).
+_LITERAL_DATA_SUPPRESSIBLE_RULES: Final[frozenset[str]] = frozenset({"INSECURE_TLS"})
+
 # Sinks that execute a STRING command directly (no ``shell=True`` kwarg needed) —
 # feeding a regex-pattern string into one of these executes it. Used by the
 # re-pattern-literal suppressor to refuse suppression when the pattern is
@@ -1303,6 +1313,37 @@ def _match_inside_python_comment(source: str, line: int, match: str) -> bool:
     return False
 
 
+def _match_inside_string_literal_token(source: str, line: int, match: str) -> bool:
+    """True iff ``match`` appears inside a Python STRING / BYTES / F-STRING literal
+    on (or spanning) the 1-based ``line``.
+
+    Issue #65/#67: a code-EXECUTION shape (``new Function(``, ``verify=False``,
+    ``shell=True``) matched INSIDE a string/bytes literal is that literal's DATA —
+    a detector SIGNATURE (``b"return(function("``) or a DESCRIPTION string
+    (``"TLS bypass: verify=False"``) in a security plugin's pattern library, not a
+    live sink. The real sink, if any, is matched separately at the call site, so
+    suppressing the in-string match drops noise without dropping a true positive.
+
+    Column-precise via :mod:`tokenize` (a STRING token, not a substring scan) so
+    ``os.system("x"); evil(real)`` only matches the in-string half. Conservative:
+    returns ``False`` on any tokenize error.
+    """
+    if not source or not match:
+        return False
+    try:
+        toks = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return False
+    fstr_mid = getattr(tokenize, "FSTRING_MIDDLE", None)
+    for tok in toks:
+        is_string_tok = tok.type == tokenize.STRING or (fstr_mid is not None and tok.type == fstr_mid)
+        if not is_string_tok:
+            continue
+        if tok.start[0] <= line <= tok.end[0] and match in tok.string:
+            return True
+    return False
+
+
 def abs_path_const_is_inert_py_data(
     source: str, line: int, matched_text: str, is_test_file: bool, tree: ast.AST | None = None
 ) -> bool:
@@ -2285,6 +2326,19 @@ def classify(
         0 <= line_idx < len(lines)
         and not _rule_is_prose_vector(rule_id)
         and _match_in_python_inline_comment(lines[line_idx], match)
+    ):
+        return "safe_literal"
+
+    # Issue #65/#67 — a code-execution / config shape (new Function(, verify=False,
+    # shell=True) matched INSIDE a string / bytes literal is the literal's DATA
+    # (a detector signature, a description string in a security plugin's pattern
+    # library), not a live sink. Suppress for the code-shape rules only; the real
+    # sink, if any, is matched separately at the call site. Prose-vector / secret
+    # rules are excluded — a payload string or a real key in a literal stays visible.
+    if (
+        rule_id in _LITERAL_DATA_SUPPRESSIBLE_RULES
+        and 0 <= line_idx < len(lines)
+        and _match_inside_string_literal_token(source, line_idx + 1, match)
     ):
         return "safe_literal"
 
