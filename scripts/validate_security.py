@@ -294,6 +294,45 @@ def _is_always_skip_basename(file_ref: str) -> bool:
     return Path(str(file_ref)).name in ALWAYS_SKIP_BASENAMES
 
 
+def _external_finding_is_gitignored(file_ref: str, gi: Any) -> bool:
+    """Return True iff an external scanner's finding path is excluded by the
+    plugin's own ``.gitignore`` (issue #67).
+
+    External scanners (trufflehog / cc-audit / tirith / semgrep / Cisco) run as
+    subprocesses over the WHOLE plugin tree and cannot use CPV's
+    gitignore-aware walk. They post-filter findings against a HARDCODED
+    dev-scratch dir list (``_is_dev_scratch_path`` → ``_DEV_SCRATCH_DIR_PARTS``),
+    which only covers ``docs_dev/`` / ``scripts_dev/`` / ``reports/`` / … and
+    misses any OTHER gitignored sub-tree a plugin keeps — research corpora,
+    vendored reference repos, extracted archives (the reported case: a
+    gitignored ``INPUT_DEV/**/*.zip`` corpus producing ~97 trufflehog hits).
+    This generalises that hardcoded list to the plugin's ACTUAL ``.gitignore``.
+
+    Rationale + FN-safety: a gitignored path is not committed → not shipped to
+    the marketplace → not installed by users, so a secret / pattern hit in it
+    is the author's LOCAL concern, not a published-plugin vulnerability. This
+    ALIGNS the external scanners with the two in-process scanners that already
+    honor gitignore — the in-process secret scanner walks via ``gi.walk`` and
+    the skillaudit native scanner filters via ``_load_gitignore_predicate`` — so
+    it opens NO new false-negative surface relative to CPV's existing
+    "gitignored = not-shipped = not-scanned" contract.
+
+    ``file_ref`` may be absolute (cc-audit / tirith / Cisco hand them back) or
+    plugin-root-relative; it is normalised against ``gi.root`` (the resolved
+    plugin root) first. A path outside the root, or any error, returns False —
+    fail-safe toward MORE scanning (never silently suppress a shipped finding).
+    """
+    if not file_ref:
+        return False
+    rel = _normalize_to_relpath(str(file_ref), gi.root)
+    if rel is None:
+        return False
+    try:
+        return bool(gi.is_ignored(gi.root / rel))
+    except Exception:  # noqa: BLE001 — the gitignore filter must never crash a scan
+        return False
+
+
 def _split_lines(text: str) -> list[str]:
     """Return `text.split("\\n")`, cached by identity of `text` for one shot.
 
@@ -6615,6 +6654,11 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             raw = data.get("results") or data.get("findings") or data.get("vulnerabilities") or []
             findings = list(raw)
 
+        # Issue #67 — build the plugin's gitignore filter ONCE so each
+        # external (cc-audit) finding can be dropped when its path is
+        # gitignored (research corpora / vendored repos / extracted archives
+        # the hardcoded _is_dev_scratch_path list below doesn't cover).
+        gi = get_gitignore_filter(plugin_path)
         for finding in findings:
             if not isinstance(finding, dict):
                 continue
@@ -6656,6 +6700,11 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
                 continue
             # v2.44 — drop findings inside gitignored dev-scratch dirs.
             if file_ref and _is_dev_scratch_path(str(file_ref)):
+                continue
+            # Issue #67 — drop findings inside ANY path the plugin's own
+            # .gitignore excludes (generalises the hardcoded dev-scratch list
+            # above to the actual .gitignore; gitignored = not shipped).
+            if file_ref and _external_finding_is_gitignored(str(file_ref), gi):
                 continue
 
             # v2.48 P-2 sibling — drop findings on Python test files.
@@ -6943,6 +6992,9 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
     }
 
     issues_found = 0
+    # Issue #67 — gitignore filter built ONCE; drop tirith findings whose path
+    # the plugin's own .gitignore excludes (gitignored = not shipped).
+    gi = get_gitignore_filter(plugin_path)
     for finding in findings:
         if not isinstance(finding, dict):
             continue
@@ -6988,6 +7040,10 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
             if _is_dev_scratch_path(f_str):
                 continue
             if _is_test_file_path(f_str):
+                continue
+            # Issue #67 — drop findings inside ANY gitignored path (generalises
+            # the hardcoded dev-scratch list above to the actual .gitignore).
+            if _external_finding_is_gitignored(f_str, gi):
                 continue
             # Per-line catalog/docstring/comment pattern-source skip.
             if isinstance(line, int) and line > 0:
@@ -8487,6 +8543,10 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
         return 0
 
     issues = 0
+    # Issue #67 — gitignore filter built ONCE; drop trufflehog findings whose
+    # path the plugin's own .gitignore excludes (gitignored = not shipped). This
+    # is the reported case: a gitignored INPUT_DEV/**/*.zip corpus = ~97 hits.
+    gi = get_gitignore_filter(plugin_path)
     # v2.48 — explicit --concurrency leverages trufflehog's internal goroutine
     # pool. Default is 8; we request `os.cpu_count() or 4` so dedicated 12+
     # core machines see the full benefit. This is the parallelism win that
@@ -8558,6 +8618,10 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
         # examples and are never shipped, so any external-scanner hit
         # in them is operational noise, not a security finding.
         if _is_dev_scratch_path(rel):
+            continue
+        # Issue #67 — drop findings inside ANY gitignored path (generalises the
+        # hardcoded dev-scratch list above to the actual .gitignore).
+        if _external_finding_is_gitignored(rel, gi):
             continue
         # Test-file skip — fixture tokens like `const FAKE = "ghs_..."`
         # in `test_*.py` / `*.test.ts` / `tests/fixtures/...` exist by
@@ -8649,6 +8713,9 @@ def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
         "WARNING": "minor",
         "INFO": "info",
     }
+    # Issue #67 — gitignore filter built ONCE; drop semgrep findings whose path
+    # the plugin's own .gitignore excludes (gitignored = not shipped).
+    gi = get_gitignore_filter(plugin_path)
     for finding in data.get("results", []):
         if not isinstance(finding, dict):
             continue
@@ -8682,6 +8749,10 @@ def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
         # already early-exit on _is_test_file_path, this aligns
         # semgrep with that contract.
         if _is_test_file_path(rel):
+            continue
+        # Issue #67 — drop findings inside ANY gitignored path (generalises the
+        # hardcoded dev-scratch list above to the actual .gitignore).
+        if _external_finding_is_gitignored(rel, gi):
             continue
         # FP-corpus markdown skip (file-level, requires both directory
         # shape AND in-file marker) so corpus exemplars don't fire.
@@ -9435,6 +9506,11 @@ def validate_security(
     # resolved at its PyPI source URL. See scripts/cpv_skill_scanner.py.
     from cpv_skill_scanner import report_findings, run_cisco_scan  # noqa: PLC0415
 
+    # Issue #67 — Cisco runs as an external uvx subprocess over the whole tree;
+    # build the gitignore filter ONCE so _cisco_should_skip can drop findings
+    # whose path the plugin's own .gitignore excludes (gitignored = not shipped).
+    cisco_gi = get_gitignore_filter(plugin_path)
+
     def _cisco_should_skip(file_path: str, line: int | None) -> bool:
         """Apply CPV's full self-scan filter chain to each Cisco finding.
 
@@ -9455,6 +9531,10 @@ def validate_security(
         if _is_dev_scratch_path(file_path):
             return True
         if _is_test_file_path(file_path):
+            return True
+        # Issue #67 — drop findings inside ANY gitignored path (generalises the
+        # hardcoded dev-scratch list above to the actual .gitignore).
+        if _external_finding_is_gitignored(file_path, cisco_gi):
             return True
         if isinstance(line, int) and line > 0:
             try:
