@@ -203,6 +203,18 @@ _SHIPPED_WALK_SKIP_DIRS = frozenset(
         "tests_dev",
         "examples_dev",
         "docs_dev",
+        # CPV/plugin RUNTIME-STATE dirs created during a scan — never shipped,
+        # always gitignored. On a fresh (non-git) INSTALL the FS-walk fallback
+        # would otherwise hash these and verify_self_integrity would flag them as
+        # "added" files, aborting EVERY scan on a clean install (GitHub issue #66:
+        # `.in_use/` PID-lock files). `git ls-files` already excludes them on a
+        # source checkout; this list fixes the installed (non-git) case.
+        ".in_use",
+        ".trashcan",
+        ".rechecker",
+        ".audit",
+        ".cpv-cache",
+        ".scan-cache",
     }
 )
 

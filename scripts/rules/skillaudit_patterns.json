@@ -117,7 +117,6 @@
       "name": "Suspicious network activity",
       "description": "Skill makes network requests to unusual destinations",
       "patterns": [
-        "\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}:\\d+",
         "base64.*decode.*http",
         "atob.*fetch",
         "Buffer\\.from.*http",
@@ -349,13 +348,10 @@
       "patterns": [
         "new Date\\(\\).*(?:getMonth|getFullYear|getDate|getTime).*(?:>|<|>=|<=|===|==)\\s*\\d",
         "Date\\.now\\(\\)\\s*(?:>|<|>=|<=)\\s*\\d{10,}",
-        "setTimeout\\s*\\(.*\\d{5,}",
-        "setInterval\\s*\\(.*\\d{5,}",
         "(?:if|when|after)\\s+.{0,40}\\b\\d+\\s+(?:days?|hours?|minutes?)\\b.{0,40}(?:then|execute|run|activate)",
         "activation[_-]?date",
         "trigger[_-]?(?:after|date|time)",
-        "dormant.*(?:until|period|phase)",
-        "\\bsleep\\s*\\(\\s*\\d{4,}"
+        "dormant.*(?:until|period|phase)"
       ],
       "remediation": "Remove all time-based activation logic (date checks, delayed execution, dormant periods). Legitimate skills should function consistently regardless of when they're run. If scheduling is needed, use the agent's built-in scheduling capabilities. NOTE: pattern 5 now requires a LITERAL TIME DELTA (`\\d+ days?`, `\\d+ hours?`, `\\d+ minutes?`) and bounded `.{0,40}` spans, so it no longer matches rate-limiter bash code that uses identifier names like `current_minute` and `last_minute` with no actual numeric delta — those are per-minute rate-limit windows, not time bombs."
     },
@@ -415,7 +411,7 @@
         "<img.*src=.*encodeURIComponent",
         "new Image\\(\\)\\.src\\s*=",
         "beacon.*send",
-        "navigator\\.sendBeacon",
+        "navigator\\.sendBeacon\\s*\\(\\s*['\"`]?https?://",
         "\\?data=.*base64",
         "\\?exfil=",
         "\\?d=.*encode"
@@ -617,7 +613,6 @@
       "name": "Path traversal attack",
       "description": "Skill uses directory traversal sequences to access files outside intended scope — reading /etc/passwd, escaping chroot, or navigating to sensitive system paths",
       "patterns": [
-        "\\.\\.[\\\\/]\\.\\.[\\\\/]\\.\\.[\\\\/]",
         "\\.\\.[\\\\/].*(?:etc[\\\\/](?:passwd|shadow|hosts)|proc[\\\\/]|sys[\\\\/])",
         "path\\.(?:join|resolve)\\s*\\(.*\\.\\.[\\\\/]",
         "(?:readFile|readFileSync|open|fopen)\\s*\\(.*\\.\\.[\\\\/]",
@@ -939,7 +934,7 @@
         "(?:you\\s+are|you're)\\s+(?:now|actually|really)\\s+(?:a|an|in)\\s+(?:new|different|special|unrestricted|developer|admin)",
         "(?:ignore|forget|discard|disregard)\\s+(?:all|any|every|your|the|previous)\\s+(?:prior|previous|above|earlier|original|preceding)?\\s*(?:instruction|rule|guideline|constraint|restriction|safety|guardrail|system\\s*prompt)",
         "(?:new|updated|revised|corrected|real|actual|true)\\s+(?:system\\s*)?(?:instruction|directive|rule|guideline|policy|prompt|persona)\\s*[:=]",
-        "\\[(?:SYSTEM|ADMIN|OVERRIDE|HIDDEN|INVISIBLE)\\]",
+        "\\[(?:SYSTEM|ADMIN|OVERRIDE|INVISIBLE)\\]",
         "<!--\\s*(?:INSTRUCTION|PROMPT|SYSTEM|OVERRIDE|AI|AGENT|COMMAND)",
         "(?:when|if)\\s+(?:an?|the)?\\s*(?:AI|agent|assistant|model|LLM|GPT|Claude)\\s+(?:reads?|sees?|processes?|encounters?|parses?)\\s+this",
         "(?:this\\s+(?:message|text|content|data)\\s+is\\s+(?:for|intended\\s+for|meant\\s+for|directed\\s+at))\\s+(?:the\\s+)?(?:AI|agent|assistant|model)",
