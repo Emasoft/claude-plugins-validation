@@ -20,10 +20,20 @@ There are **two ways to use CPV**. Pick the one that fits your workflow:
 | **Best for** | Quick one-off checks, CI/CD pipelines, automation | Daily development, plugin management, AI-assisted fixing |
 | **Jump to** | [Part 1: Standalone Validation](#part-1-standalone-validation-via-uvx) | [Part 2: Claude Code Plugin](#part-2-claude-code-plugin) |
 
+> **Using CPV from inside Claude Code? You don't need to memorize anything.**
+> Tell any Claude:
+>
+> > **"read the CPV skills menu and use whatever you need"**
+>
+> and it routes your request — validate, security-scan, fix, optimize cache,
+> create, publish — to the right tool automatically. Or run **`/cpv-main-menu`**
+> for an interactive menu. Full capability list: [Features at a glance](#features-at-a-glance).
+
 ---
 
 ## Table of Contents
 
+- [Features at a glance](#features-at-a-glance)
 - [What Does CPV Check?](#what-does-cpv-check)
   - [Claude Code Documentation](#claude-code-documentation)
 - [Usage](#usage)
@@ -40,6 +50,40 @@ There are **two ways to use CPV**. Pick the one that fits your workflow:
 - [For Developers](#for-developers)
 - [Requirements](#requirements)
 - [Troubleshooting](#troubleshooting)
+
+---
+
+## Features at a glance
+
+Every CPV capability, with its route in three contexts: a human-facing
+slash command, the agent that owns it, and the standalone `uvx` alias.
+Throughout this table, **`cpv`** is the standalone alias =
+`uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate`
+(make it a shell alias once and just type `cpv plugin /path`).
+
+> **Two menus, two audiences.** Humans run **`/cpv-main-menu`** — a real
+> interactive numbered menu (zero token cost). Agents (and any routing
+> Claude) read **the-skills-menu** instead — a plain à-la-carte catalog
+> they pick from. The universal, memorize-nothing instruction is
+> **"read the CPV skills menu and use whatever you need"**.
+
+| Feature | What it does | In Claude Code (slash command / agent / skill) | Standalone (uvx) |
+|---------|--------------|------------------------------------------------|------------------|
+| **Validate a plugin** | Structure, hooks, skills, security, compat, quality — 20 validators | `plugin-validator` agent, or `Skill(claude-plugins-validation:plugin-validation-skill)` | `cpv plugin /path` |
+| **Validate a skill / component** | One skill's SKILL.md, or an agent / command / hook / MCP / LSP | `skill-validation-agent` (skill) · `plugin-validator` (any component) | `cpv skill /path --strict` · `cpv agent` · `cpv command` · `cpv hook` · `cpv mcp` · `cpv lsp` |
+| **Security scan** | 5 external scanners (trufflehog, cc-audit, tirith, semgrep, Cisco) + native skillaudit | `plugin-validator` agent, or fleet-wide `/cpv-batch-security-audit` | `cpv security /path` |
+| **Pre-install gate** | Sandboxed scan of an untrusted plugin / skill / marketplace BEFORE install — never writes to the plugin cache | `/cpv-pre-install-scan <target>` | `cpv security <github-url-or-path>` |
+| **Fix findings (don't hand-edit)** | Mechanical per-rule remediation; CPV ships the fixer so you never hand-patch | `plugin-fixer` agent (validate → fix loop), or fleet-wide `/cpv-batch-fix` · `/cpv-batch-validate-and-fix` | — (fixing needs write access) |
+| **Optimize prompt cache** | CA-01..CA-06 — dynamic placeholders, hook mutations, model-fork, unbounded output | Audit: `/cpv-batch-caching-audit` · `Skill(…:cache-validation-skill)`. Fix: `cache-optimizer-agent` · `/cpv-batch-caching-optimize` | `cpv cache /path` (audit only) |
+| **Create** | Scaffold a plugin / marketplace / skill / agent / command / hook / MCP | `plugin-creator` agent, or `Skill(claude-plugins-validation:create-plugin)` · `…:scaffold-skill` · `…:scaffold-agent` | — |
+| **Publish to GitHub + add to marketplace** | Scaffold repo + CI/CD, publish, link into a marketplace | `plugin-creator` agent (end-to-end) | — |
+| **Migrate marketplace layout** | Fix marketplace findings + convert Layout A ⇄ B ⇄ C | `marketplace-fixer` agent, or `Skill(…:migrate-marketplace-architecture)` | — |
+| **Standardize** | Bring an old plugin up to the current CPV pipeline (CI/CD, hooks, publish.py) | `plugin-creator` agent, or `Skill(…:standardize-plugin)` / `Skill(…:canonical-pipeline)` | `cpv standardize /path` |
+| **Manage installed plugins** | Install / update / enable / disable / list / search / health-check | `plugin-manager` agent, or `Skill(…:plugin-management)` | `cpv doctor` (health-check only) |
+| **Deep diagnostic** | All scanners + pipeline-staleness + cross-platform + marketplace-registration + cache-sync | `plugin-diagnoser` agent; for `.claude/` scope `/cpv-batch-scope-diagnose` | `cpv doctor` |
+| **AI semantic grade** *(opt-in, expensive)* | Descriptions that won't trigger, unclear instructions, workflows with no exit — ~10–50× token cost, asks first | `semantic-validator` agent | — (needs Opus) |
+| **Fleet / batch** | Run any op across many plugins (marketplace / list / `@listfile`) in parallel | The `/cpv-batch-*` family — validate, security-audit, caching-audit/optimize, fix, validate-and-fix, full-scan-and-fix, scope-diagnose/fix | most aliases accept `--marketplace <spec>` |
+| **Hand off the whole job** | One autonomous worker reads the menu, routes, executes, returns a report | `Agent(subagent_type: "cpv", prompt: "<request>")` | — |
 
 ---
 
@@ -454,8 +498,8 @@ For CI/CD and scripting, the Python validators are still callable directly (no m
 |----------|-------|-------------|
 | Validation scripts | 25 | Python validators (21 plugin + 2 marketplace + 2 scope) covering plugin packages, marketplaces, and end-user `.claude/` configuration |
 | Management scripts | 6 | Plugin lifecycle, marketplace operations, scaffolding (`manage_*.py`) |
-| Agents | 11 | AI-powered validation, fixing, management, and batch orchestration |
-| Skills | 45 (12 user-invocable + 33 agent-loaded) | Validation, management, publishing, fix, migration, auto-notify, batch / fleet (v2.101.0), scope-aware doctor (v2.101.0), and main-menu workflows |
+| Agents | 13 | AI-powered validation, fixing, management, and batch orchestration, plus the `cpv` general router |
+| Skills | 44 (12 user-invocable + 32 agent-loaded) | Validation, management, publishing, fix, migration, auto-notify, batch / fleet (v2.101.0), scope-aware doctor (v2.101.0), the-skills-menu router, and main-menu workflows |
 | Commands | 13 user-invocable | `/cpv-main-menu` (canonical entry), 10 `/cpv-batch-*` fleet skills (v2.101.0), `/cpv-pre-install-scan`, `/the-skills-menu-create` |
 | Tests | 5700+ | Full coverage across all modules |
 

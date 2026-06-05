@@ -382,13 +382,23 @@ class TestSkillAgentArchitecture:
     def test_all_skills_are_non_user_invocable(self):
         """Every SKILL.md must have user-invocable: false.
 
-        Exception: ``the-skills-menu-create`` is the universal migrator that
-        converts arbitrary plugins to the-skills-menu method. It MUST stay
-        user-invocable so authors can trigger /the-skills-menu-create against
-        a target plugin path or Git URL — the migration target is the OTHER
-        plugin, not this one.
+        Exceptions (user-invocable: true): ``the-skills-menu`` is the
+        universal agent-facing router (the agent counterpart to the human
+        /cpv-main-menu — see agents/cpv.md); ``the-skills-menu-create`` is the
+        universal migrator that converts arbitrary plugins to the-skills-menu
+        method. Both MUST stay user-invocable so authors/agents can trigger
+        them directly (the migration target of -create is the OTHER plugin,
+        not this one). The batch family below is user-invocable for the same
+        direct-invocation reason.
         """
         user_invocable_exemptions = {
+            # The universal agent-facing router — the agent counterpart to the
+            # human-facing /cpv-main-menu. Flipped to user-invocable so any
+            # Claude can be told "read the CPV skills menu and use whatever you
+            # need" and have it auto-trigger and route the request. Companion:
+            # agents/cpv.md. Deliberate evolution of v2.90.0 menu-unification
+            # (TRDD-c50531c2), NOT drift — do NOT revert to user-invocable: false.
+            "the-skills-menu",
             "the-skills-menu-create",
             # TRDD-3dcbb37c (v2.101.0) — Batch-skills family. Users invoke
             # these directly (`/cpv-batch-validate Emasoft/emasoft-plugins`),
