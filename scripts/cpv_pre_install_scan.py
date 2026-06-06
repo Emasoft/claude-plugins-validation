@@ -256,6 +256,29 @@ def _run_scan(root: Path, kind: str) -> tuple[int, dict[str, Any]]:
     return _run_native_skillaudit(root, kind=kind)
 
 
+def _extract_json_object(stdout: str) -> str | None:
+    """Slice the trailing JSON object out of a possibly-preambled stdout.
+
+    ``validate_plugin.py --json`` is contractually supposed to emit ONLY
+    the JSON object on stdout, but older builds (and any future regression)
+    can leak a human-readable preamble ahead of it — e.g. the
+    ``═══ [REPO LINT] ═══`` banner and per-language lint headers (GitHub
+    issue #70). To stay robust regardless of that bug, locate the first
+    line whose lstrip starts with ``{`` and return everything from there to
+    the end; the JSON object is always the final, top-level value so the
+    tail of the buffer parses cleanly once the preamble is dropped.
+
+    Returns the candidate JSON substring, or ``None`` when no line opens an
+    object (genuinely-empty / non-JSON output — the caller then reports a
+    real failure rather than masking it).
+    """
+    lines = stdout.splitlines(keepends=True)
+    for idx, line in enumerate(lines):
+        if line.lstrip().startswith("{"):
+            return "".join(lines[idx:])
+    return None
+
+
 def _run_validate_plugin(root: Path, *, marketplace_only: bool = False) -> tuple[int, dict[str, Any]]:
     cmd = ["uv", "run", "python", str(SCRIPTS_DIR / "validate_plugin.py"), str(root), "--strict", "--json"]
     if marketplace_only:
@@ -273,14 +296,30 @@ def _run_validate_plugin(root: Path, *, marketplace_only: bool = False) -> tuple
             "error": "validate_plugin produced no JSON output (likely a usage/shape error)",
             "raw_stderr": result.stderr.strip(),
         }
+    # Primary path: stdout is pure JSON (the --json contract). Fall back to
+    # stripping a leading non-JSON preamble only if the direct parse fails —
+    # this hardens against a regression where validate_plugin leaks the
+    # REPO-LINT banner / lint headers onto stdout ahead of the JSON object
+    # (GitHub issue #70). Genuinely-empty / unparseable output still errors
+    # gracefully below; we never mask a real failure, only a preamble.
     try:
         raw = json.loads(result.stdout)
     except json.JSONDecodeError:
-        return 2, {
-            "error": "validate_plugin emitted unparseable JSON",
-            "raw_stdout": result.stdout,
-            "raw_stderr": result.stderr.strip(),
-        }
+        candidate = _extract_json_object(result.stdout)
+        if candidate is None:
+            return 2, {
+                "error": "validate_plugin emitted unparseable JSON",
+                "raw_stdout": result.stdout,
+                "raw_stderr": result.stderr.strip(),
+            }
+        try:
+            raw = json.loads(candidate)
+        except json.JSONDecodeError:
+            return 2, {
+                "error": "validate_plugin emitted unparseable JSON",
+                "raw_stdout": result.stdout,
+                "raw_stderr": result.stderr.strip(),
+            }
 
     # validate_plugin emits counts under "counts" and per-issue records under
     # "results" with an uppercase "level". Normalise to this scanner's canonical
