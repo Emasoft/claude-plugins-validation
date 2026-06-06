@@ -1619,6 +1619,7 @@ def lint_repo(
     strict_missing_tools: bool = True,
     languages: list[str] | None = None,
     cache: ScannerCache | None = None,
+    quiet: bool = False,
 ) -> bool:
     """Run every applicable linter across the gitignore-filtered tree.
 
@@ -1639,6 +1640,14 @@ def lint_repo(
             ``ScannerCache(cache_dir=tmp_path / "cache")``. When the
             cache hits for a language, the cached findings are replayed
             into ``report`` and the linter subprocess is skipped.
+        quiet: When True, suppress the two human-readable stdout writes
+            this function makes (the ``Detected languages: ...`` line and
+            the per-language ``[LABEL] N file(s)`` headers). Findings are
+            STILL recorded into ``report`` exactly as before — only the
+            decorative terminal output is muted. ``validate_plugin.py``
+            passes ``quiet=True`` whenever ``--json`` is active so stdout
+            ends up containing ONLY the machine-readable JSON object (the
+            ``--json`` contract: stdout = JSON only, human text → stderr).
 
     Returns:
         True iff no MAJOR/CRITICAL was added by any linter AND no
@@ -1663,7 +1672,8 @@ def lint_repo(
         report.info("No files matched the requested language subset: " + ", ".join(sorted(languages or [])))
         return True
 
-    print(f"  Detected languages: {', '.join(sorted(selected.keys()))}")
+    if not quiet:
+        print(f"  Detected languages: {', '.join(sorted(selected.keys()))}")
 
     # Phase B (v2.76.0) — run every applicable linter in parallel.
     # Each lint function is essentially a series of subprocess calls
@@ -1824,7 +1834,7 @@ def lint_repo(
 
     all_passed = True
     for _lang, local_report, header_line, passed in results:
-        if header_line:
+        if header_line and not quiet:
             sys.stdout.write(header_line)
         report.merge(local_report)
         if not passed:

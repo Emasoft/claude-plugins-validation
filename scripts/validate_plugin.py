@@ -6334,7 +6334,16 @@ def main() -> int:
     # Print the repo-lint banner up front so output ordering is stable
     # whether or not the rest of the validators run in parallel. The lint
     # engine itself runs INSIDE the parallel batch below.
-    print(f"\n{COLORS['BOLD']}═══ [REPO LINT] (15 languages, gitignore-filtered) ═══{COLORS['RESET']}")
+    #
+    # In --json mode this banner (and the lint engine's own preamble lines)
+    # MUST NOT touch stdout: the --json contract is stdout = the JSON object
+    # ONLY, so a JSON consumer (e.g. cpv_pre_install_scan) can json.loads()
+    # the whole stdout buffer. Route the human-readable banner to stderr;
+    # the lint engine's preamble is suppressed via quiet=args.json below.
+    print(
+        f"\n{COLORS['BOLD']}═══ [REPO LINT] (15 languages, gitignore-filtered) ═══{COLORS['RESET']}",
+        file=sys.stderr if args.json else sys.stdout,
+    )
 
     # ---------------------------------------------------------------------
     # Phase 2 — independent per-plugin validators run in PARALLEL.
@@ -6376,7 +6385,7 @@ def main() -> int:
         # shell shellcheck, JS eslint, PowerShell PSSA, Go vet, Rust cargo) AND
         # the standalone scripts/lint_files.py orchestrator. Strict-by-default:
         # any missing linter for a detected language fails the run with MAJOR.
-        ("run_lint_engine", run_lint_engine, ((), {"strict_missing_tools": True})),
+        ("run_lint_engine", run_lint_engine, ((), {"strict_missing_tools": True, "quiet": args.json})),
         ("validate_bin_executables", validate_bin_executables, ((), {})),
         ("validate_skills", validate_skills, ((skip_platform_checks,), {})),
         # TRDD-25b9be90 — cross-reference validation, including ghost-agent dispatch
