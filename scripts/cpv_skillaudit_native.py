@@ -845,6 +845,33 @@ _EXECUTION_CLASS_RULES: frozenset[str] = frozenset(
     }
 )
 
+# Pure styling languages (CSS + its preprocessors) are rendered by a browser;
+# they cannot invoke a shell, spawn a process, escalate privileges, persist, or
+# install a package. So the OS-execution / package-install rules below are
+# CATEGORICALLY inapplicable to a `.css` / `.scss` / `.sass` / `.less` file — on
+# every line, comment or not (issue #70-B row 9: CMD_INJECTION + SUPPLY_CHAIN
+# fired inside a CSS `/* … */` comment explaining a `:has()` filter). FN-safe,
+# and mirrors the FS_WRITE-in-Dockerfile carve-out: a file is executed by HOW it
+# is invoked, not its extension — an attacker who ships a real payload as
+# `evil.css` and runs it as `bash evil.css` trips these rules at the INVOKING
+# hook/script (which is not a stylesheet), so suppressing them in the stylesheet
+# itself hides nothing. NETWORK / exfil rules are deliberately NOT here: CSS
+# `url()` / `@import` CAN fetch a remote resource, so SSRF_ADVANCED /
+# NET_SUSPICIOUS / DATA_EXFIL / URL_SUSPICIOUS stay live in a stylesheet.
+_STYLE_LANG_EXTS: tuple[str, ...] = (".css", ".scss", ".sass", ".less")
+_STYLE_LANG_INERT_EXEC_RULES: frozenset[str] = frozenset(
+    {
+        "CMD_INJECTION",
+        "SHELL_EXEC",
+        "REVERSE_SHELL",
+        "PRIVILEGE_ESC",
+        "CONTAINER_ESCAPE",
+        "PERSISTENCE",
+        "TIME_BOMB",
+        "SUPPLY_CHAIN",
+    }
+)
+
 # **Intent HARD signals**: the prose pattern IS the threat-delivery
 # vector. A markdown line containing "Ignore previous instructions"
 # (PROMPT_INJECT), "exfiltrate the .env file" (DATA_EXFIL), or a link
@@ -1264,6 +1291,16 @@ def _context_classifier_verdict(
         or _ig_base.endswith(".dockerfile")
         or (_ig_base.startswith(("docker-compose", "compose")) and _ig_base.endswith((".yml", ".yaml")))
     ):
+        return "suppress"
+    # Pure styling languages (CSS/SCSS/SASS/LESS) are browser-rendered styles —
+    # they cannot invoke a shell, spawn a process, persist, or install a package.
+    # So the OS-execution / install rules in `_STYLE_LANG_INERT_EXEC_RULES` are
+    # categorically inapplicable there, on every line incl. comments (issue #70-B
+    # row 9: CMD_INJECTION + SUPPLY_CHAIN fired inside a CSS comment). FN-safe: a
+    # payload shipped as `evil.css` and run via `bash evil.css` fires at the
+    # INVOKING hook (not a stylesheet), so this hides nothing — and CSS `url()` /
+    # `@import` network/exfil rules are NOT in the set, so they stay live here.
+    if rule_id in _STYLE_LANG_INERT_EXEC_RULES and fp_lower.endswith(_STYLE_LANG_EXTS):
         return "suppress"
     # Point 1 (v2.114.0): an extension-less script (git hook, configure,
     # runme) reaches here with no classifier-recognised extension. The
