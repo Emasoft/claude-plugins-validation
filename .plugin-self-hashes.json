@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-06-07T01:53:44+00:00",
+  "computed_at": "2026-06-07T02:21:13+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:ea0b1d710944be4d8de9917b282b96fefd5f99af9099b94f71bc63279c0064fa",
@@ -198,7 +198,7 @@
     "scripts/cpv_security_benchmark.py": "sha256:48e4759e1c68c38411c72346e2ea68b48061d688df0832f2cb81229cd929cdf9",
     "scripts/cpv_setup_auth.py": "sha256:f8d53bc5a5bd4e9771feca02899d0265823806a15f22cbaa78b925fa35774a18",
     "scripts/cpv_skill_scanner.py": "sha256:4a07671c967803af7dfe4e85b881f11b983b1ebe18310f66fc576fe085dea9e5",
-    "scripts/cpv_skillaudit_native.py": "sha256:ed33a4f7cf751995d8c251254d6cd562cce92fdb586f265582e915a604c1d94e",
+    "scripts/cpv_skillaudit_native.py": "sha256:013ed73b6002be33723974bc7742c00293e1f523c3d7e26d042ed8d284c32059",
     "scripts/cpv_staging.py": "sha256:22c067dfa11aeb56ac28112e6f4796618f1bd9f59366198899ba02734be8d5c9",
     "scripts/cpv_strip_dev.py": "sha256:a432bae5fb4ef8717628e57dc6d8eb4827c5ed44816b267ebae4296ad0314a80",
     "scripts/cpv_taint_engine.py": "sha256:7bd572f2c933442d04bb31096cab3eada824ed058a0045eb59bcf072bc6bb7d3",
@@ -714,6 +714,7 @@
     "tests/test_issue_67_external_scanner_gitignore.py": "sha256:d4d80b67d5dabfa8de6ee11b96311b630ef1048a3e5469605e7b31d4a502e244",
     "tests/test_issue_70_json_stdout_contract.py": "sha256:b6f2b63ffaba085a3a62a25e5bcf6317609d8c52d1a36d9d37b4510b49865076",
     "tests/test_issue_70_orphaned_marker_skip.py": "sha256:b048492302708c726960b36ff8a6f77db00a417eef681b54f8da0c6de6334701",
+    "tests/test_issue_70b_css_exec_carveout.py": "sha256:1d24fa31ba364c784669b0dd493cece88b673d317e1f1d7f15093ce11fe4835b",
     "tests/test_issues_27_28_29.py": "sha256:0dbeb31cdf6c5cd856b5b98900320ed041ae602821e3f6a65b77b833c2b094d1",
     "tests/test_issues_30_31_batch_thresholds.py": "sha256:cf02ce59a767d0695119adc781f2978995a018f05c3753d46c874fe27aa2b5dd",
     "tests/test_issues_40_42_skillaudit_fp.py": "sha256:ecc58232c5149d821960b7c398526b05dd10a6e90545da4b25616de5ae4168e1",
