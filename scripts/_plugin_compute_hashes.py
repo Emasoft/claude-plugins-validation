@@ -223,7 +223,18 @@ _SHIPPED_WALK_SKIP_DIRS = frozenset(
 # never hashes them AND verify_self_integrity's added-file detection never
 # false-flags a developer's `.DS_Store` or a stray `.pyc` as an inoculated
 # file. The git path needs no such list — `git ls-files` excludes them.
-_RUNTIME_CRUFT_BASENAMES = frozenset({".DS_Store", "Thumbs.db", "desktop.ini"})
+#
+# `.orphaned_at` (GitHub issue #70-C): the Claude Code plugin-cache HOST — NOT
+# CPV — drops this marker into a `<cache>/<plugin>/<version>/` dir once a newer
+# version supersedes it. When the orphaned CPV version then runs its own
+# self-integrity check, the FS-walk fallback would see `.orphaned_at` (absent
+# from the canonical manifest) and abort with a CRITICAL "added/inoculated
+# file". It is a host-generated, never-executed timestamp marker — CPV neither
+# writes, reads, nor loads it — so skipping this one exact basename cannot
+# weaken tamper-detection of CPV's executable surface: any added .py / skill /
+# agent / hook is still caught (proved by the scoped-fix test). Same family as
+# the closed #66 `.in_use` PID-lock fix.
+_RUNTIME_CRUFT_BASENAMES = frozenset({".DS_Store", "Thumbs.db", "desktop.ini", ".orphaned_at"})
 _RUNTIME_CRUFT_SUFFIXES = (".pyc", ".pyo", ".pyd", ".swp", ".swo", ".swn", ".orig", ".bak", ".tmp")
 
 
