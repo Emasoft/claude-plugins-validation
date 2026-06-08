@@ -1066,7 +1066,7 @@ END THE TURN.
 
 ### 3.2 Fix sub-menu
 
-For SINGLE-plugin fixes (the common case), use leaves 1-4 below. For
+For SINGLE-plugin fixes (the common case), use leaves 1-5 below. For
 FLEET / MARKETPLACE-scale fixes (TRDD-3dcbb37c, v2.101.0) — many
 plugins in parallel — see §3.1.7 Batch / fleet (rows 5-7 cover
 batch-fix, batch-validate-and-fix, batch-full-scan-and-fix). The
@@ -1082,7 +1082,8 @@ Fixed key→action map (slug `fix`):
 | 2   | fix_mkt        | Fix marketplace issues — From a report file OR a marketplace folder                           |
 | 3   | fix_cache      | Optimize prompt cache — Audit + auto-fix the cache patterns                                   |
 | 4   | fix_devitalize | Devitalize security threats — Convert flagged execution-class code into provably-inert data (plugin-devitalizer); never suppresses a rule, flags load-bearing code |
-| 5   | fix_batch      | Batch fix (fleet) — Drill into §3.1.7 Batch / fleet                                           |
+| 5   | fix_leaks      | Prevent leaks & harden — Redact exposed secrets (runtime-read the needed ones) + implement missing safeguards (plugin-leaks-preventer); never suppresses a rule, flags what it can't safely fix |
+| 6   | fix_batch      | Batch fix (fleet) — Drill into §3.1.7 Batch / fleet                                           |
 | A   | ask            | Ask the agent                                                                                 |
 | B   | back           | Back — Go back to the top-level menu                                                          |
 | 0   | cancel         | Cancel / Exit                                                                                 |
@@ -1130,9 +1131,14 @@ END THE TURN.
 - **arg-prompt**: `Path to a security report .md file OR a plugin directory?`
 - **execution**: dispatch the **plugin-devitalizer agent** (`model: opus` for the security reasoning) with the path. It scans with `validate_security` + native skillaudit, then converts each flagged execution-class finding into provably-inert data — passing the security gate by neutralizing the code's shape, NEVER by suppressing a rule or relaxing `--strict`. Load-bearing code (live shell-exec, real installers, genuine code-execution features, verified leaked secrets) is FLAGGED to the user, not silently broken. The agent runs a scan → classify → minimal-transform → re-scan-to-prove-inert loop until the scan is clean or only load-bearing findings remain flagged, then returns a before/after report path.
 
-#### 3.2.5 Batch fix (fleet)
+#### 3.2.5 Prevent leaks & harden
 
-This row is a routing shortcut, not a separate workflow. When the user picks `5`, the orchestrator MUST jump to §3.1.7 Batch / fleet so the user can pick which batch variant they actually want (validate-only / fix-only / same-turn validate+fix / same-turn full scan+fix). No path prompt here — the batch sub-menu has its own input prompt accepting all universal shapes (single / marketplace / list / @listfile / mixed).
+- **arg-prompt**: `Path to a security report .md file OR a plugin directory?`
+- **execution**: dispatch the **plugin-leaks-preventer agent** (`model: opus` for the security reasoning) with the path. It scans with `validate_security` + native skillaudit, then redacts every exposed secret (runtime-reading the genuinely-needed ones from env / exported vars / GitHub vars / OS keychain) and implements the missing safeguards (safe config parse, input sanitization, launch/deploy params, prompt-injection pre-scan) — passing the gate by removing leaks and adding safeguards, NEVER by suppressing a rule or relaxing `--strict`. A verified live committed secret is FLAGGED to rotate + purge history, not silently edited; anything that cannot be safely fixed is FLAGGED, never broken. The agent runs a scan → classify → minimal redact/harden → re-scan-to-prove-clean loop until the scan is clean or only flagged findings remain, then returns a before/after report path.
+
+#### 3.2.6 Batch fix (fleet)
+
+This row is a routing shortcut, not a separate workflow. When the user picks `6`, the orchestrator MUST jump to §3.1.7 Batch / fleet so the user can pick which batch variant they actually want (validate-only / fix-only / same-turn validate+fix / same-turn full scan+fix). No path prompt here — the batch sub-menu has its own input prompt accepting all universal shapes (single / marketplace / list / @listfile / mixed).
 
 ---
 

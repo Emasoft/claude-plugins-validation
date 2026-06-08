@@ -70,6 +70,8 @@ from cpv_validation_common import (
     TIMEBOMB_PATTERNS,
     USER_PATH_PATTERNS,
     ValidationReport,
+    _classify_security_buckets,
+    _print_security_gate_banners,
     build_fence_state,
     detect_multilayer_encoded_payload,
     disposition,
@@ -10977,6 +10979,19 @@ Exit Codes:
     if args.json:
         output = report.to_dict()
         output["plugin_path"] = str(plugin_path)
+        # Additive, machine-observable security-gate signal. The human banner
+        # ASCII is NEVER printed to stdout under --json (stdout must stay pure
+        # JSON — the #70-A contract); consumers learn which gate fired from
+        # this object instead. Purely derived from the already-built report —
+        # changes no count and no exit code.
+        _gate_buckets = _classify_security_buckets(report)
+        output["security_gates"] = {
+            "A": "A" in _gate_buckets,
+            "B": "B" in _gate_buckets,
+            "C": "C" in _gate_buckets,
+            "devitalize_recommended": "A" in _gate_buckets,
+            "leaks_preventer_recommended": bool(_gate_buckets & {"B", "C"}),
+        }
         print(json.dumps(output, indent=2))
     else:
         from cpv_validation_common import print_results_aggregated  # noqa: PLC0415
@@ -11016,13 +11031,25 @@ Exit Codes:
                 print(step_table)
                 print()
             print_report_summary(report, "Security Validation Report")
+            # Security-gate warning banners go in the report-file body too, so
+            # an agent that reads ONLY the report file (the default CPV agent
+            # flow) still sees them. Rendered as Markdown sections (no ANSI in
+            # the file); no-op when no security gate fired. Purely additive —
+            # emits text only, never mutates the report or the verdict.
+            _print_security_gate_banners(report, report_path, markdown=True)
             # Use the aggregated printer instead of the flat per-finding
             # one — keeps the file body bounded by distinct-rule count
             # rather than total-finding count.
             print_results_aggregated(report, verbose=verbose)
 
         save_report_and_print_summary(
-            report, report_path, "Security Validation", _print_full, args.verbose, plugin_path=args.plugin_path
+            report,
+            report_path,
+            "Security Validation",
+            _print_full,
+            args.verbose,
+            plugin_path=args.plugin_path,
+            security_gates=True,
         )
 
         # Surface the step table to stdout too — it answers the operator's
