@@ -1066,7 +1066,7 @@ END THE TURN.
 
 ### 3.2 Fix sub-menu
 
-For SINGLE-plugin fixes (the common case), use leaves 1-3 below. For
+For SINGLE-plugin fixes (the common case), use leaves 1-4 below. For
 FLEET / MARKETPLACE-scale fixes (TRDD-3dcbb37c, v2.101.0) — many
 plugins in parallel — see §3.1.7 Batch / fleet (rows 5-7 cover
 batch-fix, batch-validate-and-fix, batch-full-scan-and-fix). The
@@ -1076,15 +1076,16 @@ shape than fleet operations.
 
 Fixed key→action map (slug `fix`):
 
-| Key | Action ID    | Label shown to user                                                       |
-|-----|--------------|----------------------------------------------------------------------------|
-| 1   | fix_plugin   | Fix plugin issues — From a report file OR a plugin folder (plugin-fixer)   |
-| 2   | fix_mkt      | Fix marketplace issues — From a report file OR a marketplace folder        |
-| 3   | fix_cache    | Optimize prompt cache — Audit + auto-fix the cache patterns                |
-| 4   | fix_batch    | Batch fix (fleet) — Drill into §3.1.7 Batch / fleet                        |
-| A   | ask          | Ask the agent                                                              |
-| B   | back         | Back — Go back to the top-level menu                                       |
-| 0   | cancel       | Cancel / Exit                                                              |
+| Key | Action ID      | Label shown to user                                                                          |
+|-----|----------------|----------------------------------------------------------------------------------------------|
+| 1   | fix_plugin     | Fix plugin issues — From a report file OR a plugin folder (plugin-fixer)                      |
+| 2   | fix_mkt        | Fix marketplace issues — From a report file OR a marketplace folder                           |
+| 3   | fix_cache      | Optimize prompt cache — Audit + auto-fix the cache patterns                                   |
+| 4   | fix_devitalize | Devitalize security threats — Convert flagged execution-class code into provably-inert data (plugin-devitalizer); never suppresses a rule, flags load-bearing code |
+| 5   | fix_batch      | Batch fix (fleet) — Drill into §3.1.7 Batch / fleet                                           |
+| A   | ask            | Ask the agent                                                                                 |
+| B   | back           | Back — Go back to the top-level menu                                                          |
+| 0   | cancel         | Cancel / Exit                                                                                 |
 
 Queue the spec via `print_menu.py fixed 16` and end the turn. NEVER
 print the menu inline; CMS Stop hook emits via `systemMessage`:
@@ -1124,9 +1125,14 @@ END THE TURN.
   2. `Also do broader cache-aware refactoring? (yes/no — --broader invokes Phase 4)`
 - **execution**: dispatch the **cache-optimizer-agent** with the path and `--broader` flag if requested.
 
-#### 3.2.4 Batch fix (fleet)
+#### 3.2.4 Devitalize security threats
 
-This row is a routing shortcut, not a separate workflow. When the user picks `4`, the orchestrator MUST jump to §3.1.7 Batch / fleet so the user can pick which batch variant they actually want (validate-only / fix-only / same-turn validate+fix / same-turn full scan+fix). No path prompt here — the batch sub-menu has its own input prompt accepting all universal shapes (single / marketplace / list / @listfile / mixed).
+- **arg-prompt**: `Path to a security report .md file OR a plugin directory?`
+- **execution**: dispatch the **plugin-devitalizer agent** (`model: opus` for the security reasoning) with the path. It scans with `validate_security` + native skillaudit, then converts each flagged execution-class finding into provably-inert data — passing the security gate by neutralizing the code's shape, NEVER by suppressing a rule or relaxing `--strict`. Load-bearing code (live shell-exec, real installers, genuine code-execution features, verified leaked secrets) is FLAGGED to the user, not silently broken. The agent runs a scan → classify → minimal-transform → re-scan-to-prove-inert loop until the scan is clean or only load-bearing findings remain flagged, then returns a before/after report path.
+
+#### 3.2.5 Batch fix (fleet)
+
+This row is a routing shortcut, not a separate workflow. When the user picks `5`, the orchestrator MUST jump to §3.1.7 Batch / fleet so the user can pick which batch variant they actually want (validate-only / fix-only / same-turn validate+fix / same-turn full scan+fix). No path prompt here — the batch sub-menu has its own input prompt accepting all universal shapes (single / marketplace / list / @listfile / mixed).
 
 ---
 

@@ -41,6 +41,7 @@ universal-loader pattern makes every skill available to every agent.
 | `batch-fix-protocol` | shard manifest path | schema reference + per-finding fix mappings | `batch_shard` mode + `[BATCH_REQUIRED]` exits |
 | `deterministic-codemod` | plugin path | zero-LLM mechanical codemods applied | Pre-LLM-pass quick wins |
 | `marketplace-authoring-contract` | marketplace + upstream snapshot | drift findings + reconciliation steps | Cross-validation when authoring a new marketplace |
+| `devitalize-threats` | security report + plugin path | per-shape inert-data transform recipes | The `plugin-devitalizer` scan→devitalize loop |
 
 ## Scaffold / build skills
 
@@ -126,6 +127,7 @@ Skill({skill: "claude-plugins-validation:skill-validation-skill"})
 Skill({skill: "claude-plugins-validation:fix-marketplace-validation"})
 Skill({skill: "claude-plugins-validation:migrate-marketplace-architecture"})
 Skill({skill: "claude-plugins-validation:marketplace-authoring-contract"})
+Skill({skill: "claude-plugins-validation:devitalize-threats"})
 Skill({skill: "claude-plugins-validation:deterministic-codemod"})
 Skill({skill: "claude-plugins-validation:standardize-plugin"})
 Skill({skill: "claude-plugins-validation:create-plugin"})
