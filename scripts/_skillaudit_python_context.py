@@ -141,6 +141,32 @@ _CALL_SHAPE_SUPPRESSIBLE_RULES: Final[frozenset[str]] = frozenset({"CMD_INJECTIO
 # AST-flow logic owns them (data string → demote-visible, sink-flowing → keep).
 _LITERAL_DATA_SUPPRESSIBLE_RULES: Final[frozenset[str]] = frozenset({"INSECURE_TLS"})
 
+# Content-THREAT rules that fire on the PRESENCE of a fixed substring (a header
+# name, a CLI-command name, a privilege keyword) whose live form IS that string fed
+# to an exec / shell / subprocess sink — so an in-string occurrence is suppressible
+# ONLY when the literal does NOT flow to such a sink. Issue #65:
+#   * PRIVILEGE_ESC fires on ``sudo\s`` / ``setuid`` / ``chmod +s``; a benign install
+#     help-hint (``HINT = "sudo usermod -aG docker $USER"``) is inert text, but the
+#     IDENTICAL ``sudo `` substring inside ``os.system("sudo …")`` /
+#     ``subprocess.run("sudo …", shell=True)`` IS a live escalation.
+#   * TOKEN_STEAL fires on ``Authorization:\s*Bearer`` etc.; a benign git-config
+#     literal (``GIT_CONFIG_VALUE_0 = "AUTHORIZATION: bearer {token}"``) is data, but
+#     ``os.system("curl -H 'Authorization: Bearer …' …")`` flows to a shell sink and
+#     stays a live exfil.
+#   * CLAUDE_CLI_TOKEN_THEFT fires on ``\bclaude\s+setup-token\b``; a benign
+#     ``print("Run `claude setup-token`")`` help string is data, but
+#     ``subprocess.run("claude setup-token | nc …", shell=True)`` is a live theft.
+# The discriminator is therefore SINK-AWARE for ALL of them
+# (``_string_literal_match_is_inert_no_sink`` → ``_path_literal_feeds_fs_or_exec_sink``):
+# suppress the inert data string, keep the sink-flowing one visible. The "slightest
+# possibility the string is executed, not merely compared" → keep it. NEVER add a
+# flow-sensitive INJECTION rule (CMD_INJECTION / SHELL_EXEC) here — those are owned
+# end-to-end by the call-shape AST logic, which already demotes a data string and
+# keeps a sink-flowing one.
+_SINK_GUARDED_LITERAL_SUPPRESSIBLE_RULES: Final[frozenset[str]] = frozenset(
+    {"PRIVILEGE_ESC", "TOKEN_STEAL", "CLAUDE_CLI_TOKEN_THEFT"}
+)
+
 # Sinks that execute a STRING command directly (no ``shell=True`` kwarg needed) —
 # feeding a regex-pattern string into one of these executes it. Used by the
 # re-pattern-literal suppressor to refuse suppression when the pattern is
@@ -1344,6 +1370,55 @@ def _match_inside_string_literal_token(source: str, line: int, match: str) -> bo
     return False
 
 
+def _string_literal_match_is_inert_no_sink(tree: ast.AST, line: int, source: str, match: str) -> bool:
+    """True iff ``match`` on the 1-based ``line`` sits inside a string Constant
+    that does NOT flow to a filesystem / exec / shell / subprocess sink.
+
+    Issue #65 — the sink-aware discriminator for content-THREAT rules whose live
+    form IS a string fed to a sink (PRIVILEGE_ESC: ``sudo`` / ``setuid`` /
+    ``chmod +s``). A benign install help-hint string (``HINT = "sudo usermod -aG
+    docker $USER"``) is inert text; the IDENTICAL ``sudo `` substring inside
+    ``os.system("sudo ...")`` / ``subprocess.run(["sudo", x])`` / ``subprocess.run(
+    "sudo ...", shell=True)`` IS a live escalation. This helper suppresses ONLY the
+    former: it locates the covering string Constant and refuses (returns False) the
+    moment that Constant flows into any fs/exec/net/shell sink (reusing the existing
+    flow analysis ``_path_literal_feeds_fs_or_exec_sink``, which is conservative —
+    ANY subprocess/os-exec/open/requests call carrying the literal keeps it visible).
+
+    Conservative defaults to False (keep visible) on: an f-string match (a JoinedStr
+    has no single covering string Constant to reason about — an interpolated command
+    is potentially dynamic), no covering Constant, or any sink flow.
+    """
+    if not source:
+        return False
+    lines = source.splitlines()
+    if not (0 <= line - 1 < len(lines)) or (match and match not in lines[line - 1]):
+        return False
+    # An f-string (JoinedStr) covering the line is dynamic-shaped text, not a fixed
+    # inert literal — do not certify it here (keep visible / let other paths handle).
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            fstart = getattr(node, "lineno", None)
+            fend = getattr(node, "end_lineno", None)
+            if fstart is not None and fend is not None and fstart <= line <= fend:
+                return False
+    target: ast.Constant | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            start = getattr(node, "lineno", None)
+            end = getattr(node, "end_lineno", None)
+            if start is not None and end is not None and start <= line <= end and (not match or match in node.value):
+                target = node
+                break
+    if target is None:
+        return False
+    # The decisive guard: a literal feeding a live fs/exec/shell/subprocess sink is
+    # NOT inert — keep it visible (the real ``os.system("sudo …")`` keeps firing).
+    if _path_literal_feeds_fs_or_exec_sink(tree, target):
+        return False
+    return True
+
+
 def abs_path_const_is_inert_py_data(
     source: str, line: int, matched_text: str, is_test_file: bool, tree: ast.AST | None = None
 ) -> bool:
@@ -1728,6 +1803,101 @@ def _line_is_bytes_continuation_in_file_magic_tuple(lines: list[str], line_idx: 
         if _bytes_literal_is_file_magic(lines[i]):
             return True
     return False
+
+
+# Sinks that DECODE / DEOBFUSCATE / EXECUTE a bytes value — feeding a bytes literal
+# into one of these is the live deobfuscate-then-run shape, so the printable-UTF-8
+# carve-out must NOT apply when the literal flows here. Combined with the exec set
+# (``_STRING_CMD_EXEC_FQNAMES``: eval / exec / compile / __import__ / os.system / …).
+_BYTES_DECODE_SINK_FQNAMES: Final[frozenset[str]] = frozenset(
+    {
+        "base64.b64decode",
+        "base64.standard_b64decode",
+        "base64.urlsafe_b64decode",
+        "base64.b32decode",
+        "base64.b16decode",
+        "base64.a85decode",
+        "base64.b85decode",
+        "base64.decodebytes",
+        "codecs.decode",
+        "binascii.unhexlify",
+        "binascii.a2b_base64",
+        "binascii.a2b_hex",
+        "zlib.decompress",
+        "gzip.decompress",
+        "bz2.decompress",
+        "lzma.decompress",
+        "marshal.loads",
+        "pickle.loads",
+    }
+)
+
+
+def _bytes_const_decodes_to_printable_text(value: bytes) -> bool:
+    """True iff ``value`` is valid UTF-8 whose every character is printable or a
+    common whitespace (space / tab / newline / carriage-return).
+
+    Content-based proof of inertness for the OBFUSCATION ``\\xNN\\xNN\\xNN`` rule:
+    an em-dash byte run (``b"\\xe2\\x80\\x94"`` → ``"—"``) is human-readable text,
+    never an obfuscated machine-code payload. Real shellcode (``b"\\x90\\x901\\xc0"``)
+    is NOT valid printable UTF-8 (x86 opcodes are not legal UTF-8 continuation
+    sequences) → returns False → stays visible. Empty bytes → False (nothing to
+    certify)."""
+    if not value:
+        return False
+    try:
+        decoded = value.decode("utf-8")
+    except (UnicodeDecodeError, ValueError):
+        return False
+    return all(ch.isprintable() or ch in " \t\n\r" for ch in decoded)
+
+
+def _obfuscation_bytes_literal_is_printable_text(tree: ast.AST, line: int, source: str) -> bool:
+    """True iff the bytes Constant carrying the OBFUSCATION ``\\xNN`` hex-escape run on
+    the 1-based ``line`` decodes to printable UTF-8 text AND does NOT flow into a
+    decode / deobfuscate / exec sink.
+
+    Issue #65 — extends the file-magic carve-out: an em-dash / unicode-punctuation
+    byte literal (``MSG = b"received \\xe2\\x80\\x94 close"``) trips the 3-hex-escape
+    OBFUSCATION pattern but is plain text, not obfuscated code. The discriminator is
+    CONTENT-based (the bytes must decode to printable UTF-8 — a strict proof that
+    rules out shellcode) AND sink-aware (a literal fed to ``base64.b64decode`` /
+    ``exec`` / ``codecs.decode`` / a shell stays visible). Both must hold; defaults
+    to False (keep visible) on no covering bytes Constant, a non-printable decode,
+    or any decode/exec sink flow."""
+    if not source:
+        return False
+    lines = source.splitlines()
+    if not (0 <= line - 1 < len(lines)):
+        return False
+    # Locate the covering bytes Constant on the line.
+    target: ast.Constant | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, bytes):
+            start = getattr(node, "lineno", None)
+            end = getattr(node, "end_lineno", None)
+            if start is not None and end is not None and start <= line <= end:
+                target = node
+                break
+    if target is None:
+        return False
+    if not _bytes_const_decodes_to_printable_text(target.value):  # type: ignore[arg-type]
+        return False
+    # Sink guard — a printable-looking bytes literal that is nonetheless fed to a
+    # decode/deobfuscate/exec sink is part of a live pipeline; keep it visible.
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        qn = _node_qualname(node.func)
+        if qn is None:
+            continue
+        in_args = any(sub is target for arg in node.args for sub in ast.walk(arg))
+        in_kwargs = any(sub is target for kw in node.keywords for sub in ast.walk(kw.value))
+        if not (in_args or in_kwargs):
+            continue
+        if qn in _BYTES_DECODE_SINK_FQNAMES or qn in _STRING_CMD_EXEC_FQNAMES or qn in _SHELL_CALL_FQNAMES:
+            return False
+    return True
 
 
 # Known runtime-hijack env vars. Setting any of these IS dangerous
@@ -2364,6 +2534,22 @@ def classify(
     if _match_inside_re_pattern_literal(tree, line, source, match):
         return "safe_literal"
 
+    # Issue #65 — content-THREAT rule whose live form is a string fed to a sink
+    # (PRIVILEGE_ESC: ``sudo`` / ``setuid`` / ``chmod +s``) matched inside a string
+    # literal that does NOT flow to any fs/exec/shell/subprocess sink is an inert
+    # install help-hint / doc string (``HINT = "sudo usermod -aG docker $USER"``),
+    # not a live escalation. Sink-AWARE (unlike the zero-FN block above): the moment
+    # the SAME literal flows into ``os.system("sudo …")`` / ``subprocess.run(["sudo",
+    # x])`` / ``subprocess.run("sudo …", shell=True)``, ``_string_literal_match_is_
+    # inert_no_sink`` returns False and the finding stays visible. Runs before the
+    # call-shape dispatch, which (correctly) does NOT suppress content-threat rules
+    # for a literal-argv shape — so this is the only path that can exonerate the
+    # benign data string, and it does so only when proven sink-free.
+    if rule_id in _SINK_GUARDED_LITERAL_SUPPRESSIBLE_RULES and _string_literal_match_is_inert_no_sink(
+        tree, line, source, match
+    ):
+        return "safe_literal"
+
     # r01 anthropic FP iteration (2026-05-27) — a match inside a security
     # pattern-catalog Dict literal is detection data, not exploit code.
     # The Dict must carry at least one catalog-shape key (regex / patterns
@@ -2456,6 +2642,18 @@ def classify(
             or _line_is_bytes_continuation_in_file_magic_tuple(lines, line_idx)
         )
     ):
+        return "safe_literal"
+
+    # Issue #65 — OBFUSCATION on a ``\\xNN\\xNN\\xNN`` hex-escape run inside a bytes
+    # literal that DECODES TO PRINTABLE UTF-8 text (em-dash / unicode-punctuation
+    # ``b"received \\xe2\\x80\\x94 close"`` → ``"received — close"``) AND does not flow
+    # to a decode/deobfuscate/exec sink is plain text, not obfuscated code. The
+    # printable-UTF-8 decode is a CONTENT proof that rules out shellcode (x86 opcodes
+    # are not valid UTF-8); the sink guard keeps a literal that IS fed to
+    # ``base64.b64decode`` / ``exec`` / a shell visible. FN-safe: a real obfuscated
+    # payload neither decodes to printable text nor (per issue #65 evidence) fires
+    # OBFUSCATION on a ``\\xNN`` run at all — it fires the decode-sink rules instead.
+    if rule_id == "OBFUSCATION" and _obfuscation_bytes_literal_is_printable_text(tree, line, source):
         return "safe_literal"
 
     # r03 trailofbits FP iteration (2026-05-27) — ENV_INJECTION pattern
