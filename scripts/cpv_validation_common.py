@@ -6201,8 +6201,508 @@ def _print_fixer_recommendation(report: ValidationReport, report_path: Path | No
     print(f"{yellow}{border}{reset}")
 
 
+# =============================================================================
+# Security-gate warning banners (purely-additive; never change exit codes)
+# =============================================================================
+#
+# Two informational blocks rendered on an ALREADY-FAILING security verdict.
+# They explain WHY the scan is INVALID and point at the right WORK agent:
+#
+#   * Gate A  — execution / malicious-threat code the plugin SHIPS  → the
+#               EXISTING plugin-devitalizer agent (make it irreversibly inert).
+#   * Gate B  — leaked secrets and/or missing safeguards            → the NEW
+#               plugin-leaks-preventer agent (redact / runtime-read / harden).
+#
+# CONTRACT (the invariant the tests pin): these helpers are PURELY ADDITIVE
+# informational TEXT. They NEVER call report.add_*, NEVER mutate any count,
+# NEVER touch exit_code / exit_code_strict. The verdict already says INVALID
+# whenever exit_code != EXIT_OK; the banners do not invent failure, they
+# explain it. The ONLY trigger is "which bucket of findings is present" — no
+# env var, flag, or allow-list can mute the SIGNAL (the banner text in human
+# output, the additive "security_gates" object in --json output). This is the
+# same structural property that makes _print_fixer_recommendation safe.
+#
+# SELF-SCAN SAFETY: this module lives in scripts/ and CPV scans itself. Every
+# threat word in the banner strings below is INERT PROSE, never a runnable
+# token (e.g. "command/shell execution", "eval/exec of a payload",
+# "curl-pipe-to-shell" — never a runnable interpreter call, never a backticked
+# pipe-to-shell). So the banner strings raise zero findings from CPV's own
+# native skillaudit scanner.
+
+# rule_id → bucket map. Keys are the STABLE string IDs that appear verbatim
+# in finding messages: the native-skillaudit `id` values (emitted inside the
+# `[skillaudit:<category> <ID>] …` prefix) and the in-process `RC-NN` tokens
+# (emitted as the `RC-NN: …` message prefix). Values are a frozenset of
+# "A"/"B"/"C"; a dual-class ID carries 2+ letters (§1.5 of the spec). The map
+# is the SINGLE SOURCE OF TRUTH for both the terminal summary and the report
+# body. It does NOT need to be exhaustive over every RC rule — any finding
+# whose ID is absent here triggers neither banner (it is still counted toward
+# the verdict; it is just neither a Devitalize-target nor a Leaks-target).
+_SECURITY_GATE_BUCKETS: dict[str, frozenset[str]] = {
+    # ── Bucket A — execution / malicious-threat the plugin SHIPS ──────────
+    # skillaudit code_execution (executable threat shape)
+    "CMD_INJECTION": frozenset({"A"}),
+    "SHELL_EXEC": frozenset({"A"}),
+    "REVERSE_SHELL": frozenset({"A"}),
+    "SSTI": frozenset({"A"}),
+    "CLAUDE_CLI_PERMISSION_BYPASS": frozenset({"A"}),
+    # skillaudit obfuscation (concealed payload — remove, don't hide)
+    "OBFUSCATION": frozenset({"A"}),
+    "INVISIBLE_TEXT": frozenset({"A"}),
+    # skillaudit supply_chain (pipe-to-shell install shape)
+    "SUPPLY_CHAIN": frozenset({"A"}),
+    "CLAUDE_CLI_UNAUTHORIZED_INSTALL": frozenset({"A"}),
+    # skillaudit decode-threats (runtime-decoded payload — encoding as evasion)
+    "BASE64_DECODE_THREAT": frozenset({"A"}),
+    "CHARCODE_DECODE_THREAT": frozenset({"A"}),
+    "HEX_DECODE_THREAT": frozenset({"A"}),
+    "UNICODE_ESCAPE_DECODE_THREAT": frozenset({"A"}),
+    # skillaudit evasion (conditional-trigger executable logic)
+    "TIME_BOMB": frozenset({"A"}),
+    # skillaudit agent_manipulation (active manipulation/abuse)
+    "TOOL_POISONING": frozenset({"A"}),
+    "TOOL_SHADOW": frozenset({"A"}),
+    "TOOL_CONFUSION": frozenset({"A"}),
+    "MCP_SCHEMA_POISON": frozenset({"A"}),
+    "AGENT_MEMORY_MOD": frozenset({"A"}),
+    "CROSS_TOOL_ACCESS": frozenset({"A"}),
+    "A2A_AGENT_IMPERSONATION": frozenset({"A"}),
+    "A2A_CAPABILITY_ABUSE": frozenset({"A"}),
+    "A2A_CROSS_AGENT_INJECT": frozenset({"A"}),
+    "A2A_TASK_HIJACK": frozenset({"A"}),
+    # skillaudit crypto_theft (active theft logic)
+    "CRYPTO_THEFT": frozenset({"A"}),
+    "WALLET_DRAINER": frozenset({"A"}),
+    # skillaudit data_exfiltration (active exfil sink)
+    "DATA_EXFIL": frozenset({"A"}),
+    "EXFIL_COVERT": frozenset({"A"}),
+    "EXFIL_PATTERN": frozenset({"A"}),
+    "STRUCT_READ_EXFIL": frozenset({"A"}),
+    # skillaudit privilege_escalation / resource_abuse (active escalation)
+    "CONTAINER_ESCAPE": frozenset({"A"}),
+    "PRIVILEGE_ESC": frozenset({"A"}),
+    "RESOURCE_ABUSE": frozenset({"A"}),
+    # skillaudit INTENT_* (imperative-to-execute prose — devitalize/nominalize)
+    "INTENT_DESTRUCTIVE_INTENT": frozenset({"A"}),
+    "INTENT_MALWARE_INSTALL_INTENT": frozenset({"A"}),
+    "INTENT_REVERSE_CONNECTION_INTENT": frozenset({"A"}),
+    "OBFUSCATION_INTENT": frozenset({"A"}),
+    # in-process taint (live code-exec / dynamic-dispatch sink — AST7)
+    "RC-73": frozenset({"A"}),
+    "RC-74": frozenset({"A"}),
+    # in-process detector-signature meta (validator-scanning-a-validator)
+    "RC-46": frozenset({"A"}),
+    "RC-87": frozenset({"A"}),
+    "RC-65": frozenset({"A"}),
+    # in-process supply-chain (typosquat / compromised dep / MCP-runs-interpreter)
+    "RC-30": frozenset({"A"}),
+    "RC-33": frozenset({"A"}),
+    "RC-45": frozenset({"A"}),
+    # in-process injection stems (executable injection shapes)
+    "RC-21": frozenset({"A"}),
+    "RC-76": frozenset({"A"}),
+    "RC-90": frozenset({"A"}),
+    "RC-92": frozenset({"A"}),
+    "RC-93": frozenset({"A"}),
+    # ── Bucket B — secret / credential LEAK (redact → runtime-read) ───────
+    "TOKEN_STEAL": frozenset({"B"}),
+    "CLAUDE_AUTH_ENV_OVERRIDE": frozenset({"B"}),
+    "CLAUDE_CLI_TOKEN_THEFT": frozenset({"B"}),
+    "CRED_ENV_SAFE": frozenset({"B"}),
+    "CREDENTIAL_REFERENCE": frozenset({"B"}),
+    "HARDCODED_SECRET": frozenset({"B"}),
+    "API_KEY_LEAK": frozenset({"B"}),
+    "SECRET_ANTHROPIC_KEY": frozenset({"B"}),
+    "SECRET_AWS_KEY": frozenset({"B"}),
+    "SECRET_GITHUB_TOKEN": frozenset({"B"}),
+    "SECRET_OPENAI_KEY": frozenset({"B"}),
+    "SECRET_STRIPE_KEY": frozenset({"B"}),
+    "SECRET_SLACK_TOKEN": frozenset({"B"}),
+    "SECRET_SLACK_WEBHOOK": frozenset({"B"}),
+    "SECRET_DISCORD_TOKEN": frozenset({"B"}),
+    "SECRET_DISCORD_WEBHOOK": frozenset({"B"}),
+    "SECRET_GOOGLE_API_KEY": frozenset({"B"}),
+    "SECRET_NPM_TOKEN": frozenset({"B"}),
+    "SECRET_PYPI_TOKEN": frozenset({"B"}),
+    "SECRET_VERCEL_TOKEN": frozenset({"B"}),
+    "SECRET_TELEGRAM_TOKEN": frozenset({"B"}),
+    "SECRET_JWT": frozenset({"B"}),
+    "SECRET_PRIVATE_KEY": frozenset({"B"}),
+    # in-process leaked-private-info / home-path
+    "RC-135": frozenset({"B"}),
+    # ── Bucket C — missing-safeguard / exposed vulnerability (harden) ─────
+    "INSECURE_TLS": frozenset({"C"}),
+    "SSRF_ADVANCED": frozenset({"C"}),
+    "SSRF_PATTERN": frozenset({"C"}),
+    "DNS_REBIND": frozenset({"C"}),
+    "NET_SUSPICIOUS": frozenset({"C"}),
+    "PATH_TRAVERSAL": frozenset({"C"}),
+    "FS_WRITE": frozenset({"C"}),
+    "SQL_INJECTION": frozenset({"C"}),
+    "XSS_INJECTION": frozenset({"C"}),
+    "XXE_INJECTION": frozenset({"C"}),
+    "INSECURE_CRYPTO": frozenset({"C"}),
+    "REGEX_DOS": frozenset({"C"}),
+    "PROMPT_INJECT": frozenset({"C"}),
+    "INDIRECT_PROMPT_INJECT": frozenset({"C"}),
+    "ENV_RECON": frozenset({"C"}),
+    "ENV_INJECTION": frozenset({"C"}),
+    "CLAUDE_RESERVED_ENV_POISON": frozenset({"C"}),
+    "CLAUDE_SAFETY_ENV_TAMPER": frozenset({"C"}),
+    "PERSISTENCE": frozenset({"C"}),
+    "JWT_VULN": frozenset({"C"}),
+    # in-process sandbox/permission downgrade
+    "RC-61": frozenset({"C"}),
+    "RC-62": frozenset({"C"}),
+    # ── Dual-class (BOTH) — counts toward both triggers (§1.5) ────────────
+    "DESERIALIZATION": frozenset({"A", "C"}),
+    "LOG_INJECTION": frozenset({"A", "C"}),
+    "PROTOTYPE_POLLUTION": frozenset({"A", "C"}),
+    "CRED_ENV_READ": frozenset({"B", "C"}),
+    "A2A_DATA_LEAK": frozenset({"A", "B"}),
+    "CREDENTIAL_DISCOVERY": frozenset({"B", "C"}),
+    "INTENT_EXFILTRATION_INTENT": frozenset({"A", "B"}),
+    "INTENT_CREDENTIAL_FORWARDING_INTENT": frozenset({"A", "B"}),
+    "INTENT_POST_DATA_INTENT": frozenset({"A", "B"}),
+    "INTENT_UPLOAD_INTENT": frozenset({"A", "B"}),
+    "INTENT_READ_AND_EXFILTRATE_INTENT": frozenset({"A", "B"}),
+    "INTENT_EXPLICIT_EXFILTRATION": frozenset({"A", "B"}),
+}
+
+# Matches an in-process rule token (`RC-46`, `RC-135`, …) anywhere in a
+# finding message — they are emitted as the message prefix `RC-NN: …`.
+_RC_TOKEN_RE = re.compile(r"\bRC-\d+\b")
+# Matches the native-skillaudit prefix `[skillaudit:<category> <ID>]` and
+# captures `<ID>` — the id charset is [A-Z0-9_]+. Extracting from the bracket
+# (rather than a bare-substring search of the whole message) avoids a false
+# match against an ID-shaped word in the human message body.
+_SKILLAUDIT_ID_RE = re.compile(r"\[skillaudit:[^\s\]]+\s+([A-Z0-9_]+)\]")
+
+
+def _classify_security_buckets(report: ValidationReport) -> set[str]:
+    """Return the set of security-gate buckets present in ``report``.
+
+    Walks findings at CRITICAL/MAJOR/MINOR/NIT ONLY — WARNING and INFO never
+    trigger a gate, matching ``_print_fixer_recommendation``'s ``fixable_total``
+    gate. For each finding, extracts its classifiable ID (the native-skillaudit
+    ``id`` from the ``[skillaudit:… <ID>]`` prefix, and any ``RC-NN`` token in
+    the message), looks each up in ``_SECURITY_GATE_BUCKETS``, and unions the
+    buckets into a set ``⊆ {"A","B","C"}``.
+
+    Reads the already-built report; it neither recomputes nor mutates the
+    verdict. Returns an empty set when no classifiable security finding is
+    present (e.g. a structural-only INVALID), so neither banner renders.
+    """
+    present: set[str] = set()
+    for result in report.results:
+        if result.level not in ("CRITICAL", "MAJOR", "MINOR", "NIT"):
+            continue
+        message = result.message or ""
+        ids: set[str] = set(_RC_TOKEN_RE.findall(message))
+        ids.update(_SKILLAUDIT_ID_RE.findall(message))
+        for ident in ids:
+            buckets = _SECURITY_GATE_BUCKETS.get(ident)
+            if buckets:
+                present |= buckets
+    return present
+
+
+def _print_security_gate_banners(
+    report: ValidationReport, report_path: Path | None, *, markdown: bool = False
+) -> None:
+    """Render the Gate A / Gate B security-gate warning banners.
+
+    Calls :func:`_classify_security_buckets`; prints the Gate A block when
+    bucket ``"A"`` is present, the Gate B block when ``"B"`` and/or ``"C"`` is
+    present (Gate A first — execution threats are the higher-severity class).
+    No-op when no bucket is present.
+
+    ``markdown=False`` → boxed-ASCII blocks for the terminal (ANSI stripped on
+    a non-TTY exactly like ``_print_fixer_recommendation``). ``markdown=True``
+    → Markdown ``## Security Gate …`` sections for the report-file body (never
+    any ANSI in the file).
+
+    Purely additive: prints text only; never mutates ``report`` or any count.
+    """
+    present = _classify_security_buckets(report)
+    if not present:
+        return
+
+    report_arg = str(report_path) if report_path else "<path-to-report.md>"
+
+    if markdown:
+        if "A" in present:
+            _print_gate_a_markdown(report_arg)
+        if present & {"B", "C"}:
+            _print_gate_b_markdown(report_arg, leaks="B" in present, safeguards="C" in present)
+        return
+
+    # Terminal: strip ANSI when stdout is not a TTY — same precedent as
+    # _print_fixer_recommendation (independent of the global color flag, so a
+    # captured/piped run is always plain text).
+    use_color = bool(getattr(sys.stdout, "isatty", lambda: False)())
+    red = COLORS["CRITICAL"] if use_color else ""
+    yellow = COLORS["MAJOR"] if use_color else ""
+    bold = COLORS["BOLD"] if use_color else ""
+    reset = COLORS["RESET"] if use_color else ""
+
+    if "A" in present:
+        _print_gate_a_terminal(report_arg, red, bold, reset)
+    if present & {"B", "C"}:
+        _print_gate_b_terminal(
+            report_arg, yellow, bold, reset, leaks="B" in present, safeguards="C" in present
+        )
+
+
+_GATE_BORDER = "=" * 60  # Fits comfortably in 80-col terminals (matches the fixer block).
+
+
+def _print_gate_a_terminal(report_arg: str, color: str, bold: str, reset: str) -> None:
+    """Gate A boxed-ASCII block (Bucket A present) — recommend plugin-devitalizer."""
+    print()
+    print(f"{color}{_GATE_BORDER}{reset}")
+    print(f"{color}{bold} SECURITY GATE A — EXECUTABLE THREAT CODE MUST BE DEVITALIZED{reset}")
+    print(f"{color}{_GATE_BORDER}{reset}")
+    print(" This plugin SHIPS code whose SHAPE can execute a threat")
+    print(" (detection signatures, attack-test patterns, command/shell")
+    print(" execution, reverse shells, eval/exec of a payload, obfuscated")
+    print(" or runtime-decoded code, curl-pipe-to-shell installs).")
+    print(" The security scan therefore reports it as INVALID.")
+    print()
+    print(" You CANNOT pass this gate by muting a rule, adding an")
+    print(" allow-list entry, or relaxing --strict. The ONLY honest fix")
+    print(" is to make each threat COMPLETELY AND IRREVERSIBLY INERT:")
+    print()
+    print("   * It becomes a scan / comparison-only pattern that CANNOT")
+    print("     execute even if an attacker reassembled it, because an")
+    print("     EXECUTION-CRITICAL PIECE has been REMOVED ENTIRELY from")
+    print("     the plugin.")
+    print("   * NOT encrypted, NOT compiled to a binary, NOT regenerated")
+    print("     or emitted programmatically at runtime, NOT hidden /")
+    print("     concealed / obfuscated. The missing piece is ABSENT, not")
+    print("     hidden. Truly non-reversible.")
+    print("   * Load-bearing code (a real installer, a genuine")
+    print("     code-execution feature) is FLAGGED for your decision, not")
+    print("     silently broken.")
+    print()
+    print(" TO DO THIS, dispatch the plugin-devitalizer AGENT (it is an")
+    print(" AGENT, not a slash command):")
+    print()
+    print("   In Claude Code, dispatch:")
+    print('     Agent(subagent_type: "plugin-devitalizer",')
+    print('           prompt: "Devitalize the execution-class findings in')
+    print(f"                    {report_arg} — make each threat irreversibly")
+    print('                    inert; flag load-bearing code, never break')
+    print('                    it; re-scan to prove inert.")')
+    print()
+    print("   Or pick it from the menu:  /cpv-main-menu  ->  Fix  ->")
+    print("     Devitalize security threats")
+    print()
+    print(" This warning is informational. It does not change the scan's")
+    print(" pass/fail result — the verdict above is already INVALID until")
+    print(" every execution-class finding is devitalized or flagged.")
+    print(f"{color}{_GATE_BORDER}{reset}")
+
+
+def _print_gate_b_terminal(
+    report_arg: str, color: str, bold: str, reset: str, *, leaks: bool, safeguards: bool
+) -> None:
+    """Gate B boxed-ASCII block (Bucket B and/or C present) — recommend plugin-leaks-preventer.
+
+    The LEAKS sub-section prints only when ``leaks`` (Bucket B); the
+    MISSING-SAFEGUARDS sub-section only when ``safeguards`` (Bucket C).
+    """
+    print()
+    print(f"{color}{_GATE_BORDER}{reset}")
+    print(f"{color}{bold} SECURITY GATE B — LEAKS & MISSING SAFEGUARDS MUST BE FIXED{reset}")
+    print(f"{color}{_GATE_BORDER}{reset}")
+    print(" The security scan found data this plugin should not expose,")
+    print(" and/or safeguards it is missing. This blocks validity whether")
+    print(" the exposure was ACCIDENTAL or INTENTIONAL — a committed")
+    print(" secret is a leak the moment it ships, and a missing safeguard")
+    print(" is a vulnerability whether or not it was meant to be there.")
+    print()
+    print(" You CANNOT pass this gate by muting a rule or relaxing")
+    print(" --strict. The exposed data must be REMOVED (not hidden,")
+    print(" not encoded, not committed-then-ignored), and each missing")
+    print(" safeguard must be IMPLEMENTED.")
+    if leaks:
+        print()
+        print(" LEAKED SECRETS / SENSITIVE DATA:")
+        print("   * Every secret, token, key, webhook, or private path is")
+        print("     REDACTED from code, docs, and config.")
+        print("   * If a secret is genuinely needed at runtime, it is replaced")
+        print("     with code that READS IT AT RUNTIME from the environment:")
+        print("     an environment variable, an exported shell var, a GitHub")
+        print("     repo / Actions variable, or an OS keychain entry — never")
+        print("     a literal in the source.")
+        print("   * If a secret was ALREADY COMMITTED and is live, redacting")
+        print("     the file is NOT enough: ROTATE the credential and PURGE it")
+        print("     from git history. It is already in the history.")
+    if safeguards:
+        print()
+        print(" MISSING SAFEGUARDS / EXPOSED VULNERABILITIES:")
+        print("   * Correct parameters when launching tools, deploying")
+        print("     services, and reading untrusted input (TLS verification")
+        print("     on, SSRF guards, host-pinning against rebinding,")
+        print("     sandbox not disabled).")
+        print("   * Input sanitization on everything processed at runtime.")
+        print("   * SAFE parsing of config files (yaml -> safe_load, and the")
+        print("     safe loaders for toml / json / cfg / ini / .plist).")
+        print("   * Safe loading of files to process (no untrusted pickle /")
+        print("     XML external entities / arbitrary deserialization).")
+        print("   * Prompt-injection prevention for skills and agents, via a")
+        print("     by-code-only preventive scan that runs BEFORE any agent")
+        print("     reads untrusted content.")
+        print("   Anything that cannot be safely fixed is FLAGGED for your")
+        print("   decision, never broken.")
+    print()
+    print(" TO DO THIS, dispatch the plugin-leaks-preventer AGENT (it is")
+    print(" an AGENT, not a slash command):")
+    print()
+    print("   In Claude Code, dispatch:")
+    print('     Agent(subagent_type: "plugin-leaks-preventer",')
+    print('           prompt: "Redact every secret and implement the')
+    print(f"                    missing safeguards reported in {report_arg};")
+    print('                    runtime-read genuinely-needed secrets; flag')
+    print('                    what cannot be safely fixed; re-scan clean.")')
+    print()
+    print("   Or pick it from the menu:  /cpv-main-menu  ->  Fix  ->")
+    print("     Prevent leaks & harden")
+    print()
+    print(" This warning is informational. It does not change the scan's")
+    print(" pass/fail result — the verdict above is already INVALID until")
+    print(" every leak is removed and every safeguard implemented.")
+    print(f"{color}{_GATE_BORDER}{reset}")
+
+
+def _print_gate_a_markdown(report_arg: str) -> None:
+    """Gate A as a Markdown section for the report-file body (no ANSI)."""
+    print()
+    print("## Security Gate A — Executable threat code must be devitalized")
+    print()
+    print(
+        "This plugin SHIPS code whose SHAPE can execute a threat (detection "
+        "signatures, attack-test patterns, command/shell execution, reverse "
+        "shells, eval/exec of a payload, obfuscated or runtime-decoded code, "
+        "curl-pipe-to-shell installs). The security scan therefore reports it "
+        "as **INVALID**."
+    )
+    print()
+    print(
+        "You CANNOT pass this gate by muting a rule, adding an allow-list entry, "
+        "or relaxing `--strict`. The ONLY honest fix is to make each threat "
+        "**completely and irreversibly inert**:"
+    )
+    print()
+    print(
+        "- It becomes a scan / comparison-only pattern that CANNOT execute even "
+        "if an attacker reassembled it, because an EXECUTION-CRITICAL PIECE has "
+        "been REMOVED ENTIRELY from the plugin."
+    )
+    print(
+        "- NOT encrypted, NOT compiled to a binary, NOT regenerated or emitted "
+        "programmatically at runtime, NOT hidden / concealed / obfuscated. The "
+        "missing piece is ABSENT, not hidden. Truly non-reversible."
+    )
+    print(
+        "- Load-bearing code (a real installer, a genuine code-execution feature) "
+        "is FLAGGED for your decision, not silently broken."
+    )
+    print()
+    print("TO DO THIS, dispatch the **plugin-devitalizer** agent (it is an agent, not a slash command):")
+    print()
+    print("```")
+    print('Agent(subagent_type: "plugin-devitalizer",')
+    print(f'      prompt: "Devitalize the execution-class findings in {report_arg} —')
+    print('               make each threat irreversibly inert; flag load-bearing')
+    print('               code, never break it; re-scan to prove inert.")')
+    print("```")
+    print()
+    print("Or pick it from the menu: `/cpv-main-menu` -> Fix -> Devitalize security threats.")
+    print()
+    print(
+        "This warning is informational. It does not change the scan's pass/fail "
+        "result — the verdict is already INVALID until every execution-class "
+        "finding is devitalized or flagged."
+    )
+
+
+def _print_gate_b_markdown(report_arg: str, *, leaks: bool, safeguards: bool) -> None:
+    """Gate B as a Markdown section for the report-file body (no ANSI)."""
+    print()
+    print("## Security Gate B — Leaks & missing safeguards must be fixed")
+    print()
+    print(
+        "The security scan found data this plugin should not expose, and/or "
+        "safeguards it is missing. This blocks validity whether the exposure was "
+        "ACCIDENTAL or INTENTIONAL — a committed secret is a leak the moment it "
+        "ships, and a missing safeguard is a vulnerability whether or not it was "
+        "meant to be there."
+    )
+    print()
+    print(
+        "You CANNOT pass this gate by muting a rule or relaxing `--strict`. The "
+        "exposed data must be REMOVED (not hidden, not encoded, "
+        "not committed-then-ignored), and each missing safeguard must be "
+        "IMPLEMENTED."
+    )
+    if leaks:
+        print()
+        print("**Leaked secrets / sensitive data:**")
+        print()
+        print("- Every secret, token, key, webhook, or private path is REDACTED from code, docs, and config.")
+        print(
+            "- If a secret is genuinely needed at runtime, it is replaced with code that READS IT AT RUNTIME "
+            "from the environment: an environment variable, an exported shell var, a GitHub repo / Actions "
+            "variable, or an OS keychain entry — never a literal in the source."
+        )
+        print(
+            "- If a secret was ALREADY COMMITTED and is live, redacting the file is NOT enough: ROTATE the "
+            "credential and PURGE it from git history. It is already in the history."
+        )
+    if safeguards:
+        print()
+        print("**Missing safeguards / exposed vulnerabilities:**")
+        print()
+        print(
+            "- Correct parameters when launching tools, deploying services, and reading untrusted input "
+            "(TLS verification on, SSRF guards, host-pinning against rebinding, sandbox not disabled)."
+        )
+        print("- Input sanitization on everything processed at runtime.")
+        print("- SAFE parsing of config files (yaml -> safe_load, and the safe loaders for toml / json / cfg / ini / .plist).")
+        print("- Safe loading of files to process (no untrusted pickle / XML external entities / arbitrary deserialization).")
+        print(
+            "- Prompt-injection prevention for skills and agents, via a by-code-only preventive scan that runs "
+            "BEFORE any agent reads untrusted content."
+        )
+        print("- Anything that cannot be safely fixed is FLAGGED for your decision, never broken.")
+    print()
+    print("TO DO THIS, dispatch the **plugin-leaks-preventer** agent (it is an agent, not a slash command):")
+    print()
+    print("```")
+    print('Agent(subagent_type: "plugin-leaks-preventer",')
+    print(f'      prompt: "Redact every secret and implement the missing safeguards reported in {report_arg};')
+    print('               runtime-read genuinely-needed secrets; flag what cannot be safely')
+    print('               fixed; re-scan clean.")')
+    print("```")
+    print()
+    print("Or pick it from the menu: `/cpv-main-menu` -> Fix -> Prevent leaks & harden.")
+    print()
+    print(
+        "This warning is informational. It does not change the scan's pass/fail "
+        "result — the verdict is already INVALID until every leak is removed and "
+        "every safeguard implemented."
+    )
+
+
 def print_compact_summary(
-    report: ValidationReport, title: str, report_path: Path | None = None, plugin_path: Path | str | None = None
+    report: ValidationReport,
+    title: str,
+    report_path: Path | None = None,
+    plugin_path: Path | str | None = None,
+    *,
+    security_gates: bool = False,
 ) -> None:
     """Print a concise summary: counts by severity + verdict."""
     counts = report.count_by_level()
@@ -6239,9 +6739,24 @@ def print_compact_summary(
     if report_path:
         print(f"  Report: {report_path}")
 
-    # If there are any fixable issues, point the user at the fixer agent/skill.
-    # This block is skipped on clean runs (0 issues) and on WARNING-only runs.
-    _print_fixer_recommendation(report, report_path)
+    # Security-gate banners — ONLY for the security report (validate_security
+    # passes security_gates=True; it is the only caller that does). The two
+    # banners are purely additive informational text; they read the already-
+    # built report and never mutate a count or the exit code. When a security
+    # gate fires we render its banner (which already points at the right WORK
+    # agent) and SKIP the generic fixer recommendation to avoid double-pointing
+    # at a fixer. When no gate fires (an empty bucket set — e.g. a structural-
+    # only INVALID), the generic fixer block prints exactly as before.
+    if security_gates:
+        gates = _classify_security_buckets(report)
+        _print_security_gate_banners(report, report_path)
+        if not gates:
+            _print_fixer_recommendation(report, report_path)
+    else:
+        # Every NON-security validator: unchanged behavior — point the user at
+        # the fixer agent/skill whenever fixable issues exist (skipped on clean
+        # runs and on WARNING-only runs).
+        _print_fixer_recommendation(report, report_path)
 
 
 def save_report_and_print_summary(
@@ -6251,6 +6766,7 @@ def save_report_and_print_summary(
     print_fn: Callable[..., None],
     *args: Any,
     plugin_path: Path | str | None = None,
+    security_gates: bool = False,
     **kwargs: Any,
 ) -> None:
     """Save full detailed report to file, print only compact summary to stdout.
@@ -6261,6 +6777,11 @@ def save_report_and_print_summary(
         title: Title for the compact summary
         print_fn: The script's print_results function (captures its stdout)
         plugin_path: Path to the validated plugin/skill (shown in compact summary)
+        security_gates: When True, the compact summary renders the additive
+            security-gate warning banners (Gate A / Gate B). Only
+            ``validate_security.py`` passes this; it is a keyword-only param so
+            it is consumed HERE and never forwarded into ``print_fn`` via
+            ``**kwargs`` (which would break the captured report body).
         *args, **kwargs: Additional arguments passed to print_fn
     """
     import io
@@ -6289,7 +6810,7 @@ def save_report_and_print_summary(
     os.replace(tmp_path, report_path)
 
     # Print compact summary to real stdout
-    print_compact_summary(report, title, report_path, plugin_path=plugin_path)
+    print_compact_summary(report, title, report_path, plugin_path=plugin_path, security_gates=security_gates)
 
 
 # =============================================================================

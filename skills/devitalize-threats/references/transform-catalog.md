@@ -11,6 +11,7 @@
 - [T7 Instruction prose](#t7--the-agent-must-execute--run--prose-instruction-to-execute)
 - [T8 Verb enumeration](#t8--destructive-verb-enumerations-delete-wipe-exfiltrate-)
 - [T9 Dynamic attribute](#t9--setattr--getattr-with-a-dynamic-attribute-name-taint-sink-ast7)
+- [Irreversibility test](#irreversibility-test)
 - [Cross-cutting rules](#catalog-cross-cutting-rules-restated)
 
 Each entry gives **BEFORE** (the flagged shape), **AFTER** (the
@@ -48,14 +49,16 @@ live argument, so it can fire.
 
 ```python
 # Detection signatures — DATA only. Never executed; compared to scanned
-# content. Raw-string form is the inert-proof CPV recognizes.
+# content. Raw-string form is the inert-proof CPV recognizes; the
+# execution-critical operand is abstracted to a placeholder so a
+# signature can never be copy-pasted into a runnable command.
 DANGEROUS_ARG_SIGNATURES = (
     r"--insecure",
     r"--no-sandbox",
-    r";\s*rm\s+-rf\s+/",
+    r";\s*rm\s+-rf\s+<PATH>",
 )
 PRIVATE_IP_SIGNATURE = r"10\.\d+\.\d+\.\d+"
-RM_RF_SIGNATURE = re.compile(r"rm\s+-rf\s+/")   # raw string
+RM_RF_SIGNATURE = re.compile(r"rm\s+-rf\s+<PATH>")   # raw string, operand abstracted
 ```
 
 **WHY-INERT:** raw-string literals are the regex convention; a real CLI
@@ -64,6 +67,8 @@ arg is a normal string (`"--no-sandbox"`), never `r"--no-sandbox"`.
 (RC-46 / RC-87) skip a match inside `r"..."`; skillaudit's
 `_match_inside_re_pattern_literal` / `safe_literal` verdict does the same.
 The string is data compared against content, with no call site.
+Additionally, the operative target is a placeholder (`<PATH>`), so the
+signature matches content but is not a runnable command.
 
 **VERIFY:** re-run security scan -> RC-46 / RC-87 / CMD_INJECTION on those
 lines gone (skipped as detector signatures), not demoted, not
@@ -125,7 +130,10 @@ shape, so removing the shape clears it.
 **BREAKS when:** the same one-liner also lives in an executable installer
 (`.sh` / hook) — that copy is load-bearing and is NOT a doc; devitalizing
 the doc is fine, but the executable copy is left and flagged (a genuine
-security decision the author owns). **Caveat:** CPV already suppresses
+security decision the author owns). **Irreversibility:** encoding,
+compiling, or runtime-regenerating the removed pipe-to-shell token does
+NOT satisfy the bar; the token must be absent from the shipped bytes.
+**Caveat:** CPV already suppresses
 `CLAUDE_CLI_UNAUTHORIZED_INSTALL` in `.md` (the benign "how to install
 this plugin" case). Only the generic pipe-to-shell SUPPLY_CHAIN class
 needs devitalizing here; check the report's `rule_id` first so an
@@ -211,6 +219,9 @@ feature. If reachable, **flag to the user**: "this is a live shell-exec;
 either harden it (argv-list + shell=False, validated input) or accept the
 finding — the devitalizer will not silently break working behavior." The
 job is to neutralize dead/example sinks, not delete features.
+**Irreversibility:** encoding, compiling, or runtime-regenerating the
+removed sink call does NOT satisfy the bar; the sink call must be absent
+from the shipped bytes.
 
 ---
 
@@ -253,6 +264,9 @@ true for plugin command dispatch). This is also a genuine security
 user-supplied code* by design (a REPL, a sandbox runner) — that is
 irreducibly an exec and is load-bearing. Flag: "this is an intentional
 code-execution feature; it cannot be devitalized without removing it."
+**Irreversibility:** encoding, compiling, or runtime-regenerating the
+removed exec/eval call does NOT satisfy the bar; the call must be absent
+from the shipped bytes.
 
 ---
 
@@ -399,6 +413,25 @@ recommend the author validate inputs rather than the devitalizer silently
 constraining a generic API.
 
 ---
+
+## Irreversibility test
+
+Before recording any transform as done, confirm it passes all three
+questions. If any answer fails, the construct is hidden, not inert —
+keep transforming (or flag).
+
+1. **Is an execution-critical piece ABSENT from the shipped files?** The
+   token a sink needs to run must be gone from the bytes the plugin
+   ships — not encrypted, not compiled to a binary, not merely
+   relocated to a demoting surface.
+2. **Could a runtime path (decode / fetch / regenerate) restore it?** If
+   a load-time base64 decode, a network fetch-then-assemble, or any code
+   path could reconstruct the removed token at runtime → it is NOT
+   inert.
+3. **Is the remnant a comparison/scan needle only, with no call site?**
+   What stays behind must be data compared against content (a
+   raw-string signature with the operand abstracted), reachable by no
+   execution sink.
 
 ## Catalog cross-cutting rules (restated)
 
