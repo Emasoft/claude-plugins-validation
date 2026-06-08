@@ -3523,6 +3523,48 @@ def _is_jupyter_notebook(rel_path: str) -> bool:
     return rel_path.lower().endswith(".ipynb")
 
 
+# Issue #67 — non-executable typeset-documentation / diagram source formats.
+# LaTeX (.tex/.sty/.cls/.dtx/.ltx), BibTeX (.bib), and Graphviz (.dot/.gv) are
+# MARKUP that a typesetter / graph renderer consumes to produce a PDF or an
+# image. They are NEVER executed as code by Claude Code's loader or by a
+# plugin's runtime. A LaTeX relative include `\input{../shared}`, a Graphviz
+# node `label="..\\windows\\path"`, or a `\verb|grep foo| . spans` line carries
+# the *shape* of a path-traversal / pipe-to-shell token but cannot reach a
+# runtime file-open or a shell exec — there is no interpreter that would treat
+# them as such. This mirrors the existing lockfile / research-data / tabular /
+# notebook early-return gates: a provably-inert NON-EXECUTABLE file type, not a
+# rule relaxation. A malicious traversal / RCE still lives in `.py/.js/.sh`
+# (which are unaffected and still fire — verified by the issue's malicious
+# sibling).
+_DOC_DIAGRAM_EXTENSIONS: tuple[str, ...] = (
+    ".tex",
+    ".sty",
+    ".cls",
+    ".dtx",
+    ".ltx",
+    ".bib",
+    ".dot",
+    ".gv",
+)
+
+
+def _is_doc_or_diagram_source(file_path: str) -> bool:
+    """GENERAL: True when the file is a typeset-documentation (LaTeX/BibTeX) or
+    diagram (Graphviz) SOURCE — a non-executable markup format consumed by a
+    typesetter / renderer, never run as code.
+
+    Used to early-return from the path-traversal and the pipe-to-shell / eval
+    scanners: a `../` LaTeX include, a Graphviz path-shaped node label, or a
+    `\\verb|...| . ` LaTeX line is markup, not a file-open or shell call. FN-safe
+    by construction — Claude Code never executes these file types, so a real
+    traversal/RCE still has to live in an actually-executable file (`.py/.js/
+    .sh`/...), which these gates do not touch.
+    """
+    if not file_path:
+        return False
+    return file_path.lower().endswith(_DOC_DIAGRAM_EXTENSIONS)
+
+
 def _rc21_is_subprocess_prep(line: str, surrounding_lines: list[str]) -> bool:
     """RC-21 bulk env-var harvest — skip `os.environ.copy()` /
     `dict(os.environ)` when the resulting variable feeds a subprocess
@@ -3606,6 +3648,48 @@ def _rc65_is_pattern_source(line: str, surrounding_lines: list[str]) -> bool:
     if any(hint in blob for hint in _RC65_PATTERN_SOURCE_HINTS):
         return True
     return False
+
+
+# Issue #67 — keys whose VALUE is human-readable prose (a security-tool's
+# self-documentation of WHAT it detects). An IMDS/SSRF IP that appears only
+# inside such a description string — with no live network sink on the line —
+# is the tool describing the threat, not reaching the endpoint. This is the
+# RC-65 analogue of the RC-46/RC-87 "validator scanning a validator's
+# descriptions" family, but for a plain (non-raw) prose string.
+_RC65_PROSE_FIELD_KEY_RE = re.compile(
+    r"""["']?(?:description|desc|message|msg|summary|title|name|label|detail|details|note|notes|help|doc|docstring|reason|explanation|info)["']?\s*[:=]""",
+    re.IGNORECASE,
+)
+
+
+def _rc65_match_is_prose_description(line: str, m_start: int, m_end: int) -> bool:
+    """RC-65 cloud IMDS — True when the IMDS IP match lies inside a quoted
+    PROSE-DESCRIPTION string value with NO live network sink on the line.
+
+    The reported FP (#67): a security plugin's
+    ``"description": "Cloud IMDS SSRF target 169.254.169.254 — steals IAM
+    credentials."`` — the IP is part of the tool's human-readable description
+    of what it detects, not a call to the endpoint.
+
+    Three conjuncts, all required (so this is provably NOT a live SSRF):
+      1. the line carries NO network-call hint (``requests.``/``.get(``/``curl``
+         /…) — a real `requests.get("http://169.254.169.254/…")` is NEVER
+         suppressed (this mirrors `_rc65_is_pattern_source`'s first guard);
+      2. the match lies inside a paired-quote string span (it is a string
+         VALUE, not a bare token);
+      3. the line has a description/message/name-style FIELD KEY before the
+         value — i.e. the quoted span is a prose field, not an arbitrary
+         string. A genuine endpoint literal is assigned to a URL/host var or
+         passed to a call, not to a `"description":` key.
+
+    FN-safe by construction: a description string cannot perform a request,
+    and any line that COULD (network-call hint present) is excluded by (1).
+    """
+    if any(hint in line for hint in _RC65_NETWORK_CALL_HINTS):
+        return False
+    if not _match_inside_quoted_span(line, m_start, m_end):
+        return False
+    return bool(_RC65_PROSE_FIELD_KEY_RE.search(line))
 
 
 def _surrounding_lines(content_lines: list[str], idx: int, window: int = 4) -> list[str]:
@@ -3741,16 +3825,31 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
     # v2.48 — non-executable data files (lockfiles, research/dataset
     # paths, CSV/TSV, .ipynb). Injection-shape strings ($(...), `...`)
     # are ubiquitous in dataset descriptions and notebook outputs.
+    # Issue #67 — also LaTeX / BibTeX / Graphviz markup. A LaTeX
+    # `\verb|grep foo| . spans` line shape-matches the RC-119 pipe-to-`.`
+    # rule, but `\verb|...|` is LaTeX verbatim markup, never a shell pipe.
+    # These formats are consumed by a typesetter / graph renderer, never
+    # executed — FN-safe (a real `cmd | . file` still fires in `.sh`).
     if (
         is_lockfile(file_path)
         or _is_research_data_path(file_path)
         or _is_tabular_data_file(file_path)
         or _is_jupyter_notebook(file_path)
+        or _is_doc_or_diagram_source(file_path)
     ):
         return 0
 
     # Python files never use backtick command substitution — backticks are RST/docstring formatting
     is_python_file = file_lower.endswith(".py")
+
+    # Issue #67 — a `.json` is parsed as DATA by Claude Code's loader and a
+    # plugin's runtime; it is NEVER executed as Python/JS. So `eval(`/`exec(`
+    # text that appears inside a JSON STRING VALUE is prose (e.g. a report
+    # field "no dangerous patterns like eval(), exec()"), not a live code
+    # path. We use this only to defang the eval/exec rule when the match lies
+    # inside a quoted JSON string span — a genuine RCE still has to live in an
+    # executable file type (`.py/.js/.sh`), which this does not touch.
+    is_json_data_file = file_lower.endswith(".json")
 
     # Skip command substitution checks for shell scripts (expected), docs markdown, and tests
     # AI-facing markdown (skills, agents) uses backticks for formatting — skip command-sub only
@@ -4006,6 +4105,17 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
             for pattern, msg in EVAL_PATTERNS:
                 eval_match = pattern.search(line)
                 if eval_match:
+                    # Issue #67 — in a `.json` DATA file, an `eval(`/`exec(`
+                    # token inside a quoted JSON string value is prose, not a
+                    # code path (Claude Code never executes JSON). Suppress
+                    # only when the match itself lies inside a quoted span on
+                    # the line; a bare `eval(` outside any string in a `.json`
+                    # is malformed JSON and would never parse, so this is
+                    # FN-safe — a real RCE lives in `.py/.js/.sh`, untouched.
+                    if is_json_data_file and _match_inside_quoted_span(
+                        line, eval_match.start(), eval_match.end()
+                    ):
+                        continue
                     # In Python files, skip shell-style eval/exec patterns (e.g. "exec " without parens)
                     # Only flag actual Python function calls: eval(...), exec(...)
                     if is_python_file and "command" in msg.lower():
@@ -4149,11 +4259,17 @@ def scan_for_path_traversal(content: str, file_path: str, report: ValidationRepo
 
     # v2.48 — non-executable data files (lockfiles, research/dataset
     # paths, CSV/TSV, .ipynb). See predicate docstrings for invariant.
+    # Issue #67 — also LaTeX / BibTeX / Graphviz markup (.tex/.sty/.cls/
+    # .dtx/.ltx/.bib/.dot/.gv): a `\input{../x}` include or a Graphviz
+    # `label="../parent"` is non-executable typeset/diagram markup, never a
+    # runtime file-open. FN-safe — a real traversal still has to live in an
+    # executable file type (`.py/.js/.sh`), which is unaffected.
     if (
         is_lockfile(file_path)
         or _is_research_data_path(file_path)
         or _is_tabular_data_file(file_path)
         or _is_jupyter_notebook(file_path)
+        or _is_doc_or_diagram_source(file_path)
     ):
         return 0
 
@@ -4753,6 +4869,25 @@ _PLACEHOLDER_LINE_MARKERS = (
     "://root:password@",
     ":password@",  # any scheme, with literal "password"
     ":secret@",  # any scheme, with literal "secret"
+    # Issue #67 — a connection string whose HOST is loopback cannot leak a
+    # credential to an attacker: nothing reachable lives at localhost /
+    # 127.0.0.1 / 0.0.0.0 / ::1 outside the user's own machine. These are
+    # the universal "local dev / CI service" DB-conn idioms
+    # (`postgresql://test:test@localhost:5432/app`, `redis://:x@127.0.0.1`).
+    # Keying on the loopback HOST is the strongest FN-safe placeholder
+    # signal — a real exfiltrable DSN points at a remote host
+    # (`@db.prod.example.com`), which still fires (verified by the issue's
+    # malicious sibling).
+    "@localhost",
+    "@127.0.0.1",
+    "@0.0.0.0",
+    "@[::1]",
+    "@::1",
+    # The identical-user==password test-fixture idiom for any scheme. The
+    # list above enumerates `postgres:postgres` / `root:root` / `admin:admin`
+    # per-scheme; this generalises the `test:test` form (which a `postgresql`
+    # DSN hit but the per-scheme `mysql://test:test` marker missed).
+    "://test:test@",
     # GENERAL — Bash / shell env-var passthrough in connection-string
     # body. The value `${TOKEN}` is bash variable expansion, never a
     # literal credential. Common shapes:
@@ -6596,11 +6731,25 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
     config_file = plugin_path / ".cc-audit.yaml"
     created_config = False
 
+    # Issue #67 — cc-audit 3.2.14 returns ZERO findings when handed an
+    # ABSOLUTE target path but scans correctly with a relative `.` target.
+    # CPV previously passed `str(plugin_path)` (always absolute), so cc-audit
+    # was a SILENT NO-OP — its 100+ rules never actually ran and CPV always
+    # reported "no findings (external scan clean)". The fix: invoke cc-audit
+    # with the relative target `.` and `cwd=` the resolved plugin root, so the
+    # scanner walks the tree. We resolve the cwd once (cc-audit's own
+    # "Parent directory is a symbolic link" guard is happiest with a resolved
+    # path). Findings then come back with plugin-root-RELATIVE `file` paths
+    # (`./skills/foo/SKILL.md`), which we normalise to absolute below so the
+    # existing self-scan / gitignore / test-file filters keep working.
+    cc_cwd = str(plugin_path.resolve())
+
     try:
         # Auto-generate .cc-audit.yaml if not present (cc-audit requires it)
         if not config_file.exists():
             subprocess.run(
-                launcher + ["init", str(plugin_path)],
+                launcher + ["init", "."],
+                cwd=cc_cwd,
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -6611,7 +6760,7 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             launcher
             + [
                 "check",
-                str(plugin_path),
+                ".",
                 "-t",
                 "plugin",
                 "--format",
@@ -6621,6 +6770,7 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
                 "--ci",
                 "--no-telemetry",
             ],
+            cwd=cc_cwd,
             capture_output=True,
             text=True,
             timeout=120,
@@ -6663,10 +6813,33 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             if not isinstance(finding, dict):
                 continue
             severity = finding.get("severity", "medium").lower()
-            rule_id = finding.get("ruleId", finding.get("rule_id", finding.get("code", "?")))
+            # cc-audit 3.2.14 puts the stable rule code in `id` (e.g. MW-027);
+            # its `code` field holds the matched source LINE, not an id, so it
+            # is the WORST `rule_id` source — try `id` / `ruleId` / `rule_id`
+            # first and fall back to `code` only as a last resort.
+            rule_id = finding.get(
+                "id",
+                finding.get("ruleId", finding.get("rule_id", finding.get("code", "?"))),
+            )
             message = finding.get("message", finding.get("description", "unknown"))
             file_ref = finding.get("file", finding.get("location", {}).get("file", ""))
             line = finding.get("line", finding.get("location", {}).get("line", 0))
+
+            # Issue #67 — with the relative-target invocation fix above,
+            # cc-audit reports plugin-root-RELATIVE paths (`./skills/x/SKILL.md`).
+            # Every downstream filter (self-scan, gitignore, test-file, doc-md,
+            # pattern-definition) expects to resolve a path against the plugin
+            # root, and several read the file off disk — so normalise the
+            # relative ref to an ABSOLUTE path under the resolved plugin root
+            # here, once, before any filter runs. A ref that is already
+            # absolute (older cc-audit, or a remote scan) is left as-is.
+            if file_ref:
+                fr = str(file_ref)
+                if not Path(fr).is_absolute():
+                    # `Path` join collapses a leading `./` correctly and — unlike
+                    # `fr.lstrip("./")` — preserves a leading dotfile dir
+                    # (`./.config/x` → `<root>/.config/x`, not `<root>/config/x`).
+                    file_ref = str((plugin_path.resolve() / fr).resolve())
 
             # Always-skip well-known runtime artifacts (Cisco scan output,
             # CPV integrity manifest). Same rationale as the in-process
@@ -7322,6 +7495,139 @@ def check_phase1_credential_rules(plugin_path: Path, report: ValidationReport) -
     return issues
 
 
+# Issue #67 — RC-67 over-fires on the ordinary lowercase API parameter
+# `wallet_address` because the catalog pattern `\bWALLET_ADDRESS\b` is
+# `re.IGNORECASE` (it was written to catch the mining-config env-var
+# `WALLET_ADDRESS=4...`). Used as a bare identifier / function parameter
+# (`def charge(wallet_address):`, `wallet_address (string): the recipient`),
+# it is NOT a cryptomining indicator — a crypto-wallet integration, a payments
+# SDK, or a blockchain-explorer skill all legitimately accept a
+# `wallet_address`. The mining signal is the wallet-address token in its
+# CONFIG-VALUE form: the env-var ASSIGNMENT `WALLET_ADDRESS=<addr>` /
+# `WALLET_ADDRESS: <addr>`, an address-shape VALUE on the line (a Monero `4…`
+# or `0x…`/`bc1…`), OR a mining keyword (xmrig/stratum/pool/…) co-occurring
+# nearby. So for the bare `WALLET_ADDRESS` match ONLY (the xmrig / stratum /
+# Monero-address-shape patterns carry the signal on their own and keep firing
+# unconditionally), keep the finding when ANY of those config-shape signals is
+# present; suppress only the pure-identifier usage. FN-safe: the
+# `WALLET_ADDRESS=4AYourMoneroAddress` mining-config form and a wallet line
+# next to a stratum pool both still fire.
+_RC67_MINING_CONTEXT_RE = re.compile(
+    r"\b(?:xmrig|t-rex|nbminer|lolminer|nicehash|ethminer|cgminer|bfgminer"
+    r"|stratum|mining[_\s-]?pool|mining[_\s-]?rig|hashrate|monero|xmr|randomx"
+    r"|coinhive|cryptonight|minerd|miningpool)\b",
+    re.IGNORECASE,
+)
+
+# A crypto-address-shaped VALUE assigned to / appearing with the wallet token:
+# a Monero address (`4` or `8` + base58 tail), an Ethereum-style `0x…`, or a
+# Bitcoin `bc1…`/`1…`/`3…`. Used to keep RC-67 firing on the mining-config
+# assignment form while suppressing a bare `wallet_address` identifier that
+# carries no such value.
+_RC67_ADDRESS_VALUE_RE = re.compile(
+    r"(?:\b[48][1-9A-HJ-NP-Za-km-z]{6,}"  # Monero-style (full or truncated placeholder)
+    r"|\b0x[0-9a-fA-F]{8,}"  # Ethereum-style hex
+    r"|\bbc1[0-9a-z]{6,}"  # Bech32 BTC
+    r")",
+)
+# The mining-config ASSIGNMENT shape: `WALLET_ADDRESS` (any case) immediately
+# followed by `=` or `:` (env-var / YAML / dotenv assignment). A parameter or
+# prose reference (`wallet_address (string)`, `pay(wallet_address)`) never has
+# this shape.
+_RC67_WALLET_ASSIGNMENT_RE = re.compile(r"\bWALLET_ADDRESS\s*[:=]", re.IGNORECASE)
+
+
+# Issue #67 — the SECOND RC-24 catalog entry (`\b0x[0-9a-fA-F]{64}\b`) flags
+# ANY 64-hex string as an "Ethereum private-key shape". But a 256-bit hex on
+# Ethereum is ALSO a public account/contract address word (padded), a 32-byte
+# transaction hash, a block hash, a Merkle root, a storage slot, a keccak256
+# digest, a public key X/Y coordinate — none of which is secret. A plugin that
+# documents `0x` hashes/addresses, or a test vector, hits this on every line.
+# A REAL private key is identified by KEY CONTEXT around it: the words
+# private/secret/signing key, a `PRIVATE_KEY`/`PRIV_KEY`/`SECRET_KEY` /
+# `sk_`/`keystore`/`mnemonic`/`signer` token, or a `*_KEY =`/`privateKey:`
+# assignment. So fire the bare-hex entry ONLY when key context co-occurs in a
+# small window. FN-safe: the issue's genuine `PRIVATE_KEY = 0x…` line carries
+# the context and still fires; public addresses / tx-hashes stop firing. The
+# FIRST RC-24 entry (the keyed env-var-name pattern) is precise and untouched.
+_RC24_KEY_CONTEXT_RE = re.compile(
+    r"(?:"
+    r"\bprivate[_\s-]?key\b"
+    r"|\bpriv[_\s-]?key\b"
+    r"|\bsecret[_\s-]?key\b"
+    r"|\bsigning[_\s-]?key\b"
+    r"|\bsigner[_\s-]?key\b"
+    r"|\bprivatekey\b"
+    r"|\bprivkey\b"
+    r"|\bseckey\b"
+    r"|\bkeystore\b"
+    r"|\bmnemonic\b"
+    r"|\bseed[_\s-]?phrase\b"
+    r"|\bwallet[_\s-]?(?:secret|key|private)\b"
+    r"|\bsk_(?:live|test)_"  # Stripe-style secret-key prefix
+    r"|\b[A-Z0-9]*PRIVATE[_]?KEY\b"
+    r"|\b[A-Z0-9]*PRIV[_]?KEY\b"
+    r"|\b[A-Z0-9]*SECRET[_]?KEY\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _rc24_bare_hex_has_key_context(content_lines: list[str], line_no: int, window: int = 2) -> bool:
+    """For the bare-64-hex RC-24 entry, decide whether a key-context word
+    co-occurs in a small window around the match (same line ± ``window``).
+
+    Returns True when the finding should be KEPT (a real private key), False
+    when it should be suppressed (a public address / tx-hash / pubkey / digest
+    with no key context). The precise, FN-safe discriminator from issue #67.
+    """
+    lo = max(0, line_no - 1 - window)
+    hi = min(len(content_lines), line_no + window)
+    window_text = "\n".join(content_lines[lo:hi])
+    return bool(_RC24_KEY_CONTEXT_RE.search(window_text))
+
+
+def _rc67_wallet_match_has_mining_context(
+    matched_text: str, content_lines: list[str], line_no: int, window: int = 4
+) -> bool:
+    """For an RC-67 match, decide whether it should be KEPT.
+
+    Returns True when the finding should be KEPT, False when it should be
+    suppressed. Non-wallet matches (xmrig / stratum / Monero-address shape) are
+    always kept — they carry the mining signal on their own. The bare
+    ``WALLET_ADDRESS`` token is kept when it appears in a config-VALUE shape —
+    any one of:
+
+      * an env-var / dotenv / YAML ASSIGNMENT ``WALLET_ADDRESS=<addr>`` /
+        ``WALLET_ADDRESS: <addr>`` (the mining-config form the catalog pattern
+        was written for, e.g. ``WALLET_ADDRESS=4AYourMoneroAddress``);
+      * a crypto-address-shaped VALUE on the SAME line (a Monero ``4…``/``8…``,
+        an Ethereum ``0x…``, or a Bech32 ``bc1…``);
+      * a mining binary / pool / protocol keyword within ``window`` lines.
+
+    It is suppressed only for the pure-IDENTIFIER usage — a lowercase
+    ``wallet_address`` parameter / prose reference with none of those signals
+    (the issue #67 FP). This is FN-safe by construction: every mining-config
+    shape still fires; only a non-mining wallet identifier is dropped.
+    """
+    # Only the bare WALLET_ADDRESS token is ambiguous; every other RC-67
+    # pattern is mining-specific and must keep firing unconditionally.
+    if matched_text.strip().upper() != "WALLET_ADDRESS":
+        return True
+    this_line = content_lines[line_no - 1] if 0 <= line_no - 1 < len(content_lines) else ""
+    # Config-value shape on the matched line keeps the finding: an explicit
+    # WALLET_ADDRESS=/: assignment, or an address-shaped value on the line.
+    if _RC67_WALLET_ASSIGNMENT_RE.search(this_line):
+        return True
+    if _RC67_ADDRESS_VALUE_RE.search(this_line):
+        return True
+    # Otherwise require a mining keyword in the surrounding window.
+    lo = max(0, line_no - 1 - window)
+    hi = min(len(content_lines), line_no + window)
+    window_text = "\n".join(content_lines[lo:hi])
+    return bool(_RC67_MINING_CONTEXT_RE.search(window_text))
+
+
 def check_phase1_supply_chain_rules(plugin_path: Path, report: ValidationReport) -> int:
     """RC-29 (.pth executable), RC-37 (GTFOBins/LOLBins), RC-67 (cryptomining)."""
     issues = 0
@@ -7373,6 +7679,16 @@ def check_phase1_supply_chain_rules(plugin_path: Path, report: ValidationReport)
             for pattern in CRYPTOMINING_PATTERNS:
                 m = pattern.search(line)
                 if m:
+                    # Issue #67 — the bare WALLET_ADDRESS token fires on the
+                    # ordinary API param `wallet_address`. Keep it only in a
+                    # config-VALUE shape (a WALLET_ADDRESS=/: assignment, an
+                    # address-shaped value on the line, or a mining keyword
+                    # nearby); every other RC-67 pattern keeps firing
+                    # unconditionally. FN-safe: real mining config still fires.
+                    if not _rc67_wallet_match_has_mining_context(
+                        m.group(0), content_lines_phase2c, line_no
+                    ):
+                        continue
                     level = effective_severity("critical", rel_path)
                     getattr(report, level)(
                         f"RC-67: cryptomining indicator at line {line_no}: {m.group(0)[:80]}",
@@ -8314,6 +8630,19 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                             line_no - 1,
                         ):
                             continue
+                    # Issue #67 — the BARE-64-hex RC-24 entry (pattern source
+                    # `\b(?:0x[0-9a-fA-F]{64})\b`) flags any 256-bit hex as an
+                    # "Ethereum private-key shape", over-firing on public
+                    # addresses / tx-hashes / pubkeys / digests. Keep it only
+                    # when key context co-occurs nearby; the precise keyed
+                    # env-var RC-24 entry is untouched. FN-safe: a real
+                    # `PRIVATE_KEY = 0x…` carries the context and still fires.
+                    if (
+                        rule_id == "RC-24"
+                        and pattern.pattern == r"\b(?:0x[0-9a-fA-F]{64})\b"
+                        and not _rc24_bare_hex_has_key_context(content_lines, line_no)
+                    ):
+                        continue
                     level = effective_severity(severity.lower(), rel_path, rule_id=rule_id)
                 # (The RC-87 CHANGELOG/HISTORY narrative-doc demotion that
                 # used to sit here was dead code — RC-87 is a Phase 4 rule,
@@ -8448,6 +8777,13 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                     else:
                         # v2.41.0 binary guard: denylist set definition is FP.
                         if _rc65_is_pattern_source(line, surrounding):
+                            break
+                        # Issue #67 — IMDS IP inside a quoted PROSE description
+                        # string with no network sink on the line is the tool
+                        # documenting the threat, not calling the endpoint.
+                        # FN-safe: any line with a real network call is excluded
+                        # by the network-hint guard inside the helper.
+                        if _rc65_match_is_prose_description(line, m.start(), m.end()):
                             break
                         level = effective_severity("major", rel_path)
                     getattr(report, level)(
