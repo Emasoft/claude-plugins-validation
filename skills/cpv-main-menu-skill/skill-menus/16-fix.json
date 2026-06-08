@@ -5,10 +5,11 @@
   "slug": "fix",
   "header": "Fix — what to fix",
   "rows": [
-    {"key": "1", "action_id": "fix_plugin", "label": "Fix plugin issues — From a report file OR a plugin folder (plugin-fixer)"},
-    {"key": "2", "action_id": "fix_mkt",    "label": "Fix marketplace issues — From a report file OR a marketplace folder"},
-    {"key": "3", "action_id": "fix_cache",  "label": "Optimize prompt cache — Audit + auto-fix the cache patterns"},
-    {"key": "4", "action_id": "fix_batch",  "label": "Batch fix (fleet) — Drill into §3.1.7 Batch / fleet"},
+    {"key": "1", "action_id": "fix_plugin",     "label": "Fix plugin issues — From a report file OR a plugin folder (plugin-fixer)"},
+    {"key": "2", "action_id": "fix_mkt",        "label": "Fix marketplace issues — From a report file OR a marketplace folder"},
+    {"key": "3", "action_id": "fix_cache",      "label": "Optimize prompt cache — Audit + auto-fix the cache patterns"},
+    {"key": "4", "action_id": "fix_devitalize", "label": "Devitalize security threats — Convert flagged execution-class code into provably-inert data (plugin-devitalizer); never suppresses a rule, flags load-bearing code"},
+    {"key": "5", "action_id": "fix_batch",      "label": "Batch fix (fleet) — Drill into §3.1.7 Batch / fleet"},
     {"key": "A", "action_id": "ask",        "label": "Ask the agent"},
     {"key": "B", "action_id": "back",       "label": "Back — Go back to the top-level menu"},
     {"key": "0", "action_id": "cancel",     "label": "Cancel / Exit"}

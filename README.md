@@ -74,6 +74,7 @@ Throughout this table, **`cpv`** is the standalone alias =
 | **Security scan** | 5 external scanners (trufflehog, cc-audit, tirith, semgrep, Cisco) + native skillaudit | `plugin-validator` agent, or fleet-wide `/cpv-batch-security-audit` | `cpv security /path` |
 | **Pre-install gate** | Sandboxed scan of an untrusted plugin / skill / marketplace BEFORE install — never writes to the plugin cache | `/cpv-pre-install-scan <target>` | `cpv security <github-url-or-path>` |
 | **Fix findings (don't hand-edit)** | Mechanical per-rule remediation; CPV ships the fixer so you never hand-patch | `plugin-fixer` agent (validate → fix loop), or fleet-wide `/cpv-batch-fix` · `/cpv-batch-validate-and-fix` | — (fixing needs write access) |
+| **Devitalize threats (don't suppress)** | Convert flagged execution-class code into provably-inert data so a plugin passes the security gate by neutralizing the shape — never by muting a rule or relaxing `--strict`; load-bearing code is flagged, not broken | `plugin-devitalizer` agent (scan → devitalize → re-scan loop) | — (rewriting needs write access) |
 | **Optimize prompt cache** | CA-01..CA-06 — dynamic placeholders, hook mutations, model-fork, unbounded output | Audit: `/cpv-batch-caching-audit` · `Skill(…:cache-validation-skill)`. Fix: `cache-optimizer-agent` · `/cpv-batch-caching-optimize` | `cpv cache /path` (audit only) |
 | **Create** | Scaffold a plugin / marketplace / skill / agent / command / hook / MCP | `plugin-creator` agent, or `Skill(claude-plugins-validation:create-plugin)` · `…:scaffold-skill` · `…:scaffold-agent` | — |
 | **Publish to GitHub + add to marketplace** | Scaffold repo + CI/CD, publish, link into a marketplace | `plugin-creator` agent (end-to-end) | — |
@@ -498,8 +499,8 @@ For CI/CD and scripting, the Python validators are still callable directly (no m
 |----------|-------|-------------|
 | Validation scripts | 25 | Python validators (21 plugin + 2 marketplace + 2 scope) covering plugin packages, marketplaces, and end-user `.claude/` configuration |
 | Management scripts | 6 | Plugin lifecycle, marketplace operations, scaffolding (`manage_*.py`) |
-| Agents | 13 | AI-powered validation, fixing, management, and batch orchestration, plus the `cpv` general router |
-| Skills | 44 (12 user-invocable + 32 agent-loaded) | Validation, management, publishing, fix, migration, auto-notify, batch / fleet (v2.101.0), scope-aware doctor (v2.101.0), the-skills-menu router, and main-menu workflows |
+| Agents | 14 | AI-powered validation, fixing, devitalization, management, and batch orchestration, plus the `cpv` general router |
+| Skills | 45 (12 user-invocable + 33 agent-loaded) | Validation, management, publishing, fix, migration, devitalization, auto-notify, batch / fleet (v2.101.0), scope-aware doctor (v2.101.0), the-skills-menu router, and main-menu workflows |
 | Commands | 13 user-invocable | `/cpv-main-menu` (canonical entry), 10 `/cpv-batch-*` fleet skills (v2.101.0), `/cpv-pre-install-scan`, `/the-skills-menu-create` |
 | Tests | 5700+ | Full coverage across all modules |
 
