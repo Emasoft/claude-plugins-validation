@@ -4735,6 +4735,8 @@ PRIVATE_INFO_SKIP_DIRS = {
     "dist",
     "build",
     "target",
+    ".next",
+    "vendor",
     ".eggs",
     "*.egg-info",
     # Also skip dev folders that aren't published
@@ -7071,7 +7073,19 @@ def scan_directory_for_private_info(
     # .gitignore syntax (wildcards, negations, directory-only rules, etc.)
     from gitignore_filter import GitignoreFilter
 
-    extra_skip = skip_dirs or set()
+    # Issue #71: always prune well-known build / dependency output dirs
+    # (target/, dist/, build/, node_modules/, .venv/, __pycache__/, .next/,
+    # vendor/ …). They are regenerated, never part of a plugin's shipped
+    # surface, and routinely embed absolute paths from the build machine —
+    # Rust's target/.rustc_info.json carries the builder's $HOME, npm's
+    # node_modules embeds install-time paths, etc. The root .gitignore alone
+    # does NOT compose nested per-directory .gitignore rules, so a Rust crate
+    # under tools/<x>/ whose target/ is ignored only by tools/<x>/.gitignore
+    # was still walked. Unioning PRIVATE_INFO_SKIP_DIRS makes the built-in
+    # skip set the reliable floor regardless of caller or nested-gitignore
+    # depth. FN-safe: a leaked private path in a TRACKED, shipped file (any
+    # dir NOT in this build/dep set) is unaffected and still fires.
+    extra_skip = (skip_dirs or set()) | PRIVATE_INFO_SKIP_DIRS
     if respect_gitignore:
         gi = GitignoreFilter(root_path)
         walker = gi.walk(root_path, skip_dirs=extra_skip)
@@ -7285,7 +7299,12 @@ def validate_no_absolute_paths(
     # .gitignore syntax (wildcards, negations, directory-only rules, etc.)
     from gitignore_filter import GitignoreFilter
 
-    extra_skip = skip_dirs or set()
+    # Issue #71: prune build / dependency output dirs (see the matching note
+    # in scan_directory_for_private_info). An absolute /Users/<name> path in
+    # Rust's target/.rustc_info.json or npm's node_modules is a build artifact,
+    # not a leak in the plugin's shipped surface. FN-safe: an absolute path in
+    # a TRACKED, shipped file (any dir NOT in the build/dep set) still fires.
+    extra_skip = (skip_dirs or set()) | PRIVATE_INFO_SKIP_DIRS
     if respect_gitignore:
         gi = GitignoreFilter(root_path)
         walker = gi.walk(root_path, skip_dirs=extra_skip)

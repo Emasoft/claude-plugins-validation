@@ -60,6 +60,46 @@ my-plugin/
 | hooks/ | Plugin ROOT | .claude-plugin/hooks/ |
 | plugin.json | .claude-plugin/plugin.json | Root plugin.json |
 
+### Bundled native binaries (Rust / Go / compiled tools)
+
+A plugin that ships a compiled CLI (a Rust crate, a Go module, etc.) passes
+validation cleanly with this **canonical layout** — the same one the
+`perfect-skill-suggester` plugin uses:
+
+```
+my-plugin/
+├── rust/                     # Source — recognized standard dir (also: go/, python/, node/, …)
+│   ├── Cargo.toml
+│   ├── src/
+│   └── .gitignore           # ignores target/ (build output)
+├── bin/                      # Pre-built cross-platform binaries (on PATH while enabled)
+│   ├── mytool-aarch64-apple-darwin
+│   ├── mytool-x86_64-apple-darwin
+│   ├── mytool-x86_64-unknown-linux-gnu
+│   └── mytool-x86_64-pc-windows-msvc.exe
+└── build.sh                  # Root build/install script (rebuilds bin/ from rust/)
+```
+
+Why each piece matters:
+
+- **Source under `rust/` (or `go/`, `python/`, `node/`, `ts/`, …), NOT `tools/`.**
+  Those language dirs are recognized standard directories; an arbitrary
+  `tools/` dir is flagged `[RC-NONSTD-DIR-001] Non-standard directory`
+  (MAJOR) because it can hide anything.
+- **Pre-built binaries in `bin/`** clear the compiled-source check (emits an
+  INFO). With NO `bin/` but a build script or build system present
+  (`Cargo.toml`/`build.sh`/`Makefile` at the plugin root) the check
+  downgrades to a WARNING ("users will need to compile"); with NEITHER it is
+  a MAJOR.
+- **A root `build.sh`** (or `install.sh`/`Makefile`/`Cargo.toml` at the
+  plugin root) is what the check looks for — a build file nested only inside
+  `rust/` is not seen at the root.
+- **Build output (`target/`, `node_modules/`, `dist/`, `build/`, `.venv/`,
+  `__pycache__/`, …) is skipped automatically** by the private-path /
+  absolute-path scans, so a `/Users/<you>/` path baked into
+  `target/.rustc_info.json` no longer surfaces as a leak (issue #71). Still
+  add a nested `.gitignore` so the build output is never committed.
+
 ---
 
 ## 2. Plugin Manifest (plugin.json)
