@@ -4126,9 +4126,67 @@ def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+# Issue #73 — rules categorically inapplicable to a binary's extracted
+# byte-strings. A font / image / audio / compiled blob is NEVER loaded by
+# Claude Code as agent INSTRUCTIONS (only SKILL.md / agents / commands /
+# CLAUDE.md / rules .md are) and is never parsed as the plugin's SOURCE, so a
+# glyph-table / pixel byte run that happens to match a prompt-injection /
+# imperative-intent / agent-manipulation / ReDoS / invisible-char regex is a
+# coincidence, not a threat (the reporter's DSIG-signed TrueType font produced
+# 2× CRITICAL INDIRECT_PROMPT_INJECT + 5× REGEX_DOS from glyph bytes). These
+# are the PROSE-instruction and SOURCE-shape rules only — a REAL embedded
+# secret / exfil URL / shell command / decoded payload (HARDCODED_SECRET,
+# DATA_EXFIL*, URL_SUSPICIOUS, SHELL_EXEC, CMD_INJECTION, SUPPLY_CHAIN,
+# *_DECODE_THREAT, TOKEN_STEAL, CRED_*) is deliberately NOT in the set and
+# still fires on a binary's string table. FN-safe: a disguised TEXT payload
+# carries no NUL bytes, so it is detected as text and routed through the full
+# text-path `_confidence` machinery (intent rules apply there), never here.
+_BINARY_INAPPLICABLE_RULES: frozenset[str] = frozenset(
+    {
+        # Prompt injection — the threat is an LLM reading prose as instructions.
+        "PROMPT_INJECT",
+        "INDIRECT_PROMPT_INJECT",
+        # Imperative-intent prose ("install a rootkit", "exfiltrate the .env").
+        "INTENT_EXFILTRATION_INTENT",
+        "INTENT_UPLOAD_INTENT",
+        "INTENT_READ_AND_EXFILTRATE_INTENT",
+        "INTENT_CREDENTIAL_FORWARDING_INTENT",
+        "INTENT_MALWARE_INSTALL_INTENT",
+        "INTENT_SECURITY_DISABLE_INTENT",
+        "INTENT_REVERSE_CONNECTION_INTENT",
+        "INTENT_EXPLICIT_EXFILTRATION",
+        "INTENT_DESTRUCTIVE_INTENT",
+        "INTENT_AGENT_MANIPULATION",
+        "INTENT_INSTRUCTION_OVERRIDE",
+        "INTENT_POST_DATA_INTENT",
+        # Agent-to-agent / tool / memory manipulation prose.
+        "A2A_AGENT_IMPERSONATION",
+        "A2A_TASK_HIJACK",
+        "A2A_CROSS_AGENT_INJECT",
+        "A2A_DATA_LEAK",
+        "A2A_CAPABILITY_ABUSE",
+        "TOOL_POISONING",
+        "MCP_SCHEMA_POISON",
+        "AGENT_MEMORY_MOD",
+        "TOOL_SHADOW",
+        "CROSS_TOOL_ACCESS",
+        # Source-shape rules: meaningless on extracted binary bytes.
+        "REGEX_DOS",
+        "INVISIBLE_UNICODE_RAW",
+    }
+)
+
+
 def _suppress_binary_placeholder(finding: dict[str, Any]) -> None:
     """In-place: suppress a binary finding whose extracted match is a
     placeholder token (``YOUR_API_KEY`` / ``<token>`` / ``xxx`` / …).
+
+    ALSO (issue #73): suppress a binary finding whose rule is a prose-
+    instruction or source-shape rule that cannot apply to a binary's byte
+    table (``_BINARY_INAPPLICABLE_RULES`` — prompt-injection, imperative
+    intent, agent/tool manipulation, ReDoS, invisible-unicode). A real
+    embedded secret / exfil URL / shell command still fires (those rules are
+    not in the set).
 
     The binary scan path has no documentation/code-fence context, so the
     text path's full ``_confidence`` machinery doesn't apply — but a
@@ -4142,6 +4200,12 @@ def _suppress_binary_placeholder(finding: dict[str, Any]) -> None:
     before the placeholder check so the test runs against the real
     extracted token.
     """
+    # Issue #73 — prose-instruction / source-shape rules cannot apply to a
+    # binary's extracted bytes; suppress them regardless of the matched text.
+    if str(finding.get("ruleId", "")) in _BINARY_INAPPLICABLE_RULES:
+        finding["severity"] = "info"
+        finding["suppressed"] = True
+        return
     raw_match = str(finding.get("match", ""))
     if raw_match.startswith(_BINARY_PREFIX):
         raw_match = raw_match[len(_BINARY_PREFIX) :]
