@@ -2078,6 +2078,19 @@ def demote_severity(level: str, by: int = 1) -> str:
 # Add to this set conservatively: a rule belongs here only when its
 # pattern firing in pure narrative text is more likely a doc artifact
 # than a real attack on the agent's instructions.
+#
+# DRIFT GUARD (G3-gate-banners-3): three members — RC-76 (prompt-injection
+# stems), RC-87 (loopback IP, already NIT), RC-93 (≥30 contiguous spaces) —
+# are ALSO in _SECURITY_GATE_BUCKETS Bucket A. Hard-demoting them to WARNING
+# in a doc/sample/test silences both the verdict AND Gate A for them. That is
+# INTENTIONAL and bounded: all three are HIGH-FP-in-prose signatures whose
+# doc-firing is overwhelmingly a documentation artifact, and a WARNING never
+# fails validation by design. The danger is a FUTURE unambiguous execution
+# rule (e.g. RC-40 SSH-backdoor, RC-48 MCP cmd-injection, RC-98 kernel-module)
+# being added here, which WOULD silence a real CRITICAL threat in a file that
+# merely "looks like a sample". `tests/test_secaudit_B-validation-common.py`
+# pins the bucket-A ∩ uncertain-in-docs intersection to exactly those three so
+# such a regression is caught. Do NOT add an unambiguous-execution rule here.
 UNCERTAIN_IN_DOCS_RULES: frozenset[str] = frozenset(
     {
         "RC-03",
@@ -2749,15 +2762,43 @@ PERSISTENCE_PATTERNS: tuple[re.Pattern[str], ...] = (
 # -----------------------------------------------------------------------------
 # Phase 2e RC-70 — Generic obfuscation (proximity-to-exec gating)
 # -----------------------------------------------------------------------------
-# Pattern: encoded payload (atob/Buffer.from/base64.b64decode) within ±3 lines
-# of an exec sink (eval/Function/exec/spawn/child_process). The check function
-# walks the file with a sliding window, not via single-pattern match.
+# Pattern: encoded payload (atob/Buffer.from/base64.b64decode/codecs.decode/
+# rot13/charcode-reconstruction/marshal.loads/pickle.loads) within ±3 lines of
+# an exec sink (eval/Function/exec/compile/os.system/subprocess/child_process,
+# AND the indirect-exec shapes getattr(__builtins__,…)/globals()[…]/__builtins__[…]
+# /__import__("os").system). The check function walks the file with a sliding
+# window, not via single-pattern match. Both a decoder AND an exec sink must be
+# present within proximity for a finding to fire — so a benign decode-only or
+# sink-only line never trips it.
 OBFUSCATION_DECODER_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\batob\s*\("),
     re.compile(r"\bBuffer\.from\s*\(\s*['\"][A-Za-z0-9+/=]{20,}['\"]\s*,\s*['\"]base64['\"]"),
-    re.compile(r"\bbase64\.(?:b64decode|standard_b64decode|urlsafe_b64decode)\s*\("),
+    re.compile(r"\bbase64\.(?:b64decode|standard_b64decode|urlsafe_b64decode|decodebytes|decodestring)\s*\("),
     re.compile(r"\bdecode\s*\(\s*['\"]base64['\"]\s*\)"),
-    re.compile(r"\bcodecs\.decode\s*\(\s*['\"][^'\"]+['\"]\s*,\s*['\"]hex['\"]"),
+    # RT4-rot13: `codecs.decode(blob, "hex")` was the ONLY codec covered. A rot13
+    # dropper (`codecs.decode(blob, "rot13")`) decoded past RC-70 and shipped a
+    # plugin that passed the gate. Any `codecs.decode(<str-or-var>, "<codec>")` is
+    # a runtime-decode signal — base64/hex/rot13/zlib/bz2/uu/quopri/… — so match
+    # any quoted codec name. FN-safe: this still only fires RC-70 when ALSO near
+    # an exec sink (the AND-proximity gate in find_obfuscated_exec is unchanged),
+    # so a benign `codecs.decode(s, "rot13")` with no exec sink nearby stays clear.
+    re.compile(r"\bcodecs\.decode\s*\(\s*[^)]*,\s*['\"][A-Za-z0-9_]+['\"]"),
+    # Hex decoders not spelled `codecs.decode(...,'hex')`.
+    re.compile(r"\bbytes\.fromhex\s*\("),
+    re.compile(r"\bbinascii\.(?:unhexlify|a2b_hex|a2b_base64)\s*\("),
+    # Charcode reconstruction — building a payload from a list of code points,
+    # then exec-ing it (`"".join(chr(c) for c in [...])`, `bytes([...]).decode()`,
+    # `"".join(map(chr, ...))`). The chr/bytes-of-int-list shape is the decoder.
+    re.compile(r"\bchr\s*\(\s*\w+\s*\)\s+for\s+\w+\s+in\b"),
+    re.compile(r"\bmap\s*\(\s*chr\s*,"),
+    re.compile(r"\bbytes\s*\(\s*\[\s*\d+\s*(?:,\s*\d+\s*)+\]\s*\)\s*\.\s*decode\s*\("),
+    # marshal/pickle deserialization as a code-payload decoder. `marshal.loads`
+    # of a bytes literal followed by exec is a classic compiled-code-object
+    # dropper; pickle.loads can execute via __reduce__. Both are runtime-decode
+    # signals when paired with an exec sink in proximity.
+    re.compile(r"\bmarshal\.loads\s*\("),
+    re.compile(r"\bpickle\.loads\s*\("),
+    re.compile(r"\b_pickle\.loads\s*\("),
 )
 EXEC_SINK_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\beval\s*\("),
@@ -2768,6 +2809,30 @@ EXEC_SINK_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bchild_process\.(?:exec|spawn|fork|execFile)\s*\("),
     re.compile(r"\bcompile\s*\("),
     re.compile(r"\bImports?\.System\.exec"),
+    # RT5: indirection-to-exec sinks reached by resolving a builtin (or `os`) by
+    # STRING KEY. The literal-token patterns above (`\bexec\s*\(`, `\bos\.system`)
+    # are evaded by `getattr(__builtins__,"ex"+"ec")(code)` /
+    # `globals()["__builtins__"]["eval"](code)` / `__builtins__["exec"](code)` /
+    # `getattr(os,"system")(cmd)`, so a download-then-indirect-exec dropper shipped
+    # past RC-70's proximity backstop. A builtin/os name reached via a string-keyed
+    # getattr/globals/vars/subscript has NO legitimate plugin use — it IS the
+    # evasion signal — so matching the SHAPE (regardless of the attacker-chosen
+    # string halves) is FN-safe and not bypassable by a different concatenation.
+    # NOTE: deliberately scoped, NOT a generic `getattr(<anything>, …)` — a bare
+    # `getattr(config, "timeout")` is benign and common, so it is NOT matched.
+    #   • getattr(__builtins__|builtins, …): ANY attr — a builtin reached by
+    #     getattr has no legitimate plugin use; it IS the exec-evasion signal.
+    #   • getattr(os, …): scoped to the SHELL-EXEC attribute names only, so a
+    #     benign `getattr(os, "environ")` / `getattr(os, "getcwd")` stays clear
+    #     while the obfuscated `getattr(os, "system")` (== os.system) is caught.
+    re.compile(r"\bgetattr\s*\(\s*(?:__builtins__|builtins)\b"),
+    re.compile(r"\bgetattr\s*\(\s*os\s*,\s*['\"](?:system|popen|exec\w*|spawn\w*)['\"]"),
+    re.compile(r"\b(?:globals|vars)\s*\(\s*\)\s*\[\s*['\"]__builtins__['\"]\s*\]"),
+    re.compile(r"\b(?:__builtins__|builtins)\s*\[\s*['\"][^'\"]+['\"]\s*\]"),
+    re.compile(r"\bvars\s*\(\s*(?:__builtins__|builtins)\s*\)\s*\[\s*['\"][^'\"]+['\"]\s*\]"),
+    # `__import__("os").system(...)` / `__import__('os').popen(...)` — the
+    # module reached via __import__ then a shell sink attribute.
+    re.compile(r"\b__import__\s*\(\s*['\"]os['\"]\s*\)\s*\.\s*(?:system|popen|exec\w*|spawn\w*)"),
 )
 
 
@@ -6304,6 +6369,33 @@ _SECURITY_GATE_BUCKETS: dict[str, frozenset[str]] = {
     "RC-90": frozenset({"A"}),
     "RC-92": frozenset({"A"}),
     "RC-93": frozenset({"A"}),
+    # in-process execution-class threats — backdoor / RCE / persistence /
+    # kernel-module / binary-drop. These fire CRITICAL/MAJOR at the in-process
+    # scanner (PHASE3_PATTERNS) but were ABSENT from the bucket map, so a plugin
+    # whose only findings were these routed to the GENERIC fixer instead of the
+    # plugin-devitalizer agent whose explicit job is to remove them entirely
+    # (G3-gate-banners-1). Strictly additive — only ever ADDS Gate-A coverage on
+    # an already-INVALID verdict; cannot mute any signal or change the exit code.
+    "RC-40": frozenset({"A"}),  # append to ~/.ssh/authorized_keys — SSH backdoor (CRITICAL)
+    "RC-41": frozenset({"A"}),  # append to .git/hooks/* — git-hook persistence (MAJOR)
+    "RC-42": frozenset({"A"}),  # docker-entrypoint/Dockerfile runtime modification (MAJOR)
+    "RC-48": frozenset({"A"}),  # MCP args shell-metacharacters / command injection (CRITICAL)
+    "RC-69": frozenset({"A"}),  # AST-level eval/Function obfuscation (CRITICAL)
+    "RC-79": frozenset({"A"}),  # workbench tampering — write into protected IDE surface (CRITICAL)
+    "RC-80": frozenset({"A"}),  # embedded binary magic bytes (ELF/Mach-O/PE) (MAJOR)
+    "RC-81": frozenset({"A"}),  # hidden dotfile with executable extension (MAJOR)
+    "RC-94": frozenset({"A"}),  # cursor:// deeplink opening settings/extensions/hooks — RCE (CRITICAL)
+    "RC-95": frozenset({"A"}),  # post-uninstall hook invokes downloader/interpreter (MAJOR)
+    "RC-98": frozenset({"A"}),  # firewall/Defender disable OR kernel-module load (CRITICAL)
+    # in-process exfil sinks (active exfil — DATA_EXFIL family is Bucket A).
+    "RC-22": frozenset({"A"}),  # clipboard exfil (CRITICAL)
+    "RC-23": frozenset({"A"}),  # navigator.sendBeacon silent exfil (MAJOR)
+    "RC-25": frozenset({"A"}),  # markdown image beacon — exfil channel (MAJOR)
+    "RC-53": frozenset({"A"}),  # MCP sampling/createMessage exfiltration (CRITICAL)
+    # in-process prompt-injection family (matches PROMPT_INJECT=C → harden).
+    "RC-02": frozenset({"C"}),  # prose conditional / time-bomb prompt injection (MAJOR)
+    "RC-99": frozenset({"C"}),  # multilingual prompt injection (CRITICAL)
+    "RC-108": frozenset({"C"}),  # comment-hidden injection bracket (MAJOR)
     # ── Bucket B — secret / credential LEAK (redact → runtime-read) ───────
     "TOKEN_STEAL": frozenset({"B"}),
     "CLAUDE_AUTH_ENV_OVERRIDE": frozenset({"B"}),
@@ -6358,6 +6450,10 @@ _SECURITY_GATE_BUCKETS: dict[str, frozenset[str]] = {
     "DESERIALIZATION": frozenset({"A", "C"}),
     "LOG_INJECTION": frozenset({"A", "C"}),
     "PROTOTYPE_POLLUTION": frozenset({"A", "C"}),
+    # in-process exfil that ALSO leaks secrets — devitalize the exfil sink (A)
+    # AND redact the forwarded secret (B). (G3-gate-banners-1.)
+    "RC-32": frozenset({"A", "B"}),  # GitHub Actions toJSON(secrets) / echoed secret (MAJOR)
+    "RC-58": frozenset({"A", "B"}),  # agent passes credentials to a downstream agent (CRITICAL)
     "CRED_ENV_READ": frozenset({"B", "C"}),
     "A2A_DATA_LEAK": frozenset({"A", "B"}),
     "CREDENTIAL_DISCOVERY": frozenset({"B", "C"}),
@@ -6898,8 +6994,18 @@ def scan_file_for_private_info(
             matched_text = match.group(0)
             line_num = content[: match.start()].count("\n") + 1
             issues_found += 1
+            # Prefix with the stable [RC-135] id so this leaked-private-info
+            # finding is gate-classifiable to Bucket B (redact) by
+            # _classify_security_buckets, matching the gate-visible
+            # RC-135 ("Hardcoded user-home path") emitted by validate_security.
+            # Keying the gate on a stable rule_id (not the free-text
+            # "Private info leaked:" prose) keeps it FN-safe and not
+            # attacker-reproducible (G3-gate-banners-2). Strictly additive:
+            # the message text is otherwise unchanged and the finding stays
+            # CRITICAL, so existing count/severity assertions are unaffected.
             report.critical(
-                f"Private info leaked: {desc} - found '{matched_text}' (replace with relative path or ${{CLAUDE_PLUGIN_ROOT}})",
+                f"[RC-135] Private info leaked: {desc} - found '{matched_text}' "
+                f"(replace with relative path or ${{CLAUDE_PLUGIN_ROOT}})",
                 rel_path,
                 line_num,
             )

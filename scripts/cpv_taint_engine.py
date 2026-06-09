@@ -209,22 +209,81 @@ def _is_source_subscript(node: ast.Subscript) -> str | None:
     return None
 
 
-def _is_sink_call(call: ast.Call) -> str | None:
-    """Return a human description if `call` is a taint sink, else None."""
-    # Direct bare-name sinks: exec(), eval(), compile()
-    if isinstance(call.func, ast.Name) and call.func.id in TAINT_SINKS_DIRECT:
-        return f"{call.func.id}(...)"
+def _resolve_sink_target(value: ast.expr, state: _TaintState | None) -> tuple[str, ...] | None:
+    """If ``value`` (the RHS of an assignment) denotes a KNOWN exec/shell sink,
+    return its normalised sink tuple, else None.
+
+    Recognises the three SIMPLE alias shapes the RT5 fix targets:
+      * ``eval`` / ``exec`` / ``compile``      → ``("eval",)`` … (a direct builtin
+        sink), but ONLY when that bare name has NOT been locally rebound — a scope
+        that did ``def eval(...)`` / ``eval = x`` / ``import ... as eval`` shadows
+        the builtin, so ``e = eval`` there is a non-sink alias and must not fire.
+      * a dotted attribute chain in ``TAINT_SINKS_QUALIFIED`` (``os.system``,
+        ``subprocess.run``, …) → that chain tuple.
+      * an existing sink alias (``t = s`` where ``s = os.system``) → alias-of-alias.
+
+    Resolution is FN-SAFE in BOTH directions: it returns a tuple ONLY for a
+    callee provably bound to a vocabulary sink, so a non-sink RHS (``g = print``)
+    yields None and creates no alias / no spurious finding.
+    """
+    # eval / exec / compile — direct builtin sinks, unless locally shadowed.
+    if isinstance(value, ast.Name):
+        if value.id in TAINT_SINKS_DIRECT and (state is None or value.id not in state.shadowed_builtins):
+            return (value.id,)
+        # alias-of-alias: t = s  where  s = os.system
+        if state is not None:
+            existing = state.lookup_sink_alias(value.id)
+            if existing is not None:
+                return existing
+        return None
+    # os.system / subprocess.run / pickle.loads / … — qualified sinks.
+    chain = _attribute_chain(value)
+    if chain is not None and chain in TAINT_SINKS_QUALIFIED:
+        return chain
+    return None
+
+
+def _qualified_sink_desc(chain: tuple[str, ...], call: ast.Call) -> str | None:
+    """Human description for a qualified-sink CALL named by ``chain``.
+
+    ``subprocess.{run,call,Popen,check_call}`` is a sink ONLY with ``shell=True``;
+    this preserves that gate for both the direct dotted form and the alias form
+    (``run = subprocess.run; run(x, shell=True)``) — an alias never relaxes the
+    shell=True requirement."""
+    if chain[:1] == ("subprocess",) and chain[1:] in (("run",), ("call",), ("Popen",), ("check_call",)):
+        for kw in call.keywords:
+            if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
+                return ".".join(chain) + "(..., shell=True)"
+        return None
+    return ".".join(chain) + "(...)"
+
+
+def _is_sink_call(call: ast.Call, state: _TaintState | None = None) -> str | None:
+    """Return a human description if `call` is a taint sink, else None.
+
+    ``state`` carries the per-scope sink-alias map (RT5). When the callee is a
+    bare ``ast.Name`` that resolves to a registered alias of a known sink
+    (``e = eval; e(x)`` / ``s = os.system; s(x)``), the call is treated as that
+    underlying sink — the alias does not let an obfuscated sink evade detection,
+    yet a non-sink name (never an alias) still returns None (FN-safe + no FP)."""
+    # Direct bare-name sinks: exec(), eval(), compile() — unless locally shadowed.
+    if isinstance(call.func, ast.Name):
+        name = call.func.id
+        if name in TAINT_SINKS_DIRECT and (state is None or name not in state.shadowed_builtins):
+            return f"{name}(...)"
+        # Bare-name ALIAS of a known sink (the RT5 hole): e = eval; e(x).
+        if state is not None:
+            aliased = state.lookup_sink_alias(name)
+            if aliased is not None:
+                if len(aliased) == 1:  # alias of a direct builtin sink
+                    return f"{aliased[0]}(...)"
+                return _qualified_sink_desc(aliased, call)
+        return None
     chain = _attribute_chain(call.func)
     if chain is None:
         return None
     if chain in TAINT_SINKS_QUALIFIED:
-        # subprocess.* is only a sink when shell=True
-        if chain[:1] == ("subprocess",) and chain[1:] in (("run",), ("call",), ("Popen",), ("check_call",)):
-            for kw in call.keywords:
-                if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
-                    return ".".join(chain) + "(..., shell=True)"
-            return None
-        return ".".join(chain) + "(...)"
+        return _qualified_sink_desc(chain, call)
     return None
 
 
@@ -268,11 +327,24 @@ def _tainted_arg_source(call: ast.Call, state: _TaintState) -> tuple[str, int] |
     return None
 
 
-def _is_exec_class_sink(call: ast.Call) -> bool:
+def _is_exec_class_sink(call: ast.Call, state: _TaintState | None = None) -> bool:
     """True iff ``call`` executes/deserializes its argument as code — exec/eval/
-    compile (bare) or pickle.loads / marshal.loads / yaml.load. (audit MAJOR #10)"""
-    if isinstance(call.func, ast.Name) and call.func.id in TAINT_SINKS_DIRECT:
-        return True
+    compile (bare) or pickle.loads / marshal.loads / yaml.load. (audit MAJOR #10)
+
+    Alias-aware (RT5): a bare-name call resolving to a sink alias is exec-class
+    iff the UNDERLYING sink is exec-class (``e = eval; e(x)`` is; ``s = os.system;
+    s(x)`` is not). A locally-shadowed builtin name (``def eval``) is not."""
+    if isinstance(call.func, ast.Name):
+        name = call.func.id
+        if name in TAINT_SINKS_DIRECT and (state is None or name not in state.shadowed_builtins):
+            return True
+        if state is not None:
+            aliased = state.lookup_sink_alias(name)
+            if aliased is not None:
+                # Direct-builtin alias (("eval",)) → exec-class; qualified alias →
+                # exec-class only if the chain is in the exec-qualified set.
+                return aliased[0] in TAINT_SINKS_DIRECT or aliased in TAINT_SINKS_EXEC_QUALIFIED
+        return False
     chain = _attribute_chain(call.func)
     return chain is not None and chain in TAINT_SINKS_EXEC_QUALIFIED
 
@@ -325,18 +397,38 @@ class _TaintState:
     values that were sanitized-for-injection by a structured-data parser but are
     still dangerous if EXEC'd (audit MAJOR #10) — they trigger ONLY exec-class
     sinks. A name lives in at most one of the two dicts.
+
+    ``sink_aliases`` resolves SIMPLE intra-scope aliases of a known exec/shell
+    sink (RT5 — sink-obfuscation FN-hole). ``e = eval`` / ``s = os.system`` /
+    ``run = subprocess.run`` make a bare ``ast.Name`` call (``e(x)``) a true sink
+    that ``_attribute_chain`` cannot see (the callee is ``Name('e')``, not
+    ``eval``). Each entry is a normalised sink tuple — ``("eval",)`` for a direct
+    builtin sink, ``("subprocess", "run")`` for a qualified one — so ``_is_sink_call``
+    re-points the alias to the underlying sink before the membership check.
+
+    ``shadowed_builtins`` records bare sink names (``eval``/``exec``/``compile``)
+    that have been REBOUND locally (``def eval(...)``, ``eval = something``, an
+    ``import``). A subsequent ``e = eval`` then aliases the LOCAL ``eval``, NOT the
+    builtin sink, so it must NOT create a sink alias — this is what keeps a
+    non-sink alias from producing a spurious finding (the "preserve" half of the
+    RT5 fix). A name is in at most one of ``sink_aliases`` / ``tainted`` /
+    ``exec_risk`` at a time; reassignment clears the others.
     """
 
     tainted: dict[str, tuple[str, int]] = field(default_factory=dict)
     exec_risk: dict[str, tuple[str, int]] = field(default_factory=dict)
+    sink_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    shadowed_builtins: set[str] = field(default_factory=set)
 
     def mark(self, name: str, source: str, hops: int) -> None:
         self.tainted[name] = (source, hops)
         self.exec_risk.pop(name, None)  # full taint supersedes exec-only
+        self.sink_aliases.pop(name, None)  # data taint supersedes a stale alias
 
     def clear(self, name: str) -> None:
         self.tainted.pop(name, None)
         self.exec_risk.pop(name, None)
+        self.sink_aliases.pop(name, None)
 
     def lookup(self, name: str) -> tuple[str, int] | None:
         return self.tainted.get(name)
@@ -345,9 +437,21 @@ class _TaintState:
         """Injection taint cleared, but the value can still be exec'd."""
         self.exec_risk[name] = (source, hops)
         self.tainted.pop(name, None)
+        self.sink_aliases.pop(name, None)
 
     def lookup_exec_risk(self, name: str) -> tuple[str, int] | None:
         return self.exec_risk.get(name)
+
+    def mark_sink_alias(self, name: str, sink: tuple[str, ...]) -> None:
+        """``name`` is now an alias of the known sink ``sink`` (e.g. ``("eval",)``
+        or ``("os", "system")``). Supersedes any prior data-taint on ``name`` —
+        the value IS the callable, not attacker data."""
+        self.sink_aliases[name] = sink
+        self.tainted.pop(name, None)
+        self.exec_risk.pop(name, None)
+
+    def lookup_sink_alias(self, name: str) -> tuple[str, ...] | None:
+        return self.sink_aliases.get(name)
 
 
 def analyze_module(tree: ast.Module) -> list[TaintFinding]:
@@ -362,6 +466,11 @@ def analyze_module(tree: ast.Module) -> list[TaintFinding]:
 
     def analyze_block(body: list[ast.stmt], scope_state: _TaintState) -> None:
         for stmt in body:
+            # SHADOWING (RT5): a ``def eval``/``class eval``/``import … as eval``
+            # rebinds a builtin sink name in THIS scope, so a later ``e = eval``
+            # aliases the local binding, not the builtin sink. Record it before
+            # the alias logic in _analyze_stmt could (mis)resolve it.
+            _record_sink_name_shadows(stmt, scope_state)
             _analyze_stmt(stmt, scope_state, findings)
             # Recurse into nested function/class definitions
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -371,6 +480,12 @@ def analyze_module(tree: ast.Module) -> list[TaintFinding]:
                 # bare `exec(arg)` inside the function still warns.
                 for arg in stmt.args.args:
                     inner.mark(arg.arg, f"function parameter '{arg.arg}'", 1)
+                    # A parameter named like a builtin sink (``def f(eval): ...``)
+                    # shadows that sink inside the body — ``eval`` there is the
+                    # tainted param, so ``e = eval`` is data passthrough, not a
+                    # sink alias. (RT5 no-FP)
+                    if arg.arg in TAINT_SINKS_DIRECT:
+                        inner.shadowed_builtins.add(arg.arg)
                 analyze_block(stmt.body, inner)
             elif isinstance(stmt, ast.ClassDef):
                 analyze_block(stmt.body, _TaintState())
@@ -434,6 +549,27 @@ def _own_calls(stmt: ast.stmt) -> Iterable[ast.Call]:
         first = False
 
 
+def _record_sink_name_shadows(stmt: ast.stmt, state: _TaintState) -> None:
+    """Record any builtin-sink name (``eval``/``exec``/``compile``) that ``stmt``
+    REBINDS to a local definition or import, so a later ``e = <that name>`` is NOT
+    treated as a builtin-sink alias (RT5 no-FP).
+
+    Covers ``def eval``/``class eval`` and ``import x as eval`` /
+    ``from m import f as eval`` / ``import eval`` (whatever a plugin imports as
+    ``eval`` is its own object, not the builtin code-exec sink). Assignment-based
+    shadowing (``eval = x``) is handled inside ``_process_assignment``.
+    """
+    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        if stmt.name in TAINT_SINKS_DIRECT:
+            state.shadowed_builtins.add(stmt.name)
+        return
+    if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+        for alias in stmt.names:
+            bound = alias.asname or alias.name.split(".")[0]
+            if bound in TAINT_SINKS_DIRECT:
+                state.shadowed_builtins.add(bound)
+
+
 def _analyze_stmt(
     stmt: ast.stmt,
     state: _TaintState,
@@ -454,11 +590,19 @@ def _analyze_stmt(
     # Inspect every Call in this statement's OWN expressions for sinks.
     # Nested-statement-block sinks are handled by analyze_block recursion,
     # so each sink is checked exactly once (audit MINOR #5).
+    #
+    # RT6 — precompute the set of Call nodes whose VALUE is itself immediately
+    # invoked, i.e. the inner ``g`` of ``g(...)``. This is exactly the
+    # ``getattr(obj, tainted)(...)`` gadget shape: the dynamic-getattr Call is the
+    # ``.func`` of an enclosing Call. ``_check_dynamic_getattr`` consults this to
+    # keep that gadget firing on an ordinary object while clearing the benign
+    # value-returning ``getattr(self._real, name)`` reflection (result not called).
+    invoked_call_ids = {id(n.func) for n in _own_calls(stmt) if isinstance(n.func, ast.Call)}
     for node in _own_calls(stmt):
-        sink_desc = _is_sink_call(node)
+        sink_desc = _is_sink_call(node, state)
         if sink_desc:
             _check_sink_args(node, sink_desc, state, findings)
-        _check_dynamic_getattr(node, state, findings)
+        _check_dynamic_getattr(node, state, findings, result_called=id(node) in invoked_call_ids)
 
 
 def _process_assignment(
@@ -470,6 +614,26 @@ def _process_assignment(
     target_names = _assigned_names(target)
     if not target_names:
         return
+
+    # SINK-ALIAS tracking (RT5). Resolve the RHS to a known exec/shell sink BEFORE
+    # the source/sanitizer/data interpretations: a sink CALLABLE (``s = os.system``,
+    # ``e = eval``) is none of those, and binding the target to it lets a later
+    # bare-name call (``s(x)``) be recognised as the underlying sink. Also track
+    # SHADOWING — rebinding a builtin sink name to a non-sink (``def eval``-style
+    # ``eval = x``) means a subsequent ``e = eval`` aliases the LOCAL ``eval``, not
+    # the builtin, so it must NOT become a sink alias (preserves no-FP).
+    resolved_sink = _resolve_sink_target(value, state)
+    for name in target_names:
+        if name in TAINT_SINKS_DIRECT and resolved_sink != (name,):
+            # ``eval``/``exec``/``compile`` rebound to anything other than itself
+            # → the builtin sink is shadowed in this scope from here on.
+            state.shadowed_builtins.add(name)
+    if resolved_sink is not None:
+        for name in target_names:
+            state.mark_sink_alias(name, resolved_sink)
+        return
+    # RHS is NOT a sink callable — drop any stale alias on the targets (handled by
+    # mark/clear below), so a reassigned alias name stops being treated as a sink.
 
     # Sanitizer call → clears taint, EXCEPT a structured-data parser whose input
     # traces to a taint source: its result can be a raw attacker string that is
@@ -592,7 +756,7 @@ def _check_sink_args(
     EXEC-class sinks, also flags values that were sanitized-for-injection but
     remain exec-dangerous (audit MAJOR #10).
     """
-    exec_sink = _is_exec_class_sink(call)
+    exec_sink = _is_exec_class_sink(call, state)
     seen: set[str] = set()
     for arg in list(call.args) + [kw.value for kw in call.keywords]:
         for name in _passthrough_tainted_names(arg):
@@ -628,14 +792,94 @@ def _check_sink_args(
 # defensive attribute lookup.
 _DYNAMIC_ATTR_BUILTINS: frozenset[str] = frozenset({"getattr", "setattr", "delattr"})
 
+# Modules whose attributes are CAPABILITIES, not data: pulling an arbitrary
+# attribute out of one of these by an attacker-controlled name hands the caller
+# a code-execution / process-control / deserialization primitive even before it
+# is invoked (``getattr(os, x)`` → ``os.system``; ``getattr(importlib, x)`` →
+# ``import_module``; ``getattr(builtins, x)`` → ``eval``/``exec``). For these the
+# dynamic-getattr IS the gadget regardless of whether the result is immediately
+# called. A tainted attr name on a non-dangerous object (``getattr(self._real,
+# name)`` — the ubiquitous ``__getattr__`` proxy idiom) returns a plain VALUE and
+# is benign UNLESS that value is then invoked (handled separately by the
+# ``result_called`` gate). The set mirrors the high-value reflection targets a
+# ``getattr`` gadget reaches; ``__builtins__`` covers the dict-or-module dunder
+# form. (RT6 — FP-prone benign reflection vs. the real getattr-on-module gadget.)
+_DANGEROUS_ATTR_OBJECTS: frozenset[str] = frozenset(
+    {
+        "os",
+        "subprocess",
+        "sys",
+        "builtins",
+        "__builtins__",
+        "importlib",
+        "pickle",
+        "marshal",
+        "ctypes",
+        "shutil",
+        "socket",
+        "commands",
+        "pty",
+        "platform",
+    }
+)
+
+
+def _getattr_object_is_dangerous(obj_arg: ast.expr) -> bool:
+    """True iff arg[0] of a getattr/setattr/delattr names a CAPABILITY module
+    (``os``, ``subprocess``, ``importlib``, ``builtins``, …) — directly
+    (``getattr(os, x)``) or as the head of a dotted chain
+    (``getattr(os.path, x)``, ``getattr(sys.modules['os'], x)`` resolves through
+    the subscript to ``sys``). A tainted attr name on such an object is dynamic
+    dispatch into a dangerous namespace and fires unconditionally."""
+    if isinstance(obj_arg, ast.Name):
+        return obj_arg.id in _DANGEROUS_ATTR_OBJECTS
+    chain = _attribute_chain(obj_arg)
+    if chain is not None:
+        return chain[0] in _DANGEROUS_ATTR_OBJECTS
+    # ``sys.modules[...]`` / ``importlib.import_module(...)`` — the head still
+    # resolves to a dangerous module through a subscript or call.
+    cur: ast.AST = obj_arg
+    while isinstance(cur, (ast.Subscript, ast.Call)):
+        cur = cur.value if isinstance(cur, ast.Subscript) else cur.func
+    head = _attribute_chain(cur)
+    return head is not None and head[0] in _DANGEROUS_ATTR_OBJECTS
+
 
 def _check_dynamic_getattr(
     call: ast.Call,
     state: _TaintState,
     findings: list[TaintFinding],
+    *,
+    result_called: bool,
 ) -> None:
     """Flag ``getattr/setattr/delattr(obj, <tainted name>)`` — dynamic attribute
-    access whose attribute NAME (arg[1]) is attacker-controlled."""
+    access whose attribute NAME (arg[1]) is attacker-controlled.
+
+    FP-safety (RT6). The bare-reflection idiom ``getattr(self._real, name)`` (a
+    ``__getattr__`` stream/proxy delegate; ``getattr(report, level)`` dynamic
+    method *lookup* that returns a value to the caller) is BENIGN: the result is
+    a plain value, not executed, and the object is not a capability module. It
+    used to fire RC-73/74 on every such proxy in every plugin — a genuine false
+    positive. The sink now fires ONLY when the dynamic dispatch can actually
+    execute / write into a dangerous namespace, i.e. when EITHER:
+
+      * the object (arg[0]) is a capability module — ``getattr(os, attr)`` hands
+        out ``os.system`` even if the result is bound, not called; OR
+      * the getattr RESULT is IMMEDIATELY INVOKED — ``getattr(obj, tainted)(...)``
+        — the classic gadget where the tainted name selects the method run.
+
+    ``setattr``/``delattr`` are attribute WRITE/DELETE primitives: they return no
+    usable value, so the benign "reflective read returns data" idiom does not
+    apply to them. A tainted attribute *name* being written/deleted is inherently
+    rare and suspicious, so they keep firing on ANY tainted name (the
+    ``result_called`` gate is a no-op for them — setattr/delattr are never the
+    func of an enclosing call in the value sense). This asymmetry is what removes
+    the ubiquitous benign-``getattr`` FP without weakening write/delete coverage.
+
+    FN-safety: a real ``getattr(os, user_input)()`` / ``getattr(__builtins__,
+    x)()`` gadget still fires (dangerous object AND/OR result called); only the
+    provably-benign value-returning reflection on an ordinary object clears.
+    """
     if not (isinstance(call.func, ast.Name) and call.func.id in _DYNAMIC_ATTR_BUILTINS):
         return
     if len(call.args) < 2:
@@ -645,6 +889,13 @@ def _check_dynamic_getattr(
     # ubiquitous shape (getattr(o, "x", default)). Never fires.
     if isinstance(name_arg, ast.Constant):
         return
+    builtin = call.func.id
+    # getattr-specific FP gate: clear benign value-returning reflection on an
+    # ordinary object (result not invoked). setattr/delattr are unaffected — they
+    # have no returned value to use as data, so they stay on the original
+    # any-tainted-name contract.
+    if builtin == "getattr" and not result_called and not _getattr_object_is_dangerous(call.args[0]):
+        return
     for nm in _passthrough_tainted_names(name_arg):
         taint = state.lookup(nm)
         if taint:
@@ -653,7 +904,7 @@ def _check_dynamic_getattr(
                 TaintFinding(
                     rule_id="RC-73" if hops == 1 else "RC-74",
                     source=src,
-                    sink=f"{call.func.id}(obj, <tainted attr name>)",
+                    sink=f"{builtin}(obj, <tainted attr name>)",
                     var_name=nm,
                     hop_count=hops,
                     line=call.lineno,

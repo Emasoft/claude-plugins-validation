@@ -315,13 +315,34 @@ def classify_rc65(ctx: Context) -> FindingVerdict:
 
     role_allows_escalation = ctx.file_role == "source"
 
-    # Pattern-source guard FIRST: a denylist/blocklist/_PATTERNS member on
-    # the same line means the IMDS literal is data, not an SSRF target —
-    # even if a generic accessor like `.get(` (an accessor-hint substring)
-    # is also present. This must precede the network-call check so an
-    # ambiguous `denylist.get("imds", "169.254.169.254")` is not escalated
-    # to DEFINITE_TP → CRITICAL.
-    if any(hint in ctx.line for hint in _RC65_PATTERN_SOURCE_HINTS):
+    # STRUCTURAL request-target check, computed once: the IMDS literal is a
+    # genuine fetch target only when it is URL-positioned on the line (inside
+    # a URL, or immediately followed by a `/` path or `:` port). A bare
+    # default value / map key / set member is NOT URL-positioned. This is the
+    # one signal an attacker cannot fake with a co-located keyword: the IP
+    # literally sits where a request URL goes. (audit G6
+    # G6-rc65-pattern-source-substring-shapeable)
+    imds_is_url_target = bool(_RC65_IMDS_IS_URL_TARGET_RE.search(ctx.line))
+
+    # Pattern-source guard: a denylist/blocklist/_PATTERNS member on the same
+    # line means the IMDS literal is data, not an SSRF target — even if a
+    # generic accessor like `.get(` (an accessor-hint substring) is also
+    # present. This precedes the network-call check so an ambiguous
+    # `denylist.get("imds", "169.254.169.254")` is not escalated to
+    # DEFINITE_TP → CRITICAL.
+    #
+    # FN-safe gate: the pattern-source hints are a bare SUBSTRING scan, which
+    # an attacker can satisfy by dropping a benign token (`# denylist`, an
+    # unused `blocklist` identifier) onto a line that performs a REAL IMDS
+    # fetch — forcing DEFINITE_FP and silencing the SSRF. So we only honour
+    # the pattern-source DEFINITE_FP when the literal is NOT a structural
+    # request target. A URL-positioned literal (`requests.get(
+    # "http://169.254.169.254/…")`) cannot be "just a denylist member" — it
+    # is where the request goes — so a co-located benign keyword can no
+    # longer suppress it. The benign cases the guard exists for (a bare set
+    # member `"169.254.169.254",` or a default value `config.get("h",
+    # "169.254.169.254")`) are NOT URL-positioned, so they still clear.
+    if not imds_is_url_target and any(hint in ctx.line for hint in _RC65_PATTERN_SOURCE_HINTS):
         return FindingVerdict.DEFINITE_FP
 
     # Unambiguous HTTP-library call on the line → genuine fetch.
@@ -329,11 +350,17 @@ def classify_rc65(ctx: Context) -> FindingVerdict:
     # Bare accessor (.get/.post/…) only counts as a fetch when the IMDS
     # literal is URL-positioned; a bare default value / map key is not.
     if not is_network_call and any(hint in ctx.line for hint in _RC65_ACCESSOR_CALL_HINTS):
-        is_network_call = bool(_RC65_IMDS_IS_URL_TARGET_RE.search(ctx.line))
+        is_network_call = imds_is_url_target
     if is_network_call:
         return FindingVerdict.DEFINITE_TP if role_allows_escalation else FindingVerdict.REAL
 
-    if any(hint in line for line in ctx.surrounding_lines for hint in _RC65_PATTERN_SOURCE_HINTS):
+    # Surrounding-lines pattern-source guard — same FN-safe gate: a real
+    # IMDS fetch whose neighbourhood happens to carry a `denylist`/`_PATTERNS`
+    # token (a comment, an adjacent constant) must not be cleared when the
+    # literal is itself a URL-positioned request target.
+    if not imds_is_url_target and any(
+        hint in line for line in ctx.surrounding_lines for hint in _RC65_PATTERN_SOURCE_HINTS
+    ):
         return FindingVerdict.DEFINITE_FP
     if ctx.file_role in ("fixture", "test"):
         return FindingVerdict.DEFINITE_FP
