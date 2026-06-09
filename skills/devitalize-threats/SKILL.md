@@ -83,17 +83,21 @@ comments-out the token (so it could be restored) does not qualify.
 Every transform moves the construct into one of four shapes:
 
 - **(A) Raw-string signature** in a clearly-named rules/patterns table —
-  the scanner proves it is a detector needle, not a live argument
-  (`_match_inside_raw_string`, `_DETECTOR_SIGNATURE_SKIP_RULES`,
-  skillaudit `safe_literal` / re-pattern-literal verdict). The signature
-  must be a **non-runnable** regex/template whose execution-critical
-  token is itself redacted/placeholdered within the signature where
-  feasible — a payload signature stores the *shape* with the operative
-  target abstracted to a `<PATH>` placeholder (see T1 in the
-  transform-catalog reference), so it can match content but can never be
-  copy-pasted into a runnable command. A signature that is a
-  **copy-pasteable literal command is NOT inert** — abstract the
-  execution-critical argument.
+  the scanner recognizes a detector needle, not a live argument, **only
+  when the raw string is in a data/comparison context** (fed to
+  `re.<func>` or held in a rules table) with NO execution sink on the
+  line (`_match_inside_raw_string` gated on no exec sink,
+  `_DETECTOR_SIGNATURE_SKIP_RULES`, skillaudit's flow-sensitive
+  re-pattern-literal verdict). The raw `r` prefix is NOT inert by
+  construction: the same token on an `os.system` / `subprocess(shell=True)`
+  / `eval` sink runs identically (a backslash-free flag is the same bytes
+  raw or plain) and the scanner now fires on it — so a raw string spread
+  onto an exec sink is an evasion, not a devitalization (load-bearing →
+  flag). SEPARATELY, as defense-in-depth, abstract the execution-critical
+  operand to a `<PATH>` placeholder (see T1 in the transform-catalog
+  reference) so the shipped signature is not a copy-pasteable command —
+  an author best-practice, **not** a scanner requirement (the scanner
+  skips a raw-string-in-data-context regardless of operand).
 - **(B) Annotated non-runnable illustration** — defanged: broken pipe,
   placeholder URL, `text` fence instead of `bash`. No executable token
   the rule matches remains.
@@ -200,9 +204,12 @@ perfectionist would still object to vs what a pragmatist accepts).
     detector signatures (recipe T1).
 - Docs install one-liner.
   - Input: a docs page shows a pipe-to-shell install line (SUPPLY_CHAIN).
-  - Output: class documentation; Form B — defang to a `text` fence with
-    the pipe elided and the URL dropped, or split into download → review
-    → run; re-scan finds no pipe-to-shell token (recipe T2).
+  - Output: class documentation; Form B — defang by removing the `|
+    <interpreter>` token (a `text` fence with the URL dropped is NOT
+    enough on its own — the `curl … | bash` token pair is what
+    `skillaudit:supply_chain` / `skillaudit:code_execution` / cisco
+    PIPELINE_TAINT_FLOW match), or split into download → review → run;
+    re-scan finds no `curl … | bash` token pair on one line (recipe T2).
 - Reachable shell-exec sink.
   - Input: a live shell-exec sink reachable from a hook.
   - Output: class live-irreducible; do NOT rewrite — flag to the user

@@ -4,9 +4,9 @@
 
 - [Raw-string signature](#1-raw-string-signature-r)
 - [safe_literal verdict](#2-safe_literal--re-pattern-literal-classifier-verdict)
-- [Exec in style/markup](#3-_style_lang_inert_exec_rules--exec-mentions-in-non-executing-stylemarkup-languages)
+- [Exec in style/markup](#3-_style_lang_inert_exec_rules--exec-mentions-in-pure-styling-languages-only)
 - [Placeholder secret](#4-placeholder-secret-your_api_token-token-api_token)
-- [Defanged illustration](#5-defanged-doc-illustration-text-fence-elided-pipe-dropped-url)
+- [Defanged illustration](#5-defanged-doc-illustration-text-fence--interpreter-token-removed-dropped-url)
 - [Doc-only suppression](#6-doc-only-path-suppression-_doc_only_basenames)
 - [Removal / nominalization](#7-removal--nominalization-no-matching-token-remains)
 - [Quick reference](#quick-reference--inert-form-to-discriminator)
@@ -26,22 +26,38 @@ never because a finding was muted.
 ## 1. Raw-string signature (`r"..."`)
 
 **Mechanism:** `validate_security._match_inside_raw_string` +
-`_DETECTOR_SIGNATURE_SKIP_RULES` (RC-46, RC-87). Skillaudit:
-`_match_inside_re_pattern_literal` and the `safe_literal` context verdict.
+`_DETECTOR_SIGNATURE_SKIP_RULES` (RC-46, RC-87) — **gated, since Wave-1,
+on the match not being on an execution sink** (no `os.system` /
+`os.popen` / `subprocess.getoutput` / `subprocess(shell=True)` / `eval` /
+`exec` on the line). Skillaudit: the flow-sensitive `re`-pattern-literal
+verdict (a raw string is only data when fed to `re.<func>` / held in a
+rules table, never when it flows to a shell sink).
 
-**Why it proves inert:** a raw-string literal is the *regex convention*. A
-real CLI argument or IP is a normal string (`"--no-sandbox"`,
-`"10.0.0.1"`); it is never written `r"--no-sandbox"`. So a dangerous-looking
-token *inside* a raw string is, by construction, a detector needle being
-compared against scanned content — there is no call site that spreads it
-into argv or a shell.
+**Why it proves inert (flow-sensitive — NOT "by construction"):** the
+raw `r` prefix is inert **only in a data/comparison context** — a regex
+pattern fed to `re.<func>`, or a rules-table element compared against
+scanned content, with no call site spreading it into argv or a shell.
+The convention that a real CLI argument is a normal string
+(`"--no-sandbox"`) holds for argv catalogs, but a raw string is NOT inert
+merely because it is raw: for a **backslash-free** flag the raw and plain
+forms are the *same bytes* (`r"--no-sandbox" == "--no-sandbox"`), so the
+same token on a live exec sink runs identically. The scanner therefore
+auto-clears a raw-string match **only when it is provably a comparison
+needle**, not when it sits on an exec sink.
 
 **Used by:** T1 (detection-pattern / signature lines).
 
-**Discriminator boundary:** only fires for the rules in
-`_DETECTOR_SIGNATURE_SKIP_RULES`. If the raw string is genuinely spread
-into a sink (`subprocess.run([tool, *SIGS])`), the bytes differ from a
-real argument and the call breaks — that case is load-bearing, not inert.
+**Discriminator boundary — two ways a raw string is NOT inert:**
+
+- **On an exec sink** (`os.system("… " + r"--no-sandbox")`,
+  `subprocess.run(r"curl … | sh", shell=True)`): the literal runs; the
+  scanner now FIRES regardless of the `r` prefix (Wave-1 sink-aware
+  gate). This is an evasion, not a devitalization — **load-bearing,
+  flag**.
+- **Spread into an argv list** (`subprocess.run([tool, *SIGS])`): if the
+  pattern contains metacharacters the bytes differ from a real argument
+  (`r"\s*"` is not a real space) and the call breaks — also
+  **load-bearing, not inert**.
 
 ---
 
@@ -69,18 +85,40 @@ as a quoted string) get the full suppression.
 
 ---
 
-## 3. `_STYLE_LANG_INERT_EXEC_RULES` — exec mentions in non-executing style/markup languages
+## 3. `_STYLE_LANG_INERT_EXEC_RULES` — exec mentions in pure styling languages ONLY
 
-**Mechanism:** execution-class rules are skipped/demoted when the match
-lands inside a non-executing surface — a CSS / SCSS comment, an AppleScript
-comment, a markdown comment-context. A style/markup language does not run
-the matched token.
+**Mechanism:** execution-class rules in `_STYLE_LANG_INERT_EXEC_RULES`
+(CMD_INJECTION, SHELL_EXEC, REVERSE_SHELL, PRIVILEGE_ESC,
+CONTAINER_ESCAPE, PERSISTENCE, TIME_BOMB, SUPPLY_CHAIN) are **suppressed
+only when the file extension is `.css` / `.scss` / `.sass` / `.less`**
+(`cpv_skillaudit_native.py:1303`, gated on `_STYLE_LANG_EXTS`). A pure
+styling language cannot invoke a shell, spawn a process, persist, or
+install a package, so the matched token cannot reach a sink.
 
-**Why it proves inert:** a comment in a stylesheet or a markup language is
-never executed; an exec-shaped token there cannot reach a sink.
+**Why it proves inert:** a CSS-family file is browser-rendered, never
+executed as a program; an exec-shaped token in it has no sink. This is a
+*language-capability* carve-out, not a comment-context one.
 
-**Used by:** T6 (when the backtick / command token lives in a markup
-comment) and as background for why doc surfaces differ from code surfaces.
+**NOT an inert surface — do NOT rely on these:**
+
+- **AppleScript is NOT inert.** It can `do shell script`, so it IS a
+  shell-capable language. CPV deliberately does NOT carve it out — in
+  fact RC-37 *fires* on `osascript -e 'do shell script'`
+  (`cpv_validation_common.py`). An exec-class token in a `.scpt` /
+  `.applescript` file (or an AppleScript comment) stays **live**.
+  Refactor it (T6/T8) or flag it; do not treat the language as inert.
+- **A markdown comment is NOT a clear.** `.md` is not in
+  `_STYLE_LANG_EXTS`; markdown surfaces are routed to a separate
+  classifier. An exec-class token in a markdown comment (or anywhere in a
+  `references/*.md`) **DEMOTES to a blocking NIT under `--strict`** — see
+  §6. Relocating a threat into a markdown comment does not clear the
+  gate.
+
+**Used by:** the dead-code / doc transforms only as background for why
+CSS-family *code surfaces* differ from shell-capable ones. (T6 does NOT
+rely on this carve-out — T6's inert form D is markdown prose cleared by
+the markdown classifier's inline-code SAFE_DOC + `_BENIGN_RECON_CMDS`
+handling, a distinct mechanism, not the style-language extension gate.)
 
 ---
 
@@ -102,15 +140,30 @@ shape rewrite, not a leak remediation.
 
 ---
 
-## 5. Defanged doc illustration (`text` fence, elided pipe, dropped URL)
+## 5. Defanged doc illustration (`text` fence, **`| interpreter` token removed**, dropped URL)
 
-**Mechanism:** SUPPLY_CHAIN / CMD_INJECTION key on the *token shape* of a
-remote fetch piped into a shell. A `text`-fenced line with the pipe elided
-(`... | bash`) and the URL removed contains no such token.
+**Mechanism:** three rules key on the literal token sequence `curl` + `|
+<interpreter>` of a remote fetch piped into a shell —
+`skillaudit:supply_chain`, `skillaudit:code_execution`, and (in security
+mode) **cisco PIPELINE_TAINT_FLOW**. They match the adjacent `curl … |
+bash` tokens on a single fenced line **independent of the fence language
+and independent of whether the URL is elided**. Switching the fence to
+`text` and dropping the URL is therefore NOT sufficient; the **`|
+<interpreter>` token must be removed** (or the line nominalized to prose
+with no literal `curl`/`| bash`).
 
-**Why it proves inert:** there is no pipe-to-shell token, no real URL, and
-the fence language is non-executable. A markdown file never executes
-anyway; removing the shape clears the token-shape rule.
+**Why it proves inert:** once neither `curl` nor `| bash` appears as an
+adjacent token on one fenced line, none of the three rules has a token to
+match. A markdown file never executes anyway; removing the token shape
+clears the token-shape rules.
+
+**Proof-of-inertness test (this class):** neither `curl` nor `|
+<interpreter>` appears as an adjacent token on a single fenced line. A
+remaining cisco PIPELINE_TAINT_FLOW MAJOR (security mode) or a demoted
+`skillaudit:supply_chain` NIT (in `references/*.md`) means the pair is
+still present — the defang is incomplete. (Re-scan verified: dropping the
+URL but keeping `| bash` still fires; removing `| bash` clears it. The
+split-steps B2 form is the reliably-clean path, LIVE = 0.)
 
 **Used by:** T2 (B1 defanged illustration), T7 (defanged literal reference).
 

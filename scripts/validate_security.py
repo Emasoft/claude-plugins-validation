@@ -1414,6 +1414,15 @@ def _set_cpv_self_scan(
                     f"raw.githubusercontent.com so the canonical manifest can "
                     f"be retrieved."
                 )
+            # SECURITY (G6): fully DISARM self-scan on the GitHub-refuse path.
+            # Leaving `_CPV_SELF_SCAN_ACTIVE = True` with an empty manifest
+            # would let the file-level SHA skip (`cpv_self_scan_skip`, gated on
+            # `_CPV_SELF_SCAN_ACTIVE`) stay "armed" with nothing to verify
+            # against. Setting it False makes the "scan everything as a safe
+            # default" invariant hold for BOTH the SHA file-skip and the
+            # content predicate, for a non-running spoofed/offline target.
+            _CPV_SELF_SCAN_ACTIVE = False
+            _CPV_SELF_PLUGIN_ROOT = None
             return
 
     if isinstance(manifest, dict):
@@ -1702,9 +1711,31 @@ def cpv_self_scan_skip_line(
     # v2.48 P-2 — universal parametrize-body suppression.
     if is_test_file_parametrize_body(file_path, content, line_no):
         return True
-    if not _CPV_SELF_SCAN_ACTIVE:
+    # SECURITY (RT3 / G6): the content predicate `is_pattern_source_line`
+    # keys on attacker-controllable signals (a `*_PATTERNS=[…]` collection
+    # name, an `RC-NN` docstring/comment marker). It must therefore NEVER be
+    # consulted on a file that a third-party plugin could supply. Gate on
+    # the NON-SPOOFABLE running-CPV identity, not the name-flippable
+    # `_CPV_SELF_SCAN_ACTIVE`:
+    #
+    #   * `_CPV_IS_RUNNING_CPV` is True ONLY when the scanned plugin root IS
+    #     the running validator's own directory (a path comparison set at
+    #     `_set_cpv_self_scan`); a spoofed plugin.json name can't satisfy it.
+    #   * `_is_self_scan_eligible(file_path)` (defense-in-depth) narrows to
+    #     files that LOOK like CPV-internal pattern sources.
+    #
+    # Why this branch exists at all: an UNMODIFIED genuine CPV file already
+    # returned True above via the SHA manifest (`cpv_self_scan_skip`). This
+    # branch only legitimately helps a CPV file being EDITED in-tree (hash
+    # mismatch) while the running CPV scans ITSELF — which already requires
+    # `_CPV_IS_RUNNING_CPV`. The pre-RT3 gate (`_CPV_SELF_SCAN_ACTIVE`) was
+    # flippable by a 3rd-party plugin name + signature files, silencing real
+    # RC-10/exec findings to CRITICAL:0.
+    if not _CPV_IS_RUNNING_CPV:
         return False
     if content is None:
+        return False
+    if not _is_self_scan_eligible(file_path):
         return False
     return is_pattern_source_line(content, line_no, file_path)
 
@@ -2254,45 +2285,181 @@ def _line_is_string_assignment(line: str) -> bool:
     return bool(re.match(r"[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?:'''|\"\"\"|r'''|r\"\"\")", stripped))
 
 
-_PATTERN_DEFINITION_HINTS = (
+# Explicit regex-COMPILATION call markers. The presence of one of these
+# on the reported line is positive evidence the matched literal is a
+# regex pattern body (detector code), not an exploit payload — but ONLY
+# when the same line is not ALSO an execution sink (guarded below).
+_REGEX_CALL_MARKERS = (
     "re.compile(",
     "re.match(",
     "re.search(",
-    "RegExp(",
+    "re.fullmatch(",
+    "re.finditer(",
+    "re.findall(",
+    "re.sub(",
+    "re.split(",
     "regex.compile(",
-    'r"',
-    "r'",  # Python raw-string literal at start of regex
+    "regex.match(",
+    "regex.search(",
+    "RegExp(",  # JS — `new RegExp(` and bare `RegExp(`
 )
-_PATTERN_DEFINITION_RE = re.compile(r"/[^/\n]+/[gimsuy]*")  # JS regex literal
+# JS regex literal — require at least one trailing flag (`/…/g`) so a
+# bare POSIX path like `/etc/passwd` (which has no flags) is NOT misread
+# as a regex. The `+` after the flag class is what distinguishes a real
+# JS regex literal from an absolute path. Only consulted on JS/TS files.
+_JS_REGEX_LITERAL_RE = re.compile(r"/[^/\n]+/[gimsuy]+")  # JS regex literal w/ flag
+
+# Execution sinks that MUST NOT be cleared by the pattern-definition
+# discriminator regardless of raw-string shape (FN-unsafe to suppress).
+# Includes the always-shell sinks (run their arg through /bin/sh) plus
+# the generic exec/eval/spawn family. A bare raw-string prefix on one of
+# these lines (e.g. `os.system(r"curl … | sh")`) is real shell-exec, not
+# a regex body — the old `r"`/`r'` hint silenced exactly this class.
+_EXEC_SINK_MARKERS = (
+    # Python always-shell sinks (no shell= kwarg; arg → /bin/sh -c).
+    "os.system(",
+    "os.popen(",
+    "os.popen2(",
+    "os.popen3(",
+    "os.popen4(",
+    "subprocess.getoutput(",
+    "subprocess.getstatusoutput(",
+    "commands.getoutput(",
+    "commands.getstatusoutput(",
+    "popen2.popen2(",
+    "popen2.popen3(",
+    "popen2.popen4(",
+    "pty.spawn(",
+    "create_subprocess_shell(",
+    # Python explicit-shell + generic process sinks.
+    "subprocess.run(",
+    "subprocess.call(",
+    "subprocess.check_call(",
+    "subprocess.check_output(",
+    "subprocess.popen(",
+    "subprocess.popen2(",
+    ".popen(",
+    "shell=true",
+    # Python code-exec sinks.
+    "eval(",
+    "exec(",
+    "__import__(",
+    # JS/TS process + code-exec sinks.
+    "child_process",
+    "execsync(",
+    "execfilesync(",
+    "spawnsync(",
+    "execfile(",
+    "spawn(",
+    "function(",  # new Function(...)
+)
+
+# `compile(` is a code-exec sink ONLY as the bare builtin — NOT as the
+# regex methods `re.compile(` / `regex.compile(`, which are the very FP
+# class this discriminator must keep suppressing. The negative lookbehind
+# excludes a preceding `re.` / `regex.` (any identifier-dot) while still
+# catching bare `compile(`, `;compile(`, `\tcompile(`. Case-insensitive.
+_BARE_CODE_EXEC_RE = re.compile(r"(?<![.\w])(?:compile)\s*\(", re.IGNORECASE)
+
+# Shell `eval` of a COMMAND SUBSTITUTION — `eval "$(…)"`, `eval $(…)`,
+# eval `…` (backticks). The marker-substring form `eval(` only catches the
+# Python/JS paren call; the shell form uses a SPACE then a command
+# substitution. Requiring the `$(` / backtick after `eval` keeps this
+# precise: benign prose like `print("eval the result")` or
+# `report.passed("No eval of remote code detected")` has no command
+# substitution after `eval`, so it does NOT match (no benign-status
+# regression). FN-unsafe to miss: `echo "ok"; eval "$(curl … | base64 -d)"`
+# is a decode-then-exec sink that a bare `echo "` status hint would
+# otherwise silence.
+_SHELL_EVAL_SUBST_RE = re.compile(
+    r"\beval\b\s*[\"']?\s*[$`]\(|\beval\b\s*[\"']?\s*`",
+    re.IGNORECASE,
+)
+
+
+def _line_has_exec_sink(line: str) -> bool:
+    """True iff `line` contains an execution sink that must never be
+    cleared by the pattern-definition / status-report discriminators.
+    Case-insensitive so JS `execSync` / `new Function` / `shell=True` all
+    match.
+
+    `compile(` is matched via `_BARE_CODE_EXEC_RE` so the regex methods
+    `re.compile(` / `regex.compile(` (genuine pattern bodies) are NOT
+    treated as exec sinks — only the bare `compile()` builtin is. The
+    shell `eval "$(…)"` / eval-backtick command-substitution form is
+    matched via `_SHELL_EVAL_SUBST_RE` (the marker-substring `eval(` only
+    covers the Python/JS paren call).
+    """
+    low = line.lower()
+    if any(marker in low for marker in _EXEC_SINK_MARKERS):
+        return True
+    if _BARE_CODE_EXEC_RE.search(line):
+        return True
+    return bool(_SHELL_EVAL_SUBST_RE.search(line))
 
 
 def _line_is_pattern_definition(file_ref: str, line_number: int) -> bool:
-    """True if line `line_number` of `file_ref` is a regex pattern
-    definition (Python `re.compile(...)`, JS `/.../g`, or `RegExp(...)`).
+    """True iff line `line_number` of `file_ref` is structurally a regex /
+    pattern-source line (detector code), in a FLOW-SENSITIVE, FN-safe way.
 
     External scanners (cc-audit, gitleaks, trufflehog, semgrep) flag the
-    LITERAL TEXT of credential markers / sandbox-escape patterns / etc.
-    inside the BODY of a regex source — but pattern bodies are detector
-    code, not exploit payloads. This helper opens the file at the
-    reported line and inspects the surrounding text. Returns False on
-    any I/O error (don't suppress on uncertainty).
+    LITERAL TEXT of credential markers / sandbox-escape patterns inside the
+    BODY of a regex source — pattern bodies are detector code, not exploit
+    payloads. This helper suppresses those, but it must NEVER suppress a
+    finding on an execution sink (`os.system(r"…")`, `subprocess.run(r"…",
+    shell=True)`, `eval`, `child_process.exec`, …). The previous version
+    keyed on a bare `r"` / `r'` raw-string prefix, which silenced exactly
+    those attacker-controllable exec lines (FN-unsafe discriminator,
+    finding RT1 / G4).
+
+    A line is suppressed ONLY when BOTH:
+      1. it contains NO execution sink (`_line_has_exec_sink`), AND
+      2. it is a genuine pattern source — either structurally per the
+         flow-sensitive `is_pattern_source_line` predicate (catalog
+         member, rule-decl-adjacent literal, anchored docstring, rule-id
+         comment) OR it carries an explicit regex-compilation CALL
+         (`re.compile(`, `RegExp(`, …) / a JS regex literal `/…/g`.
+
+    The flow-sensitive predicate is the SAME one used everywhere else
+    (`cpv_pattern_source_predicate.is_pattern_source_line`); the
+    regex-call branch preserves the single-line `re.compile(r"…")` FP
+    class that the structural predicate alone does not cover. Returns
+    False on any I/O error (don't suppress on uncertainty).
     """
     try:
         path = Path(file_ref)
         if not path.is_file():
             return False
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            for i, ln in enumerate(f, start=1):
-                if i == line_number:
-                    if any(hint in ln for hint in _PATTERN_DEFINITION_HINTS):
-                        return True
-                    if _PATTERN_DEFINITION_RE.search(ln):
-                        return True
-                    return False
-                if i > line_number:
-                    break
+        if path.stat().st_size >= 2_000_000:
+            return False
+        body = path.read_text(encoding="utf-8", errors="ignore")
     except (OSError, ValueError):
-        pass
+        return False
+    lines = body.splitlines()
+    if line_number < 1 or line_number > len(lines):
+        return False
+    target_line = lines[line_number - 1]
+    # FN-safe hard gate: an execution sink on the line is real exec, never
+    # a regex body — never suppress it even if a raw-string prefix is
+    # present. This is what closes the RT1 / G4 hole.
+    if _line_has_exec_sink(target_line):
+        return False
+    # Structural (flow-sensitive) suppression — covers catalog members,
+    # rule-decl-adjacent literals, anchored docstrings, rule-id comments.
+    if is_pattern_source_line(body, line_number, file_ref):
+        return True
+    # Explicit regex-compilation call / JS regex literal on the line —
+    # preserves the single-line `re.compile(r"…")` detector-body FP class
+    # that the structural predicate alone misses. The no-exec-sink gate
+    # above already guarantees this branch can't clear an exec line.
+    low = target_line.lower()
+    if any(marker.lower() in low for marker in _REGEX_CALL_MARKERS):
+        return True
+    # JS regex literal (`/…/g`) — only on JS/TS files, and only when it
+    # carries a trailing flag (enforced by the pattern), so a Python POSIX
+    # path `/etc/passwd` on a `.py` file is never misread as a regex.
+    if is_js_ts_file(file_ref, body) and _JS_REGEX_LITERAL_RE.search(target_line):
+        return True
     return False
 
 
@@ -2338,6 +2505,16 @@ def _line_is_status_report_message(file_ref: str, line_number: int) -> bool:
     description of what was validated, not as live payloads. External
     scanners that match on the literal string body of those calls
     produce FPs by construction.
+
+    FN-safe hard gate (RT1 / G4): a status-report HINT alone (`print(`,
+    `echo "`, `report.warning(`, …) must NEVER clear a line that ALSO
+    carries an execution sink. `print("ok"); os.system(r"curl … | sh")`
+    is real shell-exec with a cosmetic print prefix — the bare `print(`
+    substring must not silence the cc-audit reverse-shell / RCE finding
+    on that line. This mirrors the same hard gate in
+    `_line_is_pattern_definition`; the only admissible auto-clear is a
+    pure status string whose line reaches no exec sink (the genuine FP
+    class — `report.passed("No reverse shell detected")`).
     """
     try:
         path = Path(file_ref)
@@ -2346,6 +2523,11 @@ def _line_is_status_report_message(file_ref: str, line_number: int) -> bool:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             for i, ln in enumerate(f, start=1):
                 if i == line_number:
+                    # An exec sink on the line is real exec, never a
+                    # status string — never suppress even if a status
+                    # hint (`print(`/`echo "`/…) is present.
+                    if _line_has_exec_sink(ln):
+                        return False
                     return any(hint in ln for hint in _STATUS_REPORT_HINTS)
                 if i > line_number:
                     break
@@ -6933,11 +7115,17 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
                 if not is_executable_md:
                     continue
 
-            # Pattern-source skip: if the reported line is a regex
-            # PATTERN DEFINITION (Python `re.compile(`, JS `/.../g`,
-            # `RegExp(`), the literal-string match cc-audit fired on is
-            # a detector body, not real-world payload. Same logic as our
-            # internal gitleaks/trufflehog/credential-harvest skip.
+            # Pattern-source skip: if the reported line is a genuine regex /
+            # pattern-source line (a `re.compile(`/`RegExp(` body, a JS
+            # `/.../g` literal, a `*_PATTERNS=[…]` catalog member, or an
+            # RC-NN-anchored doc/comment), the literal-string match cc-audit
+            # fired on is a detector body, not real-world payload. Same logic
+            # as our internal gitleaks/trufflehog/credential-harvest skip.
+            # FN-safe (RT1/G4): the predicate hard-refuses to suppress a line
+            # that ALSO carries an execution sink (`os.system(r"…")`,
+            # `subprocess.run(r"…", shell=True)`, `eval`, bare `compile()`,
+            # `child_process.exec`), so a raw-string prefix can no longer
+            # silence an attacker-controllable shell/code-exec line.
             if file_ref and isinstance(line, int) and line > 0 and _line_is_pattern_definition(file_ref, line):
                 continue
 
@@ -7852,6 +8040,23 @@ def check_phase10_taint(plugin_path: Path, report: ValidationReport) -> int:
             rel_path = str(file_path.relative_to(plugin_path))
         except ValueError:
             rel_path = str(file_path)
+        # Self-scan-skip parity (RT6). Every OTHER phase in this module filters
+        # its findings through cpv_self_scan_skip so that when CPV scans ITSELF
+        # its own SHA-verified source files are not reported. Phase 10 was the
+        # sole omission: the taint engine flags CPV's own benign reflection
+        # (publish.py's __getattr__ stream-proxy `getattr(self._real, name)`, the
+        # `getattr(report, level)(...)` dynamic-level dispatch in the test suite)
+        # as RC-73/74 source→sink, surfacing CPV-self findings in BOTH the
+        # `security` subcommand and the group-F plugin gate (which calls this
+        # function directly). The gate is hash-anchored: cpv_self_scan_skip only
+        # returns True when the self-scan flag is armed (is_cpv_self_scan(), set
+        # solely when the scan target IS CPV) AND the file's SHA256 matches CPV's
+        # canonical manifest — so a third-party plugin's `getattr(os, tainted)()`
+        # gadget is NEVER skipped (its file is not in CPV's manifest), and a
+        # payload renamed to publish.py cannot evade it. File-level granularity
+        # is correct here: a CPV-self-skipped file is wholly SHA-verified.
+        if cpv_self_scan_skip(rel_path):
+            continue
         for f in findings:
             severity = "major" if f.rule_id == "RC-73" else "minor"
             level = effective_severity(severity, rel_path, rule_id=f.rule_id)
@@ -9156,10 +9361,11 @@ def validate_security(
             high-confidence credential / instance-metadata exfiltration
             signals with no observed benign reading. Off by default
             because escalation can only inflate findings; explicit
-            opt-in keeps the rollout safe. Implies `with_classifier=True`
-            (silently — escalation lives on the classifier path; an
-            extreme-only call without the classifier is a no-op).
-            See TRDD-fe006962 §Step 4.
+            opt-in keeps the rollout safe. Has effect ONLY together with
+            `with_classifier=True` — escalation lives on the classifier
+            path, so `with_extreme=True` alone (classifier off) is a
+            no-op (forced to False in `_set_cpv_self_scan`'s sibling
+            `_set_classifier_active`). See TRDD-fe006962 §Step 4.
         cache: Phase D scanner-result cache. When ``None`` (default), a
             ``ScannerCache`` against the user's home cache directory is
             constructed. The cache only wraps the four EXTERNAL tree-
@@ -10818,9 +11024,9 @@ Exit Codes:
         "promote the declared severity one tier (MAJOR → CRITICAL). "
         "Off by default because escalation can only inflate findings — "
         "use only when you want maximally-paranoid scanning of code "
-        "that handles credentials. Implies --with-classifier; passing "
-        "--extreme without --with-classifier is a no-op (escalation "
-        "lives on the classifier path).",
+        "that handles credentials. Has effect ONLY together with "
+        "--with-classifier; passing --extreme alone is a no-op "
+        "(escalation lives on the classifier path).",
     )
 
     args = parser.parse_args()

@@ -106,9 +106,10 @@
         "\\beval\\s*\\(",
         "(?:\\bnew\\s+)?\\bFunction\\s*\\(\\s*[`'\"]",
         "\\bos\\.system\\b",
-        "\\bsubprocess\\.(?:call|run|Popen)\\b"
+        "\\bsubprocess\\.(?:call|run|Popen)\\b",
+        "\\b(?:os\\.popen|subprocess\\.get(?:status)?output|commands\\.get(?:status)?output|asyncio\\.create_subprocess_shell)\\s*\\("
       ],
-      "remediation": "Avoid using eval(), exec(), spawn(), or child_process with dynamic input. Use parameterized APIs instead of shell commands. If shell execution is necessary, validate and sanitize all inputs, use allowlists, and never pass user input directly. NOTE: ``child_process`` and ``execSync`` patterns now use ``\\b`` word boundaries so they no longer match inside longer identifiers (`CHILD_PROCESS_EXEC` enum members, `my_execSync_wrapper` etc.). Real Node.js usage `child_process.exec(...)` / `execSync(cmd)` is still matched."
+      "remediation": "Avoid using eval(), exec(), spawn(), or child_process with dynamic input. Use parameterized APIs instead of shell commands. If shell execution is necessary, validate and sanitize all inputs, use allowlists, and never pass user input directly. NOTE: ``child_process`` and ``execSync`` patterns now use ``\\b`` word boundaries so they no longer match inside longer identifiers (`CHILD_PROCESS_EXEC` enum members, `my_execSync_wrapper` etc.). Real Node.js usage `child_process.exec(...)` / `execSync(cmd)` is still matched. The always-shell string-sink pattern (``os.popen`` / ``subprocess.get[status]output`` / ``commands.get[status]output`` / ``asyncio.create_subprocess_shell``) matches the bare CALL form so the Python context classifier (``_skillaudit_python_context._classify_call``) is consulted: a reassembled / variable / concat argument stays SUSPECT (kept), while a pure-literal argument (``os.popen('ls')``) is proven inert and suppressed. The trailing ``\\s*\\(`` requires an actual call (no FP on identifiers like ``getoutputs`` / ``my_os.popener``); ``os.system`` and ``pty.spawn`` already match the patterns above, and the argv-form ``asyncio.create_subprocess_exec`` is deliberately excluded because it bypasses the shell."
     },
     {
       "id": "NET_SUSPICIOUS",

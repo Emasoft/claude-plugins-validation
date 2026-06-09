@@ -175,14 +175,18 @@ HOOK_OUTPUT_EVENT_FIELDS: dict[str, frozenset[str]] = {
     "Notification": frozenset({"additionalContext"}),
     # hooks.md L1367
     "SubagentStart": frozenset({"additionalContext"}),
-    # hooks.md L1403 — same as Stop
-    "SubagentStop": frozenset({"decision", "reason"}),
+    # hooks.md L1403 — same as Stop.
+    # v2.1.163 — additionalContext now permitted on Stop/SubagentStop
+    # hookSpecificOutput (feedback to Claude that keeps the turn going).
+    "SubagentStop": frozenset({"decision", "reason", "additionalContext"}),
     # hooks.md L1440-1443 — exit 2 OR continue:false; no specific keys
     "TaskCreated": frozenset(),
     # hooks.md L1495-1498
     "TaskCompleted": frozenset(),
     # hooks.md L1542-1545
-    "Stop": frozenset({"decision", "reason"}),
+    # v2.1.163 — additionalContext now permitted on Stop/SubagentStop
+    # hookSpecificOutput (feedback to Claude that keeps the turn going).
+    "Stop": frozenset({"decision", "reason", "additionalContext"}),
     # hooks.md L1580 — no specific output
     "StopFailure": frozenset(),
     # hooks.md L1611-1614

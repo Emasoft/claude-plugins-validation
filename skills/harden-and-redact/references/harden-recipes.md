@@ -80,9 +80,20 @@ def resolve_and_pin(host: str) -> str:
     return pinned_ip                          # connect to this IP, not re-resolve
 ```
 
-**AFTER** — sandbox / permission flags: remove the downgrade entirely.
-Run the tool with its default sandbox on and its default permission mode;
-do not pass a flag that disables the sandbox or bypasses permissions.
+**AFTER** — sandbox / permission flags: remove the downgrade *only when it
+is unnecessary*. Run the tool with its default sandbox on and its default
+permission mode; do not pass a flag that disables the sandbox or bypasses
+permissions.
+
+**Load-bearing exception (flag, don't break):** `bypassPermissions` is a
+VALID permission mode and a disabled sandbox can be a tool's intended
+function (an automation plugin that must run without permission prompts).
+If the downgrade is load-bearing — the plugin's documented purpose requires
+running without the sandbox / permission gate — do NOT remove it. **FLAG it**
+for an explicit user decision, per the Q2-safeguard gate and cross-cutting
+rule 4 (flag, don't break). Removal is correct only when no feature depends
+on the downgrade. Cross-ref `devitalize-threats` (the load-bearing-triage
+live + irreducible row) for the dead-vs-live split.
 
 **AFTER** — subprocess with an argv list and the shell disabled:
 
@@ -319,11 +330,29 @@ code-bearing deserialization are rejected.
 
 ## C5 — By-code-only prompt-injection pre-scan (the pre-read guard)
 
-Fires PROMPT_INJECT / INDIRECT_PROMPT_INJECT on a plugin that READS
-untrusted content (a web page, a file, an issue body, a tool result) and
-feeds it to an agent. The safeguard is a **pure-code (no-LLM) scan that
-runs BEFORE any agent reads the untrusted content** — so the plugin
-hardens its OWN agent/skill flow, not merely passes the scan.
+PROMPT_INJECT / INDIRECT_PROMPT_INJECT (RC-127 / RC-128 and the native
+skillaudit equivalents) fire on the **static prose of a plugin-shipped
+file** — a SKILL.md, agent body, command `.md`, or reference doc that
+contains an injection phrase. The scanner reads file CONTENT; it has no
+notion of a runtime read/fetch path. So C5 covers **two distinct cases
+that need different fixes** — read both before editing:
+
+- **(a) The finding is on the plugin's OWN shipped prose.** This is what
+  the scanner actually flags. The fix is to **rephrase or fence the
+  prose** (RC-127's own help text: "rephrase the documentation … wrap the
+  example in backticks or a fenced code block"). A runtime guard does
+  NOTHING for this — the static text still fires. This is the case that
+  clears the finding.
+- **(b) The plugin READS untrusted content at runtime** (a web page, a
+  file, an issue body, a tool result) and feeds it to an agent. A
+  pure-code (no-LLM) pre-read guard is **genuine hardening of the
+  plugin's behavior** — it defends the plugin's own agent/skill flow
+  against indirect injection. But it does NOT clear a static-prose
+  finding, because no static finding fired on the runtime read in the
+  first place. Add it for real defense, not to pass the scan.
+
+The recipe below gives the case-(b) guard; case (a) is just rephrase /
+fence the offending prose.
 
 **BEFORE** (described): a plugin flow that fetches or reads untrusted
 content and hands it straight to an agent / model with no pre-read check.
@@ -339,9 +368,14 @@ anything:
 import re
 
 # Marker shapes the same as CPV's own prompt-injection rules look for —
-# imperative overrides aimed at an assistant, role-reassignment, and
-# "ignore previous instructions" framings. DATA only: a list of detector
-# needles compared against content, never executed.
+# imperative system-prompt overrides, role-reassignment phrasings, and
+# disregard-prior-context framings. DATA only: a list of detector needles
+# compared against content, never executed. NOTE: the narration here
+# deliberately ABSTRACTS the operative phrasings rather than quoting a live
+# injection phrase verbatim — a quoted phrase in this comment would itself
+# fire PROMPT_INJECT (per devitalize-threats T1). The regex literals below
+# are the needles, and the scanner already treats a regex-pattern literal as
+# inert data; only free prose that quotes the phrase verbatim would fire.
 INJECTION_MARKERS = (
     r"ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions",
     r"disregard\s+(?:the\s+)?(?:system|previous)\s+prompt",
@@ -374,12 +408,30 @@ reads raw untrusted content. Flagged content is refused (or, if the plugin
 prefers, the markers are stripped and the result re-scanned) before it can
 become part of any prompt. The marker list is DATA compared against
 content — there is no execution sink, so the guard itself carries no
-threat shape.
+threat shape. The regex needles are stored as raw-string literals in a
+clearly-named table, which the scanner already proves inert (a
+regex-pattern literal, not a live argument) — so the guard's own marker
+list does NOT fire PROMPT_INJECT.
 
-**VERIFY:** re-scan → PROMPT_INJECT / INDIRECT_PROMPT_INJECT on the
-read-path finding is addressed, because the untrusted content now passes
-through a pre-read guard rather than reaching the agent directly; confirm
-the guard is on every untrusted-read path.
+**VERIFY (be precise about which case you are in):**
+
+- *Case (a) — the finding is on the plugin's own shipped prose.* The fix
+  is to **rephrase / fence the offending prose**; re-scan → that
+  PROMPT_INJECT / INDIRECT_PROMPT_INJECT finding is gone. **Adding the
+  runtime guard does NOT clear it** — a re-scan after adding the guard
+  shows the static-prose finding UNCHANGED, because the scanner flags the
+  text, not the read path. Do not attribute the clear to the guard.
+- *Case (b) — the runtime-read defense.* Adding `read_untrusted_then_guard`
+  is real hardening but clears NO static finding (none fired on the
+  runtime read). Re-scan → finding counts unchanged; that is expected.
+  Confirm the guard is on every untrusted-read path by code review, not by
+  a scan delta.
+- *Guard self-check (both cases):* after writing the guard, re-run at the
+  same `--strict` level and confirm the guard's marker list and its
+  surrounding prose did NOT introduce a new PROMPT_INJECT finding. If the
+  guard's narration quotes a live injection phrase verbatim, it fires (and
+  `--strict` blocks on it) — abstract the offending phrasing per
+  `devitalize-threats` T1 (describe the phrasing, do not quote it).
 
 **NO-FUNCTIONALITY-LOSS:** clean content passes through unchanged and the
 flow behaves exactly as before; only content carrying injection markers is

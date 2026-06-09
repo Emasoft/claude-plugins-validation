@@ -1974,19 +1974,25 @@ END THE TURN.
     --report "$MAIN_ROOT/reports/validate_security/$TS-loose-$SLUG.md"
   ```
 
-#### 3.16.7..3.16.11 Single-scanner modes
+#### 3.16.7..3.16.11 Per-scanner focus (rows cc-audit / tirith / trufflehog / semgrep / Cisco)
 
 - **arg-prompts** (in order): `Path to the plugin?`
-- **execution** (substitute `<scanner>` with `cc-audit`, `tirith`, `trufflehog`, `semgrep`, or `cisco`):
+- **execution** (identical for all five rows — substitute `<scanner>` only in
+  the report filename):
   ```bash
   uv run --with pyyaml python "$LAUNCHER" security "$TARGET_PATH" \
-    --only-scanner <scanner> \
     --report "$MAIN_ROOT/reports/validate_security/$TS-<scanner>-$SLUG.md"
   ```
-- **note**: `--only-scanner` is the v2.48 flag to short-circuit the scanner
-  matrix; if it doesn't exist on the installed CPV version, fall back to
-  the full pass and surface a one-line note that single-scanner isolation
-  isn't available on this version.
+- **note**: there is **no single-scanner isolation flag** — by design the
+  external scanners are not opt-out and `validate_security` ALWAYS runs the
+  full pass (all rule packs + every available external scanner). These five
+  rows therefore run the SAME full scan; they exist only to label the report
+  by the scanner the user cares about. To read one scanner's results, open
+  the report and look at that scanner's rows (each finding is prefixed with
+  its scanner name, e.g. `cc-audit:`, `trufflehog:`, `semgrep:`). Do NOT pass
+  a `--only-scanner`/`--cc-audit`/`--no-semgrep`-style flag: none exist, and
+  `validate_security` uses `parse_args()` so an unrecognized flag aborts the
+  run with a non-zero exit instead of degrading gracefully.
 
 #### 3.16.12 Telemetry hazards only
 

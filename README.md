@@ -91,7 +91,7 @@ Throughout this table, **`cpv`** is the standalone alias =
 
 ## What Does CPV Check?
 
-CPV runs **20 specialized validators** covering **190+ rules** across every part of a Claude Code plugin (17 plugin validators + 3 marketplace/settings validators):
+CPV ships **25 on-disk `validate_*.py` scripts** (20 plugin + 3 marketplace/settings + 2 scope) covering **190+ rules** across every part of a Claude Code plugin and end-user `.claude/` configuration. The `plugin` command orchestrates 20 of these as sub-validators (a count distinct from the 25 on-disk scripts — the marketplace/scope scripts run from their own commands):
 
 | Area | Examples of what CPV catches |
 |------|------------------------------|
@@ -132,13 +132,13 @@ All in-process checks run as pure Python — no API calls, no tokens consumed, n
 
 `validate_security.py` orchestrates **five external scanners** alongside its in-process rule packs. Each is invoked unconditionally on every scan and self-skips with an INFO advisory when its source binary cannot be resolved on PATH or installed from its source URL. There is **no opt-out flag** — preventing a caller from accidentally silencing coverage. The `enable_*` keyword arguments on `validate_security()` survive only as test-isolation knobs.
 
-| # | Scanner | Source | What it adds | Resolution path |
-|---|---------|--------|--------------|-----------------|
-| 16 | **cc-audit** | [ryo-ebata/cc-audit](https://github.com/ryo-ebata/cc-audit) | 100+ AI-specific threat rules tailored to Claude Code plugins | persistent `cc-audit` (preferred — `npm install -g @cc-audit/cc-audit`) → `npx --yes @cc-audit/cc-audit` fallback |
-| 17 | **tirith** | [sheeki03/tirith](https://github.com/sheeki03/tirith) | Terminal-security, homograph domains, ANSI/bidi/zero-width injection, hidden Unicode, supply-chain pipe-to-shell | PATH → docker → nix → auto-install (pipx/brew/npm/cargo); set `CPV_NO_TIRITH_INSTALL=1` to disable the install fallback |
-| 18 | **trufflehog** | [trufflesecurity/trufflehog](https://github.com/trufflesecurity/trufflehog) | ~700 verified-secret detectors (Stripe, Slack, AWS, GitHub, …) — runs with `--concurrency=cpu_count` for parallel scans | `brew install trufflehog` or `go install github.com/trufflesecurity/trufflehog/v3@latest` |
-| 19 | **semgrep** | [semgrep/semgrep](https://github.com/semgrep/semgrep) | Thousands of static-analysis rules via the `p/security-audit` and `p/secrets` rule packs | `brew install semgrep` or `pipx install semgrep` |
-| 20 | **Cisco AI Defense skill-scanner** | [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Static (YAML+YARA), Bytecode, Pipeline (command taint), Behavioral (AST dataflow), Trigger (vague-description) — programmatic-only mode (no LLM/Meta/VirusTotal/AI Defense cloud, all of which need API keys) | persistent `skill-scanner` (preferred — `uv tool install cisco-ai-skill-scanner`) → `uvx --from cisco-ai-skill-scanner skill-scanner` fallback (set `CPV_CISCO_SCAN_TIMEOUT_S=<sec>` to override the 600s default) |
+| Scanner | Source | What it adds | Resolution path |
+|---------|--------|--------------|-----------------|
+| **cc-audit** | [ryo-ebata/cc-audit](https://github.com/ryo-ebata/cc-audit) | 100+ AI-specific threat rules tailored to Claude Code plugins | persistent `cc-audit` (preferred — `npm install -g @cc-audit/cc-audit`) → `npx --yes @cc-audit/cc-audit` fallback |
+| **tirith** | [sheeki03/tirith](https://github.com/sheeki03/tirith) | Terminal-security, homograph domains, ANSI/bidi/zero-width injection, hidden Unicode, supply-chain pipe-to-shell | PATH → docker → nix → auto-install (pipx/brew/npm/cargo); set `CPV_NO_TIRITH_INSTALL=1` to disable the install fallback |
+| **trufflehog** | [trufflesecurity/trufflehog](https://github.com/trufflesecurity/trufflehog) | ~700 verified-secret detectors (Stripe, Slack, AWS, GitHub, …) — runs with `--concurrency=cpu_count` for parallel scans | `brew install trufflehog` or `go install github.com/trufflesecurity/trufflehog/v3@latest` |
+| **semgrep** | [semgrep/semgrep](https://github.com/semgrep/semgrep) | Thousands of static-analysis rules via the `p/security-audit` and `p/secrets` rule packs | `brew install semgrep` or `pipx install semgrep` |
+| **Cisco AI Defense skill-scanner** | [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Static (YAML+YARA), Bytecode, Pipeline (command taint), Behavioral (AST dataflow), Trigger (vague-description) — programmatic-only mode (no LLM/Meta/VirusTotal/AI Defense cloud, all of which need API keys) | persistent `skill-scanner` (preferred — `uv tool install cisco-ai-skill-scanner`) → `uvx --from cisco-ai-skill-scanner skill-scanner` fallback (set `CPV_CISCO_SCAN_TIMEOUT_S=<sec>` to override the 600s default) |
 
 **v2.48 — gitleaks removed.** trufflehog (~700 detectors with `--concurrency` parallel-scan support) provides superset coverage. gitleaks shipped ~150 detectors and crashed under reliable parallel scanning, so it has been retired from the external-scanner roster.
 
@@ -499,7 +499,7 @@ For CI/CD and scripting, the Python validators are still callable directly (no m
 
 | Category | Count | Description |
 |----------|-------|-------------|
-| Validation scripts | 25 | Python validators (21 plugin + 2 marketplace + 2 scope) covering plugin packages, marketplaces, and end-user `.claude/` configuration |
+| Validation scripts | 25 | Python validators (20 plugin + 3 marketplace/settings + 2 scope) covering plugin packages, marketplaces, and end-user `.claude/` configuration |
 | Management scripts | 6 | Plugin lifecycle, marketplace operations, scaffolding (`manage_*.py`) |
 | Agents | 15 | AI-powered validation, fixing, devitalization, leak-prevention / hardening, management, and batch orchestration, plus the `cpv` general router |
 | Skills | 46 (12 user-invocable + 34 agent-loaded) | Validation, management, publishing, fix, migration, devitalization, leak-prevention / hardening, auto-notify, batch / fleet (v2.101.0), scope-aware doctor (v2.101.0), the-skills-menu router, and main-menu workflows |

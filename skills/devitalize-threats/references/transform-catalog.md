@@ -45,40 +45,60 @@ strings, and an ordinary (non-raw) `re.compile("...")` of a shell pattern.
 A normal string literal of a dangerous argument reads to the scanner like a
 live argument, so it can fire.
 
-**AFTER** (form **A** — raw-string signatures in a clearly-named table):
+**AFTER** (form **A** — raw-string signatures in a clearly-named table,
+each one a comparison needle fed to `re.<func>` or held in a DATA-only
+table, with NO call site that spreads it into a shell or argv):
 
 ```python
-# Detection signatures — DATA only. Never executed; compared to scanned
-# content. Raw-string form is the inert-proof CPV recognizes; the
-# execution-critical operand is abstracted to a placeholder so a
-# signature can never be copy-pasted into a runnable command.
+# Detection signatures — DATA only. Compared to scanned content via
+# re.search / membership; never spread into a shell or argv. Raw-string
+# form is the regex convention CPV recognizes as a detector needle ONLY
+# because there is no exec sink on the line. The operand is abstracted to
+# a placeholder as defense-in-depth (not a scanner requirement) so the
+# shipped signature is not a copy-pasteable command.
 DANGEROUS_ARG_SIGNATURES = (
     r"--insecure",
     r"--no-sandbox",
     r";\s*rm\s+-rf\s+<PATH>",
 )
 PRIVATE_IP_SIGNATURE = r"10\.\d+\.\d+\.\d+"
-RM_RF_SIGNATURE = re.compile(r"rm\s+-rf\s+<PATH>")   # raw string, operand abstracted
+RM_RF_SIGNATURE = re.compile(r"rm\s+-rf\s+<PATH>")   # fed to re.search; operand abstracted
 ```
 
-**WHY-INERT:** raw-string literals are the regex convention; a real CLI
-arg is a normal string (`"--no-sandbox"`), never `r"--no-sandbox"`.
-`validate_security._match_inside_raw_string` + `_DETECTOR_SIGNATURE_SKIP_RULES`
-(RC-46 / RC-87) skip a match inside `r"..."`; skillaudit's
-`_match_inside_re_pattern_literal` / `safe_literal` verdict does the same.
-The string is data compared against content, with no call site.
-Additionally, the operative target is a placeholder (`<PATH>`), so the
-signature matches content but is not a runnable command.
+**WHY-INERT (flow-sensitive — the raw `r` prefix is NOT inert by
+construction):** the raw-string proof holds ONLY when the literal is a
+regex pattern fed to `re.<func>` or a rules-table element compared
+against scanned content — there is **no call site** spreading it into a
+shell or argv. `validate_security._match_inside_raw_string` +
+`_DETECTOR_SIGNATURE_SKIP_RULES` skip RC-46 / RC-87 inside `r"..."`
+**only when the match is not on an execution sink** (the skip is now
+gated on the line carrying no `os.system` / `os.popen` /
+`subprocess.getoutput` / `subprocess(shell=True)` / `eval` / `exec`
+sink — Wave-1 flow-sensitive fix); skillaudit's flow-sensitive
+`re`-pattern-literal verdict does the same. The string is data compared
+against content, with no exec sink. The `<PATH>` placeholder is a
+separate author best-practice (a signature should not be a
+copy-pasteable command); it does **not** affect whether the scanner
+skips the line — the scanner keys on the raw-string-in-a-data-context
+shape, not on operand abstraction.
 
-**VERIFY:** re-run security scan -> RC-46 / RC-87 / CMD_INJECTION on those
-lines gone (skipped as detector signatures), not demoted, not
-suppressed-by-config.
+**VERIFY:** re-run security scan -> RC-46 / RC-87 / CMD_INJECTION on a
+genuine DATA-only signature line gone (skipped as a detector needle, no
+sink on the line), not demoted, not suppressed-by-config. A signature
+line that ALSO carries an exec sink will (correctly) still fire — that
+is not a devitalization, it is an evasion the scanner now rejects.
 
-**SAFE when:** the strings genuinely ARE signatures (a scanner, an audit
-plugin, a linter). **BREAKS when:** the list is actually spread into a
-subprocess as argv — raw-stringing changes the matched bytes (`r"\s*"` is
-not a real space) and breaks the call. If a sink consumes the list it is
-**load-bearing**; flag, do not devitalize.
+**SAFE when:** the strings genuinely ARE comparison needles fed to
+`re.<func>` / a rules table (a scanner, an audit plugin, a linter) with
+no sink on the line. **BREAKS / DO NOT USE when:** the literal is spread
+onto an execution sink — `os.system("chromium " + r"--no-sandbox")` runs
+**identically** to the plain string (a backslash-free flag is the same
+bytes raw or plain: `r"--no-sandbox" == "--no-sandbox"`), so raw-stringing
+a live exec argument is an **evasion, not a devitalization**, and the
+scanner now fires on it regardless of the `r` prefix. (Raw-stringing also
+changes the bytes when the literal contains metacharacters — `r"\s*"` is
+not a real space — breaking an argv call.) If any sink consumes the
+literal it is **load-bearing**: flag to the user, do not raw-string it.
 
 ---
 
@@ -94,17 +114,25 @@ classic pipe-to-shell shape.
 **AFTER** — choose by author intent:
 
 - **(B1) defanged illustration** (the doc just *describes* the pattern,
-  e.g. a security-plugin README explaining the threat):
+  e.g. a security-plugin README explaining the threat). The `| bash`
+  pipe-to-interpreter token MUST be removed — it is what the rules match;
+  eliding only the URL is NOT enough:
 
   ````markdown
   A supply-chain attack looks like this (DO NOT RUN — illustration only):
   ```text
-  curl ... | bash        <- remote script piped straight into a shell
+  curl <URL>   [pipes a remote script into a shell — DO NOT RUN]
   ```
   ````
 
-  Fence language is `text` (not `bash`), the pipe-to-shell is elided
-  (`... | bash`), and the URL is removed. No runnable one-liner remains.
+  Or nominalize the whole line to prose with no literal `curl`/`| bash`
+  token: *"…fetches a remote script and pipes it straight into a shell
+  (description only)."* Fence language is `text` (not `bash`), and the
+  `| <interpreter>` token is gone. (Re-scan confirmed: removing `| bash`
+  clears it; merely switching the fence to `text` and eliding the URL
+  while keeping `| bash` does NOT — both `skillaudit:supply_chain` and
+  `skillaudit:code_execution` still fire, and in security mode cisco
+  PIPELINE_TAINT_FLOW fires as a MAJOR.)
 
 - **(B2) placeholder + split steps** (the doc is a *real* install guide
   and must stay actionable, but the pipe is the flagged shape):
@@ -118,13 +146,24 @@ classic pipe-to-shell shape.
   install pattern anyway, and removes the piped-fetch token the rule
   matches.
 
-**WHY-INERT:** (B1) a `text`-fenced, pipe-elided line has no
-pipe-to-shell token to match. (B2) the fetch and the shell run are on
-separate lines, so no single line pipes a remote fetch into a shell. A
-markdown file cannot execute either way — but the rule keys on the token
-shape, so removing the shape clears it.
+**WHY-INERT:** the rules key on the literal token sequence `curl` + `|
+<interpreter>`, independent of the fence language or whether the URL is
+elided. (B1) once the `| bash` token is removed (or the line is
+nominalized to prose), no `curl … | bash` adjacency remains on a single
+fenced line — `skillaudit:supply_chain`, `skillaudit:code_execution`,
+and cisco PIPELINE_TAINT_FLOW have nothing to match. (B2) the fetch and
+the shell run are on separate lines, so no single line pipes a remote
+fetch into a shell. A markdown file cannot execute either way — but the
+rule keys on the token shape, so removing the shape clears it.
 
-**VERIFY:** re-scan -> SUPPLY_CHAIN / CMD_INJECTION on that block gone.
+**VERIFY:** re-scan -> on a line where the `| <interpreter>` token has
+been removed (B1) or the steps are split (B2): `skillaudit:supply_chain`
+plus `skillaudit:code_execution` gone, and in security mode cisco
+PIPELINE_TAINT_FLOW gone. If a cisco PIPELINE_TAINT_FLOW MAJOR (or a
+demoted-to-NIT `skillaudit:supply_chain` in a `references/*.md` file)
+still appears, the `curl` + `| bash` pair is still present on one line —
+the defang is incomplete. B2 (split download → review → run) is the
+reliably-clean path (re-scan verified LIVE = 0).
 
 **SAFE when:** it is documentation (always — a `.md` never executes).
 **BREAKS when:** the same one-liner also lives in an executable installer
@@ -272,36 +311,53 @@ from the shipped bytes.
 
 ## T6 — Backtick command-substitution identifier in prose / docs
 
-Fires CMD_INJECTION / SHELL_EXEC because a backtick-wrapped bare
-identifier reads as command substitution.
+Fires CMD_INJECTION / SHELL_EXEC because a backtick-wrapped command reads
+as command substitution — **but only when the inner command is not an
+already-benign read-only recon command and no network sink is adjacent.**
+Read-only recon backticks (`id`, `whoami`, `uname`, `hostname`, …) are
+**already auto-certified benign** in markdown by skillaudit's
+`_BENIGN_RECON_CMDS` discriminator and need NO transform — do not churn a
+line that already passes (cross-cutting rule 1). T6 applies only when the
+inner command is non-recon (e.g. a `curl`/fetch token) **or** a network
+sink sits within ±3 lines (which forfeits the recon certification).
 
-**BEFORE** (described): a sentence that names two shell commands by
-wrapping each bare identifier in backticks, so each reads to the scanner
-as a command-substitution shape.
+**BEFORE** (described): a sentence that wraps a non-recon command in
+backticks — e.g. a `curl` to a remote URL — so it reads to the scanner as
+a command-substitution shape that fires un-suppressed.
 
 **AFTER** (form **D** — quote as prose, not as a code token):
 
 ```markdown
-The hook runs the "id" and "whoami" commands to fingerprint the box.
+The hook captures remote config with the "curl" command pointed at a
+remote URL.
 ```
 
 Use straight or typographic quotes / the word "command" — anything that is
-plainly an English mention, not a fenced / backtick shell token.
+plainly an English mention, not a fenced / backtick shell token. Do NOT
+simply nominalize a backtick that wraps a *dangerous literal* (e.g.
+`` `cat /etc/passwd` `` or `` `nc -e /bin/sh …` ``): those tokens fire on
+the literal substring even as prose, so quoting the words is not enough —
+the literal itself must be removed/abstracted (T1/T4) or flagged.
 
-**WHY-INERT:** a backtick-wrapped bare identifier reads to the scanner as
-a command-substitution shape; the unquoted prose mention "the id command"
-carries no shell-substitution token. The sentence still documents the
-behavior; nothing executes.
+**WHY-INERT:** a backtick-wrapped command reads to the scanner as a
+command-substitution shape; an unquoted prose mention ("the curl command")
+carries no backtick command-substitution token, so the CMD_INJECTION /
+command-substitution match has nothing to key on. The sentence still
+documents the behavior; nothing executes. (Re-scan verified: the backtick
+`` `curl http://…` `` fires; the prose mention clears, LIVE = 0.)
 
 **VERIFY:** re-scan -> the backtick command-substitution CMD_INJECTION
-gone.
+gone. First check the live report: if the inner command was a recon
+command (`id`/`whoami`/…) with no adjacent sink, it was already
+suppressed and never needed a transform.
 
-**SAFE when:** it is documentation describing a command by name (the
-common case). **BREAKS when:** the backticks are *code* the reader is
-meant to copy-run AND the surrounding fence is genuinely shell — but even
-then the markdown does not execute; this transform only changes prose, so
-functionality is unaffected. (The corresponding *executable* command in a
-hook is a separate, possibly-load-bearing finding — T4 / T7 territory.)
+**SAFE when:** it is documentation describing a non-recon command by name
+(and the matched token was the backtick shape, not a dangerous literal).
+**BREAKS when:** the backticks are *code* the reader is meant to copy-run
+AND the surrounding fence is genuinely shell — but even then the markdown
+does not execute; this transform only changes prose, so functionality is
+unaffected. (The corresponding *executable* command in a hook is a
+separate, possibly-load-bearing finding — T4 / T7 territory.)
 
 ---
 

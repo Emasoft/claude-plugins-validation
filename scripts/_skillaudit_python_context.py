@@ -185,6 +185,26 @@ _STRING_CMD_EXEC_FQNAMES: Final[frozenset[str]] = (
     | _DYNAMIC_EXEC_FQNAMES
 )
 
+# ALWAYS-shell string sinks — the subset of ``_SHELL_CALL_FQNAMES`` that has NO
+# non-shell mode: each routes its argument string through ``/bin/sh -c``
+# UNCONDITIONALLY and takes NO ``shell=`` kwarg. The "shell= absent → Python
+# passes argv straight to ``execve``, no shell" guarantee that
+# ``_classify_call`` relies on is TRUE for ``subprocess.run([...])`` /
+# ``Popen([...])`` / ``os.execv(...)`` (argv-form, no shell) but FALSE for these
+# — so the leniency must NOT be applied to them. Only a PURE-literal arg
+# (``os.system("clear")``) is provably inert; ANY non-pure-literal arg (a bare
+# ``Name`` reassembled via ``.join``/concat on a prior line, a ``Call`` returning
+# the built string, a ``Subscript``/``Attribute``) is a live shell execution and
+# MUST stay ``suspect`` — reaching parity with the already-correct
+# ``subprocess.run(<Name>, shell=True)`` path. (RT2/RT4 FN-holes — never-suppress.)
+# Derived from the named always-shell set above (excluding the dynamic
+# eval/exec/compile members, which have their own ``_DYNAMIC_EXEC_FQNAMES``
+# handling), plus the two ``subprocess.get*output`` helpers, which are likewise
+# implemented as ``/bin/sh -c`` wrappers and take no ``shell=`` kwarg.
+_ALWAYS_SHELL_STRING_SINKS: Final[frozenset[str]] = (_STRING_CMD_EXEC_FQNAMES - _DYNAMIC_EXEC_FQNAMES) | frozenset(
+    {"subprocess.getoutput", "subprocess.getstatusoutput"}
+)
+
 # Hash functions flagged by INSECURE_CRYPTO. The matcher fires on the
 # function reference itself; the AST classifier then checks the call
 # context — these are commonly used for non-cryptographic identity
@@ -3008,6 +3028,34 @@ def _classify_call(call: ast.Call, qualname: str) -> ContextVerdict | None:
             return "suspect"
 
         first = call.args[0]
+
+        # ALWAYS-shell string sinks (os.system / os.popen / subprocess.getoutput
+        # / subprocess.getstatusoutput / commands.getoutput /
+        # commands.getstatusoutput / pty.spawn / asyncio.create_subprocess_shell)
+        # have NO non-shell mode — the argument string ALWAYS goes through
+        # ``/bin/sh -c``. None of them takes a ``shell=`` kwarg, so the
+        # ``_shell_kwarg_is_possibly_true`` test below is always False for them
+        # and they would otherwise fall into the "Python guarantees no shell"
+        # execve branch — which is WRONG for these sinks. A pure-literal arg is
+        # the ONLY provably-inert case (``os.system("clear")``); ANY other arg
+        # shape — a bare ``Name`` reassembled from fragments on a prior line, a
+        # ``Call`` returning the built string, a string-concat ``BinOp`` of
+        # ``Name`` operands, a ``Subscript``/``Attribute`` — is a real shell
+        # execution whose CONTENT is attacker-assembled at runtime and cannot be
+        # proven inert. The clear must NOT depend on whether the reassembly
+        # expression sits literally at the sink or one line up in a variable —
+        # that is an attacker-controllable structural signal (FN-unsafe). So
+        # force ``suspect`` for every non-pure-literal arg here, BEFORE the
+        # shell-kwarg test, bringing these to parity with the already-correct
+        # ``subprocess.run(<Name>, shell=True)`` path. FN-safe: additive only —
+        # the pure-literal arg still clears, and the argv-form sinks
+        # (subprocess.run/Popen/call/check_*/os.execv*/create_subprocess_exec/
+        # os.spawnv*), which truly bypass the shell, are NOT in this set and are
+        # unaffected. (RT2/RT4 always-shell variable-arg FN-holes.)
+        if qualname in _ALWAYS_SHELL_STRING_SINKS:
+            if _arg_is_pure_literal(first):
+                return "safe_literal"
+            return "suspect"
 
         if _shell_kwarg_is_possibly_true(call):
             # shell=True (or a non-literal shell= that could be truthy at

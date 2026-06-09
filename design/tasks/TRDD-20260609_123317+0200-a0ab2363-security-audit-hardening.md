@@ -3,7 +3,7 @@ trdd-id: a0ab2363-5fbd-402d-922d-b00d6bd85516
 title: Red-team FP discriminators + devitalize transforms for FN-holes, broad-audit all security docs/skills/code, fix + publish
 column: dev
 created: 2026-06-09T12:33:17+0200
-updated: 2026-06-09T14:57:25+0200
+updated: 2026-06-09T15:29:20+0200
 current-owner: main-session
 assignee: main-session
 priority: 1
@@ -42,7 +42,15 @@ external-refs: ["github.com/Emasoft/claude-plugins-validation/issues/67"]
 
 **CHANGELOG ALIGNMENT (CC 2.1.169):** 9 aligned / 1 gap / 2 n-a, NO blocking-FP. The 1 gap = `scripts/validate_hook_output.py` must add `additionalContext` to Stop(~185)+SubagentStop(~179) output sets (CC 2.1.163) — being fixed in Wave 2 group M. Report under reports/cc-changelog-alignment/.
 
-**RESUME STATUS:** Wave 2 (THROTTLED cap3) running as task `wti0uig2a` (run `wf_68eb1cb9-801`): groups I-devitalize-docs, J-harden-docs, K-menu-readme, M-cc-align-hook-output. On completion read `all` (verdict per group), re-dispatch any fail.
+**WAVE 2 DONE — 4/4 pass** (I-devitalize-docs, J-harden-docs, K-menu-readme, M-cc-align-hook-output; consistent_with_code + no_new_findings; skills Grade A --strict; recipes scanner-verified inert; M added additionalContext to validate_hook_output Stop/SubagentStop + 2-sided test).
+
+**CENTRAL VERIFY (post all waves):** staged 30 files + REGENERATED MANIFEST (878 hashes, .plugin-self-hashes.json + .cpv-self-hashes.json staged). ruff+mypy+pyright ALL CLEAN on 11 changed py. FULL SUITE = **8843 passed, 2 skipped, 0 failed** (the earlier 5 failures fixed by re2_compat regen + manifest regen). Consolidated red-team spot-check: plugin-gate on a combined-attack fixture = INVALID/CRITICAL:7 (reassembled os.popen/getoutput, plain curl|bash, getattr-exec, rot13, charcode ALL fire); RT3 name-spoof fixture (named "claude-plugins-validation") → malicious os.system(r"…|sh") @scripts/evil_patterns.py:3 STILL FIRES RC-136 (name does NOT silence).
+
+**REGRESSION caught by self-validate (the central step's value):** `remote_validation.py plugin . --strict` on CPV ITSELF = INVALID (MAJOR:1 MINOR:5 NIT:1), ALL RC-73 taint "tainted function-param reaches getattr(obj,<tainted attr>)" on CPV's OWN benign reflection (publish.py:134 getattr(self._real,name); 5 tests). ROOT CAUSE (verified): RC-73 getattr-sink + function-param-source are PRE-EXISTING by design (cpv_taint_engine 369-373/621-629); group F's `_run_security_execclass_gate` now runs check_phase10_taint at the PLUGIN gate (didn't before) WITHOUT applying CPV's self-scan-skip → CPV flags its own files. FIX in flight: agent `a4dea558a2b4c986c` (F2) — apply self-scan-skip to group F's pass (B1; SHA-verified `_CPV_IS_RUNNING_CPV` identity, NOT spoofable) or tighten getattr-sink (B2) if security subcommand also surfaces it; 2-sided (benign getattr clears, getattr(os,untrusted)() fires); re-validate CPV → 0/0/0.
+
+**RESUME STATUS:** F2 fix agent `a4dea558a2b4c986c` running. ON F2 DONE: re-stage edited files + RE-REGEN MANIFEST (validate_plugin.py / cpv_taint_engine.py changed again) + re-run FULL suite (0 failed) + re-run self-validate (CPV 0/0/0) + final consolidated red-team spot-check. THEN commit + publish.
+
+**NEXT (publish):** commit the whole hardening (stage by NAME, never -A) → `publish.py --minor` (feat: 12 FN-holes closed + 30 findings + CC 2.1.169 align). publish.py G2 tests run BEFORE G8 manifest-refresh → manifest MUST be committed-current first. Verify CI+Release+Notify green. Then update GitHub issues if any + MEMORY.md.
 
 **NEXT (after Wave 2):** (1) move/keep stray reverifier scratch out of tests/ (already moved test_secaudit_D_reverify.py → reports_dev/secaudit-scratch/); (2) `git add` all new+changed BY NAME (never -A); (3) REGEN MANIFEST `uv run python scripts/_plugin_compute_hashes.py` (fixes self-artifact tests 1,2); (4) FULL suite `uv run pytest -q -n auto` → must be 0 failed; (5) plugin-level self-validate `PLUGIN_SKIP_GITHUB_INTEGRITY=1 … remote_validation.py plugin .` --strict → clean; (6) red-team re-run loop-until-dry (my fixtures + the workflow reverifiers already confirmed each hole); (7) publish via publish.py (`--minor` — this is a feat: FN-hole hardening + CC alignment) → CI+Release+Notify green. publish.py G2 tests run BEFORE G8 manifest-refresh, so the manifest MUST be regenerated+committed BEFORE publish or tests 1,2 fail at G2.
 

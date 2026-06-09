@@ -51,7 +51,7 @@ Filter to execution-class + intent-class findings the gate blocks on (CRITICAL /
 
 For each finding, in priority order (CRITICAL, MAJOR, MINOR, NIT):
 
-  1. **CLASSIFY** via the devitalize-threats §3.4 decision table: documentation / detector-signature / dead-code / live-constrainable / live-irreducible / real-leaked-secret / ambiguous.
+  1. **CLASSIFY** via the devitalize-threats classification table (the load-bearing-triage reference, "The classification table"): documentation / detector-signature / dead-code / live-constrainable / live-irreducible / real-leaked-secret / ambiguous.
   2. **If devitalizable** → pick the catalog transform (T1..T9) and apply the MINIMAL edit in the SAME turn (read-and-fix together; locate the exact span with SERENA / grepika and replace only that symbol or span). Move the construct into one of the four inert forms: raw-string signature, defanged illustration, allow-map dispatch, or removal / nominalization.
   3. **If load-bearing / ambiguous / real-secret** → DO NOT edit. Record a FLAGGED entry with the exact remediation choice for the user (harden it / accept the finding / it is intended / rotate-and-purge-history for a real secret).
   4. **RE-SCAN** (Phase 1, `--strict`) and confirm THIS finding is gone AND no new finding appeared. If a new finding appeared, or it merely demoted to a blocking NIT, iterate on this finding before moving on.

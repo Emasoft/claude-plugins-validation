@@ -561,6 +561,22 @@ def _is_documentation_only_path_md(file_path: str) -> bool:
     return False
 
 
+def _is_instruction_loadable_path_md(file_path: str) -> bool:
+    """True iff ``file_path`` is a markdown surface Claude Code MAY load as
+    agent instructions — the exact complement of ``_is_documentation_only_path_md``
+    (and of the dispatcher's ``_is_documentation_only_path``). Covers the
+    instruction-loadable basenames (SKILL.md / CLAUDE.md / AGENTS.md), files
+    under ``agents/`` / ``commands/`` / ``.claude/rules/`` / ``output-styles/``,
+    and any unknown ``.md`` at plugin root not on the doc-only allowlist.
+
+    Used by ``_match_in_security_review_doc`` to DEMOTE (visible NIT) rather
+    than hard-suppress an execution-class match on these surfaces, where the
+    surrounding ``Remediation:`` / ✓ doc-vocab is attacker-controllable."""
+    if not file_path:
+        return False
+    return not _is_documentation_only_path_md(file_path)
+
+
 def _is_gfm_table_row(line: str) -> bool:
     """True iff ``line`` is a GitHub-Flavored-Markdown table row.
 
@@ -929,13 +945,26 @@ def _match_in_security_review_doc(
     lines: list[str],
     line_idx: int,
     fence_state: tuple[int, int, str] | None,
+    file_path: str,
 ) -> bool:
     """True iff an execution/injection-class match is in a markdown
     document that QUOTES attack patterns as documentation/education
     (markdown box-drawing table rows, ``Before:`` / ``Bad:`` labels, CWE
     references, etc.) — a "bad example" being *described*, not executed.
 
-    Signals (both required):
+    Signals (all required):
+      0. The host file is NOT instruction-loadable (security-audit red-team
+         G5-skillaudit-md-secreview-instr-loadable, 2026-06-09). On an
+         instruction-loadable surface (SKILL.md / CLAUDE.md / AGENTS.md /
+         ``agents/`` / ``commands/`` / ``.claude/rules/``) the doc-vocab
+         (``Remediation:`` / ✓ / ``CWE-…``) is ATTACKER-CONTROLLABLE — a
+         malicious skill can drop a ✓ or ``Remediation:`` line beside a live
+         ``curl … | bash`` to silence the scanner. Because this discriminator
+         drives a ``safe_literal`` → full SUPPRESS verdict, it MUST decline
+         on those paths so the match instead falls through to ``safe_doc`` /
+         ``code_fence_neutral`` → DEMOTE (visible NIT for agent triage). The
+         genuine FP this guard exists for — security-review prose in a
+         NON-loadable doc (``references/``, ``docs/``, README) — is unaffected.
       1. The surrounding ±5 lines contain explicit documentation vocab
          (CWE / OWASP / ``Before:`` / ``Bad:`` / ``remediation:`` / ✗ / …).
       2. The matched line is NOT inside an EXECUTABLE-language fence
@@ -943,14 +972,15 @@ def _match_in_security_review_doc(
          table cell, inline-code, or a non-executable fence is inert
          documentation; the SAME command inside a live ```bash fence is
          something the agent would actually RUN — suppressing it there
-         would hide a real threat (iron rule). Because this discriminator
-         returns ``safe_literal`` → full SUPPRESS in the dispatcher, the
-         executable-fence carve-out is mandatory: without it a real
-         ``curl … | bash`` / reverse shell inside a ```bash block in an
-         instruction-loadable SKILL.md would be silently dropped whenever
-         any nearby line happened to mention "security review" /
-         "remediation:" / a ✓ checkbox.
+         would hide a real threat (iron rule).
     """
+    # Signal 0: never SUPPRESS an execution-class match on an
+    # instruction-loadable surface — decline so the match demotes (visible)
+    # instead of vanishing. Subsumes signal 2's executable-fence carve-out
+    # there (the doc-vocab is attacker-controllable in ANY context — prose,
+    # non-exec fence, or exec fence — on those paths).
+    if _is_instruction_loadable_path_md(file_path):
+        return False
     # Signal 2: never suppress inside a live executable fence — the
     # heuristic chain (bash-fence uplift) must keep deciding there.
     if fence_state is not None and fence_state[2] in _EXECUTABLE_LANGS:
@@ -1310,6 +1340,7 @@ def _certain_benign_literal(
     fence_state: tuple[int, int, str] | None,
     match: str,
     rule_id: str,
+    file_path: str,
 ) -> bool:
     """Return True iff ``match`` is a 100%-certain-benign shape that must
     be SUPPRESSED regardless of fence/prose context.
@@ -1374,6 +1405,20 @@ def _certain_benign_literal(
     #     execute it. Iron rule preserved: same patterns OUTSIDE
     #     warning context (e.g. a real ``chmod 777`` in a real install
     #     script) still fire.
+    # Security-audit red-team (G5-skillaudit-md-secreview-instr-loadable,
+    # 2026-06-09): the warning-context vocab (``dangerous`` / ``never`` /
+    # ``remediation:`` / …) is ATTACKER-CONTROLLABLE — the same weakness as
+    # ``_match_in_security_review_doc``. On an INSTRUCTION-LOADABLE surface a
+    # malicious skill can park warning prose beside a live ``curl … | bash`` /
+    # ``eval "$(curl …)"`` to drive this branch's ``safe_literal`` → full
+    # SUPPRESS. So for the EXECUTION-class shell rules (CMD_INJECTION /
+    # SHELL_EXEC / REVERSE_SHELL) we DECLINE the warning-context suppress on
+    # those paths, letting the match fall through to ``safe_doc`` /
+    # ``code_fence_neutral`` → DEMOTE (visible NIT). Non-execution rules
+    # (FS_WRITE / PATH_TRAVERSAL / REGEX_DOS / INSECURE_CRYPTO / …) keep their
+    # warning-context FP suppression everywhere (a quoted ``chmod 777`` /
+    # ``(a+)+b`` cannot itself become an agent-delivery vector), and doc-only
+    # paths are entirely unaffected.
     if rule_id in {
         "FS_WRITE",
         "PRIVILEGE_ESC",
@@ -1396,7 +1441,10 @@ def _certain_benign_literal(
         "NET_SUSPICIOUS",
         "TIME_BOMB",
     } and _match_in_warning_context(line, lines, line_idx):
-        return True
+        if rule_id in {"CMD_INJECTION", "SHELL_EXEC", "REVERSE_SHELL"} and _is_instruction_loadable_path_md(file_path):
+            pass  # exec-class on a loadable surface → demote (visible), do not suppress
+        else:
+            return True
 
     # (6) r01 anthropic FP iter1 — ``sudo apt-get install ...`` and
     #     similar known-safe package-manager / admin commands in
@@ -1573,7 +1621,9 @@ def _certain_benign_literal(
     #     labels, and ``Bad: exec(userInput)`` examples are doc context.
     #     ``fence_state`` makes the discriminator refuse to suppress inside
     #     a live executable fence (where the command would actually run).
-    if rule_id in _EXECUTION_CLASS_RULES_MD and _match_in_security_review_doc(line, lines, line_idx, fence_state):
+    if rule_id in _EXECUTION_CLASS_RULES_MD and _match_in_security_review_doc(
+        line, lines, line_idx, fence_state, file_path
+    ):
         return True
 
     # (10c) r10-final FP iter (2026-05-28) — INTENT_DESTRUCTIVE_INTENT
@@ -1650,7 +1700,7 @@ def classify(
     # threat wearing the same surface still surfaces. ``fence_state`` is
     # passed so the security-review-doc branch can decline to suppress
     # an execution-class match inside a live executable fence.
-    if _certain_benign_literal(line, lines, line_idx, fence_state, match, rule_id):
+    if _certain_benign_literal(line, lines, line_idx, fence_state, match, rule_id, file_path):
         return "safe_literal"
 
     if fence_state is None:

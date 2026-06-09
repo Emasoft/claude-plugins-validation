@@ -226,14 +226,25 @@ def apply_verdict(
 
 
 def file_role_of(rel_path: str) -> str:
-    """Classify the file's role from its path.
+    """Classify the file's role from its path — BENCHMARK/STANDALONE ONLY.
 
-    Heuristic — uses path segments only. CPV already has the
-    authoritative `is_test_path` / `is_doc_path` / `is_sample_file`
-    helpers in `cpv_validation_common.py`; the role string keeps the
-    classifier independent of the rest of CPV at module import time.
-    Callers in the scan loop should override this with the canonical
-    helpers when available.
+    NOT AUTHORITATIVE and NOT on the live validation path. The live role
+    classification is `validate_security._file_role_from_path`, which
+    delegates to the canonical `is_test_path` / `is_doc_path` /
+    `is_sample_file` helpers in `cpv_validation_common.py`. This function
+    is a deliberately self-contained path-substring heuristic so the
+    classifier module stays import-light (no `validate_security` /
+    `cpv_validation_common` dependency at import time); its ONLY consumer
+    is the offline benchmark harness `bench_fp_classifier.py`, where a
+    fixture without an explicit `file_role` needs a cheap fallback.
+
+    Do NOT wire this into the live scan loop. Its matching is looser than
+    the authoritative helper (e.g. it treats ANY `.txt`/`.md` as `doc` and
+    ANY `/examples/` segment as `sample` by path shape alone), so the two
+    implementations of the same role taxonomy can DRIFT. On the live path
+    always call `_file_role_from_path` (the single source of truth);
+    re-route this heuristic to delegate to it only if the import-light
+    constraint is ever dropped. (audit G6 G6-file-role-of-dup-impl-drift)
     """
 
     rel = rel_path.replace("\\", "/").lower()
@@ -282,8 +293,31 @@ def has_sink_nearby(
     Pure substring match — case-sensitive, no regex compilation cost
     per call. Sink lists are kept short on purpose: a too-broad list
     starts re-introducing the FPs we just removed.
+
+    WINDOW-BOUNDED RECALL — READ BEFORE TRUSTING A `False` (audit G6
+    G6-has-sink-nearby-window-boundary). This function sees ONLY the
+    `surrounding_lines` window the caller built; it never re-reads the
+    file. Therefore its result is asymmetric:
+
+    * `True`  — reliable: a sink hint IS present in the window.
+    * `False` — means "no sink WITHIN THIS WINDOW", NOT "no sink anywhere
+      in the file". A sink placed outside the window is invisible here.
+
+    Consequence for FN-safety: a `False` MUST NEVER be escalated to a
+    `DEFINITE_FP` (full suppression) on a narrow window — a distant exfil
+    sink would then silently clear a real finding. A `False` may only ever
+    DEMOTE (to `LIKELY_FP`), and even then only on a deliberately WIDE
+    window (the live RC-21 caller uses window=30 for exactly this reason).
+    For a confident "this value never reaches a sink" verdict, derive it
+    from the structural taint engine (`cpv_taint_engine.analyze_module`),
+    which follows data flow across the whole module — not from this
+    substring-proximity check. Keep `True`-driven decisions (sink present
+    → escalate / treat as real) here; route `False`-driven SUPPRESSION
+    decisions to taint analysis.
     """
 
+    # Substring proximity only — recall is bounded by `surrounding_lines`.
+    # See the docstring: a False is NOT proof of "no sink in the file".
     return any(hint in line for line in surrounding_lines for hint in sink_hints)
 
 
