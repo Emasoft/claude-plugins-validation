@@ -1,9 +1,9 @@
 ---
 trdd-id: a0ab2363-5fbd-402d-922d-b00d6bd85516
 title: Red-team FP discriminators + devitalize transforms for FN-holes, broad-audit all security docs/skills/code, fix + publish
-column: dev
+column: published
 created: 2026-06-09T12:33:17+0200
-updated: 2026-06-09T16:48:47+0200
+updated: 2026-06-09T17:07:04+0200
 current-owner: main-session
 assignee: main-session
 priority: 1
@@ -23,6 +23,8 @@ external-refs: ["github.com/Emasoft/claude-plugins-validation/issues/67"]
 # Security audit + red-team of CPV FP discriminators / devitalize transforms, then fix + publish
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-06-09
+
+**✅ COMPLETE — shipped v2.126.1 (commit d131102, tag v2.126.1; CI+Release+Notify GREEN). 12 FN-holes + 42 findings fixed, CC 2.1.169 aligned. The broken v2.126.0 (CI-red serial-pollution) was fixed in v2.126.1. Nothing pending.**
 
 **Current state:**
 - Workflow `wcks98lk8` (run `wf_bb1014b3-edb`) is RUNNING in background: 6 red-team probes (real fixtures + real validator) + 7 audit groups, each finding adversarially verified. Script at `.../workflows/scripts/cpv-security-audit-redteam-wf_bb1014b3-edb.js`. Returns `{summary, fn_holes, confirmed, reports, per_job}`.
