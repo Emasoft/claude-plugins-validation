@@ -1250,6 +1250,7 @@ _CLASSIFIER_EXTENSIONS: tuple[str, ...] = (
     ".jsx",
     ".mjs",
     ".cjs",
+    ".rs",
 )
 
 
@@ -1292,6 +1293,77 @@ def _shebang_language(content: str) -> str | None:
     if interp.startswith(("node", "deno", "bun", "ts-node", "tsx")):
         return "ts"
     return None
+
+
+# Issue #71 — memory-authoring-skill recogniser for the AGENT_MEMORY_MOD FP.
+# A skill whose DECLARED purpose (frontmatter name/description) is authoring
+# the user's own markdown memory notes (e.g. `janitor-memory-write`) will
+# necessarily discuss "memory" / "MEMORY.md" / writing notes — exactly what
+# the AGENT_MEMORY_MOD heuristic keys on. That is the skill doing its stated
+# job, not agent manipulation.
+_MEMORY_TERM_RE = re.compile(r"\bmemor(?:y|ies)\b", re.IGNORECASE)
+# Legitimate self-authoring / note-taking verbs+nouns. Deliberately EXCLUDES
+# neutral-to-suspicious verbs (modify / change / alter / overwrite) so a
+# description like "modifies ANOTHER agent's memory" does NOT qualify.
+_MEMORY_AUTHORING_TERM_RE = re.compile(
+    r"\b(?:author|writ(?:e|es|ing)|not(?:e|es)|recall|remember(?:s|ing)?"
+    r"|persist(?:s|ing|ence)?|stor(?:e|es|ing|age)|sav(?:e|es|ing)"
+    r"|record(?:s|ing)?|maintain(?:s|ing)?|index(?:es|ing)?)\b",
+    re.IGNORECASE,
+)
+# Attack-intent terms — if the frontmatter ALSO carries any of these, the
+# "memory authoring" claim is NOT trusted (hidden tampering / cross-agent
+# manipulation). Keeps the carve-out from being a free evasion for a skill
+# that openly describes injecting / hijacking ANOTHER agent's memory.
+_MEMORY_ATTACK_INTENT_RE = re.compile(
+    r"\b(?:inject(?:s|ing|ion)?|hijack(?:s|ing)?|tamper(?:s|ing)?"
+    r"|poison(?:s|ing)?|exfiltrat\w*|manipulat\w*|overwrit\w*|bypass(?:es|ing)?"
+    r"|another\s+agent|other\s+agent|others?'?\s+memor)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_memory_authoring_skill(file_path: str, content: str) -> bool:
+    """True iff ``content`` is a markdown skill/agent/command file whose
+    frontmatter ``name``/``description`` declares memory authoring as its
+    purpose (issue #71). Used to suppress the AGENT_MEMORY_MOD FP on a skill
+    whose entire job is writing the user's own markdown memory notes.
+
+    FN-safe: requires BOTH a memory term AND a legitimate authoring verb in
+    the name/description, AND is voided when an attack-intent term is also
+    present. A skill unrelated to memory (no memory term) — or one that
+    openly describes tampering with ANOTHER agent's memory — does NOT
+    qualify, so hidden / cross-agent memory modification still fires.
+    """
+    if not file_path.lower().endswith((".md", ".markdown")):
+        return False
+    # Frontmatter is the first ``---``-fenced block. No frontmatter → not a
+    # skill/agent/command declaration → cannot self-declare memory authoring.
+    stripped = content.lstrip()
+    if not stripped.startswith("---"):
+        return False
+    body = stripped[3:]
+    end = body.find("\n---")
+    if end < 0:
+        return False
+    fm = body[:end]
+    # Extract name (single line) + description (may span lines up to the next
+    # top-level ``key:`` or the end of the frontmatter block).
+    name_m = re.search(r"(?mi)^name:[ \t]*(.+)$", fm)
+    desc_m = re.search(r"(?mis)^description:[ \t]*(.+?)(?=^\w[\w-]*:[ \t]|\Z)", fm)
+    declared = " ".join(
+        part
+        for part in (
+            name_m.group(1) if name_m else "",
+            desc_m.group(1) if desc_m else "",
+        )
+        if part
+    )
+    if not declared:
+        return False
+    if _MEMORY_ATTACK_INTENT_RE.search(declared):
+        return False
+    return bool(_MEMORY_TERM_RE.search(declared) and _MEMORY_AUTHORING_TERM_RE.search(declared))
 
 
 def _context_classifier_verdict(
@@ -1352,6 +1424,18 @@ def _context_classifier_verdict(
     # tells the user to run `claude setup-token` / `--dangerously-skip-permissions`
     # stays visible.)
     if rule_id == "CLAUDE_CLI_UNAUTHORIZED_INSTALL" and fp_lower.endswith((".md", ".markdown")):
+        return "suppress"
+    # Issue #71 — AGENT_MEMORY_MOD on a skill whose OWN frontmatter declares
+    # memory authoring as its purpose (e.g. `janitor-memory-write`). The rule
+    # keys on any text discussing memory / MEMORY.md writing; for a skill that
+    # DECLARES memory authoring as its function this is the skill doing its
+    # stated job, not agent manipulation — same defensive-documentation lens
+    # as the prompt-injection carve-outs. Suppress (the rule otherwise demotes
+    # to a NIT, which still publish-blocks under --strict). FN-safe: a skill
+    # whose name/description is NOT about memory authoring — or that openly
+    # describes injecting / hijacking ANOTHER agent's memory — still fires
+    # (see `_is_memory_authoring_skill`).
+    if rule_id == "AGENT_MEMORY_MOD" and _is_memory_authoring_skill(file_path, content):
         return "suppress"
     # Ignore-files (.gitignore / .dockerignore / .npmignore / .eslintignore /
     # .prettierignore / .cursorignore …) are NON-EXECUTABLE — git/npm/docker read
@@ -1448,6 +1532,23 @@ def _context_classifier_verdict(
         except ImportError:
             return ""
         classifier_verdict = _ts_classify(file_path, content, line_idx, match, rule_id)
+    elif fp_lower.endswith(".rs"):
+        # Issue #71 — Rust context classifier for the SHELL_EXEC `eval(` FP.
+        # Rust has NO runtime code-eval / shell-eval builtin: every `eval(`
+        # in Rust source is a user-defined function/method (`Pred::eval`,
+        # `expr.eval(lc)`, `fn eval(...)`), not shell execution. Real Rust
+        # shell exec is `std::process::Command` + `.spawn()`/`.output()`/
+        # `.status()`/`.exec()` — none contain the substring `eval`, so they
+        # fire via the SHELL_EXEC `spawn(` pattern (and the taint engine)
+        # INDEPENDENTLY of this classifier. The classifier therefore only
+        # suppresses `eval`-identifier SHELL_EXEC matches; everything else
+        # (incl. a real `.spawn()` on the same or another line) falls through
+        # to fire.
+        try:
+            from _skillaudit_rust_context import classify as _rs_classify  # type: ignore[import-not-found]
+        except ImportError:
+            return ""
+        classifier_verdict = _rs_classify(file_path, content, line_idx, match, rule_id)
     else:
         return ""
 
