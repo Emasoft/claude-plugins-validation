@@ -1067,11 +1067,23 @@ def _is_bearer_token_placeholder(line: str, match: str) -> bool:
     m = _BEARER_TOKEN_RE.search(line)
     if m is None:
         return False
-    value = m.group(1).strip().lower()
+    raw_value = m.group(1).strip()
+    value = raw_value.lower()
     if value in _BEARER_PLACEHOLDER_VALUES:
         return True
-    # Heuristic: short uppercase identifier like YOUR_API_KEY, MY_TOKEN
-    if len(value) < 32 and re.match(r"^[<\${]*[A-Z][A-Z0-9_]+[>\}]*$", value.strip("<>${}")):
+    # Heuristic: a shell-variable reference (`$AID_AUTH`, `${API_KEY}`) or an
+    # underscore-bearing uppercase identifier (`YOUR_API_KEY`, `MY_TOKEN`) as
+    # the Bearer value is a FORMAT spec / variable NAME — the literal
+    # credential is the variable's VALUE, which is NOT present in the doc. A
+    # real opaque/JWT Bearer token is mixed-case and 32+ chars, so it never
+    # matches the all-uppercase shape here. Require a `$`/`{` marker OR an
+    # embedded `_` so a contiguous uppercase secret blob (e.g. an AWS key id
+    # `AKIA…`) is NOT cleared. (issue #69 — the prior unconditional `.lower()`
+    # made the original uppercase check DEAD CODE, so `$AID_AUTH` in an
+    # instruction-loadable SKILL.md kept demoting to a publish-blocking NIT.)
+    inner = raw_value.strip("<>${}")
+    looks_like_var_or_name = bool(re.search(r"[\${]", raw_value)) or "_" in inner
+    if len(raw_value) < 32 and looks_like_var_or_name and re.match(r"^[A-Z][A-Z0-9_]+$", inner):
         return True
     # Heuristic: contains placeholder keywords like "your", "example",
     # "placeholder", "token" as a substring, AND is not a real JWT/key shape
