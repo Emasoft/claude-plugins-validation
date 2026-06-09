@@ -3,7 +3,7 @@ trdd-id: a0ab2363-5fbd-402d-922d-b00d6bd85516
 title: Red-team FP discriminators + devitalize transforms for FN-holes, broad-audit all security docs/skills/code, fix + publish
 column: dev
 created: 2026-06-09T12:33:17+0200
-updated: 2026-06-09T15:29:20+0200
+updated: 2026-06-09T16:48:47+0200
 current-owner: main-session
 assignee: main-session
 priority: 1
@@ -48,9 +48,13 @@ external-refs: ["github.com/Emasoft/claude-plugins-validation/issues/67"]
 
 **REGRESSION caught by self-validate (the central step's value):** `remote_validation.py plugin . --strict` on CPV ITSELF = INVALID (MAJOR:1 MINOR:5 NIT:1), ALL RC-73 taint "tainted function-param reaches getattr(obj,<tainted attr>)" on CPV's OWN benign reflection (publish.py:134 getattr(self._real,name); 5 tests). ROOT CAUSE (verified): RC-73 getattr-sink + function-param-source are PRE-EXISTING by design (cpv_taint_engine 369-373/621-629); group F's `_run_security_execclass_gate` now runs check_phase10_taint at the PLUGIN gate (didn't before) WITHOUT applying CPV's self-scan-skip → CPV flags its own files. FIX in flight: agent `a4dea558a2b4c986c` (F2) — apply self-scan-skip to group F's pass (B1; SHA-verified `_CPV_IS_RUNNING_CPV` identity, NOT spoofable) or tighten getattr-sink (B2) if security subcommand also surfaces it; 2-sided (benign getattr clears, getattr(os,untrusted)() fires); re-validate CPV → 0/0/0.
 
-**RESUME STATUS:** F2 fix agent `a4dea558a2b4c986c` running. ON F2 DONE: re-stage edited files + RE-REGEN MANIFEST (validate_plugin.py / cpv_taint_engine.py changed again) + re-run FULL suite (0 failed) + re-run self-validate (CPV 0/0/0) + final consolidated red-team spot-check. THEN commit + publish.
+**F2 DONE + SHIPPED v2.126.0 (commit c881bc5, tag v2.126.0)** — feat: 12 FN-holes + 42 findings + CC 2.1.169. F2 applied B1 (check_phase10_taint self-skip) + B2 (getattr-sink tighten); CPV self-validate 0/0/0/0; full suite 8855/0; ruff+mypy+pyright clean; red-team all-fire.
 
-**NEXT (publish):** commit the whole hardening (stage by NAME, never -A) → `publish.py --minor` (feat: 12 FN-holes closed + 30 findings + CC 2.1.169 align). publish.py G2 tests run BEFORE G8 manifest-refresh → manifest MUST be committed-current first. Verify CI+Release+Notify green. Then update GitHub issues if any + MEMORY.md.
+**POST-PUBLISH CI FAILURE (broken push — fixed):** v2.126.0 CI went RED: 3 failed / 8800 passed (Lint✓ Validate✓ Test✗). NOT re2, NOT validation — SERIAL-POLLUTION. Root cause: `validate_plugin._gi` (module-global GitignoreFilter, set fresh per run at validate_plugin.py:6442 — production-correct) leaks across IN-PROCESS `main()` calls. My NEW `tests/test_secaudit_F-validate-plugin.py::TestPluginGateEndToEnd` runs `main()` and sorts (alphabetically) BEFORE `test_validate_plugin.py`; serially (CI) it leaves `_gi` = the F-fixture filter, so the later `TestValidateCrossPlatformExtended`/`TestBinShebangScriptDetection` call `validate_cross_platform()` directly → `_gi.rglob("bin")` walks the stale (deleted) root → no bin/ → expected warnings ABSENT → 3 failed. xdist (`-n auto`, local) MASKED it (polluter + victims on different workers). Pinpointed via module-global before/after diff of an in-process `main()`. FIX: extended the existing `tests/conftest.py::_trdd_fa70f9b8_reset_global_state` autouse fixture to reset `validate_plugin._gi = None` before+after each test (production code untouched — it always sets `_gi` fresh; pure test-isolation). VERIFIED: serial full suite (matching CI) now **8855 passed / 0 failed / 5m07s**; the exact repro (was 3 failed) now 8 passed.
+
+**LESSON (knew it, didn't apply pre-publish):** CI runs SERIALLY (+ without google-re2); local `-n auto` (xdist + re2) masks serial-pollution + no-re2 ReDoS. ALWAYS run `pytest -p no:cacheprovider -o addopts=""` (serial) locally before publishing CPV. [[ci-vs-local-google-re2-serial]]
+
+**NEXT:** commit the conftest `_gi` fix (3 staged: conftest.py + 2 manifest + this TRDD) → `publish.py --patch` (2.126.0→2.126.1) → verify CI+Release+Notify green (watch with `gh run watch`) → update MEMORY.md to Current: 2.126.1.
 
 **NEXT (after Wave 2):** (1) move/keep stray reverifier scratch out of tests/ (already moved test_secaudit_D_reverify.py → reports_dev/secaudit-scratch/); (2) `git add` all new+changed BY NAME (never -A); (3) REGEN MANIFEST `uv run python scripts/_plugin_compute_hashes.py` (fixes self-artifact tests 1,2); (4) FULL suite `uv run pytest -q -n auto` → must be 0 failed; (5) plugin-level self-validate `PLUGIN_SKIP_GITHUB_INTEGRITY=1 … remote_validation.py plugin .` --strict → clean; (6) red-team re-run loop-until-dry (my fixtures + the workflow reverifiers already confirmed each hole); (7) publish via publish.py (`--minor` — this is a feat: FN-hole hardening + CC alignment) → CI+Release+Notify green. publish.py G2 tests run BEFORE G8 manifest-refresh, so the manifest MUST be regenerated+committed BEFORE publish or tests 1,2 fail at G2.
 
