@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-06-09T22:40:06+00:00",
+  "computed_at": "2026-06-09T23:03:31+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:d3531ce97f4126bf60b3877ee015225f39c212b7c0eae717cbdb3b2ad2898a24",
@@ -99,7 +99,7 @@
     "design/tasks/TRDD-20260601_212735+0200-de582146-skillspector-cherry-pick-static-checks.md": "sha256:ac994bad4ebc204cca84b2a2c7537df0a991dcb61ffb45d0c448b76fc69ece0b",
     "design/tasks/TRDD-20260605_175926+0200-8f146968-agent-facing-discoverability.md": "sha256:a6965fad7886ebb786a39ddee4857b6b635566e7644e15a90158e79ec08f356a",
     "design/tasks/TRDD-20260609_123317+0200-a0ab2363-security-audit-hardening.md": "sha256:88c85c30191398c1f7523b58ef651bde04020945deb652d72c1ffdc0fd736d81",
-    "design/tasks/TRDD-20260610_002709+0200-c1924215-issue71-72-rust-bundled-fp.md": "sha256:419a7de2ff2f71ff2c1e70b1246e31a888707f8aa2e7ba425ddbd7d2392ff11d",
+    "design/tasks/TRDD-20260610_002709+0200-c1924215-issue71-72-rust-bundled-fp.md": "sha256:da869e9083b3a5152122aafe1a282921192edb7c60a41dbfa4ce328891791000",
     "design/tasks/TRDD-26446eed-ea5e-43e7-886c-8512866d92be-semantic-channel-source.md": "sha256:b20480b2cf4e0a97cc06e53a32a39a4d09a4740b94c92804298a8286d88d991c",
     "design/tasks/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md": "sha256:e2f55a383481238d738aaea92cfdbcb0ce34e6f1bdeab22a3b641cfca583431d",
     "design/tasks/TRDD-2be75e88-3c23-4c91-9e4e-5ce315b497dc-scope-validators.md": "sha256:6aba8e45a304a4b8b33177decdc271a7e1677098d7b5e09903f132f73cabff68",
@@ -203,7 +203,7 @@
     "scripts/cpv_security_benchmark.py": "sha256:48e4759e1c68c38411c72346e2ea68b48061d688df0832f2cb81229cd929cdf9",
     "scripts/cpv_setup_auth.py": "sha256:f8d53bc5a5bd4e9771feca02899d0265823806a15f22cbaa78b925fa35774a18",
     "scripts/cpv_skill_scanner.py": "sha256:4a07671c967803af7dfe4e85b881f11b983b1ebe18310f66fc576fe085dea9e5",
-    "scripts/cpv_skillaudit_native.py": "sha256:c6edbd6bde13fb124eb23f17db106a201a572bee84879b0c409cecff8fcc51d7",
+    "scripts/cpv_skillaudit_native.py": "sha256:724d7a456134fd562b1fe1408cdf15605ba879d7c5f6253786878353df128ed3",
     "scripts/cpv_staging.py": "sha256:22c067dfa11aeb56ac28112e6f4796618f1bd9f59366198899ba02734be8d5c9",
     "scripts/cpv_strip_dev.py": "sha256:a432bae5fb4ef8717628e57dc6d8eb4827c5ed44816b267ebae4296ad0314a80",
     "scripts/cpv_taint_engine.py": "sha256:6e6e1ff41a58a5e0e99b3e99ae584c81b50d28766828a31cbf27ceb6355ebffd",
