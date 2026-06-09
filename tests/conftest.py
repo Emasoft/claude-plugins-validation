@@ -78,6 +78,20 @@ def _trdd_fa70f9b8_reset_global_state():
     except ImportError:
         pass
 
+    # TRDD-a0ab2363: validate_plugin._gi is a module-global GitignoreFilter set
+    # fresh per run inside main() (production-correct, process exits after). A
+    # test that runs validate_plugin.main() in-process leaves _gi pointing at
+    # THAT plugin_root; a later test calling validate_cross_platform()/the
+    # binary checks directly then rglobs the stale (deleted) root and finds no
+    # bin/ files, silently dropping its expected findings. Only bites under
+    # serial collection (CI) — parallel xdist masks it. Reset to the default.
+    try:
+        import validate_plugin as _vp
+
+        _vp._gi = None
+    except ImportError:
+        pass
+
     yield
 
     # Post-test reset — guards against tests that activate state and rely
@@ -98,6 +112,13 @@ def _trdd_fa70f9b8_reset_global_state():
 
         _read_gitmodules_paths.cache_clear()
         _load_cpv_config_cached.cache_clear()
+    except ImportError:
+        pass
+
+    try:
+        import validate_plugin as _vp
+
+        _vp._gi = None
     except ImportError:
         pass
 

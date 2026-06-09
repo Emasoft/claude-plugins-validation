@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-06-09T14:20:03+00:00",
+  "computed_at": "2026-06-09T14:43:33+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:29ed6f076fa1f070fd2bc03d7ed50d972d83c0f716d2cff40df2adf631b0221a",
@@ -547,7 +547,7 @@
     "tests/audit/fixtures/grid/29-monitors-field/monitors/example.json": "sha256:d77d7e093c9bcc310f12f5825d8a97c4c1346c957157747189ed4b74d569e88c",
     "tests/audit/fixtures/grid/30-outputstyle-field/.claude-plugin/plugin.json": "sha256:ef1ba08895e7314234e08f0d54102ce9b6f240f3981c2a4ea0e15c2ae47b015e",
     "tests/audit/fixtures/grid/30-outputstyle-field/README.md": "sha256:a66a92a35b6a061e5c5886c8aa7008ad7864361fcb66a2b148b224d3b2cebd3b",
-    "tests/conftest.py": "sha256:30ed7ea99a929c92a7c0457673e66f24b70791a04a09819e262784395d8dc34b",
+    "tests/conftest.py": "sha256:dc6a0427738d2300ac767506833296162d0b76143c8e60802a7680e0e7596ac0",
     "tests/fixtures/__init__.py": "sha256:4b38a2851b06afdc42b896d9a66d6c1ff2fbd0ec7b12b76e3a90c78a41dd31c0",
     "tests/fixtures/channel_source/chat_id_only_gated_ts/.claude-plugin/plugin.json": "sha256:60152a74f8d7267c86db41c2d9cfbe969540df7ecdc0f083b80e02e25f1c5960",
     "tests/fixtures/channel_source/chat_id_only_gated_ts/servers/telegram/src/server.ts": "sha256:716f31cec3016b9508858948a1385f209cb342c084acb8a3763300378268d077",
