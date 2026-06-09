@@ -3,7 +3,7 @@ trdd-id: a0ab2363-5fbd-402d-922d-b00d6bd85516
 title: Red-team FP discriminators + devitalize transforms for FN-holes, broad-audit all security docs/skills/code, fix + publish
 column: dev
 created: 2026-06-09T12:33:17+0200
-updated: 2026-06-09T12:33:17+0200
+updated: 2026-06-09T13:02:10+0200
 current-owner: main-session
 assignee: main-session
 priority: 1
@@ -30,6 +30,10 @@ external-refs: ["github.com/Emasoft/claude-plugins-validation/issues/67"]
 
 **NEXT ACTION (when workflow notifies):** read the returned `fn_holes` + `confirmed` findings and the per-job report paths under `reports/security-audit-redteam/`. Triage: any CONFIRMED fn-hole is a real CPV security bug to FIX. Then dispatch parallel opus fix agents (DISJOINT files), verify each fix two-sided (malicious sibling MUST still fire), loop-until-dry re-audit, then validate + test + publish (real release, bump version).
 
+**RESUME STATUS:** workflow `wcks98lk8` (1st run) CRASHED in my final aggregation (`null is not an object (p.job)` — pipeline items nulled by a transient server rate-limit wave; my `.map` didn't filter nulls). FIXED the aggregation (filter nulls) and RESUMED as task `wbegf1odv` (same run id `wf_bb1014b3-edb`, cached finders replay, failed verifiers re-run). 27 finder/verify reports already on disk under `reports/security-audit-redteam/`.
+
+**CONFIRMED FINDING RT1 (HIGH fn-hole) — read `reports/security-audit-redteam/20260609_123843+0200-RT1-execline-rawstring.md`:** `_line_is_pattern_definition` (validate_security.py:2269) `_PATTERN_DEFINITION_HINTS` (2257) includes BARE `r"` / `r'` → returns True on an EXEC line (`os.system(r"curl|sh")`, `subprocess.run(r"…", shell=True)`) → DROPS the cc-audit finding on that line (sole call site @6941). Proven: True on 5 exec sinks; cc-audit MW-018/MW-002 CRITICALs carry the `r"` hint. NOT total today (in-process RC-122/123/136/34/skillaudit backstop the tested shapes) but a cc-audit-ONLY rule (e.g. MW-018 /etc/passwd) on a raw-string line has NO backstop → fully dropped. FIX (RT1 report): replace the @6941 guard with the flow-sensitive `is_pattern_source_line` (cpv_pattern_source_predicate; returns False for raw-string→exec-sink — VERIFIED), delete `_line_is_pattern_definition`+`_PATTERN_DEFINITION_HINTS` (no other callers), 2-sided test (real `re.compile(r"…/etc/passwd…")` still suppressed / `os.system(r"…")` stays visible). MINIMAL alt: drop `r"`/`r'` from hints + require match INSIDE a real regex literal.
+
 **Load-bearing facts / gotchas:**
 - The user's core worry (verbatim): "be more strict — are you sure no malicious code can run?" The prime suspect is `_line_is_pattern_definition` (validate_security.py:2269) whose hints `_PATTERN_DEFINITION_HINTS` (2257) include a BARE `r"` / `r'` — which may wrongly clear a line that is ALSO an exec sink (`os.system(r"evil")`, `exec(r"…")`). This filter runs on cc-audit findings (~6941). RT1 tests exactly this. If confirmed → CRITICAL FN-hole → fix (the hint must NOT clear a line containing an exec sink).
 - never-suppress invariant: ONLY provably-inert data auto-clears; any execution path BLOCKS; every suppression needs a 2-sided test (benign clears + malicious sibling STILL fires). [[feedback-never-suppress-never-relax-gate]]
@@ -39,7 +43,7 @@ external-refs: ["github.com/Emasoft/claude-plugins-validation/issues/67"]
 - Two outstanding USER asks beyond the audit: (a) refine the #67 close comment with the PRECISE detector-catalog transform (pattern→raw-string/regex signature [if RT1/RT2 prove it sound], description→reword) — my posted comment said "elide a fragment" which is WRONG for a detector pattern; (b) run `plugin-devitalizer` against a detector-catalog fixture end-to-end, extend `devitalize-threats` if it doesn't cover pattern→raw-string.
 
 **SUPERSEDED — do NOT carry forward:**
-- ✗ My earlier confident claim that "a raw-string/regex literal provably can't shell out" is UNDER RED-TEAM — do NOT treat it as established until RT1/RT2 verdicts are in. If RT1 confirms the `r"` hint clears an exec line, the claim is FALSE and there is a real bug.
+- ✗ My earlier confident claim that "a raw-string/regex literal provably can't shell out, and the existing `_line_is_pattern_definition` clears it FN-safely" is now CONFIRMED FALSE by RT1. `_line_is_pattern_definition` is FN-UNSAFE (bare `r"` hint clears exec lines). The FN-SAFE discriminator is the flow-sensitive `is_pattern_source_line` (returns False for raw-string→exec-sink). Any user-facing answer / #67 comment that cited `_line_is_pattern_definition` as the safe mechanism must be corrected to cite `is_pattern_source_line` AFTER the @6941 swap is shipped. The detector-catalog devitalize transform (pattern→raw-string/regex) is still sound, but ONLY because the flow-sensitive predicate (not the broken helper) is what proves a DATA-context literal inert while an exec-context one stays flagged.
 
 **Durable artifacts to read before acting:**
 - `reports/issue-67-remnants/20260608_180451+0200-verify-67-remnants.md` — the #67 verify-first reproduction (is_pattern_source_line proven attacker-satisfiable; cc-audit never traverses the classifier).
