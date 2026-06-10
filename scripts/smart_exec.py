@@ -189,7 +189,16 @@ def detect_executors() -> dict[str, bool]:
 
 def get_version(cmd: list[str]) -> str | None:
     try:
-        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=10)
+        # stdin=DEVNULL: a `--version` probe must never block waiting on a TTY
+        # in a bare CI runner (issue #74). The 10s timeout still bounds it.
+        p = subprocess.run(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
         if p.returncode != 0:
             return None
         out = (p.stdout or "").strip().splitlines()
@@ -585,7 +594,17 @@ def main(argv: list[str]) -> int:
     print(f"[executor] {chosen}", file=sys.stderr)
     print("[exec] " + " ".join(shlex.quote(a) for a in argv2), file=sys.stderr)
 
-    p = subprocess.run(argv2)
+    # Anti-hang (issue #74): when there is no controlling TTY (a CI runner, a
+    # subprocess, a pipe) a tool that reads stdin would block forever. Redirect
+    # stdin to /dev/null in that case so it gets instant EOF. An interactive
+    # local invocation (stdin is a TTY) keeps the inherited stdin so tools that
+    # legitimately prompt still work.
+    try:
+        is_tty = bool(sys.stdin) and sys.stdin.isatty()
+    except (ValueError, OSError):
+        is_tty = False  # detached/closed stdin → treat as non-interactive
+    run_stdin = None if is_tty else subprocess.DEVNULL
+    p = subprocess.run(argv2, stdin=run_stdin)
     return p.returncode
 
 

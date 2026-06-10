@@ -82,7 +82,7 @@ class TestLintReturnValueNitMinorNonBlocking:
         report = ValidationReport()
         stderr = "doc.md:3 MD013/line-length Line length [Expected: 80; Actual: 213]\n"
         with patch("cpv_lint_engine._resolve", return_value=["/bin/markdownlint-cli2"]):
-            with patch("cpv_lint_engine.subprocess.run", side_effect=_run_returning(_FakeResult(1, "", stderr))):
+            with patch("cpv_lint_engine._run_linter", side_effect=_run_returning(_FakeResult(1, "", stderr))):
                 ok = lint_markdown(tmp_path, [f], report)
         # Corrected behaviour: NIT-only run is non-blocking.
         assert ok is True
@@ -99,7 +99,7 @@ class TestLintReturnValueNitMinorNonBlocking:
         report = ValidationReport()
         with patch("cpv_lint_engine._resolve", return_value=["/bin/stylelint"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_run_returning(_FakeResult(2, "a.css:1:1 expected indentation\n", "")),
             ):
                 ok = lint_css(tmp_path, [f], report)
@@ -115,7 +115,7 @@ class TestLintReturnValueNitMinorNonBlocking:
         report = ValidationReport()
         with patch("cpv_lint_engine._resolve", return_value=["/bin/htmlhint"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_run_returning(_FakeResult(1, "i.html:1:1 tag must be lowercase\n", "")),
             ):
                 ok = lint_html(tmp_path, [f], report)
@@ -129,7 +129,7 @@ class TestLintReturnValueNitMinorNonBlocking:
         report = ValidationReport()
         with patch("cpv_lint_engine._resolve", return_value=["/bin/sqlfluff"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_run_returning(_FakeResult(1, "L:1 | P:1 | LT01 | unexpected\n", "")),
             ):
                 ok = lint_sql(tmp_path, [f], report)
