@@ -91,7 +91,7 @@ Throughout this table, **`cpv`** is the standalone alias =
 
 ## What Does CPV Check?
 
-CPV ships **25 on-disk `validate_*.py` scripts** (20 plugin + 3 marketplace/settings + 2 scope) covering **190+ rules** across every part of a Claude Code plugin and end-user `.claude/` configuration. The `plugin` command orchestrates 20 of these as sub-validators (a count distinct from the 25 on-disk scripts — the marketplace/scope scripts run from their own commands):
+CPV ships **25 on-disk `validate_*.py` scripts** covering **190+ rules** across every part of a Claude Code plugin and end-user `.claude/` configuration. The `plugin` command orchestrates **17** of these as sub-validators (the marketplace / scope / settings scripts run from their own commands):
 
 | Area | Examples of what CPV catches |
 |------|------------------------------|
