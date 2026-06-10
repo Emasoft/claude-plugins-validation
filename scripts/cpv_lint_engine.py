@@ -39,6 +39,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -198,6 +199,141 @@ def _tool_missing(
         report.major(msg)
     else:
         report.warning(msg)
+
+
+# ---------------------------------------------------------------------------
+# Hardened linter subprocess runner (issue #74)
+# ---------------------------------------------------------------------------
+#
+# Every linter spawn in this module routes through `_run_linter`. Without it,
+# a per-linter spawn on a bare CI runner (no TTY, cold tool cache) can hang
+# FOREVER even though a `timeout=` is set, for two reasons:
+#
+#   1. No `stdin` redirect — when the linter (or the `uvx`/`npx`/`bunx`
+#      first-run fetcher that `smart_exec.choose_best` falls back to) prompts,
+#      it blocks on a stdin that never delivers EOF in a no-TTY environment.
+#   2. A forked GRANDCHILD outlives the timeout — `subprocess.run`'s own
+#      timeout kills only the DIRECT child, then `communicate()` keeps reading
+#      the captured stdout/stderr pipe; a surviving grandchild (the `uvx`/`npx`
+#      download process) that inherited that pipe keeps it open, so the read
+#      blocks PAST the deadline. This is the exact "timeout set but it still
+#      hangs + orphan `uv`/`python` children on cancel" signature in issue #74.
+#
+# `_run_linter` closes both holes universally:
+#   * `stdin=subprocess.DEVNULL` — instant EOF, so nothing can ever block on
+#     stdin (the cheapest, broadest fix).
+#   * non-interactive env — `CI=1`, `DEBIAN_FRONTEND=noninteractive`,
+#     `NPM_CONFIG_YES=true`, `PIP_NO_INPUT=1`, `UV_NO_PROGRESS=1`,
+#     `GIT_TERMINAL_PROMPT=0` — belt-and-braces so a fetcher that consults
+#     these instead of the TTY also stays silent and non-blocking.
+#   * a NEW PROCESS GROUP / SESSION (`start_new_session=True`) plus, on
+#     timeout, killing the WHOLE group — so a forked grandchild that inherited
+#     the pipe is terminated and the read unblocks at the deadline instead of
+#     hanging forever.
+#
+# It returns a `subprocess.CompletedProcess`-shaped object so call sites read
+# `.returncode` / `.stdout` / `.stderr` exactly as before, and it re-raises
+# `subprocess.TimeoutExpired` so each linter's existing
+# `except subprocess.TimeoutExpired: report.warning(...)` handler keeps
+# working unchanged.
+
+# Environment overrides forced on every linter spawn so a missing tool that
+# routes through a first-run fetcher (uvx / npx / bunx / pipx) can never stop
+# to ask a question on a runner with no TTY.
+_NONINTERACTIVE_ENV: dict[str, str] = {
+    "CI": "1",
+    "DEBIAN_FRONTEND": "noninteractive",
+    "NPM_CONFIG_YES": "true",  # npx/npm: auto-confirm package install
+    "PIP_NO_INPUT": "1",  # pip: never prompt
+    "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+    "PYTHONUNBUFFERED": "1",
+    "UV_NO_PROGRESS": "1",  # uv/uvx: no interactive progress bar
+    "GIT_TERMINAL_PROMPT": "0",  # any git fetch: fail instead of prompting
+    "HOMEBREW_NO_AUTO_UPDATE": "1",
+}
+
+
+def _run_linter(
+    cmd: list[str],
+    *,
+    timeout: float,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a linter command so it can NEVER hang in a bare CI environment.
+
+    Drop-in replacement for ``subprocess.run(cmd, capture_output=True,
+    text=True, timeout=timeout[, cwd=cwd])`` with three anti-hang
+    guarantees layered on (see the module section header for why each is
+    load-bearing for issue #74):
+
+      1. ``stdin=subprocess.DEVNULL`` — instant EOF; nothing can block on a
+         missing TTY.
+      2. ``_NONINTERACTIVE_ENV`` merged over ``os.environ`` — first-run
+         tool fetchers (uvx/npx/bunx/pipx) stay non-interactive.
+      3. a new process group (``start_new_session=True``); on
+         ``TimeoutExpired`` the WHOLE group is killed, so a forked
+         grandchild holding the captured pipe cannot keep the read alive
+         past the deadline.
+
+    Raises ``subprocess.TimeoutExpired`` on deadline (after killing the
+    group) so each caller's existing ``except subprocess.TimeoutExpired``
+    branch fires exactly as before.
+    """
+    env = {**os.environ, **_NONINTERACTIVE_ENV}
+    # Windows has no POSIX process groups / killpg; `start_new_session` is a
+    # no-op-equivalent there. On Windows, `Popen.kill()` already terminates
+    # the child, and `subprocess` cannot guarantee grandchild teardown without
+    # a Job Object — acceptable, because the bare-CI hang reported in #74 is a
+    # Linux runner and the stdin=DEVNULL + non-interactive env still apply.
+    new_session = os.name == "posix"
+    with subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=str(cwd) if cwd is not None else None,
+        env=env,
+        start_new_session=new_session,
+    ) as proc:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # Kill the ENTIRE process group so a forked grandchild (uvx/npx
+            # fetcher) that inherited the captured pipe dies too — otherwise
+            # the post-kill drain below would itself block forever, exactly
+            # the bug we are fixing.
+            _kill_process_tree(proc)
+            # Drain whatever is buffered so the pipes close cleanly; the group
+            # is dead now, so this returns promptly. Re-raise so the caller's
+            # TimeoutExpired handler runs.
+            try:
+                proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+
+def _kill_process_tree(proc: subprocess.Popen) -> None:  # type: ignore[type-arg]
+    """Best-effort kill of ``proc`` and its whole process group.
+
+    On POSIX the child was started with ``start_new_session=True`` so it is
+    the leader of its own group; ``killpg`` reaps every descendant the linter
+    spawned (the uvx/npx download grandchild that causes issue #74's hang).
+    Falls back to ``proc.kill()`` everywhere the group signal is unavailable
+    or the group is already gone.
+    """
+    if os.name == "posix":
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            return
+        except (ProcessLookupError, PermissionError, OSError):
+            pass  # group already gone / not permitted — fall through to kill()
+    try:
+        proc.kill()
+    except (ProcessLookupError, OSError):
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +501,7 @@ def lint_python(
 
     # ruff check — errors block
     try:
-        result = subprocess.run(
+        result = _run_linter(
             ruff_cmd
             + [
                 "check",
@@ -374,8 +510,6 @@ def lint_python(
                 "--output-format=concise",
                 *targets,
             ],
-            capture_output=True,
-            text=True,
             timeout=120,
         )
     except subprocess.TimeoutExpired:
@@ -441,10 +575,8 @@ def lint_python(
             report.info("pyright not available locally or via npx/uvx; skipping Python type check")
             return ok
         try:
-            pr = subprocess.run(
+            pr = _run_linter(
                 pyright_cmd + ["--outputjson", *mypy_targets],
-                capture_output=True,
-                text=True,
                 timeout=180,
             )
         except subprocess.TimeoutExpired:
@@ -472,7 +604,7 @@ def lint_python(
     mypy_cmd = _resolve("mypy")
     if mypy_cmd:
         try:
-            mypy_result = subprocess.run(
+            mypy_result = _run_linter(
                 mypy_cmd
                 + [
                     "--ignore-missing-imports",
@@ -480,8 +612,6 @@ def lint_python(
                     "scripts_dev|docs_dev|builds_dev|tests_dev|tests/fixtures",
                     *mypy_targets,
                 ],
-                capture_output=True,
-                text=True,
                 timeout=180,
             )
         except subprocess.TimeoutExpired:
@@ -551,11 +681,9 @@ def lint_javascript(
     targets = _files_or_root(repo_root, files)
 
     try:
-        result = subprocess.run(
+        result = _run_linter(
             eslint_cmd + ["--format=json", *targets],
             cwd=repo_root,
-            capture_output=True,
-            text=True,
             timeout=120,
         )
     except subprocess.TimeoutExpired:
@@ -643,10 +771,8 @@ def lint_shell(
     for f in files:
         rel = _relpath(repo_root, str(f))
         try:
-            result = subprocess.run(
+            result = _run_linter(
                 cmd + ["-f", "json", "-x", str(f)],
-                capture_output=True,
-                text=True,
                 timeout=60,
             )
         except subprocess.TimeoutExpired:
@@ -699,11 +825,9 @@ def lint_go(
     ok = True
 
     try:
-        result = subprocess.run(
+        result = _run_linter(
             gofmt_cmd + ["-l", *targets],
             cwd=repo_root,
-            capture_output=True,
-            text=True,
             timeout=120,
         )
     except subprocess.TimeoutExpired:
@@ -728,11 +852,9 @@ def lint_go(
         report.info("go binary not available; skipping go vet")
         return ok
     try:
-        vet_result = subprocess.run(
+        vet_result = _run_linter(
             go_cmd + ["vet", "./..."],
             cwd=repo_root,
-            capture_output=True,
-            text=True,
             timeout=120,
         )
     except subprocess.TimeoutExpired:
@@ -780,11 +902,9 @@ def lint_rust(
 
     ok = True
     try:
-        fmt_result = subprocess.run(
+        fmt_result = _run_linter(
             cargo_cmd + ["fmt", "--check"],
             cwd=repo_root,
-            capture_output=True,
-            text=True,
             timeout=120,
         )
     except subprocess.TimeoutExpired:
@@ -796,11 +916,9 @@ def lint_rust(
         ok = False
 
     try:
-        clippy_result = subprocess.run(
+        clippy_result = _run_linter(
             cargo_cmd + ["clippy"],
             cwd=repo_root,
-            capture_output=True,
-            text=True,
             timeout=180,
         )
     except subprocess.TimeoutExpired:
@@ -864,11 +982,9 @@ def lint_markdown(
     file_paths = [str(f) for f in files]
 
     try:
-        result = subprocess.run(
+        result = _run_linter(
             invocation + file_paths,
             cwd=repo_root,
-            capture_output=True,
-            text=True,
             timeout=120,
         )
     except subprocess.TimeoutExpired:
@@ -974,11 +1090,9 @@ def lint_yaml(
 
     file_paths = [str(f) for f in files]
     try:
-        result = subprocess.run(
+        result = _run_linter(
             cmd + ["-d", "relaxed", "--format", "parsable", *file_paths],
             cwd=repo_root,
-            capture_output=True,
-            text=True,
             timeout=120,
         )
     except subprocess.TimeoutExpired:
@@ -1028,10 +1142,8 @@ def lint_dockerfile(
     for f in files:
         rel = _relpath(repo_root, str(f))
         try:
-            result = subprocess.run(
+            result = _run_linter(
                 cmd + [str(f)],
-                capture_output=True,
-                text=True,
                 timeout=60,
             )
         except subprocess.TimeoutExpired:
@@ -1074,10 +1186,8 @@ def lint_xml(
     for f in files:
         rel = _relpath(repo_root, str(f))
         try:
-            result = subprocess.run(
+            result = _run_linter(
                 cmd + ["--noout", str(f)],
-                capture_output=True,
-                text=True,
                 timeout=60,
             )
         except subprocess.TimeoutExpired:
@@ -1118,11 +1228,9 @@ def lint_css(
 
     file_paths = [str(f) for f in files]
     try:
-        result = subprocess.run(
+        result = _run_linter(
             cmd + file_paths,
             cwd=repo_root,
-            capture_output=True,
-            text=True,
             timeout=120,
         )
     except subprocess.TimeoutExpired:
@@ -1168,11 +1276,9 @@ def lint_html(
 
     file_paths = [str(f) for f in files]
     try:
-        result = subprocess.run(
+        result = _run_linter(
             cmd + file_paths,
             cwd=repo_root,
-            capture_output=True,
-            text=True,
             timeout=120,
         )
     except subprocess.TimeoutExpired:
@@ -1218,11 +1324,9 @@ def lint_sql(
 
     file_paths = [str(f) for f in files]
     try:
-        result = subprocess.run(
+        result = _run_linter(
             cmd + ["lint", "--dialect", "ansi", *file_paths],
             cwd=repo_root,
-            capture_output=True,
-            text=True,
             timeout=180,
         )
     except subprocess.TimeoutExpired:
@@ -1305,10 +1409,8 @@ def lint_powershell(
     for f in files:
         rel = _relpath(repo_root, str(f))
         try:
-            result = subprocess.run(
+            result = _run_linter(
                 cmd + ["-Path", str(f), "-Severity", "Error,Warning"],
-                capture_output=True,
-                text=True,
                 timeout=60,
             )
         except subprocess.TimeoutExpired:

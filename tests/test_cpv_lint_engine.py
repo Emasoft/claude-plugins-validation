@@ -64,9 +64,12 @@ class FakeResult:
 
 
 def _make_run(*results: FakeResult, capture_argv: list[list[str]] | None = None):
-    """Build a subprocess.run mock that returns the next FakeResult per call.
+    """Build a ``_run_linter`` mock that returns the next FakeResult per call.
 
-    If `capture_argv` is supplied, each call's argv is appended to it.
+    ``_run_linter`` is the hardened spawn seam every linter routes through
+    (issue #74); it has the same ``(cmd, **kwargs) -> result`` shape as
+    ``subprocess.run`` so this stand-in works for both. If ``capture_argv`` is
+    supplied, each call's argv is appended to it.
     """
     queue = list(results)
 
@@ -221,7 +224,7 @@ class TestLintPython:
         report = ValidationReport()
         with patch("cpv_lint_engine._resolve", side_effect=lambda t: ["/bin/" + t]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(0, "", ""), FakeResult(0, "", "")),
             ):
                 ok = lint_python(tmp_path, [tmp_path / "main.py"], report)
@@ -235,7 +238,7 @@ class TestLintPython:
         ruff_stdout = f"{bad}:1:1: F401 unused import\n{bad}:1:1: E401 another error\n"
         with patch("cpv_lint_engine._resolve", side_effect=lambda t: ["/bin/" + t] if t == "ruff" else None):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(1, ruff_stdout, "")),
             ):
                 ok = lint_python(tmp_path, [bad], report)
@@ -264,7 +267,7 @@ class TestLintPython:
         report = ValidationReport()
         with patch("cpv_lint_engine._resolve", side_effect=lambda t: ["/bin/" + t] if t == "ruff" else None):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(0, "", ""), capture_argv=captured),
             ):
                 lint_python(tmp_path, files, report)
@@ -298,7 +301,7 @@ class TestLintJavascript:
         report = ValidationReport()
         with patch("cpv_lint_engine._resolve", return_value=["/bin/eslint"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(0, "[]", ""), capture_argv=captured),
             ):
                 lint_javascript(tmp_path, files, report)
@@ -319,7 +322,7 @@ class TestLintJavascript:
         )
         with patch("cpv_lint_engine._resolve", return_value=["/bin/eslint"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(1, eslint_json, "")),
             ):
                 ok = lint_javascript(tmp_path, files, report)
@@ -348,7 +351,7 @@ class TestLintShell:
         report = ValidationReport()
         with patch("cpv_lint_engine._resolve", return_value=["/bin/shellcheck"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(0, "", "")),
             ):
                 ok = lint_shell(tmp_path, [f], report)
@@ -364,7 +367,7 @@ class TestLintShell:
         )
         with patch("cpv_lint_engine._resolve", return_value=["/bin/shellcheck"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(1, sc_json, "")),
             ):
                 ok = lint_shell(tmp_path, [f], report)
@@ -392,7 +395,7 @@ class TestLintGo:
         report = ValidationReport()
         with patch("cpv_lint_engine._resolve", return_value=["/bin/gofmt"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(0, "", ""), capture_argv=captured),
             ):
                 lint_go(tmp_path, files, report)
@@ -408,7 +411,7 @@ class TestLintGo:
         report = ValidationReport()
         with patch("cpv_lint_engine._resolve", side_effect=lambda t: ["/bin/" + t]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(0, "", ""), capture_argv=captured),
             ):
                 lint_go(tmp_path, files, report)
@@ -428,7 +431,7 @@ class TestLintGo:
 
         with patch("cpv_lint_engine._resolve", side_effect=resolve_mock):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(
                     FakeResult(0, "", ""),
                     FakeResult(0, "", ""),
@@ -446,7 +449,7 @@ class TestLintGo:
         gofmt_stdout = str(files[0]) + "\n"
         with patch("cpv_lint_engine._resolve", return_value=["/bin/gofmt"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(0, gofmt_stdout, "")),
             ):
                 ok = lint_go(tmp_path, files, report)
@@ -490,7 +493,7 @@ class TestLintRust:
         report = ValidationReport()
         with patch("cpv_lint_engine._resolve", return_value=["/bin/cargo"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(1, "", ""), FakeResult(0, "", "")),
             ):
                 ok = lint_rust(tmp_path, files, report)
@@ -518,7 +521,7 @@ class TestLintMarkdown:
         report = ValidationReport()
         with patch("cpv_lint_engine._resolve", return_value=["/bin/markdownlint-cli2"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(0, "", "")),
             ):
                 ok = lint_markdown(tmp_path, [f], report)
@@ -538,7 +541,7 @@ class TestLintMarkdown:
         )
         with patch("cpv_lint_engine._resolve", return_value=["/bin/markdownlint-cli2"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(1, "", stderr)),
             ):
                 ok = lint_markdown(tmp_path, [f], report)
@@ -564,7 +567,7 @@ class TestLintMarkdown:
         report = ValidationReport()
         with patch("cpv_lint_engine._resolve", return_value=["/bin/markdownlint-cli2"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(3, "", "")),
             ):
                 ok = lint_markdown(tmp_path, [f], report)
@@ -597,7 +600,7 @@ class TestLintMarkdown:
             return FakeResult(0, "", "")
 
         with patch("cpv_lint_engine._resolve", return_value=["/bin/markdownlint-cli2"]):
-            with patch("cpv_lint_engine.subprocess.run", side_effect=fake_run):
+            with patch("cpv_lint_engine._run_linter", side_effect=fake_run):
                 lint_markdown(tmp_path, [f], report)
         # Either we found a bundled config (--config flag present) OR the
         # CPV install genuinely lacks one (in which case markdownlint runs
@@ -641,7 +644,7 @@ class TestLintYaml:
         stdout = "a.yml:1:5: [error] syntax error\n"
         with patch("cpv_lint_engine._resolve", return_value=["/bin/yamllint"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(1, stdout, "")),
             ):
                 ok = lint_yaml(tmp_path, [f], report)
@@ -664,7 +667,7 @@ class TestLintDockerfile:
         report = ValidationReport()
         with patch("cpv_lint_engine._resolve", return_value=["/bin/hadolint"]):
             with patch(
-                "cpv_lint_engine.subprocess.run",
+                "cpv_lint_engine._run_linter",
                 side_effect=_make_run(FakeResult(0, "", "")),
             ):
                 ok = lint_dockerfile(tmp_path, [f], report)

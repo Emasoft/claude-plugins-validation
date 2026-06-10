@@ -138,7 +138,7 @@ class TestLintPythonCheckerBranch:
             return _fake_proc(1, "scripts/mod.py:1: error: should-not-run")  # mypy
 
         monkeypatch.setattr(cle, "_resolve", lambda tool: [tool])
-        monkeypatch.setattr(cle.subprocess, "run", fake_run)
+        monkeypatch.setattr(cle, "_run_linter", fake_run)
         report = ValidationReport()
         cle.lint_python(tmp_path, [f], report, strict_missing_tools=False)
         msgs = [r.message for r in report.results]
@@ -164,7 +164,7 @@ class TestLintPythonCheckerBranch:
             return _fake_proc(1, "scripts/mod.py:1: error: bad type")  # mypy
 
         monkeypatch.setattr(cle, "_resolve", lambda tool: [tool])
-        monkeypatch.setattr(cle.subprocess, "run", fake_run)
+        monkeypatch.setattr(cle, "_run_linter", fake_run)
         report = ValidationReport()
         cle.lint_python(tmp_path, [f], report, strict_missing_tools=False)
         msgs = [r.message for r in report.results]
@@ -181,7 +181,7 @@ class TestLintPythonCheckerBranch:
 
         # ruff resolves; pyright does NOT.
         monkeypatch.setattr(cle, "_resolve", lambda tool: [tool] if tool == "ruff" else None)
-        monkeypatch.setattr(cle.subprocess, "run", fake_run)
+        monkeypatch.setattr(cle, "_run_linter", fake_run)
         report = ValidationReport()
         ok = cle.lint_python(tmp_path, [f], report, strict_missing_tools=True)
         # Type-check absence is auxiliary — never a strict failure.
