@@ -21,9 +21,15 @@ fi
 TS="$(date +%Y%m%d_%H%M%S%z)"
 SLUG="$(basename "$TARGET_PATH")"
 LAUNCHER="${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py"
+# Allowlist the dev's own username so the privacy scan does not false-positive
+# on local paths under /Users/<me>/ or /home/<me>/.
+export CLAUDE_PRIVATE_USERNAMES="$(whoami)"
 mkdir -p "$MAIN_ROOT/reports/<component>"
 REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
 ```
+
+Every leaf inherits the exported `CLAUDE_PRIVATE_USERNAMES` from this prologue,
+so individual launcher leaves do not need to set it again.
 
 ## Menu-spec rendering rules
 
@@ -479,7 +485,7 @@ indirection, no "+§3.Y as sub-leaves" hedging.
 
 | Top row              | Sub-menu section                                                       |
 |----------------------|------------------------------------------------------------------------|
-| 1 Validate           | §3.1 (Validate sub-menu — nested, ≤7 functional rows per level)        |
+| 1 Validate           | §3.1 (Validate sub-menu — nested; sub-menus group related actions)     |
 | 2 Fix                | §3.2 (Fix sub-menu)                                                    |
 | 3 Optimize for Cache | §3.3 (Cache sub-menu — promoted from drill-in to top-level)            |
 | 4 Diagnose           | §3.4 (Diagnose sub-menu — deep audit + semantic AI grading)            |
@@ -503,7 +509,11 @@ something else" spec). This is non-negotiable: the user always gets
 the explicit "fix N or end" choice after a validation, never just
 "what's next?".
 
-### 3.1 Validate sub-menu (nested, ≤7 functional rows per level)
+### 3.1 Validate sub-menu (nested)
+
+> **Sizing rule:** group related actions into sub-menus where it aids
+> discovery; a leaf menu MAY exceed 7 rows when the actions are a fixed
+> enumeration (e.g. the per-scanner security rows).
 
 When the user reaches this menu, the orchestrator queues this Level-1
 spec via `print_menu.py`. Every option that takes a path triggers the **project-type
@@ -1449,12 +1459,17 @@ END THE TURN.
 #### 3.8.3 Doctor (health check)
 
 - **arg-prompts** (in order):
-  1. `Verbose output? (yes/no)`
-  2. `Auto-fix orphaned entries? (yes/no — passes --fix)`
+  1. `Quick sub-second triage instead of full sweep? (y/N — passes --quick)`
+  2. `Verbose output? (yes/no)`
+  3. `Auto-fix orphaned entries? (yes/no — passes --fix)`
 - **execution**:
   ```bash
-  uv run --with pyyaml python "$LAUNCHER" doctor [--verbose] [--fix]
+  uv run --with pyyaml python "$LAUNCHER" doctor [--quick] [--verbose] [--fix]
   ```
+- **note**: `--quick` is `manage_doctor.py`'s sub-second triage mode (skip the
+  full sweep). It is mutually informative with the §3.7 migration table's
+  row-3/row-20 mention that the default Doctor run is the full per-plugin sweep
+  and `--quick` skips it.
 
 #### 3.8.4 Install all external scanners
 
@@ -1656,7 +1671,7 @@ END THE TURN.
 
 - **arg-prompt**: `Owner/repo slug to audit (or "auto" to detect from origin)?`
 - **execution**: dispatch the **plugin-diagnoser agent** in branch-rules-only mode (Phase 6.5). Findings include: ruleset state, bypass actors, Claude action version pin, missing secrets. After the audit prints, offer:
-  - 1: re-apply cpv-branch-rules ruleset → `/cpv-setup-branch-rules-generic <owner>/<repo>`
+  - 1: re-apply cpv-branch-rules ruleset → invoke the `setup-plugin-repo` skill (`setup-branch-rules-generic` recipe) with `<owner>/<repo>`
   - 2: pin Claude action to latest SHA via pinact
   - 3: surface secret-setup instructions for `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN`
   - 0: end
@@ -1744,12 +1759,12 @@ folded in for one-stop access to the publish workflow.
 > | 7, 8 (local / project scope)                        | §3.1.4.2, §3.1.4.1                                     |
 > | 9 (user scope)                                      | §3.1.4.2 (Local-scope) with target `~/.claude/`        |
 > | 10–13, 15, 16 (skill/agent/hook/MCP/output-style/LSP)| §3.1.2.1, §3.1.2.2, §3.1.2.4, §3.1.2.5, §3.1.2.7.1, §3.1.2.6 |
-> | 14 (specific monitor)                               | §3.1.2 (Component) with `--type monitor`               |
+> | 14 (specific monitor)                               | no dedicated monitor validator — monitor configs are checked as part of `project-scope` validation (§3.1.4) |
 > | 17 (cache cleanup)                                  | §3.8.5 Prune old plugin cache versions                 |
 > | 18 (install scanners)                               | §3.8.4 Install all external scanners                   |
-> | 19 (auto-fix orphans)                               | §3.2 Fix (sub-menu) → "Auto-fix orphans" leaf          |
+> | 19 (auto-fix orphans)                               | §3.8.3 Doctor (health check) → answer "yes" to "Auto-fix orphaned entries?" (passes `--fix`) |
 > | 20 (quick health check)                             | §3.8.3 Doctor (health check)                           |
-> | 21 (dependency tree)                                | §3.8 Manage (sub-menu) → "Dependency tree" leaf        |
+> | 21 (dependency tree)                                | not migrated — closest is §3.6.9 Add dependencies (no standalone dependency-tree view in the new menu) |
 > | 22 (add dependency)                                 | §3.6.9 Add dependencies                                |
 
 Fixed key→action map (slug `publish`):
@@ -1975,6 +1990,10 @@ END THE TURN.
   ```
 
 #### 3.16.7..3.16.11 Per-scanner focus (rows cc-audit / tirith / trufflehog / semgrep / Cisco)
+
+NOTE: there is no per-scanner isolation flag — these rows run the SAME full
+multi-scanner pass; the choice only labels the report filename. Tell the user
+this when they pick one.
 
 - **arg-prompts** (in order): `Path to the plugin?`
 - **execution** (identical for all five rows — substitute `<scanner>` only in

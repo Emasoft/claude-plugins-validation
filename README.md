@@ -2,7 +2,7 @@
 
 <!--BADGES-START-->
 ![Version](https://img.shields.io/badge/version-2.126.4-blue)
-![Tests](https://img.shields.io/badge/tests-2336%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-8800%2B%20passed-brightgreen)
 ![Validation](https://img.shields.io/badge/validation-0%20issues-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 <!--BADGES-END-->
@@ -69,7 +69,7 @@ Throughout this table, **`cpv`** is the standalone alias =
 
 | Feature | What it does | In Claude Code (slash command / agent / skill) | Standalone (uvx) |
 |---------|--------------|------------------------------------------------|------------------|
-| **Validate a plugin** | Structure, hooks, skills, security, compat, quality — 20 validators | `plugin-validator` agent, or `Skill(claude-plugins-validation:plugin-validation-skill)` | `cpv plugin /path` |
+| **Validate a plugin** | Structure, hooks, skills, security, compat, quality — 17 sub-validators | `plugin-validator` agent, or `Skill(claude-plugins-validation:plugin-validation-skill)` | `cpv plugin /path` |
 | **Validate a skill / component** | One skill's SKILL.md, or an agent / command / hook / MCP / LSP | `skill-validation-agent` (skill) · `plugin-validator` (any component) | `cpv skill /path --strict` · `cpv agent` · `cpv command` · `cpv hook` · `cpv mcp` · `cpv lsp` |
 | **Security scan** | 5 external scanners (trufflehog, cc-audit, tirith, semgrep, Cisco) + native skillaudit | `plugin-validator` agent, or fleet-wide `/cpv-batch-security-audit` | `cpv security /path` |
 | **Pre-install gate** | Sandboxed scan of an untrusted plugin / skill / marketplace BEFORE install — never writes to the plugin cache | `/cpv-pre-install-scan <target>` | `cpv security <github-url-or-path>` |
@@ -207,7 +207,7 @@ See [Part 1](#part-1-standalone-validation-via-uvx) for terminal/CI use and
 You need [uv](https://docs.astral.sh/uv/getting-started/installation/) installed. Then:
 
 ```bash
-## Validate a plugin (runs all 20 checks + linting)
+## Validate a plugin (runs all 17 sub-validators + linting)
 uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \
     cpv-remote-validate validate_plugin /path/to/your-plugin
 ```
@@ -257,7 +257,7 @@ Any of these can be passed as the first argument to `cpv-remote-validate`. Short
 
 | Command | What It Checks |
 |---------|----------------|
-| `plugin` | **Everything.** Runs all 20 sub-validators + linting. Start here. |
+| `plugin` | **Everything.** Runs all 17 sub-validators + linting. Start here. |
 | `skill` | **Skills.** SKILL.md frontmatter, required sections, description quality. 190+ rules. |
 | `hook` | **Hooks.** 28 event types, 5 hook types (incl. v2.1.118+ `mcp_tool`), script paths, bash portability. |
 | `agent` | **Agents.** Frontmatter fields, naming, tools, model, skills. |
@@ -392,9 +392,16 @@ When used as a Claude Code plugin, **agents are the primary way to interact with
 | **semantic-validator** | Deep AI quality analysis — catches things scripts cannot (see below) | "Check if descriptions actually match what skills do" |
 | **plugin-manager** | Full plugin lifecycle: install, update, enable, disable, search, health-check | "Install a plugin", "List my plugins", "Run doctor" |
 | **plugin-creator** | Scaffolds plugins, marketplaces, publishes to GitHub with CI/CD | "Create a new plugin", "Publish to GitHub", "Set up a marketplace" |
+| **plugin-diagnoser** | Deep diagnostic: all 5 external scanners + pipeline-staleness + cross-platform + marketplace-registration + cache-sync, then a follow-up fix menu | "Run a full diagnosis", "What's wrong with my plugin / marketplace" |
+| **plugin-devitalizer** | Converts flagged execution-class code into provably-inert data so a plugin passes the security gate by neutralizing the threat shape — never by muting a rule or relaxing `--strict`; load-bearing code is flagged, not broken | "Devitalize the execution-class findings", "Make this threat inert without losing functionality" |
 | **plugin-leaks-preventer** | Redacts leaked secrets (runtime-reads the genuinely-needed ones) and implements missing safeguards — passes the security gate by removing leaks and hardening, never by muting a rule; flags what it can't safely fix | "Redact the leaked secret in my plugin", "Harden the unsafe yaml.load my scan flagged" |
 
-Every agent presents a menu when invoked, asks what you need, and guides you step by step. You don't need to remember command names or flags.
+This table lists the primary user-facing agents; CPV ships 15 in total (the
+rest — `cache-optimizer-agent`, `cpv-doctor-agent`, `cpv-main-menu-agent`,
+`cpv-spark`, `cpv` — are dispatched for you by the menu or by other agents).
+You never need to remember command names: run **`/cpv-main-menu`** for an
+interactive menu, or just tell any Claude what you need and the right agent
+takes over and guides you with plain-text questions.
 
 #### Separation of Concerns: Plugins vs. Marketplaces
 
@@ -522,7 +529,7 @@ For CI/CD and scripting, the Python validators are still callable directly (no m
 
 | Script | Launcher alias | Purpose |
 |--------|---|---------|
-| `validate_plugin.py` | `plugin` | Main orchestrator -- runs all 20 sub-validators |
+| `validate_plugin.py` | `plugin` | Main orchestrator -- runs all 17 sub-validators |
 | `validate_skill_comprehensive.py` | `skill` | Comprehensive skill validator (190+ rules) |
 | `validate_hook.py` | `hook` | Hook configuration validator (28 events, 5 types) |
 | `validate_agent.py` | `agent` | Agent definition validator |
