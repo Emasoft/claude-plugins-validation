@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "computed_at": "2026-06-10T10:03:59+00:00",
+  "computed_at": "2026-06-10T10:06:28+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
-    ".claude-plugin/plugin.json": "sha256:4cab68a967c6aee30829caefb15e2e642b2bbedf8125d0b3fbd31ae5464b5f91",
+    ".claude-plugin/plugin.json": "sha256:c2b54f051aecce4557656145050d961c6bbdec442d5af5489790f655fbc38600",
     ".github/secret_scanning.yml": "sha256:6e5b65625c1c1e52c6ba4408014520ec442bf2fa37bab4d0ea8214c23f914952",
     ".github/workflows/bot-auto-merge.yml": "sha256:9ba3c456f685b72eb04537a23a44b20f47e196374a4fd37dfa1e411581af7e32",
     ".github/workflows/ci.yml": "sha256:7d891458620a05b2d08a31fb6d80b9a2c6365ca1341141726b74bb9be06ab2cf",
@@ -20,10 +20,10 @@
     ".rechecker/reports/ofr-pass1-pyproject-toml.json": "sha256:37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
     ".trashcan/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".trashcan/README.txt": "sha256:3106acc9af8415d37610ef0b9f138dc9622f25f81ac37a31f24a9ebd2d25f30f",
-    "CHANGELOG.md": "sha256:37ea21db69b5884c6ee0184adff5cb882b57b357e5b63877ef39db14fc43c5e0",
+    "CHANGELOG.md": "sha256:fc70f8ae86a1c7439493fc26c6ecbb31f965b5774d5fd551bee5e114fc8e8d64",
     "CLAUDE.md": "sha256:1c6ce3af3ee325c927fb48c17c4e209c41408e58bdd7e7caabe3f0562b586a10",
     "LICENSE": "sha256:f79aeb8187cb5e63d27261eba76a2d771292c27489645b3410bd5e67edc02f5d",
-    "README.md": "sha256:0e86c6125c84e3dbc497b09d8ea10d4f060382be445c5dd0fe12d40c3a9231f1",
+    "README.md": "sha256:4e235cfbb55b5d2a87193bffe6730b2fde1d690327117379c61dae092b5ac0b8",
     "agents/cache-optimizer-agent.md": "sha256:6dbcfbc8bd9b6dd7e4933440516004fa787a68395c95749dd3b45e50cfbb7711",
     "agents/cpv-doctor-agent.md": "sha256:f3e00568929a8daba5838b6a6a952b7336985264c7c0889d6005438d7064db4f",
     "agents/cpv-main-menu-agent.md": "sha256:a1ab51f8fcdc28a444a21cdd740afc27bc812dd8a19e0604c2b4d58c51585d5b",
@@ -102,6 +102,7 @@
     "design/tasks/TRDD-20260609_123317+0200-a0ab2363-security-audit-hardening.md": "sha256:88c85c30191398c1f7523b58ef651bde04020945deb652d72c1ffdc0fd736d81",
     "design/tasks/TRDD-20260610_002709+0200-c1924215-issue71-72-rust-bundled-fp.md": "sha256:502366b082c6b9a0e82d62033f174e3004ca47cc8cbb36b7d4ae61891bfa4ce5",
     "design/tasks/TRDD-20260610_104528+0200-37d3dbba-menu-readme-help-issue70.md": "sha256:acd94370e910f75a0e0f0e508c9e21a66c5cd2959d9d9721a03eac2f0493c9ac",
+    "design/tasks/TRDD-20260610_113254+0200-97d7d3f2-ci-lint-hang-issue-74.md": "sha256:aea30f3e790453fcfda5b3ad5d6afbd57098236f9077641872244c1ca7715c19",
     "design/tasks/TRDD-26446eed-ea5e-43e7-886c-8512866d92be-semantic-channel-source.md": "sha256:b20480b2cf4e0a97cc06e53a32a39a4d09a4740b94c92804298a8286d88d991c",
     "design/tasks/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md": "sha256:e2f55a383481238d738aaea92cfdbcb0ce34e6f1bdeab22a3b641cfca583431d",
     "design/tasks/TRDD-2be75e88-3c23-4c91-9e4e-5ce315b497dc-scope-validators.md": "sha256:6aba8e45a304a4b8b33177decdc271a7e1677098d7b5e09903f132f73cabff68",
@@ -139,7 +140,7 @@
     "design/tasks/TRDD-feb72fa4-906f-4bed-9f14-febbdae54bb1-multi-hook-precedence.md": "sha256:2bf4b3d0aecb4f8228c191bd5d0541bbce98107529c091b4ec3fe862f691e36b",
     "git-hooks/pre-commit": "sha256:47cf32b6b340cd973b6a15466d8b752993a68534429dca2e6df7159ba7240810",
     "git-hooks/pre-push": "sha256:facf8e417a1199e4759e9ae405bd95362a747331ebb2646f1cf809bd37f30708",
-    "pyproject.toml": "sha256:15ea7eaaef23cfdfde3d64be304c5d53ebefc6bfb1b6486590d1d60763085c05",
+    "pyproject.toml": "sha256:14b516c9830d29ffdc81424d47eb0b75be99581b219e0630c14a541fcf1022b4",
     "pyrightconfig.json": "sha256:9c2157ea520857e9283146265d967eeb54802e5078d89a559199cfd134cb29de",
     "pytest.ini": "sha256:6789e18df35616f4b02fcdfd72f9c15f60076aeb80de95361450539e2793db5f",
     "references/canonical-pipeline-migration-checklist.md": "sha256:27750747bacfb5d71ebafeac1376cecf57d2b83cb8c8da5fe31fe1f5e94097ee",
@@ -205,7 +206,7 @@
     "scripts/cpv_security_benchmark.py": "sha256:48e4759e1c68c38411c72346e2ea68b48061d688df0832f2cb81229cd929cdf9",
     "scripts/cpv_setup_auth.py": "sha256:f8d53bc5a5bd4e9771feca02899d0265823806a15f22cbaa78b925fa35774a18",
     "scripts/cpv_skill_scanner.py": "sha256:4a07671c967803af7dfe4e85b881f11b983b1ebe18310f66fc576fe085dea9e5",
-    "scripts/cpv_skillaudit_native.py": "sha256:87e26923397565e9e9dcf042fe1bef1c121b34435c58bc70aa39a38b3c9b543c",
+    "scripts/cpv_skillaudit_native.py": "sha256:ac121f6f43cef43dd834db915fbf2bc3c2792970b86b027ccb222674870cbb4b",
     "scripts/cpv_staging.py": "sha256:22c067dfa11aeb56ac28112e6f4796618f1bd9f59366198899ba02734be8d5c9",
     "scripts/cpv_strip_dev.py": "sha256:a432bae5fb4ef8717628e57dc6d8eb4827c5ed44816b267ebae4296ad0314a80",
     "scripts/cpv_taint_engine.py": "sha256:6e6e1ff41a58a5e0e99b3e99ae584c81b50d28766828a31cbf27ceb6355ebffd",
@@ -736,6 +737,7 @@
     "tests/test_issue_70b_css_exec_carveout.py": "sha256:1d24fa31ba364c784669b0dd493cece88b673d317e1f1d7f15093ce11fe4835b",
     "tests/test_issue_71_rust_bundled_fp.py": "sha256:2b951c3369ffa2b894b831c230f56b801c94aff388c166089036d4d3c70e952e",
     "tests/test_issue_73_binary_asset_fp.py": "sha256:71a7108375dbebed659b59091cf8482345748171e36c5e0fc605de0b945c04bb",
+    "tests/test_issue_74_ci_lint_hang.py": "sha256:a2a3c00aba8c6c6dbb4eb91b0641f72b2a3a09d0076504635dfcef096c5abc4f",
     "tests/test_issues_27_28_29.py": "sha256:0dbeb31cdf6c5cd856b5b98900320ed041ae602821e3f6a65b77b833c2b094d1",
     "tests/test_issues_30_31_batch_thresholds.py": "sha256:cf02ce59a767d0695119adc781f2978995a018f05c3753d46c874fe27aa2b5dd",
     "tests/test_issues_40_42_skillaudit_fp.py": "sha256:e6e9ddac9f65317ed519f1a005f4b04b5deb3da8b10994cd8b344ab86f9985e3",
@@ -889,6 +891,6 @@
     "tests/test_validator_early_exit.py": "sha256:f7f63b4ea47741fe4ed05fcab7c94549ec4d173481b1435badc211df6243db1b",
     "tests/test_with_classifier_flag.py": "sha256:a38df69e16396efab5edce75eb45826fc24001463dfe1aaba4ef7db406429a24",
     "tests/test_workflow_path_validation.py": "sha256:bf59e0b81296f5e31350c837aca5eeaef055a49390273ebb048c345737d03a06",
-    "uv.lock": "sha256:a1930de9a16a51f478db5f884efa5532ab3e6586ba9b590735779df6c46ba448"
+    "uv.lock": "sha256:0f45717a1329c12662d4c7032be198ac3be4d2a6594f27c77c054803dda57b14"
   }
 }
