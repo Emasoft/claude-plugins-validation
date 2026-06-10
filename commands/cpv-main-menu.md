@@ -9,8 +9,8 @@ user-invocable: true
 
 # /cpv-main-menu — CPV Main Menu
 
-The CPV plugin ships ~22 user-invocable commands plus a half-dozen agents
-and skills. This single entry point routes you through them via a
+The CPV plugin ships every CPV command, agent, and skill behind one entry
+point. This single command routes you through all of them via a
 **post-turn Stop-hook menu** so you never need to remember individual
 command names.
 
@@ -148,7 +148,7 @@ The fixed key→action map for the top-level menu:
 
 <example>
 user: /cpv-main-menu
-assistant: [Queues top-level menu spec via `print_menu.py fixed 5` and ends the turn. The CMS Stop hook emits the menu (11 rows including `0 — Cancel / Exit`) via systemMessage.]
+assistant: [Queues top-level menu spec via `print_menu.py fixed 5` and ends the turn. The CMS Stop hook emits the menu (all categories plus `0 — Cancel / Exit`) via systemMessage.]
 user: 1
 assistant: [Queues §3.1 Validate sub-menu spec; Stop hook emits the menu including `B — Back` and `0 — Cancel / Exit`.]
 user: 1

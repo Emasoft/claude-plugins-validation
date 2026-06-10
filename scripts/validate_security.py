@@ -903,6 +903,14 @@ SUPPLY_CHAIN_PATTERNS = [
     ),
 ]
 
+# issue #70-B class 3 — AppleScript source extensions whose `--` / `(* *)`
+# comments must be skipped by `scan_for_supply_chain` (the RC-136 pipe-to-shell
+# scanner) so a `curl … | sh` mention inside an AppleScript COMMENT does not
+# fire CRITICAL. Mirrors `cpv_skillaudit_native.APPLESCRIPT_EXTS` (imported
+# lazily inside the scanner to keep this list the single source of truth for the
+# membership test without paying the import cost on every module load).
+_APPLESCRIPT_SUPPLY_CHAIN_EXTS: tuple[str, ...] = (".applescript", ".scpt", ".scptd")
+
 # Credential harvesting patterns — reading sensitive credential files
 # Note: ~/.claude/ is EXCLUDED (legitimate for plugins)
 # Phase 2c (RC-20) added Claude MEMORY/USER files, browser keystores, and
@@ -5665,9 +5673,26 @@ def scan_for_supply_chain(content: str, file_path: str, report: ValidationReport
 
     issues_found = 0
     lines = _split_lines(content)
+    # issue #70-B class 3 — AppleScript COMMENT lines. AppleScript runs a shell
+    # ONLY via a real `do shell script` / `do script` statement; a `curl … | sh`
+    # mention inside a `--` / `#` / `(* *)` comment cannot execute and must not
+    # fire RC-136. The `#`-comment skip below already covers the `#` line-comment
+    # form, but AppleScript's `--` and `(* *)` (block, may span lines) forms are
+    # not `#`-prefixed, so precompute the comment-line set for AppleScript files
+    # using the single-sourced detector. FN-safe: a genuine
+    # `do shell script "curl … | sh"` is NOT a comment line and still fires.
+    applescript_comment_set: frozenset[int] = frozenset()
+    if file_lower.endswith(_APPLESCRIPT_SUPPLY_CHAIN_EXTS):
+        from cpv_skillaudit_native import applescript_comment_lines  # noqa: PLC0415
+
+        # `applescript_comment_lines` returns 0-based indices; this loop is
+        # 1-based, so the membership test below offsets by one.
+        applescript_comment_set = applescript_comment_lines(lines)
     for line_num, line in enumerate(lines, start=1):
         stripped = line.strip()
         if stripped.startswith("#"):
+            continue
+        if applescript_comment_set and (line_num - 1) in applescript_comment_set:
             continue
         # Skip Python string literals (template generators, help text, install instructions)
         if is_python and _is_python_string_context(stripped):

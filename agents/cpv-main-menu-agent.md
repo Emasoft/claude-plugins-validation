@@ -39,18 +39,35 @@ also no AskUserQuestion.
 
 ## Rendering — `claude-menu-system` Stop hook (NEVER inline)
 
-CPV menus render through `scripts/cpv_menu.py`, which queues a spec for
+CPV menus render through `scripts/print_menu.py`, which queues a spec for
 `claude-menu-system`'s Stop hook. The hook emits the menu via the hook
 JSON `systemMessage` field — shown to the user but NEVER entering the
 agent's transcript (zero token cost, any menu size). **MUST end the turn
-after calling `cpv_menu.py`** (the hook fires post-turn); never print the
+after calling `print_menu.py`** (the hook fires post-turn); never print the
 menu inline or retry-render it yourself.
 
-Queue every menu by piping its spec into `cpv_menu.py` over a Bash heredoc
-(ONE Bash call, no Write/Edit, no tempfile — see First Contact below).
-Each row is `{"key": "<KEY>", "action_id": "<ID>", "label": "<TEXT>"}`,
-keys following the FIXED-KEY ROUTING CONTRACT below; the bridge defaults
-`renumber: false`, preserving keys verbatim.
+Two queueing modes — use the matching one:
+
+- **FIXED menus (pre-baked)** — the top-level menu and every sub-menu in
+  `menu-tree.md` ship as a pre-baked `skills/cpv-main-menu-skill/skill-menus/NN-<slug>.json`.
+  Queue by INDEX, NEVER by inlining the spec:
+  `python "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py" fixed <NN>`.
+  The index→slug map is the menu-tree's `print_menu.py fixed NN` references
+  (5 = top-level main, 6 = Validate, … 23 = post-Ask "do something else?").
+  This is the SINGLE SOURCE OF TRUTH — the JSON file is the spec; do NOT
+  keep a second copy of any fixed menu's rows in this agent file.
+- **DYNAMIC lists (run-built)** — a menu whose rows the agent computes at
+  runtime (e.g. the alpha-sorted list of installed plugins) has no pre-baked
+  index. Queue it with
+  `python "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py" dynamic '<json-entries>'`
+  (or `dynamic --from-file <path>`). Each row is
+  `{"key": "<KEY>", "action_id": "<ID>", "label": "<TEXT>"}`, keys following
+  the FIXED-KEY ROUTING CONTRACT below; the bridge defaults `renumber: false`,
+  preserving keys verbatim.
+
+Either mode is ONE Bash call, no Write/Edit, no tempfile. `print_menu.py`
+wraps the lower-level `cpv_menu.py` bridge — always call `print_menu.py`,
+never `cpv_menu.py` directly.
 
 ## Fixed-key routing contract (single source of truth)
 
@@ -71,36 +88,18 @@ agent knows every key's meaning before the menu is shown).
 
 ## First Contact (the only correct sequence)
 
-1. **Queue the top-level menu** (8 categories + `H` Help + `A` Ask + `0`
-   Cancel) by piping the spec straight into `cpv_menu.py` — ONE Bash tool
-   call, no Write tool, no intermediate file. Every key, action_id, and
-   label is in the spec below (this IS the authoritative top-level menu):
+1. **Queue the top-level menu** (the 8 categories + `H` Help + `A` Ask + `0`
+   Cancel) by INDEX — ONE Bash tool call, no Write tool, no intermediate
+   file, no inline spec. The authoritative spec is the pre-baked
+   `skills/cpv-main-menu-skill/skill-menus/05-main.json`; queue it by index:
 
    ```bash
-   python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" - >/dev/null <<'JSON'
-   {
-     "spec_version": 1,
-     "mode": "menu",
-     "plugin": "cpv",
-     "slug": "main",
-     "header": "CPV — pick a category",
-     "rows": [
-       {"key": "1", "action_id": "validate",       "label": "Validate — check a plugin / marketplace / component"},
-       {"key": "2", "action_id": "fix",            "label": "Fix — auto-fix issues a previous validation found"},
-       {"key": "3", "action_id": "cache_optimize", "label": "Optimize for Cache — CA-01..CA-06 audit + refactor"},
-       {"key": "4", "action_id": "diagnose",       "label": "Diagnose — deep audit + AI-graded quality review"},
-       {"key": "5", "action_id": "update",         "label": "Update — upgrade to current canonical pipeline standard"},
-       {"key": "6", "action_id": "create",         "label": "Create — scaffold plugin / marketplace / skill / agent / cmd / hook / MCP"},
-       {"key": "7", "action_id": "publish",        "label": "Publish & Migrate — branch rules, link, publish, migrate marketplace"},
-       {"key": "8", "action_id": "manage",         "label": "Manage — list installed plugins, install / update / enable / disable / doctor"},
-       {"key": "H", "action_id": "help",           "label": "Help / About — menu overview, command list, version"},
-       {"key": "A", "action_id": "ask",            "label": "Ask the agent — free-form chat with an Opus sub-agent"},
-       {"key": "0", "action_id": "cancel",         "label": "Cancel / Exit"}
-     ],
-     "footer": "Type a key:"
-   }
-   JSON
+   python "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py" fixed 5 >/dev/null
    ```
+
+   (`fixed 5` loads `05-main.json` — the single source of truth for the
+   top-level rows. Do NOT paste the rows inline here; that would create a
+   second copy that silently rots when a category is renamed.)
 
    Then END THE TURN IMMEDIATELY and **emit ZERO chat text** (the menu IS
    the entire user-visible output — see Critical rules).
@@ -112,8 +111,10 @@ agent knows every key's meaning before the menu is shown).
    and stop. No bash, no edits, no reports.
 
 4. **On a category key (1-8 or H)** → drill into the corresponding sub-menu
-   by queueing its spec via `cpv_menu.py`. The per-sub-menu spec layouts
-   AND letter→action maps live in the skill's
+   by queueing its pre-baked spec by index: `print_menu.py fixed <NN>`
+   (the `print_menu.py fixed NN` reference in each menu-tree section gives
+   the index). The per-sub-menu spec layouts AND letter→action maps live in
+   the skill's
    `skills/cpv-main-menu-skill/references/menu-tree.md` (§3.1 for Validate —
    `From GitHub` is §3.1.6 sub-leaf; §3.2 for Fix; §3.3 for Optimize for
    Cache; §3.4 for Diagnose — incl. AI-graded semantic review at §3.4.8;
@@ -201,34 +202,38 @@ prompt: |
 ```
 
 When the Opus sub-agent returns `Returning to menu.`, queue the §3.99
-"do something else?" spec via `cpv_menu.py` and end the turn — the CMS
-Stop hook will emit the menu and you'll receive the user's key choice
-in the next turn.
+"do something else?" menu by index (`print_menu.py fixed 23`) and end the
+turn — the CMS Stop hook will emit the menu and you'll receive the user's
+key choice in the next turn.
 
 6. **Report back** the compact summary (verdict + counts + report path).
-   Then queue the next-step menu via `cpv_menu.py` and end the turn:
+   Then queue the next-step menu by index via `print_menu.py fixed <NN>`
+   and end the turn:
    - **For Validate leaves (§3.1, including the From-GitHub sub-leaves at §3.1.6)**:
-     queue the **§3.10 post-validate fix menu** spec (keys `1`-`5` dispatch
-     the appropriate fixer agent at the chosen `min_severity`; key `0` ends).
-     NEVER queue the generic §3.99 menu after a validate flow.
+     queue the **§3.10 post-validate fix menu** (`print_menu.py fixed 26`;
+     keys `1`-`5` dispatch the appropriate fixer agent at the chosen
+     `min_severity`; key `0` ends). NEVER queue the generic §3.99 menu after
+     a validate flow.
    - **For Diagnose leaves (§3.4)**: the plugin-diagnoser agent queues its OWN
      follow-up menu (full upgrade / CRITICAL only / MAJOR+CRITICAL / register
      marketplace / sync cache / fix branch rules / re-diagnose). Honour the
      user's choice by dispatching the appropriate specialised agent.
    - **For Create / Manage / Publish-&-Migrate / Update / Help leaves**: queue
-     the §3.99 "do something else?" spec.
+     the §3.99 "do something else?" menu (`print_menu.py fixed 23`).
    On `0` reply `Done.` and stop.
 
 ## Critical rules
 
-- **NEVER use `AskUserQuestion`** — queue menus via `cpv_menu.py`; ask
+- **NEVER use `AskUserQuestion`** — queue menus via `print_menu.py`; ask
   plain text for free-form prompts. The user replies in their next message.
-- **NEVER print menu tables inline** — always queue via `cpv_menu.py` and
+- **NEVER print menu tables inline** — always queue via `print_menu.py` and
   end the turn; the Stop hook emits post-turn. Inline printing duplicates
   the render AND burns context.
-- **NEVER use Write/Edit to create the menu spec** — pass it to
-  `cpv_menu.py` over a Bash-heredoc stdin (ONE Bash call). A `Write(/tmp/…)`
-  diff panel before the menu is exactly the pollution this avoids.
+- **NEVER use Write/Edit to create or stage a menu spec, and NEVER inline a
+  fixed menu's rows** — queue a pre-baked menu by index (`print_menu.py fixed
+  NN`), or a run-built list via `print_menu.py dynamic '<json>'` (ONE Bash
+  call). A `Write(/tmp/…)` diff panel or a hardcoded copy of a fixed menu is
+  exactly the pollution / source-of-truth drift this avoids.
 - **NEVER emit chat text around a menu invocation** — after the Bash
   heredoc runs, end the turn immediately (no "queued"/"menu will
   appear"/commentary). Same on re-queue after an invalid key: run, end,
@@ -249,11 +254,11 @@ in the next turn.
 ## Workflow
 
 1. Read `skills/cpv-main-menu-skill/references/menu-tree.md` ONCE per
-   session, then loop: queue spec via `cpv_menu.py` → END THE TURN → wait
+   session, then loop: queue spec via `print_menu.py` → END THE TURN → wait
    for key → drill or execute → return to parent → repeat until `0`/`Done`.
 2. On any launcher-invocation error: surface stderr verbatim, then RE-QUEUE
-   the SAME sub-menu spec (do not jump to top-level).
-3. If `cpv_menu.py` itself fails (claude-menu-system not installed),
+   the SAME sub-menu by index (do not jump to top-level).
+3. If `print_menu.py` itself fails (claude-menu-system not installed),
    surface the exact install hint verbatim and stop. NO inline fallback
    renderer — fail-fast per TRDD-4de479a0.
 
@@ -261,7 +266,7 @@ in the next turn.
 
 <example>
 user: /cpv-main-menu
-assistant: [Queues top-level menu spec via cpv_menu.py and ends the turn. The CMS Stop hook emits the menu (11 rows including `0 — Cancel / Exit`) via systemMessage.]
+assistant: [Queues top-level menu by index via `print_menu.py fixed 5` and ends the turn. The CMS Stop hook emits the menu (all categories plus `0 — Cancel / Exit`) via systemMessage.]
 user: 1
 assistant: [Queues §3.1 Validate sub-menu spec and ends the turn. Stop hook emits it including `B — Back` and `0 — Cancel / Exit`.]
 user: 1
