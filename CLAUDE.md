@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.7` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.8` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **113** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI) |
-| **test files** | **305** | `ls tests/test_*.py`; ~8972 tests |
+| **test files** | **308** | `ls tests/test_*.py`; ~8996 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -123,7 +123,16 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 
 ## Open issues snapshot (update as they close)
 
-ALL filed issues CLOSED through `#75`. Latest cycle (v2.126.7) closed `#75`
+ALL filed issues CLOSED through `#75`. **v2.126.8** (not a filed issue —
+surfaced unblocking the claude-menu-system publish): FN-safe cspell-dictionary
+carve-out — `_context_classifier_verdict` suppresses `_BINARY_INAPPLICABLE_RULES`
+(incl. `TOOL_SHADOW`) on a recognised cspell word-list (`.cspell-words.txt` /
+`project-words.txt` / `.cspell/`), gated on a non-instruction extension so no
+SKILL/agent/command/hook can be disguised as one; exec/secret/exfil rules stay
+live. The pytest words `monkeypatch*` were tripping `TOOL_SHADOW`'s bare-word
+`monkey.?patch` pattern. TRDD `aed77004`; +24 two-sided tests.
+
+Latest filed-issue cycle (v2.126.7) closed `#75`
 — 5 security-scanner-plugin FP classes after self-exemption removal, all
 FN-safe two-sided: (1) RC-70 inert-string AST carve-out (validate_security);
 (2) RC-73 yaml `Loader=<SafeLoader-subclass>` taint carve-out (cpv_taint_engine);
