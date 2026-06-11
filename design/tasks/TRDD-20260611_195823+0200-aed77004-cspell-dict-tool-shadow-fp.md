@@ -3,22 +3,26 @@ trdd-id: aed77004-2c27-4c19-8e96-6dea35fc2087
 title: cspell custom-dictionary word-lists FP as TOOL_SHADOW (agent_manipulation)
 column: complete
 created: 2026-06-11T19:58:23+0200
-updated: 2026-06-11T19:58:23+0200
+updated: 2026-06-11T20:20:23+0200
 current-owner: claude-cpv
 task-type: bugfix
 release-via: publish
 test-requirements: [unit, lint, typecheck]
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [366a7c8]
+published-version: 2.126.8
 ---
 
 # cspell dictionary TOOL_SHADOW false positive
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
 
-- **Done.** Carve-out implemented + two-sided tested + self-validated clean.
-  Ready to publish as the next CPV patch (→ v2.126.8), which unblocks the
-  `~/Code/claude-menu-system` publish (its `.cspell-words.txt` was the trigger).
+- **Shipped.** Carve-out implemented + two-sided tested + self-validated clean.
+  Published as **CPV v2.126.8** (commit `366a7c8`); CPV CI + Release + Notify all
+  green. This unblocked `~/Code/claude-menu-system` (its `.cspell-words.txt` was
+  the trigger): cms validated clean against the fixed CPV → **cms v0.2.0**
+  published (CI + Release + Notify green); cms **PR #1 closed as superseded** by
+  main (verified main is a strict superset of all 3 features).
 - **Root cause:** `TOOL_SHADOW` (skillaudit, `category: agent_manipulation`)
   carries the bare-word pattern `monkey.?patch`. A cspell custom dictionary
   (`.cspell-words.txt`) lists the pytest-jargon words `monkeypatch` /
