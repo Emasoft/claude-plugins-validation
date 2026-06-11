@@ -15,6 +15,7 @@ Coverage: 10 tests covering 8 code paths across 4 functions plus edge cases.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -804,6 +805,54 @@ reports_dev/
         validate_gitignore(plugin_dir, report)
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("ignores all source files" in m for m in major_msgs)
+
+    def test_glob_dev_covers_reports_dev(self, tmp_path):
+        """Issue #98: a `*_dev/` glob genuinely ignores reports_dev/, so git
+        check-ignore must recognise coverage and NOT warn (the FP that issue
+        #98 reports — literal-substring matching missed the glob)."""
+        plugin_dir = tmp_path / "glob-dev"
+        plugin_dir.mkdir()
+        # A `*_dev/` glob covers reports_dev/; an explicit /reports/ covers reports/.
+        (plugin_dir / ".gitignore").write_text("*_dev/\n/reports/\n")
+        # Must be a real git repo so `git check-ignore` has rules to consult.
+        subprocess.run(["git", "init", "-q"], cwd=plugin_dir, check=True)
+        (plugin_dir / "reports_dev").mkdir()
+        report = ValidationReport()
+        validate_gitignore(plugin_dir, report)
+        # No result of any severity may complain about reports_dev/ coverage.
+        offending = [r.message for r in report.results if "missing coverage" in r.message and "reports_dev/" in r.message]
+        assert not offending, f"reports_dev/ glob coverage not recognised: {offending}"
+
+    def test_uncovered_reports_still_warns(self, tmp_path):
+        """Issue #98 FN-safe sibling: a genuinely-uncovered required category
+        (real reports/ dir, .gitignore only ignores *.pyc) must STILL emit the
+        MAJOR — git check-ignore exits 1 AND the substring scan misses."""
+        plugin_dir = tmp_path / "uncovered"
+        plugin_dir.mkdir()
+        # No reports/ rule, no *_dev/ glob — reports/ is genuinely uncovered.
+        (plugin_dir / ".gitignore").write_text("*.pyc\n")
+        subprocess.run(["git", "init", "-q"], cwd=plugin_dir, check=True)
+        (plugin_dir / "reports").mkdir()
+        report = ValidationReport()
+        validate_gitignore(plugin_dir, report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("missing coverage" in m and "reports/" in m for m in major_msgs), (
+            f"uncovered reports/ category did not warn: {[r.message for r in report.results]}"
+        )
+
+    def test_not_a_git_repo_falls_back_to_substring(self, tmp_path):
+        """Issue #98 graceful fallback: with NO git repo, git check-ignore
+        cannot run (exit 128), so the legacy literal-substring scan must still
+        recognise a verbatim `reports_dev/` line and not warn."""
+        plugin_dir = tmp_path / "no-git"
+        plugin_dir.mkdir()
+        # NOTE: intentionally NOT a git repo — exercises the fallback path.
+        (plugin_dir / ".gitignore").write_text("reports_dev/\n")
+        (plugin_dir / "reports_dev").mkdir()
+        report = ValidationReport()
+        validate_gitignore(plugin_dir, report)
+        offending = [r.message for r in report.results if "missing coverage" in r.message and "reports_dev/" in r.message]
+        assert not offending, f"substring fallback failed to recognise literal reports_dev/ line: {offending}"
 
 
 class TestValidateWorkflowInlinePython:

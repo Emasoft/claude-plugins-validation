@@ -1308,14 +1308,43 @@ def validate_body_content(content: str, filename: str, report: AgentValidationRe
             filename,
         )
 
-    # Role definition check — advisory only; Anthropic does not require a role line
-    if "you are" not in body_text.lower():
-        report.warning(
-            "Agent body should include a role definition ('You are...' statement)",
+    # Role definition check — advisory only; Anthropic does not require a role line.
+    # Recognize BOTH second-person ("You are …") and third-person identity statements
+    # ("The <Name> Agent is a …", a `## Identity` section, "Acts as …",
+    # "… is a … agent that …"). Reporting "missing" when a substantive 3rd-person
+    # role-def is present is a false positive (#97).
+    _lower = body_text.lower()
+    _has_second_person = "you are" in _lower
+    # Third-person identity: a `## Identity` heading, OR an "X is a[n] ... agent ..."
+    # / "X Agent is a ..." / "Acts as ..." sentence. re-checked on the raw body.
+    _has_identity_heading = bool(
+        re.search(r"(?m)^\s*#{1,6}\s*identity\b", body_text, re.IGNORECASE)
+    )
+    _has_third_person_role = bool(
+        re.search(
+            r"\b(?:is|acts?)\s+(?:a|an|the)\s+[^.\n]{0,80}?\bagent\b"  # "is a … agent"
+            r"|\bagent\s+is\s+(?:a|an|the)\b"  # "<Name> Agent is a …"
+            r"|\bacts?\s+as\s+(?:a|an|the)\b",  # "Acts as a …"
+            body_text,
+            re.IGNORECASE,
+        )
+    )
+    if _has_second_person:
+        report.passed("Role definition present ('You are...')", filename)
+    elif _has_identity_heading or _has_third_person_role:
+        # A role IS defined, just in third person. Soft advisory only — never claim
+        # the definition is absent. Second person tends to steer a model better.
+        report.info(
+            "Role definition is written in third person; a second-person 'You are …' "
+            "statement is recommended for prompt effectiveness",
             filename,
         )
     else:
-        report.passed("Role definition present ('You are...')", filename)
+        report.warning(
+            "Agent body should include a role definition ('You are...' or a clear "
+            "third-person identity statement)",
+            filename,
+        )
 
     # Check for common sections
     sections_found = []
