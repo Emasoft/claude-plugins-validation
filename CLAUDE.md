@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.8` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.9` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **113** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI) |
-| **test files** | **308** | `ls tests/test_*.py`; ~8996 tests |
+| **test files** | **313** | `ls tests/test_*.py`; ~9058 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -123,7 +123,21 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 
 ## Open issues snapshot (update as they close)
 
-ALL filed issues CLOSED through `#75`. **v2.126.8** (not a filed issue —
+**Open: #76–#101** — FP reports + suggestions filed by 8 ecosystem plugin
+Claudes; triaged this session (18 FP-fixable, 2 by-design #92/#101-E, suggestions
+#90/#93/#94, agent-bug #82, usability #89). **v2.126.9 closed 7** (FN-safe
+two-sided): #85 (`.git`-FILE private-path skip), #96/#99 (bare-prose backtick-path
+scoping — only `./`/`../`/plugin-internal flag), #98 (.gitignore `git check-ignore`
+glob coverage), #84 (markdownlint isolated cwd + crash→WARNING), #97 (3rd-person
+role-def→INFO), #100-B/C (scanner self-match: indirection-aware message-string +
+exact-value BOM; #100-A already fixed). Remaining FP-fixable = the **Theme-A
+skillaudit doc-fence cluster** (#76 umbrella + #77/#78/#79/#80/#81/#83/#86/#87/#88/
+#91/#95). Also open: **#114** (canonical-pipeline cold-install `uvx-from-git`
+validate timeout — needs a wheel/cache, the real ecosystem CI breaker). Security:
+the "bare secrets in YAML" alarm was a janitor-scanner FP (ai-maestro-janitor #24),
+NOT a real exposure — 17-repo/52-workflow audit found ZERO bare secrets.
+
+**v2.126.8** (not a filed issue —
 surfaced unblocking the claude-menu-system publish): FN-safe cspell-dictionary
 carve-out — `_context_classifier_verdict` suppresses `_BINARY_INAPPLICABLE_RULES`
 (incl. `TOOL_SHADOW`) on a recognised cspell word-list (`.cspell-words.txt` /
