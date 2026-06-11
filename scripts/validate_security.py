@@ -4036,6 +4036,16 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
     # Python files never use backtick command substitution — backticks are RST/docstring formatting
     is_python_file = file_lower.endswith(".py")
 
+    # Issue #100 (class B, half 2) — in a Python file, the 1-based lines where an
+    # `eval(`/`exec(` token lives ONLY inside an inert string Constant (a scanner's
+    # finding MESSAGE, e.g. `msg = "Python eval() detected"`). RC-122/RC-123 are
+    # skipped on these lines only. AST-proven & sink-guarded: a real `eval(x)` call
+    # or a literal fed to a sink (`exec("eval("+x)`) is NOT in this set and STILL
+    # fires. Default-SAFE (empty) on a non-.py file or a parse failure.
+    eval_exec_inert_lines = (
+        _eval_exec_inert_string_lines(file_path, content) if is_python_file else frozenset()
+    )
+
     # Issue #67 — a `.json` is parsed as DATA by Claude Code's loader and a
     # plugin's runtime; it is NEVER executed as Python/JS. So `eval(`/`exec(`
     # text that appears inside a JSON STRING VALUE is prose (e.g. a report
@@ -4299,6 +4309,14 @@ def scan_for_injection(content: str, file_path: str, report: ValidationReport) -
             for pattern, msg in EVAL_PATTERNS:
                 eval_match = pattern.search(line)
                 if eval_match:
+                    # Issue #100 (class B, half 2) — RC-122/RC-123 fired on an
+                    # `eval(`/`exec(` token that is provably a substring of an inert
+                    # string Constant (a security plugin's finding MESSAGE / detector
+                    # doc), AST-proven sink-free. A real `eval(x)` call or a literal
+                    # fed to a sink (`exec("eval("+x)`) is NOT in `eval_exec_inert_lines`
+                    # and STILL fires. Python-only; default-SAFE on parse failure.
+                    if ("RC-122" in msg or "RC-123" in msg) and line_num in eval_exec_inert_lines:
+                        continue
                     # Issue #67 — in a `.json` DATA file, an `eval(`/`exec(`
                     # token inside a quoted JSON string value is prose, not a
                     # code path (Claude Code never executes JSON). Suppress
@@ -9041,6 +9059,114 @@ def _rc70_python_inert_decoder_lines(rel_path: str, content: str) -> frozenset[i
         if any(p.search(line) for p in OBFUSCATION_DECODER_PATTERNS)
     }
     return frozenset(decoder_hit_lines - real_decoder_lines)
+
+
+# Issue #100 (class B, half 2) — exec/shell sinks that EXECUTE a string command,
+# used by `_eval_exec_inert_string_lines` to refuse to suppress an `eval(`/`exec(`
+# token-bearing string Constant that nonetheless flows into one of these. Mirrors
+# `_skillaudit_python_context._STRING_CMD_EXEC_FQNAMES` + the always-shell subset;
+# inlined here (validate_security does not import that module) so the carve-out is
+# self-contained. A direct exec sink fires regardless of `shell=`; a subprocess /
+# asyncio sink fires only with `shell=True`.
+_EVAL_INERT_STRING_EXEC_SINKS: frozenset[str] = frozenset(
+    {
+        "eval",
+        "exec",
+        "compile",
+        "__import__",
+        "os.system",
+        "os.popen",
+        "commands.getoutput",
+        "commands.getstatusoutput",
+        "pty.spawn",
+        "asyncio.create_subprocess_shell",
+    }
+)
+_EVAL_INERT_STRING_SHELL_SINKS: frozenset[str] = frozenset(
+    {
+        "subprocess.run",
+        "subprocess.call",
+        "subprocess.check_call",
+        "subprocess.check_output",
+        "subprocess.Popen",
+        "asyncio.create_subprocess_exec",
+    }
+)
+
+
+def _eval_exec_qualname(func: ast.AST) -> str | None:
+    """Best-effort dotted name of a call target (``os.system`` / ``eval`` / …).
+    Returns the bare ``.attr`` for an attribute access and the ``.id`` for a name;
+    None for anything more complex (a call result, subscript, …)."""
+    if isinstance(func, ast.Attribute):
+        if isinstance(func.value, ast.Name):
+            return f"{func.value.id}.{func.attr}"
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return None
+
+
+def _eval_exec_inert_string_lines(rel_path: str, content: str) -> frozenset[int]:
+    """1-based lines in a ``.py`` file where an ``eval(``/``exec(`` token appears
+    ONLY as a substring of a string Constant that does NOT flow to an exec/shell
+    sink. A token inside an inert ``str`` cannot execute (a scanner's finding
+    MESSAGE / detector doc such as ``msg = "Python eval() detected"``).
+
+    Default-SAFE: empty set on a non-.py file or any parse failure, so RC-122 /
+    RC-123 keep firing unless inertness is AST-proven.
+
+    FN-safe: a REAL bare ``eval(``/``exec(`` CALL is an ``ast.Call`` (not inside a
+    string Constant) and STILL fires; a literal fed to ``exec(...)``/``os.system(...)``
+    (e.g. ``exec("eval(" + x)``) flows to a sink → the covering Constant is excluded
+    → STILL fires. Issue #100 class B."""
+    if not rel_path.endswith(".py"):
+        return frozenset()
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError):
+        return frozenset()
+
+    # Which string Constants flow into an exec/shell sink? Those must NOT be cleared.
+    sink_flowing: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        qn = _eval_exec_qualname(node.func)
+        if qn is None:
+            continue
+        is_exec_sink = qn in _EVAL_INERT_STRING_EXEC_SINKS
+        is_shell_sink = qn in _EVAL_INERT_STRING_SHELL_SINKS and any(
+            isinstance(kw.value, ast.Constant) and kw.value.value is True
+            for kw in node.keywords
+            if kw.arg == "shell"
+        )
+        if not (is_exec_sink or is_shell_sink):
+            continue
+        # Mark every string Constant reachable from this sink's args/kwargs.
+        carriers = [sub for arg in node.args for sub in ast.walk(arg)]
+        carriers += [sub for kw in node.keywords for sub in ast.walk(kw.value)]
+        for sub in carriers:
+            if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                s, e = getattr(sub, "lineno", None), getattr(sub, "end_lineno", None)
+                if s is not None and e is not None:
+                    sink_flowing.update(range(s, e + 1))
+
+    inert: set[int] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            continue
+        if "eval(" not in node.value and "exec(" not in node.value:
+            continue
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", None)
+        if start is None or end is None:
+            continue
+        # A string Constant that flows to a sink is part of a live exec — keep it.
+        if any(ln in sink_flowing for ln in range(start, end + 1)):
+            continue
+        inert.update(range(start, end + 1))
+    return frozenset(inert)
 
 
 def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:

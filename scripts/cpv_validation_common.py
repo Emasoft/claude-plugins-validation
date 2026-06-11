@@ -7105,6 +7105,17 @@ def scan_directory_for_private_info(
             filepath = Path(dirpath) / filename
             rel_path = str(rel_dir / filename) if str(rel_dir) != "." else filename
 
+            # Issue #85: a linked-worktree `.git` is a FILE (a `gitdir: …`
+            # pointer), not a directory. The dir-skip in PRIVATE_INFO_SKIP_DIRS
+            # only prunes a `.git` DIRECTORY during the walk; the pointer FILE
+            # falls through and its absolute `gitdir:` path (which embeds the
+            # validating machine's home + username) was flagged as a CRITICAL
+            # private-path leak. `.git` — file OR dir — is pure git plumbing,
+            # never plugin content. FN-safe: a leaked /Users/<user>/ path in any
+            # TRACKED, shipped non-`.git` file is unaffected and still fires.
+            if filename == ".git":
+                continue
+
             # Point 1 (v2.114.0): scan EVERY text file, not just an extension
             # allowlist. A leaked username / home path can sit in any text
             # file (.info, .rst, LICENSE, a config) referenced by the plugin.
@@ -7323,6 +7334,17 @@ def validate_no_absolute_paths(
         for filename in filenames:
             filepath = Path(dirpath) / filename
             rel_path = str(rel_dir / filename) if str(rel_dir) != "." else filename
+
+            # Issue #85: a linked-worktree `.git` is a FILE (a `gitdir: …`
+            # pointer), not a directory. The dir-skip in PRIVATE_INFO_SKIP_DIRS
+            # only prunes a `.git` DIRECTORY during the walk; the pointer FILE
+            # falls through and its absolute `gitdir:` path (which embeds the
+            # validating machine's home + username) was flagged as a CRITICAL
+            # private-path leak. `.git` — file OR dir — is pure git plumbing,
+            # never plugin content. FN-safe: a leaked /Users/<user>/ path in any
+            # TRACKED, shipped non-`.git` file is unaffected and still fires.
+            if filename == ".git":
+                continue
 
             # Point 1 (v2.114.0): scan EVERY text file, not just an extension
             # allowlist. A hardcoded absolute path can sit in any text file
@@ -8027,11 +8049,22 @@ def validate_md_file_paths(
                 rel_md,
             )
         else:
-            # External or ambiguous path in non-reference doc — flag as warning (non-blocking)
-            report.warning(
-                f"Possible broken backtick path: `{raw_path}` in {rel_md}",
-                rel_md,
-            )
+            # Issues #96/#99: a BARE backtick code-span like `lib/x.ts`,
+            # `design/requirements/index.json`, or `design/pdr/GUUID-…md` is
+            # ambiguous documentation — a cross-repo source pointer, a
+            # runtime-output path, or a template/example filename — NOT an
+            # in-repo link. Only treat a backtick path as an in-repo broken-link
+            # candidate when it carries explicit relative-link intent (a leading
+            # `./` or `../`). Markdown LINK syntax `[text](path)` is handled by
+            # the separate md_link_re loop above and STILL fires (e.g. a broken
+            # `[x](./does-not-exist.md)` → MINOR). A bare cross-repo / output /
+            # placeholder prose token is left unflagged.
+            if raw_path.startswith(("./", "../")):
+                report.warning(
+                    f"Possible broken backtick path: `{raw_path}` in {rel_md}",
+                    rel_md,
+                )
+            # else: bare ambiguous path in prose — not an in-repo link, skip.
 
 
 def _sanitize_url(url: str) -> str | None:

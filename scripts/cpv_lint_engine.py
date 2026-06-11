@@ -42,6 +42,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -78,6 +79,22 @@ from gitignore_filter import GitignoreFilter
 # matched). `\.mdx?:` matches both `.md:` and `.mdx:`; keep it in sync with
 # the markdown collect() patterns if a new markdown suffix is ever added.
 _MARKDOWNLINT_FINDING_RE = re.compile(r"\.mdx?:\d+(?::\d+)?\s+(?:error|warning|info)\s+MD\d+")
+
+# Tool/environment CRASH signatures (issue #84). When markdownlint-cli2 is
+# launched via `bunx`/`npx` and its ESM imports fail (e.g. `bunx` resolves the
+# package up into an unrelated ANCESTOR `package.json` with a broken
+# `node_modules`), markdownlint never runs and emits a Node crash stack instead
+# of MD### findings. That is an ENVIRONMENT failure, not a lint violation — it
+# must surface as a WARNING (never blocks `--strict`), not a NIT (which does).
+# This regex is consulted ONLY in the `surfaced == 0` fallback below, so a real
+# MD### finding line (which matches `_MARKDOWNLINT_FINDING_RE`, surfaced > 0) can
+# never reach — and so can never be suppressed by — this discriminator.
+_MARKDOWNLINT_TOOL_CRASH_RE = re.compile(
+    r"ERR_MODULE_NOT_FOUND|ERR_REQUIRE_ESM|Cannot find (?:module|package)"
+    r"|MODULE_NOT_FOUND|node:internal/|ERR_PACKAGE_PATH_NOT_EXPORTED"
+    r"|Error \[ERR_|npm error|command not found|No such file or directory",
+    re.IGNORECASE,
+)
 
 # ruff concise finding shape: "<path>:<line>[:<col>]: <code> <message>".
 # Group 1 captures the full path (non-greedy up to the ":<line>[:<col>]:"
@@ -981,12 +998,23 @@ def lint_markdown(
 
     file_paths = [str(f) for f in files]
 
+    # Run markdownlint from an ISOLATED empty temp cwd, not `cwd=repo_root`
+    # (issue #84). `_resolve` may return `['bunx', 'markdownlint-cli2']` /
+    # `['npx', ...]`, and `bunx`/`npx` resolve the package by walking UP the
+    # cwd's directory tree to the nearest `package.json` / `node_modules`. With
+    # `cwd=repo_root`, a broken ancestor Node project (e.g. `$HOME/package.json`
+    # with an incomplete `node_modules`) makes markdownlint-cli2's ESM imports
+    # crash with `ERR_MODULE_NOT_FOUND`. An empty temp cwd has no ancestor
+    # `package.json`, so resolution falls to the global/uvx-installed package.
+    # The file paths AND `--config <path>` are already ABSOLUTE (verified), so
+    # the cwd governs ONLY module resolution, never WHICH files get linted.
     try:
-        result = _run_linter(
-            invocation + file_paths,
-            cwd=repo_root,
-            timeout=120,
-        )
+        with tempfile.TemporaryDirectory(prefix="cpv-mdlint-") as _isolated_cwd:
+            result = _run_linter(
+                invocation + file_paths,
+                cwd=Path(_isolated_cwd),
+                timeout=120,
+            )
     except subprocess.TimeoutExpired:
         report.warning("markdownlint timed out — skipping markdown lint")
         return True
@@ -1018,13 +1046,23 @@ def lint_markdown(
     # but produced no parseable per-line output, the developer used to see
     # only "CPV blocked the push (exit 3)" with no clue what failed. Now
     # we always emit at least one finding carrying the raw stderr/stdout.
+    #
+    # Crash-vs-style discriminator (issue #84): non-zero with no MD### finding
+    # has two distinct causes. If the output is genuine non-parseable
+    # markdownlint output (NOT a Node/tool crash), keep the NIT — it is a real,
+    # if unstructured, lint signal. But a TOOL CRASH (`ERR_MODULE_NOT_FOUND`
+    # etc. — markdownlint could not even RUN) or EMPTY output is an
+    # environment/tool failure, not a lint violation, and must be a WARNING
+    # (never blocks `--strict`), never a NIT (which does). This branch is
+    # reachable ONLY when surfaced == 0, so a real MD### finding (surfaced > 0)
+    # can never be down-graded by this discriminator.
     if not surfaced:
-        if output:
+        if output and not _MARKDOWNLINT_TOOL_CRASH_RE.search(output):
             report.nit(f"markdownlint: {output[:200]}")
         else:
             report.warning(
-                f"markdownlint exited non-zero (rc={result.returncode}) but "
-                f"produced no output — possible binary or environment issue"
+                "markdownlint could not run (tool/environment failure, no "
+                f"findings produced) — rc={result.returncode}: {output[:200]}"
             )
     # Return True: the only findings this branch adds are NIT (or a lone
     # WARNING). Per the module/`lint_repo` contract — "returns True iff no

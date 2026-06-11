@@ -24,6 +24,7 @@ Contract:
 from __future__ import annotations
 
 import ast
+import codecs
 import io
 import re
 import tokenize
@@ -162,7 +163,12 @@ _LITERAL_DATA_SUPPRESSIBLE_RULES: Final[frozenset[str]] = frozenset({"INSECURE_T
 # possibility the string is executed, not merely compared" → keep it. NEVER add a
 # flow-sensitive INJECTION rule (CMD_INJECTION / SHELL_EXEC) here — those are owned
 # end-to-end by the call-shape AST logic, which already demotes a data string and
-# keeps a sink-flowing one.
+# keeps a sink-flowing one. (``_string_literal_match_is_inert_no_sink`` checks only a
+# DIRECT-argument sink flow; an INJECTION literal bound to a variable that then reaches
+# a sink — ``cmd = "curl … | sh"; subprocess.run(cmd, shell=True)`` — would slip through
+# this set as a false-negative. Issue #100 class B routes the single-line eval/exec
+# finding-MESSAGE FP through the dedicated, INDIRECTION-AWARE
+# ``_eval_exec_message_string_is_inert`` helper instead, which closes that hole.)
 _SINK_GUARDED_LITERAL_SUPPRESSIBLE_RULES: Final[frozenset[str]] = frozenset(
     {"PRIVILEGE_ESC", "TOKEN_STEAL", "CLAUDE_CLI_TOKEN_THEFT"}
 )
@@ -1439,6 +1445,109 @@ def _string_literal_match_is_inert_no_sink(tree: ast.AST, line: int, source: str
     return True
 
 
+def _eval_exec_message_string_is_inert(tree: ast.AST, line: int, source: str, match: str) -> bool:
+    """Issue #100 (class B). True iff ``match`` (an ``eval(`` / ``exec(`` / shell-exec
+    token) on the 1-based ``line`` sits inside a SINGLE-LINE string Constant that is a
+    scanner's inert finding-MESSAGE / detector doc (``msg = "Python eval() detected"``)
+    and CANNOT execute — neither directly nor through a variable.
+
+    This is a STRICTER sibling of ``_string_literal_match_is_inert_no_sink``, built
+    specifically because the flow-sensitive INJECTION rules (SHELL_EXEC / CMD_INJECTION)
+    must NOT be added to ``_SINK_GUARDED_LITERAL_SUPPRESSIBLE_RULES``: that helper checks
+    only a DIRECT-argument sink flow, so a literal bound to a variable that then reaches
+    a sink (``cmd = "curl … | sh"; subprocess.run(cmd, shell=True)``) would slip through
+    as a false-negative. The three extra guards here close every such hole:
+
+    * MULTI-LINE / triple-quoted strings are REFUSED — a multi-line data string could be
+      an exploit-payload template and must stay at ``safe_doc`` (demote-visible), which a
+      later dispatch branch already does. Only a one-line message string qualifies.
+    * The covering Constant must NOT directly feed an exec/shell/fs sink
+      (``_path_literal_feeds_fs_or_exec_sink``).
+    * If the Constant is the RHS of a simple ``NAME = "…"`` assignment, that NAME must
+      NEVER reach an exec/shell/fs sink anywhere in the module (INDIRECTION-aware walk,
+      modeled on ``_module_container_name_flows_to_sink``). A name reaching a sink keeps
+      the finding visible — the real injection through ``cmd`` STILL fires.
+
+    Conservative defaults to False (keep visible) on: an f-string (JoinedStr), a
+    multi-line Constant, no covering Constant, a direct sink flow, or a variable that
+    reaches a sink. A REAL bare ``eval(x)`` / ``os.system(x)`` CALL is not inside a string
+    Constant at all → no ``target`` → False → STILL fires."""
+    if not source:
+        return False
+    lines = source.splitlines()
+    if not (0 <= line - 1 < len(lines)) or (match and match not in lines[line - 1]):
+        return False
+    # An f-string (JoinedStr) covering the line is dynamic-shaped — never certify.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            fstart = getattr(node, "lineno", None)
+            fend = getattr(node, "end_lineno", None)
+            if fstart is not None and fend is not None and fstart <= line <= fend:
+                return False
+    # A TRIPLE-QUOTED string is a data / template block (``cmd = """os.system(…)"""``)
+    # the iron rule keeps visible — even on one physical line — because it could be a
+    # payload the variable later carries to ``exec``. A finding MESSAGE is a normal
+    # ``"…"`` string. Refuse any triple-quoted token covering the line; the later
+    # ``safe_doc`` branch demotes those (visible NIT) instead of suppressing. Tokenize-
+    # based (a ``#`` or quote inside a string is not mis-read); refuse on any tokenize error.
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tok.type != tokenize.STRING or not (tok.start[0] <= line <= tok.end[0]):
+                continue
+            body = tok.string.lstrip("rbuRBUfF")
+            if body[:3] in ('"""', "'''"):
+                return False
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return False
+    # Locate the covering string Constant; require it to be SINGLE-LINE (a multi-line
+    # data string could be a payload template → must stay at safe_doc, not suppress).
+    target: ast.Constant | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            start = getattr(node, "lineno", None)
+            end = getattr(node, "end_lineno", None)
+            if (
+                start is not None
+                and end is not None
+                and start == end == line
+                and (not match or match in node.value)
+            ):
+                target = node
+                break
+    if target is None:
+        return False
+    # Direct sink flow → not inert (a literal handed straight to exec/shell/fs fires).
+    if _path_literal_feeds_fs_or_exec_sink(tree, target):
+        return False
+    # Indirection guard: if the Constant is the RHS of ``NAME = "…"`` (simple or
+    # annotated), refuse the moment that NAME reaches a sink. Closes the
+    # ``cmd = "… | sh"; subprocess.run(cmd, shell=True)`` false-negative.
+    sinks = _STRING_CMD_EXEC_FQNAMES | _FS_NET_SINK_FQNAMES | _SHELL_CALL_FQNAMES
+    assigned_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and node.value is target:
+            for tgt in node.targets:
+                for sub in ast.walk(tgt):
+                    if isinstance(sub, ast.Name):
+                        assigned_names.add(sub.id)
+        elif isinstance(node, ast.AnnAssign) and node.value is target and isinstance(node.target, ast.Name):
+            assigned_names.add(node.target.id)
+    if assigned_names:
+        for node in ast.walk(tree):
+            # (a) the assigned NAME (or an expression containing it) is a sink argument.
+            if isinstance(node, ast.Call) and _node_qualname(node.func) in sinks:
+                for arg in list(node.args) + [kw.value for kw in node.keywords]:
+                    for sub in ast.walk(arg):
+                        if isinstance(sub, ast.Name) and sub.id in assigned_names:
+                            return False
+            # (b) ``for x in NAME:`` whose body contains any sink call.
+            if isinstance(node, ast.For) and isinstance(node.iter, ast.Name) and node.iter.id in assigned_names:
+                for sub in ast.walk(node):
+                    if isinstance(sub, ast.Call) and _node_qualname(sub.func) in sinks:
+                        return False
+    return True
+
+
 def abs_path_const_is_inert_py_data(
     source: str, line: int, matched_text: str, is_test_file: bool, tree: ast.AST | None = None
 ) -> bool:
@@ -1778,6 +1887,43 @@ _FILE_MAGIC_HEXES: Final[tuple[str, ...]] = (
     "RIFF",  # WAV / AVI / WebP
     "\\x47",  # MPEG TS (loose; combined with other checks would be stronger)
 )
+
+# Issue #100 (class C) — the canonical Unicode byte-order marks. The OBFUSCATION
+# pattern ``\\xNN\\xNN\\xNN`` matches the 3-byte UTF-8 BOM ``\\xef\\xbb\\xbf`` (and
+# the printable-UTF-8 carve-out misses it: ``b"\\xef\\xbb\\xbf".decode("utf-8")`` is
+# the zero-width ``"\\ufeff"``, which ``str.isprintable()`` reports False). A BOM in a
+# BOM-detection routine (``data.startswith(b"\\xef\\xbb\\xbf")``) is an encoding
+# CONSTANT, not obfuscated machine code.
+_CANONICAL_BOMS: Final[frozenset[bytes]] = frozenset(
+    {
+        codecs.BOM_UTF8,  # b"\xef\xbb\xbf"
+        codecs.BOM_UTF16_LE,  # b"\xff\xfe"
+        codecs.BOM_UTF16_BE,  # b"\xfe\xff"
+        codecs.BOM_UTF32_LE,  # b"\xff\xfe\x00\x00"
+        codecs.BOM_UTF32_BE,  # b"\x00\x00\xfe\xff"
+    }
+)
+
+
+def _obfuscation_bytes_literal_is_canonical_bom(tree: ast.AST, line: int) -> bool:
+    """True iff a bytes Constant on the 1-based ``line`` is EXACTLY a canonical
+    encoding BOM (UTF-8 / UTF-16 / UTF-32).
+
+    Issue #100 (class C) — a BOM is a recognized encoding constant in a BOM-detection
+    routine, not obfuscated code. The match is EXACT-value (``node.value in
+    _CANONICAL_BOMS``), NOT a prefix check, so a shellcode literal whose head happens
+    to be a BOM (``b"\\xef\\xbb\\xbf\\x90\\x90..."``) is NOT cleared — its value is not
+    a canonical BOM and OBFUSCATION STILL fires. Defaults False on no covering bytes
+    Constant (keep visible)."""
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, bytes)):
+            continue
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", None)
+        if start is not None and end is not None and start <= line <= end:
+            if node.value in _CANONICAL_BOMS:
+                return True
+    return False
 
 
 def _bytes_literal_is_file_magic(source_line: str) -> bool:
@@ -2622,6 +2768,21 @@ def classify(
     ):
         return "safe_literal"
 
+    # Issue #100 (class B) — SHELL_EXEC / CMD_INJECTION on an ``eval(`` / ``exec(`` /
+    # ``os.system(`` token that is provably a SINGLE-LINE, sink-free, finding-MESSAGE
+    # string (a security scanner's own detector message: ``msg = "Python eval()
+    # detected"``). These flow-sensitive rules are deliberately NOT in the
+    # ``_SINK_GUARDED_*`` set above (that helper is direct-arg-only, blind to variable
+    # indirection); this dedicated helper is INDIRECTION-aware and refuses multi-line
+    # strings, so a payload bound to a variable that reaches a sink
+    # (``cmd = "curl…|sh"; subprocess.run(cmd, shell=True)``) and a multi-line exploit
+    # template both STAY visible. A real bare ``eval(x)`` / ``os.system(x)`` CALL is not
+    # inside a string Constant → keeps firing.
+    if rule_id in _CALL_SHAPE_SUPPRESSIBLE_RULES and _eval_exec_message_string_is_inert(
+        tree, line, source, match
+    ):
+        return "safe_literal"
+
     # r01 anthropic FP iteration (2026-05-27) — a match inside a security
     # pattern-catalog Dict literal is detection data, not exploit code.
     # The Dict must carry at least one catalog-shape key (regex / patterns
@@ -2726,6 +2887,16 @@ def classify(
     # payload neither decodes to printable text nor (per issue #65 evidence) fires
     # OBFUSCATION on a ``\\xNN`` run at all — it fires the decode-sink rules instead.
     if rule_id == "OBFUSCATION" and _obfuscation_bytes_literal_is_printable_text(tree, line, source):
+        return "safe_literal"
+
+    # Issue #100 (class C) — OBFUSCATION on the 3-byte UTF-8 BOM ``\\xef\\xbb\\xbf``
+    # (or a UTF-16 / UTF-32 BOM) inside a bytes literal — a BOM-detection routine's
+    # encoding CONSTANT (``data.startswith(b"\\xef\\xbb\\xbf")``), not obfuscated code.
+    # EXACT-value match (not prefix): a BOM-PREFIXED shellcode literal
+    # (``b"\\xef\\xbb\\xbf\\x90\\x90…"``) has a value not in ``_CANONICAL_BOMS`` and
+    # STILL fires. The printable-UTF-8 carve-out above misses the BOM because the
+    # zero-width ``"\\ufeff"`` is not ``str.isprintable()``.
+    if rule_id == "OBFUSCATION" and _obfuscation_bytes_literal_is_canonical_bom(tree, line):
         return "safe_literal"
 
     # r03 trailofbits FP iteration (2026-05-27) — ENV_INJECTION pattern

@@ -105,9 +105,19 @@ class TestIssue30SiblingSkillBacktickResolution:
         )
 
     def test_genuinely_broken_backtick_path_still_flagged(self, tmp_path: Path) -> None:
-        """A backtick path to a non-existent location must still emit the
-        WARNING — the v2.98.0 fix only adds new resolution fallbacks, it
-        doesn't suppress the genuine-broken case."""
+        """A backtick path to a non-existent IN-PLUGIN location must still emit a
+        WARNING/MINOR — the v2.98.0 fix only adds new resolution fallbacks, it
+        doesn't suppress the genuine-broken case.
+
+        Updated for issues #96/#99: a BARE non-plugin-internal prose path
+        (``path/to/x.txt`` / ``lib/communication-graph.ts``) is intentionally NO
+        LONGER flagged — it is ambiguous documentation (a cross-repo pointer, a
+        runtime-output path, or a template/example filename), not an in-repo link,
+        and flagging every such code-span produced false positives for two reporting
+        plugins. A path that DOES carry in-repo intent — a plugin-internal prefix
+        (``scripts/…``) or a leading ``./`` / ``../`` — still flags. This fixture
+        uses the plugin-internal ``scripts/…`` form so the genuine-broken-reference
+        guard remains meaningful under the new scoping."""
         from cpv_validation_common import (
             ValidationReport,
             validate_md_file_paths,
@@ -115,11 +125,13 @@ class TestIssue30SiblingSkillBacktickResolution:
 
         plugin = self._make_plugin_with_two_skills(tmp_path)
         skill_a_md = plugin / "skills" / "skill-a" / "SKILL.md"
-        # Overwrite skill-a's body with a reference to a non-existent path
+        # Overwrite skill-a's body with a reference to a non-existent IN-PLUGIN path.
+        # `scripts/` is a plugin-internal prefix, so a missing target is a real broken
+        # in-repo reference (MINOR) — unaffected by the #96/#99 bare-prose-path scoping.
         skill_a_md.write_text(
             "---\nname: skill-a\ndescription: First skill\n---\n\n"
             "# skill-a\n\n"
-            "See `path/to/nonexistent/file.txt` for whatever.\n"
+            "See `scripts/nonexistent/file.txt` for whatever.\n"
         )
         report = ValidationReport()
         validate_md_file_paths(

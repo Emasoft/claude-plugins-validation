@@ -45,6 +45,7 @@ import os
 import platform
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, cast
@@ -3966,6 +3967,53 @@ def validate_strip_gitmodules(plugin_root: Path, report: ValidationReport) -> No
         report.passed(".gitmodules URLs pass the strip-dev-parts allowlist (TRDD-793ac32a)")
 
 
+def _gitignore_covers_category(plugin_root: Path, patterns: list[str], lines: list[str]) -> bool:
+    """True iff git considers a representative path of this category ignored.
+
+    Named `_category` (not the bare `_gitignore_covers` the issue-98 report
+    suggested) because `validate_gitignore` already defines a NESTED helper
+    `_gitignore_covers(name, lines)` for venv-dir fnmatch coverage; reusing the
+    bare name would shadow it and raise UnboundLocalError. This function is the
+    category-level, git-authoritative coverage check.
+
+    Issue #98: `EXPECTED_GITIGNORE_CATEGORIES` were matched by literal substring
+    against .gitignore lines, so a glob like `*_dev/` that genuinely ignores
+    `reports_dev/` was reported as "missing coverage". `git check-ignore` is
+    authoritative for ALL gitignore syntax — globs, negations, directory-only
+    rules, nested per-dir .gitignore files. Fall back to the legacy substring
+    scan when the plugin is not a git repo or git is unavailable (graceful,
+    never crashes). FN-safe: a genuinely-uncovered required path makes
+    `git check-ignore -q` exit non-zero AND the substring scan miss it, so the
+    WARNING still fires.
+    """
+    # Derive a concrete candidate path per pattern (strip trailing '/', drop
+    # globs to a representative name). For a wildcard like '*.pyc' use a probe
+    # filename; for 'reports_dev/' use 'reports_dev/'.
+    candidates: list[str] = []
+    for raw in patterns:
+        p = raw.strip()
+        if "*" in p:
+            # turn '*.pyc' -> 'probe.pyc', '*.egg-info' -> 'probe.egg-info'
+            candidates.append("__cpv_probe__" + p.replace("*", "") if p.startswith("*") else p.replace("*", "x"))
+        else:
+            candidates.append(p)
+    try:
+        # -q exits 0 if ANY listed path is ignored. Run once with all candidates.
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", "--", *candidates],
+            cwd=plugin_root,
+            capture_output=True,
+            timeout=15,
+        )
+        # git returns 128 when not a git repo / other fatal error -> fall back.
+        if result.returncode in (0, 1):
+            return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        pass
+    # Fallback: legacy literal substring scan.
+    return any(any(p.lower() in line.lower() for line in lines) for p in patterns)
+
+
 def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     """Validate that the plugin has a .gitignore with essential patterns.
 
@@ -3997,8 +4045,7 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     for patterns, description, severity in EXPECTED_GITIGNORE_CATEGORIES:
         # Only flag if the gitignore misses this category AND the artifact
         # actually exists in the plugin. Don't speculate about future files.
-        found_in_gitignore = any(any(p.lower() in line.lower() for line in lines) for p in patterns)
-        if found_in_gitignore:
+        if _gitignore_covers_category(plugin_root, patterns, lines):
             continue
         if _category_has_matching_artifact(plugin_root, patterns):
             missing_categories.append((description, severity))
