@@ -29,6 +29,7 @@ Security Checks Implemented:
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -63,6 +64,7 @@ from cpv_validation_common import (
     KNOWN_EXAMPLE_SECRETS,
     MCP_DANGEROUS_ENV_KEYS,
     MCP_DESCRIPTION_INJECTION_PREFILTER,
+    OBFUSCATION_DECODER_PATTERNS,
     PERSISTENCE_PATTERNS,
     PHASE3_PATTERNS,
     PHASE4_PATTERNS,
@@ -8973,6 +8975,74 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
     return issues
 
 
+# RC-70 decoder qualnames whose presence as a REAL ast.Call on a line proves the
+# "decode" half executes. Mirror of OBFUSCATION_DECODER_PATTERNS, by call name.
+_RC70_DECODER_CALL_NAMES: frozenset[str] = frozenset(
+    {
+        "atob",
+        "b64decode",
+        "standard_b64decode",
+        "urlsafe_b64decode",
+        "decodebytes",
+        "decodestring",
+        "fromhex",
+        "unhexlify",
+        "a2b_hex",
+        "a2b_base64",
+        "decode",  # codecs.decode
+        "loads",  # marshal.loads / pickle.loads / _pickle.loads
+    }
+)
+
+
+def _rc70_python_inert_decoder_lines(rel_path: str, content: str) -> frozenset[int]:
+    """Return the set of 1-based line numbers in a PYTHON file on which an
+    RC-70 *decoder* token appears ONLY as a string-literal substring (no real
+    decode ast.Call anchored on that line).
+
+    Default-SAFE: returns an EMPTY set (suppress nothing) for a non-.py file or
+    on any parse failure, so RC-70 keeps firing unless inertness is AST-proven.
+    A line is "inert-decoder" iff NO ast.Call whose func name is in
+    _RC70_DECODER_CALL_NAMES is anchored on it — meaning every decoder token the
+    regex matched there is inside a `str` constant (or a comment). Because RC-70
+    requires a decoder hit on the reported line, an inert decoder there makes the
+    whole proximity match inert regardless of the sink line.
+    """
+    if not rel_path.endswith(".py"):
+        return frozenset()
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError):
+        return frozenset()
+    real_decoder_lines: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = (
+            func.attr
+            if isinstance(func, ast.Attribute)
+            else func.id
+            if isinstance(func, ast.Name)
+            else None
+        )
+        if name in _RC70_DECODER_CALL_NAMES:
+            # Anchor on the func's end line (where the `(` is) to align with
+            # find_obfuscated_exec's per-line decoder match.
+            anchor = getattr(func, "end_lineno", None) or getattr(node, "lineno", None)
+            if anchor is not None:
+                real_decoder_lines.add(anchor)
+    # Among the lines find_obfuscated_exec flags as decoder hits, the inert ones
+    # are exactly those with NO real decoder ast.Call — the regex matched a token
+    # that lives inside a `str` constant (or a comment), which cannot execute.
+    decoder_hit_lines = {
+        idx + 1
+        for idx, line in enumerate(content.split("\n"))
+        if any(p.search(line) for p in OBFUSCATION_DECODER_PATTERNS)
+    }
+    return frozenset(decoder_hit_lines - real_decoder_lines)
+
+
 def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
     """RC-65 (cloud IMDS), RC-39 (persistence), RC-70 (obfuscated exec)."""
     issues = 0
@@ -9054,10 +9124,24 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
         # decoder+sink EXAMPLES inside a markdown ```fence``` (security docs
         # demonstrating "what attackers do") — an FP every other rule in
         # this function already suppresses. (audit row 53)
+        # RC-70 inert-string carve-out (issue #75 class 1): for a PYTHON file,
+        # suppress when the decoder token on `line_no` is provably a substring of
+        # a string literal — i.e. there is NO real ast.Call to a decoder on that
+        # line. A token inside a `str` constant cannot execute, so the whole
+        # decode-then-exec chain is inert (a security-scanner plugin's OWN test
+        # FIXTURE: the threat string is data passed to the detector, never run).
+        # FN-safe & NOT a tests/-skip: a REAL `base64.b64decode(blob)` near an
+        # `exec` (even one whose arg is a string constant) is an ast.Call and
+        # STILL fires, anywhere in the plugin including tests/. Python-only —
+        # AST is the proof; on a parse failure or non-.py file we KEEP the
+        # finding (default-visible), so a broken/foreign file cannot dodge RC-70.
+        rc70_inert_decoder_lines = _rc70_python_inert_decoder_lines(rel_path, content)
         for line_no, msg in find_obfuscated_exec(content, proximity_lines=3):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
             if cpv_self_scan_skip_line(rel_path, content_lines, line_no):
+                continue
+            if line_no in rc70_inert_decoder_lines:
                 continue
             level = effective_severity("critical", rel_path)
             getattr(report, level)(f"RC-70: {msg}", rel_path, line_no)

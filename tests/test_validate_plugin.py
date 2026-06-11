@@ -1025,6 +1025,48 @@ class TestValidateCrossPlatformExtended:
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("no compiled binaries" in m and "no build script" in m for m in major_msgs)
 
+    def test_compiled_source_crate_local_build_sh_not_flagged_no_build(self, tmp_path):
+        """#75 class 5: a Rust crate under tools/<crate>/ with its own build.sh must NOT report the 'no build script' MAJOR (the script demonstrably exists next to the source)."""
+        plugin_dir = tmp_path / "rust-tools-crate"
+        crate = plugin_dir / "tools" / "memgrep"
+        (crate / "src").mkdir(parents=True)
+        (crate / "src" / "main.rs").write_text('fn main() { println!("hi"); }')
+        (crate / "Cargo.toml").write_text('[package]\nname = "memgrep"\nversion = "0.1.0"\n')
+        (crate / "build.sh").write_text("#!/usr/bin/env bash\ncargo build --release\n")
+        report = ValidationReport()
+        validate_cross_platform(plugin_dir, report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        # The factually-wrong "no build script" MAJOR must be gone.
+        assert not any("no build script" in m for m in major_msgs), major_msgs
+        # And it should be downgraded to the "build system but no pre-compiled
+        # binaries" WARNING (build present, no bin/).
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("build system but no pre-compiled binaries" in m for m in warning_msgs), warning_msgs
+
+    def test_compiled_source_crate_local_cargo_toml_only_downgrades(self, tmp_path):
+        """#75 class 5 (build-system marker variant): a crate-local Cargo.toml next to the source counts as a build system, so the result is a WARNING, not a MAJOR."""
+        plugin_dir = tmp_path / "rust-tools-cargo"
+        crate = plugin_dir / "tools" / "memgrep"
+        (crate / "src").mkdir(parents=True)
+        (crate / "src" / "main.rs").write_text("fn main() {}")
+        (crate / "Cargo.toml").write_text('[package]\nname = "memgrep"\nversion = "0.1.0"\n')
+        report = ValidationReport()
+        validate_cross_platform(plugin_dir, report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("no build script" in m for m in major_msgs), major_msgs
+
+    def test_compiled_source_nested_no_build_still_major(self, tmp_path):
+        """FN-safety: a Rust crate under tools/<crate>/ with NEITHER a build script NOR a build-system marker anywhere from its dir up to the root must STILL report the 'no build script' MAJOR."""
+        plugin_dir = tmp_path / "rust-tools-nobuild"
+        crate = plugin_dir / "tools" / "orphan"
+        (crate / "src").mkdir(parents=True)
+        (crate / "src" / "main.rs").write_text("fn main() {}")
+        # No Cargo.toml, no build.sh, no Makefile — anywhere.
+        report = ValidationReport()
+        validate_cross_platform(plugin_dir, report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("no compiled binaries" in m and "no build script" in m for m in major_msgs), major_msgs
+
     def test_compiled_source_with_bin_reports_info(self, tmp_path):
         """validate_cross_platform reports INFO for compiled source when bin/ has binaries (lines 792-793)."""
         plugin_dir = tmp_path / "rust-withbin"

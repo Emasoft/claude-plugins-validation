@@ -1318,18 +1318,39 @@ def _is_sys_path_mutation(func: ast.expr) -> bool:
 
 
 def _sys_path_insert_sibling_modules(tree: ast.AST, anchors: list[Path]) -> set[str]:
-    """Module stems made importable by a literal ``sys.path.insert(0, <dir>)``
-    of a LOCAL subdir — so ``import X`` after it is a local sibling, not a
-    missing PyPI dep (issue #62):
+    """Module stems made importable by a ``sys.path.insert(0, <dir>)`` of a
+    LOCAL subdir — so ``import X`` after it is a local sibling, not a missing
+    PyPI dep.
 
-        sys.path.insert(0, str(Path(plugin_root) / "scripts" / "oauth_rotator"))
-        import supervisor   # → scripts/oauth_rotator/supervisor.py, NOT PyPI
+    Two resolution passes, both gated by the SAME on-disk existence check
+    (the FN-safety invariant — only dirs that ACTUALLY EXIST in the plugin
+    contribute module names, so a genuinely-missing PyPI dep with no such
+    local dir is never silenced):
 
-    The path is resolved by extracting the STRING-LITERAL segments from the
-    insert argument (the variable base, e.g. ``plugin_root``, is the anchor)
-    and joining them onto each candidate anchor dir. Only dirs that ACTUALLY
-    EXIST on disk in the plugin contribute module names — a genuinely-missing
-    PyPI dep has no such local dir, so it stays flagged.
+      1. Issue #62 — the literal path segments live INSIDE the insert call::
+
+             sys.path.insert(0, str(Path(plugin_root) / "scripts" / "oauth_rotator"))
+             import supervisor   # → scripts/oauth_rotator/supervisor.py, NOT PyPI
+
+         The string-literal segments are extracted from the insert argument
+         (the variable base, e.g. ``plugin_root``, is the anchor) and joined
+         onto each candidate anchor dir (full chain, plus any single segment
+         as a direct subdir of an anchor).
+
+      2. Issue #75 — the insert argument is a VARIABLE bound to a path built
+         elsewhere (an assignment / list-append / loop)::
+
+             candidates.append(Path(plugin_root) / "scripts" / "lib")
+             for d in candidates:
+                 if (d / "user_mem_lib.py").is_file():
+                     sys.path.insert(0, str(d))
+                     import user_mem_lib   # → scripts/lib/user_mem_lib.py, NOT PyPI
+
+         This pass fires ONLY when at least one insert has a non-literal
+         (variable) argument, and harvests the full ordered literal segment
+         chains from every ``Path()/seg/...`` division chain and every
+         ``*.join(...)`` call in the module, resolving each full chain (no
+         single-segment fallback → kept precise) against the anchors.
     """
     out: set[str] = set()
 
@@ -1342,23 +1363,38 @@ def _sys_path_insert_sibling_modules(tree: ast.AST, anchors: list[Path]) -> set[
             elif f.is_dir() and (f / "__init__.py").exists():
                 out.add(f.name)
 
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and node.args and _is_sys_path_mutation(node.func)):
-            continue
-        path_arg = node.args[-1]  # insert(idx, path) → args[-1]; append(path) → args[-1]
-        # ast.walk yields the `/`-chain operands in REVERSE source order, so
-        # sort the literal path segments by their (line, col) position to
-        # recover the on-disk order (``…/scripts/oauth_rotator``).
+    def _ordered_literal_segments(node: ast.AST) -> list[str]:
+        # ast.walk yields the `/`-chain operands in REVERSE source order, so sort
+        # the literal path segments by their (line, col) position to recover the
+        # on-disk order (e.g. ``…/scripts/lib``). `os.path.join(...)` args are
+        # already in source order but sorting by position is harmless for them too.
         seg_pos: list[tuple[tuple[int, int], str]] = []
-        for sub in ast.walk(path_arg):
+        for sub in ast.walk(node):
             if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
                 pos = (getattr(sub, "lineno", 0), getattr(sub, "col_offset", 0))
                 for part in sub.value.replace("\\", "/").split("/"):
                     if part and part not in (".", ".."):
                         seg_pos.append((pos, part))
         seg_pos.sort()
-        segs = [s for _, s in seg_pos]
+        return [s for _, s in seg_pos]
+
+    insert_calls = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and n.args and _is_sys_path_mutation(n.func)
+    ]
+    if not insert_calls:
+        return out
+
+    # (1) Issue #62 — string-literal segments INSIDE the insert argument itself
+    #     (e.g. `sys.path.insert(0, str(Path(root) / "scripts" / "oauth_rotator"))`).
+    #     Full chain onto the anchor PLUS any single segment as a subdir of the
+    #     anchor (the original #62 behavior — preserved verbatim).
+    any_variable_insert = False
+    for call in insert_calls:
+        segs = _ordered_literal_segments(call.args[-1])
         if not segs:
+            any_variable_insert = True  # arg is a variable / has no literal segments
             continue
         for anchor in anchors:
             cand = anchor
@@ -1367,6 +1403,46 @@ def _sys_path_insert_sibling_modules(tree: ast.AST, anchors: list[Path]) -> set[
             _add_dir_modules(cand)  # full segment chain (source order) onto the anchor
             for s in segs:
                 _add_dir_modules(anchor / s)  # any single segment as a subdir of the anchor
+
+    # (2) Issue #75 — the insert argument is a VARIABLE bound to a path built
+    #     elsewhere (`candidates.append(Path(root) / "scripts" / "lib"); for d in
+    #     candidates: sys.path.insert(0, str(d))`). The literal segments live in a
+    #     `Path()/seg/...` chain or an `os.path.join(...)` call, NOT in the insert
+    #     call. Harvest those FULL ordered chains module-wide and resolve each full
+    #     chain against the anchors. No single-segment fallback here → stray bare
+    #     segments (e.g. a lone "scripts") are not over-resolved. FN-safe: only
+    #     dirs that EXIST on disk contribute names, so a genuinely-missing PyPI dep
+    #     (no such local dir) is never silenced.
+    if any_variable_insert:
+        chains: list[list[str]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+                segs = _ordered_literal_segments(node)
+                if segs:
+                    chains.append(segs)
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "join"
+            ):
+                # os.path.join / posixpath.join — args are individual segments.
+                seg_pos: list[tuple[tuple[int, int], str]] = []
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        pos = (getattr(arg, "lineno", 0), getattr(arg, "col_offset", 0))
+                        for part in arg.value.replace("\\", "/").split("/"):
+                            if part and part not in (".", ".."):
+                                seg_pos.append((pos, part))
+                seg_pos.sort()
+                segs = [s for _, s in seg_pos]
+                if segs:
+                    chains.append(segs)
+        for segs in chains:
+            for anchor in anchors:
+                cand = anchor
+                for s in segs:
+                    cand = cand / s
+                _add_dir_modules(cand)
     return out
 
 

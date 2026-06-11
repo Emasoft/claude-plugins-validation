@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.4` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.7` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **113** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI) |
-| **test files** | **302** | `ls tests/test_*.py`; ~8884 tests |
+| **test files** | **305** | `ls tests/test_*.py`; ~8972 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -123,7 +123,16 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 
 ## Open issues snapshot (update as they close)
 
-`#70` OPEN — (A) `--json` stdout-purity FIXED; (B) "scanning the scanner" FP
-class (a 3rd-party plugin's own security-scanner pattern definitions +
-CSS/AppleScript comments flagged) + (C) orphan-cache integrity — pending.
-Closed this cycle: `#69` `#71` `#72` `#73` (v2.126.2/.3/.4).
+ALL filed issues CLOSED through `#75`. Latest cycle (v2.126.7) closed `#75`
+— 5 security-scanner-plugin FP classes after self-exemption removal, all
+FN-safe two-sided: (1) RC-70 inert-string AST carve-out (validate_security);
+(2) RC-73 yaml `Loader=<SafeLoader-subclass>` taint carve-out (cpv_taint_engine);
+(3) PEP-723 variable-`sys.path.insert` sibling resolution (validate_hook);
+(4) ENV_INJECTION build-output/cache-var allowlist (_skillaudit_python_context);
+(5) "no build script" ancestor-dir search (validate_plugin) — RC-NONSTD-DIR-001
+on `tools/` kept BY-DESIGN (canonical is `rust/`). Reporter's `tests/`-skip +
+fixture-annotation asks REJECTED as attacker-forgeable RT-holes.
+Tracked follow-up (defense-in-depth, already mitigated by the #75 class-2
+RC-73 fire): the #60 skillaudit DESERIALIZATION `_classdef_subclasses_safe_loader`
+ignores `add_constructor` re-enablement.
+Earlier: `#69`-`#74` closed (v2.126.2-.6).

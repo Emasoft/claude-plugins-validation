@@ -3016,25 +3016,46 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
                 if ln == lang_name:
                     expected_build_files.update(build_markers)
 
-            # Check if build system files exist at plugin root
-            has_build_system = any((plugin_root / bf).exists() for bf in expected_build_files)
+            # Build the set of directories to search for build markers/scripts:
+            # the plugin root PLUS every ancestor directory of an actual
+            # compiled-source file for this language (the source paths are
+            # plugin-root-relative, e.g. "tools/memgrep/src/main.rs"). A crate
+            # bundled under a non-standard root (tools/<crate>/) keeps its
+            # Cargo.toml / build.sh next to its src/, so a root-only check
+            # falsely reports "no build script" (issue #75 class 5). This only
+            # WIDENS the lookup to the dirs that contain (or sit above) the
+            # source — it does NOT exempt the dir from RC-NONSTD-DIR-001, and it
+            # is FN-safe: a crate with no marker anywhere from its dir up to root
+            # still reports MAJOR.
+            search_dirs: set[Path] = {plugin_root}
+            for rel in source_paths:
+                d = (plugin_root / rel).parent
+                # Climb from the source file's directory up to (not past) the
+                # plugin root. `plugin_root in d.parents` is the provably-
+                # terminating bound: once d == plugin_root we add it and stop.
+                while plugin_root in d.parents or d == plugin_root:
+                    search_dirs.add(d)
+                    if d == plugin_root:
+                        break
+                    d = d.parent
 
-            # Check for a generic build/install script
-            has_build_script = any(
-                (plugin_root / s).exists()
-                for s in [
-                    "build.sh",
-                    "install.sh",
-                    "setup.sh",
-                    "compile.sh",
-                    "build.py",
-                    "install.py",
-                    "setup.py",
-                    "Makefile",
-                    "justfile",
-                    "Taskfile.yml",
-                ]
-            )
+            # Check if build system files exist in any of those directories.
+            has_build_system = any((d / bf).exists() for d in search_dirs for bf in expected_build_files)
+
+            # Check for a generic build/install script in any of those directories.
+            _generic_build_scripts = [
+                "build.sh",
+                "install.sh",
+                "setup.sh",
+                "compile.sh",
+                "build.py",
+                "install.py",
+                "setup.py",
+                "Makefile",
+                "justfile",
+                "Taskfile.yml",
+            ]
+            has_build_script = any((d / s).exists() for d in search_dirs for s in _generic_build_scripts)
 
             if has_bin:
                 report.info(f"Found {len(source_paths)} {lang_name} source file(s) with compiled binaries in bin/")
