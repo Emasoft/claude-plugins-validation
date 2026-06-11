@@ -1507,6 +1507,53 @@ def _is_memory_authoring_skill(file_path: str, content: str) -> bool:
     return bool(_MEMORY_TERM_RE.search(declared) and _MEMORY_AUTHORING_TERM_RE.search(declared))
 
 
+# cspell custom-dictionary word-lists are non-instruction vocabulary DATA.
+# A `.cspell-words.txt` / `project-words.txt` / a file under `.cspell/` is a flat
+# list of tokens the spell-checker (cspell) accepts — one word per line, plus `#`
+# comments. cspell reads it as vocabulary; Claude Code NEVER loads it as agent
+# instructions and nothing executes it. So the prose-instruction / agent-
+# manipulation / source-shape rules in `_BINARY_INAPPLICABLE_RULES` (prompt-
+# injection, intent, A2A / tool / memory manipulation incl. TOOL_SHADOW, ReDoS,
+# invisible-unicode) cannot have a true positive there — exactly as on a binary's
+# extracted byte table (issue #73). The reported FP: the pytest-jargon word
+# `monkeypatch` (and `monkeypatched` / `monkeypatching`) tripping TOOL_SHADOW's
+# bare-word `monkey.?patch` pattern, MAJOR-blocking a publish.
+_CSPELL_DICT_EXTS: tuple[str, ...] = (".txt", ".dict", ".dic", ".wordlist", ".wl")
+# cspell's documented conventional word-list names that carry no `cspell` token.
+_CSPELL_CONVENTIONAL_BASENAMES: frozenset[str] = frozenset(
+    {"project-words.txt", "custom-words.txt"}
+)
+
+
+def _is_cspell_dictionary(file_path: str) -> bool:
+    """True iff ``file_path`` is a cspell custom-dictionary word-list.
+
+    Recognised (cspell's documented conventions), all gated on a NON-instruction
+    word-list extension (``_CSPELL_DICT_EXTS``) so an instruction-loadable surface
+    (``.md`` / ``.json`` / ``.py`` / ``.sh`` / ``.js`` …) can NEVER qualify:
+
+    * basename carries the ``cspell`` token — ``.cspell-words.txt``,
+      ``cspell-words.txt``, ``project.cspell.dict`` …;
+    * the file sits directly under a ``.cspell/`` directory;
+    * the conventional names ``project-words.txt`` / ``custom-words.txt``.
+
+    FN-safe: because the extension gate excludes every instruction-load path, a
+    payload renamed to a cspell-dict name is not made safer — it merely leaves the
+    paths Claude Code reads as instructions — and the carve-out that consults this
+    recogniser only clears ``_BINARY_INAPPLICABLE_RULES`` (exec / secret / exfil /
+    decode rules are NOT in that set and stay fully live).
+    """
+    fp = file_path.lower().replace("\\", "/")
+    base = fp.rsplit("/", 1)[-1]
+    if not base.endswith(_CSPELL_DICT_EXTS):
+        return False
+    if "cspell" in base:
+        return True
+    if "/.cspell/" in fp or fp.startswith(".cspell/"):
+        return True
+    return base in _CSPELL_CONVENTIONAL_BASENAMES
+
+
 def _context_classifier_verdict(
     file_path: str,
     lines: list[str],
@@ -1644,6 +1691,20 @@ def _context_classifier_verdict(
     if rule_id in _APPLESCRIPT_COMMENT_INERT_RULES and fp_lower.endswith(APPLESCRIPT_EXTS):
         if line_idx in applescript_comment_lines(lines):
             return "suppress"
+    # cspell custom-dictionary word-list → non-instruction DATA carve-out.
+    # Every line of a `.cspell-words.txt` / `.cspell/<name>` / `project-words.txt`
+    # is spell-checker vocabulary, never loaded by Claude Code as instructions and
+    # never executed. The instruction / agent-manipulation / source-shape rules in
+    # `_BINARY_INAPPLICABLE_RULES` (incl. TOOL_SHADOW, which fired on the pytest
+    # word `monkeypatch` via its bare-word `monkey.?patch` pattern) therefore
+    # cannot have a true positive here — same reasoning as the binary byte-table
+    # carve-out (issue #73). FN-safe: `_is_cspell_dictionary` only matches a
+    # non-instruction `.txt`/`.dict` word-list (so a real SKILL/agent/command/hook
+    # can never be disguised as one), and execution / secret / exfil / decode rules
+    # are NOT in the set — a real key or webhook host hidden as a "word" still fires
+    # (e.g. URL_SUSPICIOUS on a `webhook.site/...` token stays live).
+    if rule_id in _BINARY_INAPPLICABLE_RULES and _is_cspell_dictionary(file_path):
+        return "suppress"
     # Point 1 (v2.114.0): an extension-less script (git hook, configure,
     # runme) reaches here with no classifier-recognised extension. The
     # per-language classifiers dispatch AND internally gate on the file
