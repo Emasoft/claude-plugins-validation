@@ -1977,6 +1977,58 @@ def _is_safe_env_literal_set(source_line: str) -> bool:
     return True
 
 
+# Issue #75 (class 4) — build-OUTPUT / download-CACHE directory env vars.
+# Redirecting any of these only changes WHERE build artifacts / caches are
+# written; NONE is consulted as a code-load, library-search, or executable-
+# search path at runtime, so setting it — even to an attacker value — cannot
+# cause code execution. Positive allowlist: a runtime-hijack var can NEVER
+# appear here (asserted by tests; allowlist ∩ _ENV_HIJACK_VARS == ∅).
+# Deliberately EXCLUDES CARGO_HOME/GOPATH (have bin/), TMPDIR/TMP/TEMP
+# (executable-drop surface), and generic XDG_* — those stay VISIBLE.
+_ENV_BUILD_OUTPUT_VARS: Final[frozenset[str]] = frozenset(
+    {
+        "CARGO_TARGET_DIR",
+        "GOCACHE",
+        "CCACHE_DIR",
+        "PIP_CACHE_DIR",
+        "UV_CACHE_DIR",
+        "YARN_CACHE_FOLDER",
+        "npm_config_cache",
+        "NPM_CONFIG_CACHE",
+    }
+)
+
+# os.environ["KEY"] = <rhs>  — KEY allows lowercase (npm_config_cache); RHS may be
+# a literal OR a call that OPENS on this line (multi-line value, the janitor shape).
+_ENV_BUILD_SET_RE: Final[re.Pattern[str]] = re.compile(
+    r"""os\.environ\s*\[\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*\]\s*=\s*(.+?)\s*$"""
+)
+
+# Controlled value shapes only: a string literal, or a path/tempfile constructor.
+# Anything else (bare name, attacker var, interpolating f-string) does NOT match,
+# so the finding stays visible.
+_SAFE_BUILD_VALUE_RE: Final[re.Pattern[str]] = re.compile(
+    r"""^(?:(?:r|R|b|B|u|U)?['"]|str\s*\(|Path\s*\(|(?:os\.path|os|tempfile|pathlib)\.)"""
+)
+
+
+def _is_safe_build_env_set(source_line: str) -> bool:
+    """True iff ``source_line`` is ``os.environ["<BUILD_OUTPUT_VAR>"] = <controlled
+    path/literal>`` for a var in ``_ENV_BUILD_OUTPUT_VARS`` (build-output / cache
+    dirs only — never a code-load / library / exec search path). FN-safe: the
+    allowlist is positive and excludes every runtime-hijack var, so a hijack-var
+    assignment can never reach this suppressor regardless of value shape."""
+    m = _ENV_BUILD_SET_RE.search(source_line)
+    if m is None:
+        return False
+    if m.group(1) not in _ENV_BUILD_OUTPUT_VARS:  # positive allowlist; hijack vars excluded
+        return False
+    rhs = m.group(2).strip()
+    if rhs[:2].lower() in ("f'", 'f"'):  # an interpolating f-string is NOT controlled
+        return False
+    return bool(_SAFE_BUILD_VALUE_RE.match(rhs))
+
+
 def _line_has_quoted_string(source_line: str) -> bool:
     """True iff ``source_line`` contains a Python string literal
     (single, double, triple-single, triple-double, or any prefix
@@ -2685,6 +2737,14 @@ def classify(
     # Suppress when BOTH key and value are pure literals AND the key is
     # NOT in the hijack-var list.
     if rule_id == "ENV_INJECTION" and 0 <= line_idx < len(lines) and _is_safe_env_literal_set(lines[line_idx]):
+        return "safe_literal"
+
+    # Issue #75 (class 4) — ENV_INJECTION on a build-OUTPUT / download-CACHE dir
+    # var (CARGO_TARGET_DIR, GOCACHE, *_CACHE_DIR, …) set to a controlled path —
+    # standard build hygiene (e.g. redirect cargo's target/ to a tmp dir), not
+    # injection. The allowlist excludes every runtime-hijack var, so LD_PRELOAD /
+    # PATH / PYTHONPATH / NODE_OPTIONS / DYLD_* keep firing regardless of value.
+    if rule_id == "ENV_INJECTION" and 0 <= line_idx < len(lines) and _is_safe_build_env_set(lines[line_idx]):
         return "safe_literal"
 
     # r01 FP iter (2026-05-28) — ENV_INJECTION read-modify-write of an env

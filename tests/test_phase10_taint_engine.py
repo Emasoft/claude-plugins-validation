@@ -263,3 +263,140 @@ class TestLineAttribution:
         findings = _analyze(src)
         assert findings
         assert findings[0].line == 4
+
+
+# -----------------------------------------------------------------------------
+# RC-73 — yaml.load(..., Loader=<safe loader/subclass>) carve-out (issue #75)
+#
+# yaml.load with a SafeLoader (or a local subclass that does NOT re-add a
+# python/object constructor) is as safe as yaml.safe_load. The carve-out MUST
+# clear those, but every unsafe-loader path — bare yaml.load(x), an explicit
+# Loader=yaml.Loader|FullLoader|UnsafeLoader, or a SafeLoader subclass that
+# re-enables python/object construction, or an unresolvable Loader/tag — MUST
+# still fire. MUST CLEAR = no yaml.load(...) finding; MUST FIRE = an RC-73/74
+# finding on the yaml.load(...) sink.
+# -----------------------------------------------------------------------------
+
+
+def _yaml_load_fired(findings: list[TaintFinding]) -> bool:
+    return any(f.rule_id in ("RC-73", "RC-74") and f.sink == "yaml.load(...)" for f in findings)
+
+
+def _yaml_load_cleared(findings: list[TaintFinding]) -> bool:
+    return not any(f.sink == "yaml.load(...)" for f in findings)
+
+
+class TestRC73YamlSafeLoader:
+    def test_1_reporter_dup_loader_clears(self) -> None:
+        # Reporter's exact shape: SafeLoader subclass + module-level
+        # add_constructor of the BENIGN mapping tag → safe.
+        src = (
+            "import yaml\n"
+            "class _DupLoader(yaml.SafeLoader):\n"
+            "    pass\n"
+            "def _cm(loader, node):\n"
+            "    return list(loader.construct_pairs(node))\n"
+            "_DupLoader.add_constructor(\n"
+            "    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _cm,\n"
+            ")\n"
+            "def parse(raw_text):\n"
+            "    return yaml.load(raw_text, Loader=_DupLoader)\n"
+        )
+        assert _yaml_load_cleared(_analyze(src))
+
+    def test_2_bare_load_fires(self) -> None:
+        src = "import yaml\ndef parse(raw_text):\n    return yaml.load(raw_text)\n"
+        assert _yaml_load_fired(_analyze(src))
+
+    def test_3_loader_yaml_loader_fires(self) -> None:
+        src = "import yaml\ndef parse(raw_text):\n    return yaml.load(raw_text, Loader=yaml.Loader)\n"
+        assert _yaml_load_fired(_analyze(src))
+
+    def test_4_subclass_readds_python_object_multi_fires(self) -> None:
+        src = (
+            "import yaml\n"
+            "class _Evil(yaml.SafeLoader):\n"
+            "    pass\n"
+            "_Evil.add_multi_constructor('tag:yaml.org,2002:python/object/apply:', lambda l, s, n: None)\n"
+            "def parse(raw_text):\n"
+            "    return yaml.load(raw_text, Loader=_Evil)\n"
+        )
+        assert _yaml_load_fired(_analyze(src))
+
+    def test_5_subclass_readds_python_object_single_fires(self) -> None:
+        src = (
+            "import yaml\n"
+            "class _Evil(yaml.SafeLoader):\n"
+            "    pass\n"
+            "_Evil.add_constructor('tag:yaml.org,2002:python/object/apply:os.system', lambda l, n: None)\n"
+            "def parse(raw_text):\n"
+            "    return yaml.load(raw_text, Loader=_Evil)\n"
+        )
+        assert _yaml_load_fired(_analyze(src))
+
+    def test_6_loader_full_loader_fires(self) -> None:
+        src = "import yaml\ndef parse(raw_text):\n    return yaml.load(raw_text, Loader=yaml.FullLoader)\n"
+        assert _yaml_load_fired(_analyze(src))
+
+    def test_7_plain_safe_subclass_no_ctor_clears(self) -> None:
+        src = (
+            "import yaml\n"
+            "class _S(yaml.SafeLoader):\n"
+            "    pass\n"
+            "def parse(raw_text):\n"
+            "    return yaml.load(raw_text, Loader=_S)\n"
+        )
+        assert _yaml_load_cleared(_analyze(src))
+
+    def test_8_unresolvable_loader_fires(self) -> None:
+        # MysteryLoader imported from elsewhere — cannot prove it is safe.
+        src = (
+            "import yaml\n"
+            "from mystery import MysteryLoader\n"
+            "def parse(raw_text):\n"
+            "    return yaml.load(raw_text, Loader=MysteryLoader)\n"
+        )
+        assert _yaml_load_fired(_analyze(src))
+
+    def test_9_subclass_readds_python_object_shortform_fires(self) -> None:
+        src = (
+            "import yaml\n"
+            "class _Evil(yaml.SafeLoader):\n"
+            "    pass\n"
+            "_Evil.add_multi_constructor('!!python/object/apply:', lambda l, s, n: None)\n"
+            "def parse(raw_text):\n"
+            "    return yaml.load(raw_text, Loader=_Evil)\n"
+        )
+        assert _yaml_load_fired(_analyze(src))
+
+    def test_10_subclass_benign_literal_ctor_clears(self) -> None:
+        src = (
+            "import yaml\n"
+            "class _S(yaml.SafeLoader):\n"
+            "    pass\n"
+            "_S.add_constructor('tag:yaml.org,2002:map', lambda l, n: None)\n"
+            "def parse(raw_text):\n"
+            "    return yaml.load(raw_text, Loader=_S)\n"
+        )
+        assert _yaml_load_cleared(_analyze(src))
+
+    def test_11_subclass_unresolvable_tag_var_fires(self) -> None:
+        # add_constructor's tag is a variable we cannot resolve → conservative fire.
+        src = (
+            "import yaml\n"
+            "SOME_TAG = compute_tag()\n"
+            "class _S(yaml.SafeLoader):\n"
+            "    pass\n"
+            "_S.add_constructor(SOME_TAG, lambda l, n: None)\n"
+            "def parse(raw_text):\n"
+            "    return yaml.load(raw_text, Loader=_S)\n"
+        )
+        assert _yaml_load_fired(_analyze(src))
+
+    def test_12_loader_safeloader_directly_clears(self) -> None:
+        src = "import yaml\ndef parse(raw_text):\n    return yaml.load(raw_text, Loader=yaml.SafeLoader)\n"
+        assert _yaml_load_cleared(_analyze(src))
+
+    def test_13_loader_unsafe_loader_fires(self) -> None:
+        src = "import yaml\ndef parse(raw_text):\n    return yaml.load(raw_text, Loader=yaml.UnsafeLoader)\n"
+        assert _yaml_load_fired(_analyze(src))

@@ -124,6 +124,114 @@ TAINT_SINKS_EXEC_QUALIFIED: frozenset[tuple[str, ...]] = frozenset(
     }
 )
 
+# --- issue #75: yaml.load(..., Loader=<safe loader/subclass>) is as safe as
+# yaml.safe_load. A SafeLoader subclass that RE-ADDS a python/object constructor
+# re-enables RCE, so the carve-out also verifies no unsafe constructor is added.
+_YAML_SAFE_LOADER_NAMES: frozenset[str] = frozenset(
+    {"SafeLoader", "CSafeLoader", "BaseLoader", "CBaseLoader"}
+)
+# Resolver default-tag constants that are provably benign (map/seq/str — no python/*).
+_YAML_BENIGN_RESOLVER_TAG_ATTRS: frozenset[str] = frozenset(
+    {"DEFAULT_MAPPING_TAG", "DEFAULT_SEQUENCE_TAG", "DEFAULT_SCALAR_TAG"}
+)
+# Substrings that mark a python/object-family tag (URI and `!!python` short forms):
+# tag:yaml.org,2002:python/object/apply: , !!python/object: , python/name/module, etc.
+_YAML_DANGEROUS_TAG_MARKERS: tuple[str, ...] = (
+    "python/object",
+    "python/name",
+    "python/module",
+    "python/apply",
+)
+
+
+def _yaml_node_names_safe_loader(node: ast.expr) -> bool:
+    """True iff ``node`` names a PyYAML safe loader (``yaml.SafeLoader`` Attribute
+    or bare ``SafeLoader`` Name; incl. C/Base variants)."""
+    if isinstance(node, ast.Attribute):
+        return node.attr in _YAML_SAFE_LOADER_NAMES
+    if isinstance(node, ast.Name):
+        return node.id in _YAML_SAFE_LOADER_NAMES
+    return False
+
+
+def _yaml_classdef_subclasses_safe_loader(tree: ast.AST, class_name: str, _depth: int = 0) -> bool:
+    """True iff the local ClassDef ``class_name`` transitively subclasses a PyYAML
+    safe loader. Depth-bounded to guard against cycles."""
+    if _depth > 10:
+        return False
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.ClassDef) and node.name == class_name):
+            continue
+        for base in node.bases:
+            if _yaml_node_names_safe_loader(base):
+                return True
+            if isinstance(base, ast.Name) and _yaml_classdef_subclasses_safe_loader(tree, base.id, _depth + 1):
+                return True
+        return False
+    return False
+
+
+def _yaml_tag_arg_is_dangerous(tag: ast.expr | None) -> bool:
+    """True iff an ``add_constructor``/``add_multi_constructor`` tag argument can
+    re-enable arbitrary-object construction, OR cannot be proven benign.
+
+    - Literal string containing a python/* marker → dangerous.
+    - Literal string with no marker → benign.
+    - Attribute ending in a known-benign resolver default-tag constant → benign.
+    - Anything else (variable, call, unresolved attribute) → CONSERVATIVE: dangerous.
+    """
+    if isinstance(tag, ast.Constant) and isinstance(tag.value, str):
+        return any(m in tag.value for m in _YAML_DANGEROUS_TAG_MARKERS)
+    if isinstance(tag, ast.Attribute) and tag.attr in _YAML_BENIGN_RESOLVER_TAG_ATTRS:
+        return False
+    return True  # unresolvable tag — cannot prove inert, keep the sink firing
+
+
+def _yaml_loader_name_reenables_unsafe(tree: ast.AST, loader_name: str) -> bool:
+    """True iff ANYWHERE in the module a call ``<loader_name>.add_constructor(tag, …)``
+    or ``<loader_name>.add_multi_constructor(tag, …)`` registers a dangerous /
+    unresolvable tag. Covers the common module-level ``X.add_constructor(...)`` form
+    (the reporter's shape) and the in-class-body form."""
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr not in ("add_constructor", "add_multi_constructor"):
+            continue
+        recv = node.func.value
+        if not (isinstance(recv, ast.Name) and recv.id == loader_name):
+            continue
+        tag = node.args[0] if node.args else None
+        if _yaml_tag_arg_is_dangerous(tag):
+            return True
+    return False
+
+
+def _yaml_load_loader_is_provably_safe(call: ast.Call, module_tree: ast.AST | None) -> bool:
+    """True iff ``call`` is ``*.load(..., Loader=L)`` and ``L`` resolves to a PyYAML
+    safe loader (or a local subclass thereof that does NOT re-add an unsafe
+    constructor). NO ``Loader=`` (bare ``yaml.load(x)``), or ``Loader=yaml.Loader``/
+    ``FullLoader``/``UnsafeLoader``, or an unresolved Loader → returns False (keep
+    firing). This mirrors the issue-#60 skillaudit fix but is STRICTER: it also
+    rejects a safe subclass that re-enables python/object construction."""
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "load"):
+        return False
+    for kw in call.keywords:
+        if kw.arg != "Loader":
+            continue
+        val = kw.value
+        if _yaml_node_names_safe_loader(val):
+            return True  # Loader=yaml.SafeLoader / SafeLoader directly
+        if (
+            module_tree is not None
+            and isinstance(val, ast.Name)
+            and _yaml_classdef_subclasses_safe_loader(module_tree, val.id)
+        ):
+            return not _yaml_loader_name_reenables_unsafe(module_tree, val.id)
+        return False  # Loader= present but not provably safe → keep the finding
+    return False  # no Loader= → keep firing
+
+
 # str methods that PRESERVE taint (a tainted string stays tainted through them).
 # Used to extract tainted Names from non-Name sink args without descending into
 # arbitrary (possibly-sanitizing) function calls. (audit MINOR #11c)
@@ -471,7 +579,7 @@ def analyze_module(tree: ast.Module) -> list[TaintFinding]:
             # aliases the local binding, not the builtin sink. Record it before
             # the alias logic in _analyze_stmt could (mis)resolve it.
             _record_sink_name_shadows(stmt, scope_state)
-            _analyze_stmt(stmt, scope_state, findings)
+            _analyze_stmt(stmt, scope_state, findings, tree)
             # Recurse into nested function/class definitions
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 inner = _TaintState()
@@ -574,6 +682,7 @@ def _analyze_stmt(
     stmt: ast.stmt,
     state: _TaintState,
     findings: list[TaintFinding],
+    module_tree: ast.AST | None = None,
 ) -> None:
     # Assignments — propagate or clear taint
     if isinstance(stmt, ast.Assign):
@@ -601,7 +710,7 @@ def _analyze_stmt(
     for node in _own_calls(stmt):
         sink_desc = _is_sink_call(node, state)
         if sink_desc:
-            _check_sink_args(node, sink_desc, state, findings)
+            _check_sink_args(node, sink_desc, state, findings, module_tree)
         _check_dynamic_getattr(node, state, findings, result_called=id(node) in invoked_call_ids)
 
 
@@ -747,6 +856,7 @@ def _check_sink_args(
     sink_desc: str,
     state: _TaintState,
     findings: list[TaintFinding],
+    module_tree: ast.AST | None = None,
 ) -> None:
     """For each argument to a sink call, see if it carries a tainted variable.
 
@@ -756,6 +866,15 @@ def _check_sink_args(
     EXEC-class sinks, also flags values that were sanitized-for-injection but
     remain exec-dangerous (audit MAJOR #10).
     """
+    # issue #75 — yaml.load(..., Loader=<safe loader/subclass>) is as safe as
+    # yaml.safe_load (no arbitrary object construction). RC-73's sink descriptor
+    # ignores the Loader= kwarg, so without this guard a SafeLoader-subclass load
+    # of a tainted value (incl. a function parameter) false-positives. Gate on the
+    # exact yaml.load sink descriptor so no other sink is affected. A subclass that
+    # re-adds a python/object constructor, a bare yaml.load(x), or Loader=yaml.Loader
+    # /FullLoader/UnsafeLoader is NOT provably safe and still fires.
+    if sink_desc == "yaml.load(...)" and _yaml_load_loader_is_provably_safe(call, module_tree):
+        return
     exec_sink = _is_exec_class_sink(call, state)
     seen: set[str] = set()
     for arg in list(call.args) + [kw.value for kw in call.keywords]:
