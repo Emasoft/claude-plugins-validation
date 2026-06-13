@@ -557,6 +557,85 @@ class TestLintMarkdown:
         assert any("MD013" in r.message for r in report.results)
         assert any("MD012" in r.message for r in report.results)
 
+    def test_md004_poisoning_dedups_to_single_nit(self, tmp_path: Path) -> None:
+        """Issue #113: a consistent-mode-poisoned file (a stray '+ ' prose-wrap
+        sets expected=plus, flagging every healthy dash bullet) surfaces ONE
+        explanatory MD004 NIT, not N near-identical ones on the healthy bullets."""
+        f = tmp_path / "doc.md"
+        f.write_text("# Title\n")
+        report = ValidationReport()
+        # 5 healthy dash bullets flagged, all the SAME signature — the classic
+        # consistent-mode poisoning shape.
+        stderr = (
+            "\n".join(
+                f"doc.md:{n}:1 error MD004/ul-style Unordered list style "
+                "[Expected: plus; Actual: dash]"
+                for n in (8, 9, 10, 11, 12)
+            )
+            + "\n"
+        )
+        with patch("cpv_lint_engine._resolve", return_value=["/bin/markdownlint-cli2"]):
+            with patch(
+                "cpv_lint_engine._run_linter",
+                side_effect=_make_run(FakeResult(1, "", stderr)),
+            ):
+                ok = lint_markdown(tmp_path, [f], report)
+        assert ok is True
+        md004_nits = [r for r in report.results if "MD004" in r.message]
+        # FP noise collapsed: exactly ONE NIT for the file+signature, not 5.
+        assert len(md004_nits) == 1, (
+            f"expected 1 deduped MD004 NIT, got {len(md004_nits)}: "
+            f"{[r.message for r in md004_nits]}"
+        )
+        # Still a VISIBLE NIT (never suppressed) and names the likely cause.
+        assert md004_nits[0].level == "NIT"
+        assert "mixes" in md004_nits[0].message and "issue #113" in md004_nits[0].message
+
+    def test_md004_distinct_signatures_each_surface(self, tmp_path: Path) -> None:
+        """FN-safe: genuinely-distinct MD004 inconsistencies (different
+        Expected/Actual, or different file) each still surface — the dedup is
+        keyed on (file, signature) and never hides a second real inconsistency."""
+        f = tmp_path / "doc.md"
+        f.write_text("# Title\n")
+        report = ValidationReport()
+        stderr = (
+            "doc.md:8:1 error MD004/ul-style Unordered list style [Expected: plus; Actual: dash]\n"
+            "doc.md:9:1 error MD004/ul-style Unordered list style [Expected: plus; Actual: dash]\n"
+            "other.md:3:1 error MD004/ul-style Unordered list style [Expected: dash; Actual: asterisk]\n"
+        )
+        with patch("cpv_lint_engine._resolve", return_value=["/bin/markdownlint-cli2"]):
+            with patch(
+                "cpv_lint_engine._run_linter",
+                side_effect=_make_run(FakeResult(1, "", stderr)),
+            ):
+                ok = lint_markdown(tmp_path, [f], report)
+        assert ok is True  # NIT-only findings never flip the return to False
+        md004_nits = [r for r in report.results if "MD004" in r.message]
+        # doc.md(plus/dash) and other.md(dash/asterisk) are two distinct keys.
+        assert len(md004_nits) == 2, (
+            f"distinct (file,sig) keys must each surface: {[r.message for r in md004_nits]}"
+        )
+
+    def test_non_md004_findings_not_deduped(self, tmp_path: Path) -> None:
+        """The dedup is scoped to MD004 — repeated other-rule findings (e.g.
+        MD013) still relay per-line, since each line is a distinct location."""
+        f = tmp_path / "doc.md"
+        f.write_text("# Title\n")
+        report = ValidationReport()
+        stderr = (
+            "doc.md:3 error MD013/line-length Line length [Expected: 80; Actual: 213]\n"
+            "doc.md:5 error MD013/line-length Line length [Expected: 80; Actual: 199]\n"
+        )
+        with patch("cpv_lint_engine._resolve", return_value=["/bin/markdownlint-cli2"]):
+            with patch(
+                "cpv_lint_engine._run_linter",
+                side_effect=_make_run(FakeResult(1, "", stderr)),
+            ):
+                ok = lint_markdown(tmp_path, [f], report)
+        assert ok is True  # NIT-only findings never flip the return to False
+        md013_nits = [r for r in report.results if "MD013" in r.message]
+        assert len(md013_nits) == 2, "non-MD004 findings must still relay per-line"
+
     def test_silent_failure_surfaces_warning(self, tmp_path: Path) -> None:
         """Issue #20 fix: when markdownlint exits non-zero but produces
         NO parseable output, the developer used to see only "CPV blocked

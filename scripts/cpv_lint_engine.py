@@ -80,6 +80,24 @@ from gitignore_filter import GitignoreFilter
 # the markdown collect() patterns if a new markdown suffix is ever added.
 _MARKDOWNLINT_FINDING_RE = re.compile(r"\.mdx?:\d+(?::\d+)?\s+(?:error|warning|info)\s+MD\d+")
 
+# Issue #113: MD004 (ul-style) in markdownlint's default `consistent` mode is
+# poisoned by a stray MINORITY marker. A hard-wrapped prose line that happens to
+# begin `+ ` (or `* `) is parsed by CommonMark as a list item, which sets the
+# file's expected ul-style — then EVERY healthy bullet of the majority style is
+# flagged, producing N near-identical NITs that point at the healthy bullets,
+# not the one stray marker. We collapse repeated same-signature MD004 findings
+# WITHIN a single file to one explanatory NIT (the inconsistency still surfaces
+# ONCE — a visible NIT, never suppressed — so a genuine mixed-marker file is
+# still reported). The dedup key is (file path, `[Expected: X; Actual: Y]`
+# signature). Pinning MD004 to a single style was rejected: it would flag every
+# `*`-style file CPV lints (its own + third-party) — a style imposition, where
+# `consistent` mode (the markdownlint default) correctly leaves each file's
+# marker choice alone and only flags genuine within-file inconsistency.
+_MD004_DEDUP_RE = re.compile(
+    r"^(?P<file>.+?\.mdx?):\d+(?::\d+)?\s+(?:error|warning|info)\s+MD004/ul-style"
+    r".*?(?P<sig>\[Expected:[^\]]*\])"
+)
+
 # Tool/environment CRASH signatures (issue #84). When markdownlint-cli2 is
 # launched via `bunx`/`npx` and its ESM imports fail (e.g. `bunx` resolves the
 # package up into an unrelated ANCESTOR `package.json` with a broken
@@ -1029,6 +1047,10 @@ def lint_markdown(
     # are the JSON/YAML/Python validators, not markdown prose style).
     output = (result.stderr or result.stdout or "").strip()
     surfaced = 0
+    # Issue #113: track which (file, MD004-signature) pairs have already been
+    # surfaced so a consistent-mode-poisoned file emits one explanatory NIT
+    # instead of N near-identical ones on its healthy bullets.
+    seen_md004_signatures: set[tuple[str, str]] = set()
     for line in output.splitlines():
         if not line.strip():
             continue
@@ -1037,6 +1059,29 @@ def lint_markdown(
         # and extracted N", "Saved lockfile", etc.) that is NOT a markdownlint
         # finding and would otherwise leak through as a spurious NIT.
         if not _MARKDOWNLINT_FINDING_RE.search(line):
+            continue
+        # Issue #113: collapse repeated same-signature MD004 (ul-style) findings
+        # within one file to a single, clearer NIT. A stray prose-wrap marker
+        # poisons markdownlint's consistent-style check and flags every healthy
+        # bullet; relaying all N is confusing noise that points at the healthy
+        # bullets, not the cause. The inconsistency still surfaces ONCE (visible
+        # NIT, never suppressed), with a message naming the likely cause.
+        md004 = _MD004_DEDUP_RE.match(line.strip())
+        if md004 is not None:
+            key = (md004.group("file"), md004.group("sig"))
+            if key in seen_md004_signatures:
+                continue
+            seen_md004_signatures.add(key)
+            report.nit(
+                f"markdownlint: MD004/ul-style — {md004.group('file')} mixes "
+                f"unordered-list markers {md004.group('sig')}; standardize the file "
+                "on one marker. A hard-wrapped prose line beginning '+ ' or '* ' can "
+                "poison markdownlint's consistent-style check and flag every healthy "
+                "bullet (issue #113)."
+            )
+            surfaced += 1
+            if surfaced >= 20:
+                break
             continue
         report.nit(f"markdownlint: {line.strip()}")
         surfaced += 1

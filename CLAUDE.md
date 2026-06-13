@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.10` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.11` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **114** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers) |
-| **test files** | **314** | `ls tests/test_*.py`; ~9066 tests |
+| **test files** | **314** | `ls tests/test_*.py`; ~9069 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -135,11 +135,16 @@ the `subagent_type:` ghost-dispatch CRITICAL are untouched. **#105** — a new
 reuses the reputable-CDN host allowlist, so a pinned jsdelivr ESM `import` in a
 self-contained HTML artifact no longer fires SUPPLY_CHAIN; an unknown-host
 import, an `eval(fetch())`, and an off-allowlist `curl … | sh` still fire.
-**#113** (the markdownlint MD004 dash-pin) was PULLED from this batch — the
-naive global pin flags every star-bullet line across 17 tracked files (8
-historical TRDDs + 3 FP-corpus fixtures + 6 shipped docs); the defensible form
-(dash-pin + exclude `tests/fixtures/` and `design/` from markdownlint +
-dogfood-convert only the shipped docs) ships in the next commit.
+**#113** — resolved in **v2.126.11** by a `cpv_lint_engine` MD004 dedup, NOT the
+originally-proposed global dash-pin (which would have flagged every `*`-style
+file CPV lints — its own + third-party — 304 bullet lines across 17 files,
+incl. historical TRDDs + FP-corpus fixtures that must not be edited: a style
+imposition). A stray `+ `/`* ` prose-wrap poisons markdownlint's `consistent`
+mode and flags every healthy bullet; the finding relay now collapses repeated
+same-(file, Expected/Actual) MD004 findings to ONE explanatory NIT. `consistent`
+mode is kept (no style imposition); a genuine mixed-marker file still surfaces
+once (visible NIT, never suppressed). Verified through real markdownlint: a
+4-flag poisoned doc → 1 NIT.
 
 **Earlier backlog (#76–#118)** — FP reports + suggestions filed by 9 ecosystem
 plugin Claudes. **v2.126.9 closed 7** (FN-safe two-sided): `#85` (`.git`-FILE
