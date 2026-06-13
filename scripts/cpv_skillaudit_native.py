@@ -1392,6 +1392,8 @@ _CLASSIFIER_EXTENSIONS: tuple[str, ...] = (
     ".mjs",
     ".cjs",
     ".rs",
+    ".html",
+    ".htm",
 )
 
 
@@ -1783,6 +1785,21 @@ def _context_classifier_verdict(
         except ImportError:
             return ""
         classifier_verdict = _rs_classify(file_path, content, line_idx, match, rule_id)
+    elif fp_lower.endswith((".html", ".htm")):
+        # Issue #105 — HTML context classifier for the SUPPLY_CHAIN FP on a
+        # pinned ESM import from a reputable CDN host inside a self-contained
+        # single-file HTML artifact. CPV already treats that exact shape as
+        # benign inside a ``html`` fence in markdown; this aligns ``.html`` with
+        # it (reusing the SAME CDN host allowlist, not a copy). The classifier
+        # ONLY suppresses SUPPLY_CHAIN known-CDN imports — an unknown-host
+        # import, an eval-of-fetch, a webhook exfil, or a `curl <host> | sh`
+        # from an off-allowlist host are different rule ids / off the allowlist
+        # and keep firing.
+        try:
+            from _skillaudit_html_context import classify as _html_classify  # type: ignore[import-not-found]
+        except ImportError:
+            return ""
+        classifier_verdict = _html_classify(file_path, content, line_idx, match, rule_id)
     else:
         return ""
 

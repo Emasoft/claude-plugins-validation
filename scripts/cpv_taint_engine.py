@@ -1059,7 +1059,19 @@ def analyze_file(file_path: Path) -> list[TaintFinding]:
 
 
 def iter_python_files(root: Path) -> Iterable[Path]:
-    """Yield every .py file under root, skipping standard ignore dirs."""
+    """Yield every .py file under root, skipping gitignored + standard ignore dirs.
+
+    Issue #112: walk gitignore-aware (``GitignoreFilter`` prunes ignored dirs at
+    descent time — the same mechanism issue #19 adopted for ``lint``). A
+    gitignored path is by construction not committed → not shipped → not
+    installed, so a third-party plugin's gitignored scratch (e.g. an extracted
+    ``INPUT_DEV/`` tarball) must not produce a publish-blocking RC-73 taint
+    finding. A TRACKED shipped ``.py`` with a real source→sink still fires (its
+    dir is not gitignored).
+    """
+    from gitignore_filter import GitignoreFilter  # local — keeps cold path cheap
+
+    gi = GitignoreFilter(root)
     skip_dirs = {
         "node_modules",
         ".venv",
@@ -1074,11 +1086,19 @@ def iter_python_files(root: Path) -> Iterable[Path]:
         "vendor",
         "target",
     }
-    for p in root.rglob("*.py"):
-        parts = p.relative_to(root).parts
-        if any(part in skip_dirs or part.endswith("_dev") for part in parts[:-1]):
+    for p in gi.rglob("*.py"):
+        # ``gi.root`` is ``root.resolve()`` (absolute); re-base onto the caller's
+        # original ``root`` token so the yielded path keeps the exact form the
+        # downstream consumer expects (``plugin_path / sub``), so
+        # ``file_path.relative_to(plugin_path)`` in check_phase10_taint still
+        # yields a RELATIVE rel_path — preserving self-scan-skip + doc/test
+        # severity classification and never leaking an absolute path.
+        rel = p.relative_to(gi.root)
+        # ``.lower()`` also catches uppercase convention dirs (``INPUT_DEV``);
+        # defense-in-depth — the gitignore prune above is the primary fix.
+        if any(part in skip_dirs or part.lower().endswith("_dev") for part in rel.parts[:-1]):
             continue
-        yield p
+        yield root / rel
 
 
 def analyze_plugin(plugin_path: Path) -> dict[Path, list[TaintFinding]]:
