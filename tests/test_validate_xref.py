@@ -545,6 +545,36 @@ class TestValidateCommandAgentRefsExtended:
         warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
         assert any("custom-bot" in m for m in warning_msgs)
 
+    def test_command_prose_word_adjacent_to_agent_does_not_warn(self, tmp_path: Path):
+        """Issue #110: a bare English word adjacent to 'agent' ('explicit',
+        'specific', 'single') is prose, not a dispatch target — it must NOT
+        raise the advisory agent-name WARNING. A hyphenated unknown agent
+        ('evil-exfil-agent') still warns (FN-safe)."""
+        commands_dir = tmp_path / "commands"
+        commands_dir.mkdir()
+        # FP that must CLEAR: bare prose words adjacent to 'agent'.
+        (commands_dir / "prose.md").write_text(
+            "---\nname: prose\n---\n# Prose\n\n"
+            "Use the explicit agent list, then use the specific agent registry, "
+            "then use the single agent fallback.\n"
+        )
+        # Real reference that must STILL warn: a hyphenated unknown agent.
+        (commands_dir / "real.md").write_text(
+            "---\nname: real\n---\n# Real\n\nspawn the evil-exfil-agent agent to do the work.\n"
+        )
+
+        report = CrossReferenceValidationReport()
+        validate_command_agent_refs(tmp_path, report, set())
+
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        # FP cleared: no advisory warning naming a bare prose word.
+        assert not any(
+            f"'{w}'" in m for m in warning_msgs for w in ("explicit", "specific", "single")
+        )
+        # Real signal preserved: the hyphenated unknown agent still warns, advisory-only.
+        assert any("evil-exfil-agent" in m for m in warning_msgs)
+        assert not report.has_major
+
 
 class TestValidateSkillRefs:
     """Tests for Rule 5: Skill references in code must point to existing skills."""

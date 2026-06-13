@@ -63,6 +63,15 @@ AGENT_SPAWN_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Issue #110: a real agent name is kebab/snake-cased (browser-agent, cpv-spark,
+# caa-fix-agent) or carries a digit. A bare single English word adjacent to
+# "agent(s)" — "explicit", "specific", "single", "new" — is prose, not a
+# dispatch target. This gates ONLY the advisory prose WARNING below (which by
+# construction fires only on a candidate that is NOT a known agent); the
+# structural ghost-dispatch path (subagent_type:, RC_GHOST_DISPATCH_*) stays
+# CRITICAL and is unaffected.
+_LOOKS_LIKE_AGENT_IDENTIFIER = re.compile(r"[-0-9]")
+
 # Pattern to find skill references in code and markdown.
 #
 # Issue #27 (v2.97.0): the previous form ``[a-z][a-z0-9-]*`` allowed a
@@ -1215,6 +1224,14 @@ def validate_command_agent_refs(
             if ref_agent_normalized in _available_normalized:
                 continue  # v2.1.140 fuzzy match
             if ref_agent_normalized in _builtin_normalized:
+                continue
+            # (issue #110) A bare single-word candidate ("explicit", "specific",
+            # "single", "new") adjacent to "agent" is ordinary prose, not a
+            # dispatch target — a real agent name is kebab/snake-cased or carries
+            # a digit. Skip the advisory WARNING for such words. A hyphenated
+            # unknown agent ("evil-exfil-agent") still warns; the CRITICAL
+            # subagent_type: ghost-dispatch path above is untouched.
+            if not _LOOKS_LIKE_AGENT_IDENTIFIER.search(ref_agent):
                 continue
             # (doc #6) This is a PROSE heuristic — it fires on innocuous English
             # like "use the browser agent" / "we use the X agent". It is NOT a

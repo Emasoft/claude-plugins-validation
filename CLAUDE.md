@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.9` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.10` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
-| **scripts** | **113** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI) |
-| **test files** | **313** | `ls tests/test_*.py`; ~9058 tests |
+| **scripts** | **114** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers) |
+| **test files** | **314** | `ls tests/test_*.py`; ~9066 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -123,19 +123,36 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 
 ## Open issues snapshot (update as they close)
 
-**Open: #76–#101** — FP reports + suggestions filed by 8 ecosystem plugin
-Claudes; triaged this session (18 FP-fixable, 2 by-design #92/#101-E, suggestions
-#90/#93/#94, agent-bug #82, usability #89). **v2.126.9 closed 7** (FN-safe
-two-sided): #85 (`.git`-FILE private-path skip), #96/#99 (bare-prose backtick-path
-scoping — only `./`/`../`/plugin-internal flag), #98 (.gitignore `git check-ignore`
-glob coverage), #84 (markdownlint isolated cwd + crash→WARNING), #97 (3rd-person
-role-def→INFO), #100-B/C (scanner self-match: indirection-aware message-string +
-exact-value BOM; #100-A already fixed). Remaining FP-fixable = the **Theme-A
-skillaudit doc-fence cluster** (#76 umbrella + #77/#78/#79/#80/#81/#83/#86/#87/#88/
-#91/#95). Also open: **#114** (canonical-pipeline cold-install `uvx-from-git`
-validate timeout — needs a wheel/cache, the real ecosystem CI breaker). Security:
-the "bare secrets in YAML" alarm was a janitor-scanner FP (ai-maestro-janitor #24),
-NOT a real exposure — 17-repo/52-workflow audit found ZERO bare secrets.
+**v2.126.10 closed 3** (FN-safe two-sided, each reproduced through the real
+validator before + after the fix): **#112** — the RC-73 taint walker
+(`iter_python_files`) is now gitignore-aware, so a gitignored `INPUT_DEV/`
+scratch tree no longer yields publish-blocking MAJORs; a tracked shipped `.py`
+source→sink still fires. **#110** — the advisory prose agent-name WARNING now
+requires a kebab/digit identifier, so the English words
+`explicit`/`specific`/`single` no longer flag; a hyphenated unknown agent and
+the `subagent_type:` ghost-dispatch CRITICAL are untouched. **#105** — a new
+`.html`/`.htm` skillaudit context classifier (`_skillaudit_html_context.py`)
+reuses the reputable-CDN host allowlist, so a pinned jsdelivr ESM `import` in a
+self-contained HTML artifact no longer fires SUPPLY_CHAIN; an unknown-host
+import, an `eval(fetch())`, and an off-allowlist `curl … | sh` still fire.
+**#113** (the markdownlint MD004 dash-pin) was PULLED from this batch — the
+naive global pin flags every star-bullet line across 17 tracked files (8
+historical TRDDs + 3 FP-corpus fixtures + 6 shipped docs); the defensible form
+(dash-pin + exclude `tests/fixtures/` and `design/` from markdownlint +
+dogfood-convert only the shipped docs) ships in the next commit.
+
+**Earlier backlog (#76–#118)** — FP reports + suggestions filed by 9 ecosystem
+plugin Claudes. **v2.126.9 closed 7** (FN-safe two-sided): `#85` (`.git`-FILE
+private-path skip), `#96`/`#99` (bare-prose backtick-path scoping), `#98`
+(.gitignore `git check-ignore` glob coverage), `#84` (markdownlint isolated-cwd
+and crash→WARNING), `#97` (3rd-person role-def→INFO), `#100`-B/C (scanner
+self-match). Remaining FP-fixable = the **Theme-A skillaudit doc-fence cluster**
+(`#76` umbrella + `#77`/`#78`/`#79`/`#80`/`#81`/`#83`/`#86`/`#87`/`#88`/`#91`/`#95`),
+plus newer `#115`/`#116`/`#117`/`#118`. Also open: **`#114`** (canonical-pipeline
+cold-install `uvx-from-git` validate timeout — needs a wheel/cache, the real
+ecosystem CI breaker). Security: the "bare secrets in YAML" alarm was a
+janitor-scanner FP (ai-maestro-janitor #24), NOT a real exposure — a
+17-repo/52-workflow audit found ZERO bare secrets.
 
 **v2.126.8** (not a filed issue —
 surfaced unblocking the claude-menu-system publish): FN-safe cspell-dictionary

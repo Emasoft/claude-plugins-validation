@@ -246,6 +246,28 @@ class TestFileLevel:
         assert tmp_path / "a.py" in files
         assert (tmp_path / "scripts_dev" / "b.py") not in files
 
+    def test_iter_python_files_skips_gitignored_dir(self, tmp_path: Path) -> None:
+        """Issue #112: a gitignored dir's .py is not scanned, a tracked .py is."""
+        # GitignoreFilter reads <root>/.gitignore directly; no .git dir needed.
+        (tmp_path / ".gitignore").write_text("/INPUT_DEV/\n")
+        (tmp_path / "shipped.py").write_text("")
+        (tmp_path / "INPUT_DEV").mkdir()
+        (tmp_path / "INPUT_DEV" / "scratch.py").write_text("")
+        files = list(iter_python_files(tmp_path))
+        # FP that must CLEAR: the gitignored scratch file is absent.
+        assert (tmp_path / "INPUT_DEV" / "scratch.py") not in files
+        # Real surface that must STILL be scanned: the tracked shipped file.
+        assert tmp_path / "shipped.py" in files
+
+    def test_iter_python_files_skips_uppercase_dev_suffix(self, tmp_path: Path) -> None:
+        """Issue #112: the _dev-suffix skip is case-insensitive (FOO_DEV), even untracked."""
+        (tmp_path / "a.py").write_text("")
+        (tmp_path / "FOO_DEV").mkdir()
+        (tmp_path / "FOO_DEV" / "b.py").write_text("")
+        files = list(iter_python_files(tmp_path))
+        assert tmp_path / "a.py" in files
+        assert (tmp_path / "FOO_DEV" / "b.py") not in files
+
 
 # -----------------------------------------------------------------------------
 # Sink line attribution
