@@ -798,3 +798,224 @@ class TestBacktickRefDetection:
         validate_toc_embedding(skill_content, skill_path, tmp_path, report)
 
         assert len(report.results) == 0
+
+
+class TestTocPerRefDedup:
+    """Issue #89: at most ONE TOC-embedding finding per (SKILL.md, reference file).
+
+    A reference .md file linked multiple times in one SKILL.md used to emit a
+    near-identical MINOR (and possibly a 'no TOC section' NIT) per occurrence.
+    These tests pin the collect-then-emit dedup: one finding per distinct ref,
+    satisfied if ANY occurrence fully embeds the TOC, and per-ref (not global).
+    """
+
+    @staticmethod
+    def _ref_with_toc(ref_dir: Path, name: str, headings: list[str]) -> None:
+        """Create a reference .md with a TOC of the given headings."""
+        toc = "\n".join(f"- [{h}](#{h.lower().replace(' ', '-')})" for h in headings)
+        body = "\n\n".join(f"## {h}\n\nContent for {h}." for h in headings)
+        (ref_dir / name).write_text(f"# Guide\n\n## Table of Contents\n\n{toc}\n\n{body}\n")
+
+    @staticmethod
+    def _ref_no_toc(ref_dir: Path, name: str) -> None:
+        """Create a reference .md WITHOUT a TOC section."""
+        (ref_dir / name).write_text("# Doc\n\n## Intro\n\nNo table of contents here.\n")
+
+    def test_same_ref_linked_three_times_all_incomplete_one_finding(self, tmp_path: Path):
+        """Same ref linked 3x, all occurrences incomplete -> exactly ONE finding.
+
+        Regression for issue #89: previously emitted ~3 near-identical MINORs.
+        """
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+        self._ref_with_toc(ref_dir, "guide.md", ["Alpha", "Beta", "Gamma"])
+
+        # Three standalone links, none followed by the TOC headings.
+        skill_content = """\
+# My Skill
+
+See the [Guide](references/guide.md) for setup.
+
+Later, consult the [Guide](references/guide.md) again.
+
+And finally the [Guide](references/guide.md) for cleanup.
+
+## Usage
+
+Use it.
+"""
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        minors = [r for r in report.results if r.level == "MINOR"]
+        passed = [r for r in report.results if r.level == "PASSED"]
+        assert len(minors) == 1, f"Expected 1 MINOR (deduped), got {len(minors)}: {[m.message[:50] for m in minors]}"
+        assert "guide.md" in minors[0].message
+        assert len(passed) == 0
+
+    def test_same_ref_one_embedded_one_not_zero_findings(self, tmp_path: Path):
+        """Same ref linked 2x, one fully embeds the TOC + one doesn't -> ZERO findings.
+
+        The full TOC appears at least once, so the content IS discoverable —
+        the bare inline mention must not be flagged (issue #89 satisfied-case).
+        """
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+        self._ref_with_toc(ref_dir, "guide.md", ["Alpha", "Beta", "Gamma"])
+
+        # First link embeds all three headings; second link (prose) does not.
+        skill_content = """\
+# My Skill
+
+## Resources
+
+- [Guide](references/guide.md)
+  - Alpha
+  - Beta
+  - Gamma
+
+Reminder: the [Guide](references/guide.md) covers the basics.
+
+## Usage
+
+Use it.
+"""
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        minors = [r for r in report.results if r.level == "MINOR"]
+        nits = [r for r in report.results if r.level == "NIT"]
+        passed = [r for r in report.results if r.level == "PASSED"]
+        assert len(minors) == 0, f"Expected 0 MINOR (satisfied once), got {len(minors)}"
+        assert len(nits) == 0
+        # The ref counts as satisfied -> the all-refs-have-TOC PASSED fires.
+        assert len(passed) == 1
+
+    def test_two_different_incomplete_refs_two_findings(self, tmp_path: Path):
+        """TWO DIFFERENT incomplete refs -> exactly TWO findings (dedup is per-ref)."""
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+        self._ref_with_toc(ref_dir, "one.md", ["Alpha", "Beta"])
+        self._ref_with_toc(ref_dir, "two.md", ["Gamma", "Delta"])
+
+        skill_content = """\
+# My Skill
+
+See the [One](references/one.md) for part one.
+
+See the [Two](references/two.md) for part two.
+
+## Usage
+
+Use it.
+"""
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        minors = [r for r in report.results if r.level == "MINOR"]
+        assert len(minors) == 2, f"Expected 2 MINOR (one per distinct ref), got {len(minors)}"
+        names = " ".join(m.message for m in minors)
+        assert "one.md" in names
+        assert "two.md" in names
+
+    def test_single_incomplete_ref_linked_once_one_finding(self, tmp_path: Path):
+        """A single incomplete ref linked once -> ONE finding (unchanged baseline)."""
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+        self._ref_with_toc(ref_dir, "guide.md", ["Alpha", "Beta", "Gamma"])
+
+        skill_content = """\
+# My Skill
+
+See the [Guide](references/guide.md) for setup.
+
+## Usage
+
+Use it.
+"""
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        minors = [r for r in report.results if r.level == "MINOR"]
+        assert len(minors) == 1, f"Expected 1 MINOR, got {len(minors)}"
+        assert "0/3 TOC headings" in minors[0].message
+
+    def test_fully_embedded_ref_no_finding(self, tmp_path: Path):
+        """A ref with its full TOC embedded -> no finding, one PASSED (unchanged)."""
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+        self._ref_with_toc(ref_dir, "guide.md", ["Alpha", "Beta", "Gamma"])
+
+        skill_content = """\
+# My Skill
+
+See the [Guide](references/guide.md) for setup.
+
+- Alpha
+- Beta
+- Gamma
+
+## Usage
+
+Use it.
+"""
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        minors = [r for r in report.results if r.level == "MINOR"]
+        passed = [r for r in report.results if r.level == "PASSED"]
+        assert len(minors) == 0
+        assert len(passed) == 1
+
+    def test_no_toc_ref_linked_twice_one_nit(self, tmp_path: Path):
+        """A referenced file with NO TOC, linked 2x from lists -> exactly ONE NIT.
+
+        Regression for issue #89: the 'no Table of Contents' NIT must dedup
+        per distinct referenced file, not fire once per list occurrence.
+        """
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir()
+        self._ref_no_toc(ref_dir, "notes.md")
+
+        skill_content = """\
+# My Skill
+
+## Resources
+
+- [Notes](references/notes.md)
+
+## See Also
+
+- [Notes](references/notes.md)
+
+## Usage
+
+Use it.
+"""
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+
+        nits = [r for r in report.results if r.level == "NIT"]
+        minors = [r for r in report.results if r.level == "MINOR"]
+        assert len(nits) == 1, f"Expected 1 NIT (deduped), got {len(nits)}"
+        assert "notes.md" in nits[0].message
+        assert "Table of Contents" in nits[0].message
+        assert len(minors) == 0
