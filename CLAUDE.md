@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.19` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.20` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
-| **test files** | **323** | `ls tests/test_*.py`; ~9233 tests |
+| **test files** | **323** | `ls tests/test_*.py`; ~9239 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,22 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.20 — closed #89** (report-noise: the progressive-discovery TOC-embedding
+check emitted a separate near-identical MINOR per LINK OCCURRENCE — a reference
+`.md` linked both in a SKILL.md's Resources `>` block AND inline in prose
+produced ~6 duplicate "N/M TOC headings embedded" MINORs for ONE file, plus
+duplicated the "no Table of Contents" NIT). FIX (`cpv_validation_common.py`
+`validate_toc_embedding`, the #109/#113 dedup pattern): restructured the
+per-occurrence loop to COLLECT per distinct referenced file, then emit AT MOST
+ONE finding per (SKILL.md, ref-file) after the loop — using the BEST (max
+embedded_count) occurrence, and emitting NOTHING when ANY occurrence fully
+embeds the TOC (the content is discoverable). `refs_checked`/`refs_with_toc`
+counters moved together to per-distinct-ref (ratio meaning preserved). FN-safe
+two-sided, verified through the REAL function with a baseline that reproduces
+the dup: ref linked 3× all-incomplete 3→1; TOC embedded at one site 2→0
+(discoverable); order-independent; two DIFFERENT incomplete refs stay 2 (per-ref,
+not global). +6 tests.
 
 **v2.126.19 — closed #106** (dependency-pinning self-contradiction: `validate_plugin`
 accepts a dep as a string OR `{name,version,marketplace}` object and ADVISES the

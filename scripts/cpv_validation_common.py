@@ -7566,6 +7566,28 @@ def validate_toc_embedding(
         else:
             report.minor(msg, file)
 
+    # Issue #89: a single reference .md file is frequently LINKED MORE THAN
+    # ONCE in one SKILL.md (e.g. once inside the Resources `>` TOC block and
+    # again inline in prose). The per-occurrence loop below used to emit one
+    # near-identical MINOR (and possibly a "no TOC section" NIT) for EVERY
+    # occurrence — ~6 duplicate findings for ONE reference file. Collect the
+    # per-occurrence results here and emit AT MOST ONE finding per distinct
+    # referenced file AFTER the loop:
+    #   * If ANY occurrence fully embeds the TOC, the reference is SATISFIED
+    #     (the full TOC appears at least once → the content IS discoverable),
+    #     so nothing is emitted for it — this also clears the "TOC'd in
+    #     Resources but mentioned inline without a TOC" duplicate.
+    #   * Otherwise emit exactly ONE finding using the BEST occurrence (the
+    #     one with the highest embedded_count), choosing the list-item vs
+    #     standalone message variant per that best occurrence.
+    # The dict is keyed on the resolved reference path so two DIFFERENT files
+    # that happen to share a basename never collapse into one finding.
+    _md_toc_best: dict[str, dict[str, object]] = {}
+    # Dedup the "referenced file has no Table of Contents" NIT the same way —
+    # one NIT per distinct no-TOC referenced file, no matter how many times it
+    # is linked from a list. Keyed on resolved path → display name.
+    _md_no_toc_refs: dict[str, str] = {}
+
     for link_match in _MD_LINK_RE.finditer(md_content):
         link_target = link_match.group(2)
 
@@ -7594,20 +7616,19 @@ def validate_toc_embedding(
 
         toc_headings = extract_toc_headings(ref_content)
 
+        ref_key = str(ref_path.resolve())
+
         if not toc_headings:
             # Target file has no TOC
             if is_list_item and not _is_toc_exempt(ref_path):
                 # The link is in a list item pointing to a file without a TOC.
                 # We can't require TOC embedding, but the file itself should
-                # have a TOC for progressive discovery.
-                report.nit(
-                    f"Referenced file '{ref_path.name}' (linked from a list in {rel_file}) has no Table of Contents section. All .md reference files should include a TOC for progressive discovery.",
-                    rel_file,
-                )
+                # have a TOC for progressive discovery. Record once per ref —
+                # emitted after the loop so multiple list links to the same
+                # no-TOC file produce a single NIT (issue #89).
+                _md_no_toc_refs.setdefault(ref_key, ref_path.name)
             # For non-list links or exempt files: skip (no TOC to embed)
             continue
-
-        refs_checked += 1
 
         # Check if TOC headings appear within ~100 lines after the link
         # (large reference files can have 30+ TOC entries)
@@ -7620,16 +7641,53 @@ def validate_toc_embedding(
         nearby_lower = nearby_text.lower()
         nearby_no_backticks = nearby_lower.replace("`", "")
 
-        def _heading_matches(heading: str) -> bool:
+        def _heading_matches(heading: str, _nl: str = nearby_lower, _nnb: str = nearby_no_backticks) -> bool:
             h = heading.lower()
-            return h in nearby_lower or h.replace("`", "") in nearby_no_backticks
+            return h in _nl or h.replace("`", "") in _nnb
 
         embedded_count = sum(1 for heading in toc_headings if _heading_matches(heading))
+        total = len(toc_headings)
+        satisfied = embedded_count == total
 
-        # All TOC headings must be embedded — partial TOCs hide content from agents
-        if embedded_count == len(toc_headings):
+        # Collect the BEST occurrence for this distinct referenced file:
+        # satisfied if ANY occurrence fully embeds, otherwise keep the
+        # occurrence with the highest embedded_count for the single finding.
+        prev = _md_toc_best.get(ref_key)
+        if prev is None:
+            _md_toc_best[ref_key] = {
+                "name": ref_path.name,
+                "embedded_count": embedded_count,
+                "total": total,
+                "is_list_item": is_list_item,
+                "satisfied": satisfied,
+            }
+        else:
+            if satisfied:
+                prev["satisfied"] = True
+            if embedded_count > int(prev["embedded_count"]):  # type: ignore[call-overload]
+                prev["embedded_count"] = embedded_count
+                prev["total"] = total
+                prev["is_list_item"] = is_list_item
+
+    # Emit AT MOST ONE "no Table of Contents" NIT per distinct no-TOC ref.
+    for _no_toc_name in _md_no_toc_refs.values():
+        report.nit(
+            f"Referenced file '{_no_toc_name}' (linked from a list in {rel_file}) has no Table of Contents section. All .md reference files should include a TOC for progressive discovery.",
+            rel_file,
+        )
+
+    # Emit AT MOST ONE TOC-embedding finding per distinct referenced file.
+    # Counters track per-distinct-ref so the final PASSED summary is unchanged.
+    for _best in _md_toc_best.values():
+        refs_checked += 1
+        ref_name = str(_best["name"])
+        best_total = int(_best["total"])  # type: ignore[call-overload]
+        best_embedded = int(_best["embedded_count"])  # type: ignore[call-overload]
+        if bool(_best["satisfied"]):
+            # The full TOC appears after at least one of this file's links —
+            # the content IS discoverable, so no finding is emitted.
             refs_with_toc += 1
-        elif is_list_item:
+        elif bool(_best["is_list_item"]):
             # Even when the link sits in a list item, a missing-or-partial
             # TOC breaks progressive discovery — the unembedded headings
             # become invisible to agents. The "ambiguous list item could
@@ -7640,16 +7698,16 @@ def validate_toc_embedding(
             # than a reference, the fix is to drop the markdown link
             # (the message body explains how).
             _toc_finding(
-                f"Link to '{ref_path.name}' in a list entry of {rel_file} "
-                f"has {embedded_count}/{len(toc_headings)} TOC headings "
+                f"Link to '{ref_name}' in a list entry of {rel_file} "
+                f"has {best_embedded}/{best_total} TOC headings "
                 f"embedded. SKILL.md must copy the COMPLETE TOC of each "
                 f"referenced .md file verbatim immediately after its link — "
                 f"no exceptions, no summaries, no partial lists. Any missing "
                 f"TOC entry will never be discovered by the progressive "
                 f"discovery algorithm — that content becomes invisible to "
                 f"agents. If this is a reference, embed all "
-                f"{len(toc_headings)} headings exactly as they appear in "
-                f"'{ref_path.name}'. If the TOC is too long to embed, the "
+                f"{best_total} headings exactly as they appear in "
+                f"'{ref_name}'. If the TOC is too long to embed, the "
                 f"fix is in the reference file, NOT in SKILL.md: (1) drop "
                 f"sections that are not worth discovering (then the TOC "
                 f"shrinks naturally), or (2) merge granular subsections "
@@ -7664,15 +7722,15 @@ def validate_toc_embedding(
         else:
             # Clear standalone reference — full TOC must be embedded
             _toc_finding(
-                f"Reference to '{ref_path.name}' in {rel_file} has "
-                f"{embedded_count}/{len(toc_headings)} TOC headings embedded. "
+                f"Reference to '{ref_name}' in {rel_file} has "
+                f"{best_embedded}/{best_total} TOC headings embedded. "
                 f"SKILL.md must copy the COMPLETE TOC of each referenced .md "
                 f"file verbatim immediately after its link — no exceptions, "
                 f"no summaries, no partial lists. Any missing TOC entry will "
                 f"never be discovered by the progressive discovery algorithm "
                 f"— that content becomes invisible to agents. Embed all "
-                f"{len(toc_headings)} headings exactly as they appear in "
-                f"'{ref_path.name}'. If the TOC is too long to embed, the "
+                f"{best_total} headings exactly as they appear in "
+                f"'{ref_name}'. If the TOC is too long to embed, the "
                 f"fix is in the reference file, NOT in SKILL.md: (1) drop "
                 f"sections that are not worth discovering (then the TOC "
                 f"shrinks naturally), or (2) merge granular subsections "
