@@ -168,10 +168,13 @@ class TestMalformedAlternationStillSurfaces:
         assert ctx.classify("README.md", "x `Write|` y", 0, "|", "CMD_INJECTION") != "safe_literal"
 
     def test_backtick_double_pipe_empty_segment_not_suppressed(self) -> None:
-        """`` `a||bash` `` (empty middle segment) → NOT safe_literal."""
+        """`` `a||b` `` (empty middle segment) → NOT safe_literal via the
+        ALTERNATION discriminator. (A non-tool token is used so the #87
+        logical-OR branch — which correctly clears `a||bash` as `a || bash` —
+        is out of scope; this stays a pure malformed-alternation test.)"""
         import _skillaudit_markdown_context as ctx
 
-        assert ctx.classify("README.md", "x `a||bash` y", 0, "|bash", "CMD_INJECTION") != "safe_literal"
+        assert ctx.classify("README.md", "x `a||b` y", 0, "|b", "CMD_INJECTION") != "safe_literal"
 
     def test_backtick_dotted_segment_not_suppressed(self) -> None:
         """`` `foo|bar.sh` `` (a `.` makes a segment non-bare) → NOT safe_literal."""

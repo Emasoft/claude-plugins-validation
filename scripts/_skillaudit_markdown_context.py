@@ -1885,6 +1885,44 @@ def _is_inert_pipe_alternation(line: str, match: str, rule_id: str) -> bool:
     return needle not in bare
 
 
+# #87 — the CMD_INJECTION shell-pipe catalog pattern
+# ``(?:;|\||&&)\s*\b(?:curl|wget|nc|bash|sh|python|perl|ruby|php)\b`` matches the
+# SECOND ``|`` of a ``||`` (logical-OR fallback) as though it were a pipe: e.g.
+# ``DIR="$(sh "$A/x.sh" 2>/dev/null || sh "$B/x.sh")"`` — run the fallback script
+# if the first fails — is flagged as a pipe-to-shell injection. ``||`` is a
+# logical-OR control operator, NOT a pipe; it runs the tool as a fallback
+# COMMAND, it does not pipe untrusted output INTO it. A real single-pipe
+# ``cmd | sh`` (execute piped data — the actual ``curl … | sh`` danger) stays
+# visible. This is a MISCLASSIFICATION fix (``||`` read as ``|``), independent of
+# the executable-fence policy: ``|| sh`` is never a pipe regardless of context.
+_PIPE_TOOL_IN_MATCH_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(curl|wget|nc|bash|sh|python|perl|ruby|php)\b"
+)
+
+
+def _is_logical_or_not_pipe(line: str, match: str, rule_id: str) -> bool:
+    """#87 — True iff a CMD_INJECTION ``| <tool>`` match is actually the second
+    ``|`` of a ``||`` (logical-OR fallback), not a pipe.
+
+    Suppress ONLY when the line contains ``|| <tool>`` (logical OR immediately
+    before the matched tool) AND has NO genuine single pipe
+    ``<not-||> | <tool>`` to that same tool — so a real ``curl evil | sh`` (or a
+    ``cmd || x | sh`` whose ``| sh`` IS a pipe) stays visible. Scoped to a ``|``
+    match: ``;`` / ``&&`` separators are a different shape and untouched.
+    """
+    if rule_id != "CMD_INJECTION":
+        return False
+    if "|" not in match:
+        return False  # a `;` / `&&` separator match is not the `||` confusion
+    tm = _PIPE_TOOL_IN_MATCH_RE.search(match)
+    if not tm:
+        return False
+    tool = re.escape(tm.group(1))
+    has_logical_or = re.search(r"\|\|\s*" + tool + r"\b", line) is not None
+    has_real_pipe = re.search(r"(?<!\|)\|(?!\|)\s*" + tool + r"\b", line) is not None
+    return has_logical_or and not has_real_pipe
+
+
 # #79 — PRIVILEGE_ESC on the ubiquitous GitHub-Actions "Free disk space"
 # runner-cleanup step. A ``sudo rm -rf /usr/share/dotnet`` (and the sibling
 # pre-installed-toolchain paths) documented in a ``` ```yaml ``` GitHub
@@ -2119,6 +2157,12 @@ def _certain_benign_literal(
     #       `npm install|sh`, `a|b/c`, `a|rm -rf x`, `wget x|bash`, and a lone
     #       `Bash` all FAIL the anchored match and stay visible.
     if _is_inert_pipe_alternation(line, match, rule_id):
+        return True
+
+    # (#87) CMD_INJECTION shell-pipe pattern matched the 2nd `|` of a `||`
+    #       (logical-OR fallback, e.g. `cmd || sh "$DIR/x.sh"`) as a pipe. `||`
+    #       is not a pipe; a real single-pipe `cmd | sh` stays visible.
+    if _is_logical_or_not_pipe(line, match, rule_id):
         return True
 
     # (#79) PRIVILEGE_ESC on the GitHub-Actions free-disk-space runner-cleanup
