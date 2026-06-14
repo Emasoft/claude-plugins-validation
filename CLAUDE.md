@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.22` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.23` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
-| **test files** | **325** | `ls tests/test_*.py`; ~9261 tests |
+| **test files** | **326** | `ls tests/test_*.py`; ~9274 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,23 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.23 — closed #87** (skillaudit CMD_INJECTION FP on a `||` logical-OR
+fallback misread as a `|` pipe). The shell-pipe catalog pattern
+`(?:;|\||&&)\s*\b(curl|…|sh|…)\b` matches the SECOND pipe-char of a `||` as
+though it were a pipe — so `DIR="$(sh "$A/x.sh" 2>/dev/null || sh "$B/x.sh")"`
+(run the fallback script if the first fails) was flagged as a pipe-to-shell
+injection. The reporter framed it as "trusted-env-var", but reproducing showed
+the real root cause is the `||`-mis-matched-as-`|` precision bug — a different,
+cleaner fix. FIX (`_skillaudit_markdown_context.py` `_is_logical_or_not_pipe`,
+markdown-classifier — the shell classifier already handles the `.sh` case):
+suppress a CMD_INJECTION `\|<tool>` match only when the line has `|| <tool>` AND
+no genuine single pipe to that tool; a real `curl … | sh` (and a mixed
+`a || sh b | sh`) stays visible. A MISCLASSIFICATION fix (`||` is never a pipe),
+so independent of the executable-fence policy. Verified two-sided through the
+REAL scanner (baseline 2 → 1: the `|| sh` FP suppressed, the real `curl|sh`
+kept) + 8 classify() probes. +14 tests; reconciled one #86 test whose `a||bash`
+is now correctly cleared by the new logical-OR branch.
 
 **v2.126.22 — closed #83.5** (skillaudit execution-class FPs on static PRINT-heredoc
 help-text in `.sh` files — `cat <<USAGE … USAGE` / `cat >&2 <<EOF` blocks hold
