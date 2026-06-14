@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.14` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.15` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **114** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers) |
-| **test files** | **317** | `ls tests/test_*.py`; ~9155 tests |
+| **test files** | **319** | `ls tests/test_*.py`; ~9173 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,19 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.15 — two bounded validation-LOGIC FPs** (not security suppressions):
+closed **#120** (`validate_plugin` — the `.claude/` gitignore-coverage MINOR was
+UNSATISFIABLE for a plugin tracking content under `.claude/`, since git can't
+re-include a path under an excluded parent; now satisfied when `git ls-files --
+.claude/` is non-empty, still flags an un-ignored un-tracked cache dir) and
+**#119** (`cpv_validation_common` link-checker — a package-repo BASE URL on an
+apt `deb`/dnf `baseurl=`/`--add-repo` source line legitimately 404s on a direct
+GET; skip is scoped to the repo source LINE, not the host, so the same URL as a
+real markdown link is still checked; genuine dead links still flagged). +18
+tests; FULL SERIAL 9173 pass. Both two-sided-verified; claim-verification (per
+the #91 lesson) caught a false-alarm `.claude`-MINOR "regression" that was
+actually a wrong fixture (no `.gitignore` → the per-category check never ran).
 
 **v2.126.12 — Theme-A skillaudit doc-fence cluster, batch 1** — closed FP
 issues #77/#78/#80/#81/#88 with 7 markdown-classifier per-rule provably-inert

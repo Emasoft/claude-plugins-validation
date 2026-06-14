@@ -8252,6 +8252,53 @@ def _format_url_exception(exc: BaseException | None) -> str:
     return name
 
 
+#: Issue #119 — apt/dnf/yum package-REPOSITORY BASE URLs are not webpages and
+#  legitimately 404 on a direct GET (the package manager fetches sub-paths like
+#  `<base>/dists/stable/Release` or `<base>/repodata/repomd.xml`, never `<base>`
+#  itself). Flagging them as "Dead URL" is a structural false positive: the
+#  install recipe is correct. These line patterns recognise the standard repo
+#  source declarations so the URL tokens on them can be skipped. (Plain Python
+#  `re`, not the re2 skillaudit catalog — lookaround is unused regardless.)
+#  - apt:  `deb [opts] <base> suite component...`  /  `deb-src <base> ...`
+#  - dnf/yum: `baseurl=<base>` / `mirrorlist=<base>` / `metalink=<base>` inside a `.repo`
+#  - dnf cmd: `dnf config-manager --add-repo <base-or-.repo>` / `yum-config-manager --add-repo ...`
+_APT_SOURCE_LINE_RE = re.compile(r"^\s*deb(?:-src)?\b", re.IGNORECASE)
+_DNF_REPO_KEY_RE = re.compile(r"^\s*(?:baseurl|mirrorlist|metalink)\s*=", re.IGNORECASE)
+_DNF_ADD_REPO_RE = re.compile(r"\b(?:dnf|yum)-?\s*config-manager\b.*?--add-repo\b", re.IGNORECASE)
+#: A bare URL token (no markdown / quoting noise) used to pull the repo base out
+#  of a recognised source line.
+_BARE_URL_TOKEN_RE = re.compile(r"https?://[^\s\)\]\"'<>`]+")
+
+
+def _collect_package_repo_urls(content: str) -> set[str]:
+    """Return the set of URL tokens that sit on an apt/dnf package-repo source line.
+
+    Issue #119: a URL extracted from a `deb …` apt source line or a dnf/yum
+    `baseurl=`/`--add-repo …` declaration is a package-repository BASE, not a
+    link — it 404s by design. We scan the ORIGINAL content (not the
+    fence-stripped copy) line-by-line because these declarations appear in bare
+    prose, indented code blocks, AND fenced blocks, and the dead-link checker
+    extracts from the non-fenced text. Only the URL tokens ON such lines are
+    collected, so a genuinely-dead link elsewhere in ordinary prose is untouched.
+
+    Trailing punctuation is normalised to match how `validate_md_urls` strips
+    extracted URLs (`.rstrip(".,;:!?)`")`), so a collected base lines up with the
+    extracted token regardless of trailing characters.
+    """
+    repo_urls: set[str] = set()
+    for line in content.splitlines():
+        is_repo_line = bool(
+            _APT_SOURCE_LINE_RE.match(line)
+            or _DNF_REPO_KEY_RE.match(line)
+            or _DNF_ADD_REPO_RE.search(line)
+        )
+        if not is_repo_line:
+            continue
+        for m in _BARE_URL_TOKEN_RE.finditer(line):
+            repo_urls.add(m.group(0).rstrip(".,;:!?)`"))
+    return repo_urls
+
+
 def validate_md_urls(
     md_file: Path,
     plugin_root: Path,
@@ -8352,6 +8399,13 @@ def validate_md_urls(
 
     rel_md = str(md_file.relative_to(plugin_root)) if md_file.is_relative_to(plugin_root) else md_file.name
 
+    # Issue #119 — collect apt/dnf package-repository BASE URLs (e.g. the
+    # `https://cli.github.com/packages` token on a `deb … stable main` line).
+    # These are repo bases, not links — they 404 by design — so they must not be
+    # flagged as dead. Computed from the ORIGINAL content (the bare/indented
+    # source lines that survive fence-stripping are exactly where these appear).
+    package_repo_urls = _collect_package_repo_urls(content)
+
     # Strip fenced code blocks — URLs in code examples shouldn't be validated
     content_no_codeblocks = re.sub(r"```[\s\S]*?```", "", content)
 
@@ -8397,6 +8451,14 @@ def validate_md_urls(
 
     for match in url_re.finditer(content_no_codeblocks):
         raw_url = match.group(0).rstrip(".,;:!?)`")  # Strip trailing punctuation and backticks
+
+        # Issue #119: skip apt/dnf package-repository BASE URLs — they are not
+        # webpages and 404 by design (the package manager fetches `<base>/dists/…`
+        # / `<base>/repodata/…`, never `<base>`). Genuinely-dead links in ordinary
+        # prose/markdown are unaffected (only URLs on a recognised repo source
+        # line are in this set).
+        if raw_url in package_repo_urls:
+            continue
 
         if raw_url in checked_urls:
             continue
