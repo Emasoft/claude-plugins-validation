@@ -1574,6 +1574,61 @@ def _is_cspell_dictionary(file_path: str) -> bool:
 
 
 # ────────────────────────────────────────────────────────────────────────
+# Container-DETECTION vs container-ESCAPE discriminator (issue #122)
+# ────────────────────────────────────────────────────────────────────────
+#
+# The CONTAINER_ESCAPE catalog rule lumps three init-process /proc paths into
+# one alternation: ``/proc/(?:1|self)/(?:root|ns|cgroup)``. Two of them are
+# genuine breakout primitives — ``root`` traverses the host filesystem through
+# PID 1's mount namespace, ``ns`` are the namespace fds used with ``setns`` —
+# but ``cgroup`` is READ-ONLY and is the canonical way runtimes /
+# ``systemd-detect-virt`` / ``is-container`` IDENTIFY the runtime ("does PID 1's
+# cgroup name ``docker`` / ``kubepods``?"). Reading ``/proc/<1|self>/cgroup`` is
+# environment detection, not an escape, so flagging it CRITICAL is a false
+# positive on diagnostic / environment-report tooling (issue #122).
+#
+# The discriminator below suppresses CONTAINER_ESCAPE ONLY when (a) the match is
+# the ``cgroup`` member and (b) NO corroborating escape primitive appears
+# anywhere in the file. It is FN-safe two-sided: a ``/proc/<1|self>/root`` or
+# ``/proc/<1|self>/ns`` match is a DIFFERENT member of the same alternation and
+# is never suppressed (keeps firing CRITICAL); and a ``cgroup`` read that sits in
+# the same file as a real breakout primitive (a cgroup ``mount``, a
+# ``release_agent`` / ``notify_on_release`` write, ``nsenter`` / ``unshare`` /
+# ``setns`` / ``pivot_root``, the docker socket, ``/dev/mem``, a kernel-module
+# load, ``LD_PRELOAD`` / ``ptrace`` / ``capsh`` / ``prctl``) is "corroborated" →
+# keeps firing (and that primitive fires on its own line independently).
+_CGROUP_DETECT_MATCH_RE: re.Pattern[str] = re.compile(r"/proc/(?:1|self)/cgroup\b")
+_PROC_INIT_ESCAPE_MATCH_RE: re.Pattern[str] = re.compile(r"/proc/(?:1|self)/(?:root|ns)\b")
+_CONTAINER_ESCAPE_CORROBORATORS_RE: re.Pattern[str] = re.compile(
+    r"/proc/(?:1|self)/(?:root|ns)\b"  # host-FS / namespace traversal
+    r"|\bnsenter\b|\bunshare\b|\bsetns\b|\bpivot_root\b"  # namespace breakout
+    r"|\bmount\s+(?:-[a-zA-Z]+\s+)*(?:-o|--bind|--rbind|-r|-B|-t\s+cgroup)\b"  # bind/cgroup mount
+    r"|\brelease_agent\b|\bnotify_on_release\b"  # cgroup release_agent escape (CVE-2022-0492 family)
+    r"|/var/run/docker\.sock\b"  # docker socket
+    r"|/dev/(?:mem|kmem|port)\b"  # raw kernel-memory devices
+    r"|\bmodprobe\b|\binsmod\b|\bcapsh\b|\bprctl\s*\(|LD_PRELOAD|\bptrace\b"  # module load / cap / preload / ptrace
+)
+
+
+def _is_benign_cgroup_detection_read(match: str, content: str) -> bool:
+    """Issue #122 — True iff a CONTAINER_ESCAPE match is a bare read-only
+    ``/proc/<1|self>/cgroup`` container-DETECTION probe (no escape machinery).
+
+    Returns False (so the finding keeps firing) when the match is the
+    ``root`` / ``ns`` escape member, or when ANY corroborating breakout
+    primitive appears anywhere in the file. The presence of the ``cgroup``
+    detection read in an otherwise-clean file is the only thing this clears.
+    """
+    if not _CGROUP_DETECT_MATCH_RE.search(match):
+        return False
+    if _PROC_INIT_ESCAPE_MATCH_RE.search(match):
+        return False
+    if _CONTAINER_ESCAPE_CORROBORATORS_RE.search(content):
+        return False
+    return True
+
+
+# ────────────────────────────────────────────────────────────────────────
 # Audit-consent sentinel (issue #101)
 # ────────────────────────────────────────────────────────────────────────
 #
@@ -1894,6 +1949,15 @@ def _context_classifier_dispatch(
     # are NOT in the set — a real key or webhook host hidden as a "word" still fires
     # (e.g. URL_SUSPICIOUS on a `webhook.site/...` token stays live).
     if rule_id in _BINARY_INAPPLICABLE_RULES and _is_cspell_dictionary(file_path):
+        return "suppress"
+    # CONTAINER_ESCAPE on a read-only `/proc/<1|self>/cgroup` container-DETECTION
+    # probe (issue #122). Language-agnostic: the catalog pattern matches the path
+    # substring in any host file (.py / .sh / .md), so the discriminator keys on
+    # the matched text + a whole-file corroboration scan, not on syntax. Suppress
+    # ONLY the bare `cgroup` detection read with no escape primitive in the file;
+    # a `/proc/<1|self>/root|ns` match or a corroborated cgroup read keeps firing
+    # CRITICAL (see `_is_benign_cgroup_detection_read`). FN-safe two-sided.
+    if rule_id == "CONTAINER_ESCAPE" and _is_benign_cgroup_detection_read(match, content):
         return "suppress"
     # Point 1 (v2.114.0): an extension-less script (git hook, configure,
     # runme) reaches here with no classifier-recognised extension. The
