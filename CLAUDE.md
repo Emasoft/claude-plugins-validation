@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.20` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.21` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
-| **test files** | **323** | `ls tests/test_*.py`; ~9239 tests |
+| **test files** | **324** | `ls tests/test_*.py`; ~9252 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,28 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.21 — closed #102** (skillaudit JWT_VULN FP on a code-review plugin's
+lens/checklist files — `*.lens.md`/scenario docs necessarily ENUMERATE JWT
+anti-pattern vocabulary `algorithms=None`/`alg:'none'`/`ignoreExpiration`/
+`verify_exp=False` as the tokens the auditor greps for; demoted-NIT still blocks
+`--strict`). **Investigation corrected a wrong deferral:** reproduced #102's 5
+findings against current main — only the 2 JWT_VULN ones still fire (the
+CMD_INJECTION/A2A/PRIVILEGE_ESC ones were incidentally cleared by this turn's
+Theme-A/#88/#86 work since the reporter's 2026-06-11 run), and it's the
+doc-context family (#76/#78/#83), NOT the forgeable-data-structure by-design
+case (#70-B). So it's a clean SINGLE-rule fix. FIX
+(`_skillaudit_markdown_context.py` `_is_inert_jwt_vuln_doc`, mirroring the #78
+INSECURE_TLS doc-discriminator): a JWT_VULN CONFIG anti-pattern in markdown
+prose/table/checklist/DATA-fence → `safe_literal`; KEEPS firing inside an
+executable code fence (```python/```js). **CRUCIAL FN-safety (unlike #78):**
+JWT_VULN also matches a LEAKED SECRET (`JWT_SECRET=…`) and a JWT TOKEN LITERAL
+(`eyJ…eyJ…`) — `_JWT_LEAK_MATCH_RE` NEVER suppresses those (a committed secret is
+a real exposure even in markdown). Verified two-sided through the REAL scanner
+(baseline 6 → 4: the 2 config findings suppressed; the leaked secret, the token
+literal, and `algorithms=None`/`['none']` in the python/js fences ALL still
+fire). +14 tests. Findings 1/2/5 no longer reproduce on current main (noted in
+the close comment; reporter to re-run).
 
 **v2.126.20 — closed #89** (report-noise: the progressive-discovery TOC-embedding
 check emitted a separate near-identical MINOR per LINK OCCURRENCE — a reference
