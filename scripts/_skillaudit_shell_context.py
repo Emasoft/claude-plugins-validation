@@ -52,6 +52,13 @@ _PRINT_HEREDOC_OPEN_RE: Final[re.Pattern[str]] = re.compile(
     r"^\s*(?:cat|echo|printf|tee)\b[^<]*<<-?(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1"
 )
 
+# #83.5 — command substitution that EXECUTES inside an UNQUOTED print-heredoc
+# body: a ``$(...)`` or a backtick span. An unquoted ``<<EOF`` body interpolates
+# these (the substituted command runs), so a body line containing one is NOT
+# inert and stays demoted/visible — unlike plain printed help-text. (A QUOTED
+# ``<<'EOF'`` body interpolates NOTHING, so this check is irrelevant there.)
+_SHELL_HEREDOC_CMD_SUBST_RE: Final[re.Pattern[str]] = re.compile(r"\$\(|`")
+
 
 # r01 anthropic FP iter1 (2026-05-27) — CROSS_TOOL_ACCESS shell-script
 # field-name discriminator. Mirrors the Python classifier's
@@ -1384,18 +1391,39 @@ def classify(
     if line_idx == 0:
         return ""
     # `_` underscores below used by intent — pylint-style noqa not needed.
-    open_delimiters: list[str] = []
+    open_heredocs: list[tuple[str, bool]] = []  # (delimiter, is_quoted)
     for i in range(line_idx):
         line = lines[i]
         # If we're inside an open heredoc, ONLY check for the closer on
         # this line — non-closer lines inside a heredoc are body content,
         # never new openers (a heredoc body is data, not commands).
-        if open_delimiters and line.strip() == open_delimiters[-1]:
-            open_delimiters.pop()
+        if open_heredocs and line.strip() == open_heredocs[-1][0]:
+            open_heredocs.pop()
             continue
-        if open_delimiters:
+        if open_heredocs:
             continue
         m = _PRINT_HEREDOC_OPEN_RE.match(line)
         if m:
-            open_delimiters.append(m.group(2))
-    return "safe_doc" if open_delimiters else ""
+            # group(1) is the (optional) quote around the delimiter: a quoted
+            # delimiter (`<<'EOF'` / `<<"END"`) disables ALL expansion in the body.
+            open_heredocs.append((m.group(2), bool(m.group(1))))
+    if not open_heredocs:
+        return ""
+
+    # #83.5 — the match line is inside a PRINT heredoc body (printed text, not
+    # run). For an EXECUTION-class rule the body is fully INERT — promote to
+    # `safe_literal` (so it no longer blocks `--strict`) — when no command can
+    # interpolate: a QUOTED delimiter disables all expansion, and an UNQUOTED
+    # body line with no command substitution (`$(…)` / backticks) is literal
+    # printed text. An UNQUOTED body line that DOES contain `$(…)`/backtick
+    # interpolates and runs, so it stays demoted (`safe_doc`, visible for
+    # review). NON-execution-class (prose-vector) rules keep the existing
+    # `safe_doc` demote — printed prompt-injection / exfil text can still reach
+    # an agent, so it must stay visible.
+    if rule_id in _SHELL_EXECUTION_CLASS_RULES:
+        if open_heredocs[-1][1]:  # quoted delimiter → zero interpolation
+            return "safe_literal"
+        if not _SHELL_HEREDOC_CMD_SUBST_RE.search(line_text):
+            return "safe_literal"  # unquoted body, literal printed text
+        return "safe_doc"  # unquoted body + command substitution → interpolates
+    return "safe_doc"
