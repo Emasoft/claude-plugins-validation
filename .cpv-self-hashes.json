@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-06-14T09:47:19+00:00",
+  "computed_at": "2026-06-14T18:16:30+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:543ec3f7ea508b9aecf06eca34630878a63da214405b6b49dadf69a5cfd1cdb7",
@@ -210,7 +210,7 @@
     "scripts/cpv_security_benchmark.py": "sha256:48e4759e1c68c38411c72346e2ea68b48061d688df0832f2cb81229cd929cdf9",
     "scripts/cpv_setup_auth.py": "sha256:f8d53bc5a5bd4e9771feca02899d0265823806a15f22cbaa78b925fa35774a18",
     "scripts/cpv_skill_scanner.py": "sha256:4a07671c967803af7dfe4e85b881f11b983b1ebe18310f66fc576fe085dea9e5",
-    "scripts/cpv_skillaudit_native.py": "sha256:8f68291e73ee37b0218e701b797c77390252401222d6c08b29148fd2347ec2fd",
+    "scripts/cpv_skillaudit_native.py": "sha256:51c7d929a2b7896d6ddd1ba2b70554ddc73dee12945775c8dc6a8015088eaea2",
     "scripts/cpv_staging.py": "sha256:22c067dfa11aeb56ac28112e6f4796618f1bd9f59366198899ba02734be8d5c9",
     "scripts/cpv_strip_dev.py": "sha256:a432bae5fb4ef8717628e57dc6d8eb4827c5ed44816b267ebae4296ad0314a80",
     "scripts/cpv_taint_engine.py": "sha256:7ce0ff359bf28da23c7978b0a7f1cdf3f976ba19aee78be67e68bdf4c1dc081b",
