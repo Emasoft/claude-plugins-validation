@@ -1466,6 +1466,48 @@ def _is_inert_insecure_tls_doc(
     return fence_state[2] in _DATA_LANGS  # a data fence is inert; a code fence is not
 
 
+# #102 — JWT_VULN CONFIG anti-patterns (``alg:'none'`` / ``algorithms=[none]`` /
+# ``ignoreExpiration:true`` / ``verify_exp=false`` / ``jwt.decode(...)`` shapes)
+# can NEVER be a true positive in markdown prose / a GFM-table row / a checklist
+# bullet / a DATA fence: markdown cannot run a JWT verification. A security-
+# REVIEW plugin's lens / checklist files necessarily ENUMERATE these anti-pattern
+# tokens as the vocabulary the auditor greps for. The match KEEPS firing inside
+# an executable code fence (```python / ```js / ```ts / …) where a real
+# ``jwt.decode(token, algorithms=None)`` would run.
+#
+# CRUCIAL difference from #78 (INSECURE_TLS, which has no leak sub-pattern):
+# JWT_VULN ALSO matches a LEAKED SECRET (``JWT_SECRET='…'`` / ``jwt_secret=…``)
+# and a JWT TOKEN LITERAL (``eyJ…eyJ…``). A committed secret / token is a real
+# exposure regardless of the surrounding markdown, so those sub-patterns are
+# NEVER suppressed here — only the inert config anti-patterns are.
+_JWT_LEAK_MATCH_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?i)jwt[_-]?secret\s*[:=]|eyJ[A-Za-z0-9_-]{10,}\.eyJ"
+)
+
+
+def _is_inert_jwt_vuln_doc(
+    fence_state: tuple[int, int, str] | None,
+    match: str,
+    rule_id: str,
+) -> bool:
+    """#102 — True iff a JWT_VULN match is an inert CONFIG anti-pattern
+    (``algorithms=none`` / ``ignoreExpiration`` / ``verify``-off /
+    ``jwt.decode`` shape) sitting in markdown prose / a GFM-table row / a
+    checklist bullet / a DATA fence, where no JWT call can run. A match inside a
+    non-data code fence (```python / ```js / …) is NOT suppressed (a real
+    ``jwt.decode(…, algorithms=None)`` there would run). A LEAKED secret/token
+    sub-pattern (``JWT_SECRET=…`` / ``eyJ…eyJ…``) is NEVER suppressed — a
+    committed secret is a real exposure regardless of the surrounding markdown.
+    """
+    if rule_id != "JWT_VULN":
+        return False
+    if _JWT_LEAK_MATCH_RE.search(match):
+        return False  # a leaked secret / token literal is a real exposure
+    if fence_state is None:
+        return True  # config anti-pattern in prose / table / checklist — inert
+    return fence_state[2] in _DATA_LANGS  # a data fence is inert; a code fence is not
+
+
 # #80 / #83.2 — PROTOTYPE_POLLUTION is a JavaScript/TypeScript-only vuln
 # class (the JS prototype chain). A fenced block whose language is an
 # explicit NON-JS code language cannot host it; and a GFM-table-row /
@@ -2018,6 +2060,15 @@ def _certain_benign_literal(
     #       markdown cannot disable TLS. KEEPS firing inside an executable
     #       code fence (```python / ```js / ```ts / …) on a loadable surface.
     if _is_inert_insecure_tls_doc(fence_state, rule_id):
+        return True
+
+    # (#102) JWT_VULN config anti-patterns (`alg:'none'` / `ignoreExpiration` /
+    #        `verify`-off / `jwt.decode` shapes) in markdown prose / table /
+    #        checklist / DATA fence — markdown cannot run a JWT verification, and
+    #        a security-review lens necessarily enumerates these. KEEPS firing
+    #        in an executable code fence AND on a leaked JWT secret / token
+    #        literal (`JWT_SECRET=…` / `eyJ…eyJ…`).
+    if _is_inert_jwt_vuln_doc(fence_state, match, rule_id):
         return True
 
     # (#80 + #83.2) PROTOTYPE_POLLUTION is JS/TS-only — categorically
