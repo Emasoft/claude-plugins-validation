@@ -2895,6 +2895,59 @@ def validate_bin_executables(plugin_root: Path, report: ValidationReport) -> Non
         report.passed(f"bin/ directory: {executable_count} executable(s) found")
 
 
+# ── Release-asset installer detection (issue #117) ───────────────────────────
+# A compiled-source plugin that ships its binaries as RELEASE ASSETS (out of
+# tree) plus a checksum-verified installer is NOT "users will need to compile":
+# the default install path is a sha256-verified prebuilt-binary download, with
+# compiling only as a last-resort fallback. Committing multi-MB per-platform
+# binaries into bin/ is the anti-pattern; the release-asset + installer model
+# is the recommended distribution shape for a compiled helper. Detect it so the
+# advisory compile WARNING does not fire on this legitimate class.
+#
+# Detection requires BOTH signals in the SAME installer script (kept narrow so
+# a plain build script that merely runs `cargo build` cannot satisfy it):
+#   (a) it DOWNLOADS a release asset — `gh release download`, OR a curl/wget of
+#       a `.tar.gz`/`.tgz`/`.zip` (the release-tarball shape); and
+#   (b) it VERIFIES the download — a `sha256`/`shasum`/`sha256sum -c` step.
+# FN-safe: a Rust crate with no committed bin/ AND no such installer still WARNs
+# (a build-only `install.sh` that compiles from source has no download+verify).
+_INSTALLER_NAME_RE = re.compile(r"(?:^|[-_/])install[-_]?[a-z0-9]*\.sh$", re.IGNORECASE)
+_RELEASE_DOWNLOAD_RE = re.compile(
+    r"gh\s+release\s+download"  # gh CLI release-asset download
+    r"|(?:curl|wget)\b[^\n]*\.(?:tar\.gz|tgz|zip)\b",  # curl/wget of a release tarball
+    re.IGNORECASE,
+)
+_CHECKSUM_VERIFY_RE = re.compile(
+    r"sha256sum\b|shasum\b|sha256\b|\.sha256\b",
+    re.IGNORECASE,
+)
+
+
+def _has_release_asset_installer(plugin_root: Path) -> bool:
+    """True iff the plugin ships an installer script that downloads a prebuilt
+    release asset AND verifies it with a sha256 checksum (issue #117).
+
+    Scans every ``install*.sh`` / ``*install*.sh`` in the tree (gitignore-aware
+    when available). A match requires BOTH a release-download pattern and a
+    checksum-verify pattern in the SAME file, so a build-from-source
+    ``install.sh`` (no download/verify) does not qualify.
+    """
+    candidates: list[Path] = []
+    walker = _gi.walk(plugin_root) if _gi else os.walk(plugin_root)
+    for dirpath, _dirnames, filenames in walker:
+        for filename in filenames:
+            if _INSTALLER_NAME_RE.search(filename):
+                candidates.append(Path(dirpath) / filename)
+    for script in candidates:
+        try:
+            text = script.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if _RELEASE_DOWNLOAD_RE.search(text) and _CHECKSUM_VERIFY_RE.search(text):
+            return True
+    return False
+
+
 def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None:
     """Validate cross-platform compatibility of plugin scripts and binaries.
 
@@ -3010,6 +3063,15 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
         bin_dirs = list(_gi.rglob("bin") if _gi else plugin_root.rglob("bin"))
         has_bin = any(d.is_dir() and any(d.iterdir()) for d in bin_dirs)
 
+        # Issue #117: a checksum-verified release-asset installer means the
+        # binaries ARE shipped (just out of tree), so "users will need to
+        # compile" is false. Computed once here (not per-language) — it's a
+        # whole-plugin property. When present, the compile WARNING is demoted
+        # to INFO. FN-safe: a build-only install.sh (compiles from source, no
+        # download+verify) does NOT satisfy _has_release_asset_installer, so a
+        # genuinely compile-required plugin still WARNs.
+        ships_release_binaries = _has_release_asset_installer(plugin_root)
+
         for lang_name, source_paths in compiled_source_files.items():
             # Find expected build system files for this language
             expected_build_files: set[str] = set()
@@ -3061,9 +3123,19 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
             if has_bin:
                 report.info(f"Found {len(source_paths)} {lang_name} source file(s) with compiled binaries in bin/")
             elif has_build_system or has_build_script:
-                report.warning(
-                    f"Found {len(source_paths)} {lang_name} source file(s) with build system but no pre-compiled binaries in bin/. Users will need to compile before use."
-                )
+                if ships_release_binaries:
+                    # Issue #117: binaries shipped as checksum-verified release
+                    # assets — default install path downloads a prebuilt binary,
+                    # compiling is only a fallback. Not a "must compile" case.
+                    report.info(
+                        f"Found {len(source_paths)} {lang_name} source file(s) with build system; prebuilt "
+                        "binaries are shipped as checksum-verified release assets via an installer script "
+                        "(out-of-tree distribution — no in-tree compile required)."
+                    )
+                else:
+                    report.warning(
+                        f"Found {len(source_paths)} {lang_name} source file(s) with build system but no pre-compiled binaries in bin/. Users will need to compile before use."
+                    )
             else:
                 report.major(
                     f"Found {len(source_paths)} {lang_name} source file(s) but no compiled binaries in bin/ and no build script (build.sh, install.sh, Makefile, etc.). Provide pre-compiled binaries or a build/install script."
@@ -4769,6 +4841,132 @@ _WORKFLOW_PATH_PREFIXES: tuple[str, ...] = (
 # Glob meta-characters in the same shell sense Python's glob module uses.
 _WORKFLOW_GLOB_CHARS: frozenset[str] = frozenset({"*", "?", "[", "]"})
 
+# ── RC-WORKFLOW-PATH-BROKEN mid-job build-artifact awareness (issue #117/#116) ─
+# A workflow that builds a binary and then runs it references a path that can
+# NEVER exist in the repo — e.g. `bash scripts/.../stage.sh ...` produces
+# `./dist/foo` and the next step runs `./dist/foo --help`. Flagging that as
+# "does not exist on disk" is a FP on the normal shape of every build/release
+# workflow. Before flagging a literal path, suppress it when EITHER signal holds
+# (both kept narrow so a genuinely-broken canonical-entry-point ref still fires):
+#   (a) the path sits under a conventional BUILD-OUTPUT directory; OR
+#   (b) an EARLIER step in the SAME job plausibly CREATES it — an earlier run:
+#       mentions the same path, or runs a build/compile/stage command.
+# Conventional build-output roots (leading "./" tolerated, matched as the first
+# path segment so a source dir like "distributions/" is NOT caught).
+_WORKFLOW_BUILD_OUTPUT_DIRS: frozenset[str] = frozenset(
+    {"dist", "build", "target", "out", "bin", ".bin", "output", "release", "artifacts"}
+)
+# Build/compile/stage command shapes an earlier step may use to produce a path.
+# re2-safe (no lookaround); matched against earlier same-job run: text.
+_WORKFLOW_BUILD_CMD_RE = re.compile(
+    r"\bcargo\s+build\b"
+    r"|\bgo\s+build\b"
+    r"|\b(?:npm|pnpm|yarn|bun)\s+run\s+build\b"
+    r"|\bmake\b"
+    r"|\bcmake\b"
+    r"|\bmeson\b"
+    r"|\bgradle\b"
+    r"|\bdotnet\s+build\b"
+    r"|\bstage\b"  # a *stage* step (e.g. scripts/.../stage.sh) produces artifacts
+    r"|\bbuild\.sh\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_leading_dotslash(token: str) -> str:
+    """Drop a single leading ``./`` from a path token (``./dist/x`` → ``dist/x``)."""
+    return token[2:] if token.startswith("./") else token
+
+
+def _is_under_build_output_dir(token: str) -> bool:
+    """True iff ``token``'s FIRST path segment is a conventional build-output
+    directory (``dist/``, ``build/``, ``target/`` … with a leading ``./``
+    tolerated). Matching the leading segment (not a substring) avoids catching
+    a legitimate source dir whose name merely starts with one of these words
+    (e.g. ``distributions/foo``)."""
+    cleaned = _strip_leading_dotslash(token)
+    head = cleaned.split("/", 1)[0]
+    return bool(head) and head in _WORKFLOW_BUILD_OUTPUT_DIRS
+
+
+def _collect_jobs_run_text(content: str) -> list[tuple[int, int, str]]:
+    """Return one ``(job_start_line, job_end_line, job_run_text)`` triple per
+    workflow JOB — the concatenation of every ``run:`` body in that job, used to
+    answer "does an earlier step in the same job create this path?".
+
+    Best-effort structural parse via ``yaml.safe_load``. The line span is
+    located by re-finding each job's first non-empty ``run:`` body and the next
+    job's start. On any parse failure the list is empty, so the caller falls
+    back to flagging (FN-safe — a real broken ref is never silently dropped by
+    a parse failure)."""
+    try:
+        doc = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return []
+    if not isinstance(doc, dict):
+        return []
+    jobs = doc.get("jobs")
+    if not isinstance(jobs, dict):
+        return []
+
+    results: list[tuple[int, int, str]] = []
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        steps = job.get("steps")
+        run_bodies: list[str] = []
+        if isinstance(steps, list):
+            for step in steps:
+                if isinstance(step, dict) and isinstance(step.get("run"), str):
+                    run_bodies.append(step["run"])
+        if not run_bodies:
+            continue
+        # Locate the job's line span: first run body line → last run body's end.
+        first_line, _ = _locate_run_body(content, run_bodies[0], 0)
+        last_line = first_line
+        cursor = 0
+        for body in run_bodies:
+            ln, cursor = _locate_run_body(content, body, cursor)
+            last_line = max(last_line, ln + body.count("\n"))
+        results.append((first_line, last_line, "\n".join(run_bodies)))
+    return results
+
+
+def _is_mid_job_build_artifact(
+    token: str,
+    line_no: int,
+    content: str,
+    jobs_run_text: list[tuple[int, int, str]],
+) -> bool:
+    """True iff the literal ``token`` at ``line_no`` is a build artifact that an
+    EARLIER step in its SAME job creates — signal (b) of the issue-#116 fix.
+
+    Finds the job whose line span contains ``line_no``, takes that job's raw
+    YAML lines UP TO (not including) ``line_no`` (the earlier steps), and
+    returns True when that earlier text either mentions the same path token or
+    runs a build/compile/stage command. Signal (a) — build-output-dir — is
+    checked separately by the caller so it works even without a parseable job
+    structure. ``content`` is the raw workflow source; line numbers are
+    1-based to match the rest of the validator."""
+    cleaned = _strip_leading_dotslash(token)
+    src_lines = content.splitlines()
+    for job_start, job_end, _job_text in jobs_run_text:
+        if not (job_start <= line_no <= job_end):
+            continue
+        # Earlier-in-job text = raw YAML from the job's first run body line up
+        # to (excluding) the offending line. 1-based → 0-based slice; clamp.
+        lo = max(0, job_start - 1)
+        hi = max(lo, line_no - 1)
+        earlier_text = "\n".join(src_lines[lo:hi])
+        if cleaned and cleaned in earlier_text:
+            return True
+        if token in earlier_text:
+            return True
+        if _WORKFLOW_BUILD_CMD_RE.search(earlier_text):
+            return True
+        return False
+    return False
+
 # Trailing shell control operators that frequently glue onto path-like
 # tokens because shlex.split does NOT consume them as token separators —
 # they are shell metacharacters, not whitespace. Without stripping them,
@@ -5076,6 +5274,12 @@ def validate_workflow_path_broken(plugin_root: Path, report: ValidationReport) -
             continue
         rel_path = str(yaml_path.relative_to(plugin_root))
 
+        # Issue #116: per-job run-text spans, so a literal path that an earlier
+        # step in the SAME job builds (e.g. `./dist/foo` after a stage/build
+        # step) is recognised as a build artifact rather than flagged as
+        # missing. Computed once per file.
+        jobs_run_text = _collect_jobs_run_text(content)
+
         run_blocks = _collect_run_blocks(content)
         for body, body_start_line in run_blocks:
             for token, line_no in _scan_workflow_run_body(body, body_start_line):
@@ -5105,6 +5309,16 @@ def validate_workflow_path_broken(plugin_root: Path, report: ValidationReport) -
                 else:
                     target = plugin_root / token
                     if not target.exists():
+                        # Issue #116: a mid-job build artifact can never exist in
+                        # the repo. Suppress when the path is under a build-output
+                        # directory (signal a) OR an earlier same-job step builds
+                        # it (signal b). FN-safe: a broken ref to a real canonical
+                        # entry-point (NOT under a build dir, NOT created earlier)
+                        # still flags — e.g. `python scripts/removed-real-file.py`.
+                        if _is_under_build_output_dir(token) or _is_mid_job_build_artifact(
+                            token, line_no, content, jobs_run_text
+                        ):
+                            continue
                         found_any = True
                         report.major(
                             f"[RC-WORKFLOW-PATH-BROKEN] {rel_path}:{line_no} — "
