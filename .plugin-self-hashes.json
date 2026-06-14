@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-06-14T00:53:13+00:00",
+  "computed_at": "2026-06-14T01:39:12+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:94b3d0b0d5a8843221e9b08337bedc67544e8183d7d3cdee0cd1b873912cfc5c",
@@ -21,7 +21,7 @@
     ".trashcan/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".trashcan/README.txt": "sha256:3106acc9af8415d37610ef0b9f138dc9622f25f81ac37a31f24a9ebd2d25f30f",
     "CHANGELOG.md": "sha256:e58ee580052ba3db34d9db2b8df2af4f48fe006bb633187b0a4cf164521fc457",
-    "CLAUDE.md": "sha256:8b4e2ae49e06e2c5925ea5af1481f91685de49f6f76e95f1cd4c8a84e0678fe5",
+    "CLAUDE.md": "sha256:bfe5c52449c5166baaa7c41e4f44fa6956cf04c5507f8ecc543b500475a81c55",
     "LICENSE": "sha256:f79aeb8187cb5e63d27261eba76a2d771292c27489645b3410bd5e67edc02f5d",
     "README.md": "sha256:b72f720c133f457acb1d01b31ba18b473fb5f60b6bd9fe4fb52ec26d1f686b40",
     "agents/cache-optimizer-agent.md": "sha256:6dbcfbc8bd9b6dd7e4933440516004fa787a68395c95749dd3b45e50cfbb7711",
@@ -162,7 +162,7 @@
     "scripts/_skillaudit_python_context.py": "sha256:6024969aa8889ef62a33cf5e2b8cede70f581d8754db6dd2586c610b00262f63",
     "scripts/_skillaudit_rust_context.py": "sha256:1392dc0184018d020e3decebd7506546e48b156591fd1bdec0fcbacac49f3411",
     "scripts/_skillaudit_shell_context.py": "sha256:fc3be19da06109970fe40277a3f00549d22c543aacbfa2ae46842add3fac8e78",
-    "scripts/_skillaudit_typescript_context.py": "sha256:a14e9426e27a518651242a8e04a2611a0346fcd024ffb001f0239763c70c4a70",
+    "scripts/_skillaudit_typescript_context.py": "sha256:71aa09f88a4c1397f8c06a016a3a833d918eca66311943cd2d9dbdeea46cb0b6",
     "scripts/_skillaudit_yaml_context.py": "sha256:b15202cee044a0a232e4e97a1321f30b49d1906d193a1cd5403eaff4de3b6da0",
     "scripts/add_component.py": "sha256:57ac8f24446eb5c9cc26be7ae68afdf96ddf16a9a3889f805c96aaf700e43a70",
     "scripts/add_dependencies.py": "sha256:53fda1e3dcfe16a929997e0b20628a8d0691469bcde16516e179e5d96e2a907e",
@@ -749,6 +749,7 @@
     "tests/test_issue_79_sudo_rm_toolchain.py": "sha256:34a4e139bc63ddf78eb2456bbf7ff29fc864f5123e3f272ba7f6948ffef72ba9",
     "tests/test_issue_84_markdownlint_crash_fp.py": "sha256:f7369304d07915a6060b32dc6131c17f8fe76a2772dc43d36e4def7a83da5c1e",
     "tests/test_issue_85_worktree_gitfile_fp.py": "sha256:d9221c20ab895d88a4107e7d79d4ebf5dd7dd374eb0124f3c11989fbeb735928",
+    "tests/test_issue_91_regex_dos_linear.py": "sha256:eefb02c1e97f5c280f67f632e71acf04af677a7de0e58e4e8877d2e0588ee288",
     "tests/test_issue_96_99_backtick_xref_fp.py": "sha256:f3b7814e8fdfe21b8abe67bd66a2c19fca07fa21f5a8098213087c06d7ad73ac",
     "tests/test_issue_97_third_person_roledef_fp.py": "sha256:83ff0edc2f5d59efad06f1dcc230eb52adc0743d5fce608e2fedcd6664101119",
     "tests/test_issue_cspell_dict_fp.py": "sha256:120f66abfdeaa85b28ccbbfd4e2fd55afe16e7bf006ab29613ba9cd84b3d9eac",

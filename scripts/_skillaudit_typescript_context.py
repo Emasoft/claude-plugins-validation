@@ -1419,6 +1419,220 @@ def _is_versionish_regex_quantifier(match: str) -> bool:
     return "(\\.\\d+)+" in match or "(?:\\.\\d+)+" in match
 
 
+# Issue #91 — REGEX_DOS over-fires on a dynamically-built ``new RegExp(...)``
+# PURELY because of ``+`` string concatenation (catalog pattern 3,
+# ``RegExp\s*\(.*\+``). A regex assembled as ``'literal' + ext + 'literal'``
+# whose parts are constant string literals + non-user identifiers, and whose
+# assembled shape has NO nested/overlapping quantifier, is linear/polynomial —
+# NOT catastrophic backtracking. The reporter's case
+# ``new RegExp('\\S*/reports/code-auditor-agent/\\S*\\.' + ext + '\\b')`` is
+# ``\S* … literal … \S* … literal`` — single-level quantifiers, no nesting.
+#
+# SECURITY (FN-safety is paramount — the WORST outcome is missing a real
+# ReDoS): suppression is granted ONLY when ALL of these hold, otherwise the
+# match keeps firing:
+#   1. The call is ``new RegExp(<args>)`` / ``RegExp(<args>)`` (NOT a regex
+#      literal ``/.../`` — a literal is left entirely to the catalog/heuristic
+#      chain so a catastrophic literal like ``/(\w+)*$/`` still fires).
+#   2. The FIRST argument (the pattern) is built ONLY from string literals and
+#      ``+``-joined plain identifiers / member-access (``ext``, ``cfg.suffix``)
+#      — anything else (a function call, ternary, bracket-index, …) is
+#      unprovable → fire.
+#   3. NO identifier is a user / request source (an attacker-controlled pattern
+#      is a ReDoS vector even with no visible nested quantifier) → fire.
+#   4. NEITHER any individual string-literal part NOR the assembled skeleton
+#      (literals joined with a neutral placeholder standing in for each
+#      identifier gap, so nesting assembled across concatenation —
+#      ``'(' + a + '+)+'`` → ``(<ph>+)+`` — is still detected) contains a
+#      catastrophic shape (a group quantified by ``+``/``*``/``{…}`` whose body
+#      itself carries a quantifier OR a ``|`` alternation) → fire.
+
+# A user/request/attacker-controlled source on the RHS of the concatenation.
+# Word-bounded so ``ext``/``query`` as a *substring* of an unrelated name does
+# not over-trigger, but a genuine ``userInput`` / ``req.query`` / ``params`` /
+# ``process.argv`` / ``location.*`` / ``window.*`` / ``document.*`` does.
+_REGEXP_USER_SOURCE_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[^.\w$])"
+    r"(?:req|request|input|userInput|user_input|userData|user_data|"
+    r"params?|query|user|body|args|argv)\b"
+    r"|process\.argv|location\.|window\.|document\."
+)
+
+# A "filler" run between string-literal parts is provably-inert ONLY if it is
+# nothing but ``+``, whitespace, and plain identifier / member-access tokens
+# (``ext``, ``cfg.suffix``, ``a``). A function call ``foo()``, a ternary, a
+# bracket index ``a[i]``, a template literal, etc. are NOT provable here.
+_REGEXP_PLAIN_FILLER_RE: Final[re.Pattern[str]] = re.compile(r"^(?:\s|\+|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)*$")
+
+# A catastrophic backtracking shape: a group ``( … )`` / ``(?: … )`` that is
+# immediately followed by an UNBOUNDED-repeat quantifier (``+`` / ``*`` / any
+# ``{ … }`` brace form — bounded braces are kept-firing too, the safe
+# direction), where the group BODY itself carries a quantifier (``+`` / ``*`` /
+# ``{ … }``) OR a top-level ``|`` alternation. This catches every listed
+# FN-warning shape: ``(a+)+`` ``(\w+)*`` ``(\d+)*`` ``(.*)*`` ``(a|a)*``
+# ``(a|ab)*`` and the assembled ``(x+)+``. ``[^)]`` keeps the inner-body scan
+# cheap and ReDoS-free (no nested ``.*`` over the engine).
+_CATASTROPHIC_REGEX_SHAPE_RE: Final[re.Pattern[str]] = re.compile(
+    r"\((?:\?[:=!])?(?P<body>[^()]*)\)\s*(?:[+*]|\{[^}]*\})"
+)
+# An inner quantifier on a single token (``a+`` ``\w*`` ``.{2,}``) — NOT a bare
+# ``+`` that is part of ``\+`` (an escaped literal plus). A leading ``\`` before
+# the quantifier means it is escaped (literal), so we require the quantifier to
+# NOT be immediately preceded by an odd run of backslashes. We approximate that
+# safely: a quantifier counts only when the char before it is not ``\`` OR the
+# char two-before is also ``\`` (``\\+`` = escaped-backslash then a real ``+``).
+_INNER_QUANTIFIER_RE: Final[re.Pattern[str]] = re.compile(r"(?:[^\\]|^)(?:\\\\)*[+*]|(?:[^\\]|^)(?:\\\\)*\{[^}]*\}")
+
+
+def _regex_body_is_dangerous(body: str) -> bool:
+    """True iff a quantified-group BODY itself carries a quantifier or a
+    top-level ``|`` alternation (the two ways a quantified group becomes
+    catastrophic). ``|`` anywhere in the (paren-free) body is top-level."""
+    if "|" in body:
+        return True
+    return bool(_INNER_QUANTIFIER_RE.search(body))
+
+
+def _regex_has_catastrophic_shape(pattern: str) -> bool:
+    r"""True iff ``pattern`` contains a catastrophic-backtracking shape: a
+    group quantified by an unbounded outer quantifier whose body itself has a
+    quantifier or a ``|`` alternation (``(a+)+``, ``(\w+)*``, ``(.*)*``,
+    ``(a|a)*``, ``(a|ab)*``). FN-safe by construction — only the linear shapes
+    (a bare ``\S*`` / ``.+`` not wrapping a quantified-or-alternated group)
+    are NOT flagged here."""
+    for m in _CATASTROPHIC_REGEX_SHAPE_RE.finditer(pattern):
+        if _regex_body_is_dangerous(m.group("body")):
+            return True
+    return False
+
+
+# Split a first-argument expression into its string-literal parts (contents)
+# and verify every gap between them is provably-inert filler. A single quote /
+# double quote / backtick opens a literal; ``+`` and identifiers live between.
+_REGEXP_STRING_PART_RE: Final[re.Pattern[str]] = re.compile(
+    r"'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"|`((?:[^`\\]|\\.)*)`"
+)
+# Neutral single-char placeholder for an identifier gap when assembling the
+# concatenation skeleton. A literal control char participates structurally like
+# any other literal char, so a nesting assembled ACROSS the concatenation
+# (``'(' + a + '+)+'`` → ``(\x01+)+``) is still detected, while the placeholder
+# itself can never CREATE a group/quantifier/alternation.
+_REGEXP_ASSEMBLY_PLACEHOLDER: Final[str] = "\x01"
+# An identifier (a real, unknown runtime value) inside a concatenation gap. A
+# gap that contains one contributes the neutral placeholder to the skeleton; a
+# gap that is ONLY the ``+`` operator / whitespace (two DIRECTLY-ADJACENT string
+# literals) contributes nothing, so a catastrophic shape split across the ``+``
+# between two literals (``"(a+)" + "+"`` → ``(a+)+``) is assembled and detected.
+# (issue #91 FN-hole fix — the prior ``placeholder.join(parts)`` inserted a
+# placeholder between EVERY literal pair, hiding literal-adjacent nesting.)
+_REGEXP_IDENTIFIER_IN_GAP_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_$]")
+
+
+def _new_regexp_call_first_arg(line: str) -> str | None:
+    """Return the raw first-argument expression text of a ``new RegExp(...)`` /
+    ``RegExp(...)`` call on ``line``, or ``None`` if the line is not such a
+    call (or the call cannot be cleanly parsed — caller then keeps firing).
+
+    Balanced-paren + string-aware scan: a ``)`` or ``,`` inside a string
+    literal does not end the argument. The bare ``RegExp(`` form must not be
+    glued to a preceding identifier char / ``.`` (so ``myRegExp(`` /
+    ``foo.RegExp(`` do not count — only ``new RegExp(`` / ``= RegExp(`` /
+    ``(RegExp(``)."""
+    m = re.search(r"(?:\bnew\s+RegExp|(?<![.\w$])RegExp)\s*\(", line)
+    if not m:
+        return None
+    i = m.end()  # index just past the opening "("
+    depth = 1
+    arg_start = i
+    quote: str | None = None
+    escaped = False
+    first_arg_end: int | None = None
+    while i < len(line):
+        ch = line[i]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = None
+        elif ch in ("'", '"', "`"):
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                if first_arg_end is None:
+                    first_arg_end = i
+                break
+        elif ch == "," and depth == 1 and first_arg_end is None:
+            first_arg_end = i
+        i += 1
+    if first_arg_end is None:
+        return None
+    return line[arg_start:first_arg_end]
+
+
+def _new_regexp_is_provably_linear(line: str) -> bool:
+    r"""True iff a ``new RegExp(...)`` / ``RegExp(...)`` call on ``line`` is a
+    provably-LINEAR dynamically-built regex (issue #91): first arg is string
+    literals + ``+``-joined non-user identifiers, with NO catastrophic shape in
+    any literal part NOR in the assembled skeleton. Returns False (→ the match
+    keeps firing) on ANY doubt: a regex literal, a user/request source, a
+    non-identifier filler, or a catastrophic assembled shape."""
+    arg = _new_regexp_call_first_arg(line)
+    if arg is None:
+        return False
+    # A user/request source anywhere in the pattern expression → attacker can
+    # supply a catastrophic pattern even with no visible nesting → fire.
+    if _REGEXP_USER_SOURCE_RE.search(arg):
+        return False
+
+    # Walk the concatenation, collecting each string-literal's inner content and
+    # building the assembled skeleton. A gap BETWEEN two literals that contains
+    # an identifier (an unknown runtime value) contributes a neutral placeholder;
+    # a gap that is ONLY the ``+`` operator / whitespace (two DIRECTLY-ADJACENT
+    # literals) contributes nothing, so the literals join directly and a nesting
+    # split across the ``+`` (``"(a+)" + "+"`` → ``(a+)+``) is detected.
+    literal_parts: list[str] = []
+    skeleton_chunks: list[str] = []
+    cursor = 0
+    for sm in _REGEXP_STRING_PART_RE.finditer(arg):
+        gap = arg[cursor : sm.start()]
+        if not _REGEXP_PLAIN_FILLER_RE.match(gap):
+            return False  # non-identifier filler (call / ternary / index) → fire
+        if _REGEXP_IDENTIFIER_IN_GAP_RE.search(gap):
+            skeleton_chunks.append(_REGEXP_ASSEMBLY_PLACEHOLDER)
+        # The literal's first non-None capture group is its raw inner content.
+        inner = next(g for g in sm.groups() if g is not None)
+        literal_parts.append(inner)
+        skeleton_chunks.append(inner)
+        cursor = sm.end()
+    trailing = arg[cursor:]
+    if not _REGEXP_PLAIN_FILLER_RE.match(trailing):
+        return False
+    if _REGEXP_IDENTIFIER_IN_GAP_RE.search(trailing):
+        skeleton_chunks.append(_REGEXP_ASSEMBLY_PLACEHOLDER)
+    if not literal_parts:
+        # No string-literal part at all (e.g. ``RegExp(someVar)``): the entire
+        # pattern is an unknown identifier — not provably linear → fire.
+        return False
+
+    # (a) Each individual literal part must be non-catastrophic …
+    for raw in literal_parts:
+        if _regex_has_catastrophic_shape(raw):
+            return False
+    # … and (b) the ASSEMBLED skeleton (literals joined directly, with a neutral
+    # placeholder ONLY for an identifier gap) must be non-catastrophic, so a
+    # nesting assembled across the ``+`` — whether the split point is an
+    # identifier gap OR two directly-adjacent literals — is caught.
+    skeleton = "".join(skeleton_chunks)
+    if _regex_has_catastrophic_shape(skeleton):
+        return False
+    return True
+
+
 # r04 obra FP iter (2026-05-28) — the SUPPLY_CHAIN ``window[…]=`` /
 # ``globalThis[…]=`` pattern targets dynamic loading / injection of
 # EXTERNAL code. Assigning a LOCAL value (an arrow function, a callback,
@@ -1495,6 +1709,17 @@ def classify(
     # version-number idiom ``(\.\d+)+`` / ``(?:\.\d+)+`` is linear-time,
     # not catastrophic backtracking.
     if rule_id == "REGEX_DOS" and _is_versionish_regex_quantifier(match):
+        return "safe_literal"
+
+    # issue #91 FP — REGEX_DOS on a dynamically-built ``new RegExp(...)`` whose
+    # first argument is constant string literals + ``+``-joined non-user
+    # identifiers with NO catastrophic shape (in any literal part OR in the
+    # assembled skeleton). Linear/polynomial, not catastrophic backtracking —
+    # the bare ``+`` concatenation (catalog pattern 3) is not a ReDoS signal.
+    # FN-safe: a user/request source, a non-identifier filler, a regex literal,
+    # or any nested/overlapping-quantifier shape (incl. one assembled across the
+    # concatenation, ``'(' + a + '+)+'``) returns False here and keeps firing.
+    if rule_id == "REGEX_DOS" and _new_regexp_is_provably_linear(line):
         return "safe_literal"
 
     # r04/r07 FP iter (2026-05-28) — TOOL_SHADOW / INDIRECT_PROMPT_INJECT
