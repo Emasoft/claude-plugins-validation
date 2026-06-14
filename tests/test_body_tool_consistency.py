@@ -393,6 +393,78 @@ def test_emit_nothing_when_absent() -> None:
     assert report.findings == []
 
 
+# ── validate_body_tool_consistency: prose-WARNING collapse (issue #109) ────────
+
+
+def test_emit_collapses_multiple_prose_warnings_into_one_summary() -> None:
+    """≥2 prose MCP mentions + a non-empty field → ONE summary WARNING listing every line and tool.
+
+    A documentation-heavy body that merely DESCRIBES optional MCP tooling produced one
+    near-identical WARNING per mention (issue #109). They now collapse into a single
+    information-preserving summary WARNING; CRITICAL invocations are unaffected.
+    """
+    body = (
+        "If the LLM Externalizer is available, prefer mcp__llmx__chat for offloading.\n"
+        "You may also call mcp__github__get_issue to fetch context.\n"
+    )
+    report = FakeReport()
+    m.validate_body_tool_consistency(["Read"], body, report, filename="agent.md", field_name="tools")
+    assert report.levels() == ["WARNING"]  # exactly one finding, collapsed
+    msg = report.findings[0][1]
+    assert "prose mentions of tools not granted" in msg  # summary phrasing, not per-mention
+    assert "'tools'" in msg  # references the caller-supplied field name
+    assert "lines 1, 2" in msg  # every line number preserved
+    assert "mcp__llmx__chat" in msg and "mcp__github__get_issue" in msg  # every tool name preserved
+    assert report.findings[0][3] == 1  # anchored at the first prose line
+
+
+def test_emit_critical_usages_never_collapsed() -> None:
+    """Tool usages inside a code fence stay CRITICAL and per-mention, never collapsed.
+
+    The collapse is prose-WARNING-only — a real undeclared INVOCATION fails silently at
+    runtime and must keep surfacing individually (FN-safe).
+    """
+    body = _fence("Bash(npm test)", "Agent({subagent_type: 'x'})")
+    report = FakeReport()
+    m.validate_body_tool_consistency(["Read"], body, report, filename="SKILL.md")
+    assert report.levels() == ["CRITICAL", "CRITICAL"]  # both fenced usages, per-mention
+    assert all("prose mentions of tools not granted" not in f[1] for f in report.findings)
+
+
+def test_emit_single_prose_warning_unchanged() -> None:
+    """Exactly one prose mention → that one WARNING is emitted verbatim (no summary phrasing)."""
+    report = FakeReport()
+    m.validate_body_tool_consistency(["Read"], "You can run Bash(ls) optionally.\n", report, filename="SKILL.md")
+    assert report.levels() == ["WARNING"]
+    msg = report.findings[0][1]
+    assert "prose mentions of tools not granted" not in msg  # NOT the summary form
+    assert "(in prose)" in msg and "'Bash'" in msg  # the original per-mention message
+
+
+def test_emit_mixed_critical_and_prose_yields_one_critical_per_mention_plus_one_summary() -> None:
+    """1 fenced CRITICAL + 3 prose WARNINGs → 1 CRITICAL (per-mention) + 1 summary WARNING."""
+    body = (
+        "## Steps\n"
+        "First, optionally call mcp__a__x to warm up.\n"
+        "You may also use mcp__b__y here.\n"
+        "And mcp__c__z is another option.\n"
+        "\n"
+        "```text\n"
+        "Bash(npm run build)\n"
+        "```\n"
+    )
+    report = FakeReport()
+    m.validate_body_tool_consistency(["Read"], body, report, filename="agent.md", field_name="tools")
+    levels = report.levels()
+    assert levels.count("CRITICAL") == 1  # the fenced Bash invocation, per-mention
+    assert levels.count("WARNING") == 1  # the 3 prose mentions collapsed into one summary
+    summary = next(f for f in report.findings if f[0] == "WARNING")[1]
+    assert "3 prose mentions of tools not granted" in summary
+    assert "mcp__a__x" in summary and "mcp__b__y" in summary and "mcp__c__z" in summary
+    crit = next(f for f in report.findings if f[0] == "CRITICAL")[1]
+    assert "'Bash'" in crit and "fail at runtime" in crit  # real silent-failure invocation preserved
+
+
 # ── End-to-end integration through the real validators ────────────────────────
 
 
