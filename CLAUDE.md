@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.23` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.24` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
-| **test files** | **326** | `ls tests/test_*.py`; ~9274 tests |
+| **test files** | **327** | `ls tests/test_*.py`; ~9290 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,30 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.24 — closed #101 via a USER-APPROVED feature: the "audit-consent
+sentinel"** (informed-consent, NOT an allowlist). An EXECUTION-class skillaudit
+finding (CMD_INJECTION/SHELL_EXEC/SUPPLY_CHAIN/ENV_INJECTION/PRIVILEGE_ESC/
+FS_WRITE/… = `_SHELL_EXECUTION_CLASS_RULES`) DEMOTES to a non-blocking, still-
+VISIBLE WARNING iff the exact line `WARNING: the following code could be
+malicious. Audit it for safety before executing it!` immediately precedes the
+flagged code — a text line before a ```` ``` ```` fence in markdown, OR a
+comment line before the flagged line in a script (.sh/.py/.mjs/…). No sentinel →
+unchanged (stays NIT/critical, blocks --strict). Applies to markdown component
+fences AND every script invoked by skills/agents/commands/rules. The user's
+rationale: the warning makes the danger EXPLICIT to any reader/agent (and is
+self-incriminating for a real payload), so it is informed consent — the finding
+stays visible, it just stops gating. FIX (`cpv_skillaudit_native.py`):
+`_audit_consent_sentinel_present` + a `"warn"` action overlay in
+`_context_classifier_verdict`, mapped to WARNING in the consumer. SECURITY
+INVARIANTS verified two-sided through the REAL scanner (central-verified, not
+self-report): +sentinel → WARNING (visible); no-sentinel → blocks; vague
+"be careful" → NOT demoted (exact phrase required); INTENT-class
+(PROMPT_INJECT/INDIRECT_PROMPT_INJECT/INTENT_EXFIL) +sentinel → NOT demoted
+(stays critical/major — the sentinel cannot weaken prompt-injection/exfil); a
+`safe_literal`-suppressed finding stays suppressed. +16 tests; FULL SERIAL 9290
+pass; ZERO existing tests broke. Delegated impl (fresh opus agent, spec at
+`docs_dev/audit-consent-sentinel-spec.md`), I central-verified the gate.
 
 **v2.126.23 — closed #87** (skillaudit CMD_INJECTION FP on a `||` logical-OR
 fallback misread as a `|` pipe). The shell-pipe catalog pattern

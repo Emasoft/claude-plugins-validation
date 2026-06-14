@@ -132,10 +132,21 @@ def _compiled_rules() -> list[tuple[dict[str, Any], list[re.Pattern[str]]]]:
 # scanner collide on one key (audit MINOR #4).
 _SEVERITY_RANK: dict[str, int] = {
     "info": 0,
-    "low": 1,
-    "medium": 2,
-    "high": 3,
-    "critical": 4,
+    # "warning" ranks strictly between "info" and "low" — mirroring CPV's
+    # final hierarchy INFO < WARNING < NIT (a "low" scanner severity maps to
+    # the publish-blocking CPV NIT, while "warning" maps to the non-blocking
+    # CPV WARNING). The dedup at the tail of ``scan_content`` ranks findings
+    # on the same (ruleId, line) by this map, so an audit-consent-demoted
+    # WARNING must out-rank a suppressed INFO duplicate yet still lose to a
+    # genuine "low"/"medium"/"high"/"critical" duplicate. The chain stays
+    # strictly increasing (info < warning < low < medium < high < critical)
+    # so the existing ``info < low < medium < high < critical`` invariant
+    # (test_audit_fixes_engines) is preserved.
+    "warning": 1,
+    "low": 2,
+    "medium": 3,
+    "high": 4,
+    "critical": 5,
 }
 
 
@@ -414,6 +425,12 @@ _SEVERITY_MAP: dict[str, str] = {
     "high": "major",
     "medium": "minor",
     "low": "nit",
+    # Audit-consent sentinel (issue #101): an execution-class finding whose
+    # flagged code is immediately preceded by the exact audit-warning sentinel
+    # is DEMOTED to a CPV WARNING — visible in the report but, unlike NIT,
+    # never blocks ``--strict`` (cpv_validation_common.exit_code_strict). This
+    # is informed consent, NOT suppression: the finding still appears.
+    "warning": "warning",
     "info": "info",
 }
 
@@ -1556,7 +1573,178 @@ def _is_cspell_dictionary(file_path: str) -> bool:
     return base in _CSPELL_CONVENTIONAL_BASENAMES
 
 
+# ────────────────────────────────────────────────────────────────────────
+# Audit-consent sentinel (issue #101)
+# ────────────────────────────────────────────────────────────────────────
+#
+# USER-APPROVED informed-consent policy: an EXECUTION-class skillaudit finding
+# demotes to a VISIBLE-but-NON-blocking WARNING (it is NOT suppressed — it
+# still appears in the report) IFF the exact audit-warning sentinel line below
+# appears immediately before the flagged code. The phrase makes the danger
+# EXPLICIT to any human / agent reading the file and is self-incriminating for
+# a real payload, so a malicious author gains nothing by adding it; meanwhile a
+# legitimate author who knowingly ships a dangerous-looking snippet can stop it
+# publish-blocking by prepending the consent line. No sentinel → unchanged
+# (the finding stays whatever it is today — typically NIT, which blocks
+# ``--strict``).
+_AUDIT_CONSENT_SENTINEL: str = (
+    "warning: the following code could be malicious. "
+    "audit it for safety before executing it!"
+)
+
+
+def _normalize_sentinel_candidate(line: str) -> str:
+    """Strip leading markdown / comment markers and trailing decoration from a
+    candidate line, returning the inner text lowercased for sentinel matching.
+
+    Removes (repeatedly, left side) the universal comment / quote / list
+    markers ``# // > * - ; <!-- /* *`` and surrounding whitespace, and the
+    trailing ``--> */`` / ``!`` / ``.`` decoration on the right — so the SAME
+    canonical phrase matches whether it is a markdown text line, a ``#`` /
+    ``//`` script comment, an HTML ``<!-- … -->`` comment, or a ``/* … */``
+    C-style comment.
+    """
+    s = line.strip()
+    # Strip leading comment / quote / list openers (possibly several, e.g.
+    # ``> # WARNING…`` in a quoted markdown block, or ``<!-- WARNING…``).
+    _openers = ("<!--", "/*", "//", "#", ">", "*", "-", ";")
+    changed = True
+    while changed:
+        changed = False
+        s = s.lstrip()
+        for opener in _openers:
+            if s.startswith(opener):
+                s = s[len(opener) :]
+                changed = True
+                break
+    # Strip trailing comment closers / decoration.
+    s = s.strip()
+    for closer in ("-->", "*/"):
+        if s.endswith(closer):
+            s = s[: -len(closer)].strip()
+    return s.lower()
+
+
+def _line_carries_sentinel(line: str) -> bool:
+    """True iff ``line`` (after marker-stripping) carries the exact sentinel.
+
+    Tight by design: the normalized line must EQUAL the canonical sentence, OR
+    contain it as a contiguous substring (tolerating a trailing ``.`` instead
+    of ``!``, or a wrapping comment closer). A vague ``warning: be careful``
+    does NOT match — the full phrase is required.
+    """
+    norm = _normalize_sentinel_candidate(line)
+    if not norm:
+        return False
+    canon = _AUDIT_CONSENT_SENTINEL
+    # Tolerate a trailing ``.`` where the canonical ends in ``!``.
+    canon_dot = canon[:-1] + "." if canon.endswith("!") else canon
+    if norm in (canon, canon_dot):
+        return True
+    return canon in norm or canon_dot in norm
+
+
+def _audit_consent_sentinel_present(
+    file_path: str,
+    lines: list[str],
+    line_idx: int,
+) -> bool:
+    """True iff the exact audit-consent sentinel precedes the flagged line.
+
+    Placement rules (issue #101):
+
+    * **Markdown** (``.md`` / ``.markdown``): the flagged code is inside a
+      fenced block. The sentinel is the nearest NON-blank line ABOVE the
+      opening fence (the fence-info line itself and blank lines are skipped).
+      A flagged line that is NOT inside a fence has no fence to anchor to, so
+      the markdown branch returns ``False`` (the sentinel is a
+      before-the-fence affordance).
+    * **Script files** (``.sh`` / ``.py`` / ``.mjs`` / ``.js`` / ``.ts`` /
+      ``.rb`` / … — any host with a recognised comment syntax): the sentinel
+      is a COMMENT line that is among the 3 nearest NON-blank lines ABOVE the
+      flagged line (skipping blanks), tolerating an intervening
+      shebang / ``set -e`` line. It MUST be a comment line carrying the phrase.
+    """
+    if not lines or line_idx < 0 or line_idx >= len(lines):
+        return False
+    fp_lower = file_path.lower()
+
+    if fp_lower.endswith((".md", ".markdown")):
+        # Find the enclosing fenced block via the markdown fence map. Entries
+        # are 1-based ``(start_line, end_line, lang)``; ``start_line`` is the
+        # first CONTENT line, so the opening fence line is one above it →
+        # 0-based ``start_line - 2``.
+        try:
+            from _skillaudit_markdown_context import _build_fence_map  # type: ignore[import-not-found]
+        except ImportError:
+            return False
+        fence_map = _build_fence_map("\n".join(lines))
+        if line_idx >= len(fence_map):
+            return False
+        entry = fence_map[line_idx]
+        if entry is None:
+            return False
+        fence_open_idx = entry[0] - 2  # 0-based index of the ``` opener line
+        scan = fence_open_idx - 1
+        while scan >= 0 and not lines[scan].strip():
+            scan -= 1
+        if scan < 0:
+            return False
+        return _line_carries_sentinel(lines[scan])
+
+    # Script / any-other-host: a comment line carrying the sentinel within the
+    # 3 nearest non-blank lines above the flagged line.
+    found_nonblank = 0
+    scan = line_idx - 1
+    while scan >= 0 and found_nonblank < 3:
+        candidate = lines[scan]
+        if not candidate.strip():
+            scan -= 1
+            continue
+        found_nonblank += 1
+        if _is_in_line_comment(candidate, file_path) and _line_carries_sentinel(candidate):
+            return True
+        scan -= 1
+    return False
+
+
 def _context_classifier_verdict(
+    file_path: str,
+    lines: list[str],
+    line_idx: int,
+    match: str,
+    rule_id: str,
+) -> str:
+    """Context-classification verdict with the audit-consent sentinel overlay.
+
+    Delegates the per-file-type analysis to ``_context_classifier_dispatch``
+    (the v2.100.0 dispatcher), then applies the issue-#101 audit-consent
+    sentinel rule:
+
+    * If the inner verdict is ``"suppress"`` → return it UNCHANGED. A
+      genuinely-inert finding stays suppressed; there is no need to surface a
+      WARNING for code that is provably not an exploit shape.
+    * Otherwise, if the rule is EXECUTION-class (in ``_EXECUTION_CLASS_RULES``)
+      AND the exact audit-consent sentinel immediately precedes the flagged
+      code (``_audit_consent_sentinel_present``) → return ``"warn"``. This
+      overrides a would-be ``demote`` / ``keep`` / ``""`` (fall-through fire),
+      demoting the finding to a VISIBLE-but-NON-blocking CPV WARNING — informed
+      consent, not suppression.
+    * Otherwise → return the inner verdict unchanged.
+
+    The sentinel overlay is scoped to execution-class rules ONLY; intent-class
+    / prose-vector rules (PROMPT_INJECT / DATA_EXFIL / INTENT_* / …) keep their
+    current behavior (they are prose-delivery threats, not "executable code").
+    """
+    inner = _context_classifier_dispatch(file_path, lines, line_idx, match, rule_id)
+    if inner == "suppress":
+        return inner
+    if rule_id in _EXECUTION_CLASS_RULES and _audit_consent_sentinel_present(file_path, lines, line_idx):
+        return "warn"
+    return inner
+
+
+def _context_classifier_dispatch(
     file_path: str,
     lines: list[str],
     line_idx: int,
@@ -3326,13 +3514,21 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
                     file_path=file_path,
                 )
                 suppressed = verdict == "suppress"
-                demoted = verdict == "demote"
+                # Issue #101 — an execution-class finding whose flagged code is
+                # immediately preceded by the exact audit-consent sentinel is
+                # DEMOTED to a CPV WARNING (visible, never blocks ``--strict``).
+                # It is NOT suppressed (stays in the report) and IS flagged
+                # ``demoted`` so the report adapter marks it "needs review".
+                consent_warn = verdict == "warn"
+                demoted = verdict == "demote" or consent_warn
                 # Demoted findings stay visible — emitted at "low" so the
                 # CPV severity mapping renders them as NIT, which routes
                 # to the security agents' WARNING bucket for LLM-based
                 # disambiguation rather than being silently dropped.
                 if suppressed:
                     adj_sev = "info"
+                elif consent_warn:
+                    adj_sev = "warning"
                 elif demoted:
                     adj_sev = "low"
                 else:
@@ -3407,6 +3603,11 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
             # what was suppressed.
             sf["severity"] = "info"
             sf["suppressed"] = True
+        elif verdict == "warn":
+            # Issue #101 — audit-consent demote to a visible, non-blocking
+            # WARNING (kept in the report, marked "needs review").
+            sf["severity"] = "warning"
+            sf["demoted"] = True
         elif verdict == "demote":
             sf["severity"] = "low"
             sf["demoted"] = True
