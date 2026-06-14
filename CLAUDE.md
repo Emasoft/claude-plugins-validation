@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.17` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.18` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **114** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers) |
-| **test files** | **322** | `ls tests/test_*.py`; ~9207 tests |
+| **test files** | **322** | `ls tests/test_*.py`; ~9211 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,20 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.18 — closed #109** (report-noise: the "body mentions the MCP tool …
+but 'tools' does not grant it (in prose)" WARNING fired once PER MENTION → 18×
+on a docs-heavy plugin describing optional MCP tooling; the warning text itself
+concedes "If this is documentation, ignore it"). FIX
+(`cpv_tool_permission_match.py` `validate_body_tool_consistency`, analogous to
+the #113 MD004 dedup): collapse a file's prose WARNING findings into ONE
+information-preserving summary (lists every line + every distinct tool name)
+when there are ≥`_PROSE_WARNING_COLLAPSE_MIN` (2); a single prose mention emits
+as-is. `ConsistencyFinding` gained `name`/`is_mcp` fields (defaulted → no
+contract break). FN-safe: CRITICAL findings (a usage inside a code fence /
+imperative invocation, or an empty-`[]` field — a real silent-failure
+invocation) are NEVER collapsed, stay per-mention; the summary loses no
+information. +4 two-sided tests (in `test_body_tool_consistency.py`).
 
 **v2.126.17 — closed #86** (skillaudit CMD_INJECTION FP on a pipe-delimited
 bare-identifier list in markdown backticks). A hooks.json matcher

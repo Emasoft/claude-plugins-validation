@@ -171,6 +171,11 @@ class ConsistencyFinding:
     severity: str  # "CRITICAL" | "WARNING"
     message: str
     line: int
+    # The undeclared tool's name + kind. Defaulted so existing positional/keyword
+    # construction (and the test fakes) keep working; populated by _build_finding so
+    # validate_body_tool_consistency can collapse the prose WARNINGs into one summary.
+    name: str = ""
+    is_mcp: bool = False
 
 
 def resolve_alias(tool: str) -> str:
@@ -449,7 +454,18 @@ def _build_finding(usage: BodyUsage, field_name: str, is_empty: bool, critical: 
         )
         severity = "WARNING"
     message = f"body {verb} the {kind} '{usage.name}' (line {usage.line}) {why} {tail}"
-    return ConsistencyFinding(severity=severity, message=message, line=usage.line)
+    return ConsistencyFinding(
+        severity=severity, message=message, line=usage.line, name=usage.name, is_mcp=usage.is_mcp
+    )
+
+
+# When a documentation-heavy body merely *describes* (in prose) ≥ this many tools
+# it does not grant, the near-identical per-mention WARNINGs are collapsed into ONE
+# summary WARNING (report-noise reduction, analogous to the MD004 lint dedup). A
+# single prose mention is emitted as-is. CRITICALs (fenced / imperative usage, or an
+# empty-[] field) are NEVER collapsed — a real silent-failure invocation must stay
+# individually visible.
+_PROSE_WARNING_COLLAPSE_MIN = 2
 
 
 def validate_body_tool_consistency(
@@ -465,7 +481,34 @@ def validate_body_tool_consistency(
     ``report`` must expose ``.critical(message, file, line)`` and
     ``.warning(message, file, line)`` (every CPV validator report does; the
     comprehensive report's extra ``category`` kwarg defaults to ``None``).
+
+    CRITICAL findings are emitted per-mention (a real undeclared *invocation* fails
+    silently at runtime and must surface individually). Prose WARNING findings — a
+    body that only *mentions* a tool it does not grant, most likely documentation —
+    are collapsed into ONE information-preserving summary WARNING when there are
+    ``_PROSE_WARNING_COLLAPSE_MIN`` (2) or more, so a doc-heavy body that references
+    many optional tools yields one finding instead of N near-identical ones.
     """
-    for finding in check_body_tool_consistency(declared_value, body, field_name=field_name):
+    findings = check_body_tool_consistency(declared_value, body, field_name=field_name)
+    prose_warnings = [f for f in findings if f.severity == "WARNING"]
+
+    for finding in findings:
+        if finding.severity == "WARNING" and len(prose_warnings) >= _PROSE_WARNING_COLLAPSE_MIN:
+            continue  # collapsed below into a single summary WARNING
         emit = report.critical if finding.severity == "CRITICAL" else report.warning
         emit(finding.message, filename, finding.line)
+
+    if len(prose_warnings) >= _PROSE_WARNING_COLLAPSE_MIN:
+        lines = sorted({f.line for f in prose_warnings})
+        names: list[str] = []  # distinct tool names, first-appearance order (deterministic)
+        for f in prose_warnings:
+            if f.name and f.name not in names:
+                names.append(f.name)
+        lines_str = ", ".join(str(line_no) for line_no in lines)
+        names_str = ", ".join(names)
+        summary = (
+            f"{len(prose_warnings)} prose mentions of tools not granted by '{field_name}' "
+            f"(lines {lines_str}; tools: {names_str}). If these are documentation, ignore; "
+            f"if any actually invoke the tool, grant it in '{field_name}' (or remove the field)."
+        )
+        report.warning(summary, filename, lines[0])
