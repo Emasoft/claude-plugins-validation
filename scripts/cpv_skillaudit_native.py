@@ -178,7 +178,7 @@ def _severity_rank(severity: str) -> int:
 #     monkeypatch.setenv works without reloading the module.
 
 
-__version__ = "2.126.13"  # bumped in lockstep with plugin.json by publish.py
+__version__ = "2.126.14"  # bumped in lockstep with plugin.json by publish.py
 
 
 def _compute_catalog_hash() -> str:
