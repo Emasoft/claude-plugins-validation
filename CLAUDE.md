@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.24` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.25` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
-| **test files** | **327** | `ls tests/test_*.py`; ~9290 tests |
+| **test files** | **328** | `ls tests/test_*.py`; ~9303 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,29 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.25 — closed #122** (skillaudit CONTAINER_ESCAPE FP on read-only
+container-DETECTION). The catalog rule lumped three init-process `/proc` paths
+into one alternation: `/proc/(?:1|self)/(?:root|ns|cgroup)`. `root` (host-FS
+traversal through PID 1's mount ns) and `ns` (the namespace fds for `setns`) are
+genuine breakout primitives, but `cgroup` is READ-ONLY and is the canonical way
+runtimes/`systemd-detect-virt`/`is-container` IDENTIFY the runtime — flagging a
+bare `/proc/<1|self>/cgroup` read CRITICAL was an FP on diagnostic/env-report
+tooling. FIX (`cpv_skillaudit_native.py` — `_is_benign_cgroup_detection_read`, a
+language-agnostic early carve-out in `_context_classifier_dispatch`): suppress
+CONTAINER_ESCAPE ONLY when (a) the match is the `cgroup` member AND (b) NO
+corroborating escape primitive appears anywhere in the file (whole-file scan for
+`/proc/<1|self>/root|ns`, nsenter/unshare/setns/pivot_root, a cgroup/bind
+`mount`, a `release_agent`/`notify_on_release` write, the docker socket,
+`/dev/mem`, modprobe/insmod, LD_PRELOAD/ptrace/capsh/prctl). FN-safe two-sided,
+central-verified through the REAL scanner baseline-vs-fix: `/proc/<1|self>/cgroup`
+detection read (.py/.sh) → suppressed (baseline FIRES → reproduced the FP);
+`/proc/<1|self>/root|ns` → different member → still CRITICAL; a cgroup read next
+to real escape machinery → corroborated → still fires (the corroborator even
+catches `mount -t cgroup -o …` that the catalog's own mount rule misses); every
+other CONTAINER_ESCAPE primitive untouched. +13 tests (10 integration, 4 unit;
+every assertion two-sided); FULL SERIAL 9303 pass / 2 skip; ZERO existing tests
+broke. Implemented in-context (bounded single-discriminator security change).
 
 **v2.126.24 — closed #101 via a USER-APPROVED feature: the "audit-consent
 sentinel"** (informed-consent, NOT an allowlist). An EXECUTION-class skillaudit
