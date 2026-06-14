@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-06-14T00:15:38+00:00",
+  "computed_at": "2026-06-14T00:51:27+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:23986753a2601b5b63e123f325ce251006b8271cb34c5a50cd0bbf3a472b9800",
@@ -21,7 +21,7 @@
     ".trashcan/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".trashcan/README.txt": "sha256:3106acc9af8415d37610ef0b9f138dc9622f25f81ac37a31f24a9ebd2d25f30f",
     "CHANGELOG.md": "sha256:20d1d0db564ff853be435c7811845dc7e12b9bfdd8f861ca1d8102e91d360475",
-    "CLAUDE.md": "sha256:0ad6a9f4491951fc67ab5abee271f0d41c8f617bb0fe9018d90815366f4d9115",
+    "CLAUDE.md": "sha256:8b4e2ae49e06e2c5925ea5af1481f91685de49f6f76e95f1cd4c8a84e0678fe5",
     "LICENSE": "sha256:f79aeb8187cb5e63d27261eba76a2d771292c27489645b3410bd5e67edc02f5d",
     "README.md": "sha256:7b7b3baaf90622f11721ea446deb1543eea6a32316a92e3fee905ec3fcc608b0",
     "agents/cache-optimizer-agent.md": "sha256:6dbcfbc8bd9b6dd7e4933440516004fa787a68395c95749dd3b45e50cfbb7711",
@@ -158,7 +158,7 @@
     "scripts/_plugin_verify_hashes.py": "sha256:ca2fbfe046122797dd2915a4ffaae43e21f3c25b1f7f9613f7a512f24934c063",
     "scripts/_skillaudit_html_context.py": "sha256:daa4188195efd9bc0c985cf9b0eeab79f0df0f23622ba405881fb74aa11b7acb",
     "scripts/_skillaudit_json_context.py": "sha256:1da166098c3108cae74643b3763565c0787850f1a6525f2483be6809d80637cd",
-    "scripts/_skillaudit_markdown_context.py": "sha256:2f8d9c8e0f8a292b04e59161c7fbb77fd88183d4c45a499efb11cdb77298ffa3",
+    "scripts/_skillaudit_markdown_context.py": "sha256:4a4c1ea1b7e0cf7dd6087f248c13a5d4a5499df2fddb1867970936ee42e43c34",
     "scripts/_skillaudit_python_context.py": "sha256:6024969aa8889ef62a33cf5e2b8cede70f581d8754db6dd2586c610b00262f63",
     "scripts/_skillaudit_rust_context.py": "sha256:1392dc0184018d020e3decebd7506546e48b156591fd1bdec0fcbacac49f3411",
     "scripts/_skillaudit_shell_context.py": "sha256:fc3be19da06109970fe40277a3f00549d22c543aacbfa2ae46842add3fac8e78",
@@ -746,6 +746,7 @@
     "tests/test_issue_75_class1_rc70_inert.py": "sha256:5ec95378012c06bbfbce4751e6d194966e432be1adfafc5c06ce036ea891de82",
     "tests/test_issue_75_class3_sibling_imports.py": "sha256:2e7a8d3be321ee9130e8110cea9fe8471cc257f38ab3a1805651701f1dfd37bb",
     "tests/test_issue_75_class4_env_inject_cargo.py": "sha256:8c4a8dae90d8032f7ae260718e50081629e0655592549a4263bb3bd565c71eb6",
+    "tests/test_issue_79_sudo_rm_toolchain.py": "sha256:34a4e139bc63ddf78eb2456bbf7ff29fc864f5123e3f272ba7f6948ffef72ba9",
     "tests/test_issue_84_markdownlint_crash_fp.py": "sha256:f7369304d07915a6060b32dc6131c17f8fe76a2772dc43d36e4def7a83da5c1e",
     "tests/test_issue_85_worktree_gitfile_fp.py": "sha256:d9221c20ab895d88a4107e7d79d4ebf5dd7dd374eb0124f3c11989fbeb735928",
     "tests/test_issue_96_99_backtick_xref_fp.py": "sha256:f3b7814e8fdfe21b8abe67bd66a2c19fca07fa21f5a8098213087c06d7ad73ac",

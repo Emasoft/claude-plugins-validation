@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.12` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.13` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **114** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers) |
-| **test files** | **315** | `ls tests/test_*.py`; ~9094 tests |
+| **test files** | **316** | `ls tests/test_*.py`; ~9121 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -141,10 +141,23 @@ backtick-list helper suppressed ANY single backticked command incl. `cat
 /etc/passwd` (the full serial suite caught it — 7 failing tests); narrowed to
 ≥2 bare-command-NAME spans only. Crux verified: `exit_code_strict()` makes NIT
 block `--strict`, so doc findings that demote-to-NIT genuinely block downstream
-CI. **Still open:** #79 PRIVILEGE_ESC sudo-rm (highest-FN-risk, mine next), #91
-REGEX_DOS, the #83.5/#87/#95 NEEDS-DESIGN, #86+#83.1/.4/.6 already-fixed
-(regression tests), #76/#83 umbrellas. Investigation: `reports/fp-investigation/
-20260614_012725...-theme-a-doc-fence-cluster.md`.
+CI. **v2.126.13** then closed **#79** PRIVILEGE_ESC `sudo rm` — a deliberately
+narrow two-gate (yaml/GHA-step fence + a CLOSED literal-toolchain-path allowlist,
+token-terminated so `…/dotnet/../etc` does not match) + a hard-disqualifier
+(variable/glob/`..`/2nd-sudo/interpreter/system-path). The allowlist cannot widen
+into a `sudo rm` bypass — independently adversarial-probed: an allowlisted
+toolchain dir whose name contains a `lib` segment (the jvm/android caches) still
+clears, while a config-dir system path (sudoers/shadow), a `$VAR` target, a
+bare-root target, a `~` target, a toolchain path plus a `..` traversal, a
+toolchain sub-path or a `dotnetEVIL` prefix-trick, the toolchain's parent dir, a
+chained `curl|sh` or a second `sudo rm`, and the same line in a `.sh` file or a
+bash fence all still fire. (Note to self: NEVER put a literal `/usr`-or-`/opt`
+absolute path in a tracked doc — CPV's own absolute-path rule flags it MAJOR;
+always re-self-validate AFTER editing CLAUDE.md.) **Still open:** #91 REGEX_DOS (gate on a
+nested/overlapping quantifier or a user-input source, not bare `+`); the
+NEEDS-DESIGN trio (#83.5/#87/#95); regression tests for the already-fixed
+(#86 + #83.1/.4/.6); and the #76/#83 umbrellas. Investigation:
+`reports/fp-investigation/20260614_012725...-theme-a-doc-fence-cluster.md`.
 
 **v2.126.10 closed 3** (FN-safe two-sided, each reproduced through the real
 validator before + after the fix): **#112** — the RC-73 taint walker

