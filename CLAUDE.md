@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.13` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.14` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **114** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers) |
-| **test files** | **316** | `ls tests/test_*.py`; ~9121 tests |
+| **test files** | **317** | `ls tests/test_*.py`; ~9155 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -153,11 +153,20 @@ toolchain sub-path or a `dotnetEVIL` prefix-trick, the toolchain's parent dir, a
 chained `curl|sh` or a second `sudo rm`, and the same line in a `.sh` file or a
 bash fence all still fire. (Note to self: NEVER put a literal `/usr`-or-`/opt`
 absolute path in a tracked doc — CPV's own absolute-path rule flags it MAJOR;
-always re-self-validate AFTER editing CLAUDE.md.) **Still open:** #91 REGEX_DOS (gate on a
-nested/overlapping quantifier or a user-input source, not bare `+`); the
-NEEDS-DESIGN trio (#83.5/#87/#95); regression tests for the already-fixed
-(#86 + #83.1/.4/.6); and the #76/#83 umbrellas. Investigation:
-`reports/fp-investigation/20260614_012725...-theme-a-doc-fence-cluster.md`.
+always re-self-validate AFTER editing CLAUDE.md.) **v2.126.14** then closed **#91**
+REGEX_DOS — a classifier-level `_new_regexp_is_provably_linear` (TS/JS) suppresses
+a `new RegExp(string-literals + non-user-idents)` ONLY when no literal part and
+no ASSEMBLED skeleton has a catastrophic shape (group + unbounded quantifier with
+a quantified body, or top-level alternation). Independently probed; one FN hole
+caught + closed in central verification — a catastrophic shape split across two
+ADJACENT literals (`"(a+)" + "+"` → `(a+)+`) was being suppressed because the
+skeleton joined every literal pair with a placeholder; fixed to join adjacent
+literals directly and place a placeholder only for an identifier gap. (Two of my
+probe "holes" were FALSE — a no-`+` lone-var `new RegExp(userInput)` never matched
+the catalog at baseline, a SEPARATE pre-existing detection gap, not a #91
+regression.) **Still open:** the NEEDS-DESIGN trio (#83.5/#87/#95); regression
+tests for the already-fixed (#86 + #83.1/.4/.6); and the #76/#83 umbrellas.
+Investigation: `reports/fp-investigation/20260614_012725...-theme-a-doc-fence-cluster.md`.
 
 **v2.126.10 closed 3** (FN-safe two-sided, each reproduced through the real
 validator before + after the fix): **#112** — the RC-73 taint walker
