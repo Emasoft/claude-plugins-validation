@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.18` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.19` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
-| **scripts** | **114** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers) |
-| **test files** | **322** | `ls tests/test_*.py`; ~9211 tests |
+| **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
+| **test files** | **323** | `ls tests/test_*.py`; ~9233 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,24 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.19 — closed #106** (dependency-pinning self-contradiction: `validate_plugin`
+accepts a dep as a string OR `{name,version,marketplace}` object and ADVISES the
+object form to pin, but `validate_marketplace` rejected every non-string dep
+element as MAJOR — so the pinned object form CPV itself recommends failed under
+the marketplace validator). Root cause = two divergent copies of the dep schema.
+FIX (single-source-of-truth): extracted the dependency-element validation into a
+shared `scripts/cpv_dependency_schema.py` (`validate_dependency_element` →
+`[(level, message)]`); rewired BOTH validators to it. `validate_plugin` behavior
+is byte-identical (same messages/severities; the cross-marketplace allowlist
+check, which needs hosting context, stays inline). `validate_marketplace` now
+ACCEPTS the `{name,version[,marketplace]}` object form (was MAJOR), keeps the
+"must be an array" guard, and still MAJORs genuinely-malformed deps. Canonical
+answer (grounded in CPV's v2.22.3 GAP-6 "manifest-schema fields valid at
+marketplace entry level"): `{name, version}` is the pinned form valid in BOTH
+plugin.json and marketplace.json. +23 tests. FN-safe two-sided verified through
+the SSOT (object accepted; number/list/missing-name/bad-semver/non-kebab →
+MAJOR).
 
 **v2.126.18 — closed #109** (report-noise: the "body mentions the MCP tool …
 but 'tools' does not grant it (in prose)" WARNING fired once PER MENTION → 18×

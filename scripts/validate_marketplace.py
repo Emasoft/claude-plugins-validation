@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from cpv_dependency_schema import validate_dependency_element
 from cpv_validation_common import (
     MAX_NAME_LENGTH,
     NAME_PATTERN,
@@ -729,7 +730,14 @@ def validate_plugin_entry(
                 )
             )
 
-    # Validate dependencies if present
+    # Validate dependencies if present. A marketplace plugin-entry's
+    # `dependencies` field MIRRORS the plugin.json schema (GAP-6 policy,
+    # plugin-marketplaces.md:180-181), so each element is validated by the
+    # SHARED SSOT helper — the SAME schema validate_plugin uses (issue #106).
+    # Before this, the marketplace validator rejected the object form
+    # `{name, version}` that validate_plugin advises, a direct contradiction.
+    # The object form is now accepted; a malformed element is still MAJOR; a
+    # bare unversioned string still WARNs (schema consistency).
     deps = plugin.get("dependencies")
     if deps is not None:
         if not isinstance(deps, list):
@@ -741,15 +749,17 @@ def validate_plugin_entry(
                     file=json_path,
                 )
             )
-        elif not all(isinstance(d, str) for d in deps):
-            results.append(
-                ValidationResult(
-                    level="MAJOR",
-                    category="plugin",
-                    message=f"Plugin '{plugin_id}' dependencies must be strings",
-                    file=json_path,
-                )
-            )
+        else:
+            for i, dep in enumerate(deps):
+                for level, message in validate_dependency_element(i, dep):
+                    results.append(
+                        ValidationResult(
+                            level=level,
+                            category="plugin",
+                            message=message,
+                            file=json_path,
+                        )
+                    )
 
     # Validate author structure (spec: object with name required, email optional)
     author = plugin.get("author")

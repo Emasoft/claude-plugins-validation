@@ -454,6 +454,108 @@ class TestValidatePluginEntryFields:
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
         assert any(r.level == "MAJOR" and "dependencies must be an array" in r.message for r in results)
 
+    def test_dependency_object_form_accepted_issue_106(self, tmp_path):
+        """Object-form dep {name, version} is ACCEPTED (issue #106 — was wrongly MAJOR).
+
+        A marketplace plugin-entry's `dependencies` mirrors the plugin.json
+        schema (GAP-6), which validate_plugin advises declaring as
+        {name, version}. The marketplace validator used to reject the object
+        form outright — the contradiction this fix resolves.
+        """
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": "github",
+            "dependencies": [{"name": "dev-browser", "version": "~1.2.0"}],
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        dep_majors = [r.message for r in results if r.level == "MAJOR" and "dependencies" in r.message]
+        assert not dep_majors, f"Object-form dep must not produce MAJOR; got: {dep_majors}"
+
+    def test_dependency_object_with_marketplace_accepted(self, tmp_path):
+        """Object dep {name, marketplace, version} is accepted (full subkey set)."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": "github",
+            "dependencies": [{"name": "x", "marketplace": "acme", "version": "^2.0"}],
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        dep_majors = [r.message for r in results if r.level == "MAJOR" and "dependencies" in r.message]
+        assert not dep_majors, f"Full-subkey object dep must not produce MAJOR; got: {dep_majors}"
+
+    def test_dependency_malformed_elements_still_major(self, tmp_path):
+        """Malformed dep elements still produce MAJOR (schema integrity preserved).
+
+        A number, a nested list, an object missing `name`, and a non-kebab
+        bare string must each still be MAJOR so genuinely-invalid deps keep
+        being rejected.
+        """
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": "github",
+            "dependencies": [42, ["nested"], {"version": "1.0.0"}, "Bad_Name"],
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        dep_majors = [r for r in results if r.level == "MAJOR" and "dependencies[" in r.message]
+        # 42 + nested-list → "string or object"; {version} → missing name;
+        # "Bad_Name" → bare-string not kebab. At least 4 MAJORs.
+        assert len(dep_majors) >= 4, (
+            f"Expected ≥4 MAJORs for malformed dep elements; got: {[r.message for r in dep_majors]}"
+        )
+
+    def test_dependency_unknown_subkey_still_major_via_index(self, tmp_path):
+        """Object dep with an UNKNOWN subkey produces a finding referencing the dep index."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": "github",
+            "dependencies": [{"name": "x", "foo": 1}],
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        # Unknown dep sub-key is a MINOR in the shared schema; it must surface
+        # with the dep index + the offending key name.
+        assert any(
+            "dependencies[0].foo" in r.message and "not a recognized dependency sub-field" in r.message
+            for r in results
+        ), f"Expected unknown-subkey finding for dependencies[0].foo; got: {[r.message for r in results]}"
+
+    def test_dependency_bare_unversioned_string_warns_not_major(self, tmp_path):
+        """A bare unversioned string is accepted with the pin-it WARNING (schema consistency)."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": "github",
+            "dependencies": ["dev-browser"],
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        dep_majors = [r.message for r in results if r.level == "MAJOR" and "dependencies" in r.message]
+        assert not dep_majors, f"Bare unversioned string dep must not be MAJOR; got: {dep_majors}"
+        assert any(
+            r.level == "WARNING" and "dependencies[0]" in r.message and "no version constraint" in r.message
+            for r in results
+        ), f"Expected pin-it WARNING for bare unversioned string; got: {[r.message for r in results]}"
+
+    def test_dependency_invalid_bare_string_still_major(self, tmp_path):
+        """A non-kebab bare-string dep is still MAJOR (invalid names keep rejecting)."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": "github",
+            "dependencies": ["NotKebab!"],
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert any(
+            r.level == "MAJOR" and "dependencies[0]" in r.message and "kebab-case" in r.message for r in results
+        ), f"Expected MAJOR for non-kebab bare-string dep; got: {[r.message for r in results]}"
+
 
 class TestValidatePluginSource:
     """Tests for validate_plugin_source covering string sources, dict sources, SHA, submodule conflict."""

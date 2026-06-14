@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
+from cpv_dependency_schema import validate_dependency_element
 from cpv_lint_engine import lint_repo as run_lint_engine
 from cpv_validation_common import (
     COLORS,
@@ -100,37 +101,16 @@ _IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 # Monitor `when` pattern — "always" or "on-skill-invoke:<kebab-skill-name>".
 _MONITOR_WHEN_RE = re.compile(r"^always$|^on-skill-invoke:[a-z0-9-]+$")
 
-# Minimal syntactic semver-range check for plugin dependencies.
-# Accepts npm-semver-range idioms documented at plugin-dependencies.md:44-52:
-#   ~2.1.0, ^2.0, ^2.0.0-0, >=1.4, =2.1.0, 1.2.3, x.y.z - a.b.c, "a || b".
-# The regex targets a SINGLE range atom; logical OR is split and each side checked.
-_SEMVER_ATOM_RE = re.compile(
-    r"""^
-    \s*                                           # leading space ok
-    (?:                                           # range-kind prefix
-        [~^]                                      #   ~ or ^
-      | =
-      | >=?|<=?                                   #   >, >=, <, <=
-    )?
-    \s*
-    \d+(?:\.\d+){0,2}                             # MAJOR[.MINOR[.PATCH]]
-    (?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?       # -prerelease
-    (?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?      # +build
-    \s*
-    $
-    """,
-    re.VERBOSE,
-)
-
-# Hyphen range "x.y.z - a.b.c" (3 tokens separated by a bare dash and spaces).
-_SEMVER_HYPHEN_RE = re.compile(
-    r"^\s*\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?\s+-\s+\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?\s*$"
-)
+# Dependency semver-RANGE validation lives in the shared SSOT module
+# cpv_dependency_schema (is_valid_semver_range), imported via
+# validate_dependency_element above — so validate_plugin and validate_marketplace
+# share one copy (issue #106). The plugin's OWN exact-version regex below is a
+# separate concern and stays here.
 
 # Exact semver for a plugin's OWN `version` (semver.org §2): full
 # MAJOR.MINOR.PATCH, no leading zeros, optional -prerelease / +build, FULLY
-# anchored. Unlike the dependency-RANGE check above, a plugin version is a
-# single concrete version, not a range — `re.match(r"^\d+\.\d+\.\d+", v)`
+# anchored. Unlike the dependency-RANGE check (cpv_dependency_schema), a plugin
+# version is a single concrete version, not a range — `re.match(r"^\d+\.\d+\.\d+", v)`
 # (no `$`) wrongly accepted trailing garbage ("1.2.3foo"), extra components
 # ("1.2.3.4"), and leading zeros ("01.02.03"), all of which break the
 # version-bump / publish tooling that consumes this field.
@@ -138,30 +118,6 @@ _PLUGIN_VERSION_RE = re.compile(
     r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
     r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
 )
-
-
-def _is_valid_semver_range(text: str) -> bool:
-    """Return True when ``text`` parses as a syntactic semver range.
-
-    Not a full npm-semver parser — we only guard against obviously-malformed
-    strings (empty, spaces inside a single range token, non-ASCII). Valid
-    ranges like ``~2.1.0``, ``^2.0``, ``^2.0.0-0``, ``>=1.4``, ``=2.1.0``,
-    ``1.2.3``, ``x.y.z - a.b.c``, logical OR chains ``a || b`` all pass.
-    """
-    if not isinstance(text, str) or not text:
-        return False
-    try:
-        text.encode("ascii")
-    except UnicodeEncodeError:
-        return False
-    # Logical OR — each side must be a valid range on its own.
-    if "||" in text:
-        return all(_is_valid_semver_range(part) for part in text.split("||"))
-    # Hyphen range ("x.y.z - a.b.c") — must be checked before the atom regex
-    # since the atom regex does not allow internal whitespace.
-    if _SEMVER_HYPHEN_RE.match(text):
-        return True
-    return bool(_SEMVER_ATOM_RE.match(text))
 
 
 def _path_has_traversal(path: object) -> bool:
@@ -322,121 +278,75 @@ def validate_dependencies(
         if isinstance(raw_allow, list):
             # Keep only string items — bad items are the marketplace validator's job.
             hosting_allowlist = [x for x in raw_allow if isinstance(x, str) and x]
-    known_subkeys = {"name", "version", "marketplace"}
     for i, entry in enumerate(deps):
-        if isinstance(entry, str):
-            if not _PLUGIN_NAME_RE.match(entry):
-                report.major(
-                    f"'dependencies[{i}]' bare-string name '{entry}' is not a valid kebab-case plugin name",
-                    ".claude-plugin/plugin.json",
-                )
-            else:
-                # plugin-dependencies.md:9-11: "By default, a dependency tracks
-                # the latest available version, so an upstream release can
-                # change the dependency under your plugin without warning."
-                # An unversioned bare-string dep is therefore a soft-WARNING
-                # signal — install can break on the next upstream tag. Always
-                # flagged: a plugin cannot self-exempt via config
-                # (TRDD-02e1672b removed `cpv.allow_unversioned_dependencies`).
-                report.warning(
-                    f"'dependencies[{i}]' = '{entry}' has no version constraint "
-                    f"— it auto-tracks the latest tag and the next upstream release "
-                    f"can break this plugin without warning. Pin a semver range: "
-                    f"{{'name': '{entry}', 'version': '~1.2.0'}} (plugin-dependencies.md:9-11).",
-                    ".claude-plugin/plugin.json",
-                )
-            continue
-        if not isinstance(entry, dict):
-            report.major(
-                f"'dependencies[{i}]' must be a string or object, got {type(entry).__name__} "
-                "(plugin-dependencies.md:29-50)",
-                ".claude-plugin/plugin.json",
-            )
-            continue
-        # name — required
-        if "name" not in entry:
-            report.major(
-                f"'dependencies[{i}]' object missing required 'name' field (plugin-dependencies.md:46)",
-                ".claude-plugin/plugin.json",
-            )
-        else:
-            dep_name = entry["name"]
-            if not isinstance(dep_name, str) or not _PLUGIN_NAME_RE.match(dep_name):
-                report.major(
-                    f"'dependencies[{i}].name' must be a kebab-case plugin name, got {dep_name!r}",
-                    ".claude-plugin/plugin.json",
-                )
-        # version — optional; syntactic range check
-        if "version" in entry:
-            dep_version = entry["version"]
-            if not isinstance(dep_version, str) or not _is_valid_semver_range(dep_version):
-                report.major(
-                    f"'dependencies[{i}].version' is not a valid semver range: {dep_version!r} "
-                    "(plugin-dependencies.md:44-52)",
-                    ".claude-plugin/plugin.json",
-                )
-        # marketplace — optional; must be a plugin-style kebab name
-        if "marketplace" in entry:
+        # Schema checks (string-or-object, kebab name, semver range, marketplace
+        # FORMAT, unknown sub-keys) come from the shared SSOT helper so
+        # validate_marketplace validates the SAME dependency-element shape
+        # (issue #106). The helper is report-agnostic — emit each finding on
+        # this report at its returned severity.
+        for level, message in validate_dependency_element(i, entry):
+            if level == "MAJOR":
+                report.major(message, ".claude-plugin/plugin.json")
+            elif level == "WARNING":
+                report.warning(message, ".claude-plugin/plugin.json")
+            elif level == "MINOR":
+                report.minor(message, ".claude-plugin/plugin.json")
+        # Cross-marketplace allowlist enforcement (TRDD-20108ab7) is NOT part of
+        # the shared element schema — it needs the hosting-marketplace context
+        # and is a plugin-only concern, so it stays inline here. Runs only when
+        # the dep is a well-formed object with a syntactically-valid
+        # `marketplace` name (the helper above already flagged a bad format).
+        if (
+            isinstance(entry, dict)
+            and isinstance(entry.get("marketplace"), str)
+            and _PLUGIN_NAME_RE.match(entry["marketplace"])
+        ):
             market = entry["marketplace"]
-            if not isinstance(market, str) or not _PLUGIN_NAME_RE.match(market):
-                report.major(
-                    f"'dependencies[{i}].marketplace' must be a kebab-case marketplace name, got {market!r}",
+            # When a dep declares a DIFFERENT marketplace from the hosting one,
+            # the target MUST appear in the hosting marketplace's
+            # `allowCrossMarketplaceDependenciesOn` list — otherwise the
+            # dependency is blocked at install time.
+            if hosting_marketplace is None:
+                # Validating in isolation — informational only.
+                report.info(
+                    f"'dependencies[{i}].marketplace' = '{market}' is a cross-marketplace "
+                    "reference; allowlist check skipped (no hosting marketplace context)",
                     ".claude-plugin/plugin.json",
                 )
-            else:
-                # TRDD-20108ab7: cross-marketplace dependency resolution. When a
-                # dep declares a DIFFERENT marketplace from the hosting one, the
-                # target MUST appear in the hosting marketplace's
-                # `allowedDependencyMarketplaces` list — otherwise the
-                # dependency is blocked at install time.
-                if hosting_marketplace is None:
-                    # Validating in isolation — informational only.
-                    report.info(
-                        f"'dependencies[{i}].marketplace' = '{market}' is a cross-marketplace "
-                        "reference; allowlist check skipped (no hosting marketplace context)",
+            elif hosting_name is None:
+                # A hosting marketplace WAS supplied/discovered but it has no
+                # usable `name` — the cross-marketplace allowlist is keyed on
+                # the hosting name, so the check below cannot run. Without
+                # this branch the enforcement was silently skipped (a
+                # malformed marketplace.json bypassing the install-blocking
+                # check). Surface it as INFO so the gap is visible; the
+                # missing `name` itself is the marketplace validator's hard
+                # error to report, not the plugin's.
+                report.info(
+                    f"'dependencies[{i}].marketplace' = '{market}' is a cross-marketplace "
+                    "reference, but the hosting marketplace.json has no usable 'name' — "
+                    "allowlist check skipped. Fix the hosting marketplace.json's 'name' "
+                    "so cross-marketplace dependencies can be enforced.",
+                    ".claude-plugin/plugin.json",
+                )
+            elif market != hosting_name:
+                if hosting_allowlist is None or market not in hosting_allowlist:
+                    allow_desc = sorted(hosting_allowlist) if hosting_allowlist is not None else "<none declared>"
+                    report.major(
+                        f"'dependencies[{i}].marketplace' = '{market}' is not in the hosting "
+                        f"marketplace's allowCrossMarketplaceDependenciesOn allowlist "
+                        f"({allow_desc}) — cross-marketplace dependency is blocked at install time "
+                        "with a 'cross-marketplace' error (plugin-dependencies.md:54-79). Add "
+                        f"'{market}' to the root marketplace.json's "
+                        "allowCrossMarketplaceDependenciesOn array OR remove the marketplace field.",
                         ".claude-plugin/plugin.json",
                     )
-                elif hosting_name is None:
-                    # A hosting marketplace WAS supplied/discovered but it has no
-                    # usable `name` — the cross-marketplace allowlist is keyed on
-                    # the hosting name, so the check below cannot run. Without
-                    # this branch the enforcement was silently skipped (a
-                    # malformed marketplace.json bypassing the install-blocking
-                    # check). Surface it as INFO so the gap is visible; the
-                    # missing `name` itself is the marketplace validator's hard
-                    # error to report, not the plugin's.
-                    report.info(
-                        f"'dependencies[{i}].marketplace' = '{market}' is a cross-marketplace "
-                        "reference, but the hosting marketplace.json has no usable 'name' — "
-                        "allowlist check skipped. Fix the hosting marketplace.json's 'name' "
-                        "so cross-marketplace dependencies can be enforced.",
+                else:
+                    report.passed(
+                        f"'dependencies[{i}].marketplace' = '{market}' allowlisted "
+                        "for cross-marketplace resolution",
                         ".claude-plugin/plugin.json",
                     )
-                elif market != hosting_name:
-                    if hosting_allowlist is None or market not in hosting_allowlist:
-                        allow_desc = sorted(hosting_allowlist) if hosting_allowlist is not None else "<none declared>"
-                        report.major(
-                            f"'dependencies[{i}].marketplace' = '{market}' is not in the hosting "
-                            f"marketplace's allowCrossMarketplaceDependenciesOn allowlist "
-                            f"({allow_desc}) — cross-marketplace dependency is blocked at install time "
-                            "with a 'cross-marketplace' error (plugin-dependencies.md:54-79). Add "
-                            f"'{market}' to the root marketplace.json's "
-                            "allowCrossMarketplaceDependenciesOn array OR remove the marketplace field.",
-                            ".claude-plugin/plugin.json",
-                        )
-                    else:
-                        report.passed(
-                            f"'dependencies[{i}].marketplace' = '{market}' allowlisted "
-                            "for cross-marketplace resolution",
-                            ".claude-plugin/plugin.json",
-                        )
-        # unknown sub-keys — MINOR so authors notice typos
-        for extra in set(entry.keys()) - known_subkeys:
-            report.minor(
-                f"'dependencies[{i}].{extra}' is not a recognized dependency sub-field "
-                "(recognized: name, version, marketplace)",
-                ".claude-plugin/plugin.json",
-            )
     if deps:
         report.passed(f"'dependencies' schema valid: {len(deps)} entry(ies)", ".claude-plugin/plugin.json")
 
