@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.16` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.17` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **114** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers) |
-| **test files** | **321** | `ls tests/test_*.py`; ~9185 tests |
+| **test files** | **322** | `ls tests/test_*.py`; ~9207 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,23 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.17 — closed #86** (skillaudit CMD_INJECTION FP on a pipe-delimited
+bare-identifier list in markdown backticks). A hooks.json matcher
+(`` `Write|Edit|NotebookEdit|Bash` ``) or regex alternation tripped the
+shell-pipe heuristic `(?:;|\||&&)\s*\b(bash|sh|…)\b` because a segment is a
+tool name (`|Bash`); it classified `safe_doc` → NIT → and NIT blocks `--strict`.
+FIX (`_skillaudit_markdown_context.py` `_is_inert_pipe_alternation`, the
+single-span sibling of the #88 multi-span helper): SPAN-AWARE — every backtick
+inline-code span CONTAINING the matched fragment must be, in its entirety, a
+pure `IDENT|IDENT[|…]` alternation (≥2 strict bare idents, no whitespace/`/`/
+`.`/`:`/`-`/`+`/flag/metachar), AND the fragment must not also sit in bare prose
+→ `safe_literal` (full suppress). FN-safe two-sided: a real pipe in prose
+(`curl x|bash`), inside backticks (`` `curl x|bash` ``), or beside a benign span
+all still surface (verified through the REAL scanner — baseline 4 → 2 findings,
+cache off, baseline via stash; the 2 real `curl|bash` pipes still fire). The
+agent's first draft was whole-line (missed the real mid-prose-bullet case);
+central verification caught it → rewrote span-aware. +22 two-sided tests.
 
 **v2.126.16 — two bounded `validate_plugin` workflow/cross-platform FPs**
 (validation-LOGIC, not security): closed **#116** (RC-WORKFLOW-PATH-BROKEN

