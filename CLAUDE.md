@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.11` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.12` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **114** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers) |
-| **test files** | **314** | `ls tests/test_*.py`; ~9069 tests |
+| **test files** | **315** | `ls tests/test_*.py`; ~9094 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,29 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.12 — Theme-A skillaudit doc-fence cluster, batch 1** — closed FP
+issues #77/#78/#80/#81/#88 with 7 markdown-classifier per-rule provably-inert
+suppressions in
+`_skillaudit_markdown_context.py` (delegated to an opus agent; I caught + closed
+TWO FN holes in central verification the agent's targeted tests missed): #77
+TIME_BOMB prose-with-no-code-construct; #78 INSECURE_TLS in md table/prose (keeps
+firing in an executable fence); #80/#83.2 PROTOTYPE_POLLUTION non-JS-fence /
+table; #81 SHELL_EXEC safe static-argv subprocess; #83.3 LOG_INJECTION `${env:}`
+no-JNDI; #88 CMD_INJECTION bare-command-NAME list. **FN hole #1 (#81):** the
+shell-interpreter-argv0 guard missed code interpreters — `["python","-c",…]` /
+`["node","-e",…]` / `["perl","-E"]` / `["ruby","-e"]` / `["php","-r"]` (and
+`["env","bash","-c",…]`) run arbitrary inline code and were being suppressed;
+fixed to decline a SHELL interp anywhere OR a CODE interp + inline-eval-flag
+(`["python","x.py"]` named-target still clears). **FN hole #2 (#88):** the
+backtick-list helper suppressed ANY single backticked command incl. `cat
+/etc/passwd` (the full serial suite caught it — 7 failing tests); narrowed to
+≥2 bare-command-NAME spans only. Crux verified: `exit_code_strict()` makes NIT
+block `--strict`, so doc findings that demote-to-NIT genuinely block downstream
+CI. **Still open:** #79 PRIVILEGE_ESC sudo-rm (highest-FN-risk, mine next), #91
+REGEX_DOS, the #83.5/#87/#95 NEEDS-DESIGN, #86+#83.1/.4/.6 already-fixed
+(regression tests), #76/#83 umbrellas. Investigation: `reports/fp-investigation/
+20260614_012725...-theme-a-doc-fence-cluster.md`.
 
 **v2.126.10 closed 3** (FN-safe two-sided, each reproduced through the real
 validator before + after the fix): **#112** — the RC-73 taint walker

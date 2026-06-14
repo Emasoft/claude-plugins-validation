@@ -178,12 +178,19 @@ class TestSafeDocFencedData:
 
 class TestCodeFenceNeutral:
     def test_match_inside_python_fence(self) -> None:
-        """Match inside ```python fence → code_fence_neutral."""
+        """Match inside ```python fence → code_fence_neutral, EXCEPT the
+        provably-safe static-argv subprocess shape, which issue #81 now
+        suppresses (`safe_literal`). `subprocess.run(["x"])` is a list-literal
+        argv with no shell=True / interpolation / shell-or-code-interpreter
+        argv0 — the provably-safe shape — so it is fully suppressed rather than
+        demoted to a publish-blocking NIT. (The general code_fence_neutral rule
+        is still covered by test_match_inside_javascript_fence and
+        test_match_inside_untagged_fence below.)"""
         import _skillaudit_markdown_context as ctx
 
         src = '```python\nresult = subprocess.run(["x"])\n```'
-        verdict = ctx.classify("doc.md", src, 1, "subprocess.run", "CMD_INJECTION")
-        assert verdict == "code_fence_neutral"
+        verdict = ctx.classify("doc.md", src, 1, 'subprocess.run(["x"])', "CMD_INJECTION")
+        assert verdict == "safe_literal"
 
     def test_match_inside_javascript_fence(self) -> None:
         """Match inside ```javascript fence → code_fence_neutral."""
