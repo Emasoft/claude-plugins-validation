@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.15` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.16` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **114** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers) |
-| **test files** | **319** | `ls tests/test_*.py`; ~9173 tests |
+| **test files** | **321** | `ls tests/test_*.py`; ~9185 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,20 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.16 — two bounded `validate_plugin` workflow/cross-platform FPs**
+(validation-LOGIC, not security): closed **#116** (RC-WORKFLOW-PATH-BROKEN
+flagged a mid-job build artifact — a `run:` step executing a path that an
+EARLIER step in the SAME job builds, e.g. `./dist/...-bin --help` after a
+`stage.sh`; now suppressed when the path's leading segment is a build-output dir
+[`dist`/`build`/`target`/`out`/`bin`/`.bin`/`output`/`release`/`artifacts`] OR an
+earlier same-job step names it / runs a build command; SAME-JOB only, so a
+cross-job broken ref still flags, and the dir match is leading-segment so a
+source dir like `distributions/` is never caught) and **#117** (the "Rust source
+… users will need to compile" advisory DEMOTED to INFO — kept visible — when an
+`install*.sh` BOTH downloads a release asset AND verifies its checksum;
+build-from-source or download-without-verify installers still WARN). +13 tests;
+FULL SERIAL 9185 pass. Both two-sided-verified through the real validator.
 
 **v2.126.15 — two bounded validation-LOGIC FPs** (not security suppressions):
 closed **#120** (`validate_plugin` — the `.claude/` gitignore-coverage MINOR was
