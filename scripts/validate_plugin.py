@@ -3967,6 +3967,44 @@ def validate_strip_gitmodules(plugin_root: Path, report: ValidationReport) -> No
         report.passed(".gitmodules URLs pass the strip-dev-parts allowlist (TRDD-793ac32a)")
 
 
+def _claude_dir_has_tracked_content(plugin_root: Path) -> bool:
+    """True iff the plugin git-tracks any file under ``.claude/``.
+
+    Issue #120: the `.claude/` cache-dir coverage check (`git check-ignore .claude`)
+    is *unsatisfiable* for a plugin that deliberately tracks content under
+    `.claude/` (e.g. the fleet wiki-memory corpus at
+    `.claude/project/memory/**`). git cannot re-include a path whose parent
+    directory is excluded (`man gitignore`), so the only gitignore that keeps
+    `.claude/project/memory/` trackable is the deep form `.claude/**` +
+    `!.claude/project/...`, which ignores the cache *contents* but leaves the
+    bare `.claude` dir entry un-ignored → `git check-ignore .claude` exits 1 →
+    a spurious MINOR that no gitignore can clear.
+
+    Tracked content is git-authoritative proof of intent: a plugin that ships
+    files under `.claude/` is not leaking a cache, so the "should be ignored"
+    finding does not apply. This mirrors the existing
+    `_category_has_matching_artifact` "only flag if the artifact exists"
+    philosophy. Returns False (→ the check stays live) when the plugin is not a
+    git repo or git is unavailable, so the genuine "un-ignored, un-tracked cache
+    dir" case still fires.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--", ".claude/"],
+            cwd=plugin_root,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    # `git ls-files` exits 0 with an empty stdout when nothing is tracked, and
+    # exits 128 when not a git repo — both → no tracked content → keep the check.
+    if result.returncode != 0:
+        return False
+    return bool(result.stdout.strip())
+
+
 def _gitignore_covers_category(plugin_root: Path, patterns: list[str], lines: list[str]) -> bool:
     """True iff git considers a representative path of this category ignored.
 
@@ -4043,6 +4081,13 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     missing_categories: list[tuple[str, str]] = []
 
     for patterns, description, severity in EXPECTED_GITIGNORE_CATEGORIES:
+        # Issue #120: the `.claude/` cache-dir category is unsatisfiable when the
+        # plugin deliberately tracks content under `.claude/` (no gitignore can
+        # both ignore the bare `.claude` dir AND keep a tracked subtree under it).
+        # Tracked content proves intent — treat the category as satisfied. Scoped
+        # strictly to the `.claude` category so no other category's logic changes.
+        if patterns == [".claude"] and _claude_dir_has_tracked_content(plugin_root):
+            continue
         # Only flag if the gitignore misses this category AND the artifact
         # actually exists in the plugin. Don't speculate about future files.
         if _gitignore_covers_category(plugin_root, patterns, lines):
