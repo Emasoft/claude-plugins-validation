@@ -61,6 +61,7 @@ from cpv_validation_common import (
     load_cpv_config,
     removed_cpv_size_keys_present,
     save_report_and_print_summary,
+    tracked_but_gitignored_paths,
     validate_component_name,
     validate_md_file_paths,
     validate_md_urls,
@@ -2080,6 +2081,41 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
             report.passed(".python-version exists")
         else:
             report.warning(".python-version not found — recommended for reproducible builds")
+
+
+def check_tracked_gitignored_files(plugin_root: Path, report: ValidationReport) -> None:
+    """Enforce .gitignore: a git-tracked file that ALSO matches .gitignore is INVALID.
+
+    `.gitignore` declares a path "not part of the repo," but tracking it ships it
+    anyway (`.gitignore` does not untrack an already-tracked file). The result is
+    an ambiguous shipped-but-ignored artifact AND a scan-evasion vector — an
+    author could `git add` a payload then `.gitignore` it to hide it from the
+    scanners. The skillaudit scanner now scans such files regardless; this rule
+    additionally FAILS the plugin so the anti-pattern is removed, not merely
+    scanned around. gitignore enforcement is non-negotiable.
+
+    Emits ONE MAJOR finding (blocking → plugin INVALID) listing the offending
+    files (capped, for readability) and directing the user to the fix agent,
+    which untracks them automatically (`git rm --cached`, keeping the working-tree
+    copy). No-ops when git is unavailable / not a repo (tracked-ness is then
+    undeterminable) or when nothing is tracked+gitignored.
+    """
+    tracked_ignored = tracked_but_gitignored_paths(plugin_root)
+    if not tracked_ignored:  # None (no git) or empty list (clean)
+        return
+    shown = tracked_ignored[:15]
+    more = len(tracked_ignored) - len(shown)
+    listing = ", ".join(shown) + (f", … (+{more} more)" if more > 0 else "")
+    report.major(
+        f"{len(tracked_ignored)} git-tracked file(s) also match .gitignore — "
+        "gitignore is not enforced. A tracked+gitignored file still ships "
+        "(.gitignore does not untrack it), creating a shipped-but-ignored artifact "
+        "and a scan-evasion vector, so the plugin is INVALID. Untrack them with the "
+        "fix agent (/cpv-fix-validation — it runs `git rm --cached <file>` to "
+        "untrack while keeping the working-tree file), or remove them from "
+        f".gitignore if they must ship. Files: {listing}",
+        ".gitignore",
+    )
 
 
 def validate_commands(plugin_root: Path, report: ValidationReport) -> None:
@@ -6732,6 +6768,10 @@ def main() -> int:
     # complete before any concurrent reader fires.
     validate_manifest(plugin_root, report, marketplace_only, hosting_marketplace=explicit_hosting)
     validate_structure(plugin_root, report, marketplace_only)
+    # gitignore-evasion hardening — a git-tracked file that ALSO matches
+    # .gitignore ships but is marked ignored (a scan-evasion vector); flag the
+    # plugin INVALID and route the user to the fix agent to untrack them.
+    check_tracked_gitignored_files(plugin_root, report)
     # v2.32.0 — Layout C cross-validation (marketplace-in-plugin)
     validate_layout_c_consistency(plugin_root, report)
     # v2.99.1 — skillaudit native (50 rules / 489 patterns) — MANDATORY,

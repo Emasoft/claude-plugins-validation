@@ -60,6 +60,7 @@ Primary fix guide: [plugin-structure-fixes.md](plugin-structure-fixes.md)
 | Rules directory | plugin-structure-fixes §11 |
 | Path and private info | plugin-structure-fixes §12 |
 | `.gitignore` coverage and virtual-env leakage | plugin-structure-fixes §13 |
+| `N git-tracked file(s) also match .gitignore — gitignore is not enforced … the plugin is INVALID` (MAJOR; gitignore-evasion hardening) — tracked+gitignored files ship but are marked ignored (scan-evasion vector) **[NEW]** | plugin-structure-fixes §13 ("Untrack tracked+gitignored files (`git rm --cached`)") |
 | Workflow inline-Python patterns | plugin-structure-fixes §14 |
 | `bin/` executables and platform naming **[NEW]** | plugin-structure-fixes §8 (bin/ subsections) |
 | `userConfig` schema validation — `title` required, `type` required + must be one of `{string, number, boolean, directory, file}`, `default` must match `type` (CPV v2.22.4+) | plugin-structure-fixes "userConfig schema invalid" |

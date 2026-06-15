@@ -1510,6 +1510,33 @@ Rules validation is delegated to `validate_rules.py`. All results are transferre
    git rm --cached .DS_Store
    ```
 
+### MAJOR: git-tracked file(s) also match .gitignore (gitignore not enforced — plugin INVALID)
+
+**Error message**: `N git-tracked file(s) also match .gitignore — gitignore is not enforced. A tracked+gitignored file still ships (.gitignore does not untrack it), creating a shipped-but-ignored artifact and a scan-evasion vector, so the plugin is INVALID. Untrack them with the fix agent … Files: …`
+**Severity**: MAJOR (blocking — gitignore-evasion hardening)
+
+**Root cause**: One or more files are BOTH git-tracked AND matched by `.gitignore`. `.gitignore` does not untrack an already-tracked file, so these files still ship in the published artifact even though they are declared ignored. This is (a) an ambiguous shipped-but-ignored state and (b) a scan-evasion vector — an author could `git add` a payload then `.gitignore` it to hide it from the scanners. CPV now scans such files regardless AND fails the plugin so the anti-pattern is removed, not merely scanned around.
+
+**Fix** (automatic — this is what the fix agent runs):
+
+1. List the offending files — the authoritative set; re-derive it, do NOT rely on the truncated list in the finding message:
+   ```bash
+   git ls-files --cached --ignored --exclude-standard
+   ```
+2. For each file decide:
+   - **Dev-only / operational / regeneratable, should NOT ship** (the common case — reports, caches, logs, build artifacts) → **untrack** it, keeping the working-tree copy so nothing is lost:
+     ```bash
+     git ls-files --cached --ignored --exclude-standard -z | xargs -0 git rm --cached --
+     ```
+     (or `git rm --cached <file>` per file). The file leaves the index/published artifact but stays on disk; `.gitignore` is now enforced.
+   - **Legitimately must ship** (e.g. vendored third-party reference docs) → it must NOT be ignored: **remove its pattern from `.gitignore`** so it is tracked-and-not-ignored (valid, shipped, and scanned). Do NOT keep it gitignored to skip scanning — vendored content is scanned by design; report any false-positives instead.
+3. Re-validate; the check passes when this prints nothing:
+   ```bash
+   git ls-files --cached --ignored --exclude-standard
+   ```
+
+**Do NOT** resolve this by deleting the files from disk or by relaxing the gate — the only valid resolutions are untrack (`git rm --cached`) or un-ignore (edit `.gitignore`).
+
 ---
 
 ## 14. Workflow Inline Python Issues

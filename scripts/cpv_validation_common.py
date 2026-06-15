@@ -4805,6 +4805,92 @@ def get_gitignored_files(root_path: Path) -> set[str]:
     return ignored
 
 
+def gitignored_unshipped_paths(plugin_root: Path) -> set[str] | None:
+    """Git-ACCURATE set of rel-paths that are gitignored AND untracked.
+
+    Returns the set of paths that are BOTH ignored by ``.gitignore`` AND not
+    tracked by git — i.e. genuinely **not part of the published artifact**, so
+    they are safe to skip from SECURITY scanning. Returns ``None`` when git is
+    unavailable / the tree is not a repo, which signals the caller to NOT skip
+    anything on gitignore grounds (the present tree IS the artifact — scan
+    everything).
+
+    SECURITY — this is the difference between a correct skip and an evasion
+    vector. ``.gitignore`` does NOT untrack an already-tracked file; a
+    ``tracked + gitignored`` file still ships in ``git archive`` / the publish
+    tarball. So such a file is deliberately EXCLUDED from this set (it is in the
+    index, hence not in ``--others``) and MUST be scanned. The previous
+    pure-pattern skip (``is_path_gitignored``) matched a tracked+gitignored file
+    and wrongly skipped it, letting an author ``git add`` a payload and
+    ``.gitignore`` it to evade the scanner. Using ``git ls-files`` instead keys
+    the skip on *shipped-ness*, not on the gitignore pattern.
+
+    ``--others`` = untracked only; ``--ignored --exclude-standard`` = restricted
+    to the ones git ignores (honoring nested ``.gitignore`` + ``.git/info/exclude``
+    + global excludes); ``--directory`` = collapse a fully-ignored-untracked dir
+    to a single entry (a dir that still contains a tracked file is NOT collapsed,
+    so a force-added tracked file under an ignored dir stays scannable).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"],
+            cwd=plugin_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return {line.rstrip("/") for line in result.stdout.splitlines() if line.strip()}
+
+
+def path_is_unshipped(rel_posix: str, unshipped: set[str]) -> bool:
+    """True iff ``rel_posix`` equals, or lives under, a gitignored-untracked entry.
+
+    ``unshipped`` is the set from :func:`gitignored_unshipped_paths`; an entry may
+    be a file (exact match) or a collapsed directory (prefix match).
+    """
+    if rel_posix in unshipped:
+        return True
+    return any(rel_posix.startswith(entry + "/") for entry in unshipped)
+
+
+def tracked_but_gitignored_paths(plugin_root: Path) -> list[str] | None:
+    """Files that are BOTH git-tracked AND gitignored — the invalid "ships but
+    marked ignored" state. Returns a sorted list of rel-paths (empty when none),
+    or ``None`` when git is unavailable / the tree is not a repo (the check is
+    then inapplicable).
+
+    ``.gitignore`` is a contract: an ignored path is declared "not part of the
+    repo." Tracking such a path ships it anyway (``.gitignore`` does not untrack
+    an already-tracked file), producing an ambiguous shipped-but-ignored
+    artifact AND the exact evasion vector the scanner now defends against (an
+    author could ``git add`` a payload then ``.gitignore`` it to hide it). A
+    plugin in this state is INVALID; the resolution is to untrack the files
+    (``git rm --cached``) or remove them from ``.gitignore``.
+
+    ``git ls-files --cached --ignored --exclude-standard`` lists exactly the
+    tracked files that match the active ignore rules.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--cached", "--ignored", "--exclude-standard"],
+            cwd=plugin_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return sorted({line.strip() for line in result.stdout.splitlines() if line.strip()})
+
+
 def parse_gitignore(gitignore_path: Path) -> list[str]:
     """Parse a .gitignore file and return list of patterns.
 

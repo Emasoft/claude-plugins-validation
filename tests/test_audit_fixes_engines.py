@@ -723,36 +723,9 @@ class TestWorkflowNonRunDefers:
         assert verdict in ("safe_schema", "unknown")
 
 
-# ───────────────────────────────────────────────────────────────────────
-# NIT #14 — gitignore predicate excludes files under dir-only patterns
-# ───────────────────────────────────────────────────────────────────────
-class TestGitignoreDirOnlyPattern:
-    def test_file_under_dir_only_pattern_excluded(self, tmp_path):
-        import cpv_skillaudit_native as nat
-
-        (tmp_path / ".gitignore").write_text("/build/\n", encoding="utf-8")
-        build_dir = tmp_path / "build"
-        build_dir.mkdir()
-        target = build_dir / "artifact.py"
-        target.write_text("x = 1\n", encoding="utf-8")
-
-        predicate = nat._load_gitignore_predicate(tmp_path)
-        if predicate is None:
-            pytest.skip("pathspec/parse_gitignore unavailable")
-        # The FILE under the dir-only /build/ pattern must be ignored.
-        assert predicate(target) is True
-
-    def test_file_outside_ignored_dir_still_scanned(self, tmp_path):
-        """Two-sided: a file NOT under the ignored dir is still scanned."""
-        import cpv_skillaudit_native as nat
-
-        (tmp_path / ".gitignore").write_text("/build/\n", encoding="utf-8")
-        src_dir = tmp_path / "src"
-        src_dir.mkdir()
-        target = src_dir / "main.py"
-        target.write_text("x = 1\n", encoding="utf-8")
-
-        predicate = nat._load_gitignore_predicate(tmp_path)
-        if predicate is None:
-            pytest.skip("pathspec/parse_gitignore unavailable")
-        assert predicate(target) is False
+# NOTE: the former `TestGitignoreDirOnlyPattern` class tested
+# `_load_gitignore_predicate` (the pure-pattern gitignore skip), which was
+# REMOVED in the gitignore-evasion hardening — a tracked+gitignored file ships
+# and must be scanned, so the skillaudit walker now skips only gitignored-AND-
+# untracked paths (git-accurate). The replacement behavior is covered by
+# tests/test_gitignore_evasion_hardening.py (two-sided, real git fixtures).
