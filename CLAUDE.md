@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.25` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.26` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
-| **test files** | **328** | `ls tests/test_*.py`; ~9303 tests |
+| **test files** | **329** | `ls tests/test_*.py`; ~9312 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,29 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.26 — gitignore-evasion hardening (USER-directed, #123 triage)** — closed a
+scan-evasion hole: the in-process scanners skipped any path matching `.gitignore`
+("gitignored = not-shipped"), but `.gitignore` does NOT untrack an already-tracked
+file — a tracked+gitignored file still SHIPS. So `git add payload.sh` + `.gitignore
+payload.sh` → skipped-but-shipped (evasion). THREE-PART fix (all two-sided, real git
+fixtures): (1) SCANNER — `_iter_scannable_files` now skips only gitignored-AND-untracked
+paths via new `gitignored_unshipped_paths` (`git ls-files --others --ignored
+--exclude-standard --directory`); tracked+gitignored is SCANNED (baseline SKIPPED →
+the hole), untracked+gitignored research still skipped (issue #37), non-git tree scans
+all; removed pure-pattern `_load_gitignore_predicate` + its 2 tests. (2) VALIDATOR —
+new `check_tracked_gitignored_files` in validate_plugin: a plugin tracking a gitignored
+file is INVALID (one blocking MAJOR listing the files via `git ls-files --cached
+--ignored --exclude-standard` + routing to the fix agent). gitignore enforcement is
+non-negotiable. (3) FIX AGENT — fix-validation skill §13 recipe: untrack via `git rm
+--cached` (keeps working-tree copy) or un-ignore if it must ship. DOGFOOD: CPV's own
+repo had 5 tracked+gitignored `.rechecker/reports/*` → untracked them; CPV passes its
+own rule. The external post-filter + secret `gi.walk` still pattern-skip — BACKSTOPPED
+by the validator rule (a tracked+gitignored file fails the gate regardless);
+git-accurate-ing those is defense-in-depth follow-up. +11 tests; self-validate VALID
+0/0/0/0; FULL SERIAL 9312 pass/2 skip; zero regressions. (#123 reply: existing
+`cpv.exclude_paths` covers style-rule skips; a security-scan exclude is DECLINED per
+the no-exempt rule — vendored is scanned by design, fix FPs not exclude.)
 
 **v2.126.25 — closed #122** (skillaudit CONTAINER_ESCAPE FP on read-only
 container-DETECTION). The catalog rule lumped three init-process `/proc` paths
