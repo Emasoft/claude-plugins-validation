@@ -312,14 +312,19 @@ def _external_finding_is_gitignored(file_ref: str, gi: Any) -> bool:
     gitignored ``INPUT_DEV/**/*.zip`` corpus producing ~97 trufflehog hits).
     This generalises that hardcoded list to the plugin's ACTUAL ``.gitignore``.
 
-    Rationale + FN-safety: a gitignored path is not committed → not shipped to
-    the marketplace → not installed by users, so a secret / pattern hit in it
+    Rationale + FN-safety: a gitignored AND UNTRACKED path is not in the
+    published artifact → not installed by users, so a secret / pattern hit in it
     is the author's LOCAL concern, not a published-plugin vulnerability. This
-    ALIGNS the external scanners with the two in-process scanners that already
-    honor gitignore — the in-process secret scanner walks via ``gi.walk`` and
-    the skillaudit native scanner filters via ``_load_gitignore_predicate`` — so
-    it opens NO new false-negative surface relative to CPV's existing
-    "gitignored = not-shipped = not-scanned" contract.
+    post-filter matches the gitignore PATTERN, so it also suppresses an external
+    finding on a TRACKED+gitignored file — but that case is BACKSTOPPED by
+    ``validate_plugin.check_tracked_gitignored_files``, which fails any plugin
+    that tracks a gitignored file (such a file SHIPS despite being ignored — the
+    scan-evasion vector), so it can never reach users. The skillaudit native
+    scanner is git-accurate: it skips only gitignored-AND-untracked paths via
+    ``gitignored_unshipped_paths`` and scans tracked+gitignored files. (Aligning
+    this external post-filter + the in-process secret ``gi.walk`` to be
+    git-accurate too is defense-in-depth follow-up; the gate is already closed by
+    the validator rule above.)
 
     ``file_ref`` may be absolute (cc-audit / tirith / Cisco hand them back) or
     plugin-root-relative; it is normalised against ``gi.root`` (the resolved

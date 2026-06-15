@@ -35,7 +35,7 @@ import re
 import unicodedata
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
 __all__ = [
@@ -3958,9 +3958,25 @@ def _iter_scannable_files(plugin_root: Path) -> Iterable[Path]:
         if plugin_root.is_file() and _file_is_scannable(plugin_root):
             yield plugin_root
         return
-    # Build the gitignore predicate once — pure-Python pattern matching,
-    # no subprocess. Used to filter each candidate path below.
-    gi_predicate = _load_gitignore_predicate(plugin_root)
+    # Build the SHIPPED-set skip once (gitignore-evasion hardening). SECURITY:
+    # skip a path ONLY if it is gitignored AND untracked (= not in the published
+    # artifact). A tracked+gitignored file STILL SHIPS (`.gitignore` does not
+    # untrack an already-tracked file) and therefore MUST be scanned — the old
+    # pure-pattern skip matched it and wrongly dropped it, letting an author
+    # `git add` a payload then `.gitignore` it to evade the scanner.
+    # `gitignored_unshipped_paths` is git-accurate (one `git ls-files` call) and
+    # returns None when git is unavailable, in which case we skip nothing on
+    # gitignore grounds (the present tree IS the artifact — scan everything).
+    try:
+        from cpv_validation_common import (  # noqa: PLC0415
+            gitignored_unshipped_paths,
+            path_is_unshipped,
+        )
+
+        unshipped: set[str] | None = gitignored_unshipped_paths(plugin_root)
+    except ImportError:
+        unshipped = None
+        path_is_unshipped = None  # type: ignore[assignment]
     for p in plugin_root.rglob("*"):
         if not p.is_file():
             continue
@@ -3977,76 +3993,24 @@ def _iter_scannable_files(plugin_root: Path) -> Iterable[Path]:
         # auditor packaging). Spoofed basenames (different bytes) fall through.
         if _is_self_artifact_copy(p):
             continue
-        # Issue #37 — skip anything the plugin's .gitignore excludes.
-        # Applied AFTER _SKIP_DIRS / extension filters because most
-        # files won't be ignored and a cheap negative path is preferred.
-        if gi_predicate is not None and gi_predicate(p):
-            continue
+        # Issue #37 + gitignore-evasion hardening — skip ONLY genuinely-unshipped
+        # paths (gitignored AND untracked). A tracked+gitignored file ships and is
+        # scanned here (and separately flagged INVALID by validate_plugin's
+        # gitignore-enforcement rule). Applied AFTER _SKIP_DIRS / extension filters
+        # because most files won't be unshipped and a cheap negative path is preferred.
+        if unshipped is not None and path_is_unshipped is not None:
+            try:
+                rel = p.relative_to(plugin_root).as_posix()
+            except ValueError:
+                rel = ""
+            if rel and path_is_unshipped(rel, unshipped):
+                continue
         try:
             if p.stat().st_size > 2_000_000:
                 continue
         except OSError:
             continue
         yield p
-
-
-def _load_gitignore_predicate(plugin_root: Path) -> Callable[[Path], bool] | None:
-    """Compile the plugin's .gitignore into a `bool(Path) -> ignored?` predicate.
-
-    Returns None if no .gitignore exists or the helper module cannot be
-    imported (defensive — fall back to scanning everything is safer
-    than silently dropping findings).
-
-    Pure-Python: parses the file once, matches each candidate path with
-    `is_path_gitignored`. No subprocess; SkillAudit's design contract
-    holds (issue #37).
-    """
-    gitignore_path = plugin_root / ".gitignore"
-    if not gitignore_path.is_file():
-        return None
-    try:
-        from cpv_validation_common import is_path_gitignored, parse_gitignore  # noqa: PLC0415
-    except ImportError:
-        return None
-    try:
-        patterns = parse_gitignore(gitignore_path)
-    except (OSError, ValueError):
-        return None
-    if not patterns:
-        return None
-
-    def predicate(path: Path) -> bool:
-        try:
-            rel = path.relative_to(plugin_root).as_posix()
-        except ValueError:
-            return False
-        # Filesystem-aware: query with trailing slash for directories so
-        # dir-only patterns (`/INPUT_DEV/`, `node_modules/`) match
-        # correctly via pathspec's gitwildmatch (issue #37).
-        if is_path_gitignored(rel, patterns):
-            return True
-        try:
-            if path.is_dir() and is_path_gitignored(rel.rstrip("/") + "/", patterns):
-                return True
-        except OSError:
-            pass
-        # audit NIT #14: `_iter_scannable_files` rglobs FILES only, so the
-        # dir-trailing-slash branch above never fires for a file candidate.
-        # A file under a DIR-ONLY ignore pattern (`/build/`, `node_modules/`)
-        # would then be scanned (overscan) because pathspec's gitwildmatch
-        # may not match a bare dir pattern against the file path itself.
-        # Walk this file's ancestor directories and test each with a
-        # trailing slash so a dir-only pattern excludes its contained files.
-        rel_path = PurePosixPath(rel)
-        for parent in rel_path.parents:
-            parent_str = parent.as_posix()
-            if parent_str in ("", "."):
-                continue
-            if is_path_gitignored(parent_str + "/", patterns):
-                return True
-        return False
-
-    return predicate
 
 
 # ────────────────────────────────────────────────────────────────────────

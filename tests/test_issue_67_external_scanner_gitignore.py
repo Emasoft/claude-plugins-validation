@@ -12,9 +12,9 @@ arbitrary gitignored sub-tree.
 Fix: a shared ``_external_finding_is_gitignored(file_ref, gi)`` predicate wired
 into every external scanner's skip chain, generalising the hardcoded list to
 the plugin's ACTUAL ``.gitignore``. This aligns the external scanners with the
-two in-process scanners that already honor gitignore (the secret scanner walks
-via ``gi.walk``; the skillaudit native scanner filters via
-``_load_gitignore_predicate``) — so it opens NO new false-negative surface.
+in-process gitignore handling (the secret scanner walks via ``gi.walk``; the
+skillaudit native scanner skips only gitignored-AND-untracked paths via
+``gitignored_unshipped_paths``) — so it opens NO new false-negative surface.
 
 Each test is TWO-SIDED: a gitignored finding is dropped AND a tracked/shipped
 finding still fires — proving the fix is a precise not-shipped discrimination,
