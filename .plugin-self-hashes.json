@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-06-16T08:50:07+00:00",
+  "computed_at": "2026-06-16T09:21:17+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:37c7988e0b1555f9699a3d07e8d15002e4e52c515b55f1893099bfad080fec6e",
@@ -16,7 +16,7 @@
     ".trashcan/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".trashcan/README.txt": "sha256:3106acc9af8415d37610ef0b9f138dc9622f25f81ac37a31f24a9ebd2d25f30f",
     "CHANGELOG.md": "sha256:03e91f37e17b7f63afd08de869b442ebbe4242eb335410fbe987d33e34666c8f",
-    "CLAUDE.md": "sha256:4cb3761eff0f15599da70d2249e658c9308aa44bed63b731531728d72fca4346",
+    "CLAUDE.md": "sha256:43744654117c3797f868f6c1dc04e13d3f8b78075a956bddb899dab972623b41",
     "LICENSE": "sha256:f79aeb8187cb5e63d27261eba76a2d771292c27489645b3410bd5e67edc02f5d",
     "README.md": "sha256:5124bde78bcf05258d4edbf3b4d4245e7fbbb3fa8526083557c1b1cbe05f0519",
     "agents/cache-optimizer-agent.md": "sha256:6dbcfbc8bd9b6dd7e4933440516004fa787a68395c95749dd3b45e50cfbb7711",
@@ -338,7 +338,7 @@
     "skills/create-plugin/references/v2-1-80-features.md": "sha256:f79c411f24eb1d6b2bbe040a3bc452730260da62d5abbdad0c258191f0679353",
     "skills/deterministic-codemod/SKILL.md": "sha256:74ac762b927e65cf9e6cac70b4dedea3f176ee9e9ca8585b0fbca2a3a6608cfb",
     "skills/deterministic-codemod/references/subcommands.md": "sha256:196e637fa12c905542f66cc16842b58222a6eb4313d85092d3a4fa35e9e52b20",
-    "skills/devitalize-threats/SKILL.md": "sha256:eba46e1d547bd9d473a1e799a1f66260c9f7f63bde6030e45882e6984ccdc95d",
+    "skills/devitalize-threats/SKILL.md": "sha256:56fe094f765e6f1ac613c1e3130041522ff5463b3280dfcb175f19fc18244477",
     "skills/devitalize-threats/references/inert-proofs.md": "sha256:91cedd58f8e8d8f0fe86f1e545459af97130a85868db6f00f989b0e6ce16753e",
     "skills/devitalize-threats/references/load-bearing-triage.md": "sha256:805e1215213c5b6320c2a8802edc3e9ba7d705b11ca295348fb23d3c3d14cd56",
     "skills/devitalize-threats/references/transform-catalog.md": "sha256:b76b9ab6a653dc3d355854f33d3a8028909567409d27369cd28891ee88bcee0f",
