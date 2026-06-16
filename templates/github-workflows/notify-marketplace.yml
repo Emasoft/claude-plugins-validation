@@ -59,6 +59,20 @@ jobs:
           echo "name=${{ github.event.repository.name }}" >> $GITHUB_OUTPUT
           echo "ref=${{ github.sha }}" >> $GITHUB_OUTPUT
 
+      - name: Verify MARKETPLACE_PAT secret is present
+        # Fail with a clear message BEFORE the dispatch step. Without this guard
+        # a missing or expired PAT surfaces as an opaque 401 from
+        # peter-evans/repository-dispatch with no hint that the secret is the
+        # cause — wastes triage time. Exit 78 (EX_CONFIG) signals a config error.
+        env:
+          MARKETPLACE_PAT: ${{ secrets.MARKETPLACE_PAT }}
+        run: |
+          if [ -z "${MARKETPLACE_PAT:-}" ]; then
+            echo "::error::MARKETPLACE_PAT secret is unset on this repo." >&2
+            echo "::error::Set it with: gh secret set MARKETPLACE_PAT --repo ${{ github.repository }} --body \"\$MARKETPLACE_PAT\"" >&2
+            exit 78
+          fi
+
       - name: Trigger marketplace update
         # Third-party action pinned to a full commit SHA (gh-actions rule).
         # Defensive "second-latest" pin: v4.0.0 (not v4.0.1). The latest
