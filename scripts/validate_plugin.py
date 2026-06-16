@@ -1828,6 +1828,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "design",  # TRDD design docs (design/tasks/)
         "reports",  # v2.24.0 — mandated report output folder (gitignored; see cpv_validation_common.resolve_reports_dir())
         "reviews",  # code-review output folder (recognised built-in; TRDD-02e1672b)
+        "workflows",  # Workflow-DSL scripts (Claude Code 2.1.154+ Workflow tool / ultracode); #94. Files inside are still security-scanned — this only stops the structural RC-NONSTD-DIR-001 MAJOR.
         # Common dirs across many plugins (added v2.23.2 after empirical scan
         # of 160 installed plugins surfaced these as repeat false positives):
         "prompts",  # prompt templates (used by codex and most AI plugins)

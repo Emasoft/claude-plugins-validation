@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-06-16T07:53:22+00:00",
+  "computed_at": "2026-06-16T08:47:59+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:a8a76170c2d4859472b02c67cb2d7d954e197b811dd8f348307dd868141bbc62",
@@ -16,7 +16,7 @@
     ".trashcan/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".trashcan/README.txt": "sha256:3106acc9af8415d37610ef0b9f138dc9622f25f81ac37a31f24a9ebd2d25f30f",
     "CHANGELOG.md": "sha256:349b45681038f0d5be613b15c788b90c0d8cc2c97793a6ad86650a56a204ce5a",
-    "CLAUDE.md": "sha256:6e933b3aa846c03fb2321c9ce53e3965692ddfed69306e9ad7059ec7a4faa1d6",
+    "CLAUDE.md": "sha256:4cb3761eff0f15599da70d2249e658c9308aa44bed63b731531728d72fca4346",
     "LICENSE": "sha256:f79aeb8187cb5e63d27261eba76a2d771292c27489645b3410bd5e67edc02f5d",
     "README.md": "sha256:ebff714ba806ba33d4b03472b64899691af9225835d403067caa75d8a9a97a44",
     "agents/cache-optimizer-agent.md": "sha256:6dbcfbc8bd9b6dd7e4933440516004fa787a68395c95749dd3b45e50cfbb7711",
@@ -260,7 +260,7 @@
     "scripts/validate_marketplace.py": "sha256:0d30ff02da28260277b194ee82b5de7494feaabc455c2c14e8e101736a970cbb",
     "scripts/validate_marketplace_pipeline.py": "sha256:530e7dbfe558fb386a7dba5976869b71ff1777cb39e3ecc126e73f5ac9637c8b",
     "scripts/validate_mcp.py": "sha256:3121992e98f24671d16c429169d64bad4b6a7f8ad67fa81cc85dd3384de3f079",
-    "scripts/validate_plugin.py": "sha256:4de39db28fec844d0326bac8b094e933211e259a6628fde08a99aff2986e7385",
+    "scripts/validate_plugin.py": "sha256:726a2af1e068733e58856f918eeff00c99d873f425d732609ca18b7149791cc9",
     "scripts/validate_project_scope.py": "sha256:2558145adba959a4863085f19aef7ec4a6d801d4c6b2ef622a217186ff8e1edd",
     "scripts/validate_rules.py": "sha256:2d8d4ecf266bbde1a5d8f982a0285a5d433d47264a9ed35425725cd989e57185",
     "scripts/validate_scoring.py": "sha256:cf1487d9bbec9e2b010fade13d8037a14190be56725cf6214cd2a964e7e43e52",
@@ -761,6 +761,7 @@
     "tests/test_issue_86_pipe_alternation.py": "sha256:890f5b119c389e0f6dd23b5b08dafd86ee963da83dc63ea9a4373798bedbe642",
     "tests/test_issue_87_logical_or_not_pipe.py": "sha256:33e691f662c13acda3f2766d28590da7ac5bbc67abac6801d28b79e5f51cbdba",
     "tests/test_issue_91_regex_dos_linear.py": "sha256:eefb02c1e97f5c280f67f632e71acf04af677a7de0e58e4e8877d2e0588ee288",
+    "tests/test_issue_94_workflows_known_dir.py": "sha256:2a2cbc767ec0a396ec1657df1cb062de30d4dbc1c1a4838481784a074b6b5aa6",
     "tests/test_issue_96_99_backtick_xref_fp.py": "sha256:f3b7814e8fdfe21b8abe67bd66a2c19fca07fa21f5a8098213087c06d7ad73ac",
     "tests/test_issue_97_third_person_roledef_fp.py": "sha256:83ff0edc2f5d59efad06f1dcc230eb52adc0743d5fce608e2fedcd6664101119",
     "tests/test_issue_cspell_dict_fp.py": "sha256:120f66abfdeaa85b28ccbbfd4e2fd55afe16e7bf006ab29613ba9cd84b3d9eac",
