@@ -831,6 +831,89 @@ def _is_test_monkeypatch_defineProperty(source_line: str) -> bool:
     return bool(_TEST_MONKEYPATCH_DEFINEPROPERTY_RE.search(source_line))
 
 
+# Issue #125 class 4 — the TOOL_SHADOW pattern ``Object\.defineProperty.*
+# (?:get|set|value)`` fires on the universal CommonJS→ESM re-export-interop
+# getter every bundled UMD/ESM library emits (webpack/rollup/esbuild
+# ``__reExport`` / ``_interopNamespace``), plus React-class accessors and the
+# passive-event-listener feature-detect. None of these redefine another tool —
+# they define a property on the module's OWN exports object (a fresh ``{}`` /
+# the local ``exports`` / a local ``*.prototype``). A REAL tool-shadow attack
+# redefines a GLOBAL / BUILTIN (``window`` / ``globalThis`` / ``process`` / a
+# known global function / ``__proto__``) to hijack it.
+#
+# Extract the FIRST argument of ``Object.defineProperty(<arg1>, …)`` so its
+# target can be classified. (re2-safe — no lookaround.)
+_DEFINEPROPERTY_FIRST_ARG_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bObject\.defineProperty\s*\(\s*([^,]+?)\s*,"
+)
+# A first-arg target that IS a real shadow surface — keep firing. A global
+# object, a builtin prototype, a known global function name reached bare, or a
+# ``__proto__`` redefinition. The match is on the WHOLE first-arg expression, so
+# ``window``, ``globalThis.fetch``, ``Object.prototype`` etc. are all caught.
+_DEFINEPROPERTY_SHADOW_TARGET_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[^\w$.])"
+    r"(?:window|globalThis|global|self|process|"
+    r"Function\.prototype|Object\.prototype|Array\.prototype|"
+    r"fetch|require|eval|XMLHttpRequest|__proto__)"
+    r"(?:$|[^\w$])",
+)
+# A first-arg target that is provably a LOCAL / module object — safe to suppress
+# when paired with a re-export/forwarding/feature-detect descriptor:
+#   * ``exports`` / ``module.exports`` — the module's own export object
+#   * a fresh object literal ``{}`` — a brand-new object, owns nothing global
+#   * ``<ident>.prototype`` where the ident is a LOCAL (a minified class binding,
+#     NOT a builtin prototype — those are caught by the shadow-target regex above)
+#   * a minified single/short local binding or a ``__``-prefixed internal name
+_DEFINEPROPERTY_LOCAL_TARGET_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?:"
+    r"exports"
+    r"|module\.exports"
+    r"|\{\s*\}"
+    r"|[A-Za-z_$][\w$]*\.prototype"
+    r"|[A-Za-z_$][\w$]*"
+    r")$",
+)
+# The descriptor / surrounding shape that confirms a benign module-interop or
+# self-object defineProperty: a forwarding getter (``get:()=>r[o]`` /
+# ``get:function(){return …}``), the ``enumerable:!0`` re-export flag, a
+# ``Symbol.toStringTag`` with ``'Module'``, or a feature-detect getter.
+_DEFINEPROPERTY_INTEROP_SHAPE_RE: Final[re.Pattern[str]] = re.compile(
+    r"get\s*:\s*(?:\(\s*\)\s*=>|function\b)"
+    r"|enumerable\s*:\s*(?:!0|true)"
+    r"|Symbol\.toStringTag"
+    r"|set\s*:\s*(?:\(|function\b)"
+    r"|value\s*:\s*['\"]Module['\"]",
+)
+
+
+def _is_module_interop_or_self_defineproperty(source_line: str, match: str) -> bool:
+    """True iff a TOOL_SHADOW ``Object.defineProperty(...)`` match defines a
+    property on the module's OWN object (re-export interop / a fresh ``{}`` / a
+    local ``*.prototype``) with a forwarding / re-export / feature-detect
+    descriptor — NOT a redefinition of a global / builtin / known tool.
+
+    FN-safe: the first arg is rejected (keeps firing) when it names a global
+    object (``window`` / ``globalThis`` / ``global`` / ``self`` / ``process``),
+    a builtin prototype (``Object.prototype`` / ``Function.prototype`` /
+    ``Array.prototype``), a known global function (``fetch`` / ``require`` /
+    ``eval`` / ``XMLHttpRequest``), or ``__proto__`` — the real shadow targets.
+    """
+    m = _DEFINEPROPERTY_FIRST_ARG_RE.search(source_line)
+    if m is None:
+        return False
+    first_arg = m.group(1).strip()
+    # A real shadow target anywhere in the first-arg expression voids the
+    # carve-out (e.g. ``globalThis.fetch`` / ``window`` / ``Object.prototype``).
+    if _DEFINEPROPERTY_SHADOW_TARGET_RE.search(first_arg):
+        return False
+    if not _DEFINEPROPERTY_LOCAL_TARGET_RE.match(first_arg):
+        return False
+    # Require the benign descriptor / interop shape on the line, so a
+    # ``Object.defineProperty(localObj, k, {value: maliciousHandler})`` that is
+    # NOT a forwarding/feature-detect shape does not get a free pass.
+    return bool(_DEFINEPROPERTY_INTEROP_SHAPE_RE.search(source_line))
+
+
 # r07 jarrodwatts FP iter1 (2026-05-28) — test fixture arrays of
 # Unicode bidi/zero-width/format characters used by detection-tests.
 _TEST_UNICODE_VOCAB_RE: Final[re.Pattern[str]] = re.compile(
@@ -1741,6 +1824,20 @@ def classify(
     # Iron rule preserved: same pattern OUTSIDE a test file still fires
     # (real ``Object.defineProperty(window, '__proto__', ...)`` etc.).
     if rule_id == "TOOL_SHADOW" and is_test and _is_test_monkeypatch_defineProperty(line):
+        return "safe_literal"
+
+    # issue #125 class 4 — TOOL_SHADOW fires on the universal CommonJS→ESM
+    # re-export-interop ``Object.defineProperty(exports, k, {get:()=>src[k]})``
+    # every bundled UMD/ESM library emits, plus React-class accessors and the
+    # passive-event-listener feature-detect. These define a property on the
+    # module's OWN object, never on a global/builtin/tool. Suppress only that
+    # self-object / interop shape (any file, not just tests).
+    # FN-safe: a real ``Object.defineProperty(window,'fetch',{get:…steal})`` /
+    # ``(globalThis,'__proto__',…)`` / ``(process,'env',…)`` keeps firing
+    # because the first arg is a global / builtin / known tool; the other
+    # TOOL_SHADOW patterns (``__proto__ =`` / ``monkeypatch`` / ``Proxy(target``)
+    # are not in scope of this branch and keep firing.
+    if rule_id == "TOOL_SHADOW" and _is_module_interop_or_self_defineproperty(line, match):
         return "safe_literal"
 
     # r07 jarrodwatts FP iter1 (2026-05-28) — INVISIBLE_UNICODE_RAW pattern

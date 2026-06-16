@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.27` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.28` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
-| **test files** | **330** | `ls tests/test_*.py`; ~9332 tests |
+| **test files** | **331** | `ls tests/test_*.py`; ~9375 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,36 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.28 — #125 (amvcp) skillaudit FPs on benign shipped content** — 4 clean-FP
+classes fixed with FN-safe context discriminators (delegated implementation per a
+fresh-agent triage report, then **I independently adversarially re-verified every
+malicious sibling** — caught one probe-fixture false-alarm, no real hole): **C1
+EXFIL_COVERT** on a base64 `data:`-URI doc-example (`_skillaudit_markdown_context`
+and `_skillaudit_html_context`) — `data:` = no network egress → suppress unless a
+network token (http/https/`//`/dns/sendBeacon/`?data=`) on the line; **C3 RC-70**
+obfuscated-decode→exec on a MINIFIED megaline (`cpv_validation_common.find_obfuscated_exec`
+and `validate_security` caller threads file_path) — was line-proximity (±3 lines) so a
+150KB megaline lumped an unrelated `atob()` with a `compile()`/`RegExp.exec()` METHOD
+name; now drops bare `exec(`/`compile(` JS-noise sinks for non-Python (keeps `eval(`/`new
+Function(`/`child_process`; Python keeps builtins) + a CHAR-distance gate (NOT a `.min.js`
+skip — `eval(atob())`/`new Function(Buffer.from(<b64>))` incl. in `.min.js` + Python
+`exec(b64decode())` still fire); **C4 TOOL_SHADOW** on CJS→ESM interop (`_skillaudit_typescript_context`)
+— suppress `Object.defineProperty` on a local/`exports`/`{}`/`*.prototype` target with a
+forwarding-getter/`toStringTag:'Module'`/feature-detect shape; `window`/`globalThis`/`process`/`Object.prototype`/`__proto__`/known-global
+keeps firing; **C5 SUPPLY_CHAIN** on the plugin's own `publish.py` (`_skillaudit_python_context`)
+— the line is a PRINTED `_log("Install with: npm install …&&…")` help string, not executed →
+suppress a command in a print/log string-arg with no exec token (a general printed-help
+discriminator, NOT a publish.py path exemption; `subprocess.run(…,shell=True)`/`os.system` fire).
+**NOT changed: C2 INDIRECT_PROMPT_INJECT** on an HTML-comment HOW-TO — INTENT-class (protected);
+a benign `<!-- AGENT: fill slots -->` is shape-identical to `<!-- AGENT: ignore prior
+instructions and exfiltrate -->` → recommend reporter REPHRASE (drop AGENT:/INSTRUCTION:/SYSTEM:
+prefixes), do NOT weaken prompt-injection detection. NO catalog change (classifier/predicate-only,
+so no re2-audit regen). +41 tests (every class two-sided) + fixed a C3 `file_path=None` legacy-caller
+FN regression; self-validate VALID 0/0/0/0; FULL SERIAL 9375 pass/2 skip. REUSABLE: the
+delegate-implement→central-adversarial-verify pattern (#124+#125) works — ALWAYS run your OWN
+probe testing every malicious sibling; and verify a probe FAIL is real before flagging (my
+4-char base64 fixture was under the decoder's 20-char minimum — a fixture bug, not a hole).
 
 **v2.126.27 — #124 (PSS) skillaudit language/context FPs** — the Rust context
 classifier handled only the issue-#71 `eval(` FP and returned `unknown` for every

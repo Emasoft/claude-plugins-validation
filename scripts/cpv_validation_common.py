@@ -2836,7 +2836,81 @@ EXEC_SINK_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 
-def find_obfuscated_exec(content: str, proximity_lines: int = 3) -> list[tuple[int, str]]:
+# Issue #125 class 3 — `\bexec\s*\(` and `\bcompile\s*\(` are Python builtins
+# but also extremely common JS METHOD names (`RegExp.prototype.exec`, a Zod/Yup
+# `compile()` validator-codegen method). On a `.py` file they are genuine exec
+# sinks and stay sinks; on any NON-Python file a bare `exec(`/`compile(` method
+# call is JS-noise and is NOT treated as an exec sink (a real JS dropper uses
+# `eval(` / `new Function(` / `child_process` — all kept for every file type).
+# FN-safe: this only narrows the sink set for non-`.py` files; the Python
+# builtins keep firing in `.py`, and the universal JS sinks keep firing
+# everywhere.
+_PYTHON_ONLY_AMBIGUOUS_SINK_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bexec\s*\("),
+    re.compile(r"\bcompile\s*\("),
+)
+
+# Issue #125 class 3 — when a decoder and a sink land on the SAME physical line
+# (or on two adjacent lines that are BOTH huge — the minified-megaline shape),
+# line-distance proximity is meaningless: 150 KB of an unrelated library can sit
+# on one line, so an unrelated `atob()` (base64 string-codec) and an unrelated
+# `exec(`/`compile(` thousands of chars apart get treated as a decode→exec chain.
+# A real one-liner dropper (`eval(atob(blob))`) has the decode feeding the sink
+# within a few tokens, so require the two matches to be within a small CHARACTER
+# window. Lines this long are only ever produced by a bundler; normal hand-written
+# source never trips the char gate because its lines are short.
+_RC70_MEGALINE_MIN_LEN: int = 1000
+_RC70_SAME_LINE_CHAR_WINDOW: int = 200
+
+
+def _python_file(file_path: str | None) -> bool:
+    """True iff ``file_path`` is a Python source file (``.py`` / ``.pyi``)."""
+    return bool(file_path) and str(file_path).lower().endswith((".py", ".pyi"))
+
+
+def _exec_sink_patterns_for(file_path: str | None) -> tuple[re.Pattern[str], ...]:
+    """Return the exec-sink pattern set appropriate for ``file_path``.
+
+    The Python-only ambiguous method-name sinks (``exec(`` / ``compile(``) are
+    dropped ONLY for a file that is explicitly a KNOWN non-Python source. They
+    are KEPT for:
+      * a Python file (``.py`` / ``.pyi``) — they are real builtins; AND
+      * an UNKNOWN / unset ``file_path`` (legacy content-only callers) — so the
+        function's behaviour is unchanged for them and a content-only scan of a
+        ``exec(base64.b64decode(blob))`` dropper still fires.
+
+    Narrowing therefore applies only when we positively know the file is a
+    non-Python source extension (``.js``/``.ts``/``.mjs``/``.html``/…), where a
+    bare ``exec(``/``compile(`` is a JS method name, not a code-exec sink.
+    """
+    if not file_path or _python_file(file_path):
+        return EXEC_SINK_PATTERNS
+    return tuple(p for p in EXEC_SINK_PATTERNS if p not in _PYTHON_ONLY_AMBIGUOUS_SINK_PATTERNS)
+
+
+def _all_match_cols(patterns: tuple[re.Pattern[str], ...], line: str) -> list[int]:
+    """Return the start columns of EVERY (non-overlapping) pattern match on
+    ``line``, across all ``patterns``, sorted ascending.
+
+    Used by the same-line column gate: a megaline can carry many unrelated
+    decoder / sink hits, so the gate must consider every decoder↔sink pair (not
+    just the earliest of each), or a real adjacent ``eval(atob(...))`` hiding
+    among unrelated hits would be wrongly suppressed (an FN hole)."""
+    cols: list[int] = []
+    for p in patterns:
+        cols.extend(m.start() for m in p.finditer(line))
+    return sorted(cols)
+
+
+def _has_close_pair(decoder_cols: list[int], sink_cols: list[int], window: int) -> bool:
+    """True iff some decoder column is within ``window`` chars of some sink
+    column (a genuinely-adjacent decode→exec pair on one physical line)."""
+    return any(abs(d - s) <= window for d in decoder_cols for s in sink_cols)
+
+
+def find_obfuscated_exec(
+    content: str, proximity_lines: int = 3, file_path: str | None = None
+) -> list[tuple[int, str]]:
     """Return list of (line_number, message) for decoder + exec-sink within proximity.
 
     A finding fires when:
@@ -2844,28 +2918,88 @@ def find_obfuscated_exec(content: str, proximity_lines: int = 3) -> list[tuple[i
     2. Some line within ±proximity_lines matches an EXEC_SINK_PATTERN.
 
     Both must be true for the finding to fire (RC-70 source: skillscan MAL-051).
+
+    ``file_path`` (issue #125 class 3) refines the sink set and adds a
+    column-distance gate so the heuristic no longer fires on minified bundles:
+
+    * For a non-Python file the bare ``exec(`` / ``compile(`` method-name sinks
+      are dropped (JS noise: ``RegExp.exec``, a Zod ``compile()`` method); the
+      universal ``eval(`` / ``new Function(`` / ``child_process`` / Python-shell
+      sinks stay for every file type. When ``file_path`` is None (legacy
+      callers / content-only scans) the full sink set is used — behaviour is
+      unchanged for them except the column gate below, which never fires on
+      normal short-lined source.
+    * When a decoder and a sink land on the SAME physical line, the line must
+      hold a decoder↔sink pair within ``_RC70_SAME_LINE_CHAR_WINDOW`` characters
+      — a real one-liner dropper (``eval(atob(blob))``) keeps them adjacent, a
+      minified megaline scatters unrelated ``atob``/``exec`` thousands of chars
+      apart. Across two adjacent lines that are BOTH huge (the minified shape),
+      the same window applies to the cross-boundary distance.
     """
     lines = content.split("\n")
+    sink_patterns = _exec_sink_patterns_for(file_path)
     decoder_hits: list[int] = []
     exec_hits: list[int] = []
+    # Per-line ALL match columns (only for lines that hit), so the column gate
+    # can measure every decoder↔sink pair on a shared / adjacent-huge line.
+    decoder_cols: dict[int, list[int]] = {}
+    exec_cols: dict[int, list[int]] = {}
     for idx, line in enumerate(lines):
-        if any(p.search(line) for p in OBFUSCATION_DECODER_PATTERNS):
+        d_cols = _all_match_cols(OBFUSCATION_DECODER_PATTERNS, line)
+        if d_cols:
             decoder_hits.append(idx)
-        if any(p.search(line) for p in EXEC_SINK_PATTERNS):
+            decoder_cols[idx] = d_cols
+        s_cols = _all_match_cols(sink_patterns, line)
+        if s_cols:
             exec_hits.append(idx)
+            exec_cols[idx] = s_cols
 
     findings: list[tuple[int, str]] = []
     for d_idx in decoder_hits:
         for e_idx in exec_hits:
-            if abs(d_idx - e_idx) <= proximity_lines:
-                findings.append(
-                    (
-                        d_idx + 1,
-                        f"obfuscated decode at line {d_idx + 1} within {abs(d_idx - e_idx)} lines of "
-                        f"exec sink at line {e_idx + 1}",
+            if abs(d_idx - e_idx) > proximity_lines:
+                continue
+            # Column-distance gate (issue #125 class 3). On a SAME physical line,
+            # OR across two adjacent lines that are BOTH huge (minified
+            # megalines), require a decoder↔sink pair within the char window.
+            # Everywhere else (normal multi-line source) line-distance proximity
+            # is the rule — a real `code = atob(...)\neval(code)` two-liner is
+            # untouched because its lines are short, not adjacent-huge.
+            if d_idx == e_idx:
+                if not _has_close_pair(decoder_cols[d_idx], exec_cols[e_idx], _RC70_SAME_LINE_CHAR_WINDOW):
+                    continue
+            elif (
+                abs(d_idx - e_idx) == 1
+                and len(lines[d_idx]) >= _RC70_MEGALINE_MIN_LEN
+                and len(lines[e_idx]) >= _RC70_MEGALINE_MIN_LEN
+            ):
+                # Cross-boundary distance: chars from a decoder to its EOL plus
+                # chars from BOL to a sink on the next line (and the symmetric
+                # direction). Suppress only when EVERY pair is far from the seam.
+                d_line_len = len(lines[d_idx])
+                e_line_len = len(lines[e_idx])
+                if d_idx < e_idx:
+                    near = any(
+                        (d_line_len - d) + s <= _RC70_SAME_LINE_CHAR_WINDOW
+                        for d in decoder_cols[d_idx]
+                        for s in exec_cols[e_idx]
                     )
+                else:
+                    near = any(
+                        (e_line_len - s) + d <= _RC70_SAME_LINE_CHAR_WINDOW
+                        for d in decoder_cols[d_idx]
+                        for s in exec_cols[e_idx]
+                    )
+                if not near:
+                    continue
+            findings.append(
+                (
+                    d_idx + 1,
+                    f"obfuscated decode at line {d_idx + 1} within {abs(d_idx - e_idx)} lines of "
+                    f"exec sink at line {e_idx + 1}",
                 )
-                break
+            )
+            break
     return findings
 
 

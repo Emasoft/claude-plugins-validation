@@ -62,16 +62,35 @@ def classify(
     if not file_path.lower().endswith((".html", ".htm")):
         return "unknown"
 
-    # The only HTML FP this classifier owns is the SUPPLY_CHAIN CDN import.
-    # A real remote-code load (eval-of-fetch, an unknown-host import, a
-    # webhook exfil) is a DIFFERENT rule id, so it never reaches here.
-    if rule_id != "SUPPLY_CHAIN":
+    # This classifier owns two HTML FP classes: the SUPPLY_CHAIN CDN import,
+    # and (issue #125 class 1) the EXFIL_COVERT inline ``data:`` URI image.
+    # Every other rule (a real remote-code load — eval-of-fetch, an
+    # unknown-host import, a webhook exfil) is a DIFFERENT rule id, so it
+    # never reaches here and the heuristic chain decides.
+    if rule_id not in ("SUPPLY_CHAIN", "EXFIL_COVERT"):
         return "unknown"
 
     lines = content.splitlines()
     if not (0 <= line_idx < len(lines)):
         return "unknown"
     line = lines[line_idx]
+
+    # Issue #125 class 1 — an ``<img src="data:image/png;base64,${IMG}">``
+    # inline-image idiom in a self-contained HTML artifact has no network
+    # egress, so EXFIL_COVERT (a covert-CHANNEL rule) is a FP. Reuse the
+    # markdown classifier's discriminator (single source of truth) — a
+    # remote-URL / protocol-relative / ``?data=`` / beacon src fails it and
+    # keeps firing.
+    if rule_id == "EXFIL_COVERT":
+        try:
+            from _skillaudit_markdown_context import (  # type: ignore[import-not-found]
+                _is_inert_data_uri_img,
+            )
+        except ImportError:
+            return "unknown"
+        if _is_inert_data_uri_img(line, match):
+            return "safe_literal"
+        return "unknown"
 
     # Reuse the markdown classifier's reputable-CDN host allowlist + the
     # official-install-pipe allowlist (single source of truth — do NOT copy
