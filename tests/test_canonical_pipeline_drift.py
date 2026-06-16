@@ -32,6 +32,8 @@ SCRIPTS = REPO_ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+from generate_plugin_repo import PluginParams  # noqa: E402
+
 
 def _make_minimal_plugin(tmp_path: Path, name: str = "test-plugin") -> Path:
     """Create a plugin folder with just the manifest. No pipeline files."""
@@ -211,3 +213,80 @@ def test_drift_warning_caps_diff_at_max_hunks_or_lines(tmp_path: Path) -> None:
     msg = drift_warnings[0].message
     # The truncation footer is the marker that the cap fired.
     assert "truncated" in msg, "Large drift must be truncated with a marker, not flooded into the report"
+
+
+def test_drift_recommendation_text_only_claims_features_the_templates_emit() -> None:
+    """Issue #118 defect 1: the RC-PIPELINE-DRIFT-001 remediation text must NOT
+    advertise features the generated templates don't actually contain.
+
+    The text previously promised "SHA-pinned actions, actionlint + commitlint
+    gates, macOS matrix, env-sanitized run blocks" — but the templates didn't
+    ship those, so the migration over-promised. Both recommendation strings
+    (the "behind canon → migrate" branch and the "ahead of canon" softer
+    branch) live as literals in ``validate_canonical_pipeline_drift``; this
+    guard extracts whatever feature phrases either string names and asserts
+    each is verifiably present in the corresponding generated template.
+    """
+    import re as _re
+
+    from generate_plugin_repo import gen_ci_yml, gen_notify_marketplace_yml, gen_release_yml
+
+    src = (REPO_ROOT / "scripts" / "validate_plugin.py").read_text(encoding="utf-8")
+    # The full recommendation text is what the validator can put after
+    # "{recommendation}" — grab the whole function body region so both
+    # branches' literals are in scope for the phrase scan.
+    fn_start = src.index("def validate_canonical_pipeline_drift")
+    fn_body = src[fn_start : src.index("\ndef ", fn_start)]
+    assert "Canon now bundles" in fn_body, "migrate-branch recommendation text missing"
+
+    p = PluginParams(
+        name="test-plugin",
+        description="t",
+        author="X",
+        author_email="x@x",
+        python_version="3.12",
+        github_owner="Emasoft",
+        marketplace="test-marketplace",
+    )
+    ci = gen_ci_yml(p)
+    rel = gen_release_yml(p)
+    notify = gen_notify_marketplace_yml(p)
+
+    # Each feature phrase the recommendation text may name → the verifiable
+    # template fact that MUST back it. A phrase present in the source text
+    # without its backing fact is the #118-d1 over-promise regression.
+    checks: list[tuple[str, bool]] = []
+
+    def _all_pinned(*contents: str) -> bool:
+        for content in contents:
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith(("- uses:", "uses:")):
+                    sha = stripped.rsplit("@", 1)[1].split()[0]
+                    if not _re.fullmatch(r"[0-9a-f]{40}", sha):
+                        return False
+        return True
+
+    if "SHA-pinned actions" in fn_body:
+        checks.append(("SHA-pinned actions across ci/release/notify", _all_pinned(ci, rel, notify)))
+    if "timeout-minutes" in fn_body:
+        checks.append(("timeout-minutes in ci+release+notify", all("timeout-minutes:" in c for c in (ci, rel, notify))))
+    if "actionlint" in fn_body:
+        checks.append(("actionlint in ci.yml", "rhysd/actionlint" in ci))
+    if "commitlint" in fn_body:
+        checks.append(("commitlint in ci.yml", "wagoid/commitlint-github-action" in ci))
+    if "macOS test matrix" in fn_body:
+        checks.append(("macOS test matrix in ci.yml", "macos-latest" in ci))
+    if "env-sanitized" in fn_body:
+        # ci.yml + release.yml bind github.* into env: for run blocks; notify too.
+        checks.append(("env-sanitized run blocks", all("env:" in c for c in (ci, rel, notify))))
+    if "SBOM" in fn_body:
+        checks.append(("SBOM in release.yml", ("anchore/sbom-action" in rel or "attest-sbom" in rel)))
+    if "build-provenance attestation" in fn_body:
+        checks.append(("build-provenance attestation in release.yml", "actions/attest-build-provenance" in rel))
+    if "SHA256SUMS" in fn_body:
+        checks.append(("SHA256SUMS in release.yml", "SHA256SUMS" in rel))
+
+    assert checks, "recommendation text named no recognizable feature phrases"
+    failed = [label for label, ok in checks if not ok]
+    assert not failed, f"RC-PIPELINE-DRIFT-001 text over-promises (no backing template feature): {failed}"

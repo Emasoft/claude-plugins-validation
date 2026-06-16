@@ -318,23 +318,34 @@ class TestPyprojectOptionalPerformanceDep:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Part C — gen_ci_yml emits actions/cache@v4 for ~/.cache/cpv
+# Part C — gen_ci_yml emits a SHA-pinned actions/cache for ~/.cache/cpv
 # ─────────────────────────────────────────────────────────────────────
 
 
 class TestGenCiYmlScanCacheBlock:
-    """gen_ci_yml must scaffold an actions/cache@v4 step inside the Validate job."""
+    """gen_ci_yml must scaffold a SHA-pinned actions/cache step inside the Validate job."""
 
     @pytest.fixture(scope="class")
     def ci_yml(self) -> str:
         return gen_ci_yml(_default_params())
 
-    def test_includes_actions_cache_v4(self, ci_yml: str) -> None:
-        """The Validate job must use actions/cache pinned to a v4.x release."""
+    def test_includes_actions_cache_sha_pin_with_version_comment(self, ci_yml: str) -> None:
+        """The Validate job must use a SHA-pinned actions/cache with a version comment.
+
+        Version-agnostic on purpose: canon bumps the cache action over time
+        (v4.x → v5.x …) — what must hold is a 40-hex SHA pin carrying a
+        pinact-compatible ``# vMAJOR.MINOR[.PATCH]`` comment, not a specific
+        major version.
+        """
+        import re  # noqa: PLC0415
+
         # SHA-pinned form per gh-actions.md §"Pin third-party actions to a full commit SHA"
         assert "actions/cache@" in ci_yml, "gen_ci_yml must emit an actions/cache step"
-        # Pin comment carries the version for pinact-compatible re-syncing.
-        assert "# v4." in ci_yml, "actions/cache pin comment must declare a v4.x version"
+        # Pin comment carries the version for pinact-compatible re-syncing —
+        # any vX.Y[.Z], not a hardcoded major.
+        assert re.search(r"actions/cache@[0-9a-f]{40}\s*#\s*v\d+\.\d+", ci_yml), (
+            "actions/cache must be SHA-pinned with a `# vX.Y[.Z]` pinact comment"
+        )
 
     def test_cache_step_path_is_cpv_cache(self, ci_yml: str) -> None:
         """The cached path must be ~/.cache/cpv (scan-cache root)."""

@@ -5520,25 +5520,44 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
                 "commitlint-github-action",
                 "wagoid/commitlint",
                 "rhysd/actionlint",
+                "timeout-minutes",
+                "attest-build-provenance",
+                "sbom-action",
+                "SHA256SUMS",
             )
         )
         if already_hardened:
             recommendation = (
                 "This file appears to already include canon-level hardening "
                 "(SHA-pinned actions, atomic push, actionlint/commitlint, "
-                "etc.). Review the unified diff and decide whether the "
-                "remaining deltas are intentional. If your version is "
-                "STRICTLY above canon, consider opening an upstream PR to "
-                "narrow this gap. This WARNING is advisory and non-blocking; "
-                "it cannot be suppressed via plugin config (TRDD-02e1672b)."
+                "per-job timeouts, SBOM/provenance, etc.). Review the unified "
+                "diff and decide whether the remaining deltas are intentional. "
+                "If your version is STRICTLY above canon, consider opening an "
+                "upstream PR to narrow this gap. This WARNING is advisory and "
+                "non-blocking; it cannot be suppressed via plugin config "
+                "(TRDD-02e1672b)."
             )
         else:
+            # NOTE: the parenthetical below describes what canon bundles
+            # ACROSS the pipeline as a whole — it must stay truthful to the
+            # generated templates (gen_ci_yml / gen_release_yml /
+            # gen_notify_marketplace_yml). ci.yml carries the actionlint +
+            # commitlint gates and the macOS test matrix; release.yml carries
+            # the SBOM + build-provenance attestation + per-asset SHA256SUMS;
+            # ALL three workflows are SHA-pinned, carry per-job
+            # timeout-minutes, and env-sanitize the github.* expressions their
+            # run blocks consume. Do not list a feature here that the
+            # templates do not actually emit (issue #118 defect 1).
             recommendation = (
                 "Run `/cpv-upgrade-plugin` (or `uvx cpv-remote-validate "
                 "standardize <plugin> --fix --force-templates`) to migrate "
-                "to the latest standard (canon now bundles idempotent "
-                "publish.py, atomic push, SHA-pinned actions, actionlint + "
-                "commitlint gates, macOS matrix, env-sanitized run blocks)."
+                "to the latest standard. Canon now bundles: idempotent "
+                "publish.py with atomic push; SHA-pinned actions, per-job "
+                "timeout-minutes, and env-sanitized run blocks across ci.yml, "
+                "release.yml, and notify-marketplace.yml; actionlint + "
+                "commitlint gates and a macOS test matrix in ci.yml; and an "
+                "SBOM, a build-provenance attestation, and per-asset "
+                "SHA256SUMS in release.yml."
             )
         report.warning(
             f"[RC-PIPELINE-DRIFT-001] Plugin pipeline differs from the "

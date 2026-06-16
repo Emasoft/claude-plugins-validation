@@ -3085,6 +3085,15 @@ def gen_ci_yml(p: PluginParams) -> str:
       (pathlib casing, mtime resolution, BSD `ps` vs procps-ng output).
       `fail-fast: false` so each OS reports its own failure even when
       one fails.
+
+    v2.86.0+ follow-on hardening (issues #90 / #114):
+    * Every job declares `timeout-minutes` so a hung action / stalled uvx
+      git-fetch fails fast instead of burning the 360-min default (#90).
+    * The validate job's timeout is the cold-install ceiling (30 min) —
+      `uvx --from git+…` builds CPV from source on a COLD runner (12-20 min,
+      #114); the UV cache (`enable-cache: true`) makes every later run fast.
+    * First-party `actions/*` are SHA-pinned too (not only third-party), so
+      a hostile first-party tag rewrite cannot swap action code.
     """
     return f"""name: CI
 
@@ -3110,12 +3119,16 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    # Hard cap so a hung action / network flake doesn't burn the 360-min
+    # default. Mega-Linter on a fresh repo is the slow step (~5-8 min);
+    # 20 min is generous headroom (issue #90).
+    timeout-minutes: 20
     permissions:
       contents: read
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
 
@@ -3131,7 +3144,7 @@ jobs:
 
       - name: Upload Mega-Linter reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mega-linter-reports
           path: |
@@ -3141,11 +3154,13 @@ jobs:
   commitlint:
     name: Commitlint
     runs-on: ubuntu-latest
+    # Single git-history scan — 10 min is ample (issue #90).
+    timeout-minutes: 10
     # PRs only — push events on main don't need conventional-commit
     # enforcement (the commits are already merged).
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
       - name: Conventional-commits gate
@@ -3154,16 +3169,28 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
+    # Cold-install ceiling (issues #90 + #114). `uvx --from git+…` clones and
+    # builds CPV from source on a COLD runner — empirically 12-20 min. The UV
+    # cache below makes every run after the first fast (seconds), but the
+    # FIRST cold build per cache key must fit under this cap. 30 min is the
+    # documented cold ceiling with headroom; do NOT lower it below 25.
+    timeout-minutes: 30
     steps:
       # Plain checkout — scaffolded plugins ship NO submodules; asking the
       # checkout action to recurse occasionally flakes with "could not read
       # Username" auth errors against non-existent submodule URLs, taking
       # the Validate job down with a misleading 'process git failed exit
       # code 128'. Drop the recurse to remove the moot enumeration step.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Install uv
-        uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
+        # enable-cache: true keys an actions/cache on UV_CACHE_DIR so the
+        # cold `uvx --from git+…` build of CPV (12-20 min, issue #114) is
+        # paid ONCE per lockfile/runner; every later run restores the warm
+        # uv cache and resolves in seconds.
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
 
       - name: Set up Python
         run: uv python install {p.python_version}
@@ -3176,11 +3203,11 @@ jobs:
       # change to the validator's own source busts the cache automatically;
       # the restore-keys fallback still hits a same-OS warm cache on the
       # first run after a CPV bump so we don't pay the full cold-scan cost.
-      # actions/cache@v4.3.0 is the latest v4.x SHA at scaffold time —
-      # pinact-compatible (the `# v4.3.0` comment is kept in sync on `uv
+      # actions/cache@v5.0.5 is the latest SHA at scaffold time —
+      # pinact-compatible (the `# v5.0.5` comment is kept in sync on `uv
       # lock`). gh-actions.md §"Pin third-party actions to a full commit SHA".
       - name: Restore CPV scan-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.cache/cpv
           key: cpv-scan-cache-${{{{ runner.os }}}}-${{{{ hashFiles('**/.cpv-self-hashes.json') }}}}
@@ -3221,11 +3248,17 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{{{ matrix.os }}}}
+    # Hard cap so a hung test / dependency install doesn't burn the 360-min
+    # default. The warm uv cache keeps installs fast; 25 min covers a cold
+    # cache plus a real test suite on both runners (issue #90).
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Install uv
-        uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
 
       - name: Set up Python
         run: uv python install {p.python_version}
@@ -3244,7 +3277,28 @@ jobs:
 
 
 def gen_release_yml(p: PluginParams) -> str:
-    """Generate .github/workflows/release.yml — GitHub Release on semver tag."""
+    """Generate .github/workflows/release.yml — GitHub Release on semver tag.
+
+    v2.86.0+ canon hardening parity with ci.yml:
+    * Every action SHA-pinned (gh-actions.md §"Pin third-party actions to a
+      full commit SHA") — first-party actions/* included, not just
+      third-party, so a hostile tag rewrite cannot swap action code.
+    * timeout-minutes on the release job (issue #90) — the cold `uvx
+      --from git+…` build of CPV (12-20 min, issue #114) must fit; 30 min is
+      the documented cold ceiling. The UV cache (enable-cache: true) makes
+      every run after the first fast.
+    * env-sanitized run blocks — every ${{{{ github.* }}}} consumed by a
+      run: block is bound to an env: mapping first (gh-actions.md
+      §"Avoid expression injection").
+
+    SLSA / supply-chain provenance (issue #121):
+    * SBOM generation (anchore/sbom-action) → an SPDX SBOM artifact, also
+      attached to the release.
+    * Build-provenance attestation (actions/attest-build-provenance) over
+      the release assets — needs `id-token: write` + `attestations: write`.
+    * Per-asset SHA256SUMS uploaded alongside the assets so consumers can
+      verify integrity.
+    """
     # Use p.python_version instead of hardcoded 3.12
     return f"""name: Release
 
@@ -3253,18 +3307,38 @@ on:
     tags:
       - 'v*.*.*'
 
+# Least-privilege baseline. The release job widens to the writes it needs
+# (contents: write to create the release + upload assets; id-token +
+# attestations: write for build-provenance attestation — issue #121).
+permissions:
+  contents: read
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Cold-install ceiling (issues #90 + #114). `uvx --from git+…` clones and
+    # builds CPV from source on a COLD runner — 12-20 min. The UV cache below
+    # makes every run after the first fast; the FIRST cold build must fit
+    # under this cap. 30 min is the documented cold ceiling; do NOT lower it
+    # below 25.
+    timeout-minutes: 30
     permissions:
-      contents: write
+      contents: write       # create the release + upload assets
+      id-token: write       # OIDC token for build-provenance attestation (#121)
+      attestations: write   # write the provenance attestation (#121)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
+        # enable-cache: true keys an actions/cache on UV_CACHE_DIR so the
+        # cold `uvx --from git+…` build of CPV (12-20 min, issue #114) is
+        # paid ONCE per lockfile/runner; later runs restore the warm cache.
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
 
       - name: Set up Python
         run: uv python install {p.python_version}
@@ -3303,6 +3377,20 @@ jobs:
 
       - name: Type check
         run: uv run mypy scripts/ --ignore-missing-imports
+
+      - name: Generate SBOM (SPDX)
+        # SLSA supply-chain control (issue #121): produce an SPDX SBOM of the
+        # repository contents so the published artifact carries a software
+        # bill of materials. Attached to the release below.
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          # The action can attach the SBOM to the release itself; we also
+          # upload it as an asset explicitly below for determinism.
+          upload-release-assets: false
+          upload-artifact: false
 
       - name: Generate changelog
         id: changelog
@@ -3349,13 +3437,28 @@ jobs:
           fi
           echo "changelog_file=changelog.txt" >> "$GITHUB_OUTPUT"
 
+      - name: Compute per-asset SHA256SUMS
+        # SLSA supply-chain control (issue #121): checksum every release
+        # asset so consumers can verify integrity. SHA256SUMS is itself
+        # uploaded as an asset alongside the files it covers.
+        run: |
+          set -e
+          : > SHA256SUMS
+          for f in validation-report.txt sbom.spdx.json; do
+            if [ -f "$f" ]; then
+              sha256sum "$f" >> SHA256SUMS
+            fi
+          done
+          echo "SHA256SUMS:"
+          cat SHA256SUMS
+
       - name: Create or update GitHub Release (idempotent)
         # Idempotent shell flow — replaces the `softprops/action-gh-release`
         # action which 422s when publish.py's Gate-13 already created the
         # release locally. Pattern: `gh release view` to detect existence,
         # then `gh release edit` (with --notes-file fallback to existing body)
         # OR `gh release create` (when not pre-existing). Both branches
-        # upload the validation-report artifact.
+        # upload the validation-report, the SBOM, and SHA256SUMS (issue #121).
         env:
           GH_TOKEN: ${{{{ secrets.GITHUB_TOKEN }}}}
           TAG: ${{{{ github.ref_name }}}}
@@ -3366,14 +3469,25 @@ jobs:
             gh release edit "$TAG" \
               --notes-file changelog.txt \
               --verify-tag
-            gh release upload "$TAG" validation-report.txt --clobber
+            gh release upload "$TAG" validation-report.txt sbom.spdx.json SHA256SUMS --clobber
           else
             echo "Release $TAG does not exist yet — creating"
-            gh release create "$TAG" validation-report.txt \
+            gh release create "$TAG" validation-report.txt sbom.spdx.json SHA256SUMS \
               --title "$TAG" \
               --notes-file changelog.txt \
               --verify-tag
           fi
+
+      - name: Attest build provenance
+        # SLSA build-provenance attestation (issue #121) over the release
+        # assets. Needs id-token: write + attestations: write (declared on
+        # the job). The attestation is recorded in the repo's attestations
+        # store and verifiable with `gh attestation verify`.
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: |
+            validation-report.txt
+            sbom.spdx.json
 """
 
 
@@ -3535,9 +3649,18 @@ env:
   MARKETPLACE_OWNER: '{marketplace_owner}'
   MARKETPLACE_REPO: '{marketplace_repo}'
 
+# Least-privilege: the cross-repo dispatch uses the MARKETPLACE_PAT secret,
+# not the workflow GITHUB_TOKEN, so this workflow needs no write scopes
+# (gh-actions.md §"least privilege").
+permissions:
+  contents: read
+
 jobs:
   notify:
     runs-on: ubuntu-latest
+    # Single API dispatch — 5 min is generous (issue #90). If we exceed it,
+    # the marketplace repo's API is very wrong.
+    timeout-minutes: 5
     steps:
       # Sanitization: every `${{{{ github.* }}}}` value crossing into a shell `run:`
       # block is first bound to an `env:` mapping; the run-script sees `$VAR`
@@ -3553,6 +3676,11 @@ jobs:
           printf 'ref=%s\\n'  "$REF_SHA"   >> "$GITHUB_OUTPUT"
 
       - name: Trigger marketplace update
+        # Defensive "second-latest" pin: v4.0.0, NOT the bleeding-edge v4.0.1.
+        # v4.0.1's SHA was the user-visible symptom of the 2026-05-26 GitHub
+        # Actions codeload auth outage; CPV stays one tag behind on the
+        # dispatch action as a hedge. See
+        # tests/test_canon_repository_dispatch_sha_pin.py for the full record.
         uses: peter-evans/repository-dispatch@5fc4efd1a4797ddb68ffd0714a238564e4cc0e6f # v4.0.0
         with:
           token: ${{{{ secrets.MARKETPLACE_PAT }}}}
