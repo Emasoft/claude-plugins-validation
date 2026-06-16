@@ -134,13 +134,13 @@ Orthogonal trait: `cron-daemon` (heartbeat/daemon runtime) — only relaxes test
 
 ## Decomposition (delegated, dependency-ordered)
 
-- **Piece A+B** (one opus agent; new `cpv_pipeline_profile.py` + rewire `validate_canonical_pipeline_drift`
-  + `validate_pipeline_readiness` to be profile-aware + strengthen direction-awareness): resolves #130 and
+- **Piece A+B** (one opus agent; new `cpv_pipeline_profile.py` + rewire `validate_canonical_pipeline_drift` +
+  `validate_pipeline_readiness` to be profile-aware + strengthen direction-awareness): resolves #130 and
   #118-d2; foundation for C/D. FN-safe two-sided tests per profile. Fetch CAA's publish.py (remote-validation
   signature) + the maintainer's hardened release.yml (ahead-of-canon case) as reference.
 - **Piece C** (one opus agent; `gen_publish_py(profile)` + `gen_release_binaries_yml` + submodule
-  source-change detection): resolves #128 + #115. Depends on A. Fetch PSS `publish.py`/`build-binaries.yml`
-  + janitor `release-binaries.yml`/`stage.sh` (commits f7104d6 + v0.7.1) as reference.
+  source-change detection): resolves #128 + #115. Depends on A. Fetch PSS `publish.py`/`build-binaries.yml` +
+  janitor `release-binaries.yml`/`stage.sh` (commits f7104d6 + v0.7.1) as reference.
 - **Piece D** (one opus agent; upgrade-agent + diagnose-skill profile awareness): resolves #128-A. Depends on A + C.
 - Upstream acceptance: take the maintainer's offered hardened `release.yml` + `notify-marketplace.yml`
   PAT-preflight into canon (clears drift at the source) — fold into Piece C or a follow-up.
