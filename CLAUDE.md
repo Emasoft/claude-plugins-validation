@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.34` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.35` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
 | **scripts** | **116** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic) |
-| **test files** | **335** | `ls tests/test_*.py`; ~9444 tests |
+| **test files** | **335** | `ls tests/test_*.py`; ~9449 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,21 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.35 — #129 REOPENED (CAA): docker-fallback follow-on to v2.126.34** — after .34 removed the
+npx misroute, xmllint correctly routes to the docker fallback on a bare runner, but `_lint_xml`
+then reported docker's image-**pull progress** (on stderr, mixed with xmllint's) PLUS a non-fatal
+xmllint warning as per-file MAJORs on VALID XML (6 false MAJORs). FIX: `_lint_xml` now triages
+xmllint stderr three ways — container/registry/daemon INFRA noise (pull-progress, bare `<hash>:`
+layer lines, daemon-connect errors) is dropped (never a finding); a NON-FATAL warning (`warning:` /
+`failed to load external entity`) → WARNING; a GENUINE validation error (`parser error`, `: error`,
+tag-mismatch, premature-end, not-well-formed) → MAJOR. The real-error regex is checked BEFORE the
+warning regex (an error+warning line stays an error), and an infra/warning-only non-zero exit emits
+ONE explanatory WARNING and does NOT fail the file (nor falsely pass it). FN-safe verified
+two-sided: real malformed XML still → MAJOR (native + docker paths); docker-pull/layer lines →
+skipped; external-entity warning → WARNING. Delegated to 1 opus agent + central-adversarial-verified
+(direct regex spot-check on the reporter's exact lines). +5 tests (mock `_run_linter`, no real
+docker needed); ruff+mypy clean; self-validate VALID 0/0/0/0. Re-closing #129.
 
 **v2.126.34 — #129 (CAA): smart_exec false MAJOR on valid XML (bare CI runner)** — a reduce-FP
 fix. On a runner without native `xmllint`, `smart_exec.build_argv_for_executor` did
