@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.26` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.27` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
-| **test files** | **329** | `ls tests/test_*.py`; ~9312 tests |
+| **test files** | **330** | `ls tests/test_*.py`; ~9332 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,33 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.27 — #124 (PSS) skillaudit language/context FPs** — the Rust context
+classifier handled only the issue-#71 `eval(` FP and returned `unknown` for every
+other rule, so Rust idioms fell through to the PCRE/JS/shell-oriented catalog
+regexes. 8 classes reported; **6 clean Rust FPs FIXED** in `_skillaudit_rust_context.py`
+(all FN-safe two-sided, real-scanner verified with a malicious sibling per clear):
+(1) PROTOTYPE_POLLUTION on `Vec::extend` → cleared for `.rs` (JS-only class; JS
+`__proto__`/`req.body` siblings keep firing); (3) CROSS_TOOL_ACCESS → clears only the
+bare `full_context`/`context_window` member (strong members conversation_history/
+system_prompt/call_tool keep firing); (4) CLAUDE_RESERVED_ENV_POISON on an env-NAME in
+an `eprintln!` help string → clears a print-macro with no env-write on the line, AND
+added a **catalog write-pattern** `(?:std::)?env::set_var\(…"CLAUDE_*"` (closed a real
+Rust detection GAP — a genuine Rust poison write previously fired nothing); (5)
+REGEX_DOS on the Rust `regex` crate → cleared (RE2-style linear, no backtracking;
+`fancy_regex`/`onig`/`pcre` imports keep firing); (6) SHELL_EXEC on `Command::new(<non-shell>)…spawn()`
+→ cleared for direct exec only, `Command::new("sh").arg("-c")`/any `-c`/`/c` flag keeps
+firing (issue-#71 eval unchanged). **NOT changed:** class 2 INDIRECT_PROMPT_INJECT on a
+`debug!("…corrected prompt: {}")` log macro — INTENT-class (v2.126.24 protected set),
+collision-shaped with a real injection → resolved by **rephrasing** the log string, NOT
+a classifier clear (the rule keeps firing); class 7 Python list-form `subprocess.Popen`
+already non-blocking `info`; class 8 `.md` doc commands by-design (prose demotes to NIT,
+executable-fence stays CRITICAL, audit-consent sentinel is the escape). +21 tests (every
+class two-sided) + #71 regression intact; re2_compatibility.json audit regen (528→529
+patterns); self-validate VALID 0/0/0/0; FULL SERIAL 9332 pass/2 skip. REUSABLE: caught a
+real FN hole in the delegated triage's class-2 proposal (it would have cleared a real
+`debug!("corrected system prompt: <override>")`) — central spot-check before trusting a
+delegated security analysis, every time.
 
 **v2.126.26 — gitignore-evasion hardening (USER-directed, #123 triage)** — closed a
 scan-evasion hole: the in-process scanners skipped any path matching `.gitignore`
