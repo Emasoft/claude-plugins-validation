@@ -3253,15 +3253,26 @@ on:
     tags:
       - 'v*.*.*'
 
+# Least-privilege default: the workflow as a whole only needs to READ the
+# repo. The single job that creates the GitHub Release elevates to
+# `contents: write` locally (below). gh-actions.md §"Set top-level
+# permissions to least privilege".
+permissions:
+  contents: read
+
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          # No workflow step pushes back to this repo, so the checkout
+          # must NOT leave the GITHUB_TOKEN persisted in .git/config.
+          # gh-actions.md §"persist-credentials: false on checkout".
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
@@ -3531,6 +3542,12 @@ on:
       - 'skills/**'
       - 'scripts/**'
 
+# This workflow authenticates exclusively with the MARKETPLACE_PAT secret to
+# dispatch into the marketplace repo — it never needs the per-repo GITHUB_TOKEN,
+# so the least-privilege scope is the empty set. gh-actions.md §"Set top-level
+# permissions to least privilege".
+permissions: {{}}
+
 env:
   MARKETPLACE_OWNER: '{marketplace_owner}'
   MARKETPLACE_REPO: '{marketplace_repo}'
@@ -3538,6 +3555,11 @@ env:
 jobs:
   notify:
     runs-on: ubuntu-latest
+    # Single API dispatch — 10 min is generous. If we exceed it, the
+    # marketplace repo's API is unresponsive and the run should fail fast
+    # rather than burn the 360-min default. gh-actions.md §"Always set
+    # timeout-minutes".
+    timeout-minutes: 10
     steps:
       # Sanitization: every `${{{{ github.* }}}}` value crossing into a shell `run:`
       # block is first bound to an `env:` mapping; the run-script sees `$VAR`
@@ -3551,6 +3573,20 @@ jobs:
         run: |
           printf 'name=%s\\n' "$REPO_NAME" >> "$GITHUB_OUTPUT"
           printf 'ref=%s\\n'  "$REF_SHA"   >> "$GITHUB_OUTPUT"
+
+      - name: Verify MARKETPLACE_PAT secret is present
+        # Fail with a clear message BEFORE the dispatch step. Without this guard
+        # a missing or expired PAT surfaces as an opaque 401 from
+        # peter-evans/repository-dispatch with no hint that the secret is the
+        # cause — wastes triage time. Exit 78 (EX_CONFIG) signals a config error.
+        env:
+          MARKETPLACE_PAT: ${{{{ secrets.MARKETPLACE_PAT }}}}
+        run: |
+          if [ -z "${{MARKETPLACE_PAT:-}}" ]; then
+            echo "::error::MARKETPLACE_PAT secret is unset on this repo." >&2
+            echo "::error::Set it with: gh secret set MARKETPLACE_PAT --repo ${{{{ github.repository }}}} --body \\"\\$MARKETPLACE_PAT\\"" >&2
+            exit 78
+          fi
 
       - name: Trigger marketplace update
         uses: peter-evans/repository-dispatch@5fc4efd1a4797ddb68ffd0714a238564e4cc0e6f # v4.0.0
