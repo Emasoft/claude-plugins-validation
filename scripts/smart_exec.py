@@ -419,28 +419,35 @@ def build_argv_for_executor(executor: str, spec: ToolSpec, tool_args: list[str])
         # If cmd!=pkg, we pass cmd as first arg (best-effort; uvx is better for cmd!=pkg).
         return pipx_run_argv(pkg, [cmd] + tool_args if cmd != pkg else tool_args)
 
+    # A package-fetching executor (bunx/pnpm/npx/npm/yarn, and the node/native
+    # deno path below) cannot run a tool that ships NO package: there is nothing
+    # to fetch, so `pkg` would fall back to `spec.name` and the executor would
+    # try to install a package that doesn't exist (issue #129). A package-less
+    # native tool (e.g. xmllint, package=None) must resolve via the `direct`
+    # PATH executor or `docker` only — never by misusing its name as an npm
+    # package. The `spec.package is None` guard below enforces that.
     if executor == "bunx":
-        if spec.ecosystem not in ("node", "native"):
+        if spec.ecosystem not in ("node", "native") or spec.package is None:
             return None
         return bunx_argv(pkg, cmd, tool_args) if (have("bunx") or have("bun")) else None
 
     if executor == "pnpm":
-        if spec.ecosystem not in ("node", "native"):
+        if spec.ecosystem not in ("node", "native") or spec.package is None:
             return None
         return pnpm_dlx_argv(pkg, cmd, tool_args) if have("pnpm") else None
 
     if executor == "npx":
-        if spec.ecosystem not in ("node", "native"):
+        if spec.ecosystem not in ("node", "native") or spec.package is None:
             return None
         return npx_argv(pkg, cmd, tool_args) if have("npx") else None
 
     if executor == "npm":
-        if spec.ecosystem not in ("node", "native"):
+        if spec.ecosystem not in ("node", "native") or spec.package is None:
             return None
         return npm_exec_argv(pkg, cmd, tool_args) if have("npm") else None
 
     if executor == "yarn":
-        if spec.ecosystem not in ("node", "native"):
+        if spec.ecosystem not in ("node", "native") or spec.package is None:
             return None
         return yarn_dlx_argv(pkg, cmd, tool_args) if have("yarn") else None
 
@@ -448,8 +455,10 @@ def build_argv_for_executor(executor: str, spec: ToolSpec, tool_args: list[str])
         if not have("deno"):
             return None
         if spec.ecosystem == "deno_builtin":
+            # A Deno built-in subcommand (deno lint/fmt/check) needs no package.
             return deno_builtin_argv(cmd, tool_args)
-        if spec.ecosystem in ("node", "native"):
+        if spec.ecosystem in ("node", "native") and spec.package is not None:
+            # node/native path fetches an npm package — skip when there is none.
             return deno_npm_argv(pkg, cmd, tool_args, latest=spec.prefer_latest)
         return None
 

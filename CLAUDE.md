@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.33` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.34` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
 | **scripts** | **116** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic) |
-| **test files** | **334** | `ls tests/test_*.py`; ~9429 tests |
+| **test files** | **335** | `ls tests/test_*.py`; ~9444 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,24 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.34 — #129 (CAA): smart_exec false MAJOR on valid XML (bare CI runner)** — a reduce-FP
+fix. On a runner without native `xmllint`, `smart_exec.build_argv_for_executor` did
+`pkg = spec.package or spec.name`, so a ToolSpec with `package=None` (`xmllint`) was resolved
+through the package-fetching executors as if its NAME were an npm package (`npx --yes xmllint`),
+which npx can't run — and `cpv_lint_engine._lint_xml` surfaced npx's "could not determine
+executable to run" via `report.major()` as a per-file MAJOR on the user's valid XML (CI red; bit
+CAA v4.0.0). FIX (FN-safe): a package-based executor cannot run a package-less tool — every
+package-fetching branch (`bunx`/`pnpm`/`npx`/`npm`/`yarn` + the node/native `deno_npm` path) now
+returns None when `spec.package is None`. So `xmllint` resolves only via native PATH (`direct`) or
+`docker`; with neither, resolution returns None and `_lint_xml`'s existing `_tool_missing` path
+degrades to a WARNING/skip, NOT a MAJOR. FN-safety verified two-sided: `shellcheck`/`hadolint`
+(native but with real npm wrapper packages) STILL resolve via npx; node tools unaffected; native
+`xmllint` present → real invalid XML still MAJOR. Matches the reporter's suggested CPV-side fix.
++14 two-sided tests; ruff+mypy clean; lint-engine + smart_exec suites green; self-validate VALID
+0/0/0/0. **VERIFICATION LESSON (from the v2.126.33 round-trip): when checking a background suite,
+grep `failed` AND read the real pytest exit code (tee it to a file) — never just `passed`; a
+bg-task notification's "exit 0" is the trailing command, not pytest.**
 
 **v2.126.33 — #128 gap-1 (PSS): lean-plugin DIAGNOSE skill + engine** — first piece of the
 user-directed lean-plugin canon work (the "separate" engine already exists as `cpv_strip_dev.py`;
