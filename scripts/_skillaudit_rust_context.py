@@ -102,10 +102,135 @@ _RUST_BACKTRACK_REGEX_RE: Final[re.Pattern[str]] = re.compile(
 # DIFFERENT match texts and keep firing as their own matches.
 _CROSS_TOOL_WEAK_RE: Final[re.Pattern[str]] = re.compile(r"^(?:full_context|context_window)$", re.IGNORECASE)
 
+# ── issue #124 (reopened) — multi-line look-back support ─────────────────
+# Real Rust code spreads a construct across several lines, so the token that
+# proves a match safe (the `eprintln!(` opener, the `Regex::new(` call, the
+# `Command::new(` builder head) sits on a PRIOR line, not the flagged one.
+# These helpers walk a small window back up from the flagged line to find the
+# enclosing construct. The window is bounded (a handful of non-blank lines) so
+# the cost stays line-local-ish and an unrelated earlier construct cannot leak
+# in. re2-safe: plain `re.search` on already-compiled patterns, no parsing.
+#
+# Max non-blank lines to walk back when associating a flagged line with the
+# construct that opened it. Real print-macro args / builder chains / multi-line
+# `Regex::new(` calls in the wild span 2-6 lines; 8 is a comfortable ceiling
+# that still refuses to reach an unrelated statement far above.
+_RUST_LOOKBACK_MAX: Final[int] = 8
+# A line that OPENS a print/format macro call whose argument list is not closed
+# on the same line (the trailing `(` with nothing balancing it) — e.g.
+# ``eprintln!(`` on its own line, the string args following below.
+_RUST_FMT_MACRO_OPEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:eprintln|println|eprint|print|format|write|writeln|panic|todo|"
+    r"unimplemented|unreachable|debug|info|warn|error|trace|log)\s*!\s*\("
+)
+# A builder-chain continuation line — begins (after indentation) with a method
+# call `.foo(` / `.foo` (e.g. `.stdin(...)`, `.stdout(...)`, `.arg(...)`). Used
+# to walk UP a `Command::new(...)` builder chain to its `Command::new(` head.
+_RUST_BUILDER_CONT_RE: Final[re.Pattern[str]] = re.compile(r"^\s*\.\s*[A-Za-z_]")
 
-def _classify_shell_exec(line: str, match: str) -> ContextVerdict:
+
+def _rust_macro_call_span_has_no_env_write(lines: list[str], line_idx: int) -> bool:
+    """C4 (multi-line): True iff the flagged line is INSIDE the argument list of
+    a print/format macro call whose opener is on a prior line, and NO genuine
+    ``env::set_var`` write appears anywhere in that macro-call span.
+
+    A single-line macro (``eprintln!("… Set CLAUDE_* …")``) is handled by the
+    caller's existing ``_RUST_FMT_MACRO_RE`` check; this covers the case where
+    ``eprintln!(`` is on line N and the flagged ``CLAUDE_*`` env-name sits on a
+    string-CONTINUATION line N+k. Walks back up to ``_RUST_LOOKBACK_MAX``
+    non-blank lines for a macro opener; if found, the macro span is the opener
+    line through the flagged line, and an ``env::set_var`` ANYWHERE in that span
+    disqualifies (a real poisoning write, not a printed reference).
+    """
+    seen = 0
+    for j in range(line_idx, -1, -1):
+        text = lines[j]
+        if not text.strip():
+            continue
+        if _RUST_FMT_MACRO_OPEN_RE.search(text):
+            # Found the macro opener at line j. The macro-call span is j..line_idx
+            # inclusive. A genuine env write anywhere in that span keeps it firing.
+            for k in range(j, line_idx + 1):
+                if _RUST_ENV_WRITE_RE.search(lines[k]):
+                    return False
+            return True
+        seen += 1
+        if seen >= _RUST_LOOKBACK_MAX:
+            break
+    return False
+
+
+def _rust_regex_crate_call_above(lines: list[str], line_idx: int) -> bool:
+    """C5 (multi-line): True iff the flagged pattern line is the string argument
+    of a ``Regex::new(`` / ``RegexBuilder`` call whose call site is on a prior
+    line. Walks back up to ``_RUST_LOOKBACK_MAX`` non-blank lines for the
+    ``regex``-crate API call site.
+
+    The whole-file BACKTRACKING-engine guard (``fancy_regex`` / ``onig`` /
+    ``pcre``) is applied by the caller BEFORE this helper, so a file importing a
+    backtracking engine never reaches here — only the linear RE2-style ``regex``
+    crate is cleared.
+    """
+    seen = 0
+    for j in range(line_idx, -1, -1):
+        text = lines[j]
+        if not text.strip():
+            continue
+        if _RUST_REGEX_CRATE_RE.search(text):
+            return True
+        seen += 1
+        if seen >= _RUST_LOOKBACK_MAX:
+            break
+    return False
+
+
+def _rust_command_chain_is_direct_exec(lines: list[str], line_idx: int) -> bool:
+    """C6 (multi-line): True iff the flagged ``.spawn()`` / ``.output()`` /
+    ``.status()`` terminates a ``Command::new(<non-shell program>)`` builder
+    chain that carries NO inline-shell flag (``-c`` / ``/c``) and NO shell
+    program (``sh`` / ``bash`` / ``cmd`` / ``powershell`` / …) ANYWHERE in the
+    chain. Walks UP the builder chain (continuation lines beginning with ``.``)
+    to the ``Command::new(`` head, then inspects every line of the chain.
+
+    FN-safe: a ``Command::new("sh")\\n.arg("-c")\\n.spawn()`` chain has a shell
+    program literal AND a ``-c`` flag → disqualified → keeps firing; a
+    ``Command::new(prog).arg("-c").spawn()`` chain has a ``-c`` flag → keeps
+    firing regardless of program. A chain whose head is not found within the
+    look-back window is NOT cleared (returns False → falls through to firing).
+    """
+    # 1. Walk up to the Command::new( head. The flagged line and the lines above
+    #    it (while they look like builder continuations) belong to one chain.
+    head_idx: int | None = None
+    seen = 0
+    for j in range(line_idx, -1, -1):
+        text = lines[j]
+        if not text.strip():
+            continue
+        if _RUST_COMMAND_NEW_RE.search(text):
+            head_idx = j
+            break
+        # Only keep walking up while the line is a builder continuation; if we
+        # hit a non-continuation, non-Command line first, this `.spawn()` is not
+        # part of a recognisable Command chain → bail (conservative).
+        if not _RUST_BUILDER_CONT_RE.search(text):
+            return False
+        seen += 1
+        if seen >= _RUST_LOOKBACK_MAX:
+            return False
+    if head_idx is None:
+        return False
+    # 2. Inspect every line of the chain (head through the flagged line). A shell
+    #    program literal OR an inline-shell flag ANYWHERE keeps it firing.
+    for k in range(head_idx, line_idx + 1):
+        if _RUST_SHELL_PROGRAM_RE.search(lines[k]) or _RUST_SHELL_FLAG_RE.search(lines[k]):
+            return False
+    return True
+
+
+def _classify_shell_exec(lines: list[str], line_idx: int, match: str) -> ContextVerdict:
     """SHELL_EXEC: the issue-#71 `eval` FP plus the issue-#124 direct-exec
-    `Command::new(<non-shell>)…spawn()` FP."""
+    `Command::new(<non-shell>)…spawn()` FP (single- AND multi-line)."""
+    line = lines[line_idx]
     m = (match or "").lower()
     # issue #71 — an `eval`-identifier match (no real-exec on the line).
     if "eval" in m:
@@ -114,17 +239,24 @@ def _classify_shell_exec(line: str, match: str) -> ContextVerdict:
         if _RUST_EVAL_IDENT_RE.search(line):
             return "safe_literal"
         return "unknown"
-    # issue #124 class 6 — a `spawn`/`output`/`status` match. Clear ONLY a
-    # direct exec of a non-shell program with NO inline-shell flag on the line.
+    # issue #124 class 6 — a `spawn`/`output`/`status` match. Clear ONLY a direct
+    # exec of a non-shell program with NO inline-shell flag in the builder chain.
     # FN-safe: `Command::new("sh").arg("-c")…` has a shell-program literal AND a
-    # `-c` flag → both gates fail → FIRES; `Command::new(prog).arg("-c")…` has a
-    # `-c` flag → FIRES (shell form regardless of program); a multi-line builder
-    # whose `spawn()` line lacks `Command::new(` is not cleared (conservative).
-    if not _RUST_COMMAND_NEW_RE.search(line):
-        return "unknown"
-    if _RUST_SHELL_PROGRAM_RE.search(line) or _RUST_SHELL_FLAG_RE.search(line):
-        return "unknown"
-    return "safe_literal"
+    # `-c` flag → FIRES; `Command::new(prog).arg("-c")…` has a `-c` flag → FIRES
+    # (shell form regardless of program).
+    #
+    # Single-line shape (`Command::new(...)…spawn()` all on one line): decide off
+    # the flagged line directly. Multi-line shape (issue #124 reopened — the
+    # `.spawn()` is several lines down a builder chain whose `Command::new(` head
+    # is on a prior line): walk the chain. A chain whose head can't be located is
+    # NOT cleared (conservative → falls through to firing).
+    if _RUST_COMMAND_NEW_RE.search(line):
+        if _RUST_SHELL_PROGRAM_RE.search(line) or _RUST_SHELL_FLAG_RE.search(line):
+            return "unknown"
+        return "safe_literal"
+    if _rust_command_chain_is_direct_exec(lines, line_idx):
+        return "safe_literal"
+    return "unknown"
 
 
 def classify(
@@ -157,7 +289,7 @@ def classify(
     line = lines[line_idx]
 
     if rule_id == "SHELL_EXEC":
-        return _classify_shell_exec(line, match)
+        return _classify_shell_exec(lines, line_idx, match)
 
     # Class 1 — PROTOTYPE_POLLUTION is a JS/TS-only vulnerability class (it needs
     # a mutable `Object.prototype` / dynamic property assignment). Rust has no
@@ -177,7 +309,12 @@ def classify(
     if rule_id == "REGEX_DOS":
         if _RUST_BACKTRACK_REGEX_RE.search(content):
             return "unknown"
-        if _RUST_REGEX_CRATE_RE.search(line):
+        # Single-line shape (`Regex::new(r"…")` on one line) OR multi-line shape
+        # (issue #124 reopened — `Regex::new(` on a prior line, the flagged
+        # pattern on a string-continuation line below). The whole-file
+        # backtracking-engine guard above already gates this, so only the linear
+        # RE2-style `regex` crate reaches the clear.
+        if _RUST_REGEX_CRATE_RE.search(line) or _rust_regex_crate_call_above(lines, line_idx):
             return "safe_literal"
         return "unknown"
 
@@ -201,7 +338,15 @@ def classify(
     # print macro → not cleared → FIRES; the Python/shell/Node write siblings are
     # other languages and keep firing.
     if rule_id == "CLAUDE_RESERVED_ENV_POISON":
+        # Single-line shape — the print macro and the env-name are on the flagged
+        # line (`eprintln!("… Set CLAUDE_* …")`), no env write on the line.
         if _RUST_FMT_MACRO_RE.search(line) and not _RUST_ENV_WRITE_RE.search(line):
+            return "safe_literal"
+        # Multi-line shape (issue #124 reopened) — the `eprintln!(` opener is on a
+        # prior line and the flagged `CLAUDE_*` env-name sits on a string-
+        # continuation line with no macro token of its own. Resolve the enclosing
+        # macro-call span and clear only when NO env::set_var write is in it.
+        if _rust_macro_call_span_has_no_env_write(lines, line_idx):
             return "safe_literal"
         return "unknown"
 

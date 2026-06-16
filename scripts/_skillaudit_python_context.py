@@ -2717,6 +2717,106 @@ def _invisible_unicode_is_detector_vocab(tree: ast.AST, line: int, source: str) 
     return False
 
 
+def _subprocess_match_is_annotation_only(tree: ast.AST, line: int, match: str) -> bool:
+    """Issue #124 (reopened) class 7 — True iff a ``SHELL_EXEC`` match whose text
+    is ``subprocess.Popen`` / ``subprocess.run`` sits in TYPE-ANNOTATION position
+    on ``line``, not in a CALL.
+
+    The reporter's shapes (PSS ``pss_reindex.py``) are pure type hints, not
+    invocations::
+
+        p2: subprocess.Popen[bytes] | None = None
+        running: tuple[subprocess.Popen[bytes] | None, ...] = (p2, p3)
+
+    There the ``subprocess.Popen`` attribute is the ``.value`` of a ``Subscript``
+    (``subprocess.Popen[bytes]``) that lives inside an annotation — never the
+    ``.func`` of a ``Call``. The real call form ``subprocess.Popen(args, …)`` is
+    the ``.func`` of a ``Call`` and is classified by the call-shape dispatch
+    (list-form argv → non-blocking ``info``; ``shell=True`` → fires), so this
+    helper deliberately suppresses ONLY the annotation use.
+
+    Decision (conservative — must be PROVEN an annotation, never a call):
+      * the match text is a ``subprocess.Popen`` / ``subprocess.run`` qualname,
+      * an ``ast.Attribute`` matching that qualname covers ``line``,
+      * that Attribute is NOT (directly or via an enclosing ``Subscript`` chain)
+        the ``.func`` of any ``ast.Call``,
+      * that Attribute IS reached through an annotation slot — an
+        ``AnnAssign.annotation``, a function arg / return annotation, or the
+        value/slice of a ``Subscript`` that is itself in such an annotation.
+    Any uncertainty → False (the rule keeps firing).
+    """
+    m = (match or "").strip()
+    if not (m.startswith("subprocess.Popen") or m.startswith("subprocess.run")):
+        return False
+
+    # Collect every Attribute node on `line` whose qualname is the exec target.
+    targets: list[ast.Attribute] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute):
+            continue
+        if getattr(node, "lineno", None) != line:
+            continue
+        if _node_qualname(node) not in ("subprocess.Popen", "subprocess.run"):
+            continue
+        targets.append(node)
+    if not targets:
+        return False
+
+    # Build child→parent links once so we can walk a target upward.
+    parent: dict[int, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parent[id(child)] = node
+
+    def _is_call_func(attr: ast.Attribute) -> bool:
+        """True iff ``attr`` is (directly, or via a Subscript value chain) the
+        callee of a Call — i.e. ``subprocess.Popen(...)`` or
+        ``subprocess.Popen[...](...)`` invocation."""
+        cur: ast.AST = attr
+        while True:
+            par = parent.get(id(cur))
+            if par is None:
+                return False
+            if isinstance(par, ast.Call) and par.func is cur:
+                return True
+            # A Subscript whose .value is `cur` could still be called
+            # (`Foo[bar](...)`), so keep climbing through Subscript values only.
+            if isinstance(par, ast.Subscript) and par.value is cur:
+                cur = par
+                continue
+            return False
+
+    def _is_in_annotation(attr: ast.Attribute) -> bool:
+        """True iff ``attr`` is reached through a type-annotation slot."""
+        cur: ast.AST = attr
+        while True:
+            par = parent.get(id(cur))
+            if par is None:
+                return False
+            if isinstance(par, ast.AnnAssign) and par.annotation is cur:
+                return True
+            if isinstance(par, ast.arg) and getattr(par, "annotation", None) is cur:
+                return True
+            if isinstance(par, (ast.FunctionDef, ast.AsyncFunctionDef)) and getattr(par, "returns", None) is cur:
+                return True
+            # Climb through annotation-internal nodes (Subscript, BinOp for
+            # `X | None`, Tuple for `tuple[...]`, Index/Attribute) toward the slot.
+            if isinstance(par, (ast.Subscript, ast.BinOp, ast.Tuple, ast.List, ast.Index, ast.Attribute, ast.Starred)):
+                cur = par
+                continue
+            return False
+
+    # EVERY target on the line must be a proven annotation use AND none a call.
+    # If any target is a call (or unprovable as an annotation), do not suppress —
+    # the line carries a real invocation and must stay visible.
+    for attr in targets:
+        if _is_call_func(attr):
+            return False
+        if not _is_in_annotation(attr):
+            return False
+    return True
+
+
 def classify(
     file_path: str,
     source: str,
@@ -3035,6 +3135,18 @@ def classify(
     # preserved: HARDCODED_SECRET / SECRET_OPENAI_KEY / API_KEY_LEAK
     # rules fire on the actual key payload, not on the word ``.env``.
     if rule_id == "CRED_ENV_SAFE" and 0 <= line_idx < len(lines) and _line_has_quoted_string(lines[line_idx]):
+        return "safe_literal"
+
+    # Issue #124 (reopened) class 7 — SHELL_EXEC matched on a ``subprocess.Popen``
+    # / ``subprocess.run`` token that is in TYPE-ANNOTATION position
+    # (``p2: subprocess.Popen[bytes] | None = None``), not a call. The substring
+    # appears in the annotation's Subscript value, never as a Call func, so it is
+    # provably not an exec site. Runs before the call-shape dispatch (which only
+    # handles actual Calls and would otherwise fall through to firing on the bare
+    # token). FN-safe: a real ``subprocess.Popen(args, …)`` invocation IS a Call
+    # func → not suppressed here → classified by the call-shape dispatch below
+    # (list-form argv → non-blocking info; ``shell=True`` → fires).
+    if rule_id == "SHELL_EXEC" and _subprocess_match_is_annotation_only(tree, line, match):
         return "safe_literal"
 
     # PRIMARY PATH: find the enclosing Call. A line that contains a

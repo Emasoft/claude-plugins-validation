@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.28` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.29` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
-| **test files** | **331** | `ls tests/test_*.py`; ~9375 tests |
+| **test files** | **331** | `ls tests/test_*.py`; ~9389 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,35 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.29 — #124 REOPENED (PSS multi-line shapes)** — the v2.126.27 Rust/Python
+discriminators were LINE-LOCAL, but real code writes these constructs across
+MULTIPLE lines, so the proving token (the `eprintln!(` opener, `Regex::new(` call,
+`Command::new(...)` chain head, or call-vs-annotation) sits on an ADJACENT line to
+the flagged one. PSS refreshed to v2.126.27: classes 1/2/3 resolved, 4/5/6/7 still
+fired. ROOT CAUSE of the miss: my #124 fixtures were all SINGLE-LINE and didn't
+represent real code. FIX (`_skillaudit_rust_context.py` + `_skillaudit_python_context.py`,
+bounded 8-line look-back, re2-safe): C4 `_rust_macro_call_span_has_no_env_write`
+walks back to the enclosing print-macro opener (single-line `env::set_var` write
+still fires); C5 `_rust_regex_crate_call_above` keys the linear-engine clear off the
+file's `use regex::` import / a `Regex::new(` call above (a `fancy_regex`/`onig`/`pcre`
+backtracking file still fires); C6 `_rust_command_chain_is_direct_exec` walks UP the
+builder chain to the `Command::new(<program>)` head (a multi-line
+`Command::new("sh").arg("-c").spawn()` or any `-c`/`/c` flag in the chain still
+fires); C7 AST-based `_subprocess_match_is_annotation_only` suppresses
+`subprocess.Popen[bytes]` proven to be in an annotation slot and never a Call func
+(a real `subprocess.run(…,shell=True)` call is unaffected — baseline-identical).
+INDEPENDENTLY adversarial-re-verified through the real scanner with the EXACT
+multi-line PSS layouts as benign fixtures AND multi-line malicious siblings — and
+3 of my probe "FAILs" were diagnosed as MY fixture/expectation bugs (a multi-line
+`env::set_var` is a pre-existing single-line-catalog gap, not a discriminator hole;
+`subprocess.run(shell=True)` SHELL_EXEC suppression is pre-existing/baseline-identical
+and the dangerous npm case fires SUPPLY_CHAIN, not SHELL_EXEC). 17 multi-line tests
+added (two-sided); single-line #124 + #71 eval regression intact; self-validate VALID
+0/0/0/0; FULL SERIAL 9389 pass/2 skip. REUSABLE: a discriminator's verification
+fixtures MUST mirror real multi-line code layout — single-line fixtures gave a false
+ALL-PASS on #124 v1; and verify every probe FAIL is a REAL hole (baseline-stash) before
+flagging — 3/3 here were fixture/pre-existing, none a regression.
 
 **v2.126.28 — #125 (amvcp) skillaudit FPs on benign shipped content** — 4 clean-FP
 classes fixed with FN-safe context discriminators (delegated implementation per a
