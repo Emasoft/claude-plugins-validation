@@ -177,6 +177,24 @@ Resources). Key points:
 3. **One finding, one minimal edit, one re-scan.** Never batch-rewrite a
    file blind; transform the specific flagged span, re-scan, confirm the
    finding is gone AND no new finding appeared.
+4. **Preserve coherence — never leave a dangling reference.** Before
+   editing, check whether the flagged span BINDS a name whose value is used
+   OUTSIDE the span — e.g. `result = subprocess.run(...)` followed later by
+   `if result.returncode`. A minimal-span edit that comments out or removes
+   only the binding leaves every downstream use undefined (`NameError`, a
+   broken example) — that is silently breaking the code, the worst outcome
+   forbidden below. In that case either (a) keep the binding coherent —
+   rewrite the construct to its inert form while STILL assigning the same
+   name to a valid value (the data form, a placeholder result, or the
+   constrained-dispatch result) so every downstream reference still
+   resolves — or (b) if you cannot produce a coherent inert form, treat the
+   finding as not-cleanly-devitalizable and FLAG it to the user; do NOT emit
+   code with an undefined variable. After editing, re-read the WHOLE
+   enclosing block (not just the flagged line) and confirm no reference is
+   left dangling. (Note: doc-context execution-class findings in
+   `references/*.md` are now suppressed by the matcher, so the devitalizer
+   should rarely be invoked on documentation at all — but this rule governs
+   the remaining real-code cases.)
 
 ## When devitalizing is WRONG (do not break real plugins)
 

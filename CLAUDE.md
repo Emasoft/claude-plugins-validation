@@ -19,7 +19,7 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.31` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.32` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
@@ -122,6 +122,33 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.32 — #82 (integrator) devitalizer coherence guardrail + triage-closure of #76/#92** — one
+prompt-only skill change plus two umbrella/template closures, all verified through the actual
+scanner. **#82 (skill change):** the `plugin-devitalizer` could leave a dangling reference when it
+devitalized a flagged call that BINDS a downstream-used name (the reporter's case: `result =
+subprocess.run(...)` → the binding was commented out but `if result.returncode` below kept
+referencing the now-undefined `result`, an actual NameError). Added cross-cutting rule 4 to the
+`devitalize-threats` skill: before a minimal-span edit, check whether the flagged span binds a name
+used OUTSIDE the span; if so, either keep the binding coherent (rewrite to the inert form while
+still assigning a valid value) or FLAG it as not-cleanly-devitalizable — never emit code with an
+undefined variable; re-read the WHOLE block after editing. Part 1 of #82 (devitalizer invoked on
+doc blocks at all) is independently mitigated by #76 — doc-context execution-class findings are now
+suppressed, so the devitalizer is rarely invoked on documentation. Prompt-only (no Python/scanner
+change, no test-logic change); self-validate VALID 0/0/0/0; skill validates 0/0/0/0/0.
+**Triage closures (no code change, verified through the actual scanner):** **#76** (the
+doc-context classification UMBRELLA) — all sub-classes resolved: TIME_BOMB-prose (#77) → 0
+findings, INSECURE_TLS-checklist (#78) → suppressed, PRIVILEGE_ESC `sudo rm` GH-Actions yaml (#79) →
+suppressed (a `bash`-fence `sudo rm -rf` still fires, by design — a shell fence is a copy-paste-run
+instruction), #80 PROTOTYPE_POLLUTION-graphql → suppressed, #81 safe `subprocess.run([argv],
+shell=False)` → suppressed, #91 linear dynamic `RegExp` → suppressed (real `(a+)+` still fires,
+verified), #88/#83 closed; the blanket `references/*.md → SAFE_DOC` cure stayed DECLINED
+(instruction-loadable). **#92** (canonical-pipeline `publish.py` install-hint data fires
+CMD_INJECTION/SUPPLY_CHAIN downstream) — already fixed by a content-keyed `_skillaudit_python_context`
+discriminator for the `REQUIRED_TOOLS = [(tool, install-hint-string), …]` shape (the `curl … | sh`
+hint is inert data → suppressed; a real `subprocess.run("curl …|sh", shell=True)` still fires
+SUPPLY_CHAIN high — verified two-sided; NOT a self-hash exemption, so downstream adopters benefit).
+self-validate VALID 0/0/0/0.
 
 **v2.126.31 — #94 (CAA) `workflows/` known_dir + triage-closure of #104/#102/#83/#93** — one
 focused VALIDATOR change plus four issue closures, each verified through the actual scanner
