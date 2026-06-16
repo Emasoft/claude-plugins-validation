@@ -57,8 +57,10 @@ from cpv_validation_common import (
     COLORS,
     ValidationReport,
     check_remote_execution_guard,
+    gitignored_unshipped_paths,
     is_vendored_path,
     load_cpv_config,
+    path_is_unshipped,
     removed_cpv_size_keys_present,
     save_report_and_print_summary,
     tracked_but_gitignored_paths,
@@ -2784,6 +2786,16 @@ def validate_bin_executables(plugin_root: Path, report: ValidationReport) -> Non
         report.info("bin/ directory exists but is empty")
         return
 
+    # FP issue #127: a gitignored-AND-untracked bin/ file (a macOS `.DS_Store`,
+    # `Thumbs.db`, an editor temp file, `__pycache__`) never ships in
+    # `git archive` / the publish tarball, so it should not be checked for the
+    # exec bit. Compute the git-accurate unshipped set once (v2.126.26
+    # semantics): a TRACKED file is still scanned even if gitignored (it ships),
+    # an untracked+gitignored file is skipped, and a non-git tree (None) scans
+    # everything (the present tree IS the artifact). FN-safe: a real tracked,
+    # shipped non-executable script in bin/ still flags.
+    unshipped = gitignored_unshipped_paths(plugin_root)
+
     # Extensions that indicate data/library files — skip executable check
     data_extensions = {
         ".dll",
@@ -2813,6 +2825,12 @@ def validate_bin_executables(plugin_root: Path, report: ValidationReport) -> Non
 
     executable_count = 0
     for bin_file in bin_files:
+        # FP issue #127: skip a gitignored-AND-untracked bin/ file — it does not
+        # ship, so its exec bit is irrelevant. None ⇒ non-git tree ⇒ scan all.
+        if unshipped is not None and path_is_unshipped(
+            bin_file.relative_to(plugin_root).as_posix(), unshipped
+        ):
+            continue
         ext = bin_file.suffix.lower()
         if ext in data_extensions:
             continue  # Skip data/library files
@@ -4657,6 +4675,34 @@ def validate_pipeline_readiness(plugin_root: Path, report: ValidationReport) -> 
 _SCRIPT_REF_RE = re.compile(r"(?<![\w./])scripts/([A-Za-z_][A-Za-z0-9_]*\.py)(?![\w.])")
 
 
+def _ref_after_comment_marker(line: str, match_start: int) -> bool:
+    """True iff the match begins after an (unquoted) ``#`` comment marker on the line.
+
+    The dangling-ref targets — ``.github/workflows/*.yml|*.yaml``, the
+    ``.git/hooks/pre-push`` + ``git-hooks/*`` shell hooks, the
+    plugin-validation-skill reference hook, and ``setup_plugin_pipeline.py`` —
+    all use ``#`` as their comment marker (YAML, shell, Python). Everything after
+    an unquoted ``#`` is never executed, so a ``scripts/*.py`` token sitting in a
+    comment tail can never be a live invocation: skipping it cannot hide a real
+    dangling reference (FP issue #127). A real ``run:``/invocation token before
+    the ``#`` still records.
+
+    Quote state is tracked so a ``#`` inside a quoted string is NOT treated as a
+    comment marker (defensive: ``run: echo "scripts/x.py # not a comment"``).
+    Script-ref paths never contain ``#``, so the marker we care about is always
+    outside the matched token.
+    """
+    in_s = in_d = False
+    for ch in line[:match_start]:
+        if ch == "'" and not in_d:
+            in_s = not in_s
+        elif ch == '"' and not in_s:
+            in_d = not in_d
+        elif ch == "#" and not in_s and not in_d:
+            return True
+    return False
+
+
 def _collect_script_refs(text: str, source_label: str) -> list[tuple[str, int, str]]:
     """Yield (script_name, line_no, line_excerpt) for every scripts/*.py
     reference found in ``text``. Used by ``validate_pipeline_script_refs``.
@@ -4664,6 +4710,13 @@ def _collect_script_refs(text: str, source_label: str) -> list[tuple[str, int, s
     refs: list[tuple[str, int, str]] = []
     for line_no, line in enumerate(text.splitlines(), start=1):
         for match in _SCRIPT_REF_RE.finditer(line):
+            # FP issue #127: a path inside a `#` comment is documentation, not a
+            # live invocation — skip it so a comment mentioning a removed script
+            # (e.g. "# Issue #11: removed local scripts/validate_plugin.py")
+            # does not flag as a dangling reference. A real run: invocation on
+            # the same line (before the `#`) still records.
+            if _ref_after_comment_marker(line, match.start()):
+                continue
             script_name = match.group(1)
             excerpt = line.strip()
             if len(excerpt) > 120:

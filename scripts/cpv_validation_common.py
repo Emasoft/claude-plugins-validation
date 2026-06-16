@@ -7606,6 +7606,17 @@ def validate_no_absolute_paths(
             ):
                 continue
 
+            # FP issue #127: honor `cpv.exclude_paths` (and VENDORED_DIR_NAMES /
+            # .gitmodules) for this STYLE/PORTABILITY rule. A vendored doc tree
+            # (e.g. shadcn MDX under an excluded `skills/.../docs/`) legitimately
+            # carries upstream import aliases like `/lib/utils` that read as
+            # "system absolute path" — skipping the excluded subtree clears the
+            # FP. FN-safe: a NON-excluded absolute path anywhere else still
+            # fires. This is purely a style/portability skip; no security scanner
+            # is touched (the no-exempt rule is not engaged).
+            if is_vendored_path(Path(rel_path), root_path):
+                continue
+
             files_checked += 1
 
             issues = scan_file_for_absolute_paths(filepath, report, rel_path)
