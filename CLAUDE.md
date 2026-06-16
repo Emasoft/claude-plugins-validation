@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.32` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.33` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
-| **skills** | **46** | `ls -d skills/*/` |
-| **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
-| **test files** | **333** | `ls tests/test_*.py`; ~9405 tests |
+| **skills** | **47** | `ls -d skills/*/` |
+| **scripts** | **116** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic) |
+| **test files** | **334** | `ls tests/test_*.py`; ~9429 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,29 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.33 — #128 gap-1 (PSS): lean-plugin DIAGNOSE skill + engine** — first piece of the
+user-directed lean-plugin canon work (the "separate" engine already exists as `cpv_strip_dev.py`;
+this adds the missing DETECTION front-end). New `scripts/cpv_diagnose_architecture.py` engine +
+`skills/diagnose-plugin-architecture/` skill (+ 2 references). ADVISORY/read-only: it detects files
+a plugin ships that are NOT needed at runtime and recommends the EXISTING separation — it never
+moves or deletes anything. Grounded in the authoritative Anthropic plugins-reference component
+list (runtime-essential = never strip) + a 4-category build-only taxonomy across all languages:
+BUILD_SOURCE (compiles to bin/) → strip into a submodule via `cpv strip-dev-parts` +
+`cpv.strip.extract[]`; RUNTIME_DEP (node_modules/.venv) → install-on-first-use into
+`${CLAUDE_PLUGIN_DATA}`; DEV_ONLY (tests/design/docs) → strip; BUILD_CACHE (target/, __pycache__,
+dist) → gitignore. Emits a `#`-numbered findings table + an exact `--json` contract the skill
+consumes as a black box. Delegated to 2 parallel opus agents (engine + skill) on a hard shared
+contract, then a 3rd refined it — all CENTRAL-ADVERSARIAL-VERIFIED by the orchestrator: FN-safe
+(never flags `.claude-plugin`/skills/agents/commands/hooks/bin/`_RESERVED_SRCS`/`${CLAUDE_PLUGIN_ROOT}`-referenced
+paths — verified NONE on both CPV and the real PSS tree); UNKNOWN is review-not-strip (no
+destructive recommendation on an unclassifiable dir); recognizes already-stripped
+(`cpv.strip.extract[]`) AND already-submodule (`.gitmodules`) dirs so it does NOT re-recommend
+stripping PSS's `rust/`; and on the real PSS clone it surfaced a genuine 3.6 MB unreferenced logo
+under `resources/`. +24 two-sided tests; engine ruff+mypy clean; skill validates 0/0/0/0/0;
+self-validate VALID 0/0/0/0. NEXT for #128: gap-2 (wire the diagnostic + strip into the
+standardize/upgrade agent + plugin-diagnoser as a canon option) and gap-3 (the submodule-aware
+`gen_publish_py` release pipeline).
 
 **v2.126.32 — #82 (integrator) devitalizer coherence guardrail + triage-closure of #76/#92** — one
 prompt-only skill change plus two umbrella/template closures, all verified through the actual

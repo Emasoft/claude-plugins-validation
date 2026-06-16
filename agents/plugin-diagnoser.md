@@ -11,6 +11,7 @@ description: |
 maxTurns: 80
 skills:
   - the-skills-menu
+  - diagnose-plugin-architecture
 ---
 
 # Plugin Diagnoser Agent
