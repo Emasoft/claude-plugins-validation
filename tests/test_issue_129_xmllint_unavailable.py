@@ -23,6 +23,17 @@ Two-sided coverage:
 - deno-lint (deno_builtin, package=None) -> the deno-builtin path still works
   (it needs no package; only the node/native npm path is gated).
 - _lint_xml with `_resolve` -> None reports a WARNING (skip), NOT a MAJOR.
+
+REOPEN (v2.126.35 round): after the misroute fix the XML lint correctly routes
+to the docker fallback (`docker run … alpine … xmllint --noout`). But a
+non-zero returncode's stderr now MIXES three line kinds, and `_lint_xml`
+reported EVERY stderr line as a MAJOR — so two new false MAJORs appeared:
+docker image-pull PROGRESS lines, and a non-fatal `warning: failed to load
+external entity` (offline DTD fetch). The reopened-issue tests
+(`TestLintXmlDockerFallbackStderrTriage`) assert `_lint_xml` now triages:
+container/registry noise -> dropped; a non-fatal xmllint warning -> WARNING;
+only a genuine `parser error` line -> MAJOR; and a failure that is
+infra/warning-only -> one explanatory WARNING that does NOT block.
 """
 
 from __future__ import annotations
@@ -198,3 +209,117 @@ class TestLintXmlGracefulWhenUnavailable:
             ok = lint_xml(tmp_path, [f], report, strict_missing_tools=True)
         assert ok is True
         assert not any(r.level == "MAJOR" for r in report.results)
+
+
+# ---------------------------------------------------------------------------
+# _lint_xml stderr triage (issue #129 REOPENED) — the docker fallback now runs
+# `docker run … alpine … xmllint`, so a non-zero returncode's stderr mixes
+# container/registry PULL PROGRESS, a non-fatal xmllint WARNING, and (only
+# sometimes) a genuine validation ERROR. `_lint_xml` must classify each line:
+# infra noise + warning -> no MAJOR; only a real parser error -> MAJOR.
+# ---------------------------------------------------------------------------
+
+# A realistic `docker run` image-pull transcript on stderr (the alpine pull the
+# xmllint docker ToolSpec triggers on a bare runner), with a NON-ZERO returncode.
+_DOCKER_PULL_STDERR = (
+    "Unable to find image 'alpine:latest' locally\n"
+    "latest: Pulling from library/alpine\n"
+    "9cda6c963c7b: Pulling fs layer\n"
+    "9cda6c963c7b: Verifying Checksum\n"
+    "9cda6c963c7b: Download complete\n"
+    "9cda6c963c7b: Pull complete\n"
+    "Digest: sha256:0a4eaa0eecf5f8c050e5bba433f58c052be7587ee8af3e8b3910ef9ab5fbe9f5\n"
+    "Status: Downloaded newer image for alpine:latest\n"
+)
+
+
+class TestLintXmlDockerFallbackStderrTriage:
+    """Issue #129 reopened — classify docker/registry noise, warnings, errors."""
+
+    def _run(self, tmp_path: Path, fake: FakeResult) -> tuple[ValidationReport, bool]:
+        f = tmp_path / "pom.xml"
+        f.write_text("<project/>\n")
+        report = ValidationReport()
+        with (
+            patch("cpv_lint_engine._resolve", return_value=["docker", "run", "alpine"]),
+            patch("cpv_lint_engine._run_linter", return_value=fake),
+        ):
+            ok = lint_xml(tmp_path, [f], report, strict_missing_tools=True)
+        return report, ok
+
+    def test_docker_pull_progress_only_is_single_warning_zero_major(
+        self, tmp_path: Path
+    ) -> None:
+        """(1) Pure docker-pull progress + rc!=0 -> ONE WARNING, ZERO MAJOR, passes."""
+        fake = FakeResult(returncode=1, stderr=_DOCKER_PULL_STDERR)
+        report, ok = self._run(tmp_path, fake)
+        assert ok is True
+        majors = [r for r in report.results if r.level == "MAJOR"]
+        warnings = [r for r in report.results if r.level == "WARNING"]
+        assert majors == [], f"docker pull noise leaked as MAJOR: {[m.message for m in majors]}"
+        # Exactly one explanatory "could not run cleanly" WARNING — no per-noise-line spam.
+        assert len(warnings) == 1, [w.message for w in warnings]
+        assert "not validated" in warnings[0].message
+
+    def test_external_entity_warning_is_warning_zero_major(self, tmp_path: Path) -> None:
+        """(2) `warning: failed to load external entity …` -> WARNING, ZERO MAJOR."""
+        stderr = (
+            _DOCKER_PULL_STDERR
+            + 'warning: failed to load external entity "/w/parent/pom.xml"\n'
+        )
+        fake = FakeResult(returncode=1, stderr=stderr)
+        report, ok = self._run(tmp_path, fake)
+        assert ok is True
+        majors = [r for r in report.results if r.level == "MAJOR"]
+        warnings = [r for r in report.results if r.level == "WARNING"]
+        assert majors == [], f"non-fatal warning surfaced as MAJOR: {[m.message for m in majors]}"
+        # The external-entity warning must be visible as a WARNING.
+        assert any("external entity" in w.message for w in warnings), [
+            w.message for w in warnings
+        ]
+
+    def test_real_parser_error_still_major(self, tmp_path: Path) -> None:
+        """(3) FN-safety: a genuine `parser error` line -> MAJOR (malformed XML)."""
+        stderr = (
+            _DOCKER_PULL_STDERR
+            + "/w/pom.xml:12: parser error : Opening and ending tag mismatch: a line 1 and b\n"
+        )
+        fake = FakeResult(returncode=1, stderr=stderr)
+        report, ok = self._run(tmp_path, fake)
+        assert ok is False
+        majors = [r for r in report.results if r.level == "MAJOR" and "xmllint:" in r.message]
+        assert majors, "real parser error did not fire a MAJOR"
+        assert any("parser error" in m.message for m in majors)
+        # The pull-progress lines must NOT each have become their own MAJOR.
+        assert len(majors) == 1, [m.message for m in majors]
+
+    def test_clean_valid_xml_rc0_passes(self, tmp_path: Path) -> None:
+        """(4) FN-safety: a clean rc=0 run -> PASS, no WARNING, no MAJOR."""
+        fake = FakeResult(returncode=0, stderr="")
+        report, ok = self._run(tmp_path, fake)
+        assert ok is True
+        assert not any(r.level == "MAJOR" for r in report.results)
+        assert not any(r.level == "WARNING" for r in report.results)
+        assert any(r.level == "PASSED" for r in report.results)
+
+    def test_native_xmllint_real_error_still_major(self, tmp_path: Path) -> None:
+        """FN-safety: native (non-docker) xmllint with a real error still MAJORs.
+
+        When xmllint runs natively there is no docker pull noise — just the
+        parser error on stderr. The triage must still fire a MAJOR (the v1
+        behavior is preserved for the native path).
+        """
+        f = tmp_path / "broken.xml"
+        f.write_text("<root>\n")
+        report = ValidationReport()
+        bad = FakeResult(
+            returncode=1,
+            stderr="broken.xml:2: parser error : Premature end of data in tag root line 1\n",
+        )
+        with (
+            patch("cpv_lint_engine._resolve", return_value=["/usr/bin/xmllint"]),
+            patch("cpv_lint_engine._run_linter", return_value=bad),
+        ):
+            ok = lint_xml(tmp_path, [f], report, strict_missing_tools=True)
+        assert ok is False
+        assert any(r.level == "MAJOR" and "parser error" in r.message for r in report.results)

@@ -114,6 +114,69 @@ _MARKDOWNLINT_TOOL_CRASH_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Issue #129 (reopened): xmllint now resolves via the docker fallback on a bare
+# CI runner (no native `xmllint`, docker present). `docker run` auto-pulls the
+# alpine image and its registry/daemon progress lands on the SAME stderr as
+# xmllint's diagnostics — so `_lint_xml` must triage stderr into three kinds:
+# container/tool INFRASTRUCTURE noise (never a finding), a NON-FATAL xmllint
+# WARNING (surface, never block), and a GENUINE xmllint validation ERROR (a real
+# MAJOR). These three regexes do that triage; they classify ONLY xmllint stderr
+# and are consulted nowhere else.
+
+# (a) Docker / registry / daemon output emitted by `docker run` while pulling
+# the image (and a couple of daemon-connectivity failures). NONE of these is a
+# statement about the user's XML. The final alternative matches a bare layer-id
+# progress line ("<12+hex>: Pulling fs layer", "<hash>: Download complete",
+# "<hash>: Already exists", …) — a 12+ hex-char id at the start of the line
+# followed by ':' — which is how Docker reports per-layer pull progress.
+_XMLLINT_INFRA_NOISE_RE = re.compile(
+    r"Unable to find image"
+    r"|Pulling from"
+    r"|Pulling fs layer"
+    r"|Verifying Checksum"
+    r"|Download complete"
+    r"|Downloading"
+    r"|Already exists"
+    r"|Pull complete"
+    r"|Extracting"
+    r"|Waiting"
+    r"|Retrying"
+    r"|Digest:"
+    r"|Status:"
+    r"|docker:"
+    r"|Cannot connect to the Docker daemon"
+    r"|error during connect"
+    r"|^[0-9a-f]{12,}:\s",
+    re.IGNORECASE,
+)
+
+# (b1) A GENUINE xmllint validation diagnostic. xmllint's real `--noout`
+# findings reference the file and a line number and carry one of these markers
+# (`f.xml:12: parser error : Opening and ending tag mismatch`, `Premature end of
+# data`, a bare `: error :`, …). These are the only lines that fire a MAJOR.
+_XMLLINT_REAL_ERROR_RE = re.compile(
+    r"parser error"
+    r"|:\s*error\b"
+    r"|\berror:"
+    r"|Opening and ending tag mismatch"
+    r"|Premature end of data"
+    r"|Extra content at the end"
+    r"|Start tag expected"
+    r"|xmlParseEntityRef"
+    r"|not well-formed",
+    re.IGNORECASE,
+)
+
+# (b2) A NON-FATAL xmllint WARNING — most commonly an external DTD/entity that
+# an offline runner could not fetch (`warning: failed to load external entity
+# "…/pom.xml"`). The document is still well-formed; this is reported but never
+# blocks. Checked AFTER the real-error regex so a line carrying both an error
+# and the word "warning" is still treated as the error it is.
+_XMLLINT_WARNING_RE = re.compile(
+    r"\bwarning:" r"|failed to load external entity",
+    re.IGNORECASE,
+)
+
 # ruff concise finding shape: "<path>:<line>[:<col>]: <code> <message>".
 # Group 1 captures the full path (non-greedy up to the ":<line>[:<col>]:"
 # suffix), so a Windows drive letter ("C:\\…") stays attached to its path
@@ -1250,7 +1313,31 @@ def lint_xml(
     *,
     strict_missing_tools: bool = True,
 ) -> bool:
-    """Lint XML files with xmllint --noout."""
+    """Lint XML files with xmllint --noout.
+
+    Issue #129 (reopened): when xmllint resolves via the docker fallback
+    (`smart_exec` runs `docker run … alpine … xmllint --noout`), a non-zero
+    returncode no longer means "the XML is malformed". The stderr is now a
+    mix of THREE distinct line kinds, only one of which is a real finding:
+
+      1. Docker / registry / daemon INFRASTRUCTURE noise from `docker run`
+         auto-pulling the image (`Unable to find image 'alpine:latest'
+         locally`, `latest: Pulling from library/alpine`, bare `<hash>:
+         Pulling fs layer`, `Download complete`, …). NEVER a finding.
+      2. A NON-FATAL xmllint WARNING — e.g. `warning: failed to load
+         external entity "…/pom.xml"` when an offline runner cannot fetch
+         an external DTD/entity. The document is still well-formed
+         (`xmllint --noout` passes when run with the entity available), so
+         this must be a WARNING, NEVER a MAJOR.
+      3. A GENUINE xmllint validation ERROR (`f.xml:12: parser error :
+         Opening and ending tag mismatch`, `Premature end of data`, …).
+         This is the only line kind that is a real MAJOR.
+
+    So we (a) drop the infra noise, (b) classify the surviving xmllint
+    lines into warnings vs. errors, and (c) when the run failed but no
+    genuine error line survives, emit ONE explanatory WARNING and do NOT
+    fail the file (and do NOT falsely claim it passed either).
+    """
     if not files:
         return True
 
@@ -1279,11 +1366,40 @@ def lint_xml(
         if result.returncode == 0:
             report.passed(f"xmllint: {rel} OK")
             continue
-        for line in (result.stderr or "").splitlines()[:5]:
+
+        # returncode != 0 — triage stderr line by line. `saw_error` tracks
+        # whether at least one GENUINE xmllint validation error survived
+        # the infra-noise filter; if none did, the failure was infra/pull
+        # /warning-only and must not flip `ok` to False (issue #129).
+        saw_error = False
+        for line in (result.stderr or "").splitlines():
             stripped = line.strip()
-            if stripped:
+            if not stripped:
+                continue
+            if _XMLLINT_INFRA_NOISE_RE.search(stripped):
+                # Docker/registry/daemon output mixed into stderr — never a
+                # finding about the user's XML.
+                continue
+            if _XMLLINT_REAL_ERROR_RE.search(stripped):
                 report.major(f"xmllint: {stripped}", rel)
+                saw_error = True
                 ok = False
+            elif _XMLLINT_WARNING_RE.search(stripped):
+                # Non-fatal xmllint warning (e.g. an unfetchable external
+                # entity offline) — surface it, but do NOT block the gate.
+                report.warning(f"xmllint: {stripped}", rel)
+            # else: an unclassified surviving line (rare) is left to the
+            # post-loop fallback rather than being upgraded to a MAJOR — a
+            # mystery non-error line must never invent a malformed-XML claim.
+        if not saw_error:
+            # The non-zero exit was infrastructure/warning-only — xmllint
+            # could not run cleanly (typically the docker fallback's
+            # image-pull failed, or only emitted a non-fatal warning). The
+            # XML was NOT validated; flag that as a WARNING and let the file
+            # pass without a false MAJOR (and without a false `passed`).
+            report.warning(
+                f"xmllint could not run cleanly via docker — XML not validated: {rel}"
+            )
     return ok
 
 
