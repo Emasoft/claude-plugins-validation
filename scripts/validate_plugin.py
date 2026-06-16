@@ -4624,7 +4624,38 @@ def validate_md_content_references(plugin_root: Path, report: ValidationReport) 
 
 
 def validate_pipeline_readiness(plugin_root: Path, report: ValidationReport) -> None:
-    """Check that the plugin has CI/CD pipeline infrastructure."""
+    """Check that the plugin has CI/CD pipeline infrastructure.
+
+    Profile-aware (TRDD-e9f13df1, issue #130): a ``remote-validation`` plugin
+    intentionally ships NO vendored CPV validator scripts — validation is the
+    remote ``cpv-remote-validate --strict`` gate, run identically in publish.py,
+    the hooks, and CI. CPV recognizes this shape so the readiness output
+    documents it (an INFO line) rather than treating the deliberate absence of
+    vendored validators as a gap. The actually-recommended pipeline files
+    (publish.py, cliff.toml, the notify workflow) are still checked normally —
+    a remote-validation plugin HAS those; recognizing the profile is
+    informative, never suppressive.
+    """
+    # Pipeline profile (informative; never relaxes a check below). Resolution
+    # fails SAFE to `standard` on any error.
+    try:
+        from cpv_pipeline_profile import PROFILE_STANDARD, resolve_pipeline_profile
+
+        profile = resolve_pipeline_profile(plugin_root)
+    except Exception:  # noqa: BLE001 — advisory; any failure falls back to `standard` (unchanged behavior)
+        profile = "standard"
+        PROFILE_STANDARD = "standard"  # noqa: N806 — local fallback constant when the import failed
+    if profile != PROFILE_STANDARD:
+        report.info(
+            f"Detected `{profile}` pipeline profile — CPV judges this plugin's "
+            f"canonical-pipeline files against the {profile} canon (e.g. a "
+            f"remote-validation plugin's intentionally-absent vendored "
+            f"validators are not a gap; its remote `cpv-remote-validate` gate "
+            f"is the validation path). The shared canon (SHA-pins, "
+            f"least-privilege permissions, notify chain, version consistency, "
+            f"atomic push) is still fully enforced."
+        )
+
     # Pre-push hook
     hook_paths = [
         plugin_root / ".githooks" / "pre-push",
@@ -5359,6 +5390,138 @@ _CANONICAL_PIPELINE_FILES: tuple[tuple[str, str], ...] = (
 )
 
 
+# ── Profile-aware drift (TRDD-e9f13df1, issues #130 / #118-d2) ───────────────
+# A plugin whose pipeline profile is NOT `standard` legitimately diverges from
+# the standard canon in specific files. For such a file we MUST NOT emit the
+# "migrate to the latest standard / run --force-templates" message — that would
+# tell the plugin to DOWNGRADE its by-design architecture (re-vendor the CPV
+# validators a remote-validation plugin deleted, clobber a submodule-aware
+# publish.py, etc.). Instead we recognize the file as an intentional,
+# profile-mandated divergence and emit the neutral ahead/accept guidance.
+#
+# Mapping: profile → the set of `_CANONICAL_PIPELINE_FILES` rel-paths whose
+# divergence from the STANDARD template is BY DESIGN for that profile. The
+# generator VARIANTS that produce the profile-appropriate expected content are
+# Piece C (issues #128/#115) — until those land, Piece A+B recognizes the
+# divergence (no downgrade message) rather than byte-comparing against a
+# nonexistent variant. The profile selector NEVER suppresses the finding: the
+# file still produces a WARNING, just with the profile-aware (neutral)
+# recommendation, and every other canon file is still compared against the
+# standard template.
+#
+# remote-validation (#130): publish.py, pre-push (process-ancestry gate),
+#   ci.yml all drive the remote gate, not a vendored validator; the vendored
+#   helper cpv_network_resilience.py is intentionally ABSENT (so it never even
+#   reaches the per-file loop — a missing file is skipped). notify-marketplace,
+#   cliff.toml, .markdownlint.json are NOT profile-divergent → still compared
+#   against the standard template.
+# submodule-build (#128): publish.py is submodule-aware.
+# binary-release (#115): release.yml builds+attaches binary assets.
+_PROFILE_BY_DESIGN_DRIFT: dict[str, frozenset[str]] = {
+    "remote-validation": frozenset(
+        {
+            "scripts/publish.py",
+            "scripts/cpv_network_resilience.py",
+            "git-hooks/pre-push",
+            ".github/workflows/ci.yml",
+        }
+    ),
+    "submodule-build": frozenset(
+        {
+            "scripts/publish.py",
+        }
+    ),
+    "binary-release": frozenset(
+        {
+            ".github/workflows/release.yml",
+        }
+    ),
+}
+
+# Hardening tokens whose drift-direction tells "ahead" from "behind". A token
+# appearing on a unified-diff line tells WHO has the hardening:
+#   - the diff is unified_diff(expected=CANON, actual=PLUGIN), so a `+` line is
+#     present in PLUGIN but NOT canon (plugin is AHEAD on that token), and a `-`
+#     line is present in CANON but NOT plugin (plugin is BEHIND on that token).
+# This is a real ahead/behind determination (issue #118 defect 2), replacing
+# the old keyword-anywhere heuristic that could not distinguish direction.
+_HARDENING_MARKERS: tuple[str, ...] = (
+    "git push --atomic",
+    "SHA-pin",
+    "actionlint",
+    "commitlint-github-action",
+    "wagoid/commitlint",
+    "rhysd/actionlint",
+    "timeout-minutes",
+    "attest-build-provenance",
+    "sbom-action",
+    "SHA256SUMS",
+    "persist-credentials: false",
+    "permissions:",
+    "MARKETPLACE_PAT",
+    # A SHA-pinned `uses:` reference (40-hex after @) is itself a hardening
+    # signal; matched structurally by _line_has_sha_pin below, not as a literal.
+)
+
+# A `uses: owner/action@<40-hex-sha>` reference — the structural form of "this
+# action is SHA-pinned". Used to detect a pin appearing only on the plugin (+)
+# or only on canon (-) side of the diff.
+_SHA_PINNED_USES_RE = re.compile(r"uses:\s*\S+@[0-9a-f]{40}\b")
+
+
+def _classify_drift_direction(diff_lines: list[str]) -> str:
+    """Classify a standard-canon file's drift direction (issue #118 defect 2).
+
+    Given the unified-diff lines (canon → plugin, i.e.
+    ``unified_diff(expected=CANON, actual=PLUGIN)``), determine whether the
+    PLUGIN is ahead of canon (carries hardening canon lacks), behind canon
+    (canon carries hardening the plugin lacks), or neither/both.
+
+    Returns one of four states. The first three are a real ahead/behind
+    determination from the diff direction; the fourth preserves today's exact
+    behavior for a plain stale file so a STANDARD plugin's migrate guidance is
+    unchanged (FN-safety: no regression for the common case):
+
+      * ``"ahead"``   — plugin adds hardening (a marker on a ``+`` line) and
+                        canon removes none (no marker on any ``-`` line).
+                        Recommend upstream/accept; NEVER recommend downgrading.
+      * ``"behind"``  — canon carries hardening the plugin lacks (a marker on a
+                        ``-`` line) and the plugin adds none. Recommend upgrade.
+      * ``"mixed"``   — BOTH sides carry hardening markers. Ambiguous; default to
+                        the SAFE (ahead/neutral) message — never tell a plugin to
+                        downgrade when hardening is present on both sides
+                        (the issue #22 case).
+      * ``"plain"``   — NEITHER side carries any hardening marker. This is the
+                        ordinary "file just drifted / is stale" case; today's
+                        behavior is the migrate recommendation, and we preserve
+                        it exactly so a behind-canon standard file is still told
+                        to upgrade.
+
+    Only added (``+``)/removed (``-``) lines are inspected; diff headers
+    (``+++`` / ``---``) and ``@@`` hunks are skipped.
+    """
+    plugin_has_extra_hardening = False  # a hardening marker on a `+` line
+    canon_has_extra_hardening = False  # a hardening marker on a `-` line
+    for line in diff_lines:
+        if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
+            continue
+        if line.startswith("+"):
+            body = line[1:]
+            if any(marker in body for marker in _HARDENING_MARKERS) or _SHA_PINNED_USES_RE.search(body):
+                plugin_has_extra_hardening = True
+        elif line.startswith("-"):
+            body = line[1:]
+            if any(marker in body for marker in _HARDENING_MARKERS) or _SHA_PINNED_USES_RE.search(body):
+                canon_has_extra_hardening = True
+    if plugin_has_extra_hardening and not canon_has_extra_hardening:
+        return "ahead"
+    if canon_has_extra_hardening and not plugin_has_extra_hardening:
+        return "behind"
+    if plugin_has_extra_hardening and canon_has_extra_hardening:
+        return "mixed"
+    return "plain"
+
+
 def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationReport) -> None:
     """Emit a WARNING for every canonical pipeline file that drifts from the
     latest CPV template.
@@ -5434,6 +5597,22 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
     # (WARNING, non-blocking); intentional drift is the maintainer's call to
     # live with the advisory, not to suppress it.
 
+    # Resolve the plugin's pipeline PROFILE (TRDD-e9f13df1, issues #130 / #118-d2).
+    # The profile is a SELECTOR, never a SUPPRESSOR: it decides WHICH canon a
+    # file's divergence is judged against (and therefore which RECOMMENDATION
+    # text the WARNING carries), but it never silences a finding. A non-standard
+    # profile recognizes specific files as intentional, profile-mandated
+    # divergences (no "migrate/downgrade" message); every other canon file is
+    # still compared against the standard template exactly as before. Resolution
+    # fails SAFE to `standard` on any error — current behavior, no suppression.
+    try:
+        from cpv_pipeline_profile import resolve_pipeline_profile
+
+        profile = resolve_pipeline_profile(plugin_root)
+    except Exception:  # noqa: BLE001 — profile resolution is advisory; any failure falls back to `standard` (unchanged behavior, no suppression)
+        profile = "standard"
+    by_design_files = _PROFILE_BY_DESIGN_DRIFT.get(profile, frozenset())
+
     # Per-file emission with embedded unified diff.
     #
     # Issue #21 ask #3: instead of one consolidated warning naming six files,
@@ -5503,41 +5682,76 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
                 f"`diff -u <canonical> {rel_path}`)"
             )
 
-        # v2.86.0: reword to handle the case where the plugin's pipeline is
-        # AT or ABOVE canon (issue #22 case — the plugin had extra hardening
-        # CPV is now adopting). The blanket "migrate to the latest standard"
-        # phrasing previously suggested regressing such plugins. Now we
-        # describe the drift neutrally and let the maintainer judge whether
-        # to migrate. Files that match canon-hardening checkpoints (SHA-pin
-        # comments, atomic-push pattern, env-sanitization comments) get a
-        # softer phrasing.
-        already_hardened = any(
-            marker in diff_body
-            for marker in (
-                "git push --atomic",
-                "SHA-pin",
-                "actionlint",
-                "commitlint-github-action",
-                "wagoid/commitlint",
-                "rhysd/actionlint",
-                "timeout-minutes",
-                "attest-build-provenance",
-                "sbom-action",
-                "SHA256SUMS",
-            )
-        )
-        if already_hardened:
+        # Pick the recommendation text. THREE cases, in priority order
+        # (TRDD-e9f13df1, issues #130 / #118-d2). NONE of these suppress the
+        # WARNING — every drifted file still emits one; only the guidance
+        # differs, and never tells a plugin to DOWNGRADE.
+        #
+        # 1. PROFILE BY-DESIGN (#130 / #128 / #115) — the file's divergence is
+        #    mandated by the plugin's non-standard pipeline profile (e.g. a
+        #    remote-validation plugin's publish.py drives the remote gate, not a
+        #    vendored validator; its pre-push is the process-ancestry gate). We
+        #    recognize this as intentional and tell the maintainer to keep it /
+        #    upstream it — NEVER to run `--force-templates` (which would
+        #    re-vendor the validators the plugin deliberately removed, or
+        #    clobber its submodule-aware publish.py).
+        # 2. AHEAD / mixed (#118-d2) — for a standard-canon file, a real
+        #    ahead/behind determination from the diff direction. AHEAD (plugin
+        #    carries hardening canon lacks) or MIXED (hardening on BOTH sides,
+        #    ambiguous) → upstream or accept; default to this SAFE message so an
+        #    ahead-of-canon plugin is never told to downgrade.
+        # 3. BEHIND / plain (#118-d2) — canon carries hardening the plugin lacks
+        #    (BEHIND), OR the file is simply stale with no hardening signal on
+        #    either side (PLAIN — today's ordinary case) → migrate. This is the
+        #    only branch that recommends `--force-templates`. The PLAIN path
+        #    preserves today's EXACT behavior for a standard plugin so a
+        #    behind-canon file is still told to upgrade (FN-safety: no
+        #    regression for the common case).
+        direction = _classify_drift_direction(diff_lines)
+        if rel_path in by_design_files:
             recommendation = (
-                "This file appears to already include canon-level hardening "
-                "(SHA-pinned actions, atomic push, actionlint/commitlint, "
-                "per-job timeouts, SBOM/provenance, etc.). Review the unified "
-                "diff and decide whether the remaining deltas are intentional. "
-                "If your version is STRICTLY above canon, consider opening an "
-                "upstream PR to narrow this gap. This WARNING is advisory and "
-                "non-blocking; it cannot be suppressed via plugin config "
-                "(TRDD-02e1672b)."
+                f"This file's divergence is BY DESIGN for the plugin's "
+                f"`{profile}` pipeline profile. CPV recognizes the "
+                f"profile-mandated shape (e.g. a remote-validation plugin's "
+                f"publish.py/CI drive the remote `cpv-remote-validate --strict` "
+                f"gate instead of a vendored validator, and its pre-push is the "
+                f"process-ancestry gate — a stronger alternative to the env-var "
+                f"gate; a submodule-build plugin's publish.py is submodule-aware; "
+                f"a binary-release plugin's release.yml builds and attaches "
+                f"binary assets). Do NOT run `--force-templates` for this file — "
+                f"it would downgrade your by-design architecture (e.g. re-vendor "
+                f"the CPV validators you deliberately removed). Keep this file, "
+                f"or upstream any further hardening. This WARNING is advisory and "
+                f"non-blocking; the `{profile}` profile is a SELECTOR (which canon "
+                f"to compare against), not a suppressor — it cannot silence a "
+                f"finding (TRDD-02e1672b). The genuinely-shared canon (SHA-pinned "
+                f"actions, least-privilege permissions, the notify chain, version "
+                f"consistency, atomic push) is still fully enforced."
+            )
+        elif direction in ("ahead", "mixed"):
+            # AHEAD-or-ambiguous: the plugin is at or above canon on this file
+            # (issue #22 / #118-d2) — hardening on the plugin side (AHEAD) or on
+            # BOTH sides (MIXED). NEVER suggest regressing it. The phrases below
+            # are still backed by real template facts (the canon templates DO
+            # SHA-pin actions, atomic-push, etc.), so the #118-d1 over-promise
+            # guard stays satisfied.
+            recommendation = (
+                "This file appears to be at or AHEAD of canon (it carries "
+                "hardening — SHA-pinned actions, atomic push, "
+                "actionlint/commitlint gates, per-job timeout-minutes, "
+                "SBOM/provenance, or a MARKETPLACE_PAT preflight — that the "
+                "canonical template does not, or the direction is ambiguous). "
+                "Do NOT run `--force-templates`: it would DOWNGRADE this file. "
+                "Review the unified diff; if your version is strictly above "
+                "canon, consider opening an upstream PR to fold your hardening "
+                "into the canonical template so the gap clears at the source. "
+                "This WARNING is advisory and non-blocking; it cannot be "
+                "suppressed via plugin config (TRDD-02e1672b)."
             )
         else:
+            # BEHIND or PLAIN (#118-d2): canon carries hardening this file lacks
+            # (BEHIND), or the file is simply stale with no hardening signal
+            # either way (PLAIN — the ordinary case, unchanged from today).
             # NOTE: the parenthetical below describes what canon bundles
             # ACROSS the pipeline as a whole — it must stay truthful to the
             # generated templates (gen_ci_yml / gen_release_yml /
