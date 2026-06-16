@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import sys
 from pathlib import Path
 
@@ -224,10 +225,12 @@ class TestGenWorkflows:
     """Tests for workflow generation functions."""
 
     def test_ci_yml_contains_checkout(self):
-        """gen_ci_yml output includes actions/checkout@v4."""
+        """gen_ci_yml output includes a SHA-pinned actions/checkout (issue #118)."""
         p = _default_params()
         content = gen_ci_yml(p)
-        assert "actions/checkout@v4" in content
+        # Canon now SHA-pins first-party actions too — match the 40-hex pin
+        # rather than the bare major tag (issue #118 defect 1).
+        assert re.search(r"actions/checkout@[0-9a-f]{40}", content), "checkout must be SHA-pinned"
         assert "name: CI" in content
 
     def test_release_yml_contains_semver_trigger(self):

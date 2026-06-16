@@ -252,3 +252,131 @@ def test_cliff_toml_drops_striptags():
     """cliff.toml's group renderer must NOT pipe through striptags."""
     toml = gen_cliff_toml(_params())
     assert "striptags" not in toml
+
+
+# ---------------------------------------------------------------------------
+# v2.86.0+ follow-on hardening: per-job timeouts (issues #90 / #114)
+# ---------------------------------------------------------------------------
+
+
+def test_ci_yml_every_job_has_timeout_minutes():
+    """Issue #90: every ci.yml job must declare timeout-minutes."""
+    yml = gen_ci_yml(_params())
+    parsed = yaml.safe_load(yml)
+    for name, job in parsed["jobs"].items():
+        assert "timeout-minutes" in job, f"ci.yml job '{name}' has no timeout-minutes"
+        assert isinstance(job["timeout-minutes"], int)
+
+
+def test_ci_yml_validate_job_timeout_is_cold_install_ceiling():
+    """Issue #114: the validate job's timeout must allow a cold uvx build (>= 25)."""
+    yml = gen_ci_yml(_params())
+    parsed = yaml.safe_load(yml)
+    assert parsed["jobs"]["validate"]["timeout-minutes"] >= 25
+
+
+def test_ci_yml_validate_job_enables_uv_cache():
+    """Issue #114: setup-uv in the validate job must enable the UV cache so only
+    the first cold run pays the git-build cost."""
+    yml = gen_ci_yml(_params())
+    parsed = yaml.safe_load(yml)
+    setup_steps = [
+        s for s in parsed["jobs"]["validate"]["steps"] if "astral-sh/setup-uv" in s.get("uses", "")
+    ]
+    assert setup_steps, "validate job must use astral-sh/setup-uv"
+    assert any(s.get("with", {}).get("enable-cache") is True for s in setup_steps)
+
+
+def test_release_yml_job_has_cold_install_timeout():
+    """Issue #114: the release job's timeout must allow a cold uvx build (>= 25)."""
+    yml = gen_release_yml(_params())
+    parsed = yaml.safe_load(yml)
+    assert parsed["jobs"]["release"]["timeout-minutes"] >= 25
+
+
+def test_notify_marketplace_yml_job_has_timeout():
+    """Issue #90: the notify job must declare timeout-minutes."""
+    yml = gen_notify_marketplace_yml(_params())
+    parsed = yaml.safe_load(yml)
+    assert "timeout-minutes" in parsed["jobs"]["notify"]
+
+
+# ---------------------------------------------------------------------------
+# v2.86.0+ follow-on hardening: first-party actions SHA-pinned (issue #118 d1)
+# ---------------------------------------------------------------------------
+
+
+def _all_uses(parsed: dict) -> list[str]:
+    out: list[str] = []
+    for job in parsed["jobs"].values():
+        for step in job.get("steps", []):
+            uses = step.get("uses", "")
+            if uses:
+                out.append(uses)
+    return out
+
+
+def test_ci_yml_all_actions_sha_pinned_including_first_party():
+    """Issue #118 d1: EVERY action (incl. actions/*) in ci.yml is SHA-pinned."""
+    parsed = yaml.safe_load(gen_ci_yml(_params()))
+    for uses in _all_uses(parsed):
+        sha_part = uses.rsplit("@", 1)[1]
+        assert re.fullmatch(r"[0-9a-f]{40}", sha_part), f"action not SHA-pinned: {uses}"
+
+
+def test_release_yml_all_actions_sha_pinned_including_first_party():
+    """Issue #118 d1: EVERY action (incl. actions/*) in release.yml is SHA-pinned."""
+    parsed = yaml.safe_load(gen_release_yml(_params()))
+    for uses in _all_uses(parsed):
+        sha_part = uses.rsplit("@", 1)[1]
+        assert re.fullmatch(r"[0-9a-f]{40}", sha_part), f"action not SHA-pinned: {uses}"
+
+
+def test_notify_marketplace_yml_all_actions_sha_pinned_including_first_party():
+    """Issue #118 d1: EVERY action in notify-marketplace.yml is SHA-pinned."""
+    parsed = yaml.safe_load(gen_notify_marketplace_yml(_params()))
+    for uses in _all_uses(parsed):
+        sha_part = uses.rsplit("@", 1)[1]
+        assert re.fullmatch(r"[0-9a-f]{40}", sha_part), f"action not SHA-pinned: {uses}"
+
+
+# ---------------------------------------------------------------------------
+# v2.86.0+ follow-on hardening: SLSA / SBOM / provenance in release.yml (#121)
+# ---------------------------------------------------------------------------
+
+
+def test_release_yml_generates_sbom():
+    """Issue #121: release.yml must run an SBOM tool."""
+    yml = gen_release_yml(_params())
+    assert "anchore/sbom-action" in yml or "actions/attest-sbom" in yml
+
+
+def test_release_yml_attests_build_provenance():
+    """Issue #121: release.yml must produce a build-provenance attestation."""
+    yml = gen_release_yml(_params())
+    assert "actions/attest-build-provenance" in yml
+
+
+def test_release_yml_uploads_per_asset_checksums():
+    """Issue #121: release.yml must compute SHA256SUMS and upload them as an asset."""
+    yml = gen_release_yml(_params())
+    assert "SHA256SUMS" in yml
+    assert "sha256sum" in yml
+    # SHA256SUMS must be among the assets uploaded with the release.
+    parsed = yaml.safe_load(yml)
+    upload_steps = [
+        s.get("run", "")
+        for s in parsed["jobs"]["release"]["steps"]
+        if "gh release" in s.get("run", "")
+    ]
+    assert any("SHA256SUMS" in r for r in upload_steps)
+
+
+def test_release_yml_declares_attestation_permissions():
+    """Issue #121: the release job needs id-token + attestations write for the
+    provenance attestation, while keeping contents: write for the release."""
+    parsed = yaml.safe_load(gen_release_yml(_params()))
+    perms = parsed["jobs"]["release"]["permissions"]
+    assert perms.get("contents") == "write"
+    assert perms.get("id-token") == "write"
+    assert perms.get("attestations") == "write"
