@@ -1079,6 +1079,94 @@ def _is_html_unescape(line: str, match: str) -> bool:
     return "html.unescape" in line
 
 
+# Issue #125 class 5 — the SUPPLY_CHAIN pattern ``npm install\s+(?!--|@)\S+.*&&``
+# fires on a printed install-instruction HINT
+# (``_log("Install with: npm install -g dev-browser && dev-browser install")``).
+# The command is a STRING-LITERAL argument to a print/log sink — it is shown to
+# the user, never executed. A printed string cannot install anything. This is a
+# GENERAL printed-help-string discriminator, NOT a publish.py path exemption.
+#
+# A print / log sink head immediately preceding a quoted string the match sits
+# inside. Conservative: the sink name must be one of the recognised
+# output/log/warn functions; an arbitrary call is NOT a print sink.
+_PRINT_LOG_SINK_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:print"
+    r"|_log|log_\w+|\w*_log"
+    r"|logging\.\w+|logger\.\w+|log\.\w+"
+    r"|sys\.stderr\.write|sys\.stdout\.write"
+    r"|click\.echo|click\.secho"
+    r"|warnings\.warn"
+    r"|echo|secho|print_\w+)\s*\(",
+    re.IGNORECASE,
+)
+# An execution token anywhere on the line voids the carve-out — a real shell
+# spawn of the install command keeps firing.
+_PY_EXEC_TOKEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bsubprocess\.|os\.system|os\.popen|\bPopen\s*\(|\bcheck_output\s*\("
+    r"|\brun\s*\(|\bcall\s*\(|shell\s*=\s*True|os\.exec\w*\s*\(|\bcommands\.getoutput",
+)
+
+
+def _is_command_in_print_string_arg(line: str, match: str) -> bool:
+    """True iff a SUPPLY_CHAIN ``match`` (an install command) sits inside a
+    STRING LITERAL that is an argument to a print / log sink, AND the line has
+    NO execution token.
+
+    A printed/logged install hint (``print("run: npm install x && y")`` /
+    ``_log("Install with: …")``) is documentation text, never executed.
+
+    FN-safe (BOTH conditions required):
+      1. the matched command is inside a double/single-quoted string on the line
+         (so it is string DATA, not a bare command), AND a print/log sink head
+         appears on the line; AND
+      2. the line carries NO execution token (``subprocess`` / ``os.system`` /
+         ``Popen(`` / ``run(`` / ``shell=True`` / …) — a real
+         ``subprocess.run("npm install x && y", shell=True)`` keeps firing.
+    """
+    if not match:
+        return False
+    if not _PRINT_LOG_SINK_RE.search(line):
+        return False
+    if _PY_EXEC_TOKEN_RE.search(line):
+        return False
+    # The matched command must sit inside a quoted string literal on the line
+    # (string DATA passed to the print sink), not be a bare token.
+    return _match_inside_quoted_string_py(line, match)
+
+
+# A lightweight same-line check: ``match`` substring is enclosed by a pair of
+# matching quotes on ``line``. Used by the print-string discriminator (the AST
+# token check is heavier and runs later for other carve-outs).
+def _match_inside_quoted_string_py(line: str, match: str) -> bool:
+    """True iff ``match`` appears inside a single/double-quoted string span on
+    ``line`` (a best-effort same-line scan, quote-pair aware)."""
+    if not match or match not in line:
+        return False
+    for quote in ('"', "'"):
+        depth_open = -1
+        i = 0
+        n = len(line)
+        spans: list[tuple[int, int]] = []
+        while i < n:
+            if line[i] == quote:
+                if depth_open == -1:
+                    depth_open = i
+                else:
+                    spans.append((depth_open, i))
+                    depth_open = -1
+            i += 1
+        start = 0
+        while True:
+            pos = line.find(match, start)
+            if pos == -1:
+                break
+            end = pos + len(match)
+            if any(s < pos and end <= e for s, e in spans):
+                return True
+            start = pos + 1
+    return False
+
+
 # Issue #42 — a string COMPILED as a regular expression is inert data: it
 # describes a match, it is never executed. A scanner / validator that
 # ships a pattern catalog (CPV's own ``cpv_skillaudit_*.py``,
@@ -2727,6 +2815,19 @@ def classify(
         rule_id in _LITERAL_DATA_SUPPRESSIBLE_RULES
         and 0 <= line_idx < len(lines)
         and _match_inside_string_literal_token(source, line_idx + 1, match)
+    ):
+        return "safe_literal"
+
+    # Issue #125 class 5 — SUPPLY_CHAIN on a printed install-instruction HINT
+    # (``_log("Install with: npm install -g dev-browser && dev-browser install")``).
+    # The command is a string-literal argument to a print/log sink — shown to the
+    # user, never executed. General printed-help-string discriminator (NOT a
+    # publish.py path exemption). FN-safe: a line with any execution token
+    # (``subprocess.run(..., shell=True)`` / ``os.system`` / …) keeps firing.
+    if (
+        rule_id == "SUPPLY_CHAIN"
+        and 0 <= line_idx < len(lines)
+        and _is_command_in_print_string_arg(lines[line_idx], match)
     ):
         return "safe_literal"
 

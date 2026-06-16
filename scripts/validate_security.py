@@ -9267,7 +9267,11 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
         # AST is the proof; on a parse failure or non-.py file we KEEP the
         # finding (default-visible), so a broken/foreign file cannot dodge RC-70.
         rc70_inert_decoder_lines = _rc70_python_inert_decoder_lines(rel_path, content)
-        for line_no, msg in find_obfuscated_exec(content, proximity_lines=3):
+        # Pass rel_path so RC-70 can (issue #125 class 3) drop the JS-noise
+        # `exec(`/`compile(` method-name sinks for non-Python files and apply the
+        # minified-megaline column-distance gate. Python files keep the full
+        # sink set; the column gate never fires on normal short-lined source.
+        for line_no, msg in find_obfuscated_exec(content, proximity_lines=3, file_path=rel_path):
             if is_in_fenced_code_block(line_no - 1, fence_state):
                 continue
             if cpv_self_scan_skip_line(rel_path, content_lines, line_no):

