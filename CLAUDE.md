@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.30` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.31` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
-| **test files** | **332** | `ls tests/test_*.py`; ~9402 tests |
+| **test files** | **333** | `ls tests/test_*.py`; ~9405 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,35 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.31 — #94 (CAA) `workflows/` known_dir + triage-closure of #104/#102/#83/#93** — one
+focused VALIDATOR change plus four issue closures, each verified through the actual scanner
+(claim-verified, not on reporter testimony). **#94 (code change):** Claude Code 2.1.154+ ships
+the Workflow tool and plugins now place Workflow-DSL scripts in a root `workflows/` directory,
+which fired the structural `RC-NONSTD-DIR-001` MAJOR — added `workflows` to
+`validate_plugin.py`'s `known_dirs`. Purely STRUCTURAL: files inside `workflows/` are still fully
+security-scanned (verified — a planted obfuscated decode-then-exec payload under `workflows/`
+still fires SHELL_EXEC + OBFUSCATION + a hidden-URL finding), and a genuinely unrecognized
+directory still fires the MAJOR. The reporter explicitly did NOT ask for an exemption — this is a
+catalog addition, not an allowlist. +3 two-sided tests. NO security-scanner change → no
+allowlist, no re2-audit regen. **Triage closures (no code change, all verified through the actual
+scanner):** **#104** (amvcp `design/` governance docs) — resolved by accumulated detection
+accuracy, NOT a carve-out: `design/` is scanned like any shipped content (a real `design/foo.sh`
+piped-installer fires CRITICAL+HIGH, not suppressed; `design/` is only a structural known-dir
+courtesy, NOT in VENDORED_DIR_NAMES), benign governance prose scans clean (amvcp's 0/26), and
+CPV's own `design/` self-validates 0/0/0/0. **#102** (CAA 3 detector-vocabulary needles) — N2
+(`CMD_INJECTION` on a `word+word` token) already fixed by pattern-tightening; N1
+(`A2A_CROSS_AGENT_INJECT` on inject-into-agent prose) declined on principle — it's
+`agent_manipulation`/INTENT-class on an instruction-loadable surface, exactly where a silent
+doc-context suppressor IS the exploitable hole (the codified rule already declines to silently
+suppress exec/injection-class on loadable paths → demote-to-visible-NIT; paths are rephrase or
+the #101 sentinel); N3 (`PRIVILEGE_ESC` on a privilege-family token inside a backtick catalog
+identifier) working-as-designed (a warning caption flips it to suppress). **#83** (webdesign 6
+doc-over-match shapes) — all resolved on the current release (CSS-font-family / markdown-link /
+activation-prose → 0 findings; merge-API-row + PowerShell-env-syntax → suppressed/non-blocking;
+heredoc → fixed v2.126.22). **#93** (CAA vendored-CPV-copies) — resolved downstream by full
+de-vendoring; suppression ask withdrawn (a vendored-copy self-exemption is an exploitable surface);
+two docs follow-ups tracked. self-validate VALID 0/0/0/0; FULL SERIAL 9405 pass/2 skip.
 
 **v2.126.30 — #127 (webdesign) 3 validator-check FPs** — non-security structural/
 portability validators (NOT the skillaudit scanner). All 3 confirmed through the
