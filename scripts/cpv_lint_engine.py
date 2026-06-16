@@ -185,6 +185,21 @@ _XMLLINT_WARNING_RE = re.compile(
 # masquerade as a file. The numeric suffix is the discriminator.
 _RUFF_CONCISE_FINDING_RE = re.compile(r"^(.+?):\d+(?::\d+)?:\s")
 
+# Issue #108: a ruff `--output-format=concise` line, fully decomposed so the
+# report can show the rule code, line:col, AND the message for EVERY finding
+# (the bare "<N> error(s) in <file>" count made every consumer re-run ruff to
+# learn what the finding was). Groups: 1=path, 2=line, 3=col (optional),
+# 4=rule code (e.g. F401 / I001 / E701), 5=the human message (which may begin
+# with ruff's "[*]" auto-fixable marker — kept verbatim). The rule-code group
+# is `[A-Z]{1,4}\d+` (ruff codes are an uppercase prefix + digits); a line that
+# matches `_RUFF_CONCISE_FINDING_RE` but NOT this (no recognizable code, e.g. a
+# future ruff format tweak) still falls back to the count path, so no finding is
+# ever silently dropped. The path group is non-greedy up to the ":<line>:"
+# suffix for the same Windows-drive-letter reason as the concise regex above.
+_RUFF_CONCISE_FINDING_FULL_RE = re.compile(
+    r"^(?P<path>.+?):(?P<line>\d+)(?::(?P<col>\d+))?:\s+(?P<code>[A-Z]{1,4}\d+)\s+(?P<msg>.*)$"
+)
+
 # Display labels for `[REPO LINT][PYTHON]` style section headers when
 # the engine is invoked from validate_plugin.py — kept short so the
 # output stays compact in CI logs.
@@ -617,24 +632,53 @@ def lint_python(
     if result.returncode == 0:
         report.passed(f"ruff check passed for {len(files)} Python file(s)")
     else:
-        errors_by_file: dict[str, int] = {}
+        # ruff --output-format=concise emits "<path>:<line>[:<col>]: <code> …".
+        # Splitting on the FIRST ":" mis-grouped Windows absolute paths
+        # ("C:\\…\\foo.py" -> bucket "C") and turned any colon-bearing
+        # summary line ("warning: …") into a bogus file bucket. Anchor on
+        # the ":<line>[:<col>]:" suffix instead: the path is everything
+        # before it, the leading numeric group is what distinguishes a real
+        # finding from prose (a Windows drive's ":" is followed by "\\", not
+        # a digit), so non-finding lines are skipped outright.
+        #
+        # Issue #108: keep the per-FILE MAJOR grouping (one MAJOR per file —
+        # the count consumers depend on is unchanged) but ENRICH each MAJOR's
+        # message to list every finding as "<code> <rel>:<line>[:<col>]
+        # <message>", so the report shows the rule code, location, and message
+        # the consumer would otherwise have to re-derive by re-running ruff.
+        # Findings are kept in ruff's emission order per file.
+        errors_by_file: dict[str, list[str]] = {}
+        order: list[str] = []
         for line in (result.stdout or "").splitlines():
-            # ruff --output-format=concise emits "<path>:<line>[:<col>]: <code> …".
-            # Splitting on the FIRST ":" mis-grouped Windows absolute paths
-            # ("C:\\…\\foo.py" -> bucket "C") and turned any colon-bearing
-            # summary line ("warning: …") into a bogus file bucket. Anchor on
-            # the ":<line>[:<col>]:" suffix instead: the path is everything
-            # before it, the leading numeric group is what distinguishes a real
-            # finding from prose (a Windows drive's ":" is followed by "\\", not
-            # a digit), so non-finding lines are skipped outright.
             m = _RUFF_CONCISE_FINDING_RE.match(line)
-            if m:
-                file_part = m.group(1).strip()
-                if file_part:
-                    errors_by_file[file_part] = errors_by_file.get(file_part, 0) + 1
-        for file_path_str, count in sorted(errors_by_file.items()):
-            rel = _relpath(repo_root, file_path_str)
-            report.major(f"Ruff: {count} error(s) in {rel}", rel)
+            if not m:
+                continue
+            file_part = m.group(1).strip()
+            if not file_part:
+                continue
+            if file_part not in errors_by_file:
+                errors_by_file[file_part] = []
+                order.append(file_part)
+            rel = _relpath(repo_root, file_part)
+            full = _RUFF_CONCISE_FINDING_FULL_RE.match(line)
+            if full:
+                loc = f"{rel}:{full.group('line')}"
+                if full.group("col"):
+                    loc += f":{full.group('col')}"
+                detail = f"{full.group('code')} {loc} {full.group('msg').strip()}".rstrip()
+            else:
+                # Recognised as a finding line by the concise regex but the
+                # rule-code shape did not parse (defensive — keeps the finding
+                # visible verbatim rather than dropping it).
+                detail = line.strip()
+            errors_by_file[file_part].append(detail)
+        for file_part in order:
+            details = errors_by_file[file_part]
+            rel = _relpath(repo_root, file_part)
+            count = len(details)
+            header = f"Ruff: {count} error(s) in {rel}"
+            body = "\n".join(f"  {d}" for d in details)
+            report.major(f"{header}\n{body}", rel)
         if not errors_by_file and (result.stdout or "").strip():
             report.major("Ruff: error(s) across Python files")
         ok = False
@@ -2187,6 +2231,23 @@ def main(argv: list[str] | None = None) -> int:
         report,
         strict_missing_tools=not args.soft_missing_linters,
     )
+
+    # Issue #108: surface the actual findings, not just a count. Before the
+    # compact summary, print one Detail block per non-PASSED result with its
+    # severity, message (which already carries the per-finding rule-code /
+    # location / text for ruff), and file:line when known. A clean run has no
+    # non-PASSED results, so nothing is printed here — the summary still shows
+    # PASSED=N as before.
+    detail_levels = ("CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING", "INFO")
+    details = [r for r in report.results if r.level in detail_levels]
+    if details:
+        print()
+        print("Details:")
+        for r in details:
+            loc = ""
+            if r.file:
+                loc = f" ({r.file}:{r.line})" if r.line else f" ({r.file})"
+            print(f"  [{r.level}] {r.message}{loc}")
 
     # Compact summary
     counts: dict[str, int] = {}
