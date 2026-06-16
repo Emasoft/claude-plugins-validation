@@ -1,13 +1,13 @@
 {
   "_schema_version": 1,
-  "_generated_at": "2026-06-09T12:54:49.402975Z",
+  "_generated_at": "2026-06-16T02:44:41+0200",
   "_source": "scripts/rules/skillaudit_patterns.json",
-  "_source_sha256": "35827e16d9532a361a77ad3d781c632aebb773cf1f021ebef996ec0597e5a9c7",
+  "_source_sha256": "85d2f1ef0a7c56ccc5c4f4732225d5f3d8b307da3b87896b09a293e996e57686",
   "_re2_version": "unknown",
   "_audit_mode": "re2_available",
   "_summary": {
-    "total": 528,
-    "compatible": 520,
+    "total": 529,
+    "compatible": 521,
     "incompatible": 8,
     "rules_total": 58,
     "rules_compatible": 52,
@@ -412,8 +412,8 @@
     },
     "CLAUDE_RESERVED_ENV_POISON": {
       "compatible": true,
-      "patterns_total": 6,
-      "patterns_compatible": 6,
+      "patterns_total": 7,
+      "patterns_compatible": 7,
       "patterns_incompatible": [],
       "reason": null
     },

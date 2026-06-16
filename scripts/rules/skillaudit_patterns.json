@@ -999,7 +999,8 @@
         "process\\.env\\.(?:CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_ENV_FILE)\\s*=[^=]",
         "process\\.env\\[\\s*['\"](?:CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_ENV_FILE)['\"]\\s*\\]\\s*=[^=]",
         "os\\.environ\\[\\s*['\"](?:CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_ENV_FILE)['\"]\\s*\\]\\s*=[^=]",
-        "(?:os\\.putenv|os\\.setenv)\\s*\\(\\s*['\"](?:CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_ENV_FILE)['\"]"
+        "(?:os\\.putenv|os\\.setenv)\\s*\\(\\s*['\"](?:CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_ENV_FILE)['\"]",
+        "(?:std::)?env::set_var\\s*\\(\\s*['\"](?:CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_ENV_FILE)['\"]"
       ],
       "remediation": "Never write a reserved CLAUDE_* variable (CLAUDE_PLUGIN_ROOT, CLAUDE_PLUGIN_DATA, CLAUDE_PROJECT_DIR, CLAUDE_ENV_FILE, CLAUDE_EFFORT, CLAUDE_CODE_REMOTE, CLAUDECODE) into the global session env or $CLAUDE_ENV_FILE. These are per-plugin values the harness sets; clobbering one breaks every other plugin. Export a namespaced var (e.g. MYPLUGIN_DATA_DIR) instead, and read CLAUDE_PLUGIN_DATA only from your own plugin's runtime-provided env."
     },
