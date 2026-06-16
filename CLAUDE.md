@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.29` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.126.30` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **46** | `ls -d skills/*/` |
 | **scripts** | **115** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema) |
-| **test files** | **331** | `ls tests/test_*.py`; ~9389 tests |
+| **test files** | **332** | `ls tests/test_*.py`; ~9402 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,30 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.126.30 — #127 (webdesign) 3 validator-check FPs** — non-security structural/
+portability validators (NOT the skillaudit scanner). All 3 confirmed through the
+actual validator + fixed FN-safe two-sided, reusing existing helpers; delegated
+implementation then independently adversarial-re-verified. FP-1: `_collect_script_refs`
+(validate_plugin.py) flagged a `scripts/*.py` path inside a YAML `#` comment (the
+Issue-#11 compliance note in scaffolded ci.yml/release.yml) as a dangling reference
+→ new quote-aware `_ref_after_comment_marker` skips a match after an unquoted `#`
+(a path in a real `run:` line still flags; mixed line flags only the non-comment ref).
+FP-2: `validate_no_absolute_paths` (cpv_validation_common.py) never consulted
+`is_vendored_path`, so `cpv.exclude_paths` had no effect on the absolute-path/portability
+rule (a vendored shadcn `.mdx` import-alias path kept firing) → now skips a path where
+`is_vendored_path(rel, root)` is True (resolves exclude_paths + VENDORED_DIR_NAMES +
+.gitmodules). **This makes good on the #123 guidance that exclude_paths covers
+STYLE/STRUCTURE/PORTABILITY rules — which it previously did NOT for this check (my gap).**
+A non-excluded absolute path still fires. FP-3: `validate_bin_executables`
+(validate_plugin.py) flagged `bin/.DS_Store` (gitignored+untracked macOS artifact) as
+not-executable → now skips a gitignored-AND-untracked file via the v2.126.26
+`gitignored_unshipped_paths`/`path_is_unshipped` helpers (a tracked non-exec `.sh` still
+flags; tracked+gitignored still scanned per the anti-evasion invariant; non-git scans all).
+NO security-scanner change → no allowlist, no re2-audit regen. +13 tests (two-sided);
+self-validate VALID 0/0/0/0; FULL SERIAL 9402 pass/2 skip. NOTE: #127 also raised the
+git-accuracy of the OTHER validators (FP-3 is one instance) — the broader Phase 2
+(secret/external scanners git-accurate) remains the deferred follow-up.
 
 **v2.126.29 — #124 REOPENED (PSS multi-line shapes)** — the v2.126.27 Rust/Python
 discriminators were LINE-LOCAL, but real code writes these constructs across
