@@ -3,7 +3,7 @@ trdd-id: 933592ac-98f0-498c-9e7c-54742acaa76c
 title: Fixer/detector hardening — amvcp field report (htmlhint FP, doc-context NITs, TOC catch-22, fixer-agent robustness)
 column: dev
 created: 2026-06-17T21:34:14+0200
-updated: 2026-06-17T21:48:17+0200
+updated: 2026-06-17T22:16:48+0200
 current-owner: claude-plugins-validation
 assignee: claude-plugins-validation
 priority: 2
@@ -64,6 +64,17 @@ detector-FPs (corrupt state). Thesis CONFIRMED.
   `_LINT_ENGINE_CODE_REV` (sha256 of `cpv_lint_engine.py`) into the key. Proven
   end-to-end: a re-validate with NO cache clear re-linted (val3 had ANSI, val4
   didn't). +5 tests; lint-engine + cache suites 293 pass.
+
+**A2 INSPECTION (done — all 8 are doc-over-match FPs of known families):**
+- 6 in `references/*.md` (node-network-cloud:139 SHELL_EXEC on a prose bullet of
+  backticked product names — CONTEXT-DEPENDENT, single-line probe misses it, use the
+  real multi-line file per the #124 lesson; the others — tabbed-code-samples:5,
+  20-layout-code-focus:94, group-collapse-handles:29, inline-svg-illustration-controls:262,
+  tokenizer-contract:131 — are displayed example code/prose). Doc-context suppress, per #76/#83.
+- 2 in SKILL.md BODIES (modal-comments:17 + graph-diagrams:17) CMD_INJECTION on a `;`
+  in PROSE (Prerequisites sentences "Mermaid CDN**;** Graphviz…"), NOT a shell separator.
+  → a PRECISE prose-`;` discriminator (same family as #86/#87/#88), FN-safe (a real
+  `; rm -rf` / `; curl|sh` still fires). NOT a SKILL.md-body blanket suppression.
 
 **NEXT ACTION:** A2 (doc-context suppressors for the 8 demoted-NIT doc examples),
 B1/B2 (TOC converge + dual embed format), B3/B4/B5 (fixer-agent hardening) — delegate
