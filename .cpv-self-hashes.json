@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-06-17T19:58:13+00:00",
+  "computed_at": "2026-06-17T22:38:33+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:44719118462382df774d42b5439b0defb6e62d40eb58a88445a2c179dfc2d751",
@@ -101,7 +101,7 @@
     "design/tasks/TRDD-20260611_105849+0200-858e449c-issue75-scanner-plugin-fps.md": "sha256:4e6a1bc65a93cf77fb319886d2ff36b710c76d453ec13cb23f07d782a511aa4f",
     "design/tasks/TRDD-20260611_195823+0200-aed77004-cspell-dict-tool-shadow-fp.md": "sha256:850ffd2d47a9350c61dab1621a1f1e6ed9ad1ae25bbc023ca4facc2ba2f61b32",
     "design/tasks/TRDD-20260616_234045+0200-e9f13df1-canon-profiles-model.md": "sha256:4306947647b5dee4eb65d1fd27bcaf9697137e9633bfb48633ad327614da4aef",
-    "design/tasks/TRDD-20260617_213414+0200-933592ac-fixer-detector-hardening.md": "sha256:65bacfdf9198a4ba999e48c993ee2211b1b27e05dff9fef3d7324a39add2ab90",
+    "design/tasks/TRDD-20260617_213414+0200-933592ac-fixer-detector-hardening.md": "sha256:ec229333ad5117b0d01baf8bc5630cbbcbed119bbea775f87f1cbe20f714a8cb",
     "design/tasks/TRDD-26446eed-ea5e-43e7-886c-8512866d92be-semantic-channel-source.md": "sha256:b20480b2cf4e0a97cc06e53a32a39a4d09a4740b94c92804298a8286d88d991c",
     "design/tasks/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md": "sha256:e2f55a383481238d738aaea92cfdbcb0ce34e6f1bdeab22a3b641cfca583431d",
     "design/tasks/TRDD-2be75e88-3c23-4c91-9e4e-5ce315b497dc-scope-validators.md": "sha256:6aba8e45a304a4b8b33177decdc271a7e1677098d7b5e09903f132f73cabff68",
@@ -155,7 +155,7 @@
     "scripts/_plugin_verify_hashes.py": "sha256:ca2fbfe046122797dd2915a4ffaae43e21f3c25b1f7f9613f7a512f24934c063",
     "scripts/_skillaudit_html_context.py": "sha256:73b3f2c0011499a90d29545f30d41370cf1f010d918d7d6515d459ac97a1f71e",
     "scripts/_skillaudit_json_context.py": "sha256:1da166098c3108cae74643b3763565c0787850f1a6525f2483be6809d80637cd",
-    "scripts/_skillaudit_markdown_context.py": "sha256:260030c886788c7b82153e6b2c5d69fc2b53f54d622c11a1b6ae927c35a9c84f",
+    "scripts/_skillaudit_markdown_context.py": "sha256:2d666d0d20082373f1fecc5f8a9e5e172eaed59301d7a1a3181c17061e90faa8",
     "scripts/_skillaudit_python_context.py": "sha256:c24e1425c5b6d28e491a130ae69426ced3eefd433fddfc7a27b2ed4932b0f205",
     "scripts/_skillaudit_rust_context.py": "sha256:cac1f434b1da6e2c61a5511a8a7a4ca00bdab887d592a731403499569e2ec25f",
     "scripts/_skillaudit_shell_context.py": "sha256:5cc479cd05b4b1813b23cf69796c5a935112540bdc04489649f4cf2b96395bf8",

