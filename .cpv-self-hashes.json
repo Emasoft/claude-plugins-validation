@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-06-17T00:46:09+00:00",
+  "computed_at": "2026-06-17T19:49:13+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:2352daae02801ff5d4d696d3113e060d4c7f6230e5c3c7457bc21be127ad9fa7",
@@ -101,6 +101,7 @@
     "design/tasks/TRDD-20260611_105849+0200-858e449c-issue75-scanner-plugin-fps.md": "sha256:4e6a1bc65a93cf77fb319886d2ff36b710c76d453ec13cb23f07d782a511aa4f",
     "design/tasks/TRDD-20260611_195823+0200-aed77004-cspell-dict-tool-shadow-fp.md": "sha256:850ffd2d47a9350c61dab1621a1f1e6ed9ad1ae25bbc023ca4facc2ba2f61b32",
     "design/tasks/TRDD-20260616_234045+0200-e9f13df1-canon-profiles-model.md": "sha256:4306947647b5dee4eb65d1fd27bcaf9697137e9633bfb48633ad327614da4aef",
+    "design/tasks/TRDD-20260617_213414+0200-933592ac-fixer-detector-hardening.md": "sha256:42bb0b30cb54b0b0b115c989401dca8d8660373b463a00d76df71e8554f4baab",
     "design/tasks/TRDD-26446eed-ea5e-43e7-886c-8512866d92be-semantic-channel-source.md": "sha256:b20480b2cf4e0a97cc06e53a32a39a4d09a4740b94c92804298a8286d88d991c",
     "design/tasks/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md": "sha256:e2f55a383481238d738aaea92cfdbcb0ce34e6f1bdeab22a3b641cfca583431d",
     "design/tasks/TRDD-2be75e88-3c23-4c91-9e4e-5ce315b497dc-scope-validators.md": "sha256:6aba8e45a304a4b8b33177decdc271a7e1677098d7b5e09903f132f73cabff68",
@@ -186,7 +187,7 @@
     "scripts/cpv_hash_manifest_v2.py": "sha256:8060849be89f5b894fbc00705b91fcecfec5fc58293f9f152dad5583765ddfca",
     "scripts/cpv_install_scanners.py": "sha256:87161e31931ce5af0c05c044ab7ca4fcfa5ccc3d94f976c49990facd73697a47",
     "scripts/cpv_integrity.py": "sha256:83660f7fb70b2e8f258936a94e48754e34dfd280c5f34f2a1ed4f8ec27441f6a",
-    "scripts/cpv_lint_engine.py": "sha256:14d6ebee05be7d9905708eae7401456ba2079becdaf25bf75964fd01a5a8f3d5",
+    "scripts/cpv_lint_engine.py": "sha256:07b905bd1a1c57dd49c4349c50fabed915dfac7b7fb75225367acb98a94867ed",
     "scripts/cpv_management_common.py": "sha256:1fa1519e5c768c26abe12c3f1c55e8e0ea4b865bcc67a5128d18d3e80cc54c92",
     "scripts/cpv_marketplace_input.py": "sha256:3151eaec0805383277ca0a29158e506a575d898dc71bbf0a64cd0f519eebfb52",
     "scripts/cpv_menu.py": "sha256:0b9d44d85574ebd3211d61076ce77459c1db155d324851e362a6e8f1baad8cec",
@@ -670,7 +671,7 @@
     "tests/test_cpv_fp_classifier_rules.py": "sha256:1973e4c814140e678370bc707ac8e93033f34884107f4c6934d2a76378c2e8eb",
     "tests/test_cpv_ingestion.py": "sha256:db846b71f76d7134e47a7d55a4d5a0e69b78a33ade52ace98eef4ebc59d63d8d",
     "tests/test_cpv_install_scanners.py": "sha256:178d4bfb6a423be3d38369941a38d7bf2e71b79902d4a3ad0dff44625e32ec9b",
-    "tests/test_cpv_lint_engine.py": "sha256:20cdd8901944b4c9a8f7892075b71da9bfb568ac68868beed5a5440c17b6a632",
+    "tests/test_cpv_lint_engine.py": "sha256:f0ef0e8667e2ebe3fc8c9428fa93bfe17e9be5f41d83731da701a0d6af07477f",
     "tests/test_cpv_lint_engine_parallelism.py": "sha256:4da2cf2a4250e422d4ce800225e920f53590d87a30f01fe5f6c37bb75750686e",
     "tests/test_cpv_main_menu_specs.py": "sha256:f61c55054ee9c75c9e5b206629fcd4ae4699698d9d11a1d8578680cb71e94136",
     "tests/test_cpv_management_common.py": "sha256:4db6422079c3b2b18012371bf582d9a406450fdd622b6cea64a76a9006e9cbcc",

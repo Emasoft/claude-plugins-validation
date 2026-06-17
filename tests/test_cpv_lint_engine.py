@@ -783,6 +783,107 @@ class TestLintHtml:
             ok = lint_html(tmp_path, [f], report, strict_missing_tools=True)
         assert ok is False
 
+    def test_config_loaded_banner_filtered(self, tmp_path: Path) -> None:
+        """Issue #132: htmlhint prints a 'Config loaded: <rc>' INFO banner (once
+        per scanned file) and a 'Scanned N files…' summary to stdout. On a
+        non-zero exit these are NOT lint errors and must not surface as MINORs
+        (a 6-file run had emitted 10 bogus 'Config loaded:' MINORs)."""
+        f = tmp_path / "i.html"
+        f.write_text("<html></html>\n")
+        report = ValidationReport()
+        stdout = (
+            "   Config loaded: .htmlhintrc\n"
+            "   Config loaded: .htmlhintrc\n"
+            "   Config loaded: .htmlhintrc\n"
+            "\n"
+            "Scanned 3 files, no errors found (9 ms).\n"
+        )
+        with patch("cpv_lint_engine._resolve", return_value=["/bin/htmlhint"]):
+            with patch(
+                "cpv_lint_engine._run_linter",
+                side_effect=_make_run(FakeResult(1, stdout, "")),
+            ):
+                ok = lint_html(tmp_path, [f], report)
+        html_findings = [r for r in report.results if "htmlhint" in r.message]
+        assert html_findings == [], (
+            f"banner/summary lines must be filtered, got "
+            f"{[r.message for r in html_findings]}"
+        )
+        assert ok is True
+
+    def test_real_htmlhint_error_still_reported(self, tmp_path: Path) -> None:
+        """FN-safe sibling: a genuine htmlhint error line still becomes a MINOR;
+        only the banner/summary noise is dropped (issue #132)."""
+        f = tmp_path / "i.html"
+        f.write_text("<html></html>\n")
+        report = ValidationReport()
+        stdout = (
+            "   Config loaded: .htmlhintrc\n"
+            "\n"
+            "   templates/x.html\n"
+            '      L1 |<img src="a.png">\n'
+            "         ^ An alt attribute must be present on <img> elements. (alt-require)\n"
+            "\n"
+            "Scanned 1 file, 1 error found (7 ms).\n"
+        )
+        with patch("cpv_lint_engine._resolve", return_value=["/bin/htmlhint"]):
+            with patch(
+                "cpv_lint_engine._run_linter",
+                side_effect=_make_run(FakeResult(1, stdout, "")),
+            ):
+                ok = lint_html(tmp_path, [f], report)
+        msgs = [r.message for r in report.results if "htmlhint" in r.message]
+        assert any("alt-require" in m for m in msgs), f"real error dropped: {msgs}"
+        assert not any("Config loaded:" in m for m in msgs), f"banner leaked: {msgs}"
+        assert not any("Scanned 1 file" in m for m in msgs), f"summary leaked: {msgs}"
+        assert ok is True
+
+    def test_ansi_color_codes_stripped_from_findings(self, tmp_path: Path) -> None:
+        """Issue #132: htmlhint colorizes its output; the surfaced finding must
+        carry no raw ANSI SGR escapes, and the real error still surfaces."""
+        f = tmp_path / "i.html"
+        f.write_text("<html></html>\n")
+        report = ValidationReport()
+        stdout = (
+            "   Config loaded: .htmlhintrc\n"
+            "   \x1b[37mtemplates/x.html\x1b[39m\n"
+            '      \x1b[37mL1 |<img src="a.png">\x1b[39m\n'
+            "         \x1b[31m^ An alt attribute must be present (alt-require)\x1b[39m\n"
+            "Scanned 1 file, 1 error found.\n"
+        )
+        with patch("cpv_lint_engine._resolve", return_value=["/bin/htmlhint"]):
+            with patch(
+                "cpv_lint_engine._run_linter",
+                side_effect=_make_run(FakeResult(1, stdout, "")),
+            ):
+                ok = lint_html(tmp_path, [f], report)
+        msgs = [r.message for r in report.results if "htmlhint" in r.message]
+        assert any("alt-require" in m for m in msgs), f"real error dropped: {msgs}"
+        assert not any("\x1b[" in m for m in msgs), f"ANSI escape leaked: {msgs!r}"
+        assert ok is True
+
+
+class TestLintCacheKeyEngineRev:
+    """Issue #132: the lint cache key folds the engine's own code revision so a
+    CPV fix to output PROCESSING invalidates warm cache entries — not just an
+    external-tool-version bump or a file-content change."""
+
+    def test_engine_code_rev_changes_cache_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import cpv_lint_engine as cle
+
+        f = tmp_path / "m.py"
+        f.write_text("x = 1\n")
+        monkeypatch.setattr(cle, "_LINT_ENGINE_CODE_REV", "REV_AAAA")
+        k1 = cle._build_cache_key("python", [f], tmp_path, strict_missing_tools=False)
+        monkeypatch.setattr(cle, "_LINT_ENGINE_CODE_REV", "REV_BBBB")
+        k2 = cle._build_cache_key("python", [f], tmp_path, strict_missing_tools=False)
+        assert k1 is not None and k2 is not None, "python lint must be cacheable"
+        assert k1.args_hash != k2.args_hash, (
+            "engine code revision must be folded into the lint cache key"
+        )
+
 
 class TestLintSql:
     def test_missing_sqlfluff_strict_fails(self, tmp_path: Path) -> None:

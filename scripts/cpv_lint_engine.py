@@ -80,6 +80,25 @@ from gitignore_filter import GitignoreFilter
 # the markdown collect() patterns if a new markdown suffix is ever added.
 _MARKDOWNLINT_FINDING_RE = re.compile(r"\.mdx?:\d+(?::\d+)?\s+(?:error|warning|info)\s+MD\d+")
 
+# htmlhint (and some other CLIs) colorize stdout with ANSI SGR escapes; strip
+# them so captured finding lines are readable and prefix-matching (banner /
+# summary detection) is not defeated by a leading color code (issue #132).
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+# Content fingerprint of THIS lint-engine module, folded into every lint cache
+# key (see _build_cache_key). The lint cache is content + external-tool-version
+# keyed, but CPV's own output-PROCESSING logic (banner filtering, finding
+# parsing, severity mapping) lives here — a fix to it (e.g. issue #132's
+# htmlhint banner strip) would otherwise be MASKED for warm-cache users until
+# the file content or the external tool version happened to change. Hashing the
+# module invalidates the lint cache exactly when this logic changes (precise —
+# unlike folding the plugin version, which would bump every release regardless
+# of whether the lint logic actually moved).
+try:
+    _LINT_ENGINE_CODE_REV = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:16]
+except OSError:
+    _LINT_ENGINE_CODE_REV = "unknown"
+
 # Issue #113: MD004 (ul-style) in markdownlint's default `consistent` mode is
 # poisoned by a stray MINORITY marker. A hard-wrapped prose line that happens to
 # begin `+ ` (or `* `) is parsed by CommonMark as a list item, which sets the
@@ -1532,10 +1551,27 @@ def lint_html(
         report.passed(f"htmlhint passed for {len(files)} HTML file(s)")
         return True
 
-    for line in (result.stdout or "").splitlines()[:20]:
-        stripped = line.strip()
-        if stripped:
-            report.minor(f"htmlhint: {stripped}")
+    # htmlhint prints an INFO banner ("Config loaded: <rc>", once per scanned
+    # file) and a "Scanned N files, M errors found" summary line to stdout —
+    # neither is a lint error. Filter both BEFORE building findings, then report
+    # the first 20 REAL error lines so genuine errors are never crowded out of
+    # the slice by banner noise (issue #132: a 6-file run emitted 10 bogus
+    # "Config loaded:" MINORs). A real htmlhint error line still becomes a
+    # MINOR (FN-safe — only the non-error banner/summary lines are dropped).
+    error_lines: list[str] = []
+    for raw in (result.stdout or "").splitlines():
+        # Strip ANSI color escapes first so the banner/summary prefix checks
+        # match a colorized line AND the surfaced finding is readable.
+        stripped = _ANSI_RE.sub("", raw).strip()
+        if not stripped:
+            continue
+        if stripped.startswith("Config loaded:"):
+            continue
+        if stripped.startswith("Scanned ") and " file" in stripped:
+            continue
+        error_lines.append(stripped)
+    for stripped in error_lines[:20]:
+        report.minor(f"htmlhint: {stripped}")
     # Return True: only MINOR findings were added. Per the module/`lint_repo`
     # contract, MINOR findings do not flip the return value; returning False
     # here would make the standalone CLI exit 1 on a MINOR-only run. The
@@ -1937,6 +1973,10 @@ def _build_cache_key(
     # Fold the resolved linter config content into the key so editing a config
     # file invalidates the cache (audit MAJOR cache #1).
     args.append(f"config_fingerprint={_config_fingerprint(lang, plugin_root)}")
+    # Fold this lint engine's own code revision into the key so a CPV fix to
+    # output PROCESSING (e.g. issue #132's htmlhint banner strip) invalidates
+    # warm cache entries instead of serving stale findings after a CPV upgrade.
+    args.append(f"lint_engine_rev={_LINT_ENGINE_CODE_REV}")
     args_hash = sha256_of_args(args)
 
     primary_tool = _PRIMARY_TOOL.get(lang, lang)
