@@ -3,7 +3,7 @@ trdd-id: 933592ac-98f0-498c-9e7c-54742acaa76c
 title: Fixer/detector hardening — amvcp field report (htmlhint FP, doc-context NITs, TOC catch-22, fixer-agent robustness)
 column: dev
 created: 2026-06-17T21:34:14+0200
-updated: 2026-06-17T22:16:48+0200
+updated: 2026-06-18T00:46:01+0200
 current-owner: claude-plugins-validation
 assignee: claude-plugins-validation
 priority: 2
@@ -80,6 +80,51 @@ detector-FPs (corrupt state). Thesis CONFIRMED.
 B1/B2 (TOC converge + dual embed format), B3/B4/B5 (fixer-agent hardening) — delegate
 to opus agents, central-verify each (own probe + full serial suite + self-validate
 `--strict`, per the NIT-catch lesson — not just pytest). Ship incrementally.
+
+**A2 IN FLIGHT (Phase 2 started):** all 8 firing sites re-read from the clone and
+classified (every one a genuine doc/prose FP — see table below; the 2 EXFIL on
+`amvcp-runtime.js` are A4 not A2, the `amvcp-code-highlight.js:133` REGEX_DOS is the
+A3 MINOR not A2). Spec at `reports_dev/a2-doc-context-suppressors-spec.md`. Opus
+impl agent dispatched (edits ONLY `scripts/_skillaudit_markdown_context.py` +
+`tests/test_a2_doc_context_suppressors.py`; amvcp read-only). My INDEPENDENT
+two-sided probe drafted at `reports_dev/a2_independent_probe.py` — 8 real FP sites +
+my own malicious siblings incl. 2 over-broad-shortcut TRAPS (`os.system` in a ```json
+fence for case 5; inline-code `(a+)+` for case 4). Run the probe + full serial suite +
+self-validate `--strict` BEFORE shipping (per the #131 silent-FN lesson — do not trust
+the agent's self-report). Engine = the existing `classify()`→{safe_literal=SUPPRESS,
+safe_doc/code_fence_neutral=DEMOTE-NIT}; A2 reclassifies the 8 to safe_literal where
+provably inert, respecting the Signal-0 instruction-loadable guard's INTENT (the 2
+SKILL.md cases use a precise prose-`;` discriminator, FN-safe by shape — NOT a blanket).
+
+**Re-dispatch note (rate-limit):** the FIRST opus agent died on a server rate-limit
+(~2649s) with NOTHING on disk; its killed-summary captured a sound prose-`;`
+discriminator design (RHS-not-command-shaped gate) which I folded into the spec's
+"Head-start" section. A FRESH opus agent was re-dispatched (incremental-disk-writes
+so a re-limit can't wipe progress). If the fresh agent also dies with zero disk
+progress after a ~10-min window, fall back to implementing A2 inline (the spec +
+classification are complete). Do NOT wait indefinitely on a dead agent's notification
+— check disk (`git diff --stat scripts/_skillaudit_markdown_context.py`, the test
+file, the `reports/plugin-fixer/*a2-doc-context*` report).
+
+**A2 VERIFIED + SHIP-PENDING (2026-06-18):** the 2nd opus agent shipped 5 helpers
+(`_is_inert_prose_clause_separator` 1/2/6, `_is_inert_backtick_product_name` 3,
+`_is_inert_count_quantifier_prose` 4, `_is_inert_rust_async_spawn` 5,
+`_is_inert_inline_code_doc_signature` 7/8) + 46 two-sided tests
+(`tests/test_a2_doc_context_suppressors.py`). CENTRAL-ADVERSARIAL-VERIFIED:
+(a) end-to-end amvcp re-validate (cache off) → **NIT 13→5**, all 8 A2 targets gone,
+nothing else moved; (b) my independent probe (`reports_dev/a2_independent_probe.py`)
+**20/20** — 8 FP suppressed + 12 malicious siblings stay visible incl. both traps
+(`os.system('curl|sh')` in a ```json fence + `function(\`rm -rf\`)`); (c) the
+inline-prose `(a+)+` suppression was confirmed **PRE-EXISTING** (baseline stash-vs-fix
+identical), not an A2 regression. **MY FIX (case-5 co-located-exec FN hole I caught
+reading the diff):** `_is_inert_rust_async_spawn` used a LINE-level
+`_RUST_ASYNC_SPAWN_RE.search(line)`, so a real sink-bearing exec co-located with a
+`tokio::spawn` on one line (`os.system('curl|sh'); tokio::spawn(x)`) had its
+SHELL_EXEC wrongly suppressed — added `_CASE5_COMPETING_EXEC_SINK_RE` decline +
+`tests/test_a2_case5_colocation_fn.py` (6 two-sided). ruff+mypy clean; 52 A2 tests
+pass; self-validate VALID 0/0/0/0/5W; hashes regen (929). NEXT: full serial re-run
+(in flight) → if green, `publish.py --minor` → ship → close #132 A2 part. Then B1/B2
+(TOC) and B3/B4/B5 (fixer hardening) remain.
 
 ## Verified findings (amvcp@4d96866)
 
