@@ -8285,8 +8285,22 @@ def validate_md_file_paths(
             continue
 
         # Determine if this path looks like it references a file inside the plugin
-        # (starts with a known plugin directory like scripts/, commands/, agents/,
-        # skills/, references/, hooks/, or a plugin config file)
+        # (starts with a known plugin component directory like scripts/, commands/,
+        # agents/, skills/, references/, hooks/, or a plugin config file). A path
+        # under one of these dirs that does NOT resolve is a genuine broken
+        # internal reference (e.g. `references/contract-validator.md` pointing at
+        # a file the plugin forgot to ship) → MINOR.
+        #
+        # Issue #131 (2026-06-17): `docs/` and `docs_dev/` are NOT plugin-internal
+        # COMPONENT dirs — `docs/...` (and `src/...`) overwhelmingly name a path in
+        # the USER's project that the skill READS as INPUT (`reads docs/product/prd.md`,
+        # `if docs/product/prd.md exists, read it`), not a file the plugin itself
+        # ships. Classifying them internal flagged every such documented input path
+        # as a broken plugin ref. They are deliberately OMITTED from this tuple so
+        # an unresolved `docs/...`/`src/...` backtick path falls through to the
+        # ambiguous-prose branch below (skipped unless it carries explicit `./`/`../`
+        # relative-link intent). A REAL broken internal ref under a COMPONENT dir
+        # still fires; a documented user-project input path no longer does.
         plugin_internal_prefixes = (
             "scripts/",
             "commands/",
@@ -8296,8 +8310,6 @@ def validate_md_file_paths(
             "hooks/",
             "rules/",
             "templates/",
-            "docs/",
-            "docs_dev/",
             ".claude-plugin/",
             "claude-plugin/",
         )
