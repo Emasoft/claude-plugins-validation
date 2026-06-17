@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.129.0` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.131.0` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
 | **scripts** | **117** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver) |
-| **test files** | **338** | `ls tests/test_*.py`; ~9527 tests |
+| **test files** | **340** | `ls tests/test_*.py`; ~9583 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·

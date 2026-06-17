@@ -3,7 +3,7 @@ trdd-id: 933592ac-98f0-498c-9e7c-54742acaa76c
 title: Fixer/detector hardening — amvcp field report (htmlhint FP, doc-context NITs, TOC catch-22, fixer-agent robustness)
 column: dev
 created: 2026-06-17T21:34:14+0200
-updated: 2026-06-18T00:46:01+0200
+updated: 2026-06-18T01:04:15+0200
 current-owner: claude-plugins-validation
 assignee: claude-plugins-validation
 priority: 2
@@ -122,9 +122,16 @@ reading the diff):** `_is_inert_rust_async_spawn` used a LINE-level
 `tokio::spawn` on one line (`os.system('curl|sh'); tokio::spawn(x)`) had its
 SHELL_EXEC wrongly suppressed — added `_CASE5_COMPETING_EXEC_SINK_RE` decline +
 `tests/test_a2_case5_colocation_fn.py` (6 two-sided). ruff+mypy clean; 52 A2 tests
-pass; self-validate VALID 0/0/0/0/5W; hashes regen (929). NEXT: full serial re-run
-(in flight) → if green, `publish.py --minor` → ship → close #132 A2 part. Then B1/B2
-(TOC) and B3/B4/B5 (fixer hardening) remain.
+pass; self-validate VALID 0/0/0/0/5W; hashes regen (929). full serial re-run
+**9583 pass/2 skip/0 fail**. **SHIPPED v2.131.0** (commit 0dd73be + release 965cf1b,
+pushed atomically, GitHub release live, Notify-Marketplace green, CI green ✓ 7m25s). NEXT
+(Phase 2 remainder): **B1/B2** (TOC contract — make `validate_toc_embedding` accept
+the nested-`-`-list embed shape + converge the two-halves fix so it stops being a
+catch-22) and **B3/B4/B5** (plugin-fixer hardening — post-move non-empty + word-count
+invariant, strict file-scope, never delete a contract-satisfying section, worktree
+isolation). These are the OTHER root causes of the agent-thrash in #132 (the TOC
+catch-22 + the fixer reaching for 0/0/0/0 on CPV-side-unfixable findings). amvcp stays
+READ-ONLY.
 
 ## Verified findings (amvcp@4d96866)
 
