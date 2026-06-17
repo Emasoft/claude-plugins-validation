@@ -663,11 +663,11 @@
         "Object\\.(?:assign|setPrototypeOf)\\s*\\(.*__proto__",
         "\\[\\s*['\"]__proto__['\"]\\s*\\]",
         "\\[\\s*['\"]constructor['\"]\\s*\\]\\s*\\[\\s*['\"]prototype['\"]\\s*\\]",
-        "(?:merge|extend|assign|deepCopy|deepMerge|defaults)\\s*\\(.*(?:req\\.body|req\\.query|input|payload|params|userData)",
+        "(?:merge|mergeWith|mergeDeep|extend|assign|deepCopy|deepMerge|defaults|defaultsDeep)\\s*\\(.*(?:req\\.body|req\\.query|request\\.body|request\\.query|\\binput\\b|\\bpayload\\b|\\bparams\\b|userData|userInput|userBody|userParams|userPayload|user_input|user_data|user_payload)",
         "(?:JSON\\.parse|qs\\.parse).*(?:__proto__|constructor)",
         "Reflect\\.(?:set|defineProperty).*(?:__proto__|prototype)"
       ],
-      "remediation": "Do not merge untrusted input into objects without filtering __proto__ and constructor keys. Use Object.create(null) for lookup objects. Freeze prototypes with Object.freeze(Object.prototype). Validate all keys before assignment."
+      "remediation": "Do not merge untrusted input into objects without filtering __proto__ and constructor keys. Use Object.create(null) for lookup objects. Freeze prototypes with Object.freeze(Object.prototype). Validate all keys before assignment. NOTE: issue #131 (2026-06-17) — pattern 6 (the merge-family gadget shape) word-bounds the generic user-input identifiers (`\\binput\\b`/`\\bpayload\\b`/`\\bparams\\b`) so the canonical shadcn `cn(...inputs)`/`cn(...args)` helper `twMerge(clsx(inputs))` no longer matches on the `inputs`/`args` rest param, and broadens the explicit user-controlled identifier set (`userInput`/`user_input`/`req.body`/…). It deliberately does NOT word-bound the merge-family VERB: the scanner matches case-insensitively, so a leading `\\b` would silently MISS real camelCase merge sinks (`recursiveMerge(req.body)`, lodash `mergeWith(req.query)`, `customMerge(userInput)`) — the ARGUMENT discriminator is what clears the benign Tailwind idiom, not a verb boundary. The verb alternation also enumerates the lodash/immutable deep-merge family (`mergeWith`/`mergeDeep`/`defaultsDeep`) so a `merge<Suffix>(` recursive-merge sink — which the verb-then-`(` anchor never caught — is now detected; benign `mergeSort(...)` is deliberately NOT in the list so it stays clear. The real proto-pollution sinks are still caught by patterns 1-5,7,8 (`__proto__[x]=`, `a[\"constructor\"][\"prototype\"]=`, `Object.assign(target, JSON.parse(userInput))`, `Reflect.set(obj,\"__proto__\",…)`)."
     },
     {
       "id": "SSRF_ADVANCED",

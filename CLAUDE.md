@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.126.35` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.129.0` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
-| **scripts** | **116** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic) |
-| **test files** | **335** | `ls tests/test_*.py`; ~9449 tests |
+| **scripts** | **117** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver) |
+| **test files** | **338** | `ls tests/test_*.py`; ~9527 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,55 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.129.0 — #131 (ai-maestro-webdesign) 2 scanner FPs** — both reduce-FP, FN-safe two-sided.
+**FP-A:** PROTOTYPE_POLLUTION over-fired on the shadcn `cn()` helper (`twMerge(clsx(inputs))`) —
+the case-insensitive catalog pattern 6 matched `merge` inside `twMerge(` and the generic `input`
+token inside the `inputs` rest param. FIX (`scripts/rules/skillaudit_patterns.json` pattern 6):
+word-bound the user-input ARGUMENT tokens (`\binput\b`/`\bpayload\b`/`\bparams\b`) so `inputs`/`args`
+no longer match — the ARGUMENT discriminator is what clears the Tailwind idiom. **CENTRAL-VERIFICATION
+CATCH (the load-bearing part):** the delegated agent's first draft ALSO word-bounded the VERB
+(`\bmerge`), which — because matching is case-insensitive — silently broke detection of real
+camelCase sinks; my own probe through the real scanner found **4 FN holes**
+(`recursiveMerge(req.body)`/`customMerge(userInput)`/`safeMerge(user_input)`/lodash `mergeWith`),
+so I removed the verb boundary. ALSO closed a PRE-EXISTING `merge<Suffix>(` miss (the verb-then-`(`
+anchor never caught it) by enumerating the deep-merge family (`mergeWith`/`mergeDeep`/`defaultsDeep`;
+benign `mergeSort(input)` deliberately stays clear). Pattern stays re2-compatible + ReDoS-safe
+(23 ms on a 200 KB adversarial input under the Python `re` fallback). **FP-B:** broken-backtick-path
+flagged `docs/product/prd.md` (a user-project INPUT path the skill READS) as a broken plugin ref.
+FIX (`cpv_validation_common.py`): `docs/`/`docs_dev/` are not plugin COMPONENT dirs — removed from the
+internal-prefix set; a real broken `references/...` ref still MINORs, `./docs/local.md` relative-link
+still WARNs. Delegated to 1 opus agent + CENTRAL-ADVERSARIAL-VERIFIED (the verb-`\b` FN holes were MY
+catch, not the agent's self-report). +31 two-sided tests; re2-compat + self-hashes regen; FULL SERIAL
+9527 pass/2 skip; self-validate VALID 0/0/0/0. **VERIFICATION LESSON (reinforced):** a delegated
+security FP-fix can clear the FP while quietly opening an FN — always run your OWN probe over the
+malicious siblings the agent did NOT enumerate, and confirm a probe FAIL is a real regression vs a
+pre-existing gap (the `mergeWith(` miss was pre-existing, NOT my fix's regression).
+
+**v2.128.0 — CANON-PROFILES Piece A+B (#130 + #118-d2)** — profile-aware + direction-aware
+canonical-pipeline drift. New `scripts/cpv_pipeline_profile.py` `resolve_pipeline_profile()`
+auto-detects the profile ∈ {standard, remote-validation, submodule-build, binary-release}
+(manifest `cpv.pipeline_profile` OVERRIDES; fails SAFE to standard). `validate_canonical_pipeline_drift`
+and `validate_pipeline_readiness` are now profile-aware (a profile's by-design divergent files get an
+"intentional / upstream — NEVER downgrade" message) AND direction-aware (AHEAD/MIXED→upstream vs
+BEHIND/PLAIN→migrate; PLAIN preserves today's exact standard-plugin behavior). SECURITY: the manifest
+key is a SELECTOR not a SUPPRESSOR — every drifted file STILL emits its WARNING (non-suppressible per
+TRDD-02e1672b; `test_override_is_selector_not_suppressor`). Recovered from a RATE-LIMITED delegated
+agent (finished the impl on disk, never reported) by central-verifying it myself. +28 two-sided tests.
+Closed #130 + #118. NIT-CATCH LESSON: central-verify of delegated work must run `validate --strict`
+(repo-wide markdownlint/skillaudit), not just pytest — an MD004 NIT in my own TRDD slipped to publish
+Gate 3 (pre-push, so no broken push). Remaining canon-profiles: Piece C (`gen_publish_py(profile)` +
+`gen_release_binaries_yml` + submodule source-change fix → #128/#115), Piece D (upgrade-agent +
+diagnose-skill profile awareness → #128-A).
+
+**v2.127.0 — canon-hardening cluster (#108/#90/#114/#121/#118-d1)** — #108: `cpv_lint_engine` now
+emits per-finding `RULE-CODE file:line:col message` detail on BOTH the plugin `--strict` report and
+the `lint` subcommand (was a bare `Ruff: N error(s)` count). #90/#114/#118-d1/#121: canon workflow
+templates in `generate_plugin_repo` gain `timeout-minutes` on every CPV-validate step (#90), a realistic
+cold ceiling ≥25 + UV cache `enable-cache` (#114), SHA-pin of every emitted action + the
+actionlint/commitlint/megalinter gates the drift text promised (#118-d1), and SBOM + build-provenance +
+per-asset SHA256SUMS + id-token/attestations perms in release.yml (#121). Delegated to 2 parallel opus
+agents (disjoint files) + central-adversarial-verified. Closed #108/#90/#114/#121.
 
 **v2.126.35 — #129 REOPENED (CAA): docker-fallback follow-on to v2.126.34** — after .34 removed the
 npx misroute, xmllint correctly routes to the docker fallback on a bare runner, but `_lint_xml`
