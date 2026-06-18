@@ -3,7 +3,7 @@ trdd-id: 933592ac-98f0-498c-9e7c-54742acaa76c
 title: Fixer/detector hardening — amvcp field report (htmlhint FP, doc-context NITs, TOC catch-22, fixer-agent robustness)
 column: dev
 created: 2026-06-17T21:34:14+0200
-updated: 2026-06-18T01:04:15+0200
+updated: 2026-06-18T03:15:01+0200
 current-owner: claude-plugins-validation
 assignee: claude-plugins-validation
 priority: 2
@@ -124,14 +124,136 @@ SHELL_EXEC wrongly suppressed — added `_CASE5_COMPETING_EXEC_SINK_RE` decline 
 `tests/test_a2_case5_colocation_fn.py` (6 two-sided). ruff+mypy clean; 52 A2 tests
 pass; self-validate VALID 0/0/0/0/5W; hashes regen (929). full serial re-run
 **9583 pass/2 skip/0 fail**. **SHIPPED v2.131.0** (commit 0dd73be + release 965cf1b,
-pushed atomically, GitHub release live, Notify-Marketplace green, CI green ✓ 7m25s). NEXT
-(Phase 2 remainder): **B1/B2** (TOC contract — make `validate_toc_embedding` accept
-the nested-`-`-list embed shape + converge the two-halves fix so it stops being a
-catch-22) and **B3/B4/B5** (plugin-fixer hardening — post-move non-empty + word-count
-invariant, strict file-scope, never delete a contract-satisfying section, worktree
-isolation). These are the OTHER root causes of the agent-thrash in #132 (the TOC
-catch-22 + the fixer reaching for 0/0/0/0 on CPV-side-unfixable findings). amvcp stays
-READ-ONLY.
+pushed atomically, GitHub release live, Notify-Marketplace green, CI green ✓ 7m25s). NEXT was B1/B2 + B3/B4/B5.
+
+## ⏵ B-SERIES DECISION (2026-06-18, USER) — detector is WAD; only fix the FIXER
+
+**Claim-verification OVERTURNED the B1/B2 mechanism diagnosis.** Read the REAL
+`validate_toc_embedding` (`cpv_validation_common.py:7733`) + `extract_toc_headings`
+(7655) + the live amvcp clone: the validator has **NO format recognition** (no
+`>`-blockquote vs `-`-list special-case) — it does pure heading-text **substring
+matching** (`_heading_matches`, 7875). amvcp's house style is a faithful **condensed**
+index per ref link (`> TOC A1.1–A1.13: what-it-does · dual-export · …`, covering all
+13 headings abbreviated; each ref carries its own full `## Table of Contents`).
+The condensed form can't substring-match the verbatim headings → **0/N**. Systematic:
+**25 TOC-embed findings across 12 amvcp skills, 20 are 0/N.** Real catch-22 (≈20 refs ×
+≈12 headings embedded verbatim blows the SKILL.md body cap → no clean `--strict`).
+
+**USER DECISION (AskUserQuestion + heartbeat directive):** **"Leave as-is (WAD) — only
+fix the fixer."** + "always enforce the rules strictly. any change necessary to pass
+the validation are changes of the SCANNED-PLUGIN side. You can help providing improved
+fix/devitalizing agents capable of fixing the issues, e.g. simplifying the reference
+.md TOC headings or merging them in more broad-scoped chapters." → **B1/B2 detector
+change DROPPED.** `validate_toc_embedding` UNCHANGED. CPV stays strict; the FIXER must
+change the PLUGIN to comply.
+
+**REFINED B-SERIES (fixer robustness + capability; each maps to a field-report symptom):**
+- **B-cycle (ROOT of "crash / exhaust context"):** the oscillation guard compares only
+  to the IMMEDIATELY-previous iteration (`N==N-1`; iterative-fix-loop.md 40/62/68/93 +
+  plugin-fixer.md 109). The TOC catch-22 is a **2-cycle** (sigA `TOC-MINOR×18` → embed →
+  sigB `SIZE-MAJOR+NIT×18` → shrink → sigA again → A,B,A,B…) so consecutive iters always
+  DIFFER and `N==N-1` NEVER fires → infinite loop → context exhaustion. FIX: detect a
+  repeat vs **ANY prior** iteration (full `seen_signatures` set). FN-safe (a progressing
+  loop never revisits an exact prior state; finite finding-space ⇒ pigeonhole guarantees
+  termination), rule-compliant (oscillation, NOT a numeric cap). Back it with a real
+  testable helper `scripts/cpv_fix_loop_state.py` (record signature → CONVERGED/CYCLE/
+  PROGRESS) so termination no longer depends on the agent hand-tracking a set across 20+
+  iters. **+ unit tests** (the win-pattern probe applies to THIS, since it IS Python).
+- **B-scope/preserve (ROOT of "corrupt state / mangle correct code"):** add to
+  plugin-fixer preservation guardrails — (a) STRICT FILE-SCOPE (only edit files named in
+  the CURRENT findings), (b) POST-BATCH CONTENT-PRESERVATION invariant
+  (`words(SKILL+refs) >= words@batch-start` unless a finding mandates a deletion), (c)
+  NEVER delete a contract-satisfying section.
+- **B-capability (ROOT of "fail to fix"; the user's explicit ask):** new fix-validation
+  reference `toc-embed-catch22-remediation.md` — the prescribed PLUGIN-SIDE fix: when a
+  TOC-embed finding can't be satisfied because the full TOC would blow the body cap,
+  MERGE the ref file's granular headings into fewer broad-scoped chapters
+  (content-preserving: keep all prose, reduce heading granularity, update the ref's own
+  TOC + anchors) so the shortened TOC fits → THEN embed it verbatim. Exactly what the
+  finding message (7941-7948) + the user prescribe. Route it from plugin-error-index.md +
+  index it in fix-validation/SKILL.md.
+
+## ⏵ B-SERIES EXTENDED (2026-06-18, USER) — loop-until-PASS for ALL three loops
+
+Two refining directives (mid-implementation):
+1. **"the agent fixer must fix and loop/iterate until the validation passes."** → the
+   CYCLE verdict is NOT "give up". It means the CURRENT fix is futile (oscillating);
+   the fixer must SWITCH to the deeper plugin-side remediation that breaks the root
+   tension (e.g. the TOC catch-22: stop re-embedding the verbatim TOC — apply Fix B,
+   MERGE the ref headings so the TOC both fits AND stays under the body cap, resolving
+   the MINOR↔MAJOR tension at once) and KEEP LOOPING. `[BLOCKED]` only as the LAST
+   resort — when even the alternative remediation re-cycles (genuinely no plugin-side
+   fix breaks it → human/CPV decision).
+2. **"the publish agent or the upgrade agent must loop/iterate until the ci/cd on
+   github passes without failures."** → the publish flow (publish.py + `gh run watch`)
+   and the upgrade/migration flow must LOOP: publish → watch CI → on red, READ the
+   failing job, FIX the cause, re-publish, re-watch → until GREEN. Same oscillation
+   guard (`cpv_fix_loop_state.py`, signature = the set of failing CI jobs/steps) so a
+   non-landing CI fix halts instead of looping forever. Currently plugin-fixer §7d
+   returns `[PARTIAL]` on first CI red — that becomes a loop-until-green.
+
+`cpv_fix_loop_state.py` is the SHARED guard for all three loops (validation findings,
+blocking-warnings, CI-job failures — each is "a failure-set that must shrink to zero;
+detect oscillation vs any prior iteration"). Touch: publish flow lives in
+`agents/plugin-fixer.md` §7d + `skills/canonical-pipeline` + the `cpv-upgrade-plugin`
+command/upgrade path — apply the loop-until-CI-green discipline there too.
+
+**FILES:** `scripts/cpv_fix_loop_state.py` (NEW + tests — DONE, 26 tests green), `skills/fix-validation/references/iterative-fix-loop.md`,
+`agents/plugin-fixer.md`, `skills/fix-validation/references/toc-embed-catch22-remediation.md` (NEW),
+`skills/fix-validation/SKILL.md`, `skills/fix-validation/references/plugin-error-index.md`. Lockstep:
+update any test that pins plugin-fixer.md / iterative-fix-loop.md strings (e.g. agent-preflight
+content tests). **VERIFY:** unit tests for cpv_fix_loop_state.py + full serial 9583+ +
+self-validate `--strict` VALID + hashes regen. **AUTHORING NOTE:** the prose half
+(agent/skill markdown) is load-bearing + deeply context-coupled (no executable probe) →
+author inline + careful two-perspective read-through; the Python half (loop-state helper)
+IS probe-verifiable. amvcp stays READ-ONLY (validate via /tmp clone only).
+
+## ⏵ ARCHITECTURE DIRECTIVE (2026-06-18, USER) — loop is a BEHAVIOUR → agent, not skill
+
+"the fix loop is a behaviour, not a skill. it belongs to the agents prompts, not to
+the skills. The agents must load the skills needed to fix the issues reported by the
+validation scan, and they can load only the skills from the-skills-menu that are
+needed to fix the issues found … the loop/iterative logic is a behaviour and then it
+belongs to the agents not to the skills." → The loop CONTROL FLOW (validate→fix→
+re-validate, oscillation detection, loop-until-PASS, CYCLE→switch-strategy,
+publish-until-CI-green) is OWNED BY THE AGENT PROMPTS (`agents/plugin-fixer.md`,
+`agents/marketplace-fixer.md`), self-contained — the agent runs the loop from its own
+prompt and loads fix-recipe skills ON DEMAND per finding. The skill ref
+`iterative-fix-loop.md` is DEMOTED to the SUPPORTING DATA the loop consults
+(WARNING-blocking categories, advisory list, migration 7c/7d step details, output
+contract) — the behavioral pseudocode I added there is being MOVED to the agent.
+
+**TEST CONSTRAINTS (lockstep, MUST stay green):**
+- `test_migration_agent_contract.py::test_iterative_fix_loop_describes_migration_extra_steps`
+  — iterative-fix-loop.md MUST still contain `run_all_checks|82-check|Pre-completion verification` (keep 7c/7d as reference data).
+- `test_batch_fix_v291.py::TestNoHardcodedIterationCaps` — scans plugin-fixer.md + marketplace-fixer.md + iterative-fix-loop.md; NO `max N iter` / `capped at N min` (oscillation-only). My prose complies.
+- `test_audit_fix_b17.py` — pins an oscillation-termination phrase (read before editing).
+
+**REMAINING STEPS (crash-safe checklist):**
+1. ✅ DONE — plugin-fixer.md `## The loop` is SELF-CONTAINED: heading "this agent OWNS
+   the loop behaviour"; reset+record cpv_fix_loop_state.py wired into step 1; step 7d =
+   publish-until-CI-green LOOP (read failing job → fix cause → re-publish → re-watch, 2nd
+   state file, [PARTIAL] only on CI-set oscillation); closing line reframes
+   iterative-fix-loop.md as "supporting DATA, loaded only if needed".
+2. ✅ DONE — plugin-fixer.md guardrails: intro now "Four"; **G3 strict file-scope** (edit
+   only files named in CURRENT findings; un-named file only if it's the prescribed
+   remediation for a named finding) + **G4 content-preservation** (`git diff --numstat`;
+   words(SKILL+refs) >= pre-batch; never delete a contract-satisfying section) ADDED.
+3. ✅ DONE — iterative-fix-loop.md: the `while True:` Algorithm pseudocode + the
+   publish-until-green pseudocode block were REMOVED and reframed as "supporting DATA;
+   control flow owned by the agent". KEPT migration 7c/7d + warning tables + output
+   contract (test-required); "Algorithm" heading kept verbatim (it is a SKILL.md TOC entry).
+4. ✅ DONE — marketplace-fixer.md: full-history oscillation via cpv_fix_loop_state.py
+   (reset+record wired into the bash block), self-contained loop, publish-until-CI-green;
+   test-pinned strings ("NO hardcoded iteration cap", "oscillates…[BLOCKED]") preserved.
+5. ✅ DONE — skill-fixes.md §8: Fix-B-merge is MANDATORY (content-preserving) over DROP;
+   Fix-A `·`-list must be VERBATIM (cited the exact amvcp bug `what-it-does`≠`A1.1 What it
+   does`); corrected the search window "~50"→"~100 lines".
+6. ✅ DONE — test_fixer_loop_behaviour.py (12 architecture-lock tests) + the 3 lockstep
+   tests (test_migration_agent_contract / test_batch_fix_v291 / test_audit_fix_b17) green.
+7. ✅ DONE (verify) — FULL SERIAL **9621 pass / 2 skip / 0 fail** (baseline 9583 + 26
+   loop-state + 12 loop-behaviour). SHIPPING now: regen hashes → self-validate --strict
+   VALID → publish.py --minor (→ v2.132.0) → CI green → comment #132 self-id'd (keep OPEN).
 
 ## Verified findings (amvcp@4d96866)
 

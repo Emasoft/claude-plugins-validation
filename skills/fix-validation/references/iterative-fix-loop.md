@@ -21,7 +21,7 @@ Copy this checklist into your fix log and tick each item as you go:
 - [ ] Re-validate AFTER every batch (never chain speculative fixes)
 - [ ] Evaluate every remaining WARNING against the publish-blocker rules
 - [ ] Fix publish-blocker WARNINGs; leave truly-advisory WARNINGs with per-entry justification
-- [ ] Stop when findings empty AND no blocking warnings, OR escalate when the finding set is identical to the previous iteration (oscillation). NO fixed iteration cap.
+- [ ] Stop when findings empty AND no blocking warnings (CONVERGED), OR escalate when the finding set RECURS vs **any** prior iteration (oscillation — tracked deterministically by `scripts/cpv_fix_loop_state.py`, not just vs N-1). NO fixed iteration cap.
 - [ ] **For migration runs only (`/cpv-upgrade-plugin`)**: run `run_all_checks` from `references/canonical-pipeline-migration-checklist.md` — every BLOCKER + MAJOR must pass.
 - [ ] **For migration runs only**: run `uv run python scripts/publish.py --print-gates` then `--dry-run` then `--patch`, then `gh run watch <run-id> --exit-status` on the resulting tag (and on the marketplace tag if Layout C / Layout A).
 - [ ] Write the iteration-by-iteration fix log to `$MAIN_ROOT/reports/plugin-fixer/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (at the **main-repo root** — first entry of `git worktree list`, never a linked worktree; both `reports/` and `reports_dev/` gitignored). NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
@@ -35,41 +35,31 @@ This reference defines the loop both fixer agents (plugin-fixer, marketplace-fix
 
 ## Algorithm
 
-```
-iterations = 0
-prev_finding_set = None                     # signature of the previous iteration's findings
-while True:                                  # NO iteration cap — see "Termination and safety"
-    iterations += 1
-    report = validate(<target>)    # validate_plugin.py --strict OR validate_marketplace.py --strict
-    findings = report.filter(severity in {CRITICAL, MAJOR, MINOR, NIT})
-    if findings is empty:
-        remaining_warnings = report.filter(severity == WARNING)
-        blocking_warnings = evaluate_warnings(remaining_warnings)
-        if blocking_warnings is empty:
-            # Step 7c — migration runs only — Pre-completion verification
-            if dispatched_for_migration:
-                run_all_rc = run_all_checks(<target>)
-                if run_all_rc != 0:
-                    return PARTIAL (BLOCKER/MAJOR check failed — see run-all log)
-                # Step 7d — migration runs only — Real publish + CI watch
-                if publish_dry_run() != 0: return PARTIAL
-                tag = publish_patch()                     # bumps + commits + pushes
-                if gh_run_watch(tag) != 0: return PARTIAL
-                if has_marketplace:
-                    if marketplace_publish_and_watch() != 0: return PARTIAL
-            return SUCCESS (clean)
-        current_set = signature(blocking_warnings)
-        if current_set == prev_finding_set:  # oscillation guard — see "Termination and safety"
-            return ESCALATE_TO_USER (finding set unchanged — a fix is not landing)
-        prev_finding_set = current_set
-        fix_batch(blocking_warnings)         # blocking warnings must be fixed too
-        continue
-    current_set = signature(findings)
-    if current_set == prev_finding_set:      # oscillation guard — the ONLY non-empty stop condition
-        return ESCALATE_TO_USER (finding set unchanged — a fix is not landing)
-    prev_finding_set = current_set
-    fix_batch(findings)                      # CRITICAL → MAJOR → MINOR → NIT, in priority order
-```
+**The loop's CONTROL FLOW is a BEHAVIOUR owned by the agent prompts** —
+`agents/plugin-fixer.md` and `agents/marketplace-fixer.md` run validate→fix→
+re-validate from their OWN prompt and do not load this skill to learn HOW to loop.
+This file is the SUPPORTING DATA that loop consults: the WARNING-evaluation rules,
+the migration-only step detail (7c/7d), and the output contract, all below. The
+shape the agent's behaviour follows:
+
+1. **Validate** (`--strict --json <findings.json>`), then `cpv_fix_loop_state.py record`
+   for the deterministic verdict.
+2. **`PROGRESS`** → fix ONE batch in priority order (CRITICAL → MAJOR → MINOR → NIT),
+   loading only the `plugin-error-index.md` fix-recipe a finding points at; re-validate.
+3. **`CONVERGED`** (blocking set empty) → evaluate WARNINGs (rules below); fix
+   publish-blockers; then the mandatory final verify (+ migration 7c/7d when dispatched
+   for an upgrade — and publish-until-CI-green).
+4. **`CYCLE`** → the standard fix is FUTILE (it oscillates against another finding);
+   do NOT repeat it — switch to the DEEPER plugin-side remediation that breaks the root
+   tension (canonical case: the TOC catch-22 → `skill-fixes.md` §8 Fix B, MERGE the
+   reference file's headings into fewer broad chapters so the TOC fits AND stays under
+   the body cap), and keep looping. Return `[BLOCKED]` ONLY if the SAME cycle recurs
+   after that deeper remediation.
+
+It is FIX-AND-LOOP-UNTIL-VALIDATION-PASSES: CPV's rules are never relaxed to converge —
+the scanned plugin changes to comply. The oscillation guard
+(`scripts/cpv_fix_loop_state.py`) is the deterministic terminator — see "Termination
+and safety".
 
 Key properties:
 - Re-validate after EVERY batch, not once at the end. Validator output changes as fixes land — a finding that seemed low-priority may upgrade once a blocking issue clears.
@@ -90,8 +80,9 @@ The old contract ("fixer never validates") is superseded by this one: the fixer 
 
 - **NO hardcoded iteration cap.** Most small plugins converge in 1-2 iterations, but plugins with hundreds of findings legitimately need 20+ iterations. Let the loop run until convergence (empty finding set) or oscillation (next bullet). The agent decides when to stop — not a magic number.
 - **NO hardcoded per-iteration timeout.** Some fixes (e.g. running `gh run watch` on a tag) legitimately take many minutes. Use judgement: if a single iteration runs absurdly long with no progress, surface that to the user with the partial state — but do not let an arbitrary `300s` ceiling kill a legitimate long-running step.
-- **Identical-finding-set guard (THE termination check):** if iteration N produces the exact same finding set as iteration N-1, there is a fix that is not landing (wrong file, wrong offset, dry-run flag, etc.). Stop and surface the finding to the user — do not keep looping. **This is the only stop condition besides "converged to zero".**
-- **Never disable/suppress rules to converge.** The goal is a genuinely clean report. Lowering severity, adding ignores, or patching the validator to skip a rule is never a valid fix.
+- **Full-history oscillation guard (THE termination check) — `scripts/cpv_fix_loop_state.py`.** A `record` call each iteration hashes the finding multiset and compares it against **every** prior iteration (not just N-1). A repeat = `CYCLE`. The old single-step "same as N-1" guard MISSED multi-step cycles: the TOC-embed catch-22 oscillates over two iterations (embed-verbatim → over-cap MAJOR → shrink → TOC MINOR returns → A,B,A,B…), so consecutive iterations always differ and the single-step guard NEVER fired → the loop ran forever and the agent exhausted its context (the field report this loop hardening fixes). The state file lives on disk, so detection survives the very context-exhaustion that was the failure mode — the agent does not have to remember 20+ prior signatures itself. Reset it once at loop start.
+- **`CYCLE` ≠ give up — it means "switch strategy".** The fixer's job is to FIX UNTIL VALIDATION PASSES, all on the scanned-plugin side. A `CYCLE` says the fix you keep applying is futile because it pulls against another finding; STOP repeating it and apply the DEEPER plugin-side remediation that resolves the root tension (the canonical case: TOC catch-22 → `skill-fixes.md` §8 Fix B, MERGE the reference file's headings into fewer broad chapters so the TOC fits *and* stays under the body cap). Return `[BLOCKED]` ONLY when the SAME cycle recurs *after* the deeper remediation was applied — i.e. no plugin-side fix can break it and a human/CPV decision is genuinely needed. The finite finding space guarantees the loop still terminates (pigeonhole) — no magic number required.
+- **Never disable/suppress rules to converge.** The goal is a genuinely clean report. Lowering severity, adding ignores, or patching the validator to skip a rule is never a valid fix — the plugin changes to comply, never CPV.
 - **Each fix batch commits** (or at minimum stages) changes, so `git status` + `git diff` stays inspectable between iterations. If the fixer crashes mid-loop, the in-progress fixes are not lost.
 
 ## WARNING evaluation rules
@@ -163,13 +154,16 @@ agent MUST also run:
   `$MAIN_ROOT/reports/canonical-pipeline-migration/<ts±tz>-run-all.md`. A
   failed BLOCKER/MAJOR is equivalent to a CRITICAL/MAJOR in
   `validate_plugin.py` — return `[PARTIAL]` (not `[DONE]`).
-- **Step 7d — Real publish + `gh run watch`.** Run
+- **Step 7d — Real publish, then LOOP UNTIL CI IS GREEN.** Run
   `uv run python scripts/publish.py --patch` then
   `gh run watch <run-id> --exit-status` on the workflow run triggered by
-  the resulting tag push. Repeat for the marketplace tag if Layout A
-  (separate marketplace repo) or Layout C (single repo with both
-  manifests bumped atomically). If either run reports failure, return
-  `[PARTIAL]` with the failing job's `gh run view` URL.
+  the resulting tag push (repeat for the marketplace tag if Layout A /
+  Layout C). **A red CI run is NOT a stopping point — it is the next fix
+  iteration.** See "Publish / upgrade — loop until CI green" below: read the
+  failing job, fix the *cause* on the plugin side, re-publish, re-watch,
+  until every required run is green. `[PARTIAL]` is returned ONLY when the
+  set of failing CI jobs *oscillates* (a fix is not landing — same
+  `cpv_fix_loop_state.py` guard), never on the first red.
 
 The migration agent never silently `--force-templates` when checks fail.
 Instead, surface the per-CHECK failure list to the user and ask them to
@@ -177,3 +171,39 @@ choose: (a) fix manually, (b) re-run with `--force-templates` (with
 explicit warning that hand-tuned customisations to canonical files will be
 overwritten), or (c) abort. See `agents/plugin-fixer.md`'s "Pre-completion
 verification (REQUIRED)" section for the full decision matrix.
+
+## Publish / upgrade — loop until CI green
+
+The same "loop until it passes" discipline that governs the validate→fix loop
+governs **publishing** and **upgrading**: a release is not done when the tag is
+pushed — it is done when **every required GitHub CI/CD run on that tag is
+green**. Whoever runs `publish.py` (the plugin-fixer migration path, the
+`/cpv-upgrade-plugin` upgrade flow, any canonical-pipeline publish) owns this
+loop and does not return `[DONE]` on a red or pending run.
+
+This is a BEHAVIOUR owned by the agent that runs `publish.py` —
+`agents/plugin-fixer.md` §7d (migration / `/cpv-upgrade-plugin` path) and
+`agents/marketplace-fixer.md` own the loop; this section is the supporting policy
+the agent applies. The shape: publish (`publish.py --patch`) → `gh run watch
+<run-id> --exit-status` → on a red run, read the failing job (`gh run view`), fix
+the CAUSE on the plugin side, re-publish, re-watch — until every required run is
+green. The set of FAILING CI jobs is tracked with `scripts/cpv_fix_loop_state.py`
+exactly like a finding set (a second `--state` file), so a non-landing CI fix
+*oscillates* → `[PARTIAL]` with the `gh run view` URL, never an infinite spin.
+
+Rules that keep this honest:
+- **Fix the cause, never the symptom.** A red CI job is fixed by correcting what
+  it caught (a failing test, a lint error, a type error, a missing workflow
+  permission), on the plugin side — never by deleting the job, marking it
+  `continue-on-error`, or `--force-templates`-ing over a hand-tuned workflow.
+- **Each iteration re-publishes a real bump.** `publish.py --patch` is idempotent
+  for an interrupted publish (pipeline-migration §4) but a genuine *new* attempt
+  bumps the patch — that is correct: every attempt is a real, auditable release
+  attempt, and the loop stops as soon as one is green.
+- **Oscillation = a fix that is not landing.** If the identical set of CI jobs
+  fails after you "fixed" it, the fix did not address the cause (or the failure
+  is environmental/flaky — surface that). `cpv_fix_loop_state.py` reports `CYCLE`
+  and the loop returns `[PARTIAL]` with the evidence — it never spins forever.
+- **GitHub transient failures retry, they don't count as a fix-cycle.** A network
+  timeout / runner-provisioning error is re-run (`gh run rerun <id> --failed`),
+  not "fixed" — only a genuine job failure enters the fix branch.

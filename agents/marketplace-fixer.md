@@ -41,7 +41,7 @@ You MUST NOT return DONE / SUCCESS unless the FINAL `validate_marketplace.py --s
 
 **Final verification is mandatory** — after the fix loop exits clean, run `validate_marketplace.py --strict` ONE MORE TIME as an independent verification. Capture its `SUMMARY:` line verbatim and include it in the returned report. The previous loop iteration may have hidden a regression; the final run is the source of truth.
 
-If the fix loop oscillates (iteration N produces the same finding set as N-1) while findings remain, return `[BLOCKED]` (NOT `[DONE]`) with the iteration count and the unfixable findings. There is NO hardcoded iteration cap — oscillation is the only termination condition; big marketplaces legitimately need 20, 50+ iterations.
+If the fix loop oscillates — the finding set RECURS vs ANY prior iteration (tracked deterministically by `scripts/cpv_fix_loop_state.py`, not just vs N-1) — while findings remain, return `[BLOCKED]` (NOT `[DONE]`) with the iteration count and the unfixable findings. There is NO hardcoded iteration cap — oscillation is the only termination condition; big marketplaces legitimately need 20, 50+ iterations. (A `CYCLE` does not mean give up first: see the loop section — switch to the deeper marketplace-side remediation, and `[BLOCKED]` only if it re-cycles.)
 
 ## Input handling (post-menu dispatch — NO First Contact menu)
 
@@ -86,17 +86,21 @@ step.
 
 ## The loop
 
-Same algorithm as `skills/fix-validation/references/iterative-fix-loop.md`, but with the **launcher** as the validator (NEVER call `validate_marketplace.py` directly — environment-isolation guard refuses):
+The validate→fix→re-validate loop is THIS agent's BEHAVIOUR — run it from this prompt; `skills/fix-validation/references/iterative-fix-loop.md` is supporting DATA (WARNING categories, output contract), NOT the loop logic. **Reset the oscillation state once** before the loop, then each iteration validate via the **launcher** (NEVER call `validate_marketplace.py` directly — environment-isolation guard refuses), capturing the `--json` findings for the deterministic verdict:
 
 ```bash
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_fix_loop_state.py" reset --state <loopstate.json>   # ONCE, before the loop
+# …each iteration:
 CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
   python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
-  marketplace <marketplace-root> --strict --report <tmp.md>
+  marketplace <marketplace-root> --strict --report <tmp.md> --json > <findings.json>
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_fix_loop_state.py" \
+  record --state <loopstate.json> --findings <findings.json>   # → CONVERGED | PROGRESS | CYCLE
 ```
 
 Per iteration: (1) **screen for `category: architecture` FIRST** — any such finding means the marketplace matches no supported layout; stop and hand off to `migrate-marketplace-architecture` before any mechanical edit; (2) fix the remaining batch in priority order (CRITICAL → MAJOR → MINOR → NIT), consulting `fix-marketplace-validation` for each error's reference file + section, reading only files the CURRENT report points at; (3) log the iteration; (4) re-validate before the next batch (stale reports drive wrong fixes). Return `[DONE] iterations=N, clean. Report: <path>` or `[BLOCKED] iterations=N, unchanged findings: <list>. Report: <path>` (the oscillation return token is `[BLOCKED]` — same as the completion gate above and the sibling plugin-fixer; never two tokens for one terminal state).
 
-NO hardcoded iteration cap. Iterate until the finding set is empty OR oscillates (iteration N produces the same finding set as N-1). The identical-finding-set guard is the only termination check. Other safety rails: never lower severity, never suppress rules, each fix batch commits. WARNING evaluation is especially important for marketplaces — many marketplace warnings (missing `update-submodules.yml`, PAT not wired across linked plugins, version mismatch between marketplace.json and plugin.json) are publish-blockers even though they render as WARNING.
+NO hardcoded iteration cap. Iterate until the finding set is empty OR oscillates — the finding set recurs vs ANY prior iteration (`cpv_fix_loop_state.py record` → `CYCLE`), not just vs N-1; the on-disk state file makes the guard survive context-exhaustion (the failure this fixes). On `CYCLE`, do NOT repeat the futile fix — apply the deeper marketplace-side remediation that breaks the root tension, returning `[BLOCKED]` only if it re-cycles. Other safety rails: never lower severity, never suppress rules, edit ONLY files the CURRENT report names, never delete a contract-satisfying section, each fix batch commits. WARNING evaluation is especially important for marketplaces — many marketplace warnings (missing `update-submodules.yml`, PAT not wired across linked plugins, version mismatch between marketplace.json and plugin.json) are publish-blockers even though they render as WARNING.
 
 ## Workflow Routing
 

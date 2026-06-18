@@ -725,16 +725,20 @@ If the reference file's TOC is accurate and all headings represent content worth
   > Webhooks · Idempotency · SDKs · Migration Guide
 ```
 
-Format conventions that work (the validator matches on heading text, not bullet style): indented bullets, inline `>` blockquote with `·` separators, numbered lists — any form where every heading text appears within ~50 lines of the link.
+Format conventions that work (the validator matches on heading text, not bullet style): indented bullets, inline `>` blockquote with `·` separators, numbered lists — any form where every heading text appears within ~100 lines of the link.
+
+**The text must be VERBATIM, not abbreviated — this is the #1 cause of a `0/N` score.** The match is a substring check against the reference file's *actual heading text*. A condensed per-link summary such as `> TOC A1.1–A1.13: what-it-does · dual-export · …` FAILS: `what-it-does` is not the heading `A1.1 What it does`, so every entry misses and the link scores `0/N` even though it *looks* like a complete index. Copy each heading's exact words (you may drop the leading `## ` and the `(#anchor)`; you may NOT hyphen-collapse `What it does` → `what-it-does`, abbreviate, or rephrase). If you also want a human-friendly abbreviated blurb per link, keep it **in addition** — but the embedded TOC the validator reads must be the verbatim headings.
 
 #### Fix B: Reduce the reference file's own TOC — not SKILL.md
 
 If the TOC is too long to embed comfortably (say, >15 headings), the fix is in **the reference file**, not in SKILL.md:
 
-1. **Drop sections that are not worth discovering.** A heading in the TOC is an advertisement: "agents should load this file when they need this content." If a subsection is genuinely not useful for the skill's purpose, delete its heading from the reference file's TOC entirely (and usually the section content too). The TOC shrinks naturally.
-2. **Merge granular subsections into fewer, more encompassing headings.** Replace five sibling subsections with one umbrella heading whose body covers all five concerns. Same coverage for agents, fewer TOC entries.
+1. **Merge granular subsections into fewer, more encompassing headings (PREFERRED — content-preserving).** Replace five sibling subsections with one umbrella heading whose body covers all five concerns. Same coverage for agents, fewer TOC entries, and **no prose is lost** — you re-chapter the content, you do not delete it. This is the safe, default Fix B.
+2. **Drop sections that are not worth discovering (only when genuinely dead).** A heading in the TOC is an advertisement: "agents should load this file when they need this content." If a subsection is *genuinely* not useful for the skill's purpose, delete its heading from the reference file's TOC (and usually the section). Use this sparingly — deleting load-bearing content to clear a finding is a worse regression than the finding (see the fixer's content-preservation guardrail).
 
 Both changes happen in the reference file, then SKILL.md mirrors the new (shorter) TOC verbatim.
+
+**Fix B is MANDATORY (not optional) for the references-heavy catch-22.** When a skill links many references (e.g. ~20), embedding every full TOC verbatim would push SKILL.md over the body-size cap (a MAJOR) — so Fix A is *mathematically impossible* and a condensed summary fails the verbatim match (§Fix A). The skill then oscillates: embed-verbatim → over-cap MAJOR → shrink → TOC MINOR returns. There is exactly one escape, and it is plugin-side: **merge the reference files' headings into fewer broad chapters (Fix B option 1) so each shortened TOC fits verbatim AND the SKILL.md stays under the cap, clearing the MINOR and the MAJOR together.** A fixer agent that hits this `CYCLE` (its standard "embed the TOC" fix oscillating against the size cap) switches to this Fix-B merge instead of re-applying the futile embed — see `iterative-fix-loop.md` and `agents/plugin-fixer.md`. CPV's rule is never relaxed; the plugin is restructured to comply.
 
 #### Forbidden "fixes"
 

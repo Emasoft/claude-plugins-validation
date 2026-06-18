@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.131.0` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.132.0` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
-| **scripts** | **117** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver) |
-| **test files** | **340** | `ls tests/test_*.py`; ~9583 tests |
+| **scripts** | **118** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver; `cpv_fix_loop_state.py` deterministic full-history fix-loop oscillation detector) |
+| **test files** | **342** | `ls tests/test_*.py`; ~9621 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,55 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.132.0 — #132 B-series (amvcp field report: fixer/devitalizer agents crash, exhaust
+context, leave corrupt state)** — root cause = the fix-loop oscillation guard compared only
+`signature(N) == signature(N-1)`, but the TOC catch-22 is a 2-CYCLE (TOC-MINOR×K → embed →
+SIZE-MAJOR+TOC-NIT×K → shrink → back), so consecutive iterations ALWAYS differ → the
+single-step guard NEVER fires → infinite loop → context exhaustion → crash mid-edit (corrupt
+tree). THREE-PART fix: (1) new `scripts/cpv_fix_loop_state.py` — a deterministic detector that
+records a sha256 over the SORTED MULTISET of `(severity, file, message)` for EVERY iteration and
+returns CONVERGED (empty) / CYCLE (this finding-set equals ANY prior iteration, not just N-1) /
+PROGRESS; clearing one of two identical findings changes the multiset (real progress), and the
+finite finding-space guarantees termination by pigeonhole. (2) per the user directive "the loop
+is a BEHAVIOUR, not a skill", the loop CONTROL FLOW now lives in the agent prompts (plugin-fixer
+and marketplace-fixer run it from their own prompt, wiring `cpv_fix_loop_state.py reset`+`record`
+around `validate --json`); `iterative-fix-loop.md` thinned to SUPPORTING DATA (the `while True:`
+pseudocode removed; migration 7c/7d + warning tables + output contract KEPT). (3) corrupt-state
+guardrails — G3 strict file-scope (edit only files named in CURRENT findings) + G4
+content-preservation (`git diff --numstat`; words(SKILL+refs) never drop; never delete a
+contract-satisfying section); a CYCLE verdict means "switch to the DEEPER plugin-side
+remediation" (TOC catch-22 → §8 Fix-B MERGE, content-preserving), not "give up", and `[BLOCKED]`
+only when the SAME cycle recurs after the deeper fix. Also: plugin-fixer §7d now PUBLISHES then
+LOOPS UNTIL CI IS GREEN (read failing job → fix cause → re-publish → re-watch; `gh run rerun
+--failed` for transient; never mute a check). skill-fixes.md §8 cites the exact amvcp bug — a
+condensed `·`-list TOC abbreviation (`what-it-does`) fails the validator's VERBATIM substring
+match against `A1.1 What it does`. WAD decision (user): the TOC detector enforces strictly; only
+the fixer is hardened. +26 loop-state tests + 12 architecture-lock tests
+(`test_fixer_loop_behaviour.py`); FULL SERIAL 9621 pass / 2 skip; self-validate VALID 0/0/0/0.
+amvcp is ANOTHER project — READ-ONLY, validate only.
+
+**v2.131.0 — #132 / A2 (amvcp: 8 demoted-NIT doc/prose FPs blocking --strict)** — lifted 8
+doc/prose execution-class findings from `safe_doc` (demote→NIT, which gates --strict) to
+`safe_literal` where provably inert, via 5 markdown-context discriminators in
+`_skillaudit_markdown_context.py`: prose-`;` clause-separator (×3, incl. 2 SKILL.md bodies),
+backtick cloud-product-name SHELL_EXEC, `(3+)` count-idiom REGEX_DOS, Rust `tokio::spawn`-in-json
+-fence SHELL_EXEC, inline-code INSECURE_CRYPTO/OBFUSCATION. Delegated to an opus agent +
+central-adversarial-verified — read-the-diff caught a case-5 FN hole (a real exec co-located on
+ONE line with `tokio::spawn` had its SHELL_EXEC wrongly suppressed) → added a competing-exec-sink
+decline. Independent probe 20/20 FN-safe two-sided; amvcp NIT 13→5. RATE-LIMIT lesson: the 1st
+delegated agent died on a server rate-limit with NOTHING on disk and NEVER reported — re-dispatched
+with "write to disk incrementally"; CHECK DISK (`git diff --stat`) rather than waiting on a
+completion notification.
+
+**v2.130.0 — #132 / A1 (amvcp: htmlhint banner FPs + stale lint cache)** — `cpv_lint_engine.
+_lint_html` now strips htmlhint's `Config loaded:` banner + `Scanned N files` summary + ANSI
+escapes BEFORE building findings, then takes the first 20 REAL lines (10 banner MINORs → 0; a
+real tag-pair error still MINORs). BIGGER fix: the lint cache key was keyed on file-content +
+external-tool-version only, NOT CPV's own engine code — so any lint-engine fix was MASKED for
+warm-cache users after a CPV upgrade (and fed the fixer agents STALE findings); folded
+`_LINT_ENGINE_CODE_REV` (sha256 of `cpv_lint_engine.py`) into the key. Verification overturned
+much of the field report (most detector claims already fixed on 2.129.0); claim-verification win.
 
 **v2.129.0 — #131 (ai-maestro-webdesign) 2 scanner FPs** — both reduce-FP, FN-safe two-sided.
 **FP-A:** PROTOTYPE_POLLUTION over-fired on the shadcn `cn()` helper (`twMerge(clsx(inputs))`) —
