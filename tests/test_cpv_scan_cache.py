@@ -762,3 +762,163 @@ def test_put_with_non_encodable_findings_silently_skips() -> None:
     put_cached_findings("c1", "cat", "v1", findings)
     # And nothing landed in the cache.
     assert get_cached_findings("c1", "cat", "v1") is None
+
+
+# ---------------------------------------------------------------------------
+# 13. Transient-lock resilience — a 'database is locked' must NOT wipe
+# ---------------------------------------------------------------------------
+#
+# Regression for the concurrent-writer data-loss bug: under heavy parallel
+# load a transient SQLITE_BUSY during get/put's open or query was caught as a
+# generic DatabaseError and routed to _wipe_and_recreate, which UNLINKS the
+# cache file — destroying entries other writers already committed. The fix
+# classifies transient locks vs genuine corruption: only corruption wipes.
+
+
+def test_is_transient_lock_classifies_lock_and_busy() -> None:
+    """'database is locked'/'busy' are transient; corruption strings are not."""
+    assert cpv_scan_cache._is_transient_lock(sqlite3.OperationalError("database is locked"))
+    assert cpv_scan_cache._is_transient_lock(sqlite3.OperationalError("database is busy"))
+    assert cpv_scan_cache._is_transient_lock(sqlite3.OperationalError("database table is locked"))
+    assert not cpv_scan_cache._is_transient_lock(sqlite3.DatabaseError("file is not a database"))
+    assert not cpv_scan_cache._is_transient_lock(sqlite3.DatabaseError("database disk image is malformed"))
+
+
+def test_is_corruption_excludes_transient_locks() -> None:
+    """Corruption markers classify as corruption; a lock NEVER does."""
+    assert cpv_scan_cache._is_corruption(sqlite3.DatabaseError("file is not a database"))
+    assert cpv_scan_cache._is_corruption(sqlite3.DatabaseError("database disk image is malformed"))
+    assert cpv_scan_cache._is_corruption(sqlite3.DatabaseError("database disk image is malformed (11)"))
+    # A transient lock must be the safe bias: NOT corruption (never wipe).
+    assert not cpv_scan_cache._is_corruption(sqlite3.OperationalError("database is locked"))
+    assert not cpv_scan_cache._is_corruption(sqlite3.OperationalError("database is busy"))
+
+
+def test_retry_on_lock_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A flaky op that locks twice then succeeds returns the value (3 calls)."""
+    monkeypatch.setattr(cpv_scan_cache, "_LOCK_RETRY_SLEEP", 0)
+    calls = {"n": 0}
+
+    def flaky() -> str:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise sqlite3.OperationalError("database is locked")
+        return "ok"
+
+    assert cpv_scan_cache._retry_on_lock(flaky) == "ok"
+    assert calls["n"] == 3
+
+
+def test_retry_on_lock_reraises_non_lock_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-lock OperationalError propagates on the FIRST try (no retry)."""
+    monkeypatch.setattr(cpv_scan_cache, "_LOCK_RETRY_SLEEP", 0)
+    calls = {"n": 0}
+
+    def boom() -> str:
+        calls["n"] += 1
+        raise sqlite3.OperationalError("no such table: scan_cache")
+
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        cpv_scan_cache._retry_on_lock(boom)
+    assert calls["n"] == 1
+
+
+def test_retry_on_lock_reraises_last_lock_after_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An always-locked op exhausts the bounded budget then re-raises (no spin)."""
+    monkeypatch.setattr(cpv_scan_cache, "_LOCK_RETRY_SLEEP", 0)
+    monkeypatch.setattr(cpv_scan_cache, "_LOCK_RETRY_ATTEMPTS", 4)
+    calls = {"n": 0}
+
+    def always_locked() -> str:
+        calls["n"] += 1
+        raise sqlite3.OperationalError("database is locked")
+
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        cpv_scan_cache._retry_on_lock(always_locked)
+    assert calls["n"] == 4  # bounded: exactly the budget, never unbounded
+
+
+def test_put_transient_lock_does_not_wipe_committed_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 'database is locked' during put's open is a best-effort skip, NOT a wipe."""
+    put_cached_findings("keep", "cat", "v1", [{"v": 1}])
+    assert get_cached_findings("keep", "cat", "v1") == [{"v": 1}]
+
+    real_open = cpv_scan_cache._open_connection
+
+    def locked_open(_path: Path) -> sqlite3.Connection:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(cpv_scan_cache, "_open_connection", locked_open)
+    # This put hits the lock; must skip cleanly without raising or wiping.
+    put_cached_findings("new", "cat", "v1", [{"v": 2}])
+    monkeypatch.setattr(cpv_scan_cache, "_open_connection", real_open)
+
+    # The pre-existing entry MUST survive (the bug wiped it).
+    assert get_cached_findings("keep", "cat", "v1") == [{"v": 1}], "transient lock wiped a committed entry"
+
+
+def test_put_corruption_still_wipes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A genuine corruption error during put's open STILL triggers recovery wipe."""
+    put_cached_findings("keep", "cat", "v1", [{"v": 1}])
+    assert get_cached_findings("keep", "cat", "v1") == [{"v": 1}]
+
+    real_open = cpv_scan_cache._open_connection
+    state = {"raise": True}
+
+    def corrupt_open(path: Path) -> sqlite3.Connection:
+        if state["raise"]:
+            raise sqlite3.DatabaseError("database disk image is malformed")
+        return real_open(path)
+
+    monkeypatch.setattr(cpv_scan_cache, "_open_connection", corrupt_open)
+    # put sees corruption → _wipe_and_recreate unlinks the file.
+    put_cached_findings("new", "cat", "v1", [{"v": 2}])
+    state["raise"] = False
+    monkeypatch.setattr(cpv_scan_cache, "_open_connection", real_open)
+
+    # Corruption recovery wiped the cache; the old entry is gone (by design).
+    assert get_cached_findings("keep", "cat", "v1") is None, "corruption should have wiped the cache"
+
+
+def test_get_transient_lock_misses_without_wipe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 'database is locked' during get's open is a MISS, NOT a wipe."""
+    put_cached_findings("keep", "cat", "v1", [{"v": 1}])
+    assert get_cached_findings("keep", "cat", "v1") == [{"v": 1}]
+
+    real_open = cpv_scan_cache._open_connection
+    state = {"raise": True}
+
+    def locked_open(path: Path) -> sqlite3.Connection:
+        if state["raise"]:
+            raise sqlite3.OperationalError("database is locked")
+        return real_open(path)
+
+    monkeypatch.setattr(cpv_scan_cache, "_open_connection", locked_open)
+    # Contended read → MISS (None), but must NOT wipe.
+    assert get_cached_findings("keep", "cat", "v1") is None
+    state["raise"] = False
+    monkeypatch.setattr(cpv_scan_cache, "_open_connection", real_open)
+
+    # The entry survived the contended read.
+    assert get_cached_findings("keep", "cat", "v1") == [{"v": 1}], "transient lock on read wiped the cache"
+
+
+def test_get_corruption_still_wipes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A genuine corruption error during get's open STILL wipes (recovery)."""
+    put_cached_findings("keep", "cat", "v1", [{"v": 1}])
+    assert get_cached_findings("keep", "cat", "v1") == [{"v": 1}]
+
+    real_open = cpv_scan_cache._open_connection
+    state = {"raise": True}
+
+    def corrupt_open(path: Path) -> sqlite3.Connection:
+        if state["raise"]:
+            raise sqlite3.DatabaseError("file is not a database")
+        return real_open(path)
+
+    monkeypatch.setattr(cpv_scan_cache, "_open_connection", corrupt_open)
+    assert get_cached_findings("keep", "cat", "v1") is None  # corruption → wipe → miss
+    state["raise"] = False
+    monkeypatch.setattr(cpv_scan_cache, "_open_connection", real_open)
+
+    assert get_cached_findings("keep", "cat", "v1") is None, "corruption should have wiped the entry"

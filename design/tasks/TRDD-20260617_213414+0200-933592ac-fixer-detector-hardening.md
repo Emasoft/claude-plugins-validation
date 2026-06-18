@@ -3,7 +3,7 @@ trdd-id: 933592ac-98f0-498c-9e7c-54742acaa76c
 title: Fixer/detector hardening — amvcp field report (htmlhint FP, doc-context NITs, TOC catch-22, fixer-agent robustness)
 column: dev
 created: 2026-06-17T21:34:14+0200
-updated: 2026-06-18T03:15:01+0200
+updated: 2026-06-18T03:41:09+0200
 current-owner: claude-plugins-validation
 assignee: claude-plugins-validation
 priority: 2
@@ -252,8 +252,34 @@ contract) — the behavioral pseudocode I added there is being MOVED to the agen
 6. ✅ DONE — test_fixer_loop_behaviour.py (12 architecture-lock tests) + the 3 lockstep
    tests (test_migration_agent_contract / test_batch_fix_v291 / test_audit_fix_b17) green.
 7. ✅ DONE (verify) — FULL SERIAL **9621 pass / 2 skip / 0 fail** (baseline 9583 + 26
-   loop-state + 12 loop-behaviour). SHIPPING now: regen hashes → self-validate --strict
-   VALID → publish.py --minor (→ v2.132.0) → CI green → comment #132 self-id'd (keep OPEN).
+   loop-state + 12 loop-behaviour). First `publish.py --minor` BLOCKED at Gate 2 (parallel
+   `-n auto`) on a PRE-EXISTING scan-cache flake → fixed (see §"Publish-gate finding" below);
+   re-verified **9630 pass / 2 skip / 0 fail** under the exact xdist gate. Re-shipping:
+   regen hashes → self-validate --strict VALID → publish.py --minor (→ v2.132.0) → CI green
+   → comment #132 self-id'd (keep OPEN).
+
+## Publish-gate finding: scan-cache wipe-on-lock (destructive concurrency bug, FIXED)
+
+`publish.py` Gate 2 runs the suite under `pytest -n auto --dist=worksteal`. Under that
+14-worker parallel load `tests/test_cpv_scan_cache.py::test_concurrent_writers_dont_corrupt`
+failed ("Lost entry for t0-i0") — it passed serially (the 9621 run). ROOT CAUSE (read, not
+guessed): `cpv_scan_cache.put`/`get` caught **any** `sqlite3.DatabaseError` from
+`_open_connection`/the query and called `_wipe_and_recreate`, which **unlinks the cache file**.
+But `OperationalError("database is locked")` IS a `DatabaseError` — so a *transient* lock
+(the barrier-synchronised first-creation race; the immediate-`SQLITE_BUSY` lock-upgrade /
+lost-WAL-switch bypass) WIPED the whole cache, destroying entries other writers/readers had
+already committed. A best-effort cache must skip ONE op, never nuke everything. FIX
+(`scripts/cpv_scan_cache.py`): classify `_is_transient_lock` vs `_is_corruption` — wipe ONLY
+on genuine corruption (`malformed`/`not a database`/…); a transient lock is a best-effort
+skip (put) / MISS (get), NEVER a wipe. Plus a BOUNDED `_retry_on_lock` (12×50 ms) around the
+schema DDL, the WAL switch, the INSERT and the SELECT so a contended op LANDS instead of
+dropping, + an explicit `PRAGMA busy_timeout`. Two-sided proof: 9 new tests in
+`test_cpv_scan_cache.py` — transient lock → cache NOT wiped + committed entry survives
+(deterministic, monkeypatched), corruption → STILL wipes (recovery preserved), `_retry_on_lock`
+retries-then-succeeds / re-raises-non-lock-immediately / re-raises-after-bounded-budget. Stress:
+24/24 green under 6× CPU load; full xdist suite **9630 pass**. ruff+mypy clean. Also corrected
+3 stale docstrings (the false "BEGIN IMMEDIATE" claim) to the real autocommit+busy_timeout+
+retry mechanism. Ships in v2.132.0 alongside the B-series.
 
 ## Verified findings (amvcp@4d96866)
 

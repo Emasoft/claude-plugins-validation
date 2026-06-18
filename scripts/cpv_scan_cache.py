@@ -36,7 +36,10 @@ console on every scan).
   ALL four keys are identical.
 * Corruption recovery — if the SQLite file is unreadable / not a valid
   database, the next ``get``/``put`` wipes and recreates it. The module
-  never serves stale or partially-decoded findings.
+  never serves stale or partially-decoded findings. A *transient* lock
+  (``database is locked`` under contention) is NOT corruption and never
+  triggers the wipe — wiping on a lock would destroy entries other
+  writers/readers just committed (a concurrent-writer data-loss bug).
 * Hard kill switch — ``CPV_SCAN_CACHE=0`` makes ``get`` always return
   ``None`` and ``put`` a no-op. Used by ``--no-cache`` callers.
 * Force-rescan-but-warm-cache — ``CPV_SCAN_CACHE_DEEP=1`` makes ``get``
@@ -46,15 +49,20 @@ console on every scan).
 ## Concurrency
 
 SQLite handles the cross-process / cross-thread synchronisation
-natively. We open the connection with
-``check_same_thread=False`` for ``put``/``get`` calls and use
-``isolation_level=None`` (autocommit) plus ``BEGIN IMMEDIATE`` for
-writes so two writers don't tear each other's transactions. The
-top-level functions are stateless wrappers — they open a connection
-per call, execute the operation, and close. That keeps the public
-surface dead simple at the cost of one open/close per query, which is
-negligible compared to the seconds-long scan work the cache is
-shielding.
+natively. We open the connection with ``check_same_thread=False`` for
+``put``/``get`` calls and use ``isolation_level=None`` (autocommit) with
+a single ``INSERT OR REPLACE`` per write — autocommit + one statement is
+atomic, so no explicit transaction is needed. WAL mode plus a 10s
+``busy_timeout`` lets readers proceed while a writer holds the lock and
+makes writers serialise instead of tearing. A transient
+``database is locked`` (the lock-UPGRADE / lost-WAL-switch case that can
+return SQLITE_BUSY *immediately*, bypassing busy_timeout) is absorbed by
+a small BOUNDED retry — and is NEVER mistaken for corruption, so it can
+never trigger the destructive wipe-and-recreate path. The top-level
+functions are stateless wrappers — they open a connection per call,
+execute the operation, and close. That keeps the public surface dead
+simple at the cost of one open/close per query, which is negligible
+compared to the seconds-long scan work the cache is shielding.
 
 This module is stdlib-only (``sqlite3``, ``os``, ``json``, ``pathlib``,
 ``logging``, ``time``, ``stat``). No external dependencies.
@@ -69,7 +77,7 @@ import sqlite3
 import stat
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -255,6 +263,78 @@ CREATE INDEX IF NOT EXISTS idx_cached_at ON scan_cache (cached_at);
 """
 
 
+# ---------------------------------------------------------------------------
+# Concurrency: transient-lock vs corruption + bounded retry
+# ---------------------------------------------------------------------------
+
+# sqlite raises OperationalError("database is locked" / "... is busy") under
+# write contention. This is TRANSIENT — the op just needs to wait/retry — and
+# is NOT corruption. It MUST NOT reach the wipe-and-recreate recovery path:
+# wiping the cache on a transient lock destroys entries other writers/readers
+# already committed (the concurrent-writer data-loss bug a barrier-synchronised
+# thread start surfaces under heavy parallel load). Only a genuinely
+# unreadable/malformed database file warrants a wipe.
+_CORRUPTION_MARKERS = (
+    "malformed",
+    "not a database",
+    "file is encrypted",
+    "disk image is malformed",
+)
+
+# Bounded retry budget for a transient lock. sqlite's own ``busy_timeout``
+# (set via ``timeout=`` at connect) covers a writer waiting for another writer,
+# but a lock UPGRADE — and a connection that lost the WAL-mode switch race,
+# left in rollback-journal mode — can return SQLITE_BUSY *immediately*,
+# bypassing busy_timeout. A short, BOUNDED retry absorbs that so a concurrent
+# op lands instead of being dropped (or, worse, mistaken for corruption). Never
+# an unbounded spin: worst case ~_LOCK_RETRY_ATTEMPTS * _LOCK_RETRY_SLEEP of
+# extra latency, and only under genuine contention.
+_LOCK_RETRY_ATTEMPTS = 12
+_LOCK_RETRY_SLEEP = 0.05  # seconds between attempts
+
+_T = TypeVar("_T")
+
+
+def _is_transient_lock(exc: BaseException) -> bool:
+    """True for a recoverable 'database is locked'/'busy' contention error."""
+    msg = str(exc).lower()
+    return "locked" in msg or "busy" in msg
+
+
+def _is_corruption(exc: BaseException) -> bool:
+    """True only for genuine on-disk corruption (warrants a wipe-and-recreate).
+
+    A transient lock is explicitly NOT corruption (see ``_is_transient_lock``);
+    erring toward "not corruption" is the safe bias because the wipe is the
+    destructive action — we would rather skip one op than nuke the cache.
+    """
+    if _is_transient_lock(exc):
+        return False
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _CORRUPTION_MARKERS)
+
+
+def _retry_on_lock(op: Callable[[], _T]) -> _T:
+    """Run ``op()``, retrying briefly on a transient lock; re-raise otherwise.
+
+    A non-lock error propagates immediately (no retry). After the bounded
+    budget the last lock error propagates so the caller's normal handling
+    (best-effort skip / corruption-classify) runs — it never silently
+    succeeds on a still-locked op.
+    """
+    last: sqlite3.OperationalError | None = None
+    for _ in range(_LOCK_RETRY_ATTEMPTS):
+        try:
+            return op()
+        except sqlite3.OperationalError as exc:
+            if not _is_transient_lock(exc):
+                raise
+            last = exc
+            time.sleep(_LOCK_RETRY_SLEEP)
+    assert last is not None  # only reachable via the transient-lock branch
+    raise last
+
+
 def _open_connection(path: Path) -> sqlite3.Connection:
     """Open (or create) the SQLite cache and return a connection.
 
@@ -262,11 +342,14 @@ def _open_connection(path: Path) -> sqlite3.Connection:
       - ``check_same_thread=False`` so callers can share/handoff conns
         across threads (we still open-per-call in top-level helpers,
         but tests use ``threading`` for concurrent writers).
-      - ``isolation_level=None`` (autocommit). Write paths use explicit
-        ``BEGIN IMMEDIATE`` so concurrent writers serialise cleanly
-        without holding readers off longer than needed.
-      - ``timeout=10.0`` — generous wait for the write lock so the
-        threaded-writers test doesn't false-fail under load.
+      - ``isolation_level=None`` (autocommit). Each write is a single
+        ``INSERT OR REPLACE`` (atomic on its own), wrapped at the call
+        site in a bounded lock-retry so concurrent writers serialise
+        cleanly without holding readers off longer than needed.
+      - ``timeout=10.0`` + an explicit ``PRAGMA busy_timeout`` — generous
+        wait for the write lock; the schema DDL and the WAL switch are
+        themselves lock-retried so a barrier-synchronised thread start
+        doesn't false-fail under load.
 
     Schema is applied unconditionally (``CREATE TABLE IF NOT EXISTS``);
     cheap on a warm cache, mandatory on a freshly-resolved location.
@@ -301,16 +384,31 @@ def _open_connection(path: Path) -> sqlite3.Connection:
         check_same_thread=False,
     )
 
-    # WAL mode lets readers proceed while a writer holds the write lock —
-    # the threaded-writers test depends on this. Best-effort: some
-    # filesystems (FAT on USB sticks, certain NFS mounts) reject WAL;
-    # we fall back to default rollback journaling silently.
+    # Explicit busy_timeout (belt-and-suspenders; ``timeout=`` above already
+    # sets it) so every statement WAITS for the write lock rather than
+    # erroring out the instant it sees contention.
     try:
-        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=10000")
     except sqlite3.DatabaseError:
         pass
 
-    conn.executescript(_SCHEMA_SQL)
+    # WAL mode lets readers proceed while a writer holds the write lock —
+    # the threaded-writers path depends on this. Retry on a transient lock so
+    # the mode actually switches under contention (a connection left in
+    # rollback-journal mode hits SQLITE_BUSY far more often). Best-effort:
+    # some filesystems (FAT on USB sticks, certain NFS mounts) reject WAL — we
+    # fall back to default rollback journaling silently in that case.
+    try:
+        _retry_on_lock(lambda: conn.execute("PRAGMA journal_mode=WAL"))
+    except sqlite3.DatabaseError:
+        pass
+
+    # Schema DDL is the first-creation write that races hardest under a
+    # barrier-synchronised thread start. Retry on a transient lock so the open
+    # does NOT propagate a lock to the caller — which would mistake it for
+    # corruption and WIPE the cache. ``CREATE ... IF NOT EXISTS`` no-ops once
+    # any racer wins, so the retry converges immediately.
+    _retry_on_lock(lambda: conn.executescript(_SCHEMA_SQL))
 
     # Belt-and-suspenders: re-enforce 0600 in case sqlite3 created the
     # file under our umask before we got to chmod it.
@@ -426,28 +524,37 @@ def get_cached_findings(
 
     try:
         conn = _open_connection(path)
-    except sqlite3.DatabaseError:
-        # Corruption — wipe and report MISS. Next put() will repopulate.
-        _wipe_and_recreate(path)
+    except sqlite3.DatabaseError as exc:
+        if _is_corruption(exc):
+            # Corruption — wipe and report MISS. Next put() will repopulate.
+            _wipe_and_recreate(path)
+        # Transient lock → plain MISS (NO wipe). The caller rescans; the entry
+        # is read on a later, uncontended lookup.
         return None
 
     try:
-        cur = conn.execute(
-            "SELECT findings_json FROM scan_cache "
-            "WHERE content_hash = ? "
-            "AND catalog_hash = ? "
-            "AND scanner_version = ? "
-            "AND file_ext = ?",
-            (content_hash, catalog_hash, scanner_version, file_ext),
+        # A SELECT under WAL needs no write lock, but a connection left in
+        # rollback-journal mode can still see SQLITE_BUSY while a writer holds
+        # the lock — bounded-retry so a contended read returns the row instead
+        # of a false MISS.
+        row = _retry_on_lock(
+            lambda: conn.execute(
+                "SELECT findings_json FROM scan_cache "
+                "WHERE content_hash = ? "
+                "AND catalog_hash = ? "
+                "AND scanner_version = ? "
+                "AND file_ext = ?",
+                (content_hash, catalog_hash, scanner_version, file_ext),
+            ).fetchone()
         )
-        row = cur.fetchone()
-    except sqlite3.DatabaseError:
-        # Mid-query corruption — wipe and miss.
+    except sqlite3.DatabaseError as exc:
+        # Mid-query: wipe only on genuine corruption, else a plain MISS.
         try:
             conn.close()
         except sqlite3.Error:
             pass
-        _wipe_and_recreate(path)
+        if _is_corruption(exc):
+            _wipe_and_recreate(path)
         return None
     finally:
         try:
@@ -540,9 +647,14 @@ def put_cached_findings(
     # after the rebuild branch and flags every later `.execute()` call.
     try:
         conn = _open_connection(path)
-    except sqlite3.DatabaseError:
-        # Corruption — try once to wipe and proceed. If even that fails
-        # we silently skip the put.
+    except sqlite3.DatabaseError as exc:
+        if not _is_corruption(exc):
+            # Transient lock (not corruption) — best-effort skip THIS put.
+            # NEVER wipe on a lock: that destroys entries other writers
+            # already committed (the concurrent-writer data-loss bug).
+            return
+        # Genuine corruption — wipe once and proceed. If even that fails we
+        # silently skip the put.
         recovered = _wipe_and_recreate(path)
         if recovered is None:
             return
@@ -551,18 +663,22 @@ def put_cached_findings(
     now = int(time.time())
     try:
         # INSERT OR REPLACE makes put() idempotent — re-caching the same
-        # key with new findings just overwrites. We don't need an
-        # explicit BEGIN here because autocommit + a single statement is
-        # atomic.
-        conn.execute(
-            "INSERT OR REPLACE INTO scan_cache "
-            "(content_hash, catalog_hash, scanner_version, file_ext, findings_json, cached_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (content_hash, catalog_hash, scanner_version, file_ext, findings_json, now),
+        # key with new findings just overwrites. autocommit + a single
+        # statement is atomic; no explicit BEGIN needed. Wrapped in a bounded
+        # lock-retry so a transient SQLITE_BUSY under contention RETRIES
+        # rather than dropping the write (the immediate-busy lock-upgrade
+        # bypass that the busy_timeout alone does not catch).
+        _retry_on_lock(
+            lambda: conn.execute(
+                "INSERT OR REPLACE INTO scan_cache "
+                "(content_hash, catalog_hash, scanner_version, file_ext, findings_json, cached_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (content_hash, catalog_hash, scanner_version, file_ext, findings_json, now),
+            )
         )
     except sqlite3.DatabaseError:
-        # Could be "database is locked" under contention — that's OK,
-        # we just skip THIS put. The next scan will retry.
+        # Still locked after the bounded retry (or a non-lock DB error) —
+        # best-effort: skip THIS put. The next scan repopulates it.
         pass
     finally:
         try:

@@ -24,7 +24,7 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
 | **scripts** | **118** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver; `cpv_fix_loop_state.py` deterministic full-history fix-loop oscillation detector) |
-| **test files** | **342** | `ls tests/test_*.py`; ~9621 tests |
+| **test files** | **342** | `ls tests/test_*.py`; ~9630 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -147,8 +147,15 @@ LOOPS UNTIL CI IS GREEN (read failing job → fix cause → re-publish → re-wa
 condensed `·`-list TOC abbreviation (`what-it-does`) fails the validator's VERBATIM substring
 match against `A1.1 What it does`. WAD decision (user): the TOC detector enforces strictly; only
 the fixer is hardened. +26 loop-state tests + 12 architecture-lock tests
-(`test_fixer_loop_behaviour.py`); FULL SERIAL 9621 pass / 2 skip; self-validate VALID 0/0/0/0.
-amvcp is ANOTHER project — READ-ONLY, validate only.
+(`test_fixer_loop_behaviour.py`); FULL SERIAL 9630 pass / 2 skip; self-validate VALID 0/0/0/0.
+Also FIXED a pre-existing destructive scan-cache bug the first publish gate surfaced (Gate 2
+runs `pytest -n auto`): `cpv_scan_cache.put`/`get` treated a transient `database is locked` as
+corruption and called `_wipe_and_recreate` (which UNLINKS the cache), destroying entries other
+writers/readers committed under load. FIX: classify transient-lock vs corruption (wipe ONLY on
+genuine corruption) + a BOUNDED `_retry_on_lock` around the schema DDL / WAL switch / INSERT /
+SELECT + explicit `PRAGMA busy_timeout`. Two-sided proof (9 tests in `test_cpv_scan_cache.py`):
+lock → no wipe + committed entry survives, corruption → still wipes; verified 9630 pass under
+the exact xdist gate. amvcp is ANOTHER project — READ-ONLY, validate only.
 
 **v2.131.0 — #132 / A2 (amvcp: 8 demoted-NIT doc/prose FPs blocking --strict)** — lifted 8
 doc/prose execution-class findings from `safe_doc` (demote→NIT, which gates --strict) to
