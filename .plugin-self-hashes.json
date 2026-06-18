@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-06-18T01:44:45+00:00",
+  "computed_at": "2026-06-18T23:31:52+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:1f81b9a91e42e586596862f522a11f02c9e807ac8672fb46735106d4f5b82569",
@@ -155,7 +155,7 @@
     "scripts/_plugin_verify_hashes.py": "sha256:ca2fbfe046122797dd2915a4ffaae43e21f3c25b1f7f9613f7a512f24934c063",
     "scripts/_skillaudit_html_context.py": "sha256:73b3f2c0011499a90d29545f30d41370cf1f010d918d7d6515d459ac97a1f71e",
     "scripts/_skillaudit_json_context.py": "sha256:1da166098c3108cae74643b3763565c0787850f1a6525f2483be6809d80637cd",
-    "scripts/_skillaudit_markdown_context.py": "sha256:2d666d0d20082373f1fecc5f8a9e5e172eaed59301d7a1a3181c17061e90faa8",
+    "scripts/_skillaudit_markdown_context.py": "sha256:b4e84f51dc049b9554d74cb39297780eef6fd3ff077c246bbcc94bd318c6855a",
     "scripts/_skillaudit_python_context.py": "sha256:c24e1425c5b6d28e491a130ae69426ced3eefd433fddfc7a27b2ed4932b0f205",
     "scripts/_skillaudit_rust_context.py": "sha256:cac1f434b1da6e2c61a5511a8a7a4ca00bdab887d592a731403499569e2ec25f",
     "scripts/_skillaudit_shell_context.py": "sha256:5cc479cd05b4b1813b23cf69796c5a935112540bdc04489649f4cf2b96395bf8",
@@ -210,7 +210,7 @@
     "scripts/cpv_security_benchmark.py": "sha256:48e4759e1c68c38411c72346e2ea68b48061d688df0832f2cb81229cd929cdf9",
     "scripts/cpv_setup_auth.py": "sha256:f8d53bc5a5bd4e9771feca02899d0265823806a15f22cbaa78b925fa35774a18",
     "scripts/cpv_skill_scanner.py": "sha256:4a07671c967803af7dfe4e85b881f11b983b1ebe18310f66fc576fe085dea9e5",
-    "scripts/cpv_skillaudit_native.py": "sha256:8035dd16144788981beb2eec9a2eed5a5b8ca40a979381180b5aa3844665d4f2",
+    "scripts/cpv_skillaudit_native.py": "sha256:6e62e7cf924614543ed85603a3ae56f33dff37e99c796eb2486c5e0dc9e8050d",
     "scripts/cpv_staging.py": "sha256:22c067dfa11aeb56ac28112e6f4796618f1bd9f59366198899ba02734be8d5c9",
     "scripts/cpv_strip_dev.py": "sha256:a432bae5fb4ef8717628e57dc6d8eb4827c5ed44816b267ebae4296ad0314a80",
     "scripts/cpv_taint_engine.py": "sha256:7ce0ff359bf28da23c7978b0a7f1cdf3f976ba19aee78be67e68bdf4c1dc081b",

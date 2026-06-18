@@ -1115,6 +1115,66 @@ _APPLESCRIPT_COMMENT_INERT_RULES: frozenset[str] = frozenset(
     }
 )
 
+# Non-JS SOURCE extensions where JS-prototype-pollution is CATEGORICALLY
+# impossible (issue #134). Prototype pollution is a JavaScript/TypeScript
+# RUNTIME attack class: it needs a mutable `Object.prototype` chain and
+# dynamic `__proto__` / `constructor.prototype` property assignment. These
+# compiled / interpreted non-JS languages have no prototype chain and no
+# `Object` global — a `list.extend([...])` / `slice.append(...)` /
+# `Vec::extend(...)` is a typed, bounds-checked concatenation that cannot
+# pollute a prototype. The catalog PROTOTYPE_POLLUTION merge-family gadget
+# (pattern #6: `(?:merge|extend|assign|…)\s*\(.*(?:…|input|payload|params|
+# userData|…)`) over-fires here on the ubiquitous `argv.extend(["--payload-
+# json", …])` shape because `extend` is a merge-family verb and `payload` /
+# `input` / `params` / `userData` are everyday non-JS identifiers/CLI flags.
+#
+# The set is an EXPLICIT ALLOWLIST of source languages, NOT an "everything
+# except .js" denylist — `.md` / `.json` / `.yaml` / `.html` / shell can all
+# EMBED JavaScript (a doc fence, a config value a JS hook eval's, an inline
+# `<script>`), so prototype pollution IS reachable there and those files are
+# deliberately absent. JS itself (`.js`/`.ts`/`.jsx`/`.tsx`/`.mjs`/`.cjs`) is
+# absent too, so the rule keeps firing at full severity on every real
+# `Object.assign(t, req.body)` / `_.merge(d, req.body)` / `_.defaultsDeep(o,
+# req.query)`. This is the dispatcher-level generalisation of the per-file
+# Rust clear the `.rs` classifier already does (issue #129 / #71) to EVERY
+# non-JS source language — FN-safe by construction.
+_PROTOTYPE_POLLUTION_INERT_SOURCE_EXTS: tuple[str, ...] = (
+    ".py",  # Python
+    ".rb",  # Ruby
+    ".go",  # Go
+    ".rs",  # Rust
+    ".java",  # Java
+    ".kt",  # Kotlin
+    ".kts",  # Kotlin script
+    ".scala",  # Scala
+    ".php",  # PHP
+    ".cs",  # C#
+    ".swift",  # Swift
+    ".c",  # C
+    ".h",  # C / C++ header
+    ".cc",  # C++
+    ".cpp",  # C++
+    ".cxx",  # C++
+    ".hpp",  # C++ header
+    ".hh",  # C++ header
+    ".m",  # Objective-C
+    ".mm",  # Objective-C++
+    ".pl",  # Perl
+    ".pm",  # Perl module
+    ".lua",  # Lua
+    ".r",  # R
+    ".jl",  # Julia
+    ".ex",  # Elixir
+    ".exs",  # Elixir script
+    ".erl",  # Erlang
+    ".clj",  # Clojure
+    ".cljs",  # ClojureScript — compiles TO JS, but the SOURCE has no proto chain
+    ".hs",  # Haskell
+    ".ml",  # OCaml
+    ".dart",  # Dart
+    ".sql",  # SQL
+)
+
 # **Intent HARD signals**: the prose pattern IS the threat-delivery
 # vector. A markdown line containing "Ignore previous instructions"
 # (PROMPT_INJECT), "exfiltrate the .env file" (DATA_EXFIL), or a link
@@ -1972,6 +2032,28 @@ def _context_classifier_dispatch(
         if _lang is not None:
             file_path = f"{file_path}.{_lang}"
             fp_lower = file_path.lower()
+
+    # PROTOTYPE_POLLUTION on a NON-JS SOURCE file → language carve-out (issue
+    # #134). Prototype pollution is a JS/TS-runtime attack class (mutable
+    # `Object.prototype` chain + dynamic `__proto__`/`constructor.prototype`
+    # assignment). A `.py`/`.rb`/`.go`/`.rs`/`.java`/`.php`/… source has no
+    # prototype chain, so the catalog merge-family gadget (pattern #6) over-fires
+    # on benign `argv.extend(["--payload-json", …])` / `_.merge(d, params)` shapes
+    # (`extend`/`merge` are merge-family verbs; `payload`/`input`/`params`/
+    # `userData` are everyday non-JS identifiers & CLI flags). The rule is
+    # CATEGORICALLY inapplicable to these languages, so a per-language clear is
+    # FN-safe BY CONSTRUCTION: JS itself (`.js`/`.ts`/`.jsx`/`.tsx`/`.mjs`/
+    # `.cjs`) is NOT in `_PROTOTYPE_POLLUTION_INERT_SOURCE_EXTS`, so a real
+    # `Object.assign(t, req.body)` / `_.merge(d, req.body)` keeps firing; and
+    # `.md`/`.json`/`.yaml`/`.html`/shell are absent too because they can EMBED
+    # JS (a doc fence, a JS-eval'd config value, an inline `<script>`), so the
+    # rule stays live there. Placed AFTER the shebang recovery above so an
+    # extension-less `#!/usr/bin/env python3` hook (now carrying a synthetic
+    # `.py`) is covered too, while a `node`/`ts-node` shebang (→ `.ts`, JS-family)
+    # is NOT cleared. This generalises the per-file `.rs` clear the Rust
+    # classifier already performs (issue #129/#71) to every non-JS source.
+    if rule_id == "PROTOTYPE_POLLUTION" and fp_lower.endswith(_PROTOTYPE_POLLUTION_INERT_SOURCE_EXTS):
+        return "suppress"
 
     classifier_verdict: str | None = None
 
