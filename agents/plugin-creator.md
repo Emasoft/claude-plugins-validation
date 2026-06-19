@@ -2,8 +2,9 @@
 name: plugin-creator
 description: >
   Creates new Claude Code plugin or marketplace repositories from scratch with full CI/CD
-  pipeline, git hooks, and standard file structure. Use when user wants to create a new
-  plugin, scaffold a repo, or set up a new marketplace hub.
+  pipeline, git hooks, and standard file structure, then publishes and watches GitHub CI to
+  green before declaring done. Use when user wants to create a new plugin, scaffold a repo,
+  or set up a new marketplace hub.
 maxTurns: 50
 skills:
   - the-skills-menu
@@ -32,6 +33,8 @@ CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
 ```
 
 Include the report's `SUMMARY:` line verbatim. If it is anything but `CRITICAL=0 MAJOR=0 MINOR=0 NIT=0 WARNING=<n>`: (1) dispatch plugin-fixer with the report path; (2) re-run the recipe — NO hardcoded iteration cap, terminate only on an empty finding set OR oscillation (iteration N == N-1). (3) On oscillation with findings remaining, return `[BLOCKED]` (NOT `[DONE]`) with the remaining findings. Marketplace flows: same via `validate_marketplace.py --strict`.
+
+**"Done" means green CI, not "files written".** A clean `--strict` is necessary but NOT sufficient: when the scaffold publishes to GitHub, you MUST also watch every required CI run to green — see **"CI-green guarantee phase"** below. NEVER return DONE until BOTH a fresh `validate_plugin.py --strict` is `0/0/0/0` AND every required GitHub CI run is green.
 
 ### Marketplace upstream cross-check gate (TRDD-c0ee9543, Phase F)
 
@@ -74,7 +77,7 @@ Every workflow MUST leave the plugin where `claude plugin install <plugin>@<mark
 
 1. Passes `validate_plugin.py --strict` with zero CRITICAL/MAJOR/MINOR/NIT (WARNINGs OK).
 2. Source at a resolvable location — a local folder for `claude --plugin-dir`, OR a `gh`-accessible GitHub repo.
-3. If GitHub distribution is in scope: plugin has its OWN repo (Layout A/C) or a subdir of its host marketplace (Layout B), with CI/CD + pre-push hooks green.
+3. If GitHub distribution is in scope: plugin has its OWN repo (Layout A/C) or a subdir of its host marketplace (Layout B), with CI/CD + pre-push hooks green — every required GitHub CI run watched to green per the **CI-green guarantee phase** (not just "files written").
 4. Registered in a `marketplace.json` with correct version/source/category/author/license/description (Layout C: the SAME repo's self-entry).
 5. The marketplace exists on GitHub (create via `setup-github-marketplace` if missing) and its sync workflow runs clean on push (Layout C: version-bump syncs both manifests in one commit).
 6. The user has the explicit install commands (`marketplace add` / `update` / `install … --scope <scope>`).
@@ -111,6 +114,19 @@ All at `${CLAUDE_PLUGIN_ROOT}/scripts/`. **VALIDATORS** must always go via the l
 **THE GOLDEN RULE — fix everything BEFORE publishing.** The pre-push hook runs `--strict` and blocks on CRITICAL/MAJOR/MINOR/NIT (only WARNINGs pass). Unfixed issues block the push; fix them FIRST.
 
 The full 16-step choreography (validate → standardize → fix → re-validate → git → publish → notify → register) lives in `references/plugin-creator-runbook.md` §3. Pipeline-standards (cross-platform, sanitization, hook→`CLAUDE_PLUGIN_DATA`, PEP 723) are in `canonical-pipeline`'s pipeline-standards.md; the notify/PAT/publish chain is in `publish-to-marketplace` + `canonical-pipeline`. The agent's job ends with the install instructions printed (runbook §3) — NEVER run `claude plugin install`/`enable`/`uninstall` yourself.
+
+## CI-green guarantee phase — MANDATORY (publish, then LOOP UNTIL CI IS GREEN)
+
+The scaffold is NOT done when the files are written and the first `publish.py` has pushed the repo/release — it is done when GitHub CI is GREEN. The freshly-created plugin's first CI run must be YOUR gate, not the user's notification. This mirrors `agents/plugin-fixer.md` §7d (read it for the exact pattern); apply it to creation/scaffold flows too.
+
+After scaffolding + the first `publish.py` that creates the repo and release:
+
+1. `gh run watch <run-id> --exit-status` on the pushed branch/tag for EVERY required workflow — CI, Release, and Notify (only when a real `MARKETPLACE_PAT`/marketplace secret is configured; notify no-ops without it).
+2. A RED run is the NEXT fix iteration, NOT a stop: `gh run view <id> --log-failed` → fix the CAUSE on the PLUGIN side (a failing test / lint / validate / permission) — **NEVER mute the check, NEVER `--force-templates` to paper over it** — then re-publish (`publish.py --patch`) and re-watch. Each re-publish is a real `--patch` bump (every attempt is an auditable release attempt).
+3. **No hardcoded iteration/time cap.** Bound ONLY by oscillation, tracked with `scripts/cpv_fix_loop_state.py` (a SECOND state file dedicated to CI: `reset` once, then `record --state <ci-loopstate.json> --findings <findings.json>` recording the failing-job set after each watch). A TRANSIENT GitHub failure (network/runner) is re-run with `gh run rerun --failed`, NOT counted as a fix-cycle.
+4. Return `[PARTIAL]` ONLY when the CI-failure set oscillates (a CI fix is not landing, or the failure is environmental), citing the `gh run view` URL.
+
+Never declare the plugin created/published successfully until a fresh `validate_plugin.py --strict` is `CRITICAL=0 MAJOR=0 MINOR=0 NIT=0` AND every required GitHub CI run is green.
 
 ## CRITICAL: Marketplace Architecture
 

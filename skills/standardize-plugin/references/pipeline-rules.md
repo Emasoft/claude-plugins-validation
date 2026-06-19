@@ -14,6 +14,7 @@
 - [README Requirements](#readme-requirements)
 - [Pre-Publish Local Dry-Run](#pre-publish-local-dry-run)
 - [Post-Push CI Verification](#post-push-ci-verification)
+- [Generated-Pipeline Reliability Contract](#generated-pipeline-reliability-contract-v21340)
 - [Mega-Linter Configuration](#mega-linter-configuration)
 - [Common Fixes Reference](#common-fixes-reference)
 
@@ -26,6 +27,8 @@
 - [ ] Plugin scripts are all Python
 - [ ] README has install/update/uninstall sections
 - [ ] Dry-run passes before first real publish
+- [ ] Generated CI pins the CPV ref (not HEAD) and the required `Test` aggregate-gate job is present
+- [ ] "Done" = green CI watched to green, not "files generated"
 
 These rules MUST be followed by every agent, command, and skill that creates, publishes, standardizes, or fixes a plugin repository.
 
@@ -137,6 +140,16 @@ sleep 30 && gh run list --repo <owner>/<plugin-name> --limit 5
 ```
 If any workflow failed, investigate with `gh run view <id> --log-failed | head -30`.
 Fix and push again. Do NOT leave failing CI as the final state.
+
+## Generated-Pipeline Reliability Contract (v2.134.0)
+
+The generator applies five reliability fixes so a scaffolded/upgraded plugin's first GitHub CI run is GREEN, not the user's failure notification. The upgrade path MUST re-apply these (and re-run CI to green) so an upgraded plugin matches what a fresh scaffold emits:
+
+1. **CI pins the CPV ref** — the generated `ci.yml`/`release.yml`/`publish.py` pin the CPV install to an explicit **`@v<ver>` git tag** (the `git+` install URL carries a `@v<ver>` suffix), NOT CPV HEAD. So a new CPV release never silently red-lights a downstream plugin. The upgrade flow updates the pin DELIBERATELY (and re-runs CI to green) rather than letting every plugin track HEAD.
+2. **Validate steps skip the live integrity fetch + carry a real timeout** — every CPV-validate step sets `env: { PLUGIN_SKIP_GITHUB_INTEGRITY: "1", CLAUDE_PRIVATE_USERNAMES: ${{ github.repository_owner }} }` and a `timeout-minutes`. On a fresh-checkout runner the local manifest already matches the code, so the `raw.githubusercontent.com` anchor adds latency/hang risk but no security.
+3. **The `test` matrix is fronted by an aggregate gate job named exactly `Test`** (`needs: [test]`, succeeds only if the matrix passed). A bare required `Test` context against a matrix that reports `Test (ubuntu-latest)` / `Test (macos-latest)` is NEVER satisfied → PRs stuck pending forever; the aggregate job satisfies the required branch context.
+4. **`notify-marketplace` no-ops when `MARKETPLACE_PAT` is absent** — the job is guarded so a repo without the secret does not surface a red associated workflow on the release.
+5. **"Done" = green CI, not "files generated"** — the creator/fixer agents PUBLISH then watch every required run with `gh run watch <run-id> --exit-status`, treating a red run as the next fix iteration (read failing job → fix the cause on the plugin side → re-publish → re-watch; `gh run rerun --failed` for transient infra; NEVER mute a check). See `agents/plugin-creator.md` "CI-green guarantee phase" and `agents/plugin-fixer.md` §7d.
 
 ## Mega-Linter Configuration
 

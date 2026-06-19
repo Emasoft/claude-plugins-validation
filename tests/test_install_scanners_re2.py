@@ -393,14 +393,24 @@ class TestGenCiYmlScanCacheBlock:
         )
 
     def test_ci_yml_lint_and_test_jobs_unchanged(self, ci_yml: str) -> None:
-        """Lint and Test jobs must still be present (not accidentally removed)."""
+        """Lint + the test jobs must be present and correctly named for branch-rule matching.
+
+        v2.134.0 (generated-CI failure mode #3): the test job is a matrix renamed
+        'Test matrix'; an aggregate gate job named exactly 'Test' (``needs: [test]``)
+        satisfies the required bare-'Test' branch context (a matrix reports
+        'Test (ubuntu-latest)'/... and never satisfies a bare 'Test' → PRs stuck pending).
+        """
         parsed = yaml.safe_load(ci_yml)
         jobs = parsed.get("jobs", {})
         assert "lint" in jobs, "lint job must remain in scaffold"
         assert "test" in jobs, "test job must remain in scaffold"
         # Lint job name pinned to "Lint" — cpv-setup-branch-rules reads it verbatim.
         assert jobs["lint"].get("name") == "Lint", "lint job display name must stay 'Lint'"
-        assert jobs["test"].get("name") == "Test", "test job display name must stay 'Test'"
+        # The matrix test job is now 'Test matrix'; the aggregate gate keeps the required 'Test'.
+        assert jobs["test"].get("name") == "Test matrix", "matrix test job display name is now 'Test matrix'"
+        assert "test-gate" in jobs, "aggregate Test gate job must be present"
+        assert jobs["test-gate"].get("name") == "Test", "aggregate gate display name must stay 'Test' (the required branch context)"
+        assert jobs["test-gate"].get("needs") == ["test"], "aggregate gate must need the matrix test job"
         # Test job must NOT have inherited a cache step (only validate gets it).
         test_steps = jobs["test"].get("steps", [])
         test_cache_steps = [s for s in test_steps if isinstance(s, dict) and "actions/cache" in s.get("uses", "")]
