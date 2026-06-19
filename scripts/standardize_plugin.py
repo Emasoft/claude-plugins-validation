@@ -1119,6 +1119,19 @@ def fix_missing_files(
     # Import generator functions from generate_plugin_repo
     gen_module = importlib.import_module("generate_plugin_repo")
 
+    # Profile-aware regeneration (TRDD-e9f13df1, #128-A / Piece D): resolve the
+    # plugin's pipeline profile so a profile-parameterized gen_* (currently
+    # gen_publish_py) regenerates the PROFILE-APPROPRIATE variant. Without this,
+    # `--force-templates` would clobber a submodule-build plugin's submodule-aware
+    # publish.py with the standard one and break its releases — the exact #128
+    # breakage PSS reported. Best-effort: resolve_pipeline_profile falls back to
+    # "standard" on any error, so a standard plugin is byte-identically unaffected.
+    from cpv_pipeline_profile import (
+        resolve_pipeline_profile,  # noqa: E402 — sibling import after the scripts/ path insert above
+    )
+
+    profile = resolve_pipeline_profile(plugin_path)
+
     created: list[str] = []
 
     # Process missing-then-force so the [create] / [overwrite] markers in the
@@ -1137,6 +1150,12 @@ def fix_missing_files(
         sig = inspect.signature(gen_func)
         if len(sig.parameters) == 0:
             content = gen_func()
+        elif "profile" in sig.parameters:
+            # Profile-aware (TRDD-e9f13df1, #128-A): pass the resolved profile so a
+            # submodule-build plugin regenerates its submodule-aware publish.py,
+            # never the standard one. SELECTOR not suppressor — a standard plugin
+            # resolves to "standard" and gets the byte-identical standard output.
+            content = gen_func(params, profile=profile)
         else:
             content = gen_func(params)
 

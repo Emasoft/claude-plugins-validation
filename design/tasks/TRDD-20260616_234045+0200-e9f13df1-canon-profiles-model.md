@@ -3,7 +3,7 @@ trdd-id: e9f13df1-556f-4c02-9fba-5a62ac248eda
 title: Canon-profiles — profile-aware + direction-aware canonical-pipeline model
 column: dev
 created: 2026-06-16T23:40:45+0200
-updated: 2026-06-19T05:59:36+0200
+updated: 2026-06-19T06:45:13+0200
 current-owner: claude-plugins-validation
 assignee: claude-plugins-validation
 priority: 2
@@ -62,13 +62,17 @@ drift-to-downgrade. Resolves the 4 remaining open issues as ONE model:
   strip-dev-parts already models a per-plugin `tests/`→submodule (gen at generate_plugin_repo.py:703).
 - `gen_publish_py` at generate_plugin_repo.py:1245.
 
-**NEXT ACTION:** central-adversarial-verify **C1** (scaffold a submodule-build sample plugin,
-inspect the emitted `publish.py`, run `actionlint` + a `--dry-run`, assert standard byte-identity
-regression, full suite) → ship → close **#128**. Then **C2 (binary-release #115)** — new
-`gen_release_binaries_yml` (matrix build + least-priv split + SHA-pins + `SHA256SUMS` +
-`gh release upload --clobber` + `workflow_dispatch` tag + CI smoke job), ref = janitor
-`.github/workflows/memgrep-release.yml` → ship → close **#115**. Then **Piece D** — upgrade-agent
-(`standardize --fix --force-templates`) + diagnose-skill profile preservation (#128-A).
+**NEXT ACTION (updated 2026-06-19):** **C1 SHIPPED v2.135.0** (CI/Release/Notify green) —
+`gen_publish_py` submodule variant, the #128 `git -C` source-change fix, profile-aware drift,
+standard byte-identical (HEAD-baseline proven). **#128-A DONE (Piece D core), shipping v2.135.1** —
+found during verify: `standardize_plugin.py::fix_missing_files` clobbered the submodule-aware
+publish.py because it called `gen_func(params)` with NO profile; it now resolves the profile and
+passes it to a profile-parameterized `gen_*`; 3 two-sided tests guard it. Remaining work, in order:
+**C2 (binary-release #115)** — see `docs_dev/piece-c2-binary-release-notes.md`. KEY: #115's drift half
+is STRUCTURAL recognition (SHA-pins, least-priv build/release split, `SHA256SUMS`, build matrix), NOT a
+byte-compare, because the release workflow is language-specific; reference is janitor
+`.github/workflows/memgrep-release.yml`. Then the rest of **Piece D** — remote-validation
+"don't re-vendor validators" (#130) and the upgrade-agent prompt's profile awareness.
 
 **Load-bearing facts / gotchas:**
 - Drift compare must select the **gen VARIANT** for the resolved profile, not always the standard one.
