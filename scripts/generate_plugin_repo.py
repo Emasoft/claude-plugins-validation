@@ -24,6 +24,20 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+# Canonical-pipeline PROFILE vocabulary (TRDD-e9f13df1, issues #128 / #115 /
+# #130 / #118-d2). `gen_publish_py` and `generate_plugin_repo` are profile-aware
+# so a `submodule-build` plugin (PSS shape, #128) generates a SUBMODULE-AWARE
+# publish.py variant instead of the standard one. The module is a sibling under
+# scripts/ (pure stdlib) — its dir is sys.path[0] when this file runs as a
+# script and is already inserted by validate_plugin.py / the tests when imported.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cpv_pipeline_profile import (  # noqa: E402 — sibling import after the path insert above
+    KNOWN_PROFILES,
+    PROFILE_STANDARD,
+    PROFILE_SUBMODULE_BUILD,
+    resolve_pipeline_profile,
+)
+
 # -- ANSI colors (disabled when NO_COLOR is set or stdout is not a tty) ------
 
 
@@ -1302,7 +1316,7 @@ def gen_cliff_toml(p: PluginParams) -> str:
     return result
 
 
-def gen_publish_py(p: PluginParams) -> str:
+def gen_publish_py(p: PluginParams, profile: str = PROFILE_STANDARD) -> str:
     """Generate scripts/publish.py — unified publish pipeline with --gate mode.
 
     The CPV validator/branch-rule callsites embedded in the publish.py body
@@ -1312,6 +1326,32 @@ def gen_publish_py(p: PluginParams) -> str:
     Pinning keeps the cold ``uvx --from git+…`` build cached per-tag and stops
     a future stricter CPV release from breaking this plugin's gate with no
     plugin change.
+
+    ``profile`` (TRDD-e9f13df1, issues #128 / #115) selects the publish-pipeline
+    VARIANT:
+
+      * ``standard`` / ``remote-validation`` — the body is byte-identical to
+        the historical output (the standard template + the ref rewrite). This
+        is a HARD guarantee: existing tests assert the exact standard bytes, and
+        every unrecognized / unknown ``profile`` value also takes this path
+        (fail-safe). The remote-validation gate shape lives in the standard
+        template already (G3/Stage-4 drive ``cpv-remote-validate``), so it
+        needs no separate variant here.
+      * ``submodule-build`` (PSS, #128) — the standard body PLUS an additive,
+        marker-delimited section carrying the four load-bearing submodule
+        behaviors: (1) submodule-commit-before-gitlink, (2)
+        submodule-push-before-parent, (3) a gitlink-tolerant clean-tree
+        preflight, and (4) the #128 source-change-detection FIX (detect a
+        source change with ``git -C <submodule> diff <tag/sha> -- <src-globs>``,
+        NOT a parent-repo ``*.rs`` glob — the parent only ever sees the
+        ``160000`` gitlink, so the standard preflight concludes "no source
+        change" and ships STALE binaries). The section is PURELY ADDITIVE: it
+        is appended after the standard body, so for every other profile the
+        return value is unchanged.
+
+    The branch is additive by construction so the standard path can never
+    regress: the standard ``result`` is built first and returned untouched for
+    all non-``submodule-build`` profiles.
     """
     template = r'''#!/usr/bin/env python3
 """Unified publish pipeline: bypass-guard -> lint -> validate (remote CPV) -> test -> bump -> badge -> changelog -> commit -> push -> release.
@@ -3012,9 +3052,250 @@ if __name__ == "__main__":
     # tag and a stricter future CPV release cannot silently break this gate.
     # The bare URL appears exactly 3× in the template; a single exact-literal
     # replace pins all of them.
-    return template.replace(
+    result = template.replace(
         "git+https://github.com/Emasoft/claude-plugins-validation",
         f"git+https://github.com/Emasoft/claude-plugins-validation@{p.cpv_ref_resolved}",
+    )
+
+    # PROFILE VARIANT (TRDD-e9f13df1, issue #128). For every profile EXCEPT
+    # `submodule-build` the body is returned byte-identical to the historical
+    # output above (HARD guarantee — the standard regression test pins it; an
+    # unknown profile also takes this path, fail-safe). For `submodule-build`
+    # we APPEND a marker-delimited section carrying the four PSS load-bearing
+    # behaviors; appending (never editing the standard body) is what keeps the
+    # standard path provably unchanged.
+    if profile == PROFILE_SUBMODULE_BUILD:
+        result += _gen_publish_py_submodule_section()
+    return result
+
+
+# Markers that delimit the appended submodule-build section. They double as the
+# detector's signature: the drift check compares a submodule-build plugin's
+# publish.py against `gen_publish_py(params, "submodule-build")`, so the variant
+# is recognized when (and only when) it carries this exact section verbatim.
+_SUBMODULE_BUILD_SECTION_BEGIN = (
+    "# === BEGIN submodule-build profile section (TRDD-e9f13df1, issue #128) ==="
+)
+_SUBMODULE_BUILD_SECTION_END = (
+    "# === END submodule-build profile section (TRDD-e9f13df1, issue #128) ==="
+)
+
+
+def _gen_publish_py_submodule_section() -> str:
+    r"""Return the additive `submodule-build` publish.py section text.
+
+    This is appended verbatim to the standard publish.py body by
+    ``gen_publish_py(p, PROFILE_SUBMODULE_BUILD)``. It is a self-contained
+    block of Python (it imports its own stdlib deps and re-derives ``ROOT``) so
+    it parses and runs even though the standard body owns the actual pipeline
+    entry point. The functions here are HELPERS the maintainer wires into their
+    submodule-aware release flow; the section is deliberately import-safe and
+    side-effect-free at module load (nothing runs at import time).
+
+    It models, verbatim from PSS's real submodule-aware publish.py
+    (``Emasoft/perfect-skill-suggester``), the four load-bearing behaviors the
+    standard template lacks:
+
+      1. ``submodule_source_changed`` — the #128 source-change-detection FIX.
+         It runs ``git -C <submodule> diff <last-tag-or-sha> -- <src-globs>``
+         INSIDE the submodule, so it sees the submodule's own files. The
+         standard preflight uses a PARENT-repo glob, which only ever sees the
+         ``160000`` gitlink and therefore ships STALE binaries.
+      2. ``submodule_commit_before_gitlink`` — commit the version bump INSIDE
+         the submodule first, THEN stage the moved gitlink in the parent.
+      3. ``ensure_submodule_pushed`` — push the submodule remote BEFORE the
+         parent push, so the parent gitlink never points at an unpushed sha
+         ("not our ref" on clone).
+      4. ``submodule_clean_tree_ok`` — a gitlink-tolerant clean-tree preflight:
+         a ``160000`` gitlink whose submodule HEAD has moved is an EXPECTED
+         release-time change, NOT a "dirty tree" abort.
+    """
+    # NOTE: this is the TEXT of generated Python, kept as a raw triple-quoted
+    # string. The leading "\n\n\n" separates it from the standard body's
+    # trailing `sys.exit(main())`. Backslashes are literal (raw string).
+    return (
+        "\n\n\n"
+        + _SUBMODULE_BUILD_SECTION_BEGIN
+        + r'''
+# These helpers add submodule-aware behavior the standard canonical publish.py
+# does not carry. A `submodule-build` plugin (build sources in a git submodule
+# + pre-compiled binaries committed to bin/) wires them into its release flow.
+# They are import-safe (nothing runs at module load) and side-effect-free until
+# called. Modeled on Emasoft/perfect-skill-suggester's real publish.py.
+# These imports sit mid-file (the section is appended after the standard body)
+# so E402 is expected and silenced — the standard body already imported the same
+# stdlib at the top; the aliased re-imports keep this section self-contained.
+import subprocess as _sub  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+# The plugin root (this file lives in <root>/scripts/publish.py).
+_SUBMOD_ROOT = _Path(__file__).resolve().parent.parent
+
+
+def _submod_run(cmd, **kwargs):
+    """Run a git command from the plugin root, capturing output (text)."""
+    kwargs.setdefault("cwd", str(_SUBMOD_ROOT))
+    kwargs.setdefault("capture_output", True)
+    kwargs.setdefault("text", True)
+    return _sub.run(cmd, **kwargs)  # noqa: S603 — fixed git argv, no shell
+
+
+def _build_source_submodule_paths():
+    """Every build-source submodule path registered in the parent .gitmodules.
+
+    A DEV/test submodule (strip-dev-parts: tests/dev/docs/...) is excluded — it
+    is not a build source. Returns submodule paths relative to the plugin root.
+    """
+    gm = _SUBMOD_ROOT / ".gitmodules"
+    if not gm.is_file():
+        return []
+    dev_hints = {"tests", "test", "dev", "docs", "doc", "examples", "samples", "fixtures"}
+    paths = []
+    for line in gm.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if line.startswith("path") and "=" in line:
+            rel = line.split("=", 1)[1].strip().rstrip("/")
+            if rel and rel.split("/", 1)[0].lower() not in dev_hints:
+                paths.append(rel)
+    return paths
+
+
+def submodule_source_changed(submodule_path, src_globs=("src",)):
+    """True iff build-source files changed in the submodule since the last tag.
+
+    THE #128 FIX. The change is detected with
+        git -C <submodule_path> diff <last_tag> HEAD -- <src_globs>
+    run INSIDE the submodule, so it inspects the submodule's OWN files. The
+    standard preflight detects rebuild-need with a PARENT-repo source glob,
+    which only ever resolves to the `160000` gitlink (never the submodule's
+    files) and therefore concludes "no source change" and ships STALE binaries.
+
+    No tag yet → assume changed (force the build). Any git error → assume
+    changed (fail safe toward rebuilding, never toward a stale ship).
+    """
+    sub = _SUBMOD_ROOT / submodule_path
+    if not (sub / ".git").exists():
+        # Not initialized as a submodule on this checkout — fall back to a
+        # parent-repo diff of the submodule path (best effort).
+        res = _submod_run(["git", "describe", "--tags", "--abbrev=0"])
+        last_tag = res.stdout.strip() if res.returncode == 0 else ""
+        if not last_tag:
+            return True
+        diff = _submod_run(["git", "diff", "--name-only", last_tag, "HEAD", "--", submodule_path])
+        return bool(diff.stdout.strip())
+    # Inside the submodule: find ITS last tag (fall back to the parent tag),
+    # then diff the source globs there.
+    tag_res = _submod_run(["git", "-C", str(sub), "describe", "--tags", "--abbrev=0"])
+    last_tag = tag_res.stdout.strip() if tag_res.returncode == 0 else ""
+    if not last_tag:
+        parent_tag = _submod_run(["git", "describe", "--tags", "--abbrev=0"])
+        last_tag = parent_tag.stdout.strip() if parent_tag.returncode == 0 else ""
+    if not last_tag:
+        return True
+    args = ["git", "-C", str(sub), "diff", "--name-only", last_tag, "HEAD", "--", *src_globs]
+    diff = _submod_run(args)
+    if diff.returncode != 0:
+        return True  # fail safe: can't prove "unchanged" → rebuild
+    return bool(diff.stdout.strip())
+
+
+def submodule_gitlink_moved(submodule_path):
+    """True iff the parent's tree records a submodule sha != the submodule HEAD.
+
+    A moved gitlink (`160000`) is the EXPECTED state during a release that bumps
+    the submodule — it is NOT a dirty working tree to abort on.
+    """
+    sub = _SUBMOD_ROOT / submodule_path
+    if not (sub / ".git").exists():
+        return False
+    tree = _submod_run(["git", "ls-tree", "HEAD", submodule_path])
+    if tree.returncode != 0 or not tree.stdout.strip():
+        return False
+    parts = tree.stdout.split()
+    if len(parts) < 3 or parts[0] != "160000":
+        return False
+    recorded = parts[2]
+    head = _submod_run(["git", "-C", str(sub), "rev-parse", "HEAD"])
+    if head.returncode != 0:
+        return False
+    return recorded != head.stdout.strip()
+
+
+def submodule_clean_tree_ok():
+    """Gitlink-tolerant clean-tree preflight.
+
+    Returns True when the working tree is clean APART FROM build-source
+    submodule gitlinks whose HEAD has legitimately moved for this release. A
+    plain `git status --porcelain` would flag those moved gitlinks as a dirty
+    tree and abort the release; this preflight tolerates them (and ONLY them).
+    Any OTHER modification still makes the tree dirty.
+    """
+    status = _submod_run(["git", "status", "--porcelain"])
+    if status.returncode != 0:
+        return False
+    submods = set(_build_source_submodule_paths())
+    for line in status.stdout.splitlines():
+        entry = line[3:].strip() if len(line) > 3 else line.strip()
+        if entry in submods and submodule_gitlink_moved(entry):
+            continue  # an expected, release-time gitlink move — tolerated
+        if entry:
+            return False  # a real uncommitted change → dirty
+    return True
+
+
+def submodule_commit_before_gitlink(submodule_path, new_version, sub_files=("Cargo.toml", "Cargo.lock")):
+    """Commit the version bump INSIDE the submodule first, then stage the gitlink.
+
+    Order is load-bearing: committing inside the submodule advances its HEAD;
+    only AFTERWARD does staging the submodule path in the parent capture the new
+    gitlink. Doing it in the reverse order stages a stale (or no) gitlink.
+    """
+    sub = _SUBMOD_ROOT / submodule_path
+    if not (sub / ".git").exists():
+        return
+    staged = [str(sub / f) for f in sub_files if (sub / f).exists()]
+    if staged:
+        add = _submod_run(["git", "-C", str(sub), "add", *staged])
+        if add.returncode != 0:
+            raise SystemExit(f"submodule git add failed: {add.stderr.strip()}")
+        commit = _submod_run(["git", "-C", str(sub), "commit", "-m", f"chore(release): {new_version}"])
+        if commit.returncode != 0 and "nothing to commit" not in (commit.stdout + commit.stderr).lower():
+            raise SystemExit(f"submodule git commit failed: {commit.stderr.strip()}")
+    # Stage the MOVED gitlink in the parent (after the submodule HEAD advanced).
+    stage = _submod_run(["git", "add", submodule_path])
+    if stage.returncode != 0:
+        raise SystemExit(f"git add (gitlink) failed: {stage.stderr.strip()}")
+
+
+def ensure_submodule_pushed(submodule_path):
+    """Push the submodule remote BEFORE the parent push.
+
+    If the parent gitlink references a commit the submodule remote does not yet
+    have, the parent must NOT be pushed first — a clone would fail with
+    'not our ref'. Push the submodule, then let the caller push the parent.
+    """
+    sub = _SUBMOD_ROOT / submodule_path
+    if not (sub / ".git").exists():
+        return
+    tree = _submod_run(["git", "ls-tree", "HEAD", submodule_path])
+    if tree.returncode != 0 or not tree.stdout.strip():
+        return
+    parts = tree.stdout.split()
+    if len(parts) < 3:
+        return
+    ref = parts[2]
+    have = _submod_run(["git", "-C", str(sub), "fetch", "--dry-run", "origin", ref], timeout=30)
+    if have.returncode == 0:
+        return  # already on the remote
+    push = _submod_run(["git", "-C", str(sub), "push"])
+    if push.returncode != 0:
+        raise SystemExit(
+            f"submodule push failed: {push.stderr.strip()}\n"
+            f"  Run 'git -C {submodule_path} push' manually before retrying."
+        )
+'''
+        + _SUBMODULE_BUILD_SECTION_END
+        + "\n"
     )
 
 
@@ -3896,8 +4177,16 @@ def gen_scripts_init(p: PluginParams) -> str:
 # =============================================================================
 
 
-def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
-    """Return list of (relative_path, content, is_executable) for all scaffold files."""
+def generate_all_files(
+    p: PluginParams, profile: str = PROFILE_STANDARD
+) -> list[tuple[str, str, bool]]:
+    """Return list of (relative_path, content, is_executable) for all scaffold files.
+
+    ``profile`` (TRDD-e9f13df1, #128) selects the profile-aware generators
+    (currently ``scripts/publish.py`` via :func:`gen_publish_py`). Defaults to
+    ``standard`` so every existing caller and the byte-identity guarantee are
+    unaffected.
+    """
     files: list[tuple[str, str, bool]] = [
         # Manifest
         (".claude-plugin/plugin.json", gen_plugin_json(p), False),
@@ -3952,7 +4241,9 @@ def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
         files.extend(
             [
                 ("scripts/__init__.py", gen_scripts_init(p), False),
-                ("scripts/publish.py", gen_publish_py(p), True),
+                # Profile-aware (TRDD-e9f13df1, #128): a `submodule-build` plugin
+                # gets the submodule-aware variant; `standard` is byte-identical.
+                ("scripts/publish.py", gen_publish_py(p, profile), True),
                 ("scripts/cpv_network_resilience.py", gen_cpv_network_resilience_py(), True),
                 ("scripts/setup-hooks.py", gen_setup_hooks_py(), True),
                 ("hooks/hooks.json", gen_hooks_json(p), False),
@@ -4049,8 +4340,26 @@ COMPONENT_DIRS = [
 ]
 
 
-def generate_plugin_repo(target: Path, p: PluginParams, dry_run: bool = False) -> list[str]:
-    """Write all scaffold files to target directory. Returns list of created file paths."""
+def generate_plugin_repo(
+    target: Path, p: PluginParams, dry_run: bool = False, profile: str | None = None
+) -> list[str]:
+    """Write all scaffold files to target directory. Returns list of created file paths.
+
+    ``profile`` (TRDD-e9f13df1, issues #128 / #115) selects the canonical-pipeline
+    VARIANT used for the profile-aware generators (currently ``scripts/publish.py``
+    via :func:`gen_publish_py`). When ``None`` (the default — fresh scaffolds and
+    every existing caller), the profile is resolved from ``target`` via
+    :func:`resolve_pipeline_profile`: an empty / standard target resolves to
+    ``standard``, so the emitted publish.py is byte-identical to today. A
+    regen/standardize callsite that already knows the plugin is e.g.
+    ``submodule-build`` may pass it explicitly to preserve the submodule-aware
+    variant instead of clobbering it with the standard one. An unrecognized value
+    falls back to ``standard`` (fail-safe — never silently disable the canon).
+    """
+    if profile is None:
+        profile = resolve_pipeline_profile(target)
+    if profile not in KNOWN_PROFILES:
+        profile = PROFILE_STANDARD
     created: list[str] = []
 
     # Create component directories (including empty ones for plugin structure)
@@ -4062,8 +4371,9 @@ def generate_plugin_repo(target: Path, p: PluginParams, dry_run: bool = False) -
             dir_path.mkdir(parents=True, exist_ok=True)
         created.append(str(dir_path) + "/")
 
-    # Write all generated files
-    all_files = generate_all_files(p)
+    # Write all generated files (profile-aware: a `submodule-build` plugin gets
+    # the submodule-aware publish.py variant; `standard` is byte-identical).
+    all_files = generate_all_files(p, profile)
     for rel_path, content, is_executable in all_files:
         file_path = target / rel_path
 
