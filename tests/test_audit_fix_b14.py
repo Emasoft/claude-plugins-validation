@@ -55,7 +55,9 @@ def _extract_generated_publish_py() -> str:
     """Return the publish.py source that gen_publish_py emits (template string)."""
 
     class _P:  # minimal stand-in for PluginParams (signature-only arg)
-        pass
+        # v2.134.0 (#2): gen_publish_py now pins the CPV ref into the generated
+        # publish.py, so the stub must expose the resolved ref attribute.
+        cpv_ref_resolved = "v2.133.0"
 
     return gpr.gen_publish_py(_P())  # type: ignore[arg-type]
 

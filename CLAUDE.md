@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.132.0` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.134.0` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
 | **scripts** | **118** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver; `cpv_fix_loop_state.py` deterministic full-history fix-loop oscillation detector) |
-| **test files** | **342** | `ls tests/test_*.py`; ~9630 tests |
+| **test files** | **345** | `ls tests/test_*.py`; ~9725 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -123,7 +123,52 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 
 ## Open issues snapshot (update as they close)
 
+**v2.134.0 — agent CI-green guarantee + canonical-pipeline reliability (user ultracode
+mandate, Phase 2+3)** — the user's core pain: "tons of plugins FAIL GitHub CI AFTER the
+agents upgraded their publish pipeline." An opus forensics pass (real failed-run IDs across 7
+ecosystem repos) found 11 failure modes; the dominant ones now fixed in the canonical-pipeline
+GENERATOR (`generate_plugin_repo.py` + tests): (#2 KEYSTONE) the generated CI tracked CPV's
+git **HEAD unpinned** → every stricter CPV release red-lit every downstream plugin with zero
+plugin changes → now **pins `git+...@v<ver>`** (a `--cpv-ref` field; the upgrade flow re-pins
+deliberately + re-runs CI green); (#1) the cold `uvx --from git+...` build hung to the **6h**
+cap → the pin stabilises the UV cache (paid once per tag) + every job carries `timeout-minutes`;
+(#4) the validate steps now set `PLUGIN_SKIP_GITHUB_INTEGRITY=1` + `CLAUDE_PRIVATE_USERNAMES`
+(no GitHub-raw integrity fetch hang on a fresh-checkout runner); (#3) the `test` MATRIX vs the
+required **bare-`Test`** branch context left PRs **stuck pending forever** → matrix renamed
+`Test matrix` + an aggregate gate job named exactly `Test` (`needs: [test]`) satisfies the
+required context (verified: required `[Lint,Validate,Test]` ⊆ emitted job names, consistent);
+(#9) notify-marketplace no-ops / is skipped when `MARKETPLACE_PAT` / a real marketplace is
+absent. Plus **Phase 2** — the loop-until-`0/0/0/0`-AND-CI-green contract added to
+plugin-devitalizer / plugin-leaks-preventer / plugin-diagnoser / cpv-doctor-agent / cpv
+(plugin-fixer / marketplace-fixer / cache-optimizer already had it), and **#11** — plugin-creator
+now has the publish → `gh run watch` → fix-cause → re-publish loop so "DONE" means **green CI**,
+not "files written"; the canonical/standardize skills document the new reliability contract.
+Delegated to opus agents (recon + 3 impl, disjoint files) + CENTRAL-VERIFIED by scaffolding a
+real sample plugin and inspecting the emitted workflows (pin + skip-env + aggregate-`Test` +
+timeouts + notify-guard all present; **actionlint exit 0**). +20 generator tests; 627 generator/
+pipeline/branch suites green; ruff+mypy clean. Addresses #128 / #115 (canon-extension). NO gate
+relaxed — correctness/reliability only.
+
+**v2.133.0 — 3 scanner detection-precision FPs (#133/#134/#135, FN-safe two-sided)** — #133:
+`_is_safe_literal_argv_subprocess` required EVERY argv element to be a literal, so a safe
+`subprocess.run(['dropdb','--if-exists', test_database])` in a ```python fence (the #81-missed
+case) demoted to a blocking NIT → relaxed so argv[0] stays a literal non-shell program but
+argv[1:] may be bare/dotted names (no `shell=True` → a variable ARGUMENT can't inject a shell);
+still fires on variable-program / `shell=True` / `["sh","-c",x]` / `["env","bash","-c",x]` /
+`["python","-c",code]` / ```bash `curl|sh`. #135: a `curl` shape inside an inert HTML comment
+`<!-- ... -->` (multi-line; unterminated-comment-safe; char-precise) routes EXECUTION/SUPPLY_CHAIN
+to suppress, INTENT-class deliberately EXCLUDED (an agent reading raw SKILL.md still sees comment
+text). #134: PROTOTYPE_POLLUTION (a JS-only class) fired on Python `argv.extend([…"payload"…])` →
+dispatcher-level non-JS-source extension allowlist (`.py`/`.rb`/`.go`/… — no prototype chain;
+catalog regex untouched, re2-safe), real JS `Object.assign(t, req.body)` / `_.merge(d, req.body)`
+keep firing. Delegated to 2 opus agents (one rate-limit-died at REPORTING after writing its work and
+tests to disk — recovered from disk) + CENTRAL-ADVERSARIALLY-VERIFIED through the real scanner
+with malicious siblings the agents did NOT enumerate (variable argv0, `env bash -c`, unterminated
+comment, curl-outside-comment, INTENT-in-comment, `.js` `_.merge`): **7/7 two-sided**. +75 tests;
+1183 skillaudit/markdown/native suites green. Closed #133/#134/#135.
+
 **v2.132.0 — #132 B-series (amvcp field report: fixer/devitalizer agents crash, exhaust
+context, leave corrupt state)** — root cause = the fix-loop oscillation guard compared only
 context, leave corrupt state)** — root cause = the fix-loop oscillation guard compared only
 `signature(N) == signature(N-1)`, but the TOC catch-22 is a 2-CYCLE (TOC-MINOR×K → embed →
 SIZE-MAJOR+TOC-NIT×K → shrink → back), so consecutive iterations ALWAYS differ → the

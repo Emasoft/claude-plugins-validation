@@ -85,6 +85,43 @@ LANGUAGE_MANIFESTS: dict[str, str] = {
 }
 
 
+# Fallback CPV ref used only when this generator's own plugin.json cannot be
+# read (e.g. the script was vendored out of the CPV repo). Pinning to a tag —
+# rather than tracking the `git+https://…` HEAD — keeps the downstream UV cache
+# key stable so the cold CPV build is paid ONCE per tag, and stops every CPV
+# release from red-lighting all downstream CI with zero plugin changes
+# (root-cause #2 of the phase-3 CI-failure analysis).
+_FALLBACK_CPV_REF = "main"
+
+
+def _default_cpv_ref() -> str:
+    """Return the CPV git ref a freshly-scaffolded plugin should pin to.
+
+    Resolves to the CPV version that is doing the scaffolding — read from
+    THIS plugin's own ``.claude-plugin/plugin.json`` ``version`` and prefixed
+    with ``v`` (e.g. ``v2.133.0``). A plugin scaffolded by CPV 2.133.0 pins
+    its publish.py / ci.yml / release.yml CPV calls to ``@v2.133.0`` so that
+    a later CPV release with a stricter rule does NOT silently break the
+    plugin's CI; the maintainer bumps the pin deliberately and re-runs CI to
+    green.
+
+    The lookup walks up from this file (scripts/generate_plugin_repo.py) to the
+    repo root and reads ``.claude-plugin/plugin.json``. Any failure (missing
+    file, unreadable JSON, no version key) degrades to ``_FALLBACK_CPV_REF``
+    rather than raising — the generator must never crash because it could not
+    introspect its own version.
+    """
+    try:
+        manifest = Path(__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json"
+        version = json.loads(manifest.read_text(encoding="utf-8")).get("version")
+    except (OSError, ValueError, json.JSONDecodeError):
+        return _FALLBACK_CPV_REF
+    if not isinstance(version, str) or not version.strip():
+        return _FALLBACK_CPV_REF
+    version = version.strip()
+    return version if version.startswith("v") else f"v{version}"
+
+
 def resolve_language(arg: str, target: Path) -> str:
     """Resolve the --language CLI argument to a concrete language string.
 
@@ -383,6 +420,29 @@ class PluginParams:
     # via an [ACTION REQUIRED] migration warning, not preserved. See
     # TRDD-canonical-pipeline-hardening for the rationale.
     marketplace_owner: str = ""  # Owner segment for MARKETPLACE_OWNER (when ≠ plugin owner)
+    # Pinned CPV ref the generated pipeline fetches the validator at. Empty
+    # means "resolve to the scaffolding CPV's own version" (see
+    # cpv_ref_resolved). Set explicitly via --cpv-ref to pin a different tag.
+    # Pinning (not tracking HEAD) is root-cause-#2's keystone fix: it makes the
+    # downstream UV cache key stable and stops every CPV release from breaking
+    # all downstream CI with no plugin change.
+    cpv_ref: str = ""
+    # Emit the (per-plugin) notify-marketplace.yml even when the marketplace is
+    # the placeholder name — normally we skip it (root-cause #9: a placeholder
+    # notify workflow red-lights every release because the secret/target are
+    # unfilled). Forced on for migrations that genuinely target the placeholder.
+    force_notify: bool = False
+
+    @property
+    def cpv_ref_resolved(self) -> str:
+        """The concrete CPV git ref to pin downstream pipeline calls to.
+
+        Returns the explicit ``cpv_ref`` when set, else the scaffolding CPV's
+        own version (``_default_cpv_ref()``). Every workflow/publish generator
+        substitutes this so all five ``git+https://…/claude-plugins-validation``
+        callsites + the README snippet pin the SAME ref.
+        """
+        return self.cpv_ref.strip() if self.cpv_ref.strip() else _default_cpv_ref()
 
     @property
     def repo_name(self) -> str:
@@ -1243,9 +1303,17 @@ def gen_cliff_toml(p: PluginParams) -> str:
 
 
 def gen_publish_py(p: PluginParams) -> str:
-    """Generate scripts/publish.py — unified publish pipeline with --gate mode."""
-    _ = p  # unused but kept for consistent signature
-    return r'''#!/usr/bin/env python3
+    """Generate scripts/publish.py — unified publish pipeline with --gate mode.
+
+    The CPV validator/branch-rule callsites embedded in the publish.py body
+    are PINNED to ``p.cpv_ref_resolved`` (root-cause #2): the raw template
+    carries the bare ``git+https://…/claude-plugins-validation`` URL, and the
+    three occurrences are rewritten to ``…@<ref>`` after the template is built.
+    Pinning keeps the cold ``uvx --from git+…`` build cached per-tag and stops
+    a future stricter CPV release from breaking this plugin's gate with no
+    plugin change.
+    """
+    template = r'''#!/usr/bin/env python3
 """Unified publish pipeline: bypass-guard -> lint -> validate (remote CPV) -> test -> bump -> badge -> changelog -> commit -> push -> release.
 
 Modes:
@@ -2938,6 +3006,16 @@ def main() -> int:
 if __name__ == "__main__":
     sys.exit(main())
 '''
+    # Root-cause #2: pin every CPV git callsite in the generated publish.py
+    # (G3 validate, Stage-4 validate, the branch-rules install) to the
+    # scaffolding CPV's version so the cold uvx-from-git build is cached per
+    # tag and a stricter future CPV release cannot silently break this gate.
+    # The bare URL appears exactly 3× in the template; a single exact-literal
+    # replace pins all of them.
+    return template.replace(
+        "git+https://github.com/Emasoft/claude-plugins-validation",
+        f"git+https://github.com/Emasoft/claude-plugins-validation@{p.cpv_ref_resolved}",
+    )
 
 
 def gen_cpv_network_resilience_py() -> str:
@@ -3056,11 +3134,22 @@ exit $?
 def gen_ci_yml(p: PluginParams) -> str:
     """Generate .github/workflows/ci.yml — single consolidated CI workflow.
 
-    Jobs (display names must stay exactly "Lint" / "Validate" / "Test" —
-    cpv-setup-branch-rules reads them verbatim to wire the branch ruleset):
-      - lint           : actionlint (workflow syntax) + Mega-Linter (multi-language)
-      - validate       : uvx cpv-remote-validate plugin . --strict (issue #11)
-      - test           : pytest (matrix: ubuntu-latest + macOS-latest)
+    Required-status-check contexts: the branch ruleset
+    (setup_branch_rules.DEFAULT_PLUGIN_CHECK_CONTEXTS) requires the THREE bare
+    contexts "Lint" / "Validate" / "Test". The first two are produced by jobs
+    whose display name is exactly that. "Test", however, is a MATRIX (ubuntu +
+    macOS) — a matrix job reports SUFFIXED contexts ("Test matrix
+    (ubuntu-latest)" / "Test matrix (macos-latest)"), never a bare "Test". To
+    keep the required bare "Test" context satisfiable (root-cause #3: otherwise
+    the PR is stuck "pending" forever / auto-merge never fires), a lightweight
+    AGGREGATE GATE job named EXACTLY "Test" (`needs: [test]`) succeeds iff the
+    matrix passed and is what produces the bare "Test" context.
+
+    Jobs:
+      - lint           : actionlint (workflow syntax) + Mega-Linter — reports "Lint"
+      - validate       : uvx cpv-remote-validate plugin . --strict (issue #11) — reports "Validate"
+      - test           : pytest MATRIX (ubuntu + macOS) — reports "Test matrix (<os>)"
+      - test-gate       : aggregate gate, `needs: [test]` — reports the required bare "Test"
       - commitlint     : conventional-commit gate (pull_request only)
 
     Triggers on both master and main branches (handles repos renamed either way).
@@ -3097,9 +3186,14 @@ def gen_ci_yml(p: PluginParams) -> str:
     """
     return f"""name: CI
 
-# Job display names below MUST stay exactly Lint / Validate / Test —
-# cpv-setup-branch-rules reads them verbatim when wiring the branch
-# ruleset (TRDD-bbff5bc5).
+# Required-context contract (cpv-setup-branch-rules wires the branch ruleset
+# to the bare contexts Lint / Validate / Test — TRDD-bbff5bc5):
+#   * "Lint" and "Validate" are produced by jobs named exactly that.
+#   * "Test" is a MATRIX (ubuntu + macOS), so the matrix lanes report
+#     "Test matrix (<os>)", NOT a bare "Test". The aggregate gate job named
+#     exactly "Test" (needs: [test]) produces the required bare "Test" context
+#     and succeeds only if the matrix passed. Do NOT rename these without also
+#     updating setup_branch_rules.DEFAULT_PLUGIN_CHECK_CONTEXTS.
 
 on:
   push:
@@ -3219,9 +3313,21 @@ jobs:
         # vendor scripts/validate_plugin.py. Matches publish.py's local gate
         # so CI and local gate agree. Issue #11: do NOT call local
         # scripts/validate_plugin.py — it does not exist in scaffolded plugins.
+        # Root-cause #2: CPV is PINNED to @{p.cpv_ref_resolved} so the cold
+        # uvx-from-git build is cached per tag and a stricter future CPV
+        # release cannot break this gate with no plugin change.
+        env:
+          # Root-cause #4: on a fresh-checkout runner the local self-hash
+          # manifest already matches the code, so CPV's GitHub-anchored
+          # integrity fetch (a live urlopen to raw.githubusercontent.com) adds
+          # no security but real latency/hang risk. Skip it — and tell CPV the
+          # repo owner so its private-path heuristics treat the org name as
+          # public, matching the project's own canonical validate command.
+          PLUGIN_SKIP_GITHUB_INTEGRITY: "1"
+          CLAUDE_PRIVATE_USERNAMES: "${{{{ github.repository_owner }}}}"
         run: |
           set +e
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \\
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation@{p.cpv_ref_resolved} \\
               --with pyyaml \\
               cpv-remote-validate plugin . --strict
           exit_code=$?
@@ -3238,7 +3344,11 @@ jobs:
           fi
 
   test:
-    name: Test
+    # NOTE: this is the test MATRIX. Its display name is "Test matrix" so the
+    # lanes report "Test matrix (ubuntu-latest)" / "Test matrix (macos-latest)"
+    # — NOT a bare "Test". The bare "Test" required context is produced by the
+    # `test-gate` aggregate job below (root-cause #3). The job ID stays `test`.
+    name: Test matrix
     # macOS matrix added v2.86.0 (issue #22) — catches darwin-specific
     # regressions that ubuntu-only runs miss (pathlib casing, mtime
     # resolution, BSD `ps` vs procps-ng output). fail-fast: false so
@@ -3273,6 +3383,33 @@ jobs:
           else
             echo "No test files found, skipping"
           fi
+
+  test-gate:
+    # Aggregate gate that produces the bare "Test" required-status-check
+    # context (root-cause #3). The branch ruleset requires "Test"; the matrix
+    # above only reports "Test matrix (<os>)", so without this gate the
+    # required "Test" check NEVER reports and the PR is stuck "pending"
+    # forever / auto-merge never fires. This job succeeds iff every matrix lane
+    # succeeded (and none was cancelled).
+    name: Test
+    runs-on: ubuntu-latest
+    needs: [test]
+    # if: always() so the gate runs even when a matrix lane failed — it then
+    # FAILS (red "Test" check) instead of being skipped (which GitHub treats as
+    # neither success nor failure and would also leave the required check
+    # unsatisfied). The single status step is near-instant.
+    if: ${{{{ always() }}}}
+    # Trivial coordination job — 5 min is far more than enough (issue #90).
+    timeout-minutes: 5
+    steps:
+      - name: Require all test-matrix lanes to have passed
+        run: |
+          if [ "${{{{ needs.test.result }}}}" = "success" ]; then
+            echo "All test-matrix lanes passed."
+            exit 0
+          fi
+          echo "::error::Test matrix did not pass (result: ${{{{ needs.test.result }}}})"
+          exit 1
 """
 
 
@@ -3352,9 +3489,23 @@ jobs:
         # CI validate job. --strict blocks on CRITICAL/MAJOR/MINOR/NIT (exit
         # codes 1-4); WARNING (exit 5+) is advisory only.
         # Issue #11: removed local scripts/validate_plugin.py invocation.
+        # Root-cause #2: CPV is PINNED to @{p.cpv_ref_resolved} (same ref the
+        # CI validate job and publish.py use) so the cold uvx-from-git build is
+        # cached per tag and a stricter future CPV release cannot break the
+        # release gate with no plugin change. Root-cause #5: this re-runs the
+        # gate publish.py already passed locally — pinning all three callsites
+        # to the SAME ref keeps that consistent; the gate itself stays intact
+        # (no security check is weakened).
+        env:
+          # Root-cause #4: skip the GitHub-anchored integrity fetch on a
+          # fresh-checkout runner (the local manifest already matches the code)
+          # and pass the repo owner so private-path heuristics treat it as
+          # public — matching the project's canonical validate command.
+          PLUGIN_SKIP_GITHUB_INTEGRITY: "1"
+          CLAUDE_PRIVATE_USERNAMES: "${{{{ github.repository_owner }}}}"
         run: |
           set +e
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation@{p.cpv_ref_resolved} \
               --with pyyaml \
               cpv-remote-validate plugin . --strict \
               > validation-report.txt 2>&1
@@ -3661,13 +3812,33 @@ jobs:
     # Single API dispatch — 5 min is generous (issue #90). If we exceed it,
     # the marketplace repo's API is very wrong.
     timeout-minutes: 5
+    # Root-cause #9: NO-OP when MARKETPLACE_PAT is not configured. Expose the
+    # secret's presence as a boolean (`secrets` is available in a job-level
+    # env: mapping); the dispatch/summary steps are then gated on it via
+    # `if: env.HAS_MARKETPLACE_PAT == 'true'`. Without the secret the job runs,
+    # prints a notice, and SUCCEEDS (green) — instead of erroring with a gh
+    # 404/auth failure and showing a red associated workflow on the release.
+    env:
+      HAS_MARKETPLACE_PAT: ${{{{ secrets.MARKETPLACE_PAT != '' }}}}
     steps:
+      - name: Check marketplace secret
+        # Always runs. When the PAT is missing, emit a friendly notice and let
+        # the gated steps below skip — the job still ends green. When present,
+        # this is a no-op log line.
+        run: |
+          if [ "$HAS_MARKETPLACE_PAT" = "true" ]; then
+            echo "MARKETPLACE_PAT is configured — proceeding with marketplace notification."
+          else
+            echo "::notice::MARKETPLACE_PAT secret is not set — skipping marketplace notification (no-op)."
+          fi
+
       # Sanitization: every `${{{{ github.* }}}}` value crossing into a shell `run:`
       # block is first bound to an `env:` mapping; the run-script sees `$VAR`
       # rather than raw expression interpolation. Prevents shell-injection if
       # upstream metadata is ever crafted hostile (gh-actions.md L66-77).
       - name: Get plugin info
         id: plugin
+        if: env.HAS_MARKETPLACE_PAT == 'true'
         env:
           REPO_NAME: ${{{{ github.event.repository.name }}}}
           REF_SHA: ${{{{ github.sha }}}}
@@ -3676,6 +3847,7 @@ jobs:
           printf 'ref=%s\\n'  "$REF_SHA"   >> "$GITHUB_OUTPUT"
 
       - name: Trigger marketplace update
+        if: env.HAS_MARKETPLACE_PAT == 'true'
         # Defensive "second-latest" pin: v4.0.0, NOT the bleeding-edge v4.0.1.
         # v4.0.1's SHA was the user-visible symptom of the 2026-05-26 GitHub
         # Actions codeload auth outage; CPV stays one tag behind on the
@@ -3695,6 +3867,7 @@ jobs:
             }}
 
       - name: Summary
+        if: env.HAS_MARKETPLACE_PAT == 'true'
         env:
           PLUGIN_NAME: ${{{{ steps.plugin.outputs.name }}}}
           PLUGIN_REF: ${{{{ steps.plugin.outputs.ref }}}}
@@ -3788,10 +3961,20 @@ def generate_all_files(p: PluginParams) -> list[tuple[str, str, bool]]:
                 (".markdownlint.json", gen_markdownlint_json(p), False),
                 (".github/workflows/ci.yml", gen_ci_yml(p), False),
                 (".github/workflows/release.yml", gen_release_yml(p), False),
-                (".github/workflows/notify-marketplace.yml", gen_notify_marketplace_yml(p), False),
                 ("tests/__init__.py", gen_tests_init(), False),
             ]
         )
+        # Root-cause #9: only emit the marketplace notifier when a REAL
+        # marketplace is configured. With no `--marketplace`, the workflow
+        # would target the placeholder "my-plugins-marketplace" and fire on
+        # every release tag — erroring (gh 404/auth) and showing a red
+        # associated workflow because the target/secret are unfilled. Skip it
+        # for the placeholder unless `--force-notify` is set (the migration
+        # path that genuinely targets the placeholder).
+        if p.marketplace or p.force_notify:
+            files.append(
+                (".github/workflows/notify-marketplace.yml", gen_notify_marketplace_yml(p), False)
+            )
     else:
         # Minimal non-python scaffold — leaves CI/publish to the plugin author,
         # but ships a README section explaining the expected commands.
@@ -3824,11 +4007,13 @@ skipped because it does not apply to your language.
 
 ## CPV validates all plugins regardless of language
 
-You can validate this plugin against the current CPV ruleset from anywhere
-using `uvx` — no need to clone or install CPV:
+You can validate this plugin against the CPV ruleset from anywhere using
+`uvx` — no need to clone or install CPV. CPV is pinned to the version that
+scaffolded this plugin (`@{p.cpv_ref_resolved}`) so your validation result is
+stable; bump the pin deliberately when you adopt a newer CPV:
 
 ```bash
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml \\
+uvx --from git+https://github.com/Emasoft/claude-plugins-validation@{p.cpv_ref_resolved} --with pyyaml \\
     cpv-remote-validate plugin . --strict
 ```
 
@@ -3968,6 +4153,27 @@ Examples:
         action="store_false",
         help="Disable dev-stripping config (legacy mode — keep all dev parts in MAIN repo).",
     )
+    parser.add_argument(
+        "--cpv-ref",
+        default="",
+        metavar="REF",
+        help="Git ref (tag/branch/SHA) the generated pipeline pins the CPV "
+        "validator to (publish.py, ci.yml, release.yml, README). Default: the "
+        "version of CPV doing the scaffolding, prefixed 'v' (e.g. v2.133.0). "
+        "Pinning — not tracking HEAD — keeps the cold uvx-from-git build cached "
+        "per tag and stops a stricter future CPV release from breaking CI with "
+        "no plugin change.",
+    )
+    parser.add_argument(
+        "--force-notify",
+        dest="force_notify",
+        action="store_true",
+        default=False,
+        help="Emit notify-marketplace.yml even when no real marketplace is set "
+        "(the placeholder 'my-plugins-marketplace'). By default the notify "
+        "workflow is skipped for the placeholder so a release never shows a red "
+        "associated workflow because the secret/target were never configured.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Preview files without writing")
 
     # ── Phase 6: single-input slurp flags ────────────────────────────────
@@ -4056,6 +4262,8 @@ Examples:
         language=resolved_language,
         self_marketplace=args.self_marketplace,
         strip_dev=args.strip_dev,
+        cpv_ref=args.cpv_ref,
+        force_notify=args.force_notify,
     )
 
     # Check target directory

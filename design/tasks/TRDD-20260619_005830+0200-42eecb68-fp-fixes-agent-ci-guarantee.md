@@ -3,7 +3,7 @@ trdd-id: 42eecb68-e6ca-4654-beb3-aed4e7f35e92
 title: Fix #133/#134/#135 scanner FPs + harden ALL fix/upgrade/doctor/devitalizer agents to loop-until-0/0/0/0-and-CI-green + guarantee canonical-pipeline upgrade passes GitHub CI
 column: dev
 created: 2026-06-19T00:58:30+0200
-updated: 2026-06-19T01:31:51+0200
+updated: 2026-06-19T02:09:25+0200
 current-owner: claude-plugins-validation
 task-type: bugfix
 relevant-rules: []
@@ -81,7 +81,7 @@ Full serial + xdist 9630+ green; self-validate --strict VALID 0/0/0/0; publish.p
 CI+Release+Notify green; comment #133/#134/#135 self-id'd; update CLAUDE.md inventory + MEMORY.md.
 
 ## REMAINING STEPS
-1. Phase 1 — FP fixes (workflow) → central-verify → ship.
-2. Phase 2 — agent hardening (workflow) → verify → ship.
-3. Phase 3 — pipeline CI-green guarantee (investigate + fix templates + bake CI-loop into agents) → ship.
-4. Phase 4 — final verify + comment issues + memory.
+1. ✅ DONE — Phase 1 — FP fixes (#133/#134/#135): 2 opus agents (one rate-limit-died at reporting → recovered from disk) + CENTRAL-VERIFIED 7/7 two-sided through the real scanner. **Shipped v2.133.0** (CI+Release+Notify green); all 3 issues closed self-id'd.
+2. ✅ DONE — Phase 2 — agent hardening: loop-until-0/0/0/0-AND-CI-green added to plugin-devitalizer/plugin-leaks-preventer/plugin-diagnoser/cpv-doctor-agent/cpv. Committed `8dec604`.
+3. ✅ DONE — Phase 3 — canonical-pipeline CI-green guarantee: opus recon (11 failure modes, real run IDs) → 2 impl agents fixed the generator (pin CPV ref / skip-env / aggregate-`Test` gate / timeouts / notify-guard) + plugin-creator watch-CI-green + canonical/standardize skill docs. CENTRAL-VERIFIED by scaffolding a real sample plugin (actionlint exit 0, all 5 fixes present, branch contexts consistent). +20 tests; 627 gen/pipeline suites green.
+4. SHIPPING — Phase 4 — publish v2.134.0 (bundles Phase 2 + Phase 3) → CI green → comment #128/#115 → update MEMORY.md.
