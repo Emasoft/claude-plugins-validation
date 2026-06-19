@@ -452,8 +452,15 @@ def _scan_python_imports(plugin_path: Path, directories: tuple[str, ...] = ("scr
     import re as _re
 
     found: set[str] = set()
+    # The `import` branch captures the rest of the line up to a comment /
+    # semicolon as a SINGLE character class (`[^\n;#]+`) — NOT a quantified
+    # comma-list group. The comma list is parsed in Python below.
+    # Rationale: a quantified group whose body also ends in a quantifier trips the
+    # skillaudit REGEX_DOS heuristic (and is a genuine backtracking-risk shape);
+    # the single char class is provably linear (no catastrophic backtracking) AND
+    # parses `as` aliases / multi-name lists more correctly than the old regex did.
     import_re = _re.compile(
-        r"^\s*(?:from\s+([A-Za-z_][\w\.]*)|import\s+([A-Za-z_][\w\.]*(?:\s*,\s*[A-Za-z_][\w\.]*)*))", _re.MULTILINE
+        r"^\s*(?:from\s+([A-Za-z_][\w\.]*)|import\s+([^\n;#]+))", _re.MULTILINE
     )
 
     for subdir in directories:
@@ -471,11 +478,14 @@ def _scan_python_imports(plugin_path: Path, directories: tuple[str, ...] = ("scr
                 if from_mod:
                     found.add(from_mod.split(".")[0].lower())
                 if import_mod:
-                    # Handle `import foo, bar` — split on commas
+                    # import_mod is the rest of the `import ...` line (up to a
+                    # comment/semicolon). Split the comma list; for each entry take
+                    # the first whitespace token (so `foo as f` -> foo) then its
+                    # top-level package (`foo.bar` -> foo).
                     for name in import_mod.split(","):
-                        top = name.strip().split(".")[0].strip()
-                        if top:
-                            found.add(top.lower())
+                        tokens = name.strip().split()
+                        if tokens:
+                            found.add(tokens[0].split(".")[0].lower())
     return found
 
 

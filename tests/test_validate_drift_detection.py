@@ -30,7 +30,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from cpv_validation_common import ValidationReport  # noqa: E402
-from standardize_plugin import audit_drift  # noqa: E402
+from standardize_plugin import _scan_python_imports, audit_drift  # noqa: E402
 from validate_plugin import (  # noqa: E402
     _lockfile_is_gitignored,
     is_plugin_in_submodule,
@@ -410,6 +410,39 @@ class TestAuditDrift:
         items = audit_drift(tmp_path)
         warns = [it for it in items if it.status == "WARN"]
         assert any("requests" in w.message for w in warns)
+
+
+# ---------------------------------------------------------------------------
+# _scan_python_imports — the import regex was rewritten to a provably-linear
+# single char class (no nested-quantifier group that trips the skillaudit
+# REGEX_DOS heuristic). This locks the parsing behavior, which the rewrite also
+# made MORE correct (as-aliases, multi-name lists, comments, semicolons). The
+# REGEX_DOS-safety itself is guarded by the publish gate, which scans this
+# module's source every release.
+# ---------------------------------------------------------------------------
+
+
+def test_scan_imports_handles_aliases_lists_comments_semicolons(tmp_path):
+    """Import scan resolves top-level modules across every statement shape."""
+    sc = tmp_path / "scripts"
+    sc.mkdir()
+    (sc / "m.py").write_text(
+        "import foo\n"
+        "from bar.baz import qux\n"
+        "import one, two.sub, three\n"
+        "import aliased as al\n"
+        "import multi as m, second as s\n"
+        "import withcomment  # trailing, comment, with commas\n"
+        "import semi; import colon\n",
+        encoding="utf-8",
+    )
+    found = _scan_python_imports(tmp_path)
+    # every imported top-level package is registered...
+    for pkg in ("foo", "bar", "one", "two", "three", "aliased", "multi", "second", "withcomment", "semi"):
+        assert pkg in found, f"{pkg!r} missing from {sorted(found)}"
+    # ...and comment words / alias keywords never leak in as fake modules.
+    for noise in ("comment", "commas", "as", "al", "trailing", "with"):
+        assert noise not in found, f"{noise!r} wrongly captured in {sorted(found)}"
 
 
 if __name__ == "__main__":
