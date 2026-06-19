@@ -1,9 +1,9 @@
 ---
 trdd-id: e9f13df1-556f-4c02-9fba-5a62ac248eda
 title: Canon-profiles — profile-aware + direction-aware canonical-pipeline model
-column: dispatch
+column: dev
 created: 2026-06-16T23:40:45+0200
-updated: 2026-06-16T23:40:45+0200
+updated: 2026-06-19T05:59:36+0200
 current-owner: claude-plugins-validation
 assignee: claude-plugins-validation
 priority: 2
@@ -28,7 +28,21 @@ external-refs: ["github.com/Emasoft/claude-plugins-validation/issues/118", "gith
 
 # TRDD-e9f13df1 — Canon-profiles model
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-16
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-19
+
+**Progress (2026-06-19, this session — user said "resume"):** Piece **A+B SHIPPED** —
+`scripts/cpv_pipeline_profile.py` (4 profiles + shape detectors: `has_build_source_submodule`,
+`has_committed_bin_artifacts`, `is_submodule_build_shape`, `is_binary_release_shape`,
+`resolve_pipeline_profile`) exists, and `validate_plugin.py` resolves the profile in BOTH the
+drift detector (≈:5611) and readiness (≈:4644); `tests/test_pipeline_profile.py` covers it.
+Now doing **Piece C, split into C1 → C2** for incremental ship: **C1 (submodule-build #128)**
+delegated to an opus agent this session (spec `docs_dev/piece-c1-submodule-build-spec.md`):
+`gen_publish_py(p, profile)` + a submodule-build variant + the #128 source-change-detection fix.
+**REFERENCE CORRECTION — do NOT carry forward the §Decomposition names:** the binary-release
+reference is janitor `.github/workflows/memgrep-release.yml` (it ships the memgrep Rust binary);
+the `release-binaries.yml` / `stage.sh` named in §Decomposition **DO NOT EXIST** in
+`Emasoft/ai-maestro-janitor`. PSS refs intact: `scripts/publish.py` (48KB), `build-binaries.yml`,
+and `.gitmodules`.
 
 **Goal:** make CPV's canonical-pipeline drift detector + generator + upgrade agent
 PROFILE-AWARE and DIRECTION-AWARE, so a plugin whose architecture legitimately
@@ -48,8 +62,13 @@ drift-to-downgrade. Resolves the 4 remaining open issues as ONE model:
   strip-dev-parts already models a per-plugin `tests/`→submodule (gen at generate_plugin_repo.py:703).
 - `gen_publish_py` at generate_plugin_repo.py:1245.
 
-**NEXT ACTION:** delegate **Piece A+B** (profile model + detection + profile-aware/direction-aware
-drift) to one opus agent per §Decomposition, central-adversarial-verify, ship. Then **C**, then **D**.
+**NEXT ACTION:** central-adversarial-verify **C1** (scaffold a submodule-build sample plugin,
+inspect the emitted `publish.py`, run `actionlint` + a `--dry-run`, assert standard byte-identity
+regression, full suite) → ship → close **#128**. Then **C2 (binary-release #115)** — new
+`gen_release_binaries_yml` (matrix build + least-priv split + SHA-pins + `SHA256SUMS` +
+`gh release upload --clobber` + `workflow_dispatch` tag + CI smoke job), ref = janitor
+`.github/workflows/memgrep-release.yml` → ship → close **#115**. Then **Piece D** — upgrade-agent
+(`standardize --fix --force-templates`) + diagnose-skill profile preservation (#128-A).
 
 **Load-bearing facts / gotchas:**
 - Drift compare must select the **gen VARIANT** for the resolved profile, not always the standard one.

@@ -5635,11 +5635,25 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
             continue
         try:
             # Some gen_* are unparameterized; introspect the signature instead
-            # of guessing.
+            # of guessing. A gen_* that ALSO declares a `profile` parameter
+            # (currently `gen_publish_py`, TRDD-e9f13df1 / #128) is compared
+            # against the PROFILE-APPROPRIATE variant: a `submodule-build`
+            # plugin's publish.py is byte-compared against the submodule-aware
+            # variant, so a correct one CLEARS (no WARNING) while a
+            # submodule-build plugin still carrying the STALE standard publish.py
+            # still differs (and the by-design branch below emits the neutral,
+            # no-downgrade WARNING). The profile is a SELECTOR (which canon to
+            # compare against), never a suppressor — a non-matching file always
+            # still WARNs.
             import inspect
 
             sig = inspect.signature(gen_func)
-            expected_content = gen_func(params) if sig.parameters else gen_func()
+            if not sig.parameters:
+                expected_content = gen_func()
+            elif "profile" in sig.parameters:
+                expected_content = gen_func(params, profile)
+            else:
+                expected_content = gen_func(params)
         except Exception:  # noqa: BLE001 — gen_func is an arbitrary template generator; a failure in one just skips that file's drift check
             continue
         if actual_content == expected_content:
