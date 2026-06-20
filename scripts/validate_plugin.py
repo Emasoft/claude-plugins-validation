@@ -4656,6 +4656,56 @@ def validate_pipeline_readiness(plugin_root: Path, report: ValidationReport) -> 
             f"atomic push) is still fully enforced."
         )
 
+    # binary-release STRUCTURAL recognition (#115 / Piece C2a). A binary-release
+    # plugin's release workflow is toolchain-specific and can NEVER byte-match
+    # the standard `release.yml`, so reporting it as a "missing standard
+    # release.yml" gap is a false flag. Recognize it STRUCTURALLY instead: a
+    # CANONICAL binary-release workflow (SHA-pinned third-party actions +
+    # least-privilege split + a checksum step + a build matrix) is documented as
+    # the recognized canon (INFO, not a gap); a DEFICIENT one (missing any of
+    # the four) WARNs, naming the missing requirement(s). SELECTOR not
+    # SUPPRESSOR (TRDD-02e1672b) — declaring binary-release HOLDS the plugin to
+    # the binary-release canon; a deficient workflow is never silenced. Fails
+    # SAFE (skips, no false claim) on any error.
+    if profile == "binary-release":
+        try:
+            from cpv_pipeline_profile import (
+                binary_release_canonical_status,
+                binary_release_release_workflow,
+            )
+
+            br_wf = binary_release_release_workflow(plugin_root)
+            if br_wf is not None:
+                br_canonical, br_missing = binary_release_canonical_status(plugin_root)
+                try:
+                    br_rel = str(br_wf.relative_to(plugin_root))
+                except ValueError:
+                    br_rel = br_wf.name
+                if br_canonical:
+                    report.info(
+                        f"Recognized `{br_rel}` as a CANONICAL binary-release "
+                        f"release workflow (SHA-pinned third-party actions, a "
+                        f"least-privilege permissions split, a checksum step, "
+                        f"and a build matrix over targets — the janitor "
+                        f"`memgrep-release.yml` shape). This is NOT a 'missing "
+                        f"standard release.yml' gap: a binary-release workflow "
+                        f"is toolchain-specific and is judged structurally, not "
+                        f"by byte-matching the standard template."
+                    )
+                else:
+                    report.warning(
+                        f"`{br_rel}` is this plugin's binary-release workflow "
+                        f"but is NOT yet a CANONICAL binary-release release "
+                        f"workflow — it is missing: {', '.join(br_missing)}. A "
+                        f"binary-release workflow is judged structurally (it "
+                        f"cannot byte-match the standard `release.yml`); add the "
+                        f"missing requirement(s) above. Advisory and "
+                        f"non-blocking; the `binary-release` profile is a "
+                        f"SELECTOR not a suppressor (TRDD-02e1672b)."
+                    )
+        except Exception:  # noqa: BLE001 — recognition is advisory; any failure skips it (no false claim either way)
+            pass
+
     # Pre-push hook
     hook_paths = [
         plugin_root / ".githooks" / "pre-push",
@@ -5661,6 +5711,35 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
         profile = "standard"
     by_design_files = _PROFILE_BY_DESIGN_DRIFT.get(profile, frozenset())
 
+    # binary-release STRUCTURAL recognition (#115 / Piece C2a). For a
+    # binary-release plugin, the release workflow is toolchain-specific and can
+    # NEVER byte-match the standard `gen_release_yml`, so the standard byte-
+    # compare would forever emit the false "missing standard release.yml" drift
+    # flag. Instead we judge it STRUCTURALLY: a CANONICAL binary-release release
+    # workflow (SHA-pinned third-party actions + least-privilege split + a
+    # checksum step + a build matrix) clears the release.yml drift WARNING; a
+    # DEFICIENT one (missing any of the four) still WARNs, naming the missing
+    # requirement(s). This is a SELECTOR, never a SUPPRESSOR (TRDD-02e1672b):
+    # declaring binary-release HOLDS the plugin to the binary-release canon — a
+    # deficient workflow is never silenced. Resolution fails SAFE (treated as
+    # NON-canonical → keeps the by-design WARNING) on any error.
+    br_release_canonical = False
+    br_missing_requirements: list[str] = []
+    br_release_workflow: Path | None = None
+    if profile == "binary-release":
+        try:
+            from cpv_pipeline_profile import (
+                binary_release_canonical_status,
+                binary_release_release_workflow,
+            )
+
+            br_release_workflow = binary_release_release_workflow(plugin_root)
+            br_release_canonical, br_missing_requirements = binary_release_canonical_status(plugin_root)
+        except Exception:  # noqa: BLE001 — recognition is advisory; any failure leaves the by-design WARNING in place (conservative), never suppresses
+            br_release_canonical = False
+            br_missing_requirements = []
+            br_release_workflow = None
+
     # Per-file emission with embedded unified diff.
     #
     # Issue #21 ask #3: instead of one consolidated warning naming six files,
@@ -5705,6 +5784,51 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
         except Exception:  # noqa: BLE001 — gen_func is an arbitrary template generator; a failure in one just skips that file's drift check
             continue
         if actual_content == expected_content:
+            continue
+
+        # binary-release release.yml STRUCTURAL recognition (#115 / Piece C2a).
+        # A binary-release plugin's release workflow is toolchain-specific and
+        # can NEVER byte-match `gen_release_yml`, so the standard byte-compare
+        # above will always report it as drifted. Judge it STRUCTURALLY instead:
+        #   * CANONICAL (all four invariants met) → it is recognized as the
+        #     binary-release canon, NOT a "missing standard release.yml" gap —
+        #     emit NO drift WARNING for this file (clear the false flag).
+        #   * DEFICIENT (missing ≥1 invariant) → STILL WARN, naming the missing
+        #     requirement(s). This is the SELECTOR behavior (TRDD-02e1672b):
+        #     declaring binary-release HOLDS the plugin to the binary-release
+        #     canon — a deficient workflow is never silenced.
+        # We only short-circuit when this very release.yml IS the plugin's
+        # binary-release workflow (it satisfies the matrix+upload+SHA256SUMS
+        # co-occurrence). If the binary build lives in a differently-named
+        # workflow (e.g. memgrep-release.yml) and this release.yml is something
+        # else, fall through to the normal by-design / drift handling below.
+        if (
+            profile == "binary-release"
+            and rel_path == ".github/workflows/release.yml"
+            and br_release_workflow is not None
+            and br_release_workflow == target
+        ):
+            if br_release_canonical:
+                # Canonical binary-release workflow — recognized, not drift.
+                continue
+            report.warning(
+                f"[RC-PIPELINE-DRIFT-001] {rel_path} is this plugin's "
+                f"`binary-release` workflow but is NOT yet a CANONICAL "
+                f"binary-release release workflow — it is missing: "
+                f"{', '.join(br_missing_requirements)}. A binary-release "
+                f"workflow is toolchain-specific and cannot byte-match the "
+                f"standard `release.yml` template, so CPV judges it "
+                f"STRUCTURALLY: it must SHA-pin every third-party action, split "
+                f"least-privilege permissions (build job `contents: read`, "
+                f"exactly one job `contents: write`), produce a `SHA256SUMS` "
+                f"(or per-asset `.sha256`) checksum, and build a `matrix` over "
+                f"targets (the janitor `memgrep-release.yml` shape). Add the "
+                f"missing requirement(s) above. This WARNING is advisory and "
+                f"non-blocking; the `binary-release` profile is a SELECTOR, not "
+                f"a suppressor (TRDD-02e1672b) — it cannot silence a finding, "
+                f"and a deficient workflow is held to the canon.",
+                file=rel_path,
+            )
             continue
 
         # Build a unified diff. Cap at ±10 hunks per file or 200 diff lines

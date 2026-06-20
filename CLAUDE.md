@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.136.1` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.137.0` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
 | **scripts** | **118** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver; `cpv_fix_loop_state.py` deterministic full-history fix-loop oscillation detector) |
-| **test files** | **349** | `ls tests/test_*.py`; ~9808 tests |
+| **test files** | **351** | `ls tests/test_*.py`; ~9848 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,37 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.137.0 — canon-profiles completion (C2 binary-release recognition + scaffold + Piece D profile-awareness) + #137 PyPI-wheel publish capability**
+— THREE coherent pieces, every one SELECTOR-not-SUPPRESSOR (a profile/source declaration NEVER silences a
+finding; the security scan of a workflow is untouched). **C2a (binary-release structural drift recognition, #115):**
+a `binary-release` plugin's release workflow (a matrix-build, toolchain-specific shape like the janitor
+`memgrep-release.yml`) can never byte-match the standard `gen_release_yml`, so it drew a false "missing standard
+release.yml" drift flag forever. New `cpv_pipeline_profile.is_binary_release_canonical_shape(text) ->
+(is_canonical, missing)` judges it STRUCTURALLY against FOUR invariants — SHA-pinned third-party actions, a
+least-privilege split (build job `contents: read`, EXACTLY ONE job `contents: write`), a `SHA256SUMS`/per-asset
+checksum step, a build matrix over targets — and `validate_canonical_pipeline_drift` / `validate_pipeline_readiness`
+clear the false flag ONLY when canonical; a DEFICIENT binary-release workflow still WARNs naming the missing
+requirement(s). FAIL-SAFE: an empty/unparseable workflow is treated as NON-canonical (keeps warning), the
+conservative direction. **C2b (`gen_release_binaries_yml`):** a scaffold template (Rust default) modelled on
+`memgrep-release.yml` that the recognizer scores canonical `(True, [])` — matrix over 4 targets, least-priv split,
+combined `SHA256SUMS`, a push/PR `build-smoke` job (the untested-until-release guard), every action SHA-pinned;
+verified actionlint-clean. **Piece D (profile awareness):** plugin-fixer (a Step-4 profile branch), standardize-plugin,
+canonical-pipeline, and diagnose-plugin-architecture now resolve `resolve_pipeline_profile()` and branch behavior per
+profile — never migrate a remote-validation / submodule-build / binary-release plugin to the plain standard shape.
+**#137 (PyPI wheel):** CPV is now publishable to PyPI via a Trusted-Publishing (OIDC, no stored token) workflow
+`.github/workflows/publish-pypi.yml` (build+publish on a GitHub Release); pyproject gains PyPI metadata (SPDX
+`license` + urls + classifiers — `uv build` clean, `Requires-Dist: pyyaml`); and `generate_plugin_repo` gains a
+`--cpv-source {git,pypi}` selector (DEFAULT `git` — NON-BREAKING) routing every generated CPV callsite through one
+`cpv_uvx_from_arg(p)` helper — `pypi` emits the prebuilt-wheel `claude-plugins-validation==<ver>` form (cold-CI
+build-from-source eliminated, `--with pyyaml` dropped), degrading a branch/SHA ref to the bare dist name. The
+downstream generator default stays `git` until CPV is live on PyPI; the one-time pypi.org Trusted-Publisher
+registration is the maintainer's (documented in the workflow header), after which the default can flip in a
+follow-up. Delegated C2a + Piece D to 2 parallel opus agents (disjoint Python vs `.md`); the generator agent died
+mid-task — CHANGE 2 (#137 selector) was recovered from disk and central-verified (the helper + every rerouted site),
+C2b + all tests finished by the orchestrator. +40 two-sided tests (`test_binary_release_canonical.py` 24,
+`test_cpv_source_and_binary_release_gen.py` 16). NO gate relaxed; detection-add + canon-extension + packaging only.
+Closes #137.
 
 **v2.136.1 — #136 (orchestrator) skillaudit PRIVILEGE_ESC FP on a hyphenated-compound `sudo` policy token**
 — a governance-doc line `Added the AID+portfolio-token / no-sudo / immutable-identity facts (R26/R28/R32).`

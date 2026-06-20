@@ -314,6 +314,209 @@ def is_binary_release_shape(plugin_root: Path) -> bool:
     return False
 
 
+# ── binary-release CANONICAL-SHAPE recognition (#115 / Piece C2a) ───────────────
+# A binary-release plugin's release workflow is inherently language/toolchain-
+# specific (`cargo` vs `go build` vs `cmake`), so no single generated template
+# can byte-match it. Recognition is therefore STRUCTURAL: a binary-release
+# release workflow is CANONICAL iff it satisfies ALL FOUR invariants below,
+# modelled on the janitor `memgrep-release.yml` reference shape:
+#   1. SHA-PINNED third-party actions — every non-`actions/`-org `uses:` is
+#      pinned to a 40-hex commit SHA (a floating `@v1`/`@main` on a third-party
+#      action is a miss). `actions/`-org uses may use a major tag.
+#   2. LEAST-PRIVILEGE split — the build job carries `permissions: contents:
+#      read` (NO write) and EXACTLY ONE job carries `contents: write`.
+#   3. A CHECKSUM step — produces or verifies `SHA256SUMS` (or per-asset
+#      `.sha256`).
+#   4. A build MATRIX over targets.
+#
+# This is a SELECTOR, never a SUPPRESSOR (TRDD-02e1672b): a CANONICAL workflow
+# clears the "missing standard release.yml" drift flag (the standard byte-
+# compare can never pass for a toolchain-specific build), but a DEFICIENT
+# binary-release workflow — one missing any of the four — still WARNs, naming
+# the missing requirement(s). Declaring/​detecting `binary-release` HOLDS the
+# plugin to the binary-release canon; it can never silence a real finding.
+
+# Human-readable identifiers for the four structural requirements. These exact
+# strings are what `is_binary_release_canonical_shape` returns in its
+# `missing_requirements` list and what the validators surface in the WARNING, so
+# the reader knows precisely which invariant to add.
+BR_REQ_SHA_PINNED_ACTIONS = "SHA-pinned third-party actions"
+BR_REQ_LEAST_PRIVILEGE = "least-privilege permissions split (build job contents:read, exactly one job contents:write)"
+BR_REQ_CHECKSUM = "a checksum step (SHA256SUMS or per-asset .sha256)"
+BR_REQ_BUILD_MATRIX = "a build matrix over targets"
+
+#: The four requirements, in a stable order (used for deterministic output).
+BINARY_RELEASE_CANONICAL_REQUIREMENTS: tuple[str, ...] = (
+    BR_REQ_SHA_PINNED_ACTIONS,
+    BR_REQ_LEAST_PRIVILEGE,
+    BR_REQ_CHECKSUM,
+    BR_REQ_BUILD_MATRIX,
+)
+
+# A `uses:` line and its action reference. We capture the whole ref token and
+# inspect it in Python (no regex lookbehind/lookahead — re2-safe). The ref may
+# be quoted; the value-extractor strips surrounding quotes.
+_USES_LINE_RE = re.compile(r"^\s*(?:-\s*)?uses\s*:\s*(?P<ref>\S+)", re.IGNORECASE | re.MULTILINE)
+# A 40-hex git commit SHA after the `@` of a `uses:` ref (the canonical pin).
+_SHA40_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
+# The two `contents:` access lines we key the least-privilege split on. Each is
+# strictly line-anchored (block-mapping style) and re2-safe.
+_CONTENTS_WRITE_RE = re.compile(r"^\s*contents\s*:\s*write\b", re.IGNORECASE | re.MULTILINE)
+_CONTENTS_READ_RE = re.compile(r"^\s*contents\s*:\s*read\b", re.IGNORECASE | re.MULTILINE)
+# A per-asset `.sha256` checksum file token (the alternative to a combined
+# SHA256SUMS). Word-anchored so it does not match a `.sha256sum` substring twice.
+_PER_ASSET_SHA256_RE = re.compile(r"\.sha256\b", re.IGNORECASE)
+
+
+def _uses_actions_are_sha_pinned(workflow_text: str) -> bool:
+    """True iff every non-``actions/``-org ``uses:`` reference is SHA-pinned.
+
+    For each ``uses: <owner>/<action>[/<sub>]@<ref>`` line:
+      * a first-party ``actions/<x>@<tag>`` (GitHub's own org) may pin to a major
+        tag and is always accepted;
+      * any OTHER (third-party) action MUST pin to a 40-hex commit SHA after the
+        ``@`` — a floating ``@v1`` / ``@main`` / ``@<branch>`` is a MISS.
+
+    A LOCAL action (``uses: ./...`` — no ``@``, runs the repo's own checked-out
+    code) and a ``docker://`` reference are not third-party registry pins and are
+    accepted as-is. A workflow with NO ``uses:`` lines vacuously satisfies this
+    requirement (there is no third-party action to pin). Side-effect-free; never
+    raises.
+    """
+    for m in _USES_LINE_RE.finditer(workflow_text):
+        ref = m.group("ref").strip().strip("'\"")
+        # Local composite action or a Dockerfile-relative action: no registry
+        # pin applies.
+        if ref.startswith("./") or ref.startswith("../") or ref.startswith("docker://"):
+            continue
+        owner = ref.split("/", 1)[0].lower()
+        # GitHub's own first-party org — a major tag is the accepted convention.
+        if owner == "actions":
+            continue
+        # Third-party action: it MUST be SHA-pinned. A ref with no `@` (a bare
+        # `owner/action`) is unpinned → a miss.
+        if "@" not in ref:
+            return False
+        pin = ref.rsplit("@", 1)[1]
+        if not _SHA40_RE.match(pin):
+            return False
+    return True
+
+
+def _has_least_privilege_split(workflow_text: str) -> bool:
+    """True iff the workflow has a least-privilege permissions split.
+
+    Requires BOTH:
+      * at least one ``contents: read`` permission line (the build job's
+        read-only default), AND
+      * EXACTLY ONE ``contents: write`` permission line (the single release job
+        that needs write to upload assets).
+
+    A workflow with zero ``contents: write`` (no job can write a release) or
+    with two-or-more ``contents: write`` (write is over-broadly granted) FAILS
+    this requirement. The check is line-level (it counts the access declarations
+    that actually appear), so a top-level ``permissions: {}`` default plus
+    per-job ``contents: read`` / a single ``contents: write`` matches the
+    canonical memgrep-release shape. Side-effect-free; never raises.
+    """
+    write_count = len(_CONTENTS_WRITE_RE.findall(workflow_text))
+    has_read = bool(_CONTENTS_READ_RE.search(workflow_text))
+    return has_read and write_count == 1
+
+
+def _has_checksum_step(workflow_text: str) -> bool:
+    """True iff the workflow produces/verifies a ``SHA256SUMS`` or ``.sha256``."""
+    return bool(_SHA256SUMS_RE.search(workflow_text) or _PER_ASSET_SHA256_RE.search(workflow_text))
+
+
+def _has_build_matrix_over_targets(workflow_text: str) -> bool:
+    """True iff the workflow has a build ``matrix`` over targets/platforms.
+
+    Reuses the same matrix + target co-occurrence that ``is_binary_release_shape``
+    keys on, so the canonical-shape recognition and the profile detection agree.
+    """
+    return bool(_BINARY_MATRIX_RE.search(workflow_text) and _BINARY_TARGET_RE.search(workflow_text))
+
+
+def is_binary_release_canonical_shape(workflow_text: str) -> tuple[bool, list[str]]:
+    """Recognize a CANONICAL binary-release release workflow, structurally.
+
+    Returns ``(is_canonical, missing_requirements)``. ``is_canonical`` is True
+    iff the workflow satisfies ALL FOUR structural invariants (SHA-pinned
+    third-party actions, a least-privilege permissions split, a checksum step,
+    and a build matrix over targets). ``missing_requirements`` lists exactly the
+    requirements (from :data:`BINARY_RELEASE_CANONICAL_REQUIREMENTS`) that are
+    NOT met — so an empty list ⟺ canonical.
+
+    This is the SELECTOR (TRDD-02e1672b): the validators clear the false
+    "missing standard release.yml" drift flag when this returns canonical, but a
+    DEFICIENT workflow (a non-empty missing list) still WARNs, naming each
+    missing requirement. It NEVER suppresses a real finding — a binary-release
+    plugin is HELD to this canon. Best-effort + side-effect-free: any error
+    treats every requirement as unmet (the conservative direction — a workflow
+    we cannot parse is NOT recognized as canonical, so it keeps warning).
+    """
+    if not workflow_text:
+        return (False, list(BINARY_RELEASE_CANONICAL_REQUIREMENTS))
+    try:
+        missing: list[str] = []
+        if not _uses_actions_are_sha_pinned(workflow_text):
+            missing.append(BR_REQ_SHA_PINNED_ACTIONS)
+        if not _has_least_privilege_split(workflow_text):
+            missing.append(BR_REQ_LEAST_PRIVILEGE)
+        if not _has_checksum_step(workflow_text):
+            missing.append(BR_REQ_CHECKSUM)
+        if not _has_build_matrix_over_targets(workflow_text):
+            missing.append(BR_REQ_BUILD_MATRIX)
+        return (not missing, missing)
+    except Exception:  # noqa: BLE001 — recognition is advisory; any failure treats the workflow as NON-canonical (keeps warning), never crashes
+        return (False, list(BINARY_RELEASE_CANONICAL_REQUIREMENTS))
+
+
+def binary_release_release_workflow(plugin_root: Path) -> Path | None:
+    """Return the binary-release release workflow file, or None.
+
+    The workflow that builds + attaches binary assets — the first
+    ``.github/workflows/*.yml`` whose text satisfies
+    :func:`is_binary_release_shape`'s co-occurrence (matrix + target + release
+    upload + SHA256SUMS). Used by the validators to pick WHICH workflow to hold
+    to the binary-release canon. Side-effect-free; returns None on any error or
+    if no such workflow exists.
+    """
+    try:
+        for wf in _workflow_yaml_files(plugin_root):
+            text = _read_text_safe(wf)
+            if not text:
+                continue
+            if (
+                _BINARY_MATRIX_RE.search(text)
+                and _BINARY_TARGET_RE.search(text)
+                and _RELEASE_UPLOAD_RE.search(text)
+                and _SHA256SUMS_RE.search(text)
+            ):
+                return wf
+    except Exception:  # noqa: BLE001 — advisory selection; any failure → no workflow identified
+        return None
+    return None
+
+
+def binary_release_canonical_status(plugin_root: Path) -> tuple[bool, list[str]]:
+    """Recognize the plugin's binary-release release workflow as canonical or not.
+
+    Convenience wrapper over :func:`binary_release_release_workflow` +
+    :func:`is_binary_release_canonical_shape`. Returns
+    ``(is_canonical, missing_requirements)`` for the plugin's binary-release
+    release workflow. If NO binary-release workflow is present (the plugin
+    doesn't actually have the shape), returns ``(False, [])`` — there is nothing
+    to recognize and nothing missing to warn about; the standard drift path
+    governs. Side-effect-free.
+    """
+    wf = binary_release_release_workflow(plugin_root)
+    if wf is None:
+        return (False, [])
+    return is_binary_release_canonical_shape(_read_text_safe(wf))
+
+
 def is_submodule_build_shape(plugin_root: Path) -> bool:
     """True iff the plugin builds from a submodule + ships committed binaries.
 

@@ -136,6 +136,24 @@ def _default_cpv_ref() -> str:
     return version if version.startswith("v") else f"v{version}"
 
 
+# Recognized CPV distribution sources (issue #137). "git" is the historical
+# default (cold from-source build); "pypi" fetches the published wheel.
+CPV_SOURCE_GIT = "git"
+CPV_SOURCE_PYPI = "pypi"
+VALID_CPV_SOURCES = {CPV_SOURCE_GIT, CPV_SOURCE_PYPI}
+
+# The PyPI distribution name of the published CPV wheel. The `pypi` source pins
+# to an EXACT version (`==`) — the same ref the `git` source pins to, with any
+# leading `v` stripped (a PyPI version is `2.136.1`, never `v2.136.1`).
+_CPV_PYPI_DIST = "claude-plugins-validation"
+
+# NOTE: the CPV-source helper FUNCTIONS (cpv_uvx_from_arg / cpv_uvx_needs_pyyaml
+# / cpv_uvx_pyyaml_shell_fragment) are defined AFTER the `PluginParams` dataclass
+# below — they take a `PluginParams` argument and this module does NOT use
+# `from __future__ import annotations`, so the annotation must resolve at def
+# time. They are grouped with the other `gen_*`/param-consuming helpers there.
+
+
 def resolve_language(arg: str, target: Path) -> str:
     """Resolve the --language CLI argument to a concrete language string.
 
@@ -441,6 +459,15 @@ class PluginParams:
     # downstream UV cache key stable and stops every CPV release from breaking
     # all downstream CI with no plugin change.
     cpv_ref: str = ""
+    # Which DISTRIBUTION the generated pipeline fetches the CPV validator from
+    # (issue #137). Default ``"git"`` keeps today's exact behavior: every
+    # callsite resolves to ``git+https://…/claude-plugins-validation@<ref>``
+    # (a cold from-source build). ``"pypi"`` instead fetches the published
+    # wheel ``claude-plugins-validation==<ver>`` (fast, no compile, and pyyaml
+    # is a declared wheel dependency so the ``--with pyyaml`` shim is dropped).
+    # NON-BREAKING: an absent / "git" value reproduces the historical output
+    # byte-for-byte. Set via ``--cpv-source pypi``.
+    cpv_source: str = "git"
     # Emit the (per-plugin) notify-marketplace.yml even when the marketplace is
     # the placeholder name — normally we skip it (root-cause #9: a placeholder
     # notify workflow red-lights every release because the secret/target are
@@ -467,6 +494,83 @@ class PluginParams:
     def github_url(self) -> str:
         """Full GitHub URL for the plugin."""
         return f"https://github.com/{self.github_owner}/{self.repo_name}"
+
+
+# =============================================================================
+# CPV-SOURCE SELECTOR (issue #137) — single source of truth for how every
+# generated pipeline file references the CPV validator. Defined here (after the
+# `PluginParams` dataclass) because they take a `PluginParams` and this module
+# does not use `from __future__ import annotations`. The recognized source
+# constants (CPV_SOURCE_GIT / CPV_SOURCE_PYPI / VALID_CPV_SOURCES / _CPV_PYPI_DIST)
+# live near `_default_cpv_ref` above.
+# =============================================================================
+
+
+def cpv_uvx_from_arg(p: PluginParams) -> str:
+    """Return the ``uvx --from`` package spec for the generated CPV callsites.
+
+    Single source of truth for how every generated pipeline file (publish.py,
+    ci.yml, release.yml, README) references CPV (issue #137). Routes on
+    ``p.cpv_source``:
+
+      * ``"git"`` (default, NON-BREAKING) →
+        ``git+https://github.com/Emasoft/claude-plugins-validation@<ref>`` — the
+        exact historical form. ``<ref>`` is ``p.cpv_ref_resolved``.
+      * ``"pypi"`` → ``claude-plugins-validation==<ver>`` where ``<ver>`` is
+        ``p.cpv_ref_resolved`` with any leading ``v`` stripped (a PyPI version
+        is bare, e.g. ``2.136.1``). When the ref is NOT a concrete version
+        (``main`` / a branch / a SHA — no published wheel exists for it), the
+        spec degrades to the bare dist name ``claude-plugins-validation`` (uvx
+        resolves the latest wheel) rather than emitting an unsatisfiable
+        ``==main``.
+
+    Any unrecognized ``cpv_source`` falls back to the ``git`` form (fail-safe —
+    the default never silently changes). Side-effect-free.
+    """
+    if p.cpv_source == CPV_SOURCE_PYPI:
+        ver = p.cpv_ref_resolved.lstrip("v").strip()
+        # A non-version ref (branch/SHA/"main") has no matching published wheel;
+        # a `==<ref>` pin would be unsatisfiable, so resolve the latest wheel
+        # instead. A version starts with a digit (`2`, `2.136`, `2.136.1`).
+        if ver and re.match(r"^[0-9]+(?:\.[0-9]+)*", ver):
+            return f"{_CPV_PYPI_DIST}=={ver}"
+        return _CPV_PYPI_DIST
+    return f"git+https://github.com/Emasoft/claude-plugins-validation@{p.cpv_ref_resolved}"
+
+
+def cpv_uvx_needs_pyyaml(p: PluginParams) -> bool:
+    """True iff the generated ``uvx`` callsites must add ``--with pyyaml``.
+
+    The ``git`` (from-source) install does not declare pyyaml, so the callsites
+    inject it with ``--with pyyaml``. The published ``pypi`` wheel declares
+    pyyaml as a runtime dependency, so the shim is dropped (issue #137).
+    """
+    return p.cpv_source != CPV_SOURCE_PYPI
+
+
+def cpv_uvx_pyyaml_shell_fragment(p: PluginParams, *, indent: str, cont: str) -> str:
+    r"""Return the ``--with pyyaml`` shell continuation fragment, or "".
+
+    Used inside the workflow f-strings (gen_ci_yml, gen_release_yml) to emit the
+    line::
+
+        --with pyyaml <cont>
+        <indent>
+
+    immediately before the ``cpv-remote-validate …`` line — but ONLY for the
+    ``git`` source (issue #137). For the ``pypi`` source the wheel already
+    declares pyyaml, so the fragment is empty and the ``cpv-remote-validate``
+    line follows the ``uvx --from …`` line directly.
+
+    ``indent`` is the leading whitespace of the following shell line; ``cont``
+    is the line-continuation token (a single ``\`` — pass ``"\\"`` from a normal
+    string literal). Both are passed by the callsite so the emitted YAML matches
+    the surrounding indentation exactly. When git: returns
+    ``"--with pyyaml <cont>\n<indent>"``. When pypi: returns ``""``.
+    """
+    if not cpv_uvx_needs_pyyaml(p):
+        return ""
+    return f"--with pyyaml {cont}\n{indent}"
 
 
 # =============================================================================
@@ -3046,16 +3150,38 @@ def main() -> int:
 if __name__ == "__main__":
     sys.exit(main())
 '''
-    # Root-cause #2: pin every CPV git callsite in the generated publish.py
-    # (G3 validate, Stage-4 validate, the branch-rules install) to the
-    # scaffolding CPV's version so the cold uvx-from-git build is cached per
-    # tag and a stricter future CPV release cannot silently break this gate.
-    # The bare URL appears exactly 3× in the template; a single exact-literal
-    # replace pins all of them.
+    # Root-cause #2 + issue #137: route every CPV callsite in the generated
+    # publish.py (G3 validate, Stage-4 validate, the branch-rules install)
+    # through `cpv_uvx_from_arg(p)`. For the default `git` source this returns
+    # the pinned `git+https://…@<ref>` form (byte-identical to the historical
+    # output — the cold uvx-from-git build stays cached per tag and a stricter
+    # future CPV release cannot silently break this gate). For the `pypi` source
+    # it returns `claude-plugins-validation==<ver>`. The bare URL appears
+    # exactly 3× in the template; a single exact-literal replace routes all of
+    # them.
     result = template.replace(
         "git+https://github.com/Emasoft/claude-plugins-validation",
-        f"git+https://github.com/Emasoft/claude-plugins-validation@{p.cpv_ref_resolved}",
+        cpv_uvx_from_arg(p),
     )
+    # Issue #137: the published `pypi` wheel declares pyyaml as a runtime
+    # dependency, so drop the `--with pyyaml` shim from all 3 inline argv lists
+    # in the generated publish.py. The two distinct argv spellings in the
+    # template are removed by exact-literal replace; the `git` source leaves
+    # them untouched (byte-identical output). The newline+indent in each match
+    # keeps the surrounding argv structure intact.
+    if not cpv_uvx_needs_pyyaml(p):
+        result = result.replace(
+            '                "--with",\n                "pyyaml",\n',
+            "",
+        )
+        result = result.replace(
+            '         "--with", "pyyaml",\n',
+            "",
+        )
+        result = result.replace(
+            '        "--with", "pyyaml",\n',
+            "",
+        )
 
     # PROFILE VARIANT (TRDD-e9f13df1, issue #128). For every profile EXCEPT
     # `submodule-build` the body is returned byte-identical to the historical
@@ -3465,6 +3591,12 @@ def gen_ci_yml(p: PluginParams) -> str:
     * First-party `actions/*` are SHA-pinned too (not only third-party), so
       a hostile first-party tag rewrite cannot swap action code.
     """
+    # Issue #137: route the CPV reference through the source selector. `git`
+    # → the pinned `git+…@<ref>` form + the `--with pyyaml` continuation
+    # (byte-identical to the historical output); `pypi` → the wheel spec with
+    # the pyyaml shim dropped.
+    cpv_from = cpv_uvx_from_arg(p)
+    cpv_pyyaml = cpv_uvx_pyyaml_shell_fragment(p, indent=" " * 14, cont="\\")
     return f"""name: CI
 
 # Required-context contract (cpv-setup-branch-rules wires the branch ruleset
@@ -3608,9 +3740,8 @@ jobs:
           CLAUDE_PRIVATE_USERNAMES: "${{{{ github.repository_owner }}}}"
         run: |
           set +e
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation@{p.cpv_ref_resolved} \\
-              --with pyyaml \\
-              cpv-remote-validate plugin . --strict
+          uvx --from {cpv_from} \\
+              {cpv_pyyaml}cpv-remote-validate plugin . --strict
           exit_code=$?
           set -e
           if [ $exit_code -eq 0 ]; then
@@ -3718,6 +3849,18 @@ def gen_release_yml(p: PluginParams) -> str:
       verify integrity.
     """
     # Use p.python_version instead of hardcoded 3.12
+    # Issue #137: route the CPV reference through the source selector. Unlike
+    # gen_ci_yml — whose `run:` block uses REAL backslash continuations (`\\` in
+    # the f-string → a literal `\` in the emitted YAML, a genuine multi-line
+    # shell command) — this block's source lines end in a SINGLE `\`, which is a
+    # PYTHON source line-continuation: it eats the newline + the next line's
+    # leading indent and emits one FLATTENED shell line. To keep the `git`
+    # output BYTE-IDENTICAL to the historical flattened form, the pyyaml shim is
+    # gated as a FLAT inline fragment (`--with pyyaml` + the exact inter-token
+    # spacing the original two `\`-continued lines produced), NOT the
+    # newline-bearing shell fragment helper. `pypi` drops it entirely.
+    cpv_from = cpv_uvx_from_arg(p)
+    cpv_pyyaml = ("--with pyyaml" + " " * 15) if cpv_uvx_needs_pyyaml(p) else ""
     return f"""name: Release
 
 on:
@@ -3786,9 +3929,8 @@ jobs:
           CLAUDE_PRIVATE_USERNAMES: "${{{{ github.repository_owner }}}}"
         run: |
           set +e
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation@{p.cpv_ref_resolved} \
-              --with pyyaml \
-              cpv-remote-validate plugin . --strict \
+          uvx --from {cpv_from} \
+              {cpv_pyyaml}cpv-remote-validate plugin . --strict \
               > validation-report.txt 2>&1
           exit_code=$?
           set -e
@@ -4031,6 +4173,167 @@ def gen_markdownlint_json(p: PluginParams) -> str:
   \"MD060\": false
 }
 """
+
+
+def gen_release_binaries_yml(p: PluginParams) -> str:
+    """Generate ``.github/workflows/release-binaries.yml`` — the binary-release profile scaffold (#115).
+
+    A best-effort scaffold for a plugin that ships COMPILED binaries (Rust by
+    default), modelled on the proven ``memgrep-release.yml`` reference shape. The
+    emitted workflow satisfies all FOUR invariants
+    :func:`cpv_pipeline_profile.is_binary_release_canonical_shape` recognizes as
+    CANONICAL, so a binary-release plugin scaffolded with this template clears
+    the false "missing standard release.yml" drift flag:
+
+      1. every third-party ``uses:`` is SHA-pinned (here every action is
+         ``actions/``-org AND SHA-pinned, reusing the pins CPV trusts in its own
+         workflows);
+      2. a least-privilege split — the build + smoke jobs are ``contents: read``
+         and EXACTLY ONE job (``release``) is ``contents: write``;
+      3. a ``SHA256SUMS`` checksum step;
+      4. a build ``matrix`` over targets (aarch64/x86_64 × apple-darwin/
+         unknown-linux-gnu).
+
+    It also carries a ``build-smoke`` job that compiles on push/PR — the
+    "untested-until-release" guard (a tag-only build that no push job exercises
+    is exactly the v2.136.0 ``RC-UNTESTED-UNTIL-RELEASE`` failure mode). The
+    compile command defaults to ``cargo build --release --locked``; a non-Rust
+    plugin replaces the build/stage steps but keeps the four invariants.
+
+    Plain (non-f) template: the pervasive ``${{ … }}`` GitHub expressions and
+    shell ``{print $1}`` braces need NO escaping — the only substitution is the
+    binary name (``@@BIN@@`` → ``p.name``), done by an explicit ``.replace``.
+    """
+    template = r"""# .github/workflows/release-binaries.yml — binary-release profile (#115)
+# Builds compiled binaries for several targets, checksums them, and attaches
+# them to the GitHub Release. Generated by CPV's canonical pipeline as the
+# binary-release scaffold (modelled on the proven memgrep-release.yml shape).
+#
+# KEEP these four structural invariants when you edit this file, or CPV's
+# binary-release canon will WARN (it recognizes a CANONICAL binary-release
+# workflow and clears the "missing standard release.yml" drift flag):
+#   1. every third-party `uses:` SHA-pinned (the `actions/`-org pins below are
+#      already full-SHA; pin any third-party action you add to a 40-hex commit);
+#   2. least-privilege split — the build + smoke jobs are `contents: read`, and
+#      EXACTLY ONE job (`release`) is `contents: write`;
+#   3. a `SHA256SUMS` checksum step;
+#   4. a build `matrix` over targets.
+#
+# The binary name is `@@BIN@@` (the plugin name by default). For a Rust crate
+# whose `[[bin]]` name differs, change `@@BIN@@` in the staging step only.
+name: Release binaries
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to (re)attach binaries to"
+        required: true
+
+# Least privilege: nothing by default; each job opts in to only what it needs.
+permissions: {}
+
+concurrency:
+  group: release-binaries-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # CI smoke (push/PR): compile on the host target so a build break is caught
+  # BEFORE a tag is cut — the "untested-until-release" guard. Mirrors the real
+  # release build command so a tag build can never surprise you.
+  build-smoke:
+    name: Build smoke (untested-until-release guard)
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Build (host target)
+        run: cargo build --release --locked
+
+  build:
+    name: Build ${{ matrix.target }}
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Add Rust target
+        run: rustup target add "${{ matrix.target }}"
+      - name: Build
+        run: cargo build --release --locked --target "${{ matrix.target }}"
+      - name: Stage binary + per-asset checksum
+        run: |
+          mkdir -p out
+          bin="target/${{ matrix.target }}/release/@@BIN@@"
+          asset="out/@@BIN@@-${{ matrix.target }}"
+          cp "$bin" "$asset"
+          shasum -a 256 "$asset" | awk '{print $1}' > "$asset.sha256"
+      - name: Upload build artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: @@BIN@@-${{ matrix.target }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    name: Attach binaries + SHA256SUMS to the release
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The ONLY job with write access (least-privilege split): it uploads the
+    # built assets to the release. The build matrix above stays read-only.
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Combine per-asset checksums into SHA256SUMS
+        run: |
+          cd dist
+          : > SHA256SUMS
+          for f in *; do
+            case "$f" in *.sha256 | SHA256SUMS) continue ;; esac
+            shasum -a 256 "$f" >> SHA256SUMS
+          done
+          cat SHA256SUMS
+      - name: Resolve the release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload binaries + SHA256SUMS to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ steps.tag.outputs.tag }}" dist/* --clobber --repo "${{ github.repository }}"
+"""
+    return template.replace("@@BIN@@", p.name)
 
 
 def gen_notify_marketplace_yml(p: PluginParams) -> str:
@@ -4281,6 +4584,17 @@ def generate_all_files(
 
 def gen_language_todo(p: PluginParams) -> str:
     """Generate a TODO note for non-python plugins explaining what to add."""
+    # Issue #137: route the README validate command through the source
+    # selector. `git` → the pinned `git+…@<ref>` form + an inline `--with
+    # pyyaml ` (byte-identical to the historical note); `pypi` → the wheel
+    # spec, no pyyaml shim, and a wheel-version pin note.
+    cpv_from = cpv_uvx_from_arg(p)
+    cpv_pyyaml = "--with pyyaml " if cpv_uvx_needs_pyyaml(p) else ""
+    cpv_pin_note = (
+        f"`@{p.cpv_ref_resolved}`"
+        if p.cpv_source == CPV_SOURCE_GIT
+        else f"`{cpv_from}`"
+    )
     return f"""# TODO: Wire up CI/CD for `{p.language}` plugin
 
 This plugin was scaffolded with `--language {p.language}`. CPV's Python
@@ -4300,11 +4614,11 @@ skipped because it does not apply to your language.
 
 You can validate this plugin against the CPV ruleset from anywhere using
 `uvx` — no need to clone or install CPV. CPV is pinned to the version that
-scaffolded this plugin (`@{p.cpv_ref_resolved}`) so your validation result is
+scaffolded this plugin ({cpv_pin_note}) so your validation result is
 stable; bump the pin deliberately when you adopt a newer CPV:
 
 ```bash
-uvx --from git+https://github.com/Emasoft/claude-plugins-validation@{p.cpv_ref_resolved} --with pyyaml \\
+uvx --from {cpv_from} {cpv_pyyaml}\\
     cpv-remote-validate plugin . --strict
 ```
 
@@ -4475,6 +4789,18 @@ Examples:
         "no plugin change.",
     )
     parser.add_argument(
+        "--cpv-source",
+        choices=sorted(VALID_CPV_SOURCES),
+        default=CPV_SOURCE_GIT,
+        help="Which CPV distribution the generated pipeline fetches the "
+        "validator from (issue #137). 'git' (default, NON-BREAKING) builds CPV "
+        "from source: `uvx --from git+https://…@<ref> --with pyyaml`. 'pypi' "
+        "fetches the published wheel: `uvx --from claude-plugins-validation==<ver>` "
+        "(fast, no compile, pyyaml is a declared wheel dependency so the "
+        "`--with pyyaml` shim is dropped). 'pypi' pins to the same <ref> as "
+        "--cpv-ref with any leading 'v' stripped.",
+    )
+    parser.add_argument(
         "--force-notify",
         dest="force_notify",
         action="store_true",
@@ -4573,6 +4899,7 @@ Examples:
         self_marketplace=args.self_marketplace,
         strip_dev=args.strip_dev,
         cpv_ref=args.cpv_ref,
+        cpv_source=args.cpv_source,
         force_notify=args.force_notify,
     )
 
