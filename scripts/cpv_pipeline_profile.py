@@ -369,3 +369,244 @@ def resolve_pipeline_profile(plugin_root: Path) -> str:
         return detect_pipeline_profile(plugin_root)
     except Exception:  # noqa: BLE001 — resolution must never crash a validation run; fall back to the conservative `standard`
         return PROFILE_STANDARD
+
+
+# ── "untested-until-release" advisory heuristic (#115 part-5) ──────────────────
+# A NON-BLOCKING WARNING surface (the validator wires these helpers to
+# ``report.warning``). It flags a workflow that BUILDS/STAGES a compiled binary
+# artifact in a step reachable ONLY from tag/release triggers (no push/PR path),
+# so the build/stage breakage is invisible until a tag is cut. Born from the
+# janitor v0.7.0 incident: a tag-only staging step copied from the wrong
+# ``target/`` dir, passed actionlint+zizmor+CPV statically, and failed on all
+# four platforms at release because no push/PR job ever exercised it.
+#
+# THE MAKE-OR-BREAK PRECISION GUARD: the STANDARD canonical ``release.yml``
+# (``gen_release_yml``) is ALSO tag-triggered and ALSO runs
+# ``gh release upload validation-report.txt sbom.spdx.json SHA256SUMS`` — it
+# literally contains the strings ``gh release upload`` AND ``SHA256SUMS``. So
+# keying on the upload / checksum alone would fire on EVERY canon plugin
+# (catastrophic FP). The discriminator is a compiled-artifact BUILD/STAGE
+# (a build MATRIX over targets, OR a compile step, OR a stage step that moves
+# COMPILED artifacts), which the standard release.yml does NOT have (it stages
+# plain text reports). Verified empirically against the real ``gen_release_yml``
+# / ``gen_ci_yml`` output: every regex below returns no match on them.
+
+# Trigger classification ─ which `on:` events are RELEASE-class vs CI-class.
+#
+# We classify by SHAPE of the `on:` mapping. `release-class` is a tag/release
+# event that fires only when a version is cut: a `release:` event, a `push:`
+# restricted to `tags:` with NO `branches:`, and `workflow_dispatch:` (a manual
+# button — never a normal commit). `ci-class` is any event a regular push/PR
+# exercises: a `push:` with `branches:` (or a bare `push`/`push:` with neither
+# tags nor branches → fires on every branch push), `pull_request`,
+# `pull_request_target`, `merge_group`, and `schedule`.
+#
+# A workflow is "release-only" iff it has ≥1 release-class trigger AND 0
+# ci-class triggers — so its steps are NEVER exercised by a normal push/PR.
+# Capture the `on:` mapping body WITHOUT a lookahead (re2-safe): match the
+# same-line value (`inline` — e.g. ` [push, pull_request]` in flow style), then
+# zero-or-more continuation lines that are blank or whitespace-indented (the
+# block body), which naturally stops at the first column-0 non-space line (the
+# next top-level key) because such a line matches neither alternative.
+_ON_BLOCK_RE = re.compile(
+    r"^on\s*:(?P<inline>[^\n]*)\n(?P<body>(?:[ \t][^\n]*\n|[ \t]*\n)*)",
+    re.IGNORECASE | re.MULTILINE,
+)
+# Each trigger keyword is matched either as a block-mapping key (`^\s*push:`)
+# OR as a flow-style list member (`on: [push, pull_request]` → `[push` / `,
+# pull_request`). The `(?:^\s*|[\[,]\s*)` prefix is re2-safe (no lookbehind):
+# the keyword must start a YAML line OR follow a `[`/`,` flow delimiter, so the
+# word `push` inside `# a comment about push` or a step name never matches.
+# The `[` is escaped inside the class (`[\[,]`) so it is an unambiguous
+# two-member class, not a nested set.
+_TRIGGER_RELEASE_EVENT_RE = re.compile(r"(?:^\s*|[\[,]\s*)release\b", re.IGNORECASE | re.MULTILINE)
+_TRIGGER_WORKFLOW_DISPATCH_RE = re.compile(
+    r"(?:^\s*|[\[,]\s*)workflow_dispatch\b", re.IGNORECASE | re.MULTILINE
+)
+_TRIGGER_PUSH_RE = re.compile(r"(?:^\s*|[\[,]\s*)push\b", re.IGNORECASE | re.MULTILINE)
+_TRIGGER_PR_RE = re.compile(r"(?:^\s*|[\[,]\s*)pull_request(?:_target)?\b", re.IGNORECASE | re.MULTILINE)
+_TRIGGER_MERGE_GROUP_RE = re.compile(r"(?:^\s*|[\[,]\s*)merge_group\b", re.IGNORECASE | re.MULTILINE)
+_TRIGGER_SCHEDULE_RE = re.compile(r"(?:^\s*|[\[,]\s*)schedule\b", re.IGNORECASE | re.MULTILINE)
+# Sub-keys WITHIN the `on:` block that qualify a `push:` event. These are only
+# meaningful in block-mapping style (a flow-style `on: [push]` has neither), so
+# they stay strictly line-anchored.
+_ON_HAS_BRANCHES_RE = re.compile(r"^\s*branches(?:-ignore)?\s*:", re.IGNORECASE | re.MULTILINE)
+_ON_HAS_TAGS_RE = re.compile(r"^\s*tags(?:-ignore)?\s*:", re.IGNORECASE | re.MULTILINE)
+
+# Compiled-artifact BUILD signals — a compile step that turns source into a
+# binary. Two regexes, both verified to NOT match `gen_release_yml`/`gen_ci_yml`:
+#
+# 1. _COMPILE_VERB_RE — VERB-BEARING tokens that are unambiguous build commands
+#    anywhere they appear (a two-word command like `cargo build` / `docker
+#    build` / `npm run build` is never English prose). Safe un-anchored.
+# 2. _COMPILE_CMD_RE — BARE single-word build tools (`make`, `cmake`, `gcc`,
+#    `clang`, `rustc`, …) that DO collide with English ("an attacker can make
+#    Dependabot …"). These fire ONLY at a shell COMMAND POSITION — start of a
+#    YAML line, after `run:`, or after a `&&`/`||`/`;`/`|`/`$(` shell separator
+#    — so a bare `make`/`gcc` in a comment or a step NAME never matches. The
+#    command-position prefix `(?:^|run:\s*|[|&;]\s*|\$\(\s*)` is re2-safe (no
+#    lookbehind).
+_COMPILE_VERB_RE = re.compile(
+    r"\b(?:cargo|go)\s+build\b"
+    r"|\bgo\s+install\b"
+    r"|\bpyinstaller\b"
+    r"|\bnuitka\b"
+    r"|\bzig\s+build\b"
+    r"|\bcmake\s+--build\b"
+    r"|\bdocker\s+build\b|\bdocker\s+buildx\s+build\b"
+    r"|\bnpm\s+run\s+build\b|\byarn\s+build\b|\bpnpm\s+run\s+build\b"
+    r"|\b(?:\./)?gradlew?\b[^\n]*?\b(?:build|assemble|shadowjar)\b"
+    r"|\bmvn\b[^\n]*?\b(?:package|install|verify)\b",
+    re.IGNORECASE,
+)
+_COMPILE_CMD_RE = re.compile(
+    r"(?:^|run:\s*|[|&;]\s*|\$\(\s*)"  # shell command position only (re2-safe)
+    r"(?:cmake|make|rustc|gcc|g\+\+|clang\+\+|clang)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+# Compiled-artifact STAGE signals — a step that copies/moves COMPILED artifacts
+# into a release-staging dir, OR a `stage.sh`-style script that feeds the upload.
+# Keys on compiled-output dir paths and binary extensions, NOT on text files.
+_STAGE_STEP_RE = re.compile(
+    r"\btarget/(?:release|debug)\b"  # cargo output dir
+    r"|[\w./-]*\bdist/bin\b"
+    r"|[\w./-]*\bbuild/(?:bin|lib|release)\b"
+    r"|\.(?:so|dylib|dll|exe|a|o|wasm)\b"  # compiled binary/object extensions
+    r"|\b[\w-]*stage(?:[-_]?bin(?:aries)?)?\.sh\b"  # stage.sh / stage-binaries.sh
+    r"|\bcargo\s+install\b",
+    re.IGNORECASE,
+)
+
+
+def classify_workflow_triggers(text: str) -> tuple[bool, bool]:
+    """Classify a workflow's ``on:`` triggers into (has_release_class, has_ci_class).
+
+    release-class = a tag/release/manual event that fires only when a version is
+    cut (``release:``, ``push:`` restricted to ``tags:`` with no ``branches:``,
+    ``workflow_dispatch``). ci-class = an event a normal push/PR exercises
+    (``push:`` with ``branches:`` or a bare/unqualified ``push``,
+    ``pull_request``/``pull_request_target``, ``merge_group``, ``schedule``).
+
+    Best-effort + side-effect-free: an unparseable ``on:`` block (or a missing
+    one) yields ``(False, False)`` — never raises.
+    """
+    has_release = False
+    has_ci = False
+    try:
+        m = _ON_BLOCK_RE.search(text)
+        # The block we classify is the `on:` mapping body: the same-line value
+        # (``inline`` — the flow-style ``[push, pull_request]`` lives here) plus
+        # the indented continuation lines (``body``). If we cannot isolate it,
+        # classify over the whole file as a conservative fallback.
+        on_block = (m.group("inline") + "\n" + m.group("body")) if m else text
+
+        if _TRIGGER_RELEASE_EVENT_RE.search(on_block):
+            has_release = True
+        if _TRIGGER_WORKFLOW_DISPATCH_RE.search(on_block):
+            has_release = True
+
+        if _TRIGGER_PR_RE.search(on_block):
+            has_ci = True
+        if _TRIGGER_MERGE_GROUP_RE.search(on_block):
+            has_ci = True
+        if _TRIGGER_SCHEDULE_RE.search(on_block):
+            has_ci = True
+
+        if _TRIGGER_PUSH_RE.search(on_block):
+            # A `push:` event is release-class ONLY when it is restricted to
+            # tags with no branches. A `push:` with `branches:` is ci-class; a
+            # bare `push` / `push:` with neither tags nor branches fires on
+            # every branch push → ci-class too (conservative: when unsure, treat
+            # a push as ci so a real CI build still counts as smoke coverage).
+            has_tags = bool(_ON_HAS_TAGS_RE.search(on_block))
+            has_branches = bool(_ON_HAS_BRANCHES_RE.search(on_block))
+            if has_tags and not has_branches:
+                has_release = True
+            else:
+                has_ci = True
+    except Exception:  # noqa: BLE001 — trigger classification is advisory; any failure → (False, False)
+        return (False, False)
+    return (has_release, has_ci)
+
+
+def workflow_has_compiled_artifact_build(text: str) -> bool:
+    """True iff the workflow text contains a compiled-artifact BUILD or STAGE step.
+
+    The discriminator that separates a real binary-build/stage workflow from the
+    standard canonical ``release.yml`` (which only uploads text reports). Fires on:
+      * a build MATRIX over targets/platforms (``is_binary_release_shape``'s
+        matrix+target co-occurrence), OR
+      * a compile step (``cargo build`` / ``go build`` / ``make <t>`` / ``cmake
+        --build`` / ``pyinstaller`` / ``zig build`` / ``docker build`` / …), OR
+      * a stage step that moves COMPILED artifacts (``target/release`` /
+        ``dist/bin`` / ``*.so``/``*.dylib``/``*.exe`` / a ``stage.sh``-style
+        script feeding the upload).
+
+    Each signal is verified to NOT match ``gen_release_yml`` / ``gen_ci_yml``.
+    Best-effort + side-effect-free.
+    """
+    if not text:
+        return False
+    try:
+        if _BINARY_MATRIX_RE.search(text) and _BINARY_TARGET_RE.search(text):
+            return True
+        if _COMPILE_VERB_RE.search(text):
+            return True
+        if _COMPILE_CMD_RE.search(text):
+            return True
+        if _STAGE_STEP_RE.search(text):
+            return True
+    except Exception:  # noqa: BLE001 — signal scan is advisory; any failure → not a build/stage
+        return False
+    return False
+
+
+def repo_has_ci_build_smoke(plugin_root: Path) -> bool:
+    """True iff ANY ci-class-triggered workflow in the repo builds/stages a binary.
+
+    The MITIGATION signal: if a push/PR-triggered workflow already exercises a
+    compile/build/stage step (or invokes the shared stage script), then the
+    binary build/stage is NOT untested-until-release — a broken step fails CI on
+    the next push, long before a tag is cut. Best-effort + side-effect-free.
+    """
+    for wf in _workflow_yaml_files(plugin_root):
+        text = _read_text_safe(wf)
+        if not text:
+            continue
+        _has_release, has_ci = classify_workflow_triggers(text)
+        if has_ci and workflow_has_compiled_artifact_build(text):
+            return True
+    return False
+
+
+def untested_until_release_workflows(plugin_root: Path) -> list[Path]:
+    """Every release-only workflow that builds/stages a binary with NO CI smoke.
+
+    Returns the sorted list of ``.github/workflows/*.yml`` files that:
+      1. are RELEASE-ONLY (≥1 release-class trigger AND 0 ci-class triggers),
+      2. contain a compiled-artifact BUILD or STAGE step, and
+      3. have NO sibling ci-class workflow in the repo that builds/stages a
+         binary (the mitigation).
+
+    The standard canonical ``release.yml`` is release-only and uploads
+    ``SHA256SUMS``, but has NO build/stage step → it is NEVER returned (the
+    catastrophic-FP guard). Best-effort + side-effect-free: any error → ``[]``.
+    """
+    try:
+        wfs = _workflow_yaml_files(plugin_root)
+        if not wfs:
+            return []
+        # Compute the repo-wide CI-smoke mitigation ONCE.
+        if repo_has_ci_build_smoke(plugin_root):
+            return []
+        offenders: list[Path] = []
+        for wf in wfs:
+            text = _read_text_safe(wf)
+            if not text:
+                continue
+            has_release, has_ci = classify_workflow_triggers(text)
+            if has_release and not has_ci and workflow_has_compiled_artifact_build(text):
+                offenders.append(wf)
+        return sorted(offenders)
+    except Exception:  # noqa: BLE001 — the whole heuristic is advisory; any failure → no findings
+        return []
