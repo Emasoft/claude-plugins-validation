@@ -3,7 +3,7 @@ trdd-id: e9f13df1-556f-4c02-9fba-5a62ac248eda
 title: Canon-profiles — profile-aware + direction-aware canonical-pipeline model
 column: dev
 created: 2026-06-16T23:40:45+0200
-updated: 2026-06-19T06:45:13+0200
+updated: 2026-06-20T04:30:50+0200
 current-owner: claude-plugins-validation
 assignee: claude-plugins-validation
 priority: 2
@@ -82,12 +82,21 @@ most aligned with CPV's core mandate; the generator/template is canon-extension 
 standard byte-identical (HEAD-baseline proven). **#128-A DONE (Piece D core), shipping v2.135.1** —
 found during verify: `standardize_plugin.py::fix_missing_files` clobbered the submodule-aware
 publish.py because it called `gen_func(params)` with NO profile; it now resolves the profile and
-passes it to a profile-parameterized `gen_*`; 3 two-sided tests guard it. Remaining work, in order:
-**C2 (binary-release #115)** — see `docs_dev/piece-c2-binary-release-notes.md`. KEY: #115's drift half
-is STRUCTURAL recognition (SHA-pins, least-priv build/release split, `SHA256SUMS`, build matrix), NOT a
-byte-compare, because the release workflow is language-specific; reference is janitor
-`.github/workflows/memgrep-release.yml`. Then the rest of **Piece D** — remote-validation
-"don't re-vendor validators" (#130) and the upgrade-agent prompt's profile awareness.
+passes it to a profile-parameterized `gen_*`; 3 two-sided tests guard it.
+**C2 part-5 (untested-until-release heuristic) SHIPPED v2.136.0** — the user-chosen #115 piece: a
+NON-BLOCKING `RC-UNTESTED-UNTIL-RELEASE` WARNING flagging a release-only workflow that builds/stages a
+compiled BINARY with no push/PR CI smoke. Detector in `cpv_pipeline_profile.py`
+(`classify_workflow_triggers`/`workflow_has_compiled_artifact_build`/`repo_has_ci_build_smoke`/`untested_until_release_workflows`)
+plus `check_untested_until_release` in `validate_plugin.py`. The make-or-break FP guard (standard
+`release.yml` is tag-triggered + uploads SHA256SUMS but has NO build/stage) verified against the REAL
+`gen_release_yml` → 0 findings; delegated to one opus agent + CENTRAL-VERIFIED (independent probe 5/5 +
+real end-to-end validator run + CPV self-validate VALID 0/0/0/0, 0 RC-UNTESTED on own tree). +40 tests.
+Remaining #115 canon-extension, in order: the `gen_release_binaries_yml` template + shared `stage.sh` +
+the CI smoke-job GENERATOR (the convergence ask — distinct from this DETECTOR), multi-language publish.py
+gates, the cron-daemon trait; then the rest of **Piece D** — remote-validation "don't re-vendor
+validators" (#130) and the upgrade-agent prompt's profile awareness. KEY for the generator half: #115's
+drift recognition is STRUCTURAL (SHA-pins, least-priv build/release split, `SHA256SUMS`, build matrix),
+NOT a byte-compare; reference is janitor `.github/workflows/memgrep-release.yml`.
 
 **Load-bearing facts / gotchas:**
 - Drift compare must select the **gen VARIANT** for the resolved profile, not always the standard one.

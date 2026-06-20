@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.135.1` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.136.0` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
 | **scripts** | **118** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver; `cpv_fix_loop_state.py` deterministic full-history fix-loop oscillation detector) |
-| **test files** | **347** | `ls tests/test_*.py`; ~9743 tests |
+| **test files** | **348** | `ls tests/test_*.py`; ~9783 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,29 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.136.0 — #115 part-5: "untested-until-release" advisory heuristic (canon-profiles Piece C2)**
+— a NEW NON-BLOCKING WARNING (`RC-UNTESTED-UNTIL-RELEASE`) flagging a `.github/workflows/*.yml`
+that BUILDS/STAGES a compiled BINARY artifact reachable ONLY from tag/release triggers with NO
+sibling push/PR CI smoke job that exercises the same build/stage — the real janitor v0.7.0
+incident (a tag-only staging step copied from the wrong `target/` dir passed actionlint+zizmor+CPV
+statically and broke on all four platforms at release because no push job ever ran it). THE
+make-or-break precision: the standard canonical `release.yml` is ALSO tag-triggered and ALSO does
+`gh release upload … SHA256SUMS`, so the discriminator is a compiled-artifact build/stage (a build
+MATRIX over targets, a compile step `cargo/go/make/cmake/pyinstaller/zig/docker build`, or a stage
+of `target/release`/`dist/bin`/`*.so|*.dylib|*.exe`/`stage.sh`), NOT a plain text-file upload —
+verified against the REAL `gen_release_yml` output → ZERO findings. New detector in
+`cpv_pipeline_profile.py` (`classify_workflow_triggers` release-vs-ci, `workflow_has_compiled_artifact_build`,
+`repo_has_ci_build_smoke` mitigation, `untested_until_release_workflows`, all re2-safe and reusing
+the existing matrix/target blocks); `check_untested_until_release` in `validate_plugin.py` emits the
+WARNING (WARNING NEVER blocks `--strict` — advisory only). Delegated to one opus agent + CENTRAL-VERIFIED
+by the orchestrator: an INDEPENDENT probe against the real `gen_ci_yml`/`gen_release_yml` (5/5 — the
+catastrophic-FP guard, FIRES on the janitor memgrep-release shape, smoke mitigates, text-only upload
+clears) AND a real end-to-end validator run surfacing the WARNING on a binary-release plugin while CPV
+self-validate stays VALID 0/0/0/0 with ZERO RC-UNTESTED on its own tree. +40 two-sided tests
+(`tests/test_untested_until_release.py`). NO gate relaxed; advisory detection-add only. Remaining
+issue #115 canon-extension: the `gen_release_binaries_yml` template, a shared `stage.sh`, a CI smoke
+generator (the convergence ask), multi-language publish.py gates, and the cron-daemon trait.
 
 **v2.134.0 — agent CI-green guarantee + canonical-pipeline reliability (user ultracode
 mandate, Phase 2+3)** — the user's core pain: "tons of plugins FAIL GitHub CI AFTER the
