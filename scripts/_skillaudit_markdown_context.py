@@ -2104,6 +2104,57 @@ def _is_logical_or_not_pipe(line: str, match: str, rule_id: str) -> bool:
     return has_logical_or and not has_real_pipe
 
 
+# #136 — PRIVILEGE_ESC's bare ``sudo\s`` catalog pattern has NO leading word
+# boundary, so it matches the substring "sudo " INSIDE a hyphenated compound
+# such as ``no-sudo`` / ``non-sudo`` / ``passwordless-sudo`` / ``without-sudo``
+# / ``agentless-sudo``. These are POLICY / NEGATION tokens — documenting that an
+# agent has NO sudo (the OPPOSITE of an escalation), not a command invocation.
+# A real ``sudo <command>`` always has the ``sudo`` token at line-start or after
+# whitespace, NEVER as the ``<word>-sudo`` tail of a hyphenated compound, so the
+# two shapes are provably disjoint. This cannot be fixed in the catalog
+# (``\bsudo`` STILL matches ``no-sudo`` because the ``o`` -> ``-`` -> ``s``
+# transition is a word boundary); it must be a markdown context discriminator.
+#
+# ``sudo\s`` mirrors the catalog matcher; ``[A-Za-z0-9_]-`` is the two-char
+# ``<word><hyphen>`` prefix that, immediately before ``sudo``, marks the
+# compound. Both are re2-safe (simple char classes; the prefix is checked by a
+# runtime substring slice ``line[start-2:start]``, NEVER a regex lookbehind).
+# CASE-INSENSITIVE is load-bearing for FN-safety, not just the ``No-Sudo`` FP:
+# the catalog ``sudo\s`` matches case-insensitively, so the token-finder MUST
+# enumerate the SAME occurrences. A case-sensitive finder would MISS a
+# capitalised real escalation (``no-sudo ... SUDO bash``) — then "every sudo on
+# the line is a compound" would wrongly hold and SUPPRESS the real ``SUDO bash``.
+_SUDO_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"sudo\s", re.IGNORECASE)
+_SUDO_COMPOUND_PREFIX_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_]-")
+
+
+def _is_hyphenated_compound_sudo(line: str, match: str, rule_id: str) -> bool:
+    """#136 — True iff a PRIVILEGE_ESC ``sudo`` match is the inert tail of a
+    ``<word>-sudo`` hyphenated compound (``no-sudo``, ``passwordless-sudo``, …),
+    a policy/negation token, NOT a command.
+
+    FN-safe by construction: it suppresses ONLY when EVERY ``sudo`` occurrence
+    the catalog ``sudo\\s`` pattern can match on the line is a ``<word>-sudo``
+    compound. If even one occurrence is a bare ``sudo`` (a real ``sudo bash`` /
+    ``sudo -i`` / ``sudo rm`` invocation — at line-start or after whitespace,
+    so NOT preceded by ``<word>-``), this DECLINES, leaving that real escalation
+    visible (a ``no-sudo container … run sudo bash`` line still fires). Context-
+    independent: a ``<word>-sudo`` token is inert in prose AND in a ``` ```bash ```
+    fence, while a real ``sudo`` keeps the baseline verdict in both.
+    """
+    if rule_id != "PRIVILEGE_ESC":
+        return False
+    if "sudo" not in match.lower():
+        return False  # the match is chmod/setuid/etc., not the sudo token
+    occurrences = list(_SUDO_TOKEN_RE.finditer(line))
+    if not occurrences:
+        return False
+    return all(
+        mm.start() >= 2 and _SUDO_COMPOUND_PREFIX_RE.fullmatch(line[mm.start() - 2 : mm.start()]) is not None
+        for mm in occurrences
+    )
+
+
 # #79 — PRIVILEGE_ESC on the ubiquitous GitHub-Actions "Free disk space"
 # runner-cleanup step. A ``sudo rm -rf /usr/share/dotnet`` (and the sibling
 # pre-installed-toolchain paths) documented in a ``` ```yaml ``` GitHub
@@ -2825,6 +2876,17 @@ def _certain_benign_literal(
     #     preserved: real ``sudo <command>`` shapes still fire (no prose
     #     marker match).
     if rule_id == "PRIVILEGE_ESC" and _is_sudo_in_prose_mention(line, match):
+        return True
+
+    # (#136) PRIVILEGE_ESC ``sudo`` match that is the inert tail of a
+    #     ``<word>-sudo`` hyphenated compound (``no-sudo`` / ``non-sudo`` /
+    #     ``passwordless-sudo`` / ``without-sudo`` / …). The catalog ``sudo\\s``
+    #     pattern has no leading boundary, so it matches "sudo " inside such a
+    #     policy/negation token (documenting that an agent has NO sudo — the
+    #     opposite of an attack). Suppressed ONLY when every ``sudo`` on the
+    #     line is a compound; a real ``sudo <command>`` (line-start / after
+    #     whitespace) keeps its baseline verdict. See the helper above.
+    if rule_id == "PRIVILEGE_ESC" and _is_hyphenated_compound_sudo(line, match, rule_id):
         return True
 
     # Issue #61 — a bash recipe that REMOVES / unloads a launchd agent (the
