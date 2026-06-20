@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.136.0` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.136.1` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
 | **scripts** | **118** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver; `cpv_fix_loop_state.py` deterministic full-history fix-loop oscillation detector) |
-| **test files** | **348** | `ls tests/test_*.py`; ~9783 tests |
+| **test files** | **349** | `ls tests/test_*.py`; ~9808 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,23 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.136.1 — #136 (orchestrator) skillaudit PRIVILEGE_ESC FP on a hyphenated-compound `sudo` policy token**
+— a governance-doc line `Added the AID+portfolio-token / no-sudo / immutable-identity facts (R26/R28/R32).`
+fired `PRIVILEGE_ESC` because the catalog pattern `sudo\s` (no leading boundary) matches the substring
+`sudo ` INSIDE `no-sudo`, a policy/negation token (the OPPOSITE of an escalation), demoted to a low NIT
+that blocks `--strict`. Not fixable in the catalog (`\bsudo` still matches `no-sudo` — the o→-→s
+transition is a word boundary), so a markdown discriminator `_is_hyphenated_compound_sudo`
+(`_skillaudit_markdown_context.py`) suppresses the match ONLY when EVERY `sudo` occurrence on the line
+is a `<word>-sudo` compound; a real `sudo <cmd>` (line-start/after-space, prose OR a bash code fence)
+keeps its exact baseline verdict. Delegated to one opus agent, then CENTRAL-VERIFICATION caught a
+case-sensitivity hole: the token-finder `_SUDO_TOKEN_RE` was case-sensitive but the catalog matches
+case-insensitively — so a capitalized `No-Sudo` still FP'd AND, worse, a mixed `no-sudo … SUDO bash`
+line MISSED the capitalized real escalation and would SUPPRESS it (an FN hole). Fixed inline
+(`re.IGNORECASE` so the finder enumerates the SAME occurrences as the catalog) plus a regression-lock
+test class. +25 two-sided tests (`tests/test_issue_136_hyphenated_compound_sudo.py`): lower/caps
+compounds clear; lower/caps real sudo and the mixed-case FN-hole stay visible. NO rule suppression / NO
+--strict relaxation — only the provably-inert policy token clears. ruff+mypy clean; closes #136.
 
 **v2.136.0 — #115 part-5: "untested-until-release" advisory heuristic (canon-profiles Piece C2)**
 — a NEW NON-BLOCKING WARNING (`RC-UNTESTED-UNTIL-RELEASE`) flagging a `.github/workflows/*.yml`
