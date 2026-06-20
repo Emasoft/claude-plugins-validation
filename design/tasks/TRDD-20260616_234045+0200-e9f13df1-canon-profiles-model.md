@@ -62,6 +62,21 @@ drift-to-downgrade. Resolves the 4 remaining open issues as ONE model:
   strip-dev-parts already models a per-plugin `tests/`→submodule (gen at generate_plugin_repo.py:703).
 - `gen_publish_py` at generate_plugin_repo.py:1245.
 
+**C2 VERIFY-FIRST FINDING (2026-06-19):** built a realistic binary-release sample (canonical
+publish.py/ci.yml/release.yml + janitor's real `memgrep-release.yml`) and ran the current detectors:
+the binary-release profile is correctly detected AND **A+B already handles the drift-recognition** —
+NO false RC-PIPELINE-DRIFT on the binary-release workflow (it's a NEW file not in
+`_CANONICAL_PIPELINE_FILES`, so never byte-compared) and the by-design branch at
+`validate_plugin.py:5725` emits the SELECTOR-not-suppressor advisory. So #115's original drift-pain is
+ALREADY resolved. **#115 is a multi-part CANON-EXTENSION**, remaining scope: (1) `gen_release_binaries_yml`
+template + a shared `stage.sh` + a **CI smoke job** in ci.yml (the convergence ask — janitor wants to
+ADOPT canon); (5) an **"untested-until-release" heuristic** — flag an artifact-producing workflow step
+reachable ONLY from tag/release triggers (the most on-MANDATE detection-add; catches the real janitor
+v0.7.0 incident where a tag-only staging step broke at release); + a `cron-daemon` orthogonal trait
+(test-gate reaps processes) + multi-language publish.py gates (Python+Rust+shell). These are
+independent sub-pieces of varying value — surfaced to USER for priority (the detection heuristic is the
+most aligned with CPV's core mandate; the generator/template is canon-extension the reporter can stage).
+
 **NEXT ACTION (updated 2026-06-19):** **C1 SHIPPED v2.135.0** (CI/Release/Notify green) —
 `gen_publish_py` submodule variant, the #128 `git -C` source-change fix, profile-aware drift,
 standard byte-identical (HEAD-baseline proven). **#128-A DONE (Piece D core), shipping v2.135.1** —
