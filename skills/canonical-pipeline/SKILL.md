@@ -12,6 +12,15 @@ user-invocable: false
 
 Defines the standard files, workflows, hooks, and release pipeline that every Emasoft Claude Code plugin repository MUST have. Covers Python, JavaScript/TypeScript, Rust, Go, and Shell plugins. Pipeline supports all three CPV layouts (A: separate plugin and marketplace repos; B: nested monorepo; C: marketplace-in-plugin self-referential single repo).
 
+### Profile-aware
+
+The pipeline comes in four PROFILES, auto-detected from repo shape (or set authoritatively via the manifest `cpv.pipeline_profile`; detection fails safe to `standard`) by `scripts/cpv_pipeline_profile.py`'s `resolve_pipeline_profile()`. The profile is a SELECTOR (which canon a file is compared against), never a SUPPRESSOR — every drift finding still fires:
+
+- **standard** — vendors the CPV validators and ships the standard `gen_*` workflows.
+- **remote-validation** — de-vendors the local validators; validation is ONLY the remote `cpv-remote-validate --strict` gate (its absence is the point).
+- **submodule-build** — build sources live in a git submodule, pre-built binaries are committed to `bin/`, and `publish.py` is submodule-aware.
+- **binary-release** — ships compiled binaries as RELEASE assets via a build matrix + stage script + CI smoke job + `SHA256SUMS`.
+
 ### Layout C specifics
 
 Layout C (marketplace-in-plugin) needs a different release pipeline:

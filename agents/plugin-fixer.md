@@ -52,6 +52,15 @@ You are a runtime decision-maker. After confirming the target is a plugin, TRIAG
 | 5 | mode `canonical-pipeline migration` | Enter §"Migration exit contract"; load `canonical-pipeline`. |
 | 6 | mode `marketplace fix` | Refuse: `[BLOCKED] wrong-agent — use marketplace-fixer`. |
 
+**Step 4 — Resolve the pipeline PROFILE before any migration/standardize fix.** Run `scripts/cpv_pipeline_profile.py`'s `resolve_pipeline_profile()` against the plugin root (the manifest `cpv.pipeline_profile` OVERRIDES; it fails safe to `standard`). It is a SELECTOR not a SUPPRESSOR — every drifted-file finding still fires; the profile only decides which canon to compare against, so NEVER hand-edit a non-standard plugin back to the plain standard shape to make a finding disappear. Branch the fix strategy:
+
+| Profile | Fix strategy |
+|---------|--------------|
+| **standard** | Current behavior — the loop + `fix-validation` recipes apply as-is. |
+| **remote-validation** | The plugin de-vendored the local CPV validator scripts on purpose — do NOT re-vendor them or "migrate" to the vendored shape; `publish.py` drives the remote `cpv-remote-validate` gate. |
+| **submodule-build** | The build sources live in a git submodule and `bin/` is shipped pre-built; `publish.py` is submodule-aware — a source change belongs IN the submodule, not the parent gitlink. Don't fix a submodule file from the parent tree. |
+| **binary-release** | The release workflow IS canonical — ensure it keeps SHA-pinned actions, a least-privilege build/release split, `SHA256SUMS`, and a build matrix; WARN if any is missing. Do NOT downgrade it to the standard `release.yml` template. |
+
 Situation 3 (v2.91.0 batch-fix): the orchestrator AUTO-DISPATCHES the batch protocol on seeing your line (the user no longer types `/cpv-batch-fix`), so it MUST include the case-sensitive `[BATCH_REQUIRED]` literal, `<N>` count, `safe-ceiling=<C>`, `plugin-root: <abs-path>` (so it plans without re-validating), and `Triage report: <abs-path>`:
 ```
 [BATCH_REQUIRED] 47 findings exceed single-agent capacity (safe-ceiling=20).

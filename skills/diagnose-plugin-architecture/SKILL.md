@@ -25,6 +25,16 @@ skills, commands, agents, hooks, MCP/LSP configs, monitors, `bin/`
 binaries, themes, output styles, settings). When a path's status is in
 doubt, the engine classifies it ship-always.
 
+**Profile note (submodule-build / binary-release plugins).** When the
+plugin's pipeline profile (`resolve_pipeline_profile()` in
+`scripts/cpv_pipeline_profile.py`) is `submodule-build` or
+`binary-release`, the build-source submodule and the committed `bin/`
+binaries are BY-DESIGN shipped artifacts — the diagnosis EXCLUDES them
+from strip/gitignore recommendations. So an `UNKNOWN`-category dir on
+such a plugin may simply be that build-source submodule or its
+build-output; surface it for manual review rather than treating it as
+bloat to strip.
+
 ## When to use
 
 Use this skill when the user wants to know which shipped files bloat an

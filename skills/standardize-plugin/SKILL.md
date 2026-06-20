@@ -12,6 +12,8 @@ user-invocable: false
 
 Audits existing plugin or marketplace repositories against CPV standards and auto-fixes missing files, workflows, and hooks.
 
+**Profile-aware.** The standardize flow first resolves the plugin's pipeline profile (`scripts/cpv_pipeline_profile.py`'s `resolve_pipeline_profile()` — manifest `cpv.pipeline_profile` overrides; fails safe to `standard`), then generates/expects the PROFILE-APPROPRIATE templates. Do NOT migrate a non-standard plugin to the plain standard shape: a **remote-validation** plugin keeps its remote `cpv-remote-validate` gate (no re-vendored validators), a **submodule-build** plugin keeps its build-source submodule + shipped `bin/` and submodule-aware `publish.py`, and a **binary-release** plugin keeps its SHA-pinned, least-privilege build/release workflow (SHA256SUMS + build matrix). The profile is a SELECTOR not a SUPPRESSOR — drift findings still fire against the profile's canon.
+
 ## Prerequisites
 
 - `uv` on PATH

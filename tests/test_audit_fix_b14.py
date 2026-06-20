@@ -58,6 +58,10 @@ def _extract_generated_publish_py() -> str:
         # v2.134.0 (#2): gen_publish_py now pins the CPV ref into the generated
         # publish.py, so the stub must expose the resolved ref attribute.
         cpv_ref_resolved = "v2.133.0"
+        # v2.137.0 (#137): gen_publish_py routes every CPV callsite through
+        # cpv_uvx_from_arg(p), which reads p.cpv_source ("git" = the historical
+        # from-source form). The stub must expose it or the template build raises.
+        cpv_source = "git"
 
     return gpr.gen_publish_py(_P())  # type: ignore[arg-type]
 

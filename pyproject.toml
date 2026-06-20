@@ -22,6 +22,18 @@ version = "2.136.1"
 description = "Comprehensive validation suite for Claude Code plugins, marketplaces, hooks, skills, and MCP servers"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Emasoft", email = "713559+Emasoft@users.noreply.github.com" }]
+keywords = ["claude", "claude-code", "plugin", "validation", "security", "skillaudit", "marketplace", "linter"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Security",
+    "Environment :: Console",
+]
 dependencies = [
     "mypy>=1.19.1",
     "pathspec>=0.12.1",
@@ -85,6 +97,11 @@ cpv-setup-branch-rules = "scripts.setup_branch_rules:main"
 branch-rules-install = "scripts.setup_branch_rules_generic:main"
 # Auth-surface status report (TRDD-b5e44619 Phase C — read-only)
 cpv-setup-auth = "scripts.cli:setup_auth"
+
+[project.urls]
+Homepage = "https://github.com/Emasoft/claude-plugins-validation"
+Repository = "https://github.com/Emasoft/claude-plugins-validation"
+Issues = "https://github.com/Emasoft/claude-plugins-validation/issues"
 
 [tool.ruff]
 line-length = 120

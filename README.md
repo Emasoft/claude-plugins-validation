@@ -216,6 +216,18 @@ That's it. `uvx` downloads CPV temporarily into an isolated environment, runs th
 
 The `--with pyyaml` flag ensures the YAML parser dependency is available.
 
+> **Faster path — install from PyPI (#137).** The `git+https://…` form above
+> always works, but on a cold `uvx` cache it builds CPV from source (the slow
+> first run). Once CPV is published to PyPI, drop the `git+…` source for a
+> **prebuilt wheel** — no source build, and `pyyaml` ships *in* the wheel so you
+> can omit `--with pyyaml`:
+> ```bash
+> uvx --from claude-plugins-validation cpv-remote-validate plugin /path/to/your-plugin
+> ```
+> _Maintainers:_ the one-time PyPI Trusted-Publishing setup is documented in
+> `.github/workflows/publish-pypi.yml`; after it, every GitHub Release
+> auto-publishes the wheel (OIDC, no stored token).
+
 ### The Remote Launcher
 
 `cpv-remote-validate` is the recommended way to validate external plugins. It wraps any CPV script with environment isolation so that the target plugin's local files (`pyproject.toml`, `.mypy.ini`, stale module copies) cannot interfere with validation.

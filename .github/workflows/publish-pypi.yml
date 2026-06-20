@@ -1,0 +1,67 @@
+# Publish the `claude-plugins-validation` wheel + sdist to PyPI on every GitHub
+# Release, via PyPI Trusted Publishing (OIDC) — NO stored token, NO secret.
+#
+# Resolves #137: once CPV is on PyPI, downstream consumers run
+#   uvx --from claude-plugins-validation cpv-remote-validate plugin .
+# and uvx fetches a PREBUILT wheel instead of building CPV from git source on a
+# cold cache (the >180 s / 12-20 min cold-start cliff that bit PSS v3.7.4).
+#
+# ── ONE-TIME MAINTAINER SETUP (the publish job is DORMANT until you do this) ──
+#   1. Add a Trusted Publisher (or "pending publisher") at
+#        https://pypi.org/manage/account/publishing/
+#      with EXACTLY:
+#        PyPI Project Name : claude-plugins-validation
+#        Owner             : Emasoft
+#        Repository name   : claude-plugins-validation
+#        Workflow name     : publish-pypi.yml
+#        Environment name  : pypi
+#   2. (recommended) create a GitHub Environment named `pypi` and protect it.
+#   3. Flip the switch — set the repo VARIABLE `PYPI_PUBLISH_ENABLED` to `true`
+#      (Settings → Secrets and variables → Actions → Variables), or run:
+#        gh variable set PYPI_PUBLISH_ENABLED --body true
+#   Until step 3 the publish job is SKIPPED (a clean neutral run, never a red
+#   failure), so the first Release after this workflow lands does NOT go red.
+#   After it, every published Release auto-publishes the wheel via OIDC — no
+#   stored token, ever.
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+# Least privilege: nothing by default; each job opts in to only what it needs.
+permissions: {}
+
+concurrency:
+  group: publish-pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pypi-publish:
+    name: Build + publish wheel (trusted publishing)
+    # Dormant until the maintainer sets repo variable PYPI_PUBLISH_ENABLED=true
+    # (see the setup block above). Skipped — a neutral run, never red — until
+    # then, so the first Release after this workflow lands does not go red.
+    if: ${{ vars.PYPI_PUBLISH_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/claude-plugins-validation
+    permissions:
+      contents: read      # actions/checkout
+      id-token: write     # OIDC token for PyPI Trusted Publishing — the ONLY extra privilege
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up uv
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+      - name: Build wheel + sdist
+        run: uv build
+      - name: Verify build artifacts exist
+        run: |
+          ls -1 dist/*.whl >/dev/null 2>&1 || { echo "no wheel built"; exit 1; }
+          ls -1 dist/*.tar.gz >/dev/null 2>&1 || { echo "no sdist built"; exit 1; }
+      - name: Publish to PyPI (OIDC, no token)
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
