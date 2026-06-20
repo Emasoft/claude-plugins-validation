@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.137.0` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.137.1` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
 | **scripts** | **118** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver; `cpv_fix_loop_state.py` deterministic full-history fix-loop oscillation detector) |
-| **test files** | **351** | `ls tests/test_*.py`; ~9848 tests |
+| **test files** | **352** | `ls tests/test_*.py`; ~9869 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,37 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.137.1 — canon-generator FP/correctness fixes (#138 / #139 / #140, INTEGRATOR field reports)**
+— three generated-pipeline bugs that broke downstream plugins' CI, all in `generate_plugin_repo.py`. Issue 140
+(CRITICAL): the canon `gen_ci_yml` / `gen_release_yml` set `CLAUDE_PRIVATE_USERNAMES` to the repo owner on the CPV
+validate step — SEMANTICALLY INVERTED (that env lists PRIVATE usernames), so CPV flagged every owner GitHub URL +
+the owner's git no-reply email as CRITICAL "private path leaked" (22 CRITICAL → the downstream CI Validate job
+failed under --strict). DROPPED the line from both generators (kept `PLUGIN_SKIP_GITHUB_INTEGRITY`); the public
+owner must never be in the private list, and a CI runner has no developer local-username to protect (the standalone
+validate.yml already omitted it and passed 0 CRITICAL). Issue 139: `_default_cpv_ref()` read
+`.claude-plugin/plugin.json` resolved RELATIVE TO THE GENERATOR FILE → OSError when CPV runs uvx/pip-INSTALLED
+(plugin.json absent from the package layout) → degraded to `_FALLBACK_CPV_REF = "main"`, but CPV's default branch
+is `master` (no `main` ref) → every `standardize`-generated plugin pinned `git+...@main` → `uvx --from git+...@main`
+404'd. FIXED: `_default_cpv_ref()` now tries `importlib.metadata.version("claude-plugins-validation")` FIRST (the
+installed-package path), then the in-repo plugin.json read, then the fallback — and `_FALLBACK_CPV_REF` flipped
+`main`→`master`; the v2.137.0 `--cpv-source pypi` path stays intact (still strips the leading `v` for the wheel
+form). Issue 138: the scaffolded `.mega-linter.yml` enabled `REPOSITORY_GITLEAKS` (gitleaks in repo mode = full git
+HISTORY), so a security-teaching plugin's example secrets in deleted/renamed/old commits failed the Lint job
+unfixably in the working tree; REMOVED it from `ENABLE_LINTERS` (a documenting comment remains so nobody re-adds
+it) — TruffleHog in publish.py already covers secrets with the public-info allowlist. Delegated to one opus agent +
+CENTRAL-VERIFIED through the real generators: the agent's issue-138 test checked the list ITEM, so my own substring
+probe first read a false "still present" (the documenting comment) — a residual-copy sweep + a dogfood check of
+CPV's OWN workflows (clean — consistent with CPV's own green CI) confirmed all three. ALSO propagated the #140 fix
+into the two canon SKILL references the fixer/standardize agents read to upgrade a plugin's pipeline
+(`skills/canonical-pipeline/references/pipeline-rules.md` + `skills/standardize-plugin/references/pipeline-rules.md`):
+both PRESCRIBED the inverted `CLAUDE_PRIVATE_USERNAMES: ${{ github.repository_owner }}` CI env as a rule the agents
+MUST emit, so an upgrade would have RE-INTRODUCED #140 even with the generator already fixed — both now prescribe the
+integrity-skip-only env and carry the WHY guardrail inline (the LOCAL `CLAUDE_PRIVATE_USERNAMES="$(whoami)"` scan
+idiom is a different, correct usage and is untouched). Re-pointed the two pre-existing
+`test_phase3_ci_failure_fixes.py` step-level env tests at the new contract (they asserted the now-removed key).
++21 two-sided tests; actionlint rc 0 on the emitted ci.yml + release.yml; ruff+mypy clean. No security gate relaxed;
+canon-correctness + FP reduction only. Closes #138 / #139 / #140.
 
 **v2.137.0 — canon-profiles completion (C2 binary-release recognition + scaffold + Piece D profile-awareness) + #137 PyPI-wheel publish capability**
 — THREE coherent pieces, every one SELECTOR-not-SUPPRESSOR (a profile/source declaration NEVER silences a

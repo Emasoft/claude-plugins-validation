@@ -145,17 +145,25 @@ def _validate_step(yml_text: str, job: str, name_prefix: str) -> dict:
 
 
 def test_ci_yml_validate_step_has_integrity_skip_env() -> None:
-    """ci.yml validate step sets PLUGIN_SKIP_GITHUB_INTEGRITY + private-usernames."""
+    """ci.yml validate step keeps PLUGIN_SKIP_GITHUB_INTEGRITY and (per #140) drops private-usernames.
+
+    #140: the step used to seed CLAUDE_PRIVATE_USERNAMES with the PUBLIC repo owner
+    — a semantic inversion (that env lists PRIVATE usernames), so CPV flagged every
+    github.com/<owner>/ URL + the owner no-reply email as a CRITICAL leak and the
+    downstream Validate job failed under --strict. The integrity-skip env STAYS (a CI
+    runner has no developer local-username to protect); the private-usernames env is
+    asserted ABSENT here so a re-introduction at the step level is caught.
+    """
     step = _validate_step(gen_ci_yml(_params()), "validate", "Run plugin validation")
     assert step["env"]["PLUGIN_SKIP_GITHUB_INTEGRITY"] == "1"
-    assert "github.repository_owner" in step["env"]["CLAUDE_PRIVATE_USERNAMES"]
+    assert "CLAUDE_PRIVATE_USERNAMES" not in step["env"]
 
 
 def test_release_yml_validate_step_has_integrity_skip_env() -> None:
-    """release.yml validate step sets PLUGIN_SKIP_GITHUB_INTEGRITY + private-usernames."""
+    """release.yml validate step keeps PLUGIN_SKIP_GITHUB_INTEGRITY and (per #140) drops private-usernames."""
     step = _validate_step(gen_release_yml(_params()), "release", "Run full plugin validation")
     assert step["env"]["PLUGIN_SKIP_GITHUB_INTEGRITY"] == "1"
-    assert "github.repository_owner" in step["env"]["CLAUDE_PRIVATE_USERNAMES"]
+    assert "CLAUDE_PRIVATE_USERNAMES" not in step["env"]
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ Usage:
 """
 
 import argparse
+import importlib.metadata
 import json
 import os
 import re
@@ -99,13 +100,18 @@ LANGUAGE_MANIFESTS: dict[str, str] = {
 }
 
 
-# Fallback CPV ref used only when this generator's own plugin.json cannot be
-# read (e.g. the script was vendored out of the CPV repo). Pinning to a tag —
-# rather than tracking the `git+https://…` HEAD — keeps the downstream UV cache
-# key stable so the cold CPV build is paid ONCE per tag, and stops every CPV
-# release from red-lighting all downstream CI with zero plugin changes
-# (root-cause #2 of the phase-3 CI-failure analysis).
-_FALLBACK_CPV_REF = "main"
+# Last-resort CPV ref used only when neither the installed-package version nor
+# this generator's own plugin.json can be read (e.g. the script was vendored out
+# of the CPV repo with no package metadata). It MUST be a ref that actually
+# exists on the CPV remote, or every `git+https://…@<ref>` / `uvx --from
+# …@<ref>` downstream callsite 404s ("ref not found"). CPV's default branch is
+# `master` (there is no `main` ref), so the fallback is `master` — NOT `main`
+# (issue #139, which 404'd `standardize` via uvx). A concrete version tag is
+# always preferred over this branch fallback (see _default_cpv_ref) because a
+# tag keeps the downstream UV cache key stable so the cold CPV build is paid
+# ONCE per tag, and stops every CPV release from red-lighting all downstream CI
+# with zero plugin changes (root-cause #2 of the phase-3 CI-failure analysis).
+_FALLBACK_CPV_REF = "master"
 
 
 def _default_cpv_ref() -> str:
@@ -119,21 +125,47 @@ def _default_cpv_ref() -> str:
     plugin's CI; the maintainer bumps the pin deliberately and re-runs CI to
     green.
 
-    The lookup walks up from this file (scripts/generate_plugin_repo.py) to the
-    repo root and reads ``.claude-plugin/plugin.json``. Any failure (missing
-    file, unreadable JSON, no version key) degrades to ``_FALLBACK_CPV_REF``
-    rather than raising — the generator must never crash because it could not
-    introspect its own version.
+    Resolution order (each attempt isolated so a failure cleanly tries the
+    next — the generator must never crash because it could not introspect its
+    own version):
+
+      1. ``importlib.metadata.version("claude-plugins-validation")`` — works
+         when CPV runs as a uvx/pip-installed PACKAGE (the layout in which
+         ``.claude-plugin/plugin.json`` is NOT present). Issue #139: without
+         this, the installed-package case fell straight through to the fallback,
+         which used to be the non-existent ``main`` ref → every standardized
+         plugin pinned ``@main`` → ``uvx --from …@main`` 404'd.
+      2. ``.claude-plugin/plugin.json`` ``version`` — the in-repo case (running
+         the generator from a CPV checkout). The lookup walks up from this file
+         (scripts/generate_plugin_repo.py) to the repo root.
+      3. ``_FALLBACK_CPV_REF`` (``master``) — when neither source is readable.
+
+    The returned version is always prefixed with a leading ``v`` (e.g.
+    ``v2.137.0``); the fallback branch ref is returned verbatim. The ``pypi``
+    CPV source strips the leading ``v`` again for the wheel form (see
+    ``cpv_uvx_from_arg``), so the prefix convention is safe for both sources.
     """
+    # 1. Installed-package metadata (pip/uvx layout — no plugin.json on disk).
+    try:
+        version = importlib.metadata.version("claude-plugins-validation")
+    except importlib.metadata.PackageNotFoundError:
+        version = None
+    if isinstance(version, str) and version.strip():
+        version = version.strip()
+        return version if version.startswith("v") else f"v{version}"
+
+    # 2. In-repo manifest (running from a CPV checkout).
     try:
         manifest = Path(__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json"
         version = json.loads(manifest.read_text(encoding="utf-8")).get("version")
     except (OSError, ValueError, json.JSONDecodeError):
-        return _FALLBACK_CPV_REF
-    if not isinstance(version, str) or not version.strip():
-        return _FALLBACK_CPV_REF
-    version = version.strip()
-    return version if version.startswith("v") else f"v{version}"
+        version = None
+    if isinstance(version, str) and version.strip():
+        version = version.strip()
+        return version if version.startswith("v") else f"v{version}"
+
+    # 3. Last resort — a ref that actually exists on the CPV remote.
+    return _FALLBACK_CPV_REF
 
 
 # Recognized CPV distribution sources (issue #137). "git" is the historical
@@ -3733,11 +3765,14 @@ jobs:
           # Root-cause #4: on a fresh-checkout runner the local self-hash
           # manifest already matches the code, so CPV's GitHub-anchored
           # integrity fetch (a live urlopen to raw.githubusercontent.com) adds
-          # no security but real latency/hang risk. Skip it — and tell CPV the
-          # repo owner so its private-path heuristics treat the org name as
-          # public, matching the project's own canonical validate command.
+          # no security but real latency/hang risk. Skip it.
+          # Issue #140: this step deliberately does NOT pass the repo owner into
+          # CPV's private-usernames allowlist. That allowlist is the set of names
+          # to treat as PRIVATE, so seeding it with the PUBLIC owner makes CPV
+          # flag every github.com/<owner>/ URL + the owner no-reply email as a
+          # CRITICAL private-path leak, red-lighting --strict CI. In CI there is
+          # no developer local-username to protect; the public owner is public.
           PLUGIN_SKIP_GITHUB_INTEGRITY: "1"
-          CLAUDE_PRIVATE_USERNAMES: "${{{{ github.repository_owner }}}}"
         run: |
           set +e
           uvx --from {cpv_from} \\
@@ -3922,11 +3957,14 @@ jobs:
         # (no security check is weakened).
         env:
           # Root-cause #4: skip the GitHub-anchored integrity fetch on a
-          # fresh-checkout runner (the local manifest already matches the code)
-          # and pass the repo owner so private-path heuristics treat it as
-          # public — matching the project's canonical validate command.
+          # fresh-checkout runner (the local manifest already matches the code).
+          # Issue #140: this step deliberately does NOT pass the repo owner into
+          # CPV's private-usernames allowlist — that allowlist is the set of
+          # names to treat as PRIVATE, so seeding it with the PUBLIC owner makes
+          # CPV flag every github.com/<owner>/ URL + the owner no-reply email as
+          # a CRITICAL private-path leak, red-lighting --strict CI. In CI there
+          # is no developer local-username to protect; the public owner is public.
           PLUGIN_SKIP_GITHUB_INTEGRITY: "1"
-          CLAUDE_PRIVATE_USERNAMES: "${{{{ github.repository_owner }}}}"
         run: |
           set +e
           uvx --from {cpv_from} \
@@ -4088,8 +4126,13 @@ ENABLE_LINTERS:
   - SPELL_CSPELL
   - COPYPASTE_JSCPD
   - REPOSITORY_CHECKOV
-  - REPOSITORY_GITLEAKS
   - REPOSITORY_TRIVY
+
+# Issue #138: REPOSITORY_GITLEAKS is intentionally NOT enabled. MegaLinter runs
+# gitleaks in repository mode (full git HISTORY), so a security-teaching plugin
+# with example secrets in docs — even in deleted/renamed/old commits — fails the
+# Lint job on FPs that are unfixable in the working tree. Secrets are already
+# covered by publish.py's TruffleHog gate (with a public-info allowlist).
 
 # Exclude paths — single-quoted YAML scalar so regex \\. is read literally
 # (double-quoted YAML treats \\. as an invalid escape and yamllint rejects it).
