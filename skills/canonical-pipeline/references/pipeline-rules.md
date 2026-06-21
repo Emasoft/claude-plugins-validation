@@ -161,6 +161,31 @@ The `.mega-linter.yml` config must include:
 - `REPOSITORY_CHECKOV_ARGUMENTS: "--skip-check CKV2_GHA_1"` — flags missing top-level workflow permissions, but we set permissions per-job
 - `.gitignore` must include `megalinter-reports/` and `mega-linter.log`
 
+## Copy-paste Gate Parity: `.jscpd.json` (issue #143)
+
+The local pre-push gate (`publish.py --gate`) now runs a **jscpd copy-paste
+check at parity with CI's Mega-Linter `COPYPASTE_JSCPD`** — so duplication over
+the threshold is caught LOCALLY, before the version bump / tag / push / release,
+not only on CI after the release is already tagged (the pre-#143 failure mode:
+`publish.py` exits 0, tags + releases, then the CI Lint job fails on jscpd).
+
+- **`.jscpd.json` is the single source of truth** for the threshold and the
+  ignore globs, read by BOTH the local gate and CI (jscpd auto-discovers
+  `.jscpd.json` at the repo root). Its `threshold: 5` matches
+  `COPYPASTE_JSCPD_ARGUMENTS: "--threshold 5"`, and its `ignore` globs mirror
+  `.mega-linter.yml`'s `FILTER_REGEX_EXCLUDE` (the `*_dev/` submodules,
+  `**/fixtures/**`, vendored trees). Tune duplication policy in ONE place and
+  both gates stay in lock-step.
+- **Graceful degradation.** The local gate needs Node/npx to run jscpd. If
+  neither is available it DEGRADES to a non-blocking WARNING and never
+  false-blocks a push — but CI's Mega-Linter still enforces the check, so a
+  green local gate does NOT guarantee green CI for the copy-paste dimension
+  unless Node/npx is installed locally. Install Node/npx for full local parity.
+- **Provisioning on upgrade.** `standardize --fix` CREATES `.jscpd.json` (the
+  canonical threshold-5 config) when ABSENT and LEAVES an existing one untouched
+  (only `--force-templates`, which refreshes publish.py, overwrites it); the
+  audit path only WARNs about a missing `.jscpd.json` or a stale `publish.py`.
+
 ## Common Fixes Reference
 
 | Issue | Fix |
