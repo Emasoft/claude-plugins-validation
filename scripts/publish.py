@@ -381,7 +381,15 @@ def run(
     threads the bypass env through this helper.
     """
     print(f"  $ {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=600, env=env)
+    # A subprocess that runs past `timeout` raises TimeoutExpired. Without
+    # this guard it would surface as a raw traceback (ugly, and not the
+    # fail-fast contract the rest of the gate uses). Catch it and exit 1 with
+    # the same styled one-line message the non-zero-exit path prints.
+    try:
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=600, env=env)
+    except subprocess.TimeoutExpired:
+        print(f"\n{RED}✗ Command timed out after 600s: {' '.join(cmd)}{NC}", file=sys.stderr)
+        sys.exit(1)
     _print_result(result, cmd, check)
     return result
 
@@ -495,6 +503,25 @@ def update_plugin_json(plugin_root: Path, new_version: str) -> tuple[bool, str]:
         return False, f"plugin.json error: {e}"
 
 
+def _project_block(content: str) -> tuple[int, int] | None:
+    """Char span of the ``[project]`` table body, or None if absent.
+
+    The project version MUST be read/written inside the ``[project]`` table.
+    A line-anchored first-match for ``version = "..."`` is wrong when a
+    ``[tool.X]`` table carrying its OWN top-level ``version`` precedes
+    ``[project]`` (e.g. ``[tool.commitizen]``). When no ``[project]`` table
+    exists (poetry-style layouts keep the version under ``[tool.poetry]``),
+    return None so callers fall back to the whole-file first-match — keeping
+    today's behavior for those files exactly.
+    """
+    m = re.search(r'^\[project\]\s*$', content, re.MULTILINE)
+    if not m:
+        return None
+    start = m.end()
+    nxt = re.search(r'^\[', content[start:], re.MULTILINE)
+    return start, (start + nxt.start() if nxt else len(content))
+
+
 def update_pyproject_toml(plugin_root: Path, new_version: str) -> tuple[bool, str]:
     """Update version field in pyproject.toml."""
     path = plugin_root / "pyproject.toml"
@@ -510,7 +537,17 @@ def update_pyproject_toml(plugin_root: Path, new_version: str) -> tuple[bool, st
             old_version = m.group(2)
             return f"{m.group(1)}{new_version}{m.group(3)}"
 
-        new_content, count = re.subn(pattern, _replace, content, flags=re.MULTILINE)
+        block = _project_block(content)
+        if block is not None:
+            # Substitute ONLY within the [project] table body, then splice the
+            # result back, so a [tool.X].version above [project] is never hit.
+            lo, hi = block
+            replaced, count = re.subn(pattern, _replace, content[lo:hi], flags=re.MULTILINE)
+            new_content = content[:lo] + replaced + content[hi:]
+        else:
+            # No [project] table (e.g. poetry) — preserve the legacy
+            # whole-file first-match behavior.
+            new_content, count = re.subn(pattern, _replace, content, flags=re.MULTILINE)
         if count == 0:
             return True, "pyproject.toml has no version field (skipped)"
         path.write_text(new_content, encoding="utf-8")
@@ -568,11 +605,15 @@ def check_version_consistency(plugin_root: Path) -> tuple[bool, str]:
         except (json.JSONDecodeError, OSError) as e:
             print(f"Warning: could not read version from plugin.json: {e}")
 
-    # pyproject.toml
+    # pyproject.toml — read from the [project] table body when present, else
+    # fall back to the whole-file first-match (poetry-style layouts).
     pp = plugin_root / "pyproject.toml"
     if pp.exists():
         try:
-            m = re.search(r'^version\s*=\s*["\']([^"\']+)["\']', pp.read_text(encoding="utf-8"), re.MULTILINE)
+            pp_text = pp.read_text(encoding="utf-8")
+            block = _project_block(pp_text)
+            haystack = pp_text[block[0]:block[1]] if block is not None else pp_text
+            m = re.search(r'^version\s*=\s*["\']([^"\']+)["\']', haystack, re.MULTILINE)
             if m:
                 versions["pyproject.toml"] = m.group(1)
         except (json.JSONDecodeError, OSError) as e:

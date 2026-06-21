@@ -1641,8 +1641,15 @@ def run(
 ) -> subprocess.CompletedProcess[str]:
     """Run a command, stream output, fail-fast on error."""
     cprint(f"  {BLUE}$ {' '.join(cmd)}{NC}")
-    result = subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True,
-                            capture_output=capture, timeout=300)
+    # A subprocess exceeding `timeout` raises TimeoutExpired; without this it
+    # would die with a raw traceback instead of the styled fail-fast message
+    # every other failure path uses. Catch it and exit 1.
+    try:
+        result = subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True,
+                                capture_output=capture, timeout=300)
+    except subprocess.TimeoutExpired:
+        cprint(f"  {RED}Command timed out after 300s: {' '.join(cmd)}{NC}")
+        sys.exit(1)
     if check and result.returncode != 0:
         cprint(f"  {RED}Command failed (exit {result.returncode}){NC}")
         sys.exit(result.returncode)
@@ -1839,6 +1846,22 @@ def update_self_marketplace_json(root: Path, new_ver: str) -> tuple[bool, str]:
         return True, f"marketplace.json (metadata + self-entry) -> {new_ver}"
     return True, f"marketplace.json (metadata only — no self-entry matched) -> {new_ver}"
 
+def _project_block(content: str) -> tuple[int, int] | None:
+    """Char span of the [project] table body, or None if absent.
+
+    The project version lives in the [project] table. A whole-file first-match
+    for `version = "..."` writes the WRONG version when a [tool.X] table with
+    its own top-level `version` (e.g. [tool.commitizen]) precedes [project].
+    When there is no [project] table (poetry keeps it under [tool.poetry]),
+    return None so the caller falls back to the legacy whole-file first-match.
+    """
+    m = re.search(r'^\[project\]\s*$', content, re.MULTILINE)
+    if not m:
+        return None
+    start = m.end()
+    nxt = re.search(r'^\[', content[start:], re.MULTILINE)
+    return start, (start + nxt.start() if nxt else len(content))
+
 def update_pyproject_toml(root: Path, new_ver: str) -> tuple[bool, str]:
     """Write version to pyproject.toml."""
     pp = root / "pyproject.toml"
@@ -1846,13 +1869,25 @@ def update_pyproject_toml(root: Path, new_ver: str) -> tuple[bool, str]:
         return False, "pyproject.toml not found"
     try:
         content = pp.read_text(encoding="utf-8")
-        updated = re.sub(
-            r'^(version\s*=\s*")[^"]*(")',
-            rf'\g<1>{new_ver}\2',
-            content,
-            count=1,
-            flags=re.MULTILINE,
-        )
+        block = _project_block(content)
+        if block is not None:
+            lo, hi = block
+            replaced = re.sub(
+                r'^(version\s*=\s*")[^"]*(")',
+                rf'\g<1>{new_ver}\2',
+                content[lo:hi],
+                count=1,
+                flags=re.MULTILINE,
+            )
+            updated = content[:lo] + replaced + content[hi:]
+        else:
+            updated = re.sub(
+                r'^(version\s*=\s*")[^"]*(")',
+                rf'\g<1>{new_ver}\2',
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
         if updated == content:
             return False, "pyproject.toml: version field not found"
         pp.write_text(updated, encoding="utf-8")
@@ -1915,10 +1950,14 @@ def check_version_consistency(root: Path) -> tuple[bool, str]:
         except (json.JSONDecodeError, OSError):
             versions["marketplace.json"] = None
 
-    # pyproject.toml
+    # pyproject.toml — read from the [project] table body when present, else
+    # fall back to the whole-file first-match (poetry-style layouts).
     pp = root / "pyproject.toml"
     if pp.is_file():
-        m = re.search(r'^version\s*=\s*"([^"]*)"', pp.read_text(encoding="utf-8"), re.MULTILINE)
+        pp_text = pp.read_text(encoding="utf-8")
+        blk = _project_block(pp_text)
+        hay = pp_text[blk[0]:blk[1]] if blk is not None else pp_text
+        m = re.search(r'^version\s*=\s*"([^"]*)"', hay, re.MULTILINE)
         versions["pyproject.toml"] = m.group(1) if m else None
 
     found = {k: v for k, v in versions.items() if v is not None}
