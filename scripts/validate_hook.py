@@ -138,8 +138,8 @@ COMMON_TOOL_NAMES = {
     "AskUserQuestion",
     "PowerShell",  # v2.1.84 — Windows opt-in preview
     "SendMessage",  # Agent teams — message teammates or resume subagents
-    "TeamCreate",  # Agent teams
-    "TeamDelete",  # Agent teams
+    # TeamCreate/TeamDelete were removed in v2.1.178 (no longer in tools-reference);
+    # SendMessage is the only surviving agent-team tool.
     "ListMcpResourcesTool",
     "ReadMcpResourceTool",
 }
@@ -1140,6 +1140,7 @@ def extract_script_paths(
     command: str,
     plugin_root: Path | None,
     malformed_out: list[str] | None = None,
+    args: list[str] | None = None,
 ) -> list[ScriptRef]:
     """Extract every script reference from a hook command, with invocation_mode.
 
@@ -1155,11 +1156,29 @@ def extract_script_paths(
     unbalanced-quote commands produce ambiguous parses that can hide scripts
     from lint coverage.
 
+    ``args`` is the v2.1.139 exec-form argv vector: in exec form the hook is
+    ``{"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/x.js", "--fix"]}``
+    — i.e. the SCRIPT to lint lives in ``args[0]``, NOT inside ``command``.
+    A pure ``command``-string scan therefore never sees it and the exec-form
+    hook would evade script-lint coverage. When ``args`` is supplied, we fold
+    it into the effective command (``command`` + the exec-form argv) BEFORE
+    tokenizing, so the same interpreter/direct-invocation extraction recognizes
+    the args-referenced script. ``shlex.join`` quotes each token because the
+    exec-form argv is literal (no shell parsing), so an arg containing spaces
+    survives intact instead of being mis-split. ``args=None`` (the default)
+    leaves the legacy shell-form parsing byte-identical — this only ADDS
+    coverage, it never changes how a plain ``command`` string is handled.
+
     The new canonical API — prefer this over extract_script_path which is
     retained for backwards compatibility.
     """
+    effective_command = command
+    if args:
+        # Exec form: append the literal argv so the script in args[0] is scanned.
+        joined_args = shlex.join(str(a) for a in args)
+        effective_command = f"{command} {joined_args}".strip() if command else joined_args
     refs: list[ScriptRef] = []
-    for original_tokens in _tokenize_hook_command(command, malformed_out=malformed_out):
+    for original_tokens in _tokenize_hook_command(effective_command, malformed_out=malformed_out):
         if not original_tokens:
             continue
         # Strip leading env-var-assignment tokens: `FOO=bar python3 foo.py`
@@ -2568,7 +2587,20 @@ def validate_command_hook(
     # silent fallback would let an attacker-authored hook smuggle a script
     # past lint coverage via a deliberately malformed quote.
     malformed_parts: list[str] = []
-    refs = extract_script_paths(command, plugin_root, malformed_out=malformed_parts)
+    # In exec form the SCRIPT to lint lives in ``args`` (e.g. command="node",
+    # args=["${CLAUDE_PLUGIN_ROOT}/x.js"]), not in ``command``. Pass the RAW
+    # command string plus the exec-form ``args`` to the extractor so the
+    # args-referenced script is lint-scanned. We pass the raw command (not the
+    # synthesized command-plus-args string used by the portability checks above)
+    # so the args are not folded in twice. For the args-only legacy form the raw
+    # command is empty and ``args`` carries the whole argv (argv[0] is the exe).
+    extract_command = hook["command"] if has_command else ""
+    refs = extract_script_paths(
+        extract_command,
+        plugin_root,
+        malformed_out=malformed_parts,
+        args=args_val,
+    )
     for malformed in malformed_parts:
         report.major(
             f"Hook command simple-command portion is unparseable (likely unbalanced quote): "

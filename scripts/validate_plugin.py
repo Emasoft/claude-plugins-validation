@@ -1180,6 +1180,7 @@ def validate_manifest(
         "repository",
         "license",
         "keywords",
+        "displayName",  # v2.1.143 — human-readable name shown in the /plugin picker; falls back to `name` when omitted, not used for namespacing
         "commands",
         "agents",
         "skills",

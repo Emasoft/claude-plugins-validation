@@ -140,6 +140,7 @@ REQUIRED_PLUGIN_FIELDS = {"name", "source"}
 # the "unknown field" branch (validate_marketplace.py:520-523).
 OPTIONAL_PLUGIN_FIELDS = {
     "version",
+    "displayName",  # v2.1.143 — human-readable UI name; falls back to `name`
     "description",
     "source",
     "path",
@@ -218,17 +219,25 @@ _KNOWN_MARKETPLACE_ENTRY_FIELDS: frozenset[str] = frozenset(REQUIRED_PLUGIN_FIEL
 # RC-MKPL-UNKNOWN-SOURCE-FIELD.
 #
 # `source` is included in every set because it is the discriminator itself.
-# `ref` is included in `github`/`git`/`git-subdir` because the spec allows
-# pinning to a ref/tag/sha. `subdir` is the canonical sub-field for
-# `git-subdir`; `path` is accepted as a one-release-compat alias because
+# `ref` AND `sha` are included on `github`/`url`/`git`/`git-subdir` because the
+# spec (plugin-marketplaces.md "Plugin sources" per-source tables) gives each of
+# these source types BOTH an optional `ref` (branch/tag) and an optional `sha`
+# (full 40-char commit pin — the recommended deletion-safe pin; when both are
+# set `sha` is the effective pin). `validate_plugin_source` ALREADY shape-checks
+# `sha` (40-hex) below, so omitting it here would self-contradictorily MAJOR a
+# valid commit-pinned source — the FP this change fixes. `subdir` is the
+# canonical CPV sub-field for `git`/`git-subdir`; `path` is accepted as a
+# one-release-compat alias (the doc settled on `path` for `git-subdir`) because
 # pre-v2.81 docs used both names interchangeably.
 _KNOWN_SOURCE_FIELDS_BY_TYPE: dict[str, frozenset[str]] = {
     # `skipLfs` (v2.1.153) skips Git LFS downloads during clone/update — github + git sources only.
-    "github": frozenset({"source", "repo", "ref", "skipLfs"}),
-    "url": frozenset({"source", "url"}),
-    "npm": frozenset({"source", "package", "version"}),
-    "git": frozenset({"source", "url", "ref", "subdir", "skipLfs"}),
-    "git-subdir": frozenset({"source", "url", "subdir", "ref", "path"}),
+    "github": frozenset({"source", "repo", "ref", "sha", "skipLfs"}),
+    "url": frozenset({"source", "url", "ref", "sha"}),
+    # `registry` (per plugin-marketplaces.md "npm packages" table) pins a custom
+    # npm-registry URL; omitting it MAJORed a valid private-registry npm plugin.
+    "npm": frozenset({"source", "package", "version", "registry"}),
+    "git": frozenset({"source", "url", "ref", "sha", "subdir", "skipLfs"}),
+    "git-subdir": frozenset({"source", "url", "subdir", "ref", "sha", "path"}),
     "directory": frozenset({"source", "path"}),
     # "relative-path" is the bare string form ("./path") — never reached via
     # a dict-shaped source — listed here so callers can reference the type.
@@ -326,16 +335,25 @@ def _validate_known_source_subfields(
     return results
 
 
-# Reserved marketplace names that cannot be used
+# Reserved marketplace names that cannot be used.
+# Per plugin-marketplaces.md:164 (current). `claude-community` is also the
+# install alias for the community marketplace in discover-plugins.md, so it is
+# genuinely reserved.
 RESERVED_MARKETPLACE_NAMES = {
     "claude-code-marketplace",
     "claude-code-plugins",
     "claude-plugins-official",
+    "claude-plugins-community",
+    "claude-community",
     "anthropic-marketplace",
     "anthropic-plugins",
     "agent-skills",
+    "anthropic-agent-skills",
     "knowledge-work-plugins",
     "life-sciences",
+    "claude-for-legal",
+    "claude-for-financial-services",
+    "financial-services-plugins",
 }
 
 # Impersonation prefix patterns — names that LOOK like official Anthropic
