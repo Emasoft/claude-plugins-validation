@@ -37,7 +37,7 @@ CHECKLIST_FILE = REPO_ROOT / "references" / "canonical-pipeline-migration-checkl
 
 
 def test_checklist_reference_file_exists() -> None:
-    """The 82-check checklist file MUST exist — the agent body links to it."""
+    """The 87-check checklist file MUST exist — the agent body links to it."""
     assert CHECKLIST_FILE.exists(), (
         f"Checklist not found at {CHECKLIST_FILE} — agent migration contract "
         f"references this file by absolute path. Recreate it before the agent "
@@ -56,13 +56,13 @@ def test_plugin_fixer_agent_file_exists() -> None:
 def test_agent_references_canonical_pipeline_migration_checklist() -> None:
     """Agent body MUST explicitly reference references/canonical-pipeline-migration-checklist.md.
 
-    Without this reference, the agent has no way to find the 82-check
+    Without this reference, the agent has no way to find the 87-check
     matrix, and the migration contract would silently revert to the old
     validator-only gate.
     """
     body = AGENT_FILE.read_text()
     assert "canonical-pipeline-migration-checklist.md" in body, (
-        "agents/plugin-fixer.md must reference the 82-check checklist "
+        "agents/plugin-fixer.md must reference the 87-check checklist "
         "(references/canonical-pipeline-migration-checklist.md) — without "
         "this link the agent cannot locate the post-migration verification "
         "matrix and silently regresses to the legacy validator-only gate."
@@ -86,7 +86,7 @@ def test_agent_runs_all_82_checks_via_run_all_checks() -> None:
     body = AGENT_FILE.read_text()
     assert "run_all_checks" in body, (
         "agents/plugin-fixer.md must invoke run_all_checks (the bash "
-        "function that executes the 82-check matrix from "
+        "function that executes the 87-check matrix from "
         "canonical-pipeline-migration-checklist.md and emits a "
         "Unicode-bordered Markdown table)."
     )
@@ -253,23 +253,23 @@ def test_deleted_cpv_upgrade_plugin_command_stays_deleted() -> None:
 
 def test_agent_description_warns_about_total_time() -> None:
     """plugin-fixer.md description MUST tell user about the 10-15 min time budget
-    (or reference the 82-check matrix, which implies the same)."""
+    (or reference the 87-check matrix, which implies the same)."""
     body = AGENT_FILE.read_text()
-    has_time_hint = bool(re.search(r"10-15\s*min|10-15\s*minute|82-check", body, re.IGNORECASE))
+    has_time_hint = bool(re.search(r"10-15\s*min|10-15\s*minute|87-check", body, re.IGNORECASE))
     assert has_time_hint, (
         "agents/plugin-fixer.md must tell the user (via its description or "
-        "body) that the migration contract runs the 82-check matrix AND a "
+        "body) that the migration contract runs the 87-check matrix AND a "
         "real publish + CI watch (total time 10-15 minutes) — without this "
         "hint the user might abort thinking the agent hung. v2.90.0 moved "
         "this responsibility from the deleted cpv-upgrade-plugin command."
     )
 
 
-def test_agent_mentions_82_check_matrix() -> None:
-    """plugin-fixer.md MUST mention the 82-check Pre-completion verification matrix."""
+def test_agent_mentions_87_check_matrix() -> None:
+    """plugin-fixer.md MUST mention the 87-check Pre-completion verification matrix."""
     body = AGENT_FILE.read_text()
-    assert "82" in body, (
-        "agents/plugin-fixer.md must reference '82' (the check count) so "
+    assert "87" in body, (
+        "agents/plugin-fixer.md must reference '87' (the check count) so "
         "users know what they are signing up for. v2.90.0 moved this "
         "responsibility from the deleted cpv-upgrade-plugin command."
     )
@@ -293,20 +293,20 @@ def test_agent_mentions_real_publish_and_ci_watch() -> None:
 
 
 def test_canonical_pipeline_skill_links_checklist() -> None:
-    """canonical-pipeline SKILL.md MUST link to the 82-check checklist."""
+    """canonical-pipeline SKILL.md MUST link to the 87-check checklist."""
     body = CANONICAL_PIPELINE_SKILL.read_text()
     assert "canonical-pipeline-migration-checklist.md" in body, (
-        "skills/canonical-pipeline/SKILL.md must link to the 82-check "
+        "skills/canonical-pipeline/SKILL.md must link to the 87-check "
         "checklist — the skill is loaded by plugin-fixer for migration "
         "runs and must surface the same exit contract."
     )
 
 
 def test_fix_validation_skill_links_checklist() -> None:
-    """fix-validation SKILL.md MUST link to the 82-check checklist."""
+    """fix-validation SKILL.md MUST link to the 87-check checklist."""
     body = FIX_VALIDATION_SKILL.read_text()
     assert "canonical-pipeline-migration-checklist.md" in body, (
-        "skills/fix-validation/SKILL.md must link to the 82-check checklist "
+        "skills/fix-validation/SKILL.md must link to the 87-check checklist "
         "— the skill is loaded by plugin-fixer for migration runs and must "
         "surface the same exit contract."
     )
@@ -315,7 +315,7 @@ def test_fix_validation_skill_links_checklist() -> None:
 def test_iterative_fix_loop_describes_migration_extra_steps() -> None:
     """iterative-fix-loop.md MUST describe the migration-only extra steps (7c, 7d)."""
     body = ITERATIVE_FIX_LOOP.read_text()
-    assert re.search(r"run_all_checks|82-check|Pre-completion verification", body), (
+    assert re.search(r"run_all_checks|87-check|Pre-completion verification", body), (
         "skills/fix-validation/references/iterative-fix-loop.md must "
         "describe the migration-only extra steps (7c run_all_checks, 7d "
         "real publish + gh run watch). Without this, a fixer agent that "
@@ -324,13 +324,13 @@ def test_iterative_fix_loop_describes_migration_extra_steps() -> None:
 
 
 def test_standardize_plugin_skill_mentions_82_check_matrix() -> None:
-    """standardize-plugin SKILL.md MUST mention the 82-check matrix in its checklist."""
+    """standardize-plugin SKILL.md MUST mention the 87-check matrix in its checklist."""
     body = STANDARDIZE_PLUGIN_SKILL.read_text()
     has_checklist_ref = (
-        "canonical-pipeline-migration-checklist" in body or "82-check matrix" in body or "82 check" in body
+        "canonical-pipeline-migration-checklist" in body or "87-check matrix" in body
     )
     assert has_checklist_ref, (
-        "skills/standardize-plugin/SKILL.md must mention the 82-check "
+        "skills/standardize-plugin/SKILL.md must mention the 87-check "
         "matrix in its tick-box checklist — when this skill is invoked "
         "from a /cpv-upgrade-plugin path, the post-fix verification step "
         "must be visible."

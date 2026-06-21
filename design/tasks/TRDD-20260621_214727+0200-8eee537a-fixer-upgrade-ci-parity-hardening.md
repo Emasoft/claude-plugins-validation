@@ -29,11 +29,13 @@ implementation-commits: []
 **Current state:** Audit DONE (reports/fixer-upgrade-audit/20260621_214106+0200-gap-analysis.md), 8 grounded
 gaps. **PHASE 1 DONE + shipping in v2.140.0** — `scripts/cpv_ci_parity_checks.py` (5 CIP static checks) +
 `scripts/cpv_ci_preflight.py` + the `cpv-remote-validate ci-preflight <path>` subcommand; 34 two-sided tests;
-`ci-preflight .` on CPV's own tree = EXIT 0 (no false-fire); ruff + mypy clean. **PHASE 2 (agent wiring — gaps
-1,3-8) PENDING → ships next as v2.141.0:** wire CHECK-83..87 into the migration matrix (calls cpv_ci_parity_checks);
-marketplace-fixer green-CI loop (gap 3); cache-optimizer loop-state (gap 4); plugin-fixer non-migration preflight
-gate (gap 5); markdown-poison guardrail (gap 6); devitalizer/leaks FM1 cause pointer (gap 7); fix-validation §6
-(gap 8). User directive: "improve the fixer agents and the upgrade agents."
+`ci-preflight .` on CPV's own tree = EXIT 0 (no false-fire); ruff + mypy clean. **PHASE 2 DONE — shipping v2.141.0**
+(3 file-disjoint opus wiring agents W1/W2/W3 + a naming-consistency sweep). All 8 gaps closed: CHECK-83..87 wired
+into the migration matrix (82→87 checks / 17 categories, run via `cpv-remote-validate ci-preflight`); marketplace-fixer
+green-CI loop (gap 3); cache-optimizer loop-state (gap 4); plugin-fixer non-migration preflight gate (gap 5);
+markdown-poison guardrail in plugin-fixer + standardize-SKILL (gap 6); devitalizer/leaks FM1 cause pointer (gap 7);
+fix-validation §6 (gap 8). CENTRAL-VERIFIED: self-validate --strict 0/0/0/0; contract + architecture-lock tests green.
+User directive: "improve the fixer agents and the upgrade agents."
 
 **Root cause (FM1):** the script layer (`generate_plugin_repo.py`, `standardize_plugin.py`) already
 implements every #137-143 fix, but the AGENT/SKILL verification layer declares DONE on

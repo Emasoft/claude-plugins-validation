@@ -24,18 +24,18 @@ contract inline and points here for the long step-by-step procedures.
 
 **Mandatory for every canonical-pipeline migration run.** Skipping any step
 violates the Migration exit contract ([issue #21 ask #1](https://github.com/Emasoft/claude-plugins-validation/issues/21)).
-The authoritative reference is the 82-check matrix in
+The authoritative reference is the 87-check matrix in
 [`references/canonical-pipeline-migration-checklist.md`](canonical-pipeline-migration-checklist.md)
-— 82 checks across 16 categories (workflow YAML integrity, Python source
+— 87 checks across 17 categories (workflow YAML integrity, Python source
 quality, hook shape, publish.py, plugin.json, .gitignore, CPV self-validate,
 canonical-template parity, tests, git state, smoke-test publish, marketplace,
-notification chain, hooks.json, MCP servers, docs & changelog). Read that file
+notification chain, hooks.json, MCP servers, docs & changelog, CI-parity). Read that file
 in full before running step 7c the first time on any plugin. Do NOT reproduce
 the matrix here or in the agent body — it lives in that one file only.
 
 Run these, in order, with `cwd` = plugin root:
 
-1. **Run the 82-check matrix.** Extract `run_all_checks` from the checklist
+1. **Run the 87-check matrix.** Extract `run_all_checks` from the checklist
    (`awk '/^### run_all_checks$/,/^### END_RUN_ALL$/' "$CHECKLIST" | sed '1d;$d' > /tmp/run_all_checks.sh`),
    `source` it (plus the plugin's `run_migration_checks.sh` under `scripts/`
    if present), then `run_all_checks "$PWD"`. It writes a Unicode-bordered

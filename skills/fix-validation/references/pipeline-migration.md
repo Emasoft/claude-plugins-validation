@@ -9,6 +9,7 @@
 - [§3 — Cross-platform Python — bash to Python, os.path to pathlib](#3--cross-platform-python-bash--python-ospath--pathlib)
 - [§4 — Make publish.py idempotent — interrupted-publish recovery](#4--make-publishpy-idempotent-interrupted-publish-recovery)
 - [§5 — Sanitize every script-input parameter against injection](#5--sanitize-every-script-input-parameter-against-injection)
+- [§6 — #137-143 CI-parity defects](#6--137-143-ci-parity-defects)
 
 ---
 
@@ -611,6 +612,52 @@ uv run python scripts/validate_plugin.py . --strict
 
 # (Future) CPV will gain a dedicated rule that flags unvalidated
 # argparse-to-subprocess flows.
+```
+
+---
+
+## §6 — #137-143 CI-parity defects
+
+These five defects all share ONE failure shape: the upgrade passes
+`validate_plugin --strict` LOCALLY but FAILS the adopting plugin's GitHub
+CI — because `validate_plugin` does NOT run the jscpd / actionlint /
+`mypy --strict` / `uv sync --extra dev` gates the generated `ci.yml` Lint
+job runs. `generate_plugin_repo.py` and `standardize_plugin.py` already
+EMIT the fixed forms; the recipe here is for an agent hand-touching one
+of these constructs during a manual upgrade step.
+
+### Local detector (§6)
+
+Run the CI-parity preflight LOCALLY before declaring DONE — it runs the
+gates `validate_plugin` skips AND statically detects all five defects
+below (CIP-1..5):
+
+```bash
+cpv-remote-validate ci-preflight <plugin-path>
+# Equivalently from inside the plugin:
+uv run python scripts/cpv_ci_preflight.py .
+```
+
+Every gate DEGRADES to a non-blocking WARNING when its tool is absent
+(never false-blocks); a real defect BLOCKS. A non-crash run is NOT
+CI-parity proof on its own — read the per-check verdicts.
+
+### The five defects (§6)
+
+| # | Defect | One-line fix |
+|---|--------|--------------|
+| CIP-1 | Inverted `CLAUDE_PRIVATE_USERNAMES` env on a CI validate step (set to the repo owner → CPV flags every owner GitHub URL + no-reply email as a private-path leak). | DROP the line from the workflow (a CI runner has no developer local-username to protect); keep only `PLUGIN_SKIP_GITHUB_INTEGRITY=1`. The local `CLAUDE_PRIVATE_USERNAMES="$(whoami)"` scan idiom is a different, correct usage — untouched. |
+| CIP-2 | `publish.py` import-fallback shim (`gh_with_retry`/`git_with_retry`) carries only `# type: ignore[no-redef]`, but `mypy --strict` also needs `[misc]` (conditional-variant non-identical-signature rule). | Use `# type: ignore[no-redef, misc]` on the fallback shim (idiomatic import-fallback idiom, NOT a suppression — keep the WHY comment). |
+| CIP-3 | `pyproject.toml` lacks a `[project.optional-dependencies].dev` table, so the canon `uv sync --extra dev` fails ("Extra dev is not defined"). | Add `dev = ["pytest", "ruff", "mypy"]` (create-or-augment, format-preserving; refresh the lockfile). `standardize --fix` auto-provisions this. |
+| CIP-4 | A superseded standalone `validate.yml` survives after the consolidated `ci.yml` was added; its pre-existing shellcheck SC2086 then fails `ci.yml`'s actionlint Lint job. | Remove the CPV-shipped `validate.yml` (its Validate job is replaced by `ci.yml`'s) and re-point branch protection; safe-delete it to `scripts_dev/superseded-workflows/`. `standardize --fix` removes it (identity-guarded, only when `ci.yml` is present). |
+| CIP-5 | The jscpd copy-paste check in `publish.py` Gate 2b and CI's Mega-Linter use divergent ignore globs, so a local pass differs from CI. | Provision a single-source `.jscpd.json` (threshold 5 + ignore globs mirroring `.mega-linter.yml`'s `FILTER_REGEX_EXCLUDE`) auto-discovered by BOTH; never clobber an existing one. `standardize --fix` provisions it. |
+
+### Verify (§6)
+
+```bash
+cpv-remote-validate ci-preflight .
+# expect: CIP-1..5 PASS (or a non-blocking WARNING when a gate's tool is
+#         absent); no BLOCK from any parity gate.
 ```
 
 ---

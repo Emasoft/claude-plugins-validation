@@ -1,7 +1,7 @@
 ---
 trdd-id: 034b4061-d92f-451d-832e-7f45bd8f8a0d
 title: Upgrade flow regresses customized + ahead-of-canon plugins — canon template quality + standardize profile-awareness (issues 144 + 145, FM6)
-column: dev
+column: published
 created: 2026-06-21T22:03:47+0200
 updated: 2026-06-21T22:03:47+0200
 current-owner: cpv-main-session
@@ -19,14 +19,15 @@ target-branch: master
 test-requirements: [unit, lint, typecheck]
 impacts: [ci-pipeline]
 external-refs: ["github.com/Emasoft/claude-plugins-validation/issues/144", "github.com/Emasoft/claude-plugins-validation/issues/145"]
-implementation-commits: []
+implementation-commits: [364679b]
+published-version: 2.140.0
 ---
 
 # TRDD-034b4061 — Upgrade flow regresses customized + ahead-of-canon plugins (issues 144 + 145)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-21
 
-**Current state:** All 3 agents DONE + central-verified — shipping in v2.140.0. C1 (canon: MD024→false +MD025,
+**Current state:** SHIPPED in v2.140.0 (feature commit 364679b, CI GREEN); #144 + #145 CLOSED self-id'd; tracker EMPTY. TERMINAL. C1 (canon: MD024→false +MD025,
 cliff scope+short-hash, em-dash kept) verified with REAL markdownlint + git-cliff; C2 (force-templates skips
 at/AHEAD-of-canon + intentional_divergence files); C3 (intentional_divergence manifest + softened nudge,
 `_classify_drift_direction` signature stable for C2). ruff + mypy(125) clean; the 4 new test files interoperate
