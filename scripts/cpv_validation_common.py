@@ -608,8 +608,15 @@ VALID_TOOLS = {
     "ListMcpResourcesTool",  # Lists MCP server resources
     "ReadMcpResourceTool",  # Reads a specific MCP resource by URI
     "SendMessage",  # Agent teams — message teammates or resume subagents
-    "TeamCreate",  # Agent teams — create a team
-    "TeamDelete",  # Agent teams — disband a team
+    # NOTE: TeamCreate/TeamDelete were REMOVED in v2.1.178 — they are no longer
+    # in the tools-reference table; the only agent-team tool that remains is
+    # SendMessage. Listing them would let a stale plugin pass validation while
+    # referencing tools the runtime no longer provides.
+    "Artifact",  # Team/Enterprise — publishes an HTML/MD artifact (tools-reference)
+    "RemoteTrigger",  # Routines — backs /schedule (tools-reference)
+    "ScheduleWakeup",  # self-paced /loop — reschedules; surfaces session_crons in Stop input (tools-reference)
+    "ShareOnboardingGuide",  # uploads ONBOARDING.md; backs /team-onboarding (tools-reference)
+    "WaitForMcpServers",  # v2.1.142 — waits for connecting MCP servers (tools-reference)
     # NOTE: `PushNotification` is not currently enumerated in tools-reference.md L13-49.
     # It was added to CPV under the rationale of v2.1.110 remote-control push support
     # but remains unverified against the official tools table. Kept here so authors
@@ -622,7 +629,8 @@ VALID_TOOLS = {
 }
 
 # Valid model short names for agents (v2.1.74+: full model IDs also accepted)
-VALID_MODELS = {"haiku", "sonnet", "opus", "inherit"}
+# sub-agents doc "Choose a model": sonnet / opus / haiku / fable / full-id / inherit.
+VALID_MODELS = {"haiku", "sonnet", "opus", "fable", "inherit"}
 
 # Valid effort levels for agents (v2.1.78+) and skills (v2.1.80+).
 # - "low"/"medium"/"high": supported on all models per cli-reference.md --effort.
@@ -634,15 +642,15 @@ VALID_EFFORT_VALUES = {"low", "medium", "high", "xhigh", "max"}
 # Full model IDs like claude-opus-4-6, claude-sonnet-4-6[1m], etc.
 _FULL_MODEL_ID_RE = re.compile(r"^claude-(?:opus|sonnet|haiku)-\d[\w.-]*(?:\[1m\])?$")
 
-# Short aliases with optional [1m] suffix: opus, sonnet[1m], haiku, etc.
-_SHORT_MODEL_RE = re.compile(r"^(?:haiku|sonnet|opus|inherit|default|opusplan)(?:\[1m\])?$", re.IGNORECASE)
+# Short aliases with optional [1m] suffix: opus, sonnet[1m], haiku, fable, etc.
+_SHORT_MODEL_RE = re.compile(r"^(?:haiku|sonnet|opus|fable|inherit|default|opusplan)(?:\[1m\])?$", re.IGNORECASE)
 
 
 def is_valid_model(value: str) -> bool:
     """Check if a model value is valid (short name, alias, or full model ID).
 
     Valid formats:
-    - Short aliases: haiku, sonnet, opus, inherit, default, opusplan
+    - Short aliases: haiku, sonnet, opus, fable, inherit, default, opusplan
     - With 1M context: opus[1m], sonnet[1m], claude-opus-4-6[1m]
     - Full model IDs: claude-opus-4-6, claude-sonnet-4-5-20251001
     """
@@ -833,6 +841,7 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_CODE_FORCE_SYNC_OUTPUT",  # v2.1.129 — force-enable synchronized output for terminals auto-detection misses
     "CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE",  # v2.1.129 — opt-in homebrew/winget background auto-update
     "CLAUDE_CODE_SESSION_ID",  # v2.1.132 — Bash subprocess session id (matches `session_id` passed to hooks)
+    "CLAUDE_CODE_CHILD_SESSION",  # v2.1.172 — set in CC-spawned subprocesses (distinct from a stdio MCP server)
     "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN",  # v2.1.132 — opt out of fullscreen alternate-screen renderer
     "CLAUDE_CODE_EFFORT_LEVEL",  # v2.1.132 — overrides the /effort picker default
     "CLAUDE_CODE_ENABLE_FEEDBACK_SURVEY_FOR_OTEL",  # v2.1.136 — re-enable session-quality survey for enterprises capturing OTEL responses
