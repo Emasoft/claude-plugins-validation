@@ -1,9 +1,9 @@
 ---
 trdd-id: abda272d-41aa-4923-a3b3-8ae03d3dfd9f
 title: Canon publish.py --gate ↔ ci.yml gate-parity gap — local gate omits the jscpd copy-paste check CI enforces (issue 143)
-column: dev
+column: published
 created: 2026-06-21T17:18:02+0200
-updated: 2026-06-21T17:18:02+0200
+updated: 2026-06-21T18:03:38+0200
 current-owner: cpv-main-session
 assignee: cpv-main-session
 priority: 2
@@ -19,14 +19,17 @@ target-branch: master
 test-requirements: [unit, lint, typecheck]
 impacts: [ci-pipeline]
 external-refs: ["github.com/Emasoft/claude-plugins-validation/issues/143"]
-implementation-commits: []
+implementation-commits: [307f8a9]
+published-version: 2.139.0
 ---
 
 # TRDD-abda272d — Canon publish.py --gate ↔ ci.yml jscpd gate-parity gap (issue 143)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-21
 
-**Current state:** IMPLEMENTED + central-verified; ready to publish v2.139.0. Two file-disjoint opus
+**Current state:** SHIPPED in **v2.139.0** (feature commit 307f8a9, release commit 8b6fe73, tag v2.139.0).
+Issue #143 CLOSED self-id'd; CPV CI GREEN (Lint/Validate/Test all success on sha 8b6fe73); superseded PR #126
+also closed. Tracker EMPTY. TERMINAL — no further edits. Two file-disjoint opus
 agents landed it (A: generate_plugin_repo.py — `gen_jscpd_json` + `.jscpd.json` wired + Gate 2b in the
 publish.py template + `--gate` help; B: standardize_plugin.py — `provision_jscpd_config`/`audit_jscpd_config`
 plus `_render_canonical_jscpd_config`, `_publish_py_has_jscpd_gate`, and both pipeline-rules.md docs). 27
