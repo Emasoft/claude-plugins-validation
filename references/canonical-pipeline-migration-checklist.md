@@ -54,8 +54,9 @@ to CHECK-NN appears at the end of this file.
 | CHECK-70..74   | `hooks/hooks.json`                             |
 | CHECK-75..78   | MCP servers                                    |
 | CHECK-79..82   | Docs & changelog                               |
+| CHECK-83..87   | CI-parity defects (#137-143)                   |
 
-**Total: 82 checks across 16 categories.**
+**Total: 87 checks across 17 categories.**
 
 ---
 
@@ -1503,6 +1504,59 @@ PY
 
 ---
 
+## Category 17 — CI-parity defects (#137-143) (CHECK-83..87)
+
+These five checks close the dominant migration failure mode: an upgrade that passes `validate_plugin.py --strict` LOCALLY but RED-CIs on GitHub, because `validate_plugin` does NOT run the jscpd / actionlint / mypy / `uv sync --extra dev` gates the generated `ci.yml` Lint job runs, nor the 5 static #137-143 defect detectors. **All five are satisfied by ONE command** — `cpv-remote-validate ci-preflight <plugin-root>` runs the CIP-1..5 static checks AND the live parity gates and exits non-zero on any real (non-WARNING) finding. Run it once; each `CHECK-83..87` row PASSES when the corresponding CIP finding is absent.
+
+**WARNING ≠ FAIL.** `ci-preflight` DEGRADES to a non-blocking WARNING when a tool is absent (no `npx`/jscpd/actionlint/mypy on the box) — that NEVER fails a check (the #129 degrade-gracefully pattern). A real over-threshold / static-defect / resolve-failure is the only non-zero exit. (A WARNING means the gate could not be locally verified — CI still enforces it; a green preflight does not guarantee green CI when a tool was absent.)
+
+### CHECK-83 [BLOCKER] CIP-1 — `CLAUDE_PRIVATE_USERNAMES` is NOT inverted in any workflow (#140)
+**Why**: A canon-generator regression set `CLAUDE_PRIVATE_USERNAMES: ${{ github.repository_owner }}` on the CPV-validate step — semantically inverted (that env lists PRIVATE usernames), so CPV flagged every owner GitHub URL + the owner's no-reply email as CRITICAL "private path leaked" → the downstream CI Validate job failed under `--strict`.
+**Verify**:
+```bash
+uv run python scripts/remote_validation.py ci-preflight . ; test $? -eq 0
+```
+**Pass when**: `ci-preflight` exits 0 with no `CIP-1` finding (the inverted env is absent from every `.github/workflows/*.yml`).
+**On fail**: drop the `CLAUDE_PRIVATE_USERNAMES` line from the affected workflow's validate step (keep `PLUGIN_SKIP_GITHUB_INTEGRITY=1`); the public owner must never be in the private list, and a CI runner has no developer local-username to protect.
+
+### CHECK-84 [MAJOR] CIP-2 — import-fallback shims carry `# type: ignore[no-redef, misc]` not bare `[no-redef]` (#142 Defect-1)
+**Why**: The generated `publish.py` network-resilience shims (`gh_with_retry`/`git_with_retry`) used `# type: ignore[no-redef]`, but the downstream `mypy --strict` gate also needs `[misc]` (the conditional-variant non-identical-signature rule) → 12 MINORs blocked the adopting plugin's `--strict`.
+**Verify**:
+```bash
+uv run python scripts/remote_validation.py ci-preflight . ; test $? -eq 0
+```
+**Pass when**: `ci-preflight` exits 0 with no `CIP-2` finding (every conditional import-fallback shim carrying `[no-redef]` also carries `misc`).
+**On fail**: change the shim's `# type: ignore[no-redef]` to `# type: ignore[no-redef, misc]` (idiomatic import-fallback, not a suppression).
+
+### CHECK-85 [BLOCKER] CIP-3 — `[project.optional-dependencies].dev` exists when CI runs `uv sync --extra dev` (#142 Defect-2)
+**Why**: The canon `ci.yml`/`release.yml` run `uv sync --extra dev`, but if `pyproject.toml` lacks a `[project.optional-dependencies].dev` table CI fails "Extra dev is not defined".
+**Verify**:
+```bash
+uv run python scripts/remote_validation.py ci-preflight . ; test $? -eq 0
+```
+**Pass when**: `ci-preflight` exits 0 with no `CIP-3` finding (the dev extra is present, or no workflow references it).
+**On fail**: run `uvx cpv-remote-validate standardize . --fix` (auto-provisions `dev = pytest/ruff/mypy`), or add the table by hand + refresh the lockfile.
+
+### CHECK-86 [MAJOR] CIP-4 — no superseded `validate.yml` alongside the consolidated `ci.yml` (#142 Defect-4)
+**Why**: Adding the consolidated `ci.yml` (whose Validate job replaces the standalone `validate.yml`) but LEAVING `validate.yml` lets its pre-existing shellcheck SC2086 fail `ci.yml`'s actionlint Lint job.
+**Verify**:
+```bash
+uv run python scripts/remote_validation.py ci-preflight . ; test $? -eq 0
+```
+**Pass when**: `ci-preflight` exits 0 with no `CIP-4` finding (no CPV-shipped `validate.yml` survives next to `ci.yml`).
+**On fail**: run `standardize --fix` (removes a CPV-shipped `validate.yml`, identity-guarded, safe-deleted to `scripts_dev/superseded-workflows/`) and re-point branch protection at the `ci.yml` Validate job.
+
+### CHECK-87 [MAJOR] CIP-5 — `.jscpd.json` exists when `ci.yml` enables `COPYPASTE_JSCPD` (jscpd parity, #143)
+**Why**: The generated `ci.yml` Mega-Linter Lint job enforces `COPYPASTE_JSCPD --threshold 5`; without a `.jscpd.json` single-source config, the publish gate ran `ruff` but NOT jscpd, so an adopter tagged + released then failed CI on jscpd.
+**Verify**:
+```bash
+uv run python scripts/remote_validation.py ci-preflight . ; test $? -eq 0
+```
+**Pass when**: `ci-preflight` exits 0 with no `CIP-5` finding (a `.jscpd.json` exists, or `ci.yml` does not enable jscpd). Note: `ci-preflight` ALSO runs jscpd itself when present (degrade-WARNING if absent), so an over-threshold duplication surfaces here too.
+**On fail**: run `standardize --fix` (provisions `.jscpd.json`, never clobbering an existing one); the config is auto-discovered by both CI's Mega-Linter jscpd and the local `publish.py` Gate 2b.
+
+---
+
 ## Issue-#21 row → check mapping
 
 Each row from the failure table in [Issue #21](https://github.com/Emasoft/claude-plugins-validation/issues/21) maps to ≥1 check above.
@@ -1540,7 +1594,7 @@ run_all_checks() {
   local log="$out_dir/${ts}-run-all.log"
   local report="$out_dir/${ts}-run-all.md"
 
-  # The 82-check matrix. Each entry: ID|SEVERITY|TITLE|CHECK_FN
+  # The full 87-check matrix (82 base + 5 CI-parity CHECK-83..87). Each entry: ID|SEVERITY|TITLE|CHECK_FN
   # CHECK_FN is the name of a shell function the orchestrator must define
   # (one per check); the function executes the snippet from this file and
   # returns 0 on PASS, non-zero on FAIL. Default cpv_check_NN are stubs that
@@ -1628,6 +1682,11 @@ run_all_checks() {
     "80|MAJOR|CHANGELOG entry for current ver|cpv_check_80"
     "81|MINOR|README install URL current|cpv_check_81"
     "82|MINOR|No new TODO/FIXME/XXX|cpv_check_82"
+    "83|BLOCKER|CIP-1 CLAUDE_PRIVATE_USERNAMES not inverted|cpv_check_ci_preflight"
+    "84|MAJOR|CIP-2 shim [no-redef, misc]|cpv_check_ci_preflight"
+    "85|BLOCKER|CIP-3 dev extra present for uv sync|cpv_check_ci_preflight"
+    "86|MAJOR|CIP-4 no superseded validate.yml|cpv_check_ci_preflight"
+    "87|MAJOR|CIP-5 .jscpd.json present for jscpd|cpv_check_ci_preflight"
   )
 
   local n_pass=0 n_fail=0 n_block_fail=0 n_major_fail=0 n_minor_fail=0
@@ -1704,8 +1763,9 @@ run_all_checks() {
 
 - The function emits a Unicode-bordered Markdown table per the user's standing format preference (heavy `━` for the header row, light `─` for body rows, status column exactly 6 chars wide so PASS/FAIL aligns).
 - `cpv_check_NN` functions are placeholders. The migration orchestrator (or a thin shell wrapper that lives at `scripts/run_migration_checks.sh`) defines each one by inlining the **Verify** block of the corresponding `### CHECK-NN` section above.
+- `cpv_check_ci_preflight` (shared by CHECK-83..87) inlines ONE `uv run python scripts/remote_validation.py ci-preflight .` invocation — it runs the CIP-1..5 static detectors AND the live parity gates and exits non-zero on any real (non-WARNING) finding; a tool-absent WARNING degrades and never fails the check. Run it once; all five rows read the same exit status.
 - Exit codes:
-  - `0` — all 82 checks pass (or only MINOR fails)
+  - `0` — all 87 checks pass (or only MINOR fails)
   - `1` — at least one BLOCKER or MAJOR check failed
   - `2` — usage error (cannot cd to plugin root)
 - Timestamps follow the canonical local-time + GMT-offset format (`%Y%m%d_%H%M%S%z`), per `~/.claude/rules/agent-reports-location.md`.
@@ -1720,6 +1780,8 @@ The `plugin-fixer` agent (`agents/plugin-fixer.md`) MUST run `run_all_checks` as
 > "Step 7 final re-run shows zero CRITICAL/MAJOR/MINOR/NIT **AND** `run_all_checks` returns exit 0."
 
 A BLOCKER/MAJOR fail in `run_all_checks` is equivalent to a CRITICAL/MAJOR finding in `validate_plugin.py` — the agent must address it before declaring DONE.
+
+Because step 7c now includes **CHECK-83..87** (the `ci-preflight` CI-parity gate — CIP-1..5 + the live jscpd/actionlint/mypy/`uv sync --extra dev` gates), a `--force-templates`-clean migration that is locally clean under `validate_plugin --strict` can no longer silently RED-CI on a #137-143 defect shape — the parity gap is caught BEFORE the real publish, not after the tag is cut.
 
 This closes issue #21 ask #1: "the migration agent's exit contract should be CI passes on next push."
 

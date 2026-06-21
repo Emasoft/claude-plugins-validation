@@ -95,6 +95,12 @@ The script prints only the compact summary + path. Read the report file with `Re
 
 ### Phase 2 — Fix
 
+**Reset the oscillation state ONCE** before the first fix batch (all modes enter Phase 2, so this is the single reset point regardless of `from_report` skipping Phase 1):
+
+```bash
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_fix_loop_state.py" reset --state <loopstate.json>
+```
+
 Group findings by CA-NN rule. For each group, consult `skills/fix-validation/references/cache-fixes.md#ca-nn` for the fix recipe, then apply edits via `Edit`.
 
 Priority order (every CA finding is a WARNING since v2.102.0 — order is by cache impact, not severity): CA-01 → CA-02 → CA-03 (prefix-invalidating, highest impact) → CA-04 → CA-05 (cost/latency) → CA-06 (compaction-aware) → CA-07 (`context: fork`/`branch` re-primes from cold — advisory; only fix when the fork is not earning its cost).
@@ -103,7 +109,14 @@ Re-read each file BEFORE editing it (auto-compaction may have stale state in you
 
 ### Phase 3 — Re-validate
 
-Re-run the validator (via the same launcher invocation as Phase 1) against the same target. Every CA finding is a WARNING, so the verdict is VALID from the start — termination is by EMPTY FINDINGS SET, not by verdict: iterate until the cache scan reports zero CA-01..CA-07 findings (or until the only ones left are intentional `model:` pins or justified `context: fork`/`branch` declarations the user explicitly chose to keep). If a rule keeps re-firing after a fix, STOP and report the residual issue with a written explanation rather than guessing further fixes.
+Re-run the validator (via the same launcher invocation as Phase 1, ADDING `--json <findings.json>` so the finding set is machine-readable) against the same target, then record the iteration into the loop-state file:
+
+```bash
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_fix_loop_state.py" \
+  record --state <loopstate.json> --findings <findings.json>   # → CONVERGED | PROGRESS | CYCLE
+```
+
+Every CA finding is a WARNING, so the verdict is VALID from the start — termination is by EMPTY FINDINGS SET, not by verdict: iterate (back to Phase 2) until the cache scan reports zero CA-01..CA-07 findings (`CONVERGED`, or the only ones left are intentional `model:` pins / justified `context: fork`/`branch` declarations the user explicitly chose to keep). Replace any single-step "if a rule keeps re-firing" guess with the deterministic verdict: `cpv_fix_loop_state.py record` compares the finding multiset against EVERY prior iteration (not just N-1, so a 2-cycle CA-01↔CA-NN re-fire is caught — the single-step heuristic #132 proved insufficient), and the on-disk state survives a context-exhaustion crash. A `CYCLE` verdict (this finding set equals ANY prior iteration) means STOP repeating the futile fix and report the residual CA finding(s) with a written explanation (`PARTIAL`), rather than guessing further fixes. Never re-apply a fix the multiset proved futile.
 
 ### Phase 4 — Broader cache-aware improvements (only if the user asked)
 

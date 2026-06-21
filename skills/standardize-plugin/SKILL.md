@@ -34,6 +34,7 @@ Audits existing plugin or marketplace repositories against CPV standards and aut
    ```
 
 3. **After --fix**, manually fix remaining issues:
+   - **Markdown-poison guardrail**: after editing any `.md`, reword a line-start `#` / `+ ` / `* ` prose continuation (markdownlint MD018/MD004 NIT blocks `--strict`).
    - .gitignore gaps, SKILL.md missing Nixtla sections, README badges, MINOR/NIT issues
    - Pre-push hook blocks on CRITICAL, MAJOR, MINOR, NIT — only WARNINGs pass
    - **Empirical-loading-bugs MAJORs** (added 2026-04-18) need manual fixes — see `skills/canonical-pipeline/references/detailed-standard.md` "Empirical Validation Rules":
@@ -52,7 +53,7 @@ Copy this checklist and track your progress:
 - [ ] `--fix` applied
 - [ ] Remaining issues fixed manually
 - [ ] Re-validation passed
-- [ ] **For migration runs (`/cpv-upgrade-plugin`)**: the 82-check matrix in the repo-root `references/canonical-pipeline-migration-checklist.md` (NOT inside this skill dir) returns exit 0 (every BLOCKER + MAJOR passes), AND a real `publish.py --patch` + `gh run watch --exit-status` returned green CI on the resulting tag. See the repo-root `agents/plugin-fixer.md` "Pre-completion verification (REQUIRED)". Closes [issue #21 ask #1](https://github.com/Emasoft/claude-plugins-validation/issues/21).
+- [ ] **For migration runs (`/cpv-upgrade-plugin`)**: the 87-check matrix in the repo-root `references/canonical-pipeline-migration-checklist.md` (NOT inside this skill dir) returns exit 0 (every BLOCKER + MAJOR passes), AND a real `publish.py --patch` + `gh run watch --exit-status` returned green CI on the resulting tag. See the repo-root `agents/plugin-fixer.md` "Pre-completion verification (REQUIRED)". Closes [issue #21 ask #1](https://github.com/Emasoft/claude-plugins-validation/issues/21).
 
 4. **Audit/Fix a Marketplace**:
    ```bash
