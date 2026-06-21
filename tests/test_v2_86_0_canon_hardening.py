@@ -13,7 +13,7 @@ TRDD-5f41ad36 into CPV's canonical templates so every plugin migrating via
 * Bypass-guard prefix-pattern (CPV_SKIP_*, SKIP_*, NO_VERIFY)
 * env: sanitization for every ${{...}} consumed by run: blocks
 * CHANGELOG-section extraction in release.yml
-* cliff.toml em-dash separator + scope-stripped commit display
+* cliff.toml em-dash separator (scope + short-hash commit display restored by #144)
 """
 
 from __future__ import annotations
@@ -242,10 +242,20 @@ def test_cliff_toml_uses_em_dash_in_section_header():
     assert "}] - {{ timestamp" not in toml
 
 
-def test_cliff_toml_drops_scope_display_in_commits():
-    """cliff.toml must NOT render `*(scope)*` in commit lines."""
+def test_cliff_toml_renders_scope_and_short_hash_in_commits():
+    """cliff.toml RESTORES the commit scope prefix + short hash in commit lines.
+
+    Issue #144 SUPERSEDES the v2.86.0 "drop scope as redundant noise" decision:
+    dropping the scope + hash lost changelog traceability (a reader could no
+    longer tell which component a change touched or which commit it was). The
+    scope is rendered CONDITIONALLY (``{% if commit.scope %}``) so unscoped
+    commits are unaffected, and the 7-char short hash is appended in parens.
+    This stays compatible with release.yml's em-dash awk section-extractor,
+    which keys on the SECTION header, not the per-commit line format.
+    """
     toml = gen_cliff_toml(_params())
-    assert "commit.scope" not in toml
+    assert "{% if commit.scope %}**{{ commit.scope }}:** {% endif %}" in toml
+    assert "commit.id | truncate(length=7" in toml
 
 
 def test_cliff_toml_drops_striptags():

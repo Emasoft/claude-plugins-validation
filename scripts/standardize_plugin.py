@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import difflib
 import fnmatch
 import json
 import os
@@ -809,6 +810,106 @@ _FORCE_TEMPLATE_FILES: set[str] = {
     ".markdownlint.json",
 }
 
+# Issue #145b / #144Bb — the RC the skip messages point a reader at when a
+# --force-templates overwrite is declined because the plugin's file is already
+# at/AHEAD of canon (i.e. the validator's "would downgrade" case).
+_PIPELINE_DRIFT_RC: str = "RC-PIPELINE-DRIFT-001"
+
+
+def _manifest_intentional_divergence(manifest: dict) -> set[str]:
+    """Return the set of repo-relative paths the plugin marks as a deliberate
+    divergence from canon — ``cpv.pipeline.intentional_divergence`` in
+    plugin.json (issue #144Ba; the manifest key is authored by C3).
+
+    The key is a list of repo-relative path strings. Anything else (a missing
+    key, a non-list value, non-string elements) is treated as "no divergence
+    declared" — the conservative direction: we never let a malformed manifest
+    silently suppress an overwrite we'd otherwise perform.
+
+    SELECTOR not suppressor: this only governs whether ``--force-templates``
+    leaves a file in place; it does NOT silence the validator's drift WARNING
+    for that file (the validator owns that, per the divergence-is-noted-not-
+    suppressed contract).
+    """
+    cpv = manifest.get("cpv")
+    if not isinstance(cpv, dict):
+        return set()
+    pipeline = cpv.get("pipeline")
+    if not isinstance(pipeline, dict):
+        return set()
+    raw = pipeline.get("intentional_divergence")
+    if not isinstance(raw, list):
+        return set()
+    return {p for p in raw if isinstance(p, str)}
+
+
+def _force_template_skip_reason(
+    plugin_file: Path,
+    rel_path: str,
+    canon_content: str,
+    divergence: set[str],
+) -> str | None:
+    """Decide whether a ``--force-templates`` overwrite of ``rel_path`` must be
+    SKIPPED (issue #145b / #144Bb).
+
+    Returns the COMPLETE skip line to print (so each condition controls its own
+    wording exactly) when the overwrite must be declined, or ``None`` when the
+    file should be overwritten as before.
+
+    Two skip conditions:
+
+    1. ``rel_path`` is in ``divergence`` (the plugin's
+       ``cpv.pipeline.intentional_divergence`` manifest list) — skip regardless
+       of drift direction; the plugin deliberately diverges.
+    2. The plugin's CURRENT file is at/AHEAD of canon — i.e. force-overwriting
+       it would DOWNGRADE a hardened/ahead file (the exact case the validator
+       flags "at or AHEAD of canon … Do NOT --force-templates"). We classify
+       direction by REUSING ``validate_plugin._classify_drift_direction`` on a
+       unified diff of (expected=CANON, actual=PLUGIN). ``ahead`` and ``mixed``
+       both mean "do not downgrade" → skip; ``behind`` and ``plain`` mean the
+       plugin lacks canon's hardening / is just stale → overwrite.
+
+    An ABSENT plugin file is never skipped here (a new file must be written);
+    in practice force-overwrite only ever processes existing files, but this
+    keeps the helper correct for any caller. An IDENTICAL file falls through to
+    ``"plain"`` (no diff lines, no hardening markers either side) → overwrite,
+    which is a harmless no-op rewrite of byte-identical content.
+    """
+    if rel_path in divergence:
+        return f"skipped {rel_path} — marked intentional_divergence"
+
+    if not plugin_file.is_file():
+        # Nothing to downgrade — let the caller write the new file.
+        return None
+
+    plugin_content = plugin_file.read_text(encoding="utf-8")
+    if plugin_content == canon_content:
+        # Byte-identical; nothing to skip (and nothing to downgrade).
+        return None
+
+    # Diff order MUST be (expected=CANON, actual=PLUGIN) so a marker on a `+`
+    # line means "the PLUGIN added hardening" (ahead) and a marker on a `-`
+    # line means "CANON carries hardening the plugin lacks" (behind) — the
+    # exact contract _classify_drift_direction documents.
+    diff_lines = list(
+        difflib.unified_diff(
+            canon_content.splitlines(),
+            plugin_content.splitlines(),
+            lineterm="",
+        )
+    )
+
+    # Lazy import to avoid a circular-import surprise during remote_validation
+    # launcher dispatch (standardize_plugin ↔ validate_plugin). Read-only — the
+    # signature is kept stable by C3 specifically so this import works.
+    from validate_plugin import _classify_drift_direction  # noqa: E402
+
+    direction = _classify_drift_direction(diff_lines)
+    if direction in ("ahead", "mixed"):
+        return f"skipped force-overwrite of {rel_path} — at/AHEAD of canon (would downgrade); see {_PIPELINE_DRIFT_RC}"
+    return None
+
+
 # Mirror of validate_plugin._LEGACY_PIPELINE_SCRIPTS — the names of older
 # helpers that publish.py now subsumes. Kept here so the upgrade flow can
 # move them without an extra import (avoids circular-import surprises during
@@ -1578,6 +1679,11 @@ def fix_missing_files(
 
     profile = resolve_pipeline_profile(plugin_path)
 
+    # Issue #145b / #144Bb — paths the plugin deliberately diverges on (read
+    # once from the already-parsed manifest). A force-overwrite of any of these
+    # is skipped regardless of drift direction.
+    divergence = _manifest_intentional_divergence(manifest)
+
     created: list[str] = []
 
     # Process missing-then-force so the [create] / [overwrite] markers in the
@@ -1607,6 +1713,19 @@ def fix_missing_files(
 
         file_path = plugin_path / rel_path
         is_executable = rel_path in _EXECUTABLE_FILES
+
+        # Issue #145b / #144Bb — profile-AWARE force-overwrite. Before clobbering
+        # an existing shared-canon file, check whether the plugin's copy is
+        # already at/AHEAD of canon (force-overwriting would DOWNGRADE it — the
+        # exact case the validator flags) or is explicitly marked as an
+        # intentional divergence. Either way, SKIP the overwrite and leave the
+        # plugin's file untouched. Only applies to the force-overwrite branch; a
+        # genuinely MISSING file (op_kind == "create") is always written.
+        if op_kind == "overwrite":
+            skip_line = _force_template_skip_reason(file_path, rel_path, content, divergence)
+            if skip_line is not None:
+                print(f"  {YELLOW}{skip_line}{NC}")
+                continue
 
         if dry_run:
             tag = f"[dry-run] Would {op_kind}"

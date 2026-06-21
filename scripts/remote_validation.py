@@ -117,6 +117,11 @@ _ALIASES: dict[str, str] = {
     # Lint engine — wraps ruff / mypy / shellcheck, dispatched from menu-tree §3.1.5.6
     "lint": "cpv_lint_engine",
     "cpv_lint_engine": "cpv_lint_engine",
+    # CI-parity preflight — runs the jscpd / actionlint / mypy / `uv sync --extra dev`
+    # / static-CIP gates that `validate_plugin --strict` omits but the adopting
+    # plugin's GitHub-CI ci.yml Lint job runs (the #137-143 parity gap, TRDD-8eee537a).
+    "ci-preflight": "cpv_ci_preflight",
+    "cpv_ci_preflight": "cpv_ci_preflight",
     # Scope validators (validate a project's .claude/ config, separating
     # git-tracked "project" elements from non-git-tracked "local" elements)
     "local-scope": "validate_local_scope",
@@ -177,6 +182,7 @@ _COMMANDS: dict[str, str] = {
     "rules": "Rules directory validation",
     "xref": "Cross-reference validation",
     "doctor": "Health-check installed plugins and settings",
+    "ci-preflight": "Local CI-parity preflight (jscpd/actionlint/mypy/dev-extra + CIP-1..5)",
     "standardize": "Audit and fix plugin repo to match standards",
     "local-scope": "Local scope validation (non-git-tracked .claude/ elements)",
     "project-scope": "Project scope validation (git-tracked .claude/ elements)",

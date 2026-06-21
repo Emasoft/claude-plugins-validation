@@ -152,6 +152,55 @@ def manifest_profile_override(plugin_root: Path) -> str | None:
     return None
 
 
+def resolve_intentional_divergence(plugin_root: Path) -> frozenset[str]:
+    """Return the repo-relative paths a plugin declares as INTENTIONALLY divergent.
+
+    Read-only resolution of the OPTIONAL manifest key
+    ``cpv.pipeline.intentional_divergence`` (issue #144Ba) — a list of
+    repo-relative file paths the maintainer has deliberately customized away
+    from the canonical template and does NOT want the upgrade flow to "fix".
+
+    Shape in `.claude-plugin/plugin.json`::
+
+        { "cpv": { "pipeline": { "intentional_divergence": ["cliff.toml", ".markdownlint.json"] } } }
+
+    For each listed file the drift detector still EMITS an auditable
+    informational note that the file is intentionally divergent (so the
+    divergence is never invisible), but DROPS the "run `--force-templates` /
+    `/cpv-upgrade-plugin`" recommendation — force-templating a deliberately
+    customized shared-canon file would REGRESS it (the #144/#145 incident).
+    The standardizer (Agent C2) reuses this reader to SKIP force-overwriting a
+    declared-divergent file.
+
+    SECURITY: this is a NUDGE selector, NOT a finding suppressor. It only
+    suppresses the *upgrade recommendation* on a drifted file — the WARNING/
+    note is still produced (visible + auditable), and it has no effect on the
+    security scanner or any other validation. (The drift WARNING is advisory
+    and non-blocking to begin with, so dropping its nudge cannot un-block a
+    `--strict` run.)
+
+    Resolution is best-effort + side-effect-free: ANY missing/malformed key
+    yields the empty set (the conservative, no-behavior-change default).
+    Non-string list elements are ignored individually; a non-list value yields
+    the empty set. Paths are normalized to forward slashes (matching the
+    ``_CANONICAL_PIPELINE_FILES`` rel-path spelling) so a Windows-authored
+    manifest still matches.
+    """
+    manifest = _load_manifest(plugin_root)
+    cpv_block = manifest.get("cpv")
+    if not isinstance(cpv_block, dict):
+        return frozenset()
+    pipeline_block = cpv_block.get("pipeline")
+    if not isinstance(pipeline_block, dict):
+        return frozenset()
+    declared = pipeline_block.get("intentional_divergence")
+    if not isinstance(declared, list):
+        return frozenset()
+    # Keep only non-empty string entries; normalize separators to `/` so the
+    # comparison against `_CANONICAL_PIPELINE_FILES` rel-paths is OS-agnostic.
+    return frozenset(entry.replace("\\", "/").strip() for entry in declared if isinstance(entry, str) and entry.strip())
+
+
 def _gitmodules_submodule_paths(plugin_root: Path) -> list[str]:
     """Every `path = <rel>` entry in the plugin's own `.gitmodules`.
 

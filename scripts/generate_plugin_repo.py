@@ -1374,13 +1374,22 @@ def gen_cliff_toml(p: PluginParams) -> str:
     # v2.86.0 hardening (issue #22):
     # * Em-dash separator ``— `` instead of `` - `` between version and date.
     #   Matches the typographic style of the rest of CPV's docs and is the
-    #   form release.yml's section-extraction awk script looks for.
-    # * Drop the scope prefix from rendered commits — the per-group header
-    #   already announces the kind (Features, Bug Fixes, …), so repeating
-    #   the scope on every commit line is redundant noise.
+    #   form release.yml's section-extraction awk script looks for. KEEP it:
+    #   release.yml's awk extractor matches the ``## [ver] — date`` SECTION
+    #   header, so reverting ``— `` to `` - `` would break release extraction.
     # * Drop ``striptags`` from the group renderer — conventional-commit
     #   group names never contain HTML and the filter just adds template
     #   surface for nothing.
+    #
+    # issue #144 — RESTORE the commit scope prefix + short hash on each
+    # rendered commit line (the v2.86.0 "drop scope as redundant noise"
+    # decision lost changelog traceability — a reader could no longer tell
+    # which component a change touched or which commit it was). The scope is
+    # rendered conditionally (``{% if commit.scope %}``) so an unscoped commit
+    # is unaffected, and the 7-char short hash (``commit.id | truncate``) is
+    # appended in parens. This is fully compatible with the em-dash awk: the
+    # extractor keys on the SECTION header, NOT the per-commit line format, so
+    # any commit-line shape is safe.
     body_template = (
         "{% if version %}\\\n"
         '    ## [{{ version | trim_start_matches(pat="v") }}]'
@@ -1392,7 +1401,10 @@ def gen_cliff_toml(p: PluginParams) -> str:
         '"group") %}\n'
         "    ### {{ group | upper_first }}\n"
         "    {% for commit in commits %}\n"
-        "        - {{ commit.message | upper_first }}\\\n"
+        "        - {% if commit.scope %}**{{ commit.scope }}:** "
+        "{% endif %}{{ commit.message | upper_first }}"
+        '{% if commit.id %} ({{ commit.id | truncate(length=7, end="") }})'
+        "{% endif %}\\\n"
         "    {% endfor %}\n"
         "{% endfor %}\n"
     )
@@ -1435,6 +1447,11 @@ def gen_cliff_toml(p: PluginParams) -> str:
     result += '  { message = "^style", group = "Styling" },\n'
     result += '  { message = "^test", group = "Testing" },\n'
     result += '  { message = "^chore\\\\(release\\\\)", skip = true },\n'
+    # issue #144 — also skip a bare ``release:`` / ``release(scope):`` commit
+    # so the release-tagging commit never renders as a noisy ``### Release``
+    # changelog group (``release`` is not a conventional-commit type; without
+    # this skip a fallback could title-case it into its own section).
+    result += '  { message = "^release", skip = true },\n'
     result += '  { message = "^chore\\\\(deps\\\\)", skip = true },\n'
     result += '  { message = "^chore\\\\(pr\\\\)", skip = true },\n'
     result += '  { message = "^chore\\\\(pull\\\\)", skip = true },\n'
@@ -4256,6 +4273,29 @@ def gen_markdownlint_json(p: PluginParams) -> str:
     Wrapping any of these would change the rendered markdown / break the
     Claude Code parser. CPV-published plugins therefore disable MD013
     everywhere; the rest of the markdownlint defaults stay in effect.
+
+    MD024 (no-duplicate-heading) is turned OFF entirely (issues #144 /
+    #145a): a per-release CHANGELOG legitimately repeats the same sub-headings
+    (``### Features``, ``### Bug Fixes``, …) across every version section, and
+    BOTH MD024 modes flag that valid content — the old ``siblings_only: true``
+    flagged repeated headings that ARE siblings within one section (the exact
+    case issue #144 reported: clean → 4 errors), and the strict default flags
+    every recurring heading even under distinct ``## [version]`` parents
+    (verified with real markdownlint). Since a changelog necessarily recurs
+    its section headings, the only non-hostile setting is OFF — which the
+    reporter explicitly recommended. A genuine DUPLICATE TOP-LEVEL TITLE is
+    still caught by MD025 below (single-title), so disabling MD024 does not
+    let two ``# H1`` slip through.
+
+    MD025 (single-title / single-H1) IS configured with an empty
+    ``front_matter_title`` (issues #144 / #145a): a doc that carries a YAML
+    frontmatter ``title:`` AND a body ``# H1`` (the common TRDD / design-doc
+    shape) otherwise trips MD025 — markdownlint counts the frontmatter title
+    as the document's H1 and then flags the body ``# H1`` as a second title.
+    Setting ``front_matter_title`` to ``""`` tells markdownlint NOT to treat
+    any frontmatter field as the title, so the body ``# H1`` is the sole H1
+    and the false positive disappears. Harmless for plugins whose docs have
+    no frontmatter title.
     """
     _ = p  # unused but kept for consistent signature
     return """{
@@ -4263,7 +4303,8 @@ def gen_markdownlint_json(p: PluginParams) -> str:
   \"MD007\": false,
   \"MD013\": false,
   \"MD022\": false,
-  \"MD024\": { \"siblings_only\": true },
+  \"MD024\": false,
+  \"MD025\": { \"front_matter_title\": \"\" },
   \"MD026\": false,
   \"MD029\": false,
   \"MD031\": false,
