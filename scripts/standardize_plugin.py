@@ -260,6 +260,28 @@ def audit_pyproject(plugin_path: Path) -> list[AuditItem]:
             items.append(AuditItem("pyproject", section, "PASS", f"{desc} present"))
         else:
             items.append(AuditItem("pyproject", section, "WARN", f"{desc} missing"))
+
+    # Issue #142 Defect #2 (audit half): the canonical ci.yml / release.yml run
+    # `uv sync --extra dev`, so the `dev` extra MUST declare pytest/ruff/mypy or
+    # CI fails at install with "Extra `dev` is not defined …" / "Failed to spawn".
+    # The AUDIT path only REPORTS the gap — it never mutates pyproject (that is
+    # the job of the --fix provisioning in fix_missing_files). Gated on a
+    # canonical workflow being PRESENT (or about to be emitted) so a plugin that
+    # does not use the canonical pipeline is never falsely flagged.
+    workflows_dir = plugin_path / ".github" / "workflows"
+    has_canonical_workflow = any((workflows_dir / Path(rel).name).is_file() for rel in _WORKFLOW_PATHS_REQUIRING_DEV_EXTRAS)
+    if has_canonical_workflow:
+        missing_dev = _canonical_dev_extras_missing(plugin_path)
+        if missing_dev:
+            items.append(
+                AuditItem(
+                    "pyproject",
+                    "[project.optional-dependencies].dev",
+                    "WARN",
+                    f"dev extra missing CI tools: {', '.join(missing_dev)} "
+                    f"(uv sync --extra dev in ci.yml/release.yml will fail) — run --fix to provision",
+                )
+            )
     return items
 
 
@@ -943,19 +965,14 @@ def _apply_notify_marketplace_overrides(
     return changes
 
 
-# Issue #25 Defect D (v2.87.1): canonical workflows the migration installs
-# (release.yml, ci.yml) run `uv run <tool>` for these tools. If the plugin's
-# pre-existing pyproject.toml's [project.optional-dependencies].dev lacks any
-# of them, `uv sync --extra dev` will not install them and the workflow step
-# crashes on first push with "Failed to spawn: <tool>". pyproject.toml is
-# user-owned (never force-overwritten — see _NEVER_FORCE_OVERWRITE), so we
-# ALERT loudly rather than auto-edit, matching the issue-#23 pattern.
+# Issue #25 Defect D (v2.87.1) / issue #142 Defect #2: the canonical workflows
+# the migration installs (release.yml, ci.yml) run `uv sync --extra dev`, so the
+# plugin's [project.optional-dependencies].dev must declare these tools. The
+# AUDIT path WARNs when they're missing (audit_pyproject); the --fix path
+# auto-provisions them (provision_dev_extra). The set below is the DETECTION
+# list (what CI needs); the EXACT provisioned literal is _PROVISION_DEV_EXTRA,
+# which must stay byte-identical to the generator's default.
 _CANONICAL_DEV_EXTRA_TOOLS: tuple[str, ...] = ("mypy", "pytest", "ruff")
-_CANONICAL_DEV_EXTRA_FLOORS: dict[str, str] = {
-    "mypy": ">=1.19.1",
-    "pytest": ">=8.0.0",
-    "ruff": ">=0.14.14",
-}
 _WORKFLOW_PATHS_REQUIRING_DEV_EXTRAS: frozenset[str] = frozenset(
     {".github/workflows/release.yml", ".github/workflows/ci.yml"}
 )
@@ -964,11 +981,17 @@ _WORKFLOW_PATHS_REQUIRING_DEV_EXTRAS: frozenset[str] = frozenset(
 def _canonical_dev_extras_missing(plugin_path: Path) -> list[str]:
     """Return canonical dev-extra tools missing from pyproject.toml.
 
-    Read-only — pyproject.toml is user-owned, so this function only detects
-    the gap. Callers emit the [ACTION REQUIRED] alert. Returns [] when
-    pyproject.toml is absent (no Python toolchain to reconcile) or when
-    every canonical tool is already declared in
-    ``[project.optional-dependencies].dev``.
+    Read-only — only DETECTS the gap (the --fix provisioner acts on it).
+    Returns [] when pyproject.toml is absent (no Python toolchain to
+    reconcile), when the interpreter predates tomllib, or when the file is
+    unparseable — those are not actionable "missing tool" states.
+
+    Issue #142 Defect #2: when pyproject EXISTS but the
+    ``[project.optional-dependencies]`` table OR its ``dev`` key is ABSENT,
+    EVERY canonical tool is reported missing — a plugin shipping the canonical
+    ci.yml / release.yml (which run ``uv sync --extra dev``) with no dev extra
+    fails CI with "Extra `dev` is not defined …". (The prior behaviour wrongly
+    returned [] for an absent dev extra, masking exactly this defect.)
     """
     pyproject = plugin_path / "pyproject.toml"
     if not pyproject.is_file():
@@ -985,25 +1008,292 @@ def _canonical_dev_extras_missing(plugin_path: Path) -> list[str]:
         return []
     if not isinstance(data, dict):
         return []
+    # An absent [project] / optional-dependencies / dev means NOTHING is
+    # declared — fall through to an empty `declared` set (→ all tools missing),
+    # rather than returning [] and masking the gap.
     project = data.get("project")
-    if not isinstance(project, dict):
-        return []
-    opt = project.get("optional-dependencies")
-    if not isinstance(opt, dict):
-        return []
-    dev = opt.get("dev")
-    if not isinstance(dev, list):
-        return []
+    opt = project.get("optional-dependencies") if isinstance(project, dict) else None
+    dev = opt.get("dev") if isinstance(opt, dict) else None
     declared: set[str] = set()
-    for spec in dev:
-        if not isinstance(spec, str):
-            continue
-        # PEP-508 name = everything before any version/extras/marker suffix.
-        # Case-insensitive per PEP-503.
-        name = re.split(r"[<>=~!\[;]", spec, 1)[0].strip().lower()
-        if name:
-            declared.add(name)
+    if isinstance(dev, list):
+        for spec in dev:
+            if not isinstance(spec, str):
+                continue
+            # PEP-508 name = everything before any version/extras/marker suffix.
+            # Case-insensitive per PEP-503.
+            name = re.split(r"[<>=~!\[;]", spec, 1)[0].strip().lower()
+            if name:
+                declared.add(name)
     return [tool for tool in _CANONICAL_DEV_EXTRA_TOOLS if tool not in declared]
+
+
+# Issue #142 Defect #2 (provision half): the EXACT literal dev-extra list the
+# generator (generate_plugin_repo.py) sets as the default. It MUST match the
+# generator byte-for-byte so a `standardize --fix` adoption and a freshly
+# scaffolded plugin declare the same `dev` extra. Unpinned by design — the
+# generator owns any future pinning, and provisioning must not invent floors
+# the generator does not also emit.
+_PROVISION_DEV_EXTRA: tuple[str, ...] = ("pytest", "ruff", "mypy")
+
+
+def _format_dev_extra_entries(tools: list[str]) -> str:
+    """Render dev-extra tool names as the inner lines of a TOML array.
+
+    Returns e.g. ``    "pytest",\n    "ruff",\n    "mypy",`` (4-space indent,
+    trailing comma per entry) so the result drops straight into a
+    ``dev = [\n…\n]`` block matching the generator's formatting.
+    """
+    return "".join(f'    "{tool}",\n' for tool in tools)
+
+
+def provision_dev_extra(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """Provision (or augment) ``[project.optional-dependencies].dev`` so the
+    canonical ci.yml / release.yml ``uv sync --extra dev`` step succeeds.
+
+    Issue #142 Defect #2. Three cases, all format-preserving (text edit, NOT a
+    TOML re-serialize — the project ships no TOML writer, and a re-serialize
+    would drop comments + reflow every other table):
+
+    1. No ``[project.optional-dependencies]`` table  → append a new table with
+       ``dev = [_PROVISION_DEV_EXTRA…]``.
+    2. Table present but no ``dev`` key              → insert a ``dev = [...]``
+       line into the existing table (other extras preserved).
+    3. ``dev`` present but incomplete               → AUGMENT: add ONLY the
+       missing tools as new list entries; existing entries (with their pins)
+       and every other extra/table are preserved verbatim.
+
+    The lockfile (``uv.lock``) is refreshed via ``uv lock`` when one exists so
+    the new extra is resolved; a missing/failed ``uv`` is non-fatal (CI's
+    ``uv sync`` regenerates it). Returns a list of human-readable change notes
+    (empty when pyproject is absent or the dev extra already declares every
+    canonical tool).
+
+    pyproject.toml stays user-owned for everything ELSE — this function only
+    ever ADDS the missing CI tools; it never rewrites or removes existing
+    content.
+    """
+    pyproject = plugin_path / "pyproject.toml"
+    if not pyproject.is_file():
+        return []
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:
+        return []
+    try:
+        original = pyproject.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    try:
+        data = tomllib.loads(original)
+    except tomllib.TOMLDecodeError:
+        return []
+    if not isinstance(data, dict):
+        return []
+
+    missing = _canonical_dev_extras_missing(plugin_path)
+    if not missing:
+        return []
+    # Provision in the generator's canonical ORDER, restricted to what's absent.
+    to_add = [tool for tool in _PROVISION_DEV_EXTRA if tool in missing]
+    if not to_add:
+        # Defensive: a tool the generator does not list is missing — nothing the
+        # canonical provisioner is responsible for. The audit WARNING still fires.
+        return []
+
+    project = data.get("project")
+    opt = project.get("optional-dependencies") if isinstance(project, dict) else None
+    dev_exists = isinstance(opt, dict) and isinstance(opt.get("dev"), list)
+    table_exists = isinstance(opt, dict)
+
+    new_text = original
+    note: str
+    if not dev_exists and not table_exists:
+        # Case 1 — append a fresh table block.
+        block = "\n[project.optional-dependencies]\ndev = [\n" + _format_dev_extra_entries(to_add) + "]\n"
+        if not new_text.endswith("\n"):
+            new_text += "\n"
+        new_text += block
+        note = f"created [project.optional-dependencies].dev = {list(to_add)}"
+    elif not dev_exists and table_exists:
+        # Case 2 — insert a `dev = [...]` line just under the existing table
+        # header, preserving every other extra in the table.
+        header_re = re.compile(r"(?m)^\[project\.optional-dependencies\][^\n]*\n")
+        m = header_re.search(new_text)
+        if not m:
+            # tomllib saw the table but the regex didn't — bail rather than guess.
+            return []
+        dev_line = "dev = [\n" + _format_dev_extra_entries(to_add) + "]\n"
+        insert_at = m.end()
+        new_text = new_text[:insert_at] + dev_line + new_text[insert_at:]
+        note = f"added dev extra to existing table = {list(to_add)}"
+    else:
+        # Case 3 — AUGMENT the existing `dev = [ ... ]` array with the missing
+        # tools only. Find the array's closing bracket and inject entries before
+        # it; existing entries (and their version pins) are untouched.
+        dev_re = re.compile(r"(?ms)^(?P<indent>[ \t]*)dev\s*=\s*\[(?P<body>.*?)\]")
+        m = dev_re.search(new_text)
+        if not m:
+            # A single-line `dev = ["x"]` or unusual layout the multiline regex
+            # missed — refuse to mutate rather than risk corrupting the file.
+            return []
+        body = m.group("body")
+        addition = _format_dev_extra_entries(to_add)
+        # Preserve a trailing newline before the closing bracket so the injected
+        # entries land on their own lines regardless of the prior body shape.
+        if body.strip() and not body.rstrip(" \t").endswith("\n"):
+            new_body = body.rstrip() + ",\n" + addition
+        else:
+            new_body = body + addition
+        new_text = new_text[: m.start()] + f"{m.group('indent')}dev = [{new_body}]" + new_text[m.end() :]
+        note = f"augmented dev extra with {list(to_add)}"
+
+    if new_text == original:
+        return []
+
+    if dry_run:
+        return [f"[dry-run] pyproject.toml: {note}"]
+
+    pyproject.write_text(new_text, encoding="utf-8")
+    notes = [f"pyproject.toml: {note}"]
+
+    # Refresh the lockfile so the new extra resolves. Non-fatal: CI's `uv sync`
+    # regenerates the lock, and a plugin without uv installed locally still has
+    # a correct pyproject. Never raise — provisioning succeeded the moment the
+    # pyproject was written.
+    lock = plugin_path / "uv.lock"
+    if lock.is_file():
+        import shutil
+        import subprocess
+
+        uv = shutil.which("uv")
+        if uv:
+            try:
+                proc = subprocess.run(
+                    [uv, "lock"],
+                    cwd=str(plugin_path),
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if proc.returncode == 0:
+                    notes.append("uv.lock refreshed")
+                else:
+                    notes.append("uv.lock refresh skipped (uv lock failed — CI will regenerate)")
+            except (OSError, subprocess.SubprocessError):
+                notes.append("uv.lock refresh skipped (uv unavailable — CI will regenerate)")
+        else:
+            notes.append("uv.lock refresh skipped (uv not on PATH — CI will regenerate)")
+    return notes
+
+
+# Issue #142 Defect #4: the canonical consolidated ci.yml carries a `Validate`
+# job that runs `cpv-remote-validate plugin . --strict`, fully replacing the
+# old standalone "Plugin Validation" validate.yml that pre-v2.12.32 CPV scaffolds
+# shipped. Standardize must remove that superseded file (else ci.yml's actionlint
+# Lint job trips on validate.yml's pre-existing SC2086) — but ONLY when the file
+# is recognisably a CPV-shipped plugin-validate workflow, NEVER an unrelated user
+# workflow that merely happens to be named validate.yml.
+_SUPERSEDED_VALIDATE_YML_REL = ".github/workflows/validate.yml"
+
+# Identity markers. We require BOTH a CPV-validate COMMAND marker AND a
+# recognisable workflow NAME so an unrelated `validate.yml` (e.g. a project's own
+# test or schema-validation workflow) is never deleted.
+_CPV_VALIDATE_CMD_MARKERS: tuple[str, ...] = (
+    "cpv-remote-validate plugin",
+    "remote_validation.py plugin",
+    "validate_plugin.py",
+)
+# The canonical CPV plugin-validate workflow names across CPV template history.
+_CPV_VALIDATE_NAME_MARKERS: tuple[str, ...] = (
+    "plugin validation",
+    "validate plugin",
+)
+_CPV_VALIDATE_NAME_RE = re.compile(r"(?im)^\s*name:\s*['\"]?(?P<name>[^'\"\n]+)['\"]?\s*$")
+
+
+def _is_cpv_shipped_validate_yml(path: Path) -> bool:
+    """Return True only when ``path`` is recognisably a CPV-shipped plugin
+    validate.yml (the workflow ci.yml's Validate job supersedes).
+
+    Conservative by construction — requires BOTH:
+      * a CPV plugin-validate COMMAND (cpv-remote-validate plugin / validate_plugin.py), AND
+      * a top-level workflow ``name:`` matching a known CPV-validate name.
+
+    An unrelated workflow named validate.yml that lacks either marker is NEVER
+    matched, so this can never delete a user's own validation workflow.
+    """
+    if not path.is_file():
+        return False
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    low = content.lower()
+    has_cmd = any(marker in low for marker in _CPV_VALIDATE_CMD_MARKERS)
+    if not has_cmd:
+        return False
+    for m in _CPV_VALIDATE_NAME_RE.finditer(content):
+        wf_name = m.group("name").strip().lower()
+        if any(marker in wf_name for marker in _CPV_VALIDATE_NAME_MARKERS):
+            return True
+    return False
+
+
+def remove_superseded_validate_yml(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """Remove the superseded CPV ``validate.yml`` when the consolidated ci.yml
+    (which carries the replacement Validate job) is present.
+
+    Issue #142 Defect #4. Safe-deletion: the file is moved into
+    ``scripts_dev/superseded-workflows/`` (gitignored, git-recoverable) rather
+    than hard-deleted, mirroring ``move_legacy_pipeline_scripts``'s preservation
+    guardrail. Only runs when ``_is_cpv_shipped_validate_yml`` confirms the
+    file's identity, so an unrelated user workflow is never touched.
+
+    Returns a list of human-readable notes (including the mandatory
+    branch-protection follow-up), or [] when there is nothing to remove.
+    """
+    validate_yml = plugin_path / _SUPERSEDED_VALIDATE_YML_REL
+    if not validate_yml.is_file():
+        return []
+    # Only supersede when the replacement ci.yml actually exists — otherwise we
+    # would strip the plugin's ONLY validation workflow.
+    if not (plugin_path / ".github" / "workflows" / "ci.yml").is_file():
+        return []
+    if not _is_cpv_shipped_validate_yml(validate_yml):
+        # An unrelated validate.yml — leave it untouched.
+        return []
+
+    note_branch = (
+        "[ACTION REQUIRED] branch protection: re-point the required check "
+        '"Plugin Validation" to ci.yml\'s "Validate" / "Test" jobs '
+        "(the standalone validate.yml has been superseded)."
+    )
+
+    if dry_run:
+        return [
+            f"[dry-run] would remove superseded {_SUPERSEDED_VALIDATE_YML_REL} "
+            "(replaced by ci.yml's Validate job)",
+            note_branch,
+        ]
+
+    dest_dir = plugin_path / "scripts_dev" / "superseded-workflows"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / "validate.yml"
+    if dest.exists():
+        n = 1
+        while True:
+            candidate = dest.with_name(f"validate.yml.{n}")
+            if not candidate.exists():
+                dest = candidate
+                break
+            n += 1
+    validate_yml.rename(dest)
+    rel_dest = dest.relative_to(plugin_path)
+    return [
+        f"removed superseded {_SUPERSEDED_VALIDATE_YML_REL} → {rel_dest} "
+        "(replaced by ci.yml's Validate job)",
+        note_branch,
+    ]
 
 
 def fix_missing_files(
@@ -1243,37 +1533,26 @@ def fix_missing_files(
                     f.write(f"{entry}\n")
             print(f"  {GREEN}Updated:{NC} .gitignore — added {len(missing)} missing entries")
 
-    # Issue #25 Defect D (v2.87.1): when the migration emits release.yml or
-    # ci.yml — both of which run `uv run mypy / pytest / ruff` under
-    # `uv sync --extra dev` — alert the user if the pre-existing pyproject.toml
-    # does not declare those tools in `[project.optional-dependencies].dev`.
-    # Without this alert the workflow step crashes on first push with
-    # `Failed to spawn: <tool>` even though the migration reported success.
-    # pyproject.toml is user-owned, so we never auto-edit — we alert.
+    # Issue #142 Defect #2 (provision half — supersedes the issue-#25 WARN-only
+    # behaviour HERE, in the --fix path): when the migration emits release.yml or
+    # ci.yml — both of which run `uv sync --extra dev` — auto-PROVISION the
+    # canonical dev extra so CI does not fail with
+    # "Extra `dev` is not defined …" / "Failed to spawn: <tool>". fix_missing_files
+    # is only ever reached under --fix/--force-templates, so mutating pyproject
+    # here is authorized; the AUDIT-only path (run_audit) still merely WARNs via
+    # audit_pyproject and never mutates.
     workflow_emitted = bool(_WORKFLOW_PATHS_REQUIRING_DEV_EXTRAS & (missing_files | force_overwrite))
-    if workflow_emitted and not dry_run:
-        missing_tools = _canonical_dev_extras_missing(plugin_path)
-        if missing_tools:
-            print()
-            print(f"  {YELLOW}{BOLD}[ACTION REQUIRED]{NC} pyproject.toml dev extras incomplete")
-            print(
-                f"  The CPV-shipped {BOLD}release.yml{NC} / {BOLD}ci.yml{NC} run "
-                f"`uv run <tool>` for: {', '.join(_CANONICAL_DEV_EXTRA_TOOLS)}."
-            )
-            print(
-                f"  Your pyproject.toml's {BOLD}[project.optional-dependencies].dev{NC} "
-                f"is missing: {RED}{', '.join(missing_tools)}{NC}."
-            )
-            print(
-                f"  `uv sync --extra dev` in CI will NOT install them — the workflow "
-                f"step crashes on first push with {DIM}Failed to spawn: <tool>{NC}."
-            )
-            print()
-            print(f"  {GREEN}Add to pyproject.toml's `dev` extra:{NC}")
-            for tool in missing_tools:
-                floor = _CANONICAL_DEV_EXTRA_FLOORS.get(tool, "")
-                print(f'    "{tool}{floor}",')
-            print()
+    if workflow_emitted:
+        for note in provision_dev_extra(plugin_path, dry_run=dry_run):
+            print(f"  {GREEN}[dev-extra]{NC} {note}")
+
+    # Issue #142 Defect #4: ci.yml's Validate job supersedes the standalone
+    # "Plugin Validation" validate.yml — remove it (identity-guarded) so ci.yml's
+    # actionlint Lint job does not trip on validate.yml's pre-existing SC2086.
+    ci_emitted = ".github/workflows/ci.yml" in (missing_files | force_overwrite)
+    if ci_emitted or (plugin_path / ".github" / "workflows" / "ci.yml").is_file():
+        for note in remove_superseded_validate_yml(plugin_path, dry_run=dry_run):
+            print(f"  {YELLOW}[validate.yml]{NC} {note}")
 
     return created
 

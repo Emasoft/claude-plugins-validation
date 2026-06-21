@@ -308,8 +308,12 @@ def _make_plugin_dir(tmp_path: Path, pyproject_dev: list[str]) -> Path:
     return root
 
 
-def test_d_alert_emitted_when_release_yml_emitted_and_dev_extras_lacking(tmp_path, capsys):
-    """Emitting release.yml when pyproject's dev lacks mypy → [ACTION REQUIRED] alert printed."""
+def test_d_dev_extra_provisioned_when_release_yml_emitted_and_dev_extras_lacking(tmp_path, capsys):
+    """Issue #142 #2: emitting release.yml when pyproject's dev lacks tools now
+    AUTO-PROVISIONS them under --fix (superseding the old issue-#25 [ACTION
+    REQUIRED] warn-only behaviour, which moved to the AUDIT path)."""
+    import tomllib
+
     root = _make_plugin_dir(tmp_path, pyproject_dev=["ruff>=0.14.0"])  # no mypy, no pytest
     # Mark release.yml as MISSING so fix_missing_files emits it.
     results = [
@@ -322,11 +326,14 @@ def test_d_alert_emitted_when_release_yml_emitted_and_dev_extras_lacking(tmp_pat
     ]
     fix_missing_files(root, results, dry_run=False)
     out = capsys.readouterr().out
-    assert "[ACTION REQUIRED]" in out, out
-    assert "pyproject.toml dev extras incomplete" in out
-    # Each missing canonical tool must be named in the alert.
-    assert "mypy" in out
-    assert "pytest" in out
+    # The fix path now provisions (it no longer prints the old warn block).
+    assert "[dev-extra]" in out, out
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    dev = data["project"]["optional-dependencies"]["dev"]
+    names = {s.split(">")[0].split("=")[0].split("<")[0].split("[")[0].strip().lower() for s in dev}
+    assert {"pytest", "ruff", "mypy"} <= names, dev
+    # Existing pinned entry is preserved (augment, not replace).
+    assert "ruff>=0.14.0" in (root / "pyproject.toml").read_text(encoding="utf-8")
 
 
 def test_d_no_alert_when_pyproject_dev_extras_complete(tmp_path, capsys):
