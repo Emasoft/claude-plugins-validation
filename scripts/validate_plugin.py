@@ -5711,6 +5711,23 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
         profile = "standard"
     by_design_files = _PROFILE_BY_DESIGN_DRIFT.get(profile, frozenset())
 
+    # INTENTIONAL-DIVERGENCE manifest declaration (issue #144Ba). A maintainer
+    # may list specific shared-canon files they have deliberately customized
+    # under `cpv.pipeline.intentional_divergence`. For such a file the drift
+    # detector still EMITS an auditable informational note (the divergence is
+    # never invisible), but DROPS the "/cpv-upgrade-plugin / --force-templates"
+    # recommendation — force-templating a deliberately-customized file would
+    # REGRESS it (the #144/#145 incident). This is a NUDGE selector, NOT a
+    # finding suppressor: the note is still produced, and it has no effect on
+    # any other validation or on the security scanner. Resolution fails SAFE to
+    # the empty set (no behavior change) on any error.
+    try:
+        from cpv_pipeline_profile import resolve_intentional_divergence
+
+        intentional_divergence = resolve_intentional_divergence(plugin_root)
+    except Exception:  # noqa: BLE001 — advisory; any failure means no file is marked divergent (the unchanged default), never a suppression
+        intentional_divergence = frozenset()
+
     # binary-release STRUCTURAL recognition (#115 / Piece C2a). For a
     # binary-release plugin, the release workflow is toolchain-specific and can
     # NEVER byte-match the standard `gen_release_yml`, so the standard byte-
@@ -5868,6 +5885,33 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
                 f"`diff -u <canonical> {rel_path}`)"
             )
 
+        # INTENTIONAL DIVERGENCE (issue #144Ba) — checked BEFORE the
+        # recommendation branches. The maintainer declared THIS file in
+        # `cpv.pipeline.intentional_divergence`: it is deliberately customized
+        # away from canon, and force-templating it would REGRESS that
+        # customization (the #144/#145 incident). So we drop the upgrade NUDGE
+        # for this file and emit an auditable INFORMATIONAL note instead — the
+        # divergence stays VISIBLE (never silently suppressed) and is
+        # non-blocking. This does not touch the ahead-of-canon "would DOWNGRADE"
+        # guidance for UNMARKED files, nor any other validation; it is a nudge
+        # selector, not a finding suppressor (the note is still produced).
+        if rel_path in intentional_divergence:
+            report.info(
+                f"[RC-PIPELINE-DRIFT-001] {rel_path} differs from the canonical "
+                f"CPV standard, but the plugin DECLARES it as an intentional "
+                f"divergence (`cpv.pipeline.intentional_divergence`) — not "
+                f"recommending an upgrade. This file is deliberately customized; "
+                f"force-templating it (via `/cpv-upgrade-plugin` or "
+                f"`--force-templates`) would REGRESS that customization, so the "
+                f"upgrade nudge is intentionally withheld. The divergence is "
+                f"recorded here for audit; review the diff if the customization "
+                f"is no longer wanted (then remove the declaration to re-enable "
+                f"the upgrade nudge).\n"
+                f"Unified diff (canonical → plugin):\n{diff_body}",
+                file=rel_path,
+            )
+            continue
+
         # Pick the recommendation text. THREE cases, in priority order
         # (TRDD-e9f13df1, issues #130 / #118-d2). NONE of these suppress the
         # WARNING — every drifted file still emits one; only the guidance
@@ -5957,7 +6001,12 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
                 "release.yml, and notify-marketplace.yml; actionlint + "
                 "commitlint gates and a macOS test matrix in ci.yml; and an "
                 "SBOM, a build-provenance attestation, and per-asset "
-                "SHA256SUMS in release.yml."
+                "SHA256SUMS in release.yml. CAUTION: if you have deliberately "
+                "customized this shared-canon file, `--force-templates` will "
+                "OVERWRITE (and therefore REGRESS) your changes — to keep an "
+                "intentional customization and silence this nudge, declare the "
+                "file in `cpv.pipeline.intentional_divergence` in your "
+                "plugin.json (the upgrade flow then skips force-overwriting it)."
             )
         report.warning(
             f"[RC-PIPELINE-DRIFT-001] Plugin pipeline differs from the "
