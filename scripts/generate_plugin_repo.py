@@ -1572,13 +1572,20 @@ except ImportError:
         "Run `cpv standardize --force-templates` to refresh.",
         file=sys.stderr,
     )
-    def gh_with_retry(cmd, **kwargs):  # type: ignore[no-redef]
+    # `misc` is needed alongside `no-redef`: under `mypy --strict` the typed
+    # real import (cpv_network_resilience) and these minimal fallback shims are
+    # conditional variants of the same name with NON-IDENTICAL signatures, which
+    # `--strict` reports as [misc] ("All conditional function variants must have
+    # identical signatures"); the combined code suppresses exactly that, the
+    # standard import-fallback idiom (cf. the tomli fallback at
+    # cpv_lint_engine.py with [no-redef,import-not-found]).
+    def gh_with_retry(cmd, **kwargs):  # type: ignore[no-redef, misc]
         kwargs.pop("max_attempts", None)
         kwargs.pop("backoff", None)
         kwargs.setdefault("check", True)
         kwargs.setdefault("capture_output", False)
         return subprocess.run(cmd, **kwargs)
-    def git_with_retry(cmd, **kwargs):  # type: ignore[no-redef]
+    def git_with_retry(cmd, **kwargs):  # type: ignore[no-redef, misc]
         kwargs.pop("max_attempts", None)
         kwargs.pop("backoff", None)
         kwargs.setdefault("check", True)

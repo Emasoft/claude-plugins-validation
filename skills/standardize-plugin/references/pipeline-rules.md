@@ -8,6 +8,7 @@
 - [Processing Validation Output](#processing-validation-output)
 - [GitHub Secrets](#github-secrets)
 - [CI Workflow Dependencies](#ci-workflow-dependencies)
+- [Superseded validate.yml Removal](#superseded-validateyml-removal-issue-142-defect-4)
 - [Marketplace Notification](#marketplace-notification)
 - [All Scripts Are Python](#all-scripts-are-python)
 - [Binary Plugins](#binary-plugins)
@@ -86,6 +87,57 @@ Check if the env var exists first: `test -n "$MARKETPLACE_PAT"`
 CI workflows MUST use `uv sync --extra dev` (NOT just `uv sync`).
 ruff, pytest, mypy, pyyaml are in `[project.optional-dependencies] dev`.
 Without `--extra dev`, ALL CI runs fail with "Failed to spawn: ruff".
+
+### The `dev` extra MUST exist (issue #142 Defect #2)
+
+Because `ci.yml` and `release.yml` run `uv sync --extra dev`, the adopting
+plugin's `pyproject.toml` MUST declare a `[project.optional-dependencies].dev`
+extra containing **pytest, ruff, mypy**. If the extra is ABSENT, CI fails at
+install with:
+
+```
+error: Extra `dev` is not defined in the project's `optional-dependencies` table
+```
+
+`standardize --fix` now PROVISIONS this automatically when it emits a canonical
+workflow:
+
+- **No dev extra** → it creates `[project.optional-dependencies]\ndev = ["pytest", "ruff", "mypy"]`
+  (the EXACT unpinned literal the generator scaffolds — they must match).
+- **Partial dev extra** → it AUGMENTS, adding only the missing tools and
+  preserving existing entries (with their version pins) and every other
+  extra/table verbatim.
+- **Complete dev extra** → no-op.
+- A `uv.lock` present is refreshed (`uv lock`); a missing/failed `uv` is
+  non-fatal — CI's `uv sync` regenerates it.
+
+The AUDIT path (`standardize` WITHOUT `--fix`) only WARNs about the missing
+extra and NEVER mutates `pyproject.toml`. Provisioning happens solely under
+`--fix`. Do NOT hand-pin floors the generator does not also emit — keep the
+two byte-identical.
+
+## Superseded validate.yml Removal (issue #142 Defect #4)
+
+The consolidated `ci.yml` carries a `Validate` job that runs
+`cpv-remote-validate plugin . --strict`, fully REPLACING the old standalone
+"Plugin Validation" `validate.yml` that pre-v2.12.32 CPV scaffolds shipped. If
+the superseded `validate.yml` is left in place, `ci.yml`'s actionlint `Lint`
+job trips on `validate.yml`'s pre-existing shellcheck SC2086
+(`$GITHUB_STEP_SUMMARY` unquoted) and CI fails.
+
+`standardize --fix` removes the superseded `validate.yml` when it ensures
+`ci.yml` — but ONLY when the file is recognisably a CPV-shipped plugin-validate
+workflow (it requires BOTH a CPV-validate command marker — `cpv-remote-validate
+plugin` / `validate_plugin.py` — AND a CPV-validate workflow `name:` such as
+"Plugin Validation"). An unrelated `validate.yml` (e.g. a project's own schema
+or test workflow) is NEVER removed. The file is moved into
+`scripts_dev/superseded-workflows/` (gitignored, git-recoverable), not
+hard-deleted.
+
+**Branch-protection follow-up:** removing `validate.yml` orphans the required
+status check named "Plugin Validation". After the upgrade, re-point that
+required check to `ci.yml`'s **Validate** / **Test** jobs. `standardize` emits
+this as an `[ACTION REQUIRED]` note.
 
 ## Marketplace Notification
 

@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.137.1` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.138.0` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
 | **scripts** | **118** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver; `cpv_fix_loop_state.py` deterministic full-history fix-loop oscillation detector) |
-| **test files** | **352** | `ls tests/test_*.py`; ~9869 tests |
+| **test files** | **354** | `ls tests/test_*.py`; ~9899 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,28 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.138.0 — canon standardize/template defects that fail an adopting plugin's CI (#142, MANAGER field report)**
+— four canonical-pipeline defects surfaced by upgrading a plugin via `remote_validation.py standardize . --fix
+--force-templates`; none caught by local dry-run (only the real GitHub CI runs the workflows). Defect 1
+(`generate_plugin_repo.py`): the generated `publish.py` network-resilience import-fallback shims
+(`gh_with_retry`/`git_with_retry`) carried `# type: ignore[no-redef]`, but the downstream `mypy --strict` gate
+also needs `[misc]` (conditional-variant non-identical-signature rule) — 12 MINORs blocked the adopting plugin's
+`--strict`. Both shims now carry `[no-redef, misc]` + a WHY comment (idiomatic import-fallback idiom, not a
+suppression). Defect 2 (`standardize_plugin.py`): the canon `ci.yml`/`release.yml` run `uv sync --extra dev`, but
+standardize only WARNED when the adopting `pyproject.toml` lacked a `[project.optional-dependencies].dev` table
+(→ CI fails "Extra dev is not defined"). Under `--fix`, standardize now AUTO-PROVISIONS `dev = pytest/ruff/mypy`
+(create-or-augment, format-preserving, lockfile refresh); the audit path stays WARN-only and never mutates; the
+generated-default template already declared it. Defect 3 (the inverted `CLAUDE_PRIVATE_USERNAMES` env): ALREADY
+fixed in v2.137.1 (same root cause as 140 — the reporter was on 2.136.1); verified `gen_ci_yml`/`gen_release_yml`
+bodies clean. Defect 4 (`standardize_plugin.py`): standardize added the consolidated `ci.yml` (whose Validate job
+replaces the standalone `validate.yml`) but LEFT `validate.yml`, whose pre-existing shellcheck SC2086 then failed
+`ci.yml`'s actionlint Lint job — standardize now removes a CPV-shipped `validate.yml` (identity-guarded by command
+AND name markers, only when `ci.yml` is present, safe-deleted to the adopting plugin's
+`scripts_dev/superseded-workflows/`) and emits the branch-protection re-point note. Delivered by 2 parallel opus
+agents (file-disjoint), central-verified: 50/50 changed-file tests + CI mypy gate (123 files clean) + ruff clean +
+self-validate `--strict` 0/0/0/0. +30 two-sided tests (`test_canon_142_genrepo.py`, `test_canon_142_standardize.py`).
+TRDD-5bcfee1b.
 
 **v2.137.1 — canon-generator FP/correctness fixes (#138 / #139 / #140, INTEGRATOR field reports)**
 — three generated-pipeline bugs that broke downstream plugins' CI, all in `generate_plugin_repo.py`. Issue 140
