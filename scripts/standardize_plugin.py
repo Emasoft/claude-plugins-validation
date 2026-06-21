@@ -285,6 +285,23 @@ def audit_pyproject(plugin_path: Path) -> list[AuditItem]:
     return items
 
 
+def audit_jscpd_config(plugin_path: Path) -> list[AuditItem]:
+    """Audit the jscpd copy-paste gate parity (issue #143) — WARN-only.
+
+    Surfaces, without mutating anything: a missing `.jscpd.json` (the local
+    `publish.py --gate` jscpd check + CI's Mega-Linter both read it), and a
+    scripts/publish.py that predates the gate. The actual findings are sourced
+    from ``provision_jscpd_config(..., dry_run=True)`` so the audit text and the
+    --fix behaviour can never drift. A PASS is emitted when the config is present
+    AND publish.py already carries the gate, so a fully-canonical plugin still
+    reports the dimension.
+    """
+    notes = provision_jscpd_config(plugin_path, dry_run=True)
+    if not notes:
+        return [AuditItem("jscpd", _JSCPD_CONFIG_REL, "PASS", "jscpd copy-paste gate parity OK")]
+    return [AuditItem("jscpd", _JSCPD_CONFIG_REL, "WARN", note) for note in notes]
+
+
 def audit_python_version(plugin_path: Path) -> list[AuditItem]:
     """Check .python-version file exists."""
     items: list[AuditItem] = []
@@ -580,6 +597,7 @@ def run_audit(plugin_path: Path) -> list[AuditItem]:
     results.extend(audit_gitignore(plugin_path))
     results.extend(audit_readme_badges(plugin_path))
     results.extend(audit_pyproject(plugin_path))
+    results.extend(audit_jscpd_config(plugin_path))
     results.extend(audit_python_version(plugin_path))
     results.extend(audit_drift(plugin_path))
     return results
@@ -606,6 +624,7 @@ def print_audit_report(results: list[AuditItem], plugin_path: Path) -> None:
         "gitignore": ".gitignore Entries",
         "badges": "README Badges",
         "pyproject": "pyproject.toml Sections",
+        "jscpd": "Copy-paste Gate (jscpd ↔ CI parity)",
         "python": "Python Version",
         "drift": "Project Drift (deps vs imports)",
     }
@@ -664,6 +683,7 @@ def save_report_to_file(results: list[AuditItem], plugin_path: Path, report_path
         "gitignore": ".gitignore Entries",
         "badges": "README Badges",
         "pyproject": "pyproject.toml Sections",
+        "jscpd": "Copy-paste Gate (jscpd ↔ CI parity)",
         "python": "Python Version",
         "drift": "Project Drift (deps vs imports)",
     }
@@ -1296,6 +1316,132 @@ def remove_superseded_validate_yml(plugin_path: Path, dry_run: bool = False) -> 
     ]
 
 
+# Issue #143: the canonical local pre-push gate (`publish.py --gate`) gains a
+# jscpd copy-paste check at PARITY with CI's Mega-Linter COPYPASTE_JSCPD. Both
+# the local gate and CI read ONE source-of-truth config — `.jscpd.json` — so the
+# threshold (5%) and the ignore globs are identical on both sides (jscpd
+# auto-discovers `.jscpd.json` at the repo root). Standardize must provision this
+# file for an existing adopter plugin so the gate it runs has a config to read.
+#
+# This canonical content is kept HERE as standardize's own copy (NOT imported
+# from generate_plugin_repo) — exactly like _PROVISION_DEV_EXTRA — so a
+# `standardize --fix` adoption and a freshly scaffolded plugin write the SAME
+# .jscpd.json. The `ignore` globs mirror the canonical `.mega-linter.yml`'s
+# FILTER_REGEX_EXCLUDE dirs (dev-submodules, fixtures, vendored trees); threshold
+# 5 matches COPYPASTE_JSCPD_ARGUMENTS "--threshold 5".
+_JSCPD_CONFIG_REL = ".jscpd.json"
+_CANONICAL_JSCPD_CONFIG: dict[str, object] = {
+    "threshold": 5,
+    "minTokens": 50,
+    "gitignore": True,
+    "reporters": ["console"],
+    "ignore": [
+        "**/tests_dev/**",
+        "**/docs_dev/**",
+        "**/scripts_dev/**",
+        "**/samples_dev/**",
+        "**/examples_dev/**",
+        "**/builds_dev/**",
+        "**/downloads_dev/**",
+        "**/libs_dev/**",
+        "**/llm_externalizer_output/**",
+        "**/.claude/**",
+        "**/.tldr/**",
+        "**/tests/fixtures/**",
+        "**/test/fixtures/**",
+        "**/spec/fixtures/**",
+        "**/__fixtures__/**",
+        "**/testdata/**",
+        "**/fixtures/**",
+        "**/node_modules/**",
+        "**/.git/**",
+    ],
+}
+
+# Markers proving a publish.py already carries the issue-#143 jscpd copy-paste
+# gate (Gate 2b). A plugin whose publish.py predates the gate is SURFACED (audit
+# WARN) so the adopter knows to refresh the template with --force-templates; we
+# never silently rewrite their publish.py on a plain --fix.
+_PUBLISH_JSCPD_GATE_MARKERS: tuple[str, ...] = ("jscpd", "copy-paste")
+
+
+def _render_canonical_jscpd_config() -> str:
+    """Render the canonical `.jscpd.json` content (2-space indent + trailing LF).
+
+    A single renderer so the provisioned file and any test/assertion compare the
+    SAME bytes. `json.dumps(indent=2)` produces the exact shape the canonical
+    template + CI's Mega-Linter expect (jscpd auto-reads `.jscpd.json`).
+    """
+    return json.dumps(_CANONICAL_JSCPD_CONFIG, indent=2) + "\n"
+
+
+def _publish_py_has_jscpd_gate(plugin_path: Path) -> bool:
+    """Return True when the plugin's scripts/publish.py already carries the
+    issue-#143 jscpd copy-paste gate (case-insensitive marker match).
+
+    Returns False when publish.py is absent or unreadable — the caller only uses
+    this to decide whether to SURFACE a "refresh publish.py" note, never to
+    mutate, so a missing/unreadable file simply yields no note.
+    """
+    publish = plugin_path / "scripts" / "publish.py"
+    if not publish.is_file():
+        return False
+    try:
+        text = publish.read_text(encoding="utf-8").lower()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return any(marker in text for marker in _PUBLISH_JSCPD_GATE_MARKERS)
+
+
+def provision_jscpd_config(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """Provision the canonical `.jscpd.json` so the local `publish.py --gate`
+    jscpd copy-paste check has the same config CI's Mega-Linter reads.
+
+    Issue #143. Mirrors the #142 provisioners (identity-guarded, format-preserving,
+    audit path WARN-only):
+
+    * ``dry_run=False`` (the --fix path): CREATE `.jscpd.json` if ABSENT (write
+      the canonical content). If it already exists, LEAVE it untouched — a user's
+      tuned config is never clobbered on a plain --fix (the --force-templates
+      template refresh is the only path that overwrites it).
+    * ``dry_run=True`` (the AUDIT path): never mutate. Surface ".jscpd.json
+      missing", and — when scripts/publish.py exists but lacks the jscpd gate —
+      "publish.py lacks the jscpd copy-paste gate (run with --force-templates to
+      refresh)".
+
+    Returns a list of human-readable action/finding lines (empty when nothing is
+    actionable: the config already exists AND publish.py already has the gate, or
+    in dry-run the config exists AND there is no stale-publish.py note).
+    """
+    config = plugin_path / _JSCPD_CONFIG_REL
+    notes: list[str] = []
+
+    if dry_run:
+        # AUDIT path — WARN-only, never write.
+        if not config.is_file():
+            notes.append(
+                f"{_JSCPD_CONFIG_REL} missing — the local publish.py --gate "
+                "jscpd copy-paste check (parity with CI Mega-Linter) has no "
+                "config to read; run --fix to provision it"
+            )
+        # Surface a publish.py that predates the gate regardless of whether the
+        # config is present (the gate code itself lives in publish.py).
+        publish = plugin_path / "scripts" / "publish.py"
+        if publish.is_file() and not _publish_py_has_jscpd_gate(plugin_path):
+            notes.append(
+                "scripts/publish.py lacks the jscpd copy-paste gate (issue #143) "
+                "— run with --force-templates to refresh publish.py to parity "
+                "with CI"
+            )
+        return notes
+
+    # --fix path — create the config when absent; never clobber an existing one.
+    if config.is_file():
+        return []
+    config.write_text(_render_canonical_jscpd_config(), encoding="utf-8")
+    return [f"created {_JSCPD_CONFIG_REL} (jscpd copy-paste threshold 5, parity with CI)"]
+
+
 def fix_missing_files(
     plugin_path: Path,
     results: list[AuditItem],
@@ -1553,6 +1699,14 @@ def fix_missing_files(
     if ci_emitted or (plugin_path / ".github" / "workflows" / "ci.yml").is_file():
         for note in remove_superseded_validate_yml(plugin_path, dry_run=dry_run):
             print(f"  {YELLOW}[validate.yml]{NC} {note}")
+
+    # Issue #143: provision the canonical .jscpd.json so the local
+    # `publish.py --gate` jscpd copy-paste check reads the SAME threshold/ignore
+    # config CI's Mega-Linter does (gate parity). Create-if-absent, never clobber
+    # an existing one on a plain --fix; runs unconditionally under --fix because
+    # the gate is part of the canonical publish.py the migration installs.
+    for note in provision_jscpd_config(plugin_path, dry_run=dry_run):
+        print(f"  {GREEN}[jscpd]{NC} {note}")
 
     return created
 

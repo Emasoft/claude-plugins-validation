@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.138.0` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.139.0` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
 | **scripts** | **118** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver; `cpv_fix_loop_state.py` deterministic full-history fix-loop oscillation detector) |
-| **test files** | **354** | `ls tests/test_*.py`; ~9899 tests |
+| **test files** | **356** | `ls tests/test_*.py`; ~9920 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -122,6 +122,24 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.139.0 — canon publish.py--gate ↔ ci.yml jscpd gate-parity gap (#143, assistant-manager-agent field report)**
+— the generated `publish.py --gate` (the pre-push hook) ran `ruff` but NOT the jscpd copy-paste check the generated
+`ci.yml` Mega-Linter Lint job enforces (`COPYPASTE_JSCPD --threshold 5`), so an adopter's publish passed every local
+gate, exited 0, tagged + released, then failed CI on jscpd (the released version shipped with red CI). 5th gate in
+the #137-142 family but a missing gate, not a malformed one. Fix (TRDD-abda272d, 2 file-disjoint opus agents): a new
+`.jscpd.json` single-source config (threshold 5 + ignore globs mirroring `.mega-linter.yml`'s `FILTER_REGEX_EXCLUDE`)
+is auto-discovered by BOTH CI's Mega-Linter jscpd AND a new local Gate 2b in the `publish.py` template. The gate uses
+a `--version` probe so a jscpd/npx-unavailable case DEGRADES to a non-blocking WARNING (a push is NEVER false-blocked;
+CI still enforces — a green gate does not guarantee green CI for the copy-paste dimension) and BLOCKS only when jscpd
+actually ran and found over-threshold duplication — the #129 degrade-gracefully pattern. `standardize --fix` provisions
+`.jscpd.json` (never clobbers an existing one) and the audit path WARNs on a stale `publish.py` lacking the gate. CPV
+itself is unaffected (its own CI does not run Mega-Linter; this is purely a generated-template + standardize fix).
+Delivered by 2 file-disjoint opus agents (A genrepo, B standardize+docs); CENTRAL-VERIFIED: the two agents' `.jscpd.json`
+is semantically identical (threshold 5, minTokens 50, same ignores — no drift), 57 canon tests + mypy 123 + ruff green,
+Gate-2 full suite 9920 pass. +27 two-sided tests (`test_canon_143_genrepo.py` 14, `test_canon_143_standardize.py` 13).
+version 2.139.0, scripts 118, test files 356, ~9920 tests. [[claim-verification]] [[feedback-delegate-to-opus-agents]]
+[[lesson-regen-hashes-last-markdown-poison]]
 
 **v2.138.0 — canon standardize/template defects that fail an adopting plugin's CI (#142, MANAGER field report)**
 — four canonical-pipeline defects surfaced by upgrading a plugin via `remote_validation.py standardize . --fix

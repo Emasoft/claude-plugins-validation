@@ -1526,6 +1526,8 @@ Gate stages (--gate mode, called by pre-push hook):
        may initiate a push (verified via process ancestry, NOT env vars).
    G1. Version bump check (local vs remote, auto-detects origin/HEAD)
    G2. Lint (ruff)
+   G2b. Copy-paste check (jscpd, parity with ci.yml Mega-Linter COPYPASTE_JSCPD;
+        WARNs+skips if jscpd/npx unavailable so a push is never false-blocked)
    G3. Validate (uvx cpv-remote-validate plugin . --strict)
    G4. Tests (pytest)
 
@@ -2197,6 +2199,34 @@ def run_gate(root: Path) -> int:
         cprint(f"  {RED}BLOCKED: Lint issues found{NC}")
         return 1
     cprint(f"  {GREEN}Lint passed.{NC}")
+
+    # Gate 2b: Copy-paste detection (jscpd) — PARITY with ci.yml Mega-Linter COPYPASTE_JSCPD.
+    # CI's Lint job fails on jscpd duplication over the .jscpd.json threshold; surface it locally
+    # BEFORE the bump/tag/push. jscpd needs Node/npx; if it cannot be obtained, DEGRADE to a
+    # non-blocking WARNING (CI still enforces it) — a green gate then does NOT guarantee green CI
+    # for the copy-paste dimension (issue #143). NEVER false-block a push on a tool-install failure.
+    cprint(f"\n{BLUE}[G2b] Copy-paste check (jscpd, parity with CI)...{NC}")
+    jscpd_bin = shutil.which("jscpd")
+    base_cmd = [jscpd_bin] if jscpd_bin else ([shutil.which("npx"), "--yes", "jscpd"] if shutil.which("npx") else None)
+    if base_cmd is None:
+        cprint(f"  {YELLOW}WARNING: jscpd/npx not found — copy-paste check SKIPPED locally.{NC}")
+        cprint(f"  {YELLOW}CI's Mega-Linter WILL enforce it (.jscpd.json threshold). A green gate does")
+        cprint(f"  {YELLOW}NOT guarantee green CI for the copy-paste dimension (issue #143). Install")
+        cprint(f"  {YELLOW}Node/npx for full local parity.{NC}")
+    else:
+        # Probe distinguishes 'jscpd unavailable/uninstallable' (WARN) from 'jscpd ran, found dupes' (BLOCK).
+        probe = subprocess.run(base_cmd + ["--version"], cwd=str(root),
+                               capture_output=True, text=True, timeout=180)
+        if probe.returncode != 0:
+            cprint(f"  {YELLOW}WARNING: jscpd could not run (npx fetch/install failed) — SKIPPED locally.{NC}")
+            cprint(f"  {YELLOW}CI's Mega-Linter WILL enforce it; green gate != green CI for copy-paste (issue #143).{NC}")
+        else:
+            cp = subprocess.run(base_cmd + ["."], cwd=str(root), timeout=300).returncode
+            if cp != 0:
+                cprint(f"  {RED}BLOCKED: jscpd found copy-paste duplication over the .jscpd.json threshold{NC}")
+                cprint(f"  {RED}(parity with CI Mega-Linter). Reduce duplication or raise the threshold in .jscpd.json.{NC}")
+                return 1
+            cprint(f"  {GREEN}Copy-paste check passed.{NC}")
 
     # Gate 3: Validate via REMOTE CPV validator. MANDATORY — no skip, no exceptions.
     # CORNERSTONE: a plugin cannot be pushed unless validation passes with 0
@@ -3095,7 +3125,7 @@ def main() -> int:
     # no flags runs the full publish pipeline with an auto-detected bump type.
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--gate", action="store_true",
-                            help="Pre-push gate mode: lint + validate + tests only (no bump/push)")
+                            help="Pre-push gate mode: lint + copy-paste (jscpd) + validate + tests only (no bump/push)")
     mode_group.add_argument("--install-hook", action="store_true",
                             help="Install pre-push hook into .git/hooks/ and set core.hooksPath")
     mode_group.add_argument("--install-branch-rules", action="store_true",
@@ -4175,6 +4205,42 @@ GITHUB_COMMENT_REPORTER: false
 """
 
 
+def gen_jscpd_json(p: PluginParams) -> str:
+    """Generate ``.jscpd.json`` — the copy-paste-detector config (issue #143).
+
+    SINGLE SOURCE OF TRUTH for the jscpd copy-paste check, auto-discovered by
+    BOTH CI's Mega-Linter ``COPYPASTE_JSCPD`` step AND the local
+    ``publish.py --gate`` G2b step (jscpd reads ``.jscpd.json`` from the repo
+    root automatically). Before this file existed, the local gate ran ruff but
+    NOT jscpd, so a publish could pass every local gate, tag+push+release, and
+    THEN fail CI's Lint job on copy-paste duplication — a green gate did not
+    predict green CI for the copy-paste dimension. With one shared config the
+    two gates enforce the EXACT same threshold and ignore list.
+
+    ``threshold`` 5 matches ``.mega-linter.yml``'s
+    ``COPYPASTE_JSCPD_ARGUMENTS: "--threshold 5"``; the ``ignore`` globs mirror
+    that file's ``FILTER_REGEX_EXCLUDE`` (same dev-only dirs + test fixtures +
+    vendored ``node_modules``/``.git``) so a dev-dir or fixture duplicate is
+    never counted by either gate.
+    """
+    _ = p  # unused but kept for consistent signature
+    return """{
+  \"threshold\": 5,
+  \"minTokens\": 50,
+  \"gitignore\": true,
+  \"reporters\": [\"console\"],
+  \"ignore\": [
+    \"**/tests_dev/**\", \"**/docs_dev/**\", \"**/scripts_dev/**\", \"**/samples_dev/**\",
+    \"**/examples_dev/**\", \"**/builds_dev/**\", \"**/downloads_dev/**\", \"**/libs_dev/**\",
+    \"**/llm_externalizer_output/**\", \"**/.claude/**\", \"**/.tldr/**\",
+    \"**/tests/fixtures/**\", \"**/test/fixtures/**\", \"**/spec/fixtures/**\",
+    \"**/__fixtures__/**\", \"**/testdata/**\", \"**/fixtures/**\",
+    \"**/node_modules/**\", \"**/.git/**\"
+  ]
+}
+"""
+
+
 def gen_markdownlint_json(p: PluginParams) -> str:
     """Generate .markdownlint.json — disables MD013 (line-length).
 
@@ -4602,6 +4668,11 @@ def generate_all_files(
                 ("hooks/hooks.json", gen_hooks_json(p), False),
                 ("git-hooks/pre-push", gen_pre_push_hook(p), True),
                 (".mega-linter.yml", gen_mega_linter_yml(p), False),
+                # Issue #143: shared copy-paste-detector config, read by BOTH
+                # CI's Mega-Linter COPYPASTE_JSCPD step AND publish.py --gate
+                # G2b — one source of truth so the local gate and CI agree on
+                # the jscpd threshold/ignores (no green-gate-then-red-CI gap).
+                (".jscpd.json", gen_jscpd_json(p), False),
                 (".markdownlint.json", gen_markdownlint_json(p), False),
                 (".github/workflows/ci.yml", gen_ci_yml(p), False),
                 (".github/workflows/release.yml", gen_release_yml(p), False),
