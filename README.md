@@ -2,7 +2,7 @@
 
 <!--BADGES-START-->
 ![Version](https://img.shields.io/badge/version-2.143.0-blue)
-![Tests](https://img.shields.io/badge/tests-8800%2B%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-10000%2B%20passed-brightgreen)
 ![Validation](https://img.shields.io/badge/validation-0%20issues-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 <!--BADGES-END-->
@@ -271,7 +271,7 @@ Any of these can be passed as the first argument to `cpv-remote-validate`. Short
 |---------|----------------|
 | `plugin` | **Everything.** Runs all 17 sub-validators + linting. Start here. |
 | `skill` | **Skills.** SKILL.md frontmatter, required sections, description quality. 190+ rules. |
-| `hook` | **Hooks.** 28 event types, 5 hook types (incl. v2.1.118+ `mcp_tool`), script paths, bash portability. |
+| `hook` | **Hooks.** 31 event types (incl. v2.1.152 `MessageDisplay`), 5 hook types (incl. v2.1.118+ `mcp_tool`), the v2.1.157 exec-form `args` field (its script is lint-scanned), script paths, bash portability. |
 | `agent` | **Agents.** Frontmatter fields, naming, tools, model, skills. |
 | `command` | **Commands.** Frontmatter, tool names, arguments, naming. |
 | `security` | **Security.** Injection, path traversal, secrets, prompt injection, exfiltration. v2.48: 5 external scanners + fclones cross-plugin dedup. |
@@ -543,7 +543,7 @@ For CI/CD and scripting, the Python validators are still callable directly (no m
 |--------|---|---------|
 | `validate_plugin.py` | `plugin` | Main orchestrator -- runs all 17 sub-validators |
 | `validate_skill_comprehensive.py` | `skill` | Comprehensive skill validator (190+ rules) |
-| `validate_hook.py` | `hook` | Hook configuration validator (28 events, 5 types) |
+| `validate_hook.py` | `hook` | Hook configuration validator (31 events, 5 types) |
 | `validate_agent.py` | `agent` | Agent definition validator |
 | `validate_command.py` | `command` | Command definition validator |
 | `validate_mcp.py` | `mcp` | MCP server config validator |
