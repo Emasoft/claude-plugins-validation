@@ -1510,8 +1510,9 @@ def gen_publish_py(p: PluginParams, profile: str = PROFILE_STANDARD) -> str:
 """Unified publish pipeline: bypass-guard -> lint -> validate (remote CPV) -> test -> bump -> badge -> changelog -> commit -> push -> release.
 
 Modes:
-  --gate                  Pre-push gate: orchestrator check + lint + validate + tests
-                          only (no bump/push). Called by git-hooks/pre-push automatically.
+  --gate                  Pre-push gate: orchestrator check + lint (ruff/jscpd/
+                          actionlint/mypy) + validate + tests only (no bump/push).
+                          Called by git-hooks/pre-push automatically.
   --install-hook          Install git-hooks/pre-push into .git/hooks/ and set core.hooksPath.
   --install-branch-rules  Apply the cpv-branch-rules GitHub ruleset to the origin
                           (server-side CI enforcement — run once after first push).
@@ -1545,6 +1546,10 @@ Gate stages (--gate mode, called by pre-push hook):
    G2. Lint (ruff)
    G2b. Copy-paste check (jscpd, parity with ci.yml Mega-Linter COPYPASTE_JSCPD;
         WARNs+skips if jscpd/npx unavailable so a push is never false-blocked)
+   G2c. Workflow lint (actionlint, parity with ci.yml Lint job; WARNs+skips if
+        actionlint unavailable so a push is never false-blocked)
+   G2d. Type-check (mypy scripts/ --ignore-missing-imports, parity with ci.yml
+        Lint job; WARNs+skips if mypy unavailable so a push is never false-blocked)
    G3. Validate (uvx cpv-remote-validate plugin . --strict)
    G4. Tests (pytest)
 
@@ -2283,6 +2288,54 @@ def run_gate(root: Path) -> int:
                 cprint(f"  {RED}(parity with CI Mega-Linter). Reduce duplication or raise the threshold in .jscpd.json.{NC}")
                 return 1
             cprint(f"  {GREEN}Copy-paste check passed.{NC}")
+
+    # Gate 2c: Workflow-syntax lint (actionlint) — PARITY with ci.yml Lint job.
+    # CI runs actionlint on .github/workflows/*; surface a workflow-syntax error
+    # locally BEFORE the bump/tag/push. actionlint is a single static binary; if it
+    # is not on PATH, DEGRADE to a non-blocking WARNING (CI still enforces it) — a
+    # green gate then does NOT guarantee green CI for the workflow-syntax dimension.
+    # NEVER false-block a push on a missing-tool case (the issue #143 pattern).
+    cprint(f"\n{BLUE}[G2c] Workflow lint (actionlint, parity with CI)...{NC}")
+    wf_dir = root / ".github" / "workflows"
+    has_workflows = wf_dir.is_dir() and (any(wf_dir.glob("*.yml")) or any(wf_dir.glob("*.yaml")))
+    actionlint_bin = shutil.which("actionlint")
+    if not has_workflows:
+        cprint(f"  {GREEN}No workflows to lint — skipped.{NC}")
+    elif actionlint_bin is None:
+        cprint(f"  {YELLOW}WARNING: actionlint not found — workflow lint SKIPPED locally.{NC}")
+        cprint(f"  {YELLOW}CI's Lint job WILL enforce it. A green gate does NOT guarantee green CI")
+        cprint(f"  {YELLOW}for the workflow-syntax dimension. Install actionlint for full parity.{NC}")
+    else:
+        al = subprocess.run([actionlint_bin], cwd=str(root), timeout=120).returncode
+        if al != 0:
+            cprint(f"  {RED}BLOCKED: actionlint found workflow-syntax errors (parity with CI Lint job).{NC}")
+            return 1
+        cprint(f"  {GREEN}Workflow lint passed.{NC}")
+
+    # Gate 2d: Static type-check (mypy) — PARITY with ci.yml Lint job
+    # (`uv run mypy scripts/ --ignore-missing-imports`). Surface a type error
+    # locally BEFORE the bump/tag/push. A `--version` probe distinguishes
+    # 'mypy unavailable' (WARN + skip, never false-block) from 'mypy ran, found
+    # errors' (BLOCK) — the issue #143 degrade-gracefully pattern.
+    cprint(f"\n{BLUE}[G2d] Type-check (mypy, parity with CI)...{NC}")
+    mypy_bin = shutil.which("mypy")
+    mypy_cmd = [mypy_bin] if mypy_bin else (["uv", "run", "mypy"] if shutil.which("uv") else None)
+    if mypy_cmd is None:
+        cprint(f"  {YELLOW}WARNING: mypy/uv not found — type-check SKIPPED locally.{NC}")
+        cprint(f"  {YELLOW}CI's Lint job WILL enforce it; a green gate does NOT guarantee green CI for types.{NC}")
+    else:
+        probe = subprocess.run(mypy_cmd + ["--version"], cwd=str(root),
+                               capture_output=True, text=True, timeout=120)
+        if probe.returncode != 0:
+            cprint(f"  {YELLOW}WARNING: mypy could not run — type-check SKIPPED locally.{NC}")
+            cprint(f"  {YELLOW}CI's Lint job WILL enforce it; green gate != green CI for types.{NC}")
+        else:
+            mt = subprocess.run(mypy_cmd + ["scripts/", "--ignore-missing-imports"],
+                                cwd=str(root), timeout=300).returncode
+            if mt != 0:
+                cprint(f"  {RED}BLOCKED: mypy found type errors in scripts/ (parity with CI Lint job).{NC}")
+                return 1
+            cprint(f"  {GREEN}Type-check passed.{NC}")
 
     # Gate 3: Validate via REMOTE CPV validator. MANDATORY — no skip, no exceptions.
     # CORNERSTONE: a plugin cannot be pushed unless validation passes with 0
