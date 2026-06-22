@@ -32,7 +32,7 @@ CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
   plugin <scaffolded-path> --strict --report <tmp.md>
 ```
 
-Include the report's `SUMMARY:` line verbatim. If it is anything but `CRITICAL=0 MAJOR=0 MINOR=0 NIT=0 WARNING=<n>`: (1) dispatch plugin-fixer with the report path; (2) re-run the recipe — NO hardcoded iteration cap, terminate only on an empty finding set OR oscillation (iteration N == N-1). (3) On oscillation with findings remaining, return `[BLOCKED]` (NOT `[DONE]`) with the remaining findings. Marketplace flows: same via `validate_marketplace.py --strict`.
+Include the report's `SUMMARY:` line verbatim. If it is anything but `CRITICAL=0 MAJOR=0 MINOR=0 NIT=0 WARNING=<n>`: (1) dispatch plugin-fixer with the report path; (2) re-run the recipe — NO hardcoded iteration cap, terminate only on an empty finding set OR oscillation detected by the full-history multiset detector `scripts/cpv_fix_loop_state.py` (record the finding-set each pass; a finding-set that has appeared before = oscillation — NOT the superseded single-step `N == N-1` guard, which issue #132's 2-cycle TOC catch-22 slips straight through into an infinite loop). (3) On oscillation with findings remaining, return `[BLOCKED]` (NOT `[DONE]`) with the remaining findings. Marketplace flows: same via `validate_marketplace.py --strict`.
 
 **"Done" means green CI, not "files written".** A clean `--strict` is necessary but NOT sufficient: when the scaffold publishes to GitHub, you MUST also watch every required CI run to green — see **"CI-green guarantee phase"** below. NEVER return DONE until BOTH a fresh `validate_plugin.py --strict` is `0/0/0/0` AND every required GitHub CI run is green.
 
@@ -105,6 +105,10 @@ Per TRDD-c50531c2 (v2.90.0 menu unification) this agent has NO First Contact men
 | Standardize plugin / marketplace | `standardize-plugin` |
 | Manage install state (info only) | `plugin-management` |
 
+### the-skills-menu canon — migrate ALL agents when onboarding an EXISTING folder (TRDD-0085a444)
+
+When you onboard / wrap / standardize an **existing** plugin folder that has an `agents/` dir (a scaffold-from-scratch already complies — `generate_plugin_repo.py` bakes the-skills-menu into every new plugin), ALL of its agents MUST end up on the-skills-menu before you call it deployment-ready: either rely on `standardize_plugin.py --fix --force-templates` (the canon-upgrade verb, which now rewrites every agent's frontmatter `skills:` → `[the-skills-menu]`, inserts the dynamic-load body instruction, and creates the per-plugin `skills/the-skills-menu/SKILL.md` catalog if absent), OR run `Skill(claude-plugins-validation:the-skills-menu-create)` explicitly. This is **CONDITIONAL canon**: it fires ONLY on the migrate/upgrade/publish path (this agent + the migrate/upgrade agents). A plain user `validate_plugin … --strict` NEVER triggers it and leaves the plugin's original agent frontmatter exactly as the author wrote it — the validator stays silent about the-skills-menu unless the user asked to migrate/publish.
+
 ## Scripts
 
 All at `${CLAUDE_PLUGIN_ROOT}/scripts/`. **VALIDATORS** must always go via the launcher (NEVER directly — environment-isolation guard refuses): `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" <alias> <args>`. **SCAFFOLD/STANDARDIZE/UTILITY scripts** (no guard) run directly: `uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/<script>" <args>`. Full script table (purpose + launcher-alias-vs-direct per script) in `references/plugin-creator-runbook.md` §2.
@@ -118,6 +122,8 @@ The full 16-step choreography (validate → standardize → fix → re-validate 
 ## CI-green guarantee phase — MANDATORY (publish, then LOOP UNTIL CI IS GREEN)
 
 The scaffold is NOT done when the files are written and the first `publish.py` has pushed the repo/release — it is done when GitHub CI is GREEN. The freshly-created plugin's first CI run must be YOUR gate, not the user's notification. This mirrors `agents/plugin-fixer.md` §7d (read it for the exact pattern); apply it to creation/scaffold flows too.
+
+**BEFORE the first `publish.py` — run the CI-parity preflight (this is what stops the create path RED-CI'ing on its very first publish).** `validate_plugin.py --strict` does NOT mirror CI's Lint job (actionlint + Mega-Linter `mypy` + jscpd + `uv sync --extra dev`) — the #137-143 root cause. Run `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" ci-preflight <plugin-root>` (the launcher's `ci-preflight` subcommand, exactly as `plugin-fixer` uses it in its completion gate) and resolve every non-WARNING finding — the CIP-1..5 #137-143 defect shapes PLUS the live jscpd/actionlint/mypy/dev-extra gates — BEFORE you publish. A WARNING (the tool is absent on this box) degrades and does not block; a real FAIL is a pre-publish fix, not a stop. This makes the publisher catch actionlint/mypy/CIP defects LOCALLY instead of reactively after the tag is cut. (The prior gap: the create path ran `--strict` + jscpd but never actionlint/mypy/CIP, so a scaffold wrapped around existing user content, or any hand-edit to a workflow/`scripts/*.py`, could pass locally and then fail the CI Lint job — exactly the "publish agent → plugin fails CI" symptom.)
 
 After scaffolding + the first `publish.py` that creates the repo and release:
 
