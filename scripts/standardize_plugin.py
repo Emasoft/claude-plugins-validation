@@ -815,6 +815,27 @@ _FORCE_TEMPLATE_FILES: set[str] = {
 # at/AHEAD of canon (i.e. the validator's "would downgrade" case).
 _PIPELINE_DRIFT_RC: str = "RC-PIPELINE-DRIFT-001"
 
+# the-skills-menu canon migration (TRDD-478d9687 / the-skills-menu-create spec).
+# The EXACT mandatory dynamic-loading instruction every migrated agent body must
+# carry, taken verbatim from the the-skills-menu-create spec
+# (skills/the-skills-menu-create/references/the-skills-menu-spec.md §"Agent body
+# instruction rule"). That spec is the SINGLE SOURCE OF TRUTH for the rewrite —
+# this constant must stay byte-identical to it. The string starts with "You must
+# load …", so it never begins with a markdown-special char (#, +, *, -); the
+# markdown-poison guard (standardize-plugin SKILL.md) below is therefore a
+# defensive assertion, not a transform.
+_SKILLS_MENU_BODY_INSTRUCTION: str = (
+    "You must load the skills you need dynamically. Use the Skill() tool to load "
+    "them. Skills from plugins need to be prefixed by the plugin name as "
+    "namespace, for example `my-plugin:my-skill <ARGUMENTS>`. Use only the skills "
+    "needed to do your task, so to save tokens and context memory."
+)
+
+# Markdown-special line-start chars the inserted body paragraph must never begin
+# with (markdownlint MD018/MD004 would fire and block --strict). The canonical
+# instruction above is guaranteed safe; this set backs the defensive guard.
+_MD_POISON_LINE_START: tuple[str, ...] = ("#", "+ ", "* ", "- ")
+
 
 def _manifest_intentional_divergence(manifest: dict) -> set[str]:
     """Return the set of repo-relative paths the plugin marks as a deliberate
@@ -1543,6 +1564,221 @@ def provision_jscpd_config(plugin_path: Path, dry_run: bool = False) -> list[str
     return [f"created {_JSCPD_CONFIG_REL} (jscpd copy-paste threshold 5, parity with CI)"]
 
 
+# =============================================================================
+# the-skills-menu CANON MIGRATION (force-templates only)
+# =============================================================================
+#
+# Under --force-templates (the canon UPGRADE verb), every agent in the plugin is
+# migrated to the-skills-menu method: its frontmatter `skills:` list is rewritten
+# to exactly `[the-skills-menu]` (all other fields preserved) and the mandatory
+# dynamic-loading instruction is inserted into its body. A per-plugin
+# skills/the-skills-menu/SKILL.md catalog is created if absent (reusing
+# generate_plugin_repo.gen_the_skills_menu_skill so scaffold-new and
+# upgrade-existing emit byte-identical catalogs). Plain --fix NEVER touches an
+# agent — only adds missing files. Implements the the-skills-menu-create spec
+# (§"Agent frontmatter rewrite rule" + §"Agent body instruction rule"), which is
+# the single source of truth.
+
+
+def _split_frontmatter(text: str) -> tuple[str, str] | None:
+    """Split a `.md` file's leading YAML frontmatter from its body.
+
+    Returns (frontmatter_inner, body) where ``frontmatter_inner`` is the text
+    BETWEEN the opening and closing ``---`` fences (without the fences), and
+    ``body`` is everything after the closing fence. Returns None when the file
+    has no frontmatter (no leading ``---`` line) — the caller treats that as
+    "skip + report for manual review" per the spec (Error #4/#7), never a crash.
+    """
+    # Frontmatter must START the file (allow a leading BOM / blank lines? No —
+    # the harness requires --- on line 1; mirror that strictly so a stray "---"
+    # mid-body is never mistaken for frontmatter).
+    if not text.startswith("---"):
+        return None
+    # The opening fence is the first line; it must be exactly "---" (optionally
+    # with trailing whitespace), not e.g. "----" or "--- foo".
+    m = re.match(r"^---[^\S\n]*\n(.*?\n)^---[^\S\n]*\n?", text, re.DOTALL | re.MULTILINE)
+    if not m:
+        return None
+    inner = m.group(1)
+    body = text[m.end() :]
+    return inner, body
+
+
+def _rewrite_agent_skills_field(frontmatter_inner: str) -> tuple[str, bool]:
+    """Rewrite the frontmatter `skills:` list to exactly `[the-skills-menu]`.
+
+    Handles BOTH YAML shapes, preserving every other field and overall ordering:
+      - block list:  ``skills:\\n  - a\\n  - b``  (consumes the indented items)
+      - flow list:   ``skills: [a, b]``           (single line)
+      - scalar:      ``skills: a``                 (single line)
+    When no `skills:` key exists, one is appended at the end of the frontmatter
+    (so an agent that declared none is still migrated to the canonical single
+    entry). Returns (new_inner, changed).
+    """
+    canonical_block = "skills:\n  - the-skills-menu"
+    lines = frontmatter_inner.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    replaced = False
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        # Match a top-level `skills:` key (no leading indentation — a nested
+        # `skills:` under some other mapping is not the agent's skill list).
+        if re.match(r"^skills[^\S\n]*:", line):
+            # Determine block vs inline by what follows the colon on this line.
+            after = line.split(":", 1)[1].strip()
+            # Emit the canonical block in place of the old key, preserving the
+            # original line's trailing newline convention.
+            newline = "\n" if line.endswith("\n") else ""
+            out.append(canonical_block + newline)
+            i += 1
+            if after == "":
+                # Block-list form: consume following indented `- item` (and blank)
+                # lines that belong to this list.
+                while i < n and re.match(r"^[^\S\n]+(-|\Z)", lines[i]):
+                    i += 1
+            # inline form (after != "") consumed only this single line.
+            replaced = True
+            continue
+        out.append(line)
+        i += 1
+    if replaced:
+        new_inner = "".join(out)
+        return new_inner, new_inner != frontmatter_inner
+    # No skills: key — append the canonical block at the end (ensure the
+    # preceding content ends with a newline so the new key starts on its own
+    # line).
+    base = frontmatter_inner if frontmatter_inner.endswith("\n") or frontmatter_inner == "" else frontmatter_inner + "\n"
+    new_inner = base + canonical_block + "\n"
+    return new_inner, True
+
+
+def _insert_body_instruction(body: str) -> tuple[str, bool]:
+    """Insert the mandatory dynamic-loading instruction into an agent body.
+
+    Placement (spec §"Agent body instruction rule"): as the FIRST body paragraph
+    AFTER the opening ``# Title`` H1 if the body starts with one; otherwise as the
+    very first body line. A blank line is left before and after so it renders as
+    its own paragraph. Idempotent — if the exact instruction already appears
+    verbatim, the body is returned unchanged (no duplicate; mirrors the
+    add_component.py duplicate-guard).
+
+    Returns (new_body, changed).
+    """
+    if _SKILLS_MENU_BODY_INSTRUCTION in body:
+        return body, False  # already present — never duplicate
+
+    # Defensive markdown-poison guard: the canonical instruction starts with
+    # "You must load …" and so never begins with a markdown-special char, but
+    # assert it explicitly so a future edit to the constant can't silently ship a
+    # body line that markdownlint MD018/MD004 would flag and block --strict.
+    if _SKILLS_MENU_BODY_INSTRUCTION.startswith(_MD_POISON_LINE_START):
+        raise ValueError("the-skills-menu body instruction must not start with a markdown-special char")
+
+    para = _SKILLS_MENU_BODY_INSTRUCTION
+
+    # Find a leading H1 (the first non-blank body line being `# ...`). Skip any
+    # leading blank lines that may sit between the frontmatter and the H1.
+    lines = body.splitlines(keepends=True)
+    idx = 0
+    while idx < len(lines) and lines[idx].strip() == "":
+        idx += 1
+    if idx < len(lines) and re.match(r"^#[^\S\n]+\S", lines[idx]):
+        # Insert AFTER the H1 line, as its own paragraph.
+        head = "".join(lines[: idx + 1])
+        tail = "".join(lines[idx + 1 :])
+        head = head if head.endswith("\n") else head + "\n"
+        new_body = head + "\n" + para + "\n" + ("\n" if tail and not tail.startswith("\n") else "") + tail
+        return new_body, True
+    # No leading H1 — insert as the very first body line.
+    new_body = para + "\n\n" + body.lstrip("\n")
+    return new_body, True
+
+
+def _ensure_skills_menu_catalog(plugin_path: Path, dry_run: bool) -> str | None:
+    """Create skills/the-skills-menu/SKILL.md if absent.
+
+    Reuses generate_plugin_repo.gen_the_skills_menu_skill so a scaffold-new and an
+    upgrade-existing plugin emit byte-identical catalogs (single source of truth).
+    Returns the repo-relative created path (also in dry-run), or None when the
+    catalog already exists. Never clobbers an existing catalog — refreshing a
+    hand-curated catalog is the the-skills-menu-create skill's job, not the
+    mechanical standardize path.
+    """
+    rel = "skills/the-skills-menu/SKILL.md"
+    target = plugin_path / rel
+    if target.exists():
+        return None
+    scripts_dir = str(Path(__file__).resolve().parent)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from generate_plugin_repo import gen_the_skills_menu_skill
+
+    manifest = _read_plugin_json(plugin_path)
+    params = _params_from_manifest(manifest)
+    if not dry_run:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(gen_the_skills_menu_skill(params), encoding="utf-8")
+    return rel
+
+
+def migrate_agents_to_skills_menu(plugin_path: Path, dry_run: bool = False) -> int:
+    """Migrate every agent in the plugin to the-skills-menu method.
+
+    For each ``agents/*.md`` file WITH YAML frontmatter:
+      - rewrite frontmatter ``skills:`` → ``[the-skills-menu]`` (preserve all
+        other fields), and
+      - insert the mandatory dynamic-loading instruction into the body.
+    An already-migrated agent (canonical skills list + instruction present) is a
+    clean no-op — no duplicate instruction. An agent file lacking frontmatter is
+    SKIPPED and reported for manual review (spec Error #4/#7), never crashed on.
+    A per-plugin skills/the-skills-menu/SKILL.md catalog is created if absent.
+
+    Profile-agnostic: every profile keeps its agents, so all are migrated.
+
+    Returns the count of agent files actually migrated (changed). Printed output
+    summarises created/migrated/skipped; the count excludes skips and no-ops.
+    """
+    agents_dir = plugin_path / "agents"
+    catalog_rel = _ensure_skills_menu_catalog(plugin_path, dry_run)
+    if catalog_rel is not None:
+        verb = "would create" if dry_run else "created"
+        print(f"  {GREEN}{verb}{NC} {catalog_rel} (the-skills-menu catalog)")
+
+    if not agents_dir.is_dir():
+        print(f"  {DIM}No agents/ directory — nothing to migrate.{NC}")
+        return 0
+
+    migrated = 0
+    skipped: list[str] = []
+    for agent_file in sorted(agents_dir.glob("*.md")):
+        text = agent_file.read_text(encoding="utf-8")
+        split = _split_frontmatter(text)
+        if split is None:
+            # No frontmatter → not a valid agent definition. Skip + report.
+            skipped.append(agent_file.name)
+            continue
+        inner, body = split
+        new_inner, fm_changed = _rewrite_agent_skills_field(inner)
+        new_body, body_changed = _insert_body_instruction(body)
+        if not fm_changed and not body_changed:
+            continue  # already migrated — clean no-op, no duplicate
+        new_text = f"---\n{new_inner}---\n{new_body}"
+        if not dry_run:
+            agent_file.write_text(new_text, encoding="utf-8")
+        verb = "would migrate" if dry_run else "migrated"
+        print(f"  {GREEN}{verb}{NC} agents/{agent_file.name} → the-skills-menu")
+        migrated += 1
+
+    if skipped:
+        print(
+            f"  {YELLOW}Manual review needed:{NC} {len(skipped)} agent file(s) lack YAML "
+            f"frontmatter and were NOT migrated: {', '.join(skipped)}"
+        )
+    return migrated
+
+
 def fix_missing_files(
     plugin_path: Path,
     results: list[AuditItem],
@@ -1943,6 +2179,15 @@ Examples (always invoke via the launcher):
             moved = move_legacy_pipeline_scripts(plugin_path, dry_run=args.dry_run)
             if not moved:
                 print(f"  {GREEN}No legacy pipeline scripts found.{NC}")
+        # the-skills-menu canon migration — ONLY under --force-templates (the
+        # canon UPGRADE verb). Plain --fix never touches an agent. Migrates every
+        # agent's frontmatter skills: → [the-skills-menu] + body instruction, and
+        # creates skills/the-skills-menu/SKILL.md if absent.
+        if args.force_templates:
+            print(f"\n{BOLD}the-skills-menu migration{NC}{mode_label}")
+            n_migrated = migrate_agents_to_skills_menu(plugin_path, dry_run=args.dry_run)
+            if n_migrated == 0:
+                print(f"  {GREEN}All agents already on the-skills-menu (or none to migrate).{NC}")
         if created and not args.dry_run:
             # Re-run audit after fixes to show updated status
             print(f"\n{BOLD}Post-fix audit:{NC}")
