@@ -1585,7 +1585,13 @@ from pathlib import Path
 # from the canonical CPV install via gen_cpv_network_resilience_py().
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
-    from cpv_network_resilience import gh_with_retry, git_with_retry
+    # `pyright: ignore[reportAssignmentType]` (on the import line itself):
+    # the typed real import and the ImportError fallback shims below are
+    # conditional variants of the same names; Pyright flags the typed import as
+    # not assignable to the fallback's loose declared type (its mypy counterpart
+    # is the [no-redef, misc] on the shims). Suppress exactly that — the
+    # standard import-fallback idiom. issue #151.
+    from cpv_network_resilience import gh_with_retry, git_with_retry  # pyright: ignore[reportAssignmentType]
 except ImportError:
     # Fallback: scripts/cpv_network_resilience.py was not shipped with this
     # plugin (older scaffold). Define no-op shims so publish.py still works,
@@ -1974,6 +1980,27 @@ def check_version_consistency(root: Path) -> tuple[bool, str]:
     details = ", ".join(f"{k}={v}" for k, v in found.items())
     return False, f"Version mismatch: {details}"
 
+def _sync_uv_lock(root: Path) -> None:
+    """Re-resolve ``uv.lock`` against the freshly-bumped ``pyproject.toml``.
+
+    Without this, every release leaves ``uv.lock`` stale by one version
+    (``pyproject.toml`` says e.g. ``2.66.2`` but ``uv.lock`` still pins the
+    root package at ``2.66.1``). The NEXT publish then runs an outer
+    ``uv run``/``uv lock``/``uv sync`` which re-syncs that single root-version
+    line in place, DIRTYING the working tree — and Gate 1 (clean-tree check)
+    aborts that publish before it does anything (issue #149). Co-locating the
+    sync in do_bump (the only place pyproject.toml is written) guarantees the
+    lock can never be stale after a successful bump. Idempotent; silently
+    skipped when neither ``uv`` nor ``uv.lock`` is present (plugins authored
+    without uv, or a host where uv isn't installed). ``check=False`` so a uv
+    hiccup degrades to a no-op instead of aborting the bump.
+    """
+    if not (root / "uv.lock").is_file():
+        return
+    if shutil.which("uv") is None:
+        return
+    run(["uv", "lock"], root, check=False)
+
 def do_bump(root: Path, new_ver: str, dry_run: bool = False) -> bool:
     """Orchestrate all version updates. Detects Layout C (marketplace.json at repo root)
     and bumps both manifests atomically when present."""
@@ -2004,7 +2031,13 @@ def do_bump(root: Path, new_ver: str, dry_run: bool = False) -> bool:
     for ok, msg in py_results:
         cprint(f"  {'OK' if ok else 'FAIL'}: {msg}")
 
-    return ok1 and ok2 and ok_mp
+    ok = ok1 and ok2 and ok_mp
+    if ok:
+        # Bump succeeded — bring uv.lock's root version along so the
+        # post-publish tree is clean and the NEXT publish's outer `uv run`
+        # doesn't re-sync uv.lock and trip Gate 1 (issue #149).
+        _sync_uv_lock(root)
+    return ok
 
 
 # -- Hook installer ------------------------------------------------------------
@@ -2268,7 +2301,12 @@ def run_gate(root: Path) -> int:
     # for the copy-paste dimension (issue #143). NEVER false-block a push on a tool-install failure.
     cprint(f"\n{BLUE}[G2b] Copy-paste check (jscpd, parity with CI)...{NC}")
     jscpd_bin = shutil.which("jscpd")
-    base_cmd = [jscpd_bin] if jscpd_bin else ([shutil.which("npx"), "--yes", "jscpd"] if shutil.which("npx") else None)
+    # Resolve npx ONCE into a variable so mypy narrows it (a second
+    # shutil.which("npx") call INSIDE the list keeps the element typed
+    # `str | None`, making base_cmd `list[str | None]` → subprocess.run
+    # [arg-type] under --strict). issue #151.
+    npx_bin = shutil.which("npx")
+    base_cmd = [jscpd_bin] if jscpd_bin else ([npx_bin, "--yes", "jscpd"] if npx_bin else None)
     if base_cmd is None:
         cprint(f"  {YELLOW}WARNING: jscpd/npx not found — copy-paste check SKIPPED locally.{NC}")
         cprint(f"  {YELLOW}CI's Mega-Linter WILL enforce it (.jscpd.json threshold). A green gate does")
@@ -3816,6 +3854,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
+          # Don't persist the checkout token in .git/config — zizmor flags
+          # `artipacked` (credential persistence) otherwise (issue #151).
+          persist-credentials: false
 
       # Cheap-fail-first: workflow-syntax errors before mega-linter.
       - name: Lint workflow YAML (actionlint)
@@ -3848,8 +3889,34 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
+          # zizmor artipacked: don't persist the token in .git/config (issue #151).
+          persist-credentials: false
       - name: Conventional-commits gate
-        uses: wagoid/commitlint-github-action@6cf16efdf4da5277c791d335142c03a0bdf1766e # v6.2.1
+        # Pinned to the COMMIT sha of v6.2.1, not the annotated-tag-object sha.
+        # `git rev-parse v6.2.1` returns the tag OBJECT (6cf16ef…), which is NOT
+        # a commit — `gh api .../commits/6cf16ef…` 404s and zizmor flags
+        # ref-version-mismatch. Deref to the commit it points at (issue #151).
+        uses: wagoid/commitlint-github-action@b948419dd99f3fd78a6548d48f94e3df7f6bf3ed # v6.2.1
+
+  zizmor:
+    # GitHub-Actions-specific static analysis (issue #151). Mega-Linter's
+    # Checkov/Trivy do NOT fully cover GHA workflows, so keep a dedicated
+    # zizmor pass. advanced-security (the action default) uploads SARIF to
+    # code-scanning, which needs security-events: write; everything else is
+    # least-privilege read.
+    name: Workflow Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # zizmor artipacked: don't persist the token in .git/config (issue #151).
+          persist-credentials: false
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7
 
   validate:
     name: Validate
@@ -3867,6 +3934,9 @@ jobs:
       # the Validate job down with a misleading 'process git failed exit
       # code 128'. Drop the recurse to remove the moot enumeration step.
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # zizmor artipacked: don't persist the token in .git/config (issue #151).
+          persist-credentials: false
 
       - name: Install uv
         # enable-cache: true keys an actions/cache on UV_CACHE_DIR so the
@@ -3957,6 +4027,9 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # zizmor artipacked: don't persist the token in .git/config (issue #151).
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
