@@ -602,17 +602,26 @@ class TestLauncherChain:
         )
 
     def test_diamond_shared_clean_target_cleared(self, tmp_path: Path) -> None:
-        """POSITIVE (diamond FP guard): wrapper → [w1, w2], BOTH ``source
-        common.sh`` (clean). The ``proven`` memo verifies ``common.sh`` once; w2's
+        """POSITIVE (diamond FP guard): wrapper → [w1, w2], BOTH launch the SAME
+        clean ``common.sh``. The ``proven`` memo verifies ``common.sh`` once; w2's
         path to it returns the proven result instead of falsely tripping the
-        cycle guard → CLEARED."""
+        cycle guard → CLEARED.
+
+        Launch the shared target with ``bash`` (an interpreter launch), NOT
+        ``source``: the fixture lives under ``tmp_path``, which on Linux is
+        ``/tmp/…`` — and ``source /tmp/…`` is CORRECTLY a C3 out-of-tree/mutable
+        source disqualifier (a real daemon sourcing from /tmp IS exploitable).
+        An interpreter launch of the same absolute path is in-tree-followed, so
+        it exercises the diamond without the unrealistic /tmp-source artifact.
+        (A production daemon sources a RELATIVE in-tree path, never an absolute
+        /tmp one — the plugin is never installed under /tmp.)"""
         tree = _make_plugin_tree(tmp_path)
         common = tree / "scripts" / "common.sh"
         common.write_text("#!/usr/bin/env bash\nsleep 1\n")
         w1 = tree / "bin" / "w1.sh"
-        w1.write_text(f"#!/usr/bin/env bash\nsource {common}\n")
+        w1.write_text(f"#!/usr/bin/env bash\nbash {common}\n")
         w2 = tree / "bin" / "w2.sh"
-        w2.write_text(f"#!/usr/bin/env bash\nsource {common}\n")
+        w2.write_text(f"#!/usr/bin/env bash\nbash {common}\n")
         wrapper = _write_daemon(
             tree, f"#!/usr/bin/env bash\nbash {w1}\nbash {w2}\n", "bin/wrapper.sh"
         )
