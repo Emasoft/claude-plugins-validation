@@ -31,7 +31,9 @@ this minimal start without changing the dispatcher contract.
 
 from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
 from typing import Final
 
 # Print commands that consume a heredoc and emit it as text (no exec).
@@ -1208,6 +1210,33 @@ def _is_bounded_promise_double_raf(line: str) -> bool:
     return arg == pm.group("res") or arg in {"resolve", "res", "r", "done"}
 
 
+def _plugin_root_for(file_path: str) -> Path:
+    """Resolve the plugin root for the file being scanned (issue #63).
+
+    Walks up from ``file_path`` to the nearest ancestor containing a
+    ``.claude-plugin/`` directory; failing that, honours the worker env var
+    ``CPV_SKILLAUDIT_WORKER_PLUGIN_ROOT`` already used by the native scanner;
+    failing that, falls back to ``Path(file_path).parent`` — which makes the
+    C1 "inside plugin root" gate LIKELIER to FAIL, the fail-safe direction
+    (an under-resolved root keeps the finding CRITICAL rather than clearing
+    it on a too-wide tree)."""
+    try:
+        here = Path(file_path).resolve()
+    except (OSError, RuntimeError, ValueError):
+        env = os.environ.get("CPV_SKILLAUDIT_WORKER_PLUGIN_ROOT")
+        return Path(env) if env else Path(file_path).parent
+    for ancestor in (here, *here.parents):
+        try:
+            if (ancestor / ".claude-plugin").is_dir():
+                return ancestor
+        except OSError:
+            break
+    env = os.environ.get("CPV_SKILLAUDIT_WORKER_PLUGIN_ROOT")
+    if env:
+        return Path(env)
+    return here.parent
+
+
 def classify(
     file_path: str,
     content: str,
@@ -1298,6 +1327,25 @@ def classify(
     # visible.
     if rule_id == "PERSISTENCE" and _is_launchagent_removal(line_text):
         return "safe_literal"
+
+    # Issue #63 — a persistence INSTALL whose launched daemon is
+    # RESOLVABLE-in-tree, CLEAN, and NON-EXPLOITABLE is a documented opt-in
+    # installer, not malware. The clear is COMPUTED from the launched code
+    # (intrinsic), never a self-declaration. FAILS-SAFE: an unresolvable /
+    # external / dirty / exploitable target → stays CRITICAL. The import is
+    # lazy because cpv_persistence_target → scan_content → this classifier,
+    # so a module-top import would be circular.
+    if rule_id == "PERSISTENCE":
+        try:
+            from cpv_persistence_target import (  # type: ignore[import-not-found]
+                persistence_launches_clean_inert_target,
+            )
+        except ImportError:
+            persistence_launches_clean_inert_target = None  # type: ignore[assignment]
+        if persistence_launches_clean_inert_target is not None and persistence_launches_clean_inert_target(
+            line_text, file_path, _plugin_root_for(file_path), full_content=content
+        ):
+            return "safe_literal"
 
     # r08 sangrokjung FP iter (2026-05-28) — Python embedded in a shell file.
     # (E) A bare Python raw-string literal line is a regex/pattern definition
