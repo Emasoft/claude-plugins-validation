@@ -47,6 +47,12 @@ from typing import Any, Callable
 
 from cpv_parametrize_body_predicate import is_parametrize_body_line
 from cpv_pattern_source_predicate import is_pattern_source_line
+
+# Issue #63 — the INTRINSIC daemon-source-scan persistence discriminator. The
+# RC-39 loop calls ``persistence_launches_clean_inert_target`` to clear a
+# persistence-install finding whose launched daemon is RESOLVABLE-in-tree,
+# CLEAN, and NON-EXPLOITABLE. FAILS-SAFE: any failure keeps the finding.
+from cpv_persistence_target import persistence_launches_clean_inert_target
 from cpv_scanner_cache import (
     CacheKey,
     ScannerCache,
@@ -9240,6 +9246,18 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                 if m and not has_negation_guard_nearby(
                     content, _line_abs_offset(content_lines_persistence, line_no) + m.start()
                 ):
+                    # Issue #63 — a persistence INSTALL whose launched daemon is
+                    # RESOLVABLE-in-tree, CLEAN, and NON-EXPLOITABLE is a
+                    # documented opt-in installer, not malware. The clear is
+                    # COMPUTED from the launched code (intrinsic), never a
+                    # self-declaration. FAILS-SAFE: an unresolvable / external /
+                    # dirty / exploitable target keeps the finding CRITICAL.
+                    # Same shared helper as the skillaudit path → identical
+                    # verdict on both detectors.
+                    if persistence_launches_clean_inert_target(
+                        line, str(_file_path), plugin_path, full_content=content
+                    ):
+                        break
                     level = effective_severity("major", rel_path)
                     getattr(report, level)(
                         f"RC-39: persistence pattern at line {line_no}: {m.group(0)[:80]}",
