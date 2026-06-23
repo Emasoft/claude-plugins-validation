@@ -36,8 +36,28 @@ from standardize_plugin import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
+def _write_skill(root: Path, name: str, description: str) -> Path:
+    """Lay down a real skills/<name>/SKILL.md so the catalog can be POPULATED.
+
+    Issue #150: the migration is now gated on a populated catalog — a plugin
+    with zero real skills is NOT migrated. These tests assert the HAPPY path
+    (an agent IS migrated), so the fixture must ship at least one real skill.
+    """
+    sk = root / "skills" / name
+    sk.mkdir(parents=True, exist_ok=True)
+    (sk / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\nuser-invocable: false\n---\n\n# {name}\n\nBody.\n",
+        encoding="utf-8",
+    )
+    return sk
+
+
 def _make_plugin(tmp_path: Path) -> Path:
-    """Lay down a minimal plugin tree with a manifest and an agents/ dir."""
+    """Lay down a minimal plugin tree with a manifest, agents/, and a REAL skill.
+
+    The skill makes the the-skills-menu catalog populatable, so the migration
+    proceeds (issue #150 gates migration on a non-empty catalog).
+    """
     root = tmp_path / "plug"
     cp = root / ".claude-plugin"
     cp.mkdir(parents=True)
@@ -47,6 +67,7 @@ def _make_plugin(tmp_path: Path) -> Path:
     )
     (root / "agents").mkdir()
     (root / "skills").mkdir()
+    _write_skill(root, "validation", "Validate a plugin tree.")
     return root
 
 
@@ -173,19 +194,30 @@ def test_catalog_is_created_when_absent(tmp_path: Path) -> None:
     assert "myplug" in body
 
 
-def test_catalog_reuses_generator_byte_identical(tmp_path: Path) -> None:
-    """The created catalog is byte-identical to the scaffold generator output."""
-    from generate_plugin_repo import gen_the_skills_menu_skill
-    from standardize_plugin import _params_from_manifest, _read_plugin_json
+def test_catalog_is_populated_and_drops_allowed_tools(tmp_path: Path) -> None:
+    """The created catalog is POPULATED from the real inventory, not the stub.
 
+    Issue #150: the catalog must list every real skill (here ``validation``,
+    seeded by _make_plugin) and must NOT carry the empty-stub placeholder
+    "no operational skills yet"; it also drops the ``allowed-tools`` frontmatter
+    (skills do not declare tools).
+    """
     root = _make_plugin(tmp_path)
     _write_agent(root, "fix-agent.md", _STATIC_AGENT)
 
     migrate_agents_to_skills_menu(root, dry_run=False)
 
     catalog = (root / "skills" / "the-skills-menu" / "SKILL.md").read_text(encoding="utf-8")
-    expected = gen_the_skills_menu_skill(_params_from_manifest(_read_plugin_json(root)))
-    assert catalog == expected
+    # the real skill is listed
+    assert "`validation`" in catalog
+    # the empty-stub placeholder is gone
+    assert "no operational skills yet" not in catalog
+    # no tool frontmatter
+    fm = catalog.split("---", 2)[1]
+    assert "allowed-tools" not in fm
+    # still the standard catalog shape, namespaced to this plugin
+    assert "## Plugin Skills" in catalog
+    assert "myplug" in catalog
 
 
 def test_existing_catalog_is_not_clobbered(tmp_path: Path) -> None:
@@ -300,7 +332,10 @@ def test_agent_without_frontmatter_is_skipped(tmp_path: Path, capsys) -> None:
 
 
 def test_no_agents_dir_is_no_op(tmp_path: Path) -> None:
-    """A skill-only plugin (no agents/) still gets the catalog, migrates 0."""
+    """A skill-only plugin (no agents/) WITH real skills still gets the catalog.
+
+    The catalog is created (it has skills to list) and 0 agents migrate.
+    """
     root = tmp_path / "skillonly"
     cp = root / ".claude-plugin"
     cp.mkdir(parents=True)
@@ -309,11 +344,14 @@ def test_no_agents_dir_is_no_op(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (root / "skills").mkdir()
+    _write_skill(root, "do-thing", "Do a thing.")
 
     n = migrate_agents_to_skills_menu(root, dry_run=False)
 
     assert n == 0
-    assert (root / "skills" / "the-skills-menu" / "SKILL.md").exists()
+    catalog = root / "skills" / "the-skills-menu" / "SKILL.md"
+    assert catalog.exists()
+    assert "`do-thing`" in catalog.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

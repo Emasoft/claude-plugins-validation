@@ -1696,31 +1696,174 @@ def _insert_body_instruction(body: str) -> tuple[str, bool]:
     return new_body, True
 
 
-def _ensure_skills_menu_catalog(plugin_path: Path, dry_run: bool) -> str | None:
-    """Create skills/the-skills-menu/SKILL.md if absent.
+def _skill_frontmatter_field(skill_md_text: str, field: str) -> str | None:
+    """Return a single scalar frontmatter value from a SKILL.md, or None.
 
-    Reuses generate_plugin_repo.gen_the_skills_menu_skill so a scaffold-new and an
-    upgrade-existing plugin emit byte-identical catalogs (single source of truth).
-    Returns the repo-relative created path (also in dry-run), or None when the
-    catalog already exists. Never clobbers an existing catalog — refreshing a
-    hand-curated catalog is the the-skills-menu-create skill's job, not the
-    mechanical standardize path.
+    Deliberately dependency-free (PyYAML is NOT imported by standardize) and
+    forgiving: it reads the leading ``---`` … ``---`` block and returns the first
+    top-level ``<field>:`` scalar, stripping surrounding single/double quotes.
+    A block value (``field:`` with nothing after the colon → list/mapping on the
+    following lines) returns None — the catalog only needs the scalar ``name``
+    and ``description``. Returns None when the file has no frontmatter at all.
     """
-    rel = "skills/the-skills-menu/SKILL.md"
-    target = plugin_path / rel
-    if target.exists():
+    split = _split_frontmatter(skill_md_text)
+    if split is None:
         return None
+    inner, _body = split
+    for line in inner.splitlines():
+        m = re.match(rf"^{re.escape(field)}[^\S\n]*:[^\S\n]*(.*)$", line)
+        if m is None:
+            continue
+        value = m.group(1).strip()
+        if value == "":
+            return None  # block scalar / list — not what the catalog wants
+        # Strip a single matched pair of surrounding quotes.
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        return value.strip() or None
+    return None
+
+
+def scan_plugin_skills_inventory(plugin_path: Path) -> list[tuple[str, str]]:
+    """Scan ``skills/<name>/SKILL.md`` and return the real operational skills.
+
+    Returns a sorted list of ``(skill_name, one_line_description)`` for every
+    skill directory under ``skills/`` that ships a ``SKILL.md`` — EXCLUDING
+    ``the-skills-menu`` itself (the catalog never lists itself) and any
+    ``the-skills-menu-create`` migrator copy. The skill's NAME comes from its
+    frontmatter ``name:`` when present, otherwise from the directory name (so a
+    skill with a malformed/missing name is still discovered, never silently
+    dropped). The description is the frontmatter ``description:`` first sentence,
+    trimmed to a single readable line; missing → a neutral placeholder.
+
+    This is the population source for the the-skills-menu catalog: WITHOUT it,
+    the standardizer wrote the empty-stub "no operational skills yet" placeholder
+    even on a plugin with many real skills (issue #150).
+    """
+    skills_dir = plugin_path / "skills"
+    if not skills_dir.is_dir():
+        return []
+    excluded = {"the-skills-menu", "the-skills-menu-create"}
+    found: list[tuple[str, str]] = []
+    for child in sorted(skills_dir.iterdir()):
+        if not child.is_dir() or child.name in excluded:
+            continue
+        skill_md = child / "SKILL.md"
+        if not skill_md.is_file():
+            continue
+        text = skill_md.read_text(encoding="utf-8")
+        name = _skill_frontmatter_field(text, "name") or child.name
+        if name in excluded:
+            continue
+        desc = _skill_frontmatter_field(text, "description")
+        if desc:
+            # Keep it to one readable line: first sentence (up to the first
+            # ". ") and a hard cap so a paragraph-length description does not
+            # bloat the catalog table.
+            first = desc.split(". ", 1)[0].strip().rstrip(".")
+            one_line = first if len(first) <= 160 else first[:157].rstrip() + "..."
+        else:
+            one_line = "(no description — see the skill's SKILL.md)"
+        found.append((name, one_line))
+    return found
+
+
+def _render_skills_menu_catalog(params: object, skills: list[tuple[str, str]]) -> str:
+    """Render the the-skills-menu SKILL.md, POPULATED from the real inventory.
+
+    Starts from generate_plugin_repo.gen_the_skills_menu_skill (the single source
+    of truth for the catalog shape), then applies two issue-#150 fixes:
+
+      1. Replace the empty-stub ``## Plugin Skills`` block ("This plugin has no
+         operational skills yet" + a placeholder table row) with a real table
+         listing every discovered skill (name + one-line description). When
+         ``skills`` is empty the stub is left as-is (an empty catalog), but the
+         CALLER must not migrate agents in that case — see
+         migrate_agents_to_skills_menu.
+      2. Drop the ``allowed-tools: Read`` frontmatter line — a skill must not
+         carry tool frontmatter (the tool surface is dynamic; only commands
+         declare allowed-tools).
+
+    Both transforms are applied verbatim to the generator's text so a future
+    change to the catalog shape flows through automatically.
+    """
     scripts_dir = str(Path(__file__).resolve().parent)
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
     from generate_plugin_repo import gen_the_skills_menu_skill
 
+    text = gen_the_skills_menu_skill(params)  # type: ignore[arg-type]
+
+    # (2) Strip the `allowed-tools:` frontmatter line (issue #150 secondary).
+    text = re.sub(r"(?m)^allowed-tools:.*\n", "", text)
+
+    # (1) Populate the Plugin Skills table when there are real skills.
+    if skills:
+        plugin_name = getattr(params, "name", "this-plugin")
+        rows = "\n".join(f"| {i} | `{name}` | {desc} |" for i, (name, desc) in enumerate(skills, start=1))
+        populated = (
+            "## Plugin Skills\n"
+            "\n"
+            f"The {plugin_name} plugin ships the operational skills below. "
+            "Pick the one your task needs and load it on demand:\n"
+            "\n"
+            "| # | Skill | What it does |\n"
+            "|---|-------|--------------|\n"
+            f"{rows}\n"
+            "\n"
+            "All entries above are invoked as\n"
+            f"`Skill({{skill: \"{plugin_name}:<name>\"}})`."
+        )
+        # Replace from the `## Plugin Skills` heading up to (but not including)
+        # the next top-level `## ` heading. The generator always emits a
+        # `## Resources` section after Plugin Skills, so an anchor exists.
+        text = re.sub(
+            r"(?ms)^## Plugin Skills\n.*?(?=^## )",
+            populated + "\n\n",
+            text,
+            count=1,
+        )
+    return text
+
+
+def _ensure_skills_menu_catalog(plugin_path: Path, dry_run: bool) -> tuple[str | None, int]:
+    """Create a POPULATED skills/the-skills-menu/SKILL.md if absent.
+
+    Reuses generate_plugin_repo.gen_the_skills_menu_skill for the catalog shape,
+    then populates its ``## Plugin Skills`` table from the plugin's REAL skill
+    inventory (issue #150 — the old code wrote the empty-stub placeholder even
+    when the plugin had many skills) and drops the ``allowed-tools`` frontmatter.
+
+    Returns ``(rel_path_or_None, n_real_skills)`` where ``rel_path_or_None`` is
+    the repo-relative path that was (or would be) created, or None when the
+    catalog already exists OR when there are no skills to list, and
+    ``n_real_skills`` is the count of operational skills discovered under
+    ``skills/`` (used by the caller to decide whether the migration is safe to
+    perform). Never clobbers an existing catalog — refreshing a hand-curated
+    catalog is the the-skills-menu-create skill's job.
+
+    CRITICAL (issue #150): an EMPTY-stub catalog is NEVER written. The old code
+    wrote the "no operational skills yet" placeholder whenever the catalog was
+    absent — and that empty catalog then made the migration look usable, so the
+    agent got stripped into a menu with nothing in it. Now, with zero real
+    skills and no existing catalog, this writes NOTHING and returns (None, 0) so
+    the caller skips the migration entirely.
+    """
+    rel = "skills/the-skills-menu/SKILL.md"
+    target = plugin_path / rel
+    skills = scan_plugin_skills_inventory(plugin_path)
+    if target.exists():
+        return None, len(skills)
+    if not skills:
+        # Nothing to populate the catalog with — do NOT write an empty stub.
+        return None, 0
+
     manifest = _read_plugin_json(plugin_path)
     params = _params_from_manifest(manifest)
     if not dry_run:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(gen_the_skills_menu_skill(params), encoding="utf-8")
-    return rel
+        target.write_text(_render_skills_menu_catalog(params, skills), encoding="utf-8")
+    return rel, len(skills)
 
 
 def migrate_agents_to_skills_menu(plugin_path: Path, dry_run: bool = False) -> int:
@@ -1737,14 +1880,42 @@ def migrate_agents_to_skills_menu(plugin_path: Path, dry_run: bool = False) -> i
 
     Profile-agnostic: every profile keeps its agents, so all are migrated.
 
+    SAFETY GATE (issue #150): an agent is migrated to the-skills-menu ONLY when
+    the catalog can actually list skills — i.e. the plugin has real skills under
+    ``skills/`` (or already ships a hand-curated catalog). If population yields
+    ZERO skills AND no catalog exists, NO agent is touched and a WARNING is
+    emitted (the caller must NOT report success): stripping an agent's ``skills:``
+    while the menu is empty would leave the agent unable to preload its core
+    skills AND unable to discover them — a strictly broken agent.
+
     Returns the count of agent files actually migrated (changed). Printed output
     summarises created/migrated/skipped; the count excludes skips and no-ops.
     """
     agents_dir = plugin_path / "agents"
-    catalog_rel = _ensure_skills_menu_catalog(plugin_path, dry_run)
+    catalog_rel, n_skills = _ensure_skills_menu_catalog(plugin_path, dry_run)
+    catalog_path = plugin_path / "skills" / "the-skills-menu" / "SKILL.md"
+    # The catalog is "usable" when it lists real skills, OR a catalog already
+    # exists on disk (hand-curated — its contents are the author's business and
+    # may already list skills we cannot parse). catalog_rel is non-None only when
+    # we just (would) create one; an EXISTING catalog returns catalog_rel=None.
+    catalog_preexisting = catalog_rel is None and catalog_path.exists()
+    catalog_usable = n_skills > 0 or catalog_preexisting
+
+    if not catalog_usable:
+        # Genuinely no skills to discover and no catalog to fall back on. Do NOT
+        # migrate (would strip agents into an empty menu). Do NOT report success.
+        print(
+            f"  {YELLOW}the-skills-menu migration SKIPPED:{NC} no operational skills found "
+            f"under skills/ and no existing catalog. Migrating now would strip each agent's "
+            f"skills into an EMPTY menu (a broken agent). Add real skills, then re-run "
+            f"--force-templates, or run the the-skills-menu-create command to build the catalog first."
+        )
+        return 0
+
     if catalog_rel is not None:
         verb = "would create" if dry_run else "created"
-        print(f"  {GREEN}{verb}{NC} {catalog_rel} (the-skills-menu catalog)")
+        detail = f"{n_skills} skill(s) listed" if n_skills else "from existing catalog"
+        print(f"  {GREEN}{verb}{NC} {catalog_rel} (the-skills-menu catalog — {detail})")
 
     if not agents_dir.is_dir():
         print(f"  {DIM}No agents/ directory — nothing to migrate.{NC}")
@@ -2186,7 +2357,13 @@ Examples (always invoke via the launcher):
         if args.force_templates:
             print(f"\n{BOLD}the-skills-menu migration{NC}{mode_label}")
             n_migrated = migrate_agents_to_skills_menu(plugin_path, dry_run=args.dry_run)
-            if n_migrated == 0:
+            # The "all already migrated" success line is only truthful when the
+            # migration was NOT skipped for an empty catalog (issue #150). When
+            # skipped, migrate_agents_to_skills_menu already printed the WARNING
+            # explaining why — never report success on top of it.
+            _menu_catalog = plugin_path / "skills" / "the-skills-menu" / "SKILL.md"
+            _catalog_usable = scan_plugin_skills_inventory(plugin_path) or _menu_catalog.exists()
+            if n_migrated == 0 and _catalog_usable:
                 print(f"  {GREEN}All agents already on the-skills-menu (or none to migrate).{NC}")
         if created and not args.dry_run:
             # Re-run audit after fixes to show updated status
