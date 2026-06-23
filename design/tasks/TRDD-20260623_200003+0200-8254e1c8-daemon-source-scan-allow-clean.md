@@ -1,9 +1,9 @@
 ---
 trdd-id: 8254e1c8-7864-4be9-8b1b-82ddf81c83ed
 title: Daemon-installer source-scan — allow provably-clean+non-exploitable boot daemons, keep blocking malicious/exploitable ones; + clear all open issues #147-#151
-column: dev
+column: complete
 created: 2026-06-23T20:00:03+0200
-updated: 2026-06-23T20:00:03+0200
+updated: 2026-06-23T21:00:47+0200
 current-owner: cpv-main
 assignee: cpv-main
 priority: 1
@@ -51,18 +51,50 @@ execution)."
    feature). Overrides the #63 won't-fix premise.
 2. **All open issues #147-#151** must be cleared.
 
-### Current state
-- PRIMARY: design phase. Opus design agent dispatched (max effort, read-only) to
-  produce the detailed technical design + two-sided test matrix.
-- #147: coordination Q (answer = "publish against the version this TRDD ships";
-  reply AFTER ship). #148-#151: real code fixes, well-specified in their bodies.
+### Current state — IMPLEMENTATION COMPLETE + CENTRAL-VERIFIED (pre-ship)
+- PRIMARY discriminator: SHIPPED in `scripts/cpv_persistence_target.py` (the four
+  ALLOW conditions C1-C4 + bounded launcher chain), wired into BOTH detector
+  paths (`_skillaudit_shell_context.py` lazy-import branch + `validate_security.py`
+  RC-39 guard) via the one shared helper. Design at
+  `reports/daemon-scan-design/20260623_200620+0200-*.md`, impl report at
+  `reports/daemon-scan-impl/20260623_203011+0200-*.md`.
+- CENTRAL-ADVERSARIAL VERIFY (this session) found + FIXED one real FN hole the
+  impl agent's 39 tests missed: `_is_thin_launcher_target` followed only the
+  FIRST launch token, so a thin launcher that exec'd TWO in-tree scripts
+  (`python ./clean.py` then `python ./evil.py`) had only `clean.py` scanned →
+  a clean-first/evil-second launcher CLEARED. Replaced it with `_launch_targets`
+  (collect+follow EVERY target via finditer, NO cap — a cap would re-open the
+  hole) and rewrote `_target_chain_passes` with a diamond-safe `proven` memo +
+  `on_path` cycle guard (so a file reached by two launch paths verifies once and
+  does not falsely trip the cycle guard). Removed dead `_depth` param. +4
+  two-sided tests in `tests/test_persistence_daemon_scan.py` (multi-exec
+  evil-second NEGATIVE, both-clean POSITIVE, single-line two-launch NEGATIVE,
+  diamond POSITIVE). All 43 daemon tests + 75 cross-path + 72 RC-39 regressions
+  green; ruff + mypy clean; re2-safe (added no new regex).
+- SELF-SCAN-CLEAN: the cache-cold `--strict` self-validate first flagged
+  `cpv_persistence_target.py:564` (the analyzer's own `@reboot`/`crontab`
+  dispatch needles tripping the PERSISTENCE rule — scanning-the-scanner). Fixed
+  by moving ALL mechanism needles into a recognized `_MECHANISM_TOKENS`
+  pattern-source collection (the dispatch `if`s now reference the table, no
+  inline literals) so CPV's self-scan reads them as DATA. This is NOT a rule
+  suppression — the P-1 `is_pattern_source_line` skip is gated to CPV's OWN
+  hash-pinned source via the non-spoofable `_CPV_IS_RUNNING_CPV`, so a
+  third-party plugin's real persistence install still BLOCKS. Re-validated
+  cache-cold → 0/0/0/0.
+- #148-#151: all four code fixes landed by file-disjoint opus agents and
+  re-verified green this session (targeted suites: #148 13, #149/#151 15, #150 12,
+  standardize 12 = 52 pass). #147: coordination Q — answer AFTER ship =
+  "publish against v2.145.0".
 
-### NEXT ACTION
-Read the opus design report at `reports/daemon-scan-design/` then implement the
-discriminator (skillaudit PERSISTENCE + validate_security RC-39 paths) with
-two-sided tests. Then fix #148-#151 (file-disjoint where possible). Then
-self-validate `--strict` cache-cold, update docs/README/CLAUDE.md, regen
-self-hashes LAST, publish via publish.py, watch CI green, answer #147.
+### NEXT ACTION (ship sequence)
+1. Await the full serial-suite run (arbiter, in flight) → confirm green.
+2. Write the v2.145.0 version-history entry in CLAUDE.md (counts already bumped
+   to scripts 121 / test files 370 / ~10155 tests).
+3. Regen self-hashes LAST (`_plugin_compute_hashes.py`) — after ALL md/TRDD edits.
+4. Cache-cold self-validate `--strict` → 0/0/0/0.
+5. Commit per concern, then `publish.py --minor` → v2.145.0, watch CI green.
+6. Close #148-#151 + #63 (intrinsic-discriminator overrides the won't-fix) and
+   answer #147 — each comment led by the self-id line.
 
 ### Load-bearing facts / gotchas
 - **TWO persistence code paths**, BOTH must get the discriminator:
