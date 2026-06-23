@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-06-23T19:42:27+00:00",
+  "computed_at": "2026-06-23T19:57:39+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:b0a2c1b1c45cc7c1cdcfcc71f4cc6d61ebe238d6b175d1b07cc0600047eca5f8",
@@ -109,7 +109,7 @@
     "design/tasks/TRDD-20260621_214727+0200-8eee537a-fixer-upgrade-ci-parity-hardening.md": "sha256:2ce64b91a3a635dee6e37750d89daaf08d277166789f941e4f31e31508f3f7e5",
     "design/tasks/TRDD-20260621_220347+0200-034b4061-standardize-regresses-customized-plugins.md": "sha256:9675428b62c6a7581cef957c256f3b77d87a8a8ac1f87c444b9dbaefddb6f4da",
     "design/tasks/TRDD-20260622_010834+0200-0085a444-spec-sync-skillsmenu-canon-publisher-docs.md": "sha256:1a52f9946909ef44c45e54e53b7a0a7664b5ee649f54ddc4fadd15bd81cdcdbb",
-    "design/tasks/TRDD-20260623_200003+0200-8254e1c8-daemon-source-scan-allow-clean.md": "sha256:4056720e1b770a501958864fadca8bac5b67ee369bcac4513df8f1cd6cabf6be",
+    "design/tasks/TRDD-20260623_200003+0200-8254e1c8-daemon-source-scan-allow-clean.md": "sha256:b9dbb24f53df42dbd98604785fe17b595cc243fc23c3c2b6b09d421e832c2117",
     "design/tasks/TRDD-26446eed-ea5e-43e7-886c-8512866d92be-semantic-channel-source.md": "sha256:b20480b2cf4e0a97cc06e53a32a39a4d09a4740b94c92804298a8286d88d991c",
     "design/tasks/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md": "sha256:e2f55a383481238d738aaea92cfdbcb0ce34e6f1bdeab22a3b641cfca583431d",
     "design/tasks/TRDD-2be75e88-3c23-4c91-9e4e-5ce315b497dc-scope-validators.md": "sha256:6aba8e45a304a4b8b33177decdc271a7e1677098d7b5e09903f132f73cabff68",
