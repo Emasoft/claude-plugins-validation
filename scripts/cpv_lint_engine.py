@@ -385,6 +385,56 @@ _NONINTERACTIVE_ENV: dict[str, str] = {
 }
 
 
+# Hard ceiling applied to EVERY linter spawn (issue #148). The per-linter call
+# sites pass a sane default (60/120/180s); `PLUGIN_REPO_LINT_TIMEOUT` lets a CI
+# runner cap (or raise) that uniformly without editing each site. A blocked or
+# never-finishing linter on a fresh GitHub runner could otherwise sit until the
+# whole CI job's wall-clock timeout (~30 min, the v2.137.0 incident) with no
+# output. With a per-linter ceiling the worst case is that language being
+# SKIPPED as a WARNING and the next language proceeding — never a job-killing
+# hang. A non-positive / unparseable value disables the override (falls back to
+# the call-site default), so a typo can never make the ceiling shorter than a
+# real linter needs and silently skip everything.
+_REPO_LINT_TIMEOUT_ENV = "PLUGIN_REPO_LINT_TIMEOUT"
+
+
+def _effective_timeout(call_site_default: float) -> float:
+    """Resolve the timeout for one linter spawn.
+
+    Returns ``PLUGIN_REPO_LINT_TIMEOUT`` (seconds, float) when it is set to a
+    positive number; otherwise the caller's ``call_site_default``. An empty,
+    zero, negative, or non-numeric value is ignored (the default wins) so a
+    misconfiguration degrades to today's hard-coded behaviour rather than to a
+    near-zero ceiling that would skip every language.
+    """
+    raw = os.environ.get(_REPO_LINT_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return call_site_default
+    try:
+        override = float(raw)
+    except ValueError:
+        return call_site_default
+    return override if override > 0 else call_site_default
+
+
+def _repo_lint_disabled() -> bool:
+    """True when ``PLUGIN_SKIP_REPO_LINT`` opts out of the whole REPO LINT phase.
+
+    Mirrors the ``PLUGIN_SKIP_GITHUB_INTEGRITY`` opt-out (issue #148): a
+    downstream CI that already runs its own linter (e.g. Mega-Linter) sets
+    ``PLUGIN_SKIP_REPO_LINT=1`` so CPV's 15-language pass is not a redundant
+    second lint that can also hang on a cold runner. Any truthy value
+    (``1``/``true``/``yes``/``on``, case-insensitive) disables the phase; unset
+    or a falsey value keeps it ON (the default — linting still happens).
+    """
+    return os.environ.get("PLUGIN_SKIP_REPO_LINT", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _run_linter(
     cmd: list[str],
     *,
@@ -410,7 +460,16 @@ def _run_linter(
     Raises ``subprocess.TimeoutExpired`` on deadline (after killing the
     group) so each caller's existing ``except subprocess.TimeoutExpired``
     branch fires exactly as before.
+
+    The effective deadline is ``PLUGIN_REPO_LINT_TIMEOUT`` when set to a
+    positive value, else the caller's ``timeout`` (issue #148) — so a single
+    env var caps EVERY linter spawn without editing each call site.
     """
+    # Resolve the hard ceiling here (issue #148): every call site passes its own
+    # default, but a CI runner can shrink/raise them all uniformly via the env
+    # var. Applied centrally so a future linter added with a fresh `_run_linter`
+    # call automatically inherits the override too.
+    timeout = _effective_timeout(timeout)
     env = {**os.environ, **_NONINTERACTIVE_ENV}
     # Windows has no POSIX process groups / killpg; `start_new_session` is a
     # no-op-equivalent there. On Windows, `Popen.kill()` already terminates
@@ -2039,6 +2098,17 @@ def lint_repo(
         missing-tool failure occurred (in strict mode). MINOR/WARNING
         findings do not flip the return value.
     """
+    # Issue #148 opt-out: when PLUGIN_SKIP_REPO_LINT is set, skip the whole
+    # phase. A downstream CI already running its own linter (Mega-Linter, etc.)
+    # uses this to avoid a redundant second lint that — on a cold runner — can
+    # also block. Return True (no findings, treated as pass) and record ONE INFO
+    # so the report explains the empty result instead of looking like a clean
+    # lint that never ran.
+    if _repo_lint_disabled():
+        if not quiet:
+            print("  REPO LINT skipped (PLUGIN_SKIP_REPO_LINT set)")
+        report.info("REPO LINT phase skipped via PLUGIN_SKIP_REPO_LINT")
+        return True
     if cache is None:
         # Default: a real on-disk cache under the user's home dir.
         # Tests that want isolation pass their own ScannerCache.
