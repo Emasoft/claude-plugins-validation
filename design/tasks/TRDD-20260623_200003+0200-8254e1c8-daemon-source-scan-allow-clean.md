@@ -1,9 +1,9 @@
 ---
 trdd-id: 8254e1c8-7864-4be9-8b1b-82ddf81c83ed
 title: Daemon-installer source-scan — allow provably-clean+non-exploitable boot daemons, keep blocking malicious/exploitable ones; + clear all open issues #147-#151
-column: complete
+column: published
 created: 2026-06-23T20:00:03+0200
-updated: 2026-06-23T21:00:47+0200
+updated: 2026-06-23T21:54:02+0200
 current-owner: cpv-main
 assignee: cpv-main
 priority: 1
@@ -26,15 +26,26 @@ audit-requirements: [security-scan, adversarial-scan]
 review-requirements: [code-review]
 runtime-targets: [macos, linux]
 impacts: [public-api, ci-pipeline]
-attempts: 0
-last-test-result: not-run
-implementation-commits: []
+attempts: 1
+last-test-result: pass
+implementation-commits: [b152f62, d5b5a77, f390b3c, d87aef4, f78ae26, 42b5210]
+published-version: 2.145.1
+published-at: 2026-06-23T21:54:02+0200
 external-refs: ["github.com/Emasoft/claude-plugins-validation/issues/147", "github.com/Emasoft/claude-plugins-validation/issues/148", "github.com/Emasoft/claude-plugins-validation/issues/149", "github.com/Emasoft/claude-plugins-validation/issues/150", "github.com/Emasoft/claude-plugins-validation/issues/151", "github.com/Emasoft/claude-plugins-validation/issues/61", "github.com/Emasoft/claude-plugins-validation/issues/63"]
 ---
 
 # TRDD-8254e1c8 — Daemon-installer source-scan (allow clean+non-exploitable boot daemons) + clear all open issues
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-06-23
+
+✅ SHIPPED in **v2.145.1** (CI GREEN). Daemon-installer source-scan discriminator
+landed (commits b152f62 + the CI-fix 42b5210); all open issues #148-#151 closed,
+the won't-fix #63 commented (intrinsic override), #147 answered. CI Test job
+went red on the FIRST publish (v2.145.0) due to a macOS-vs-Linux tmp-path test
+artifact (a fixture using `source {absolute-/tmp-path}` — correctly flagged by
+`_OUT_OF_TREE_SOURCE_RE` on Linux); fixed test-only (launch via `bash`),
+reproduced+verified locally with `--basetemp=/tmp/…`, re-shipped v2.145.1 GREEN.
+This TRDD is column: published — terminal; do not edit the body further.
 
 **User directive (verbatim intent):** "all issues must be solved before shipping!
 read the open issues on github. there are many problems with the installers of
