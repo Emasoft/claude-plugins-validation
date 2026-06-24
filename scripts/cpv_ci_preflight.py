@@ -652,9 +652,94 @@ def _gate_megalinter_tool(
 def _argv_cspell(tool_bin: str, root: Path) -> list[str]:
     # Mirror Mega-Linter SPELL_CSPELL: spell-check the tree. `--no-progress`
     # keeps output terse; `--no-summary` avoids a non-error trailer; cspell exits
-    # non-zero ONLY when it finds an unknown word (a real CI failure).
+    # non-zero when it finds an unknown word. Only invoked when the plugin ships
+    # its own cspell config (see _gate_cspell) — without one a bare cspell uses
+    # only its minimal default dictionary and false-blocks on ordinary tech terms.
     _ = root
     return [tool_bin, "lint", "--no-progress", "--no-summary", "."]
+
+
+# cspell config files a local `cspell lint` auto-discovers. Their presence is the
+# gate for the cspell probe (see _gate_cspell): WITHOUT one, a bare local cspell
+# runs on its minimal default dictionary and FAILS on ordinary tech terms
+# (pyproject / venv / pipefail / toplevel / endfor / …) that CI's Mega-Linter
+# cspell — which ships BUNDLED technical dictionaries the local invocation lacks —
+# passes. So a bare local cspell cannot faithfully reproduce CI's cspell, and
+# running it would false-block a CI-green plugin (verified: a freshly-scaffolded
+# plugin trips `endfor`/`pipefail`/`pyproject`). The probe is therefore
+# FAIL-capable only when the plugin ships its own config (a local run then
+# reproduces the plugin's intended spell-check); with no config it degrades to a
+# non-blocking WARNING and CI's Mega-Linter still enforces cspell.
+_CSPELL_CONFIG_NAMES = (
+    ".cspell.json",
+    "cspell.json",
+    ".cspell.jsonc",
+    "cspell.jsonc",
+    ".cspell.config.json",
+    "cspell.config.json",
+    "cspell.config.yaml",
+    "cspell.config.yml",
+    "cspell.config.js",
+    "cspell.config.cjs",
+    "cspell.config.mjs",
+    ".cspell.yaml",
+    ".cspell.yml",
+    "cspell.yaml",
+    "cspell.yml",
+    ".cspell-words.txt",
+    "project-words.txt",
+)
+
+
+def _plugin_has_cspell_config(root: Path) -> bool:
+    """True when the plugin ships a cspell config/dictionary a local `cspell lint`
+    auto-discovers (so a local run reproduces the plugin's intended spell-check)."""
+    if any((root / name).is_file() for name in _CSPELL_CONFIG_NAMES):
+        return True
+    return (root / ".cspell").is_dir()
+
+
+def _gate_cspell(result: PreflightResult, enabled: set[str] | None) -> None:
+    """Mega-Linter SPELL_CSPELL parity probe.
+
+    cspell is special among the probes: CI's Mega-Linter cspell applies BUNDLED
+    technical dictionaries a bare local `cspell lint` does NOT have, so without
+    the plugin's own cspell config a local run FAILS on ordinary tech terms
+    (pyproject / venv / endfor / …) that CI passes — a false-block. So this probe
+    is FAIL-capable ONLY when the plugin ships its own cspell config (a local run
+    then reproduces the plugin's intended spell-check); with no config it degrades
+    to a non-blocking WARNING (CI's Mega-Linter still enforces cspell — and the
+    agent's post-publish green-CI loop catches any real cspell failure).
+    """
+    if enabled is None or _CSPELL_LINTER_ID not in enabled:
+        result.add(
+            "cspell",
+            _SEV_PASS,
+            f"cspell ({_CSPELL_LINTER_ID}) not enabled in .mega-linter.yml — skipped.",
+        )
+        return
+    if not _plugin_has_cspell_config(result.plugin_path):
+        result.add(
+            "cspell",
+            _SEV_WARNING,
+            "cspell is enabled but the plugin ships no cspell config "
+            "(.cspell.json / project-words.txt / .cspell/) — a bare local cspell "
+            "uses only its default dictionary and would FAIL on ordinary tech terms "
+            "(pyproject/venv/pipefail/endfor) that CI's Mega-Linter cspell (bundled "
+            "dictionaries) passes. SKIPPED locally to avoid a false-block; CI's "
+            "Mega-Linter still enforces cspell. Add a .cspell.json / project-words.txt "
+            "for full local parity.",
+        )
+        return
+    _gate_megalinter_tool(
+        result,
+        gate="cspell",
+        linter_id=_CSPELL_LINTER_ID,
+        tool_name="cspell",
+        install_hint="npm i -g cspell",
+        build_argv=_argv_cspell,
+        enabled=enabled,
+    )
 
 
 def _argv_checkov(tool_bin: str, root: Path) -> list[str]:
@@ -769,15 +854,7 @@ def _gate_megalinter(result: PreflightResult) -> None:
     `.mega-linter.yml`, or one that disabled checkov/trivy, never draws a probe).
     """
     enabled = _megalinter_enabled_linters(result.plugin_path)
-    _gate_megalinter_tool(
-        result,
-        gate="cspell",
-        linter_id=_CSPELL_LINTER_ID,
-        tool_name="cspell",
-        install_hint="npm i -g cspell",
-        build_argv=_argv_cspell,
-        enabled=enabled,
-    )
+    _gate_cspell(result, enabled)
     _gate_megalinter_tool(
         result,
         gate="checkov",
