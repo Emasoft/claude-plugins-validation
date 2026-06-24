@@ -1,9 +1,9 @@
 ---
 trdd-id: 35BN0TEI
 title: Publish gate blocks a stale CPV git ref — fold CIP-6 into validate_plugin (interim) + PyPI migration (follow-on)
-column: testing
+column: published
 created: 2026-06-24T17:26:22+0200
-updated: 2026-06-24T17:39:36+0200
+updated: 2026-06-24T19:44:50+0200
 current-owner: cpv-main-session
 assignee: cpv-main-session
 priority: 0
@@ -26,6 +26,10 @@ review-requirements: [code-review]
 runtime-targets: [macos, linux]
 impacts: [ci-pipeline]
 external-refs: []
+attempts: 1
+implementation-commits: [139edc5, 56bb277]
+published-version: 2.148.0
+published-at: 2026-06-24T18:09:19+0200
 ---
 
 # TRDD-35BN0TEI — Publish gate blocks a stale CPV ref (interim) + PyPI migration (follow-on)
@@ -110,9 +114,19 @@ generator emits `@v<version>` (since #139), (2) the repin rewrites legacy `@main
 `@v<version>`, (3) THIS interim gate blocks any lingering `@main` at the publish
 gate. `publish-pypi.yml` stays DORMANT; no template switch needed.
 
-**NEXT ACTION:** CLAUDE.md version entry + migration-checklist gate note; regen
-self-hashes LAST; cache-cold self-validate 0/0/0/0; `publish.py --minor`; watch CI
-green. Column → published on a green ship.
+**DONE — SHIPPED v2.148.0, CI GREEN (2026-06-24T18:09):** commits 139edc5 (fix +
+tests + docs) + 56bb277 (release bump). publish.py all 13 gates passed; pushed +
+tagged + GitHub release created. CI / Release / Notify Marketplace all
+`completed/success`; Publish-to-PyPI `skipped` (dormant, as expected). Column →
+`published`.
+
+**OPEN (USER's call, NOT autonomously actioned):** the non-default
+`--cpv-source pypi` generator option emits a `uvx --from
+claude-plugins-validation==<ver>` pipeline that 404s today (CPV isn't on PyPI).
+It is opt-in, fully built + unit-tested (ready to flip on when PyPI goes live),
+and guarding-vs-enabling it is a distribution-strategy decision for the USER —
+deliberately left untouched. The git default (`@v<version>`, resolvable since
+#139) needs zero PyPI, so the fleet-blocker is fully resolved without it.
 
 ## Verification gates
 - Two-sided: FIRES MAJOR on `@main`/`@develop`/`@HEAD`/`@feature-x`/`.git@main`;
