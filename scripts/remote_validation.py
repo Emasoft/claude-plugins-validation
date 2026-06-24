@@ -182,7 +182,7 @@ _COMMANDS: dict[str, str] = {
     "rules": "Rules directory validation",
     "xref": "Cross-reference validation",
     "doctor": "Health-check installed plugins and settings",
-    "ci-preflight": "Local CI-parity preflight (jscpd/actionlint/mypy/dev-extra + CIP-1..5)",
+    "ci-preflight": "Local CI-parity preflight (jscpd/actionlint/mypy/dev-extra + Mega-Linter probes + CIP-1..6)",
     "standardize": "Audit and fix plugin repo to match standards",
     "local-scope": "Local scope validation (non-git-tracked .claude/ elements)",
     "project-scope": "Project scope validation (git-tracked .claude/ elements)",

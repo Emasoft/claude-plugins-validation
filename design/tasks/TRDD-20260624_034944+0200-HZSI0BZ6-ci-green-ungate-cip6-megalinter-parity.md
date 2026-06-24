@@ -1,9 +1,9 @@
 ---
 trdd-id: HZSI0BZ6
 title: Make plugin agents publish without failing GitHub CI — ungate the safety net + CIP-6 stale-ref + Mega-Linter parity
-column: dev
+column: testing
 created: 2026-06-24T03:49:44+0200
-updated: 2026-06-24T03:49:44+0200
+updated: 2026-06-24T04:30:00+0200
 current-owner: cpv-main-session
 assignee: cpv-main-session
 priority: 1
@@ -112,8 +112,24 @@ self-validate 0/0/0/0; a real `ci-preflight` dogfood on a scaffolded sample + on
 `@main`-poisoned sample (must FAIL CIP-6); update CLAUDE.md + README + help; ship via
 publish.py; watch CI green.
 
-**NEXT ACTION:** dispatch the 4 file-disjoint opus agents (prompts prepared), then
-central-verify.
+**CENTRAL-VERIFY COMPLETE (2026-06-24):** read every diff + ran own two-sided probes
+through the real preflight/scanner. F1 CIP-6 sound (11/11 ref-matrix incl. `@maindev`
+greedy-capture, `v…-rc.1`, PyPI `==` selector; MAJOR→FAIL confirmed via
+`_CIP_SEVERITY_IS_BLOCKING`). F4 parser READS the real `gen_mega_linter_yml` output (all
+6 ids matched — not a silent no-op). F3 repin two-sided + self-contained. F2 prompts
+coherent, strictly tightening (no gate relaxed). **TWO real defects caught + FIXED that
+the agents' tests missed:** (a) a **bandit FALSE-BLOCK** — the bare `bandit -r` probe
+FAILed a freshly-generated CI-green plugin on ~50 LOW B404/B603 subprocess findings
+(would have blocked the agent from publishing a green plugin); fixed with `-ll` (MEDIUM+),
+two-sided re-proven + a regression test that a generated plugin is megalinter-clean; (b)
+a **cross-agent stale-string seam** — the user-visible "All five … (CIP-1..5)" preflight
+PASS message + launcher help + migration-doc §6 still said FIVE (F1 added CIP-6 in F4's
+sibling file), corrected to SIX/CIP-1..6 across all live code+docs. DOGFOOD: clean
+scaffold→PARITY-CLEAN; `@main`-poison→CIP-6 FAIL on ci.yml+release.yml (exit non-zero).
+ruff+mypy clean, +69 two-sided tests, cache-cold self-validate 0/0/0/0, serial suite green.
+
+**NEXT ACTION:** publish via `publish.py --minor` (v2.147.0), then `gh run watch` CI to
+green (fix-cause loop if red, never mute a check). On green → column `published`.
 
 ## Verification gates
 - Two-sided tests for CIP-6 (F1) and each F4 probe (FIRES on the defect, PASSES clean).

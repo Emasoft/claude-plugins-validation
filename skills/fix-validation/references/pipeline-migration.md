@@ -618,7 +618,7 @@ uv run python scripts/validate_plugin.py . --strict
 
 ## §6 — #137-143 CI-parity defects
 
-These five defects all share ONE failure shape: the upgrade passes
+These six defects all share ONE failure shape: the upgrade passes
 `validate_plugin --strict` LOCALLY but FAILS the adopting plugin's GitHub
 CI — because `validate_plugin` does NOT run the jscpd / actionlint /
 `mypy --strict` / `uv sync --extra dev` gates the generated `ci.yml` Lint
@@ -629,8 +629,8 @@ of these constructs during a manual upgrade step.
 ### Local detector (§6)
 
 Run the CI-parity preflight LOCALLY before declaring DONE — it runs the
-gates `validate_plugin` skips AND statically detects all five defects
-below (CIP-1..5):
+gates `validate_plugin` skips AND statically detects all six defects
+below (CIP-1..6):
 
 ```bash
 cpv-remote-validate ci-preflight <plugin-path>
@@ -642,7 +642,7 @@ Every gate DEGRADES to a non-blocking WARNING when its tool is absent
 (never false-blocks); a real defect BLOCKS. A non-crash run is NOT
 CI-parity proof on its own — read the per-check verdicts.
 
-### The five defects (§6)
+### The six defects (§6)
 
 | # | Defect | One-line fix |
 |---|--------|--------------|
@@ -651,12 +651,13 @@ CI-parity proof on its own — read the per-check verdicts.
 | CIP-3 | `pyproject.toml` lacks a `[project.optional-dependencies].dev` table, so the canon `uv sync --extra dev` fails ("Extra dev is not defined"). | Add `dev = ["pytest", "ruff", "mypy"]` (create-or-augment, format-preserving; refresh the lockfile). `standardize --fix` auto-provisions this. |
 | CIP-4 | A superseded standalone `validate.yml` survives after the consolidated `ci.yml` was added; its pre-existing shellcheck SC2086 then fails `ci.yml`'s actionlint Lint job. | Remove the CPV-shipped `validate.yml` (its Validate job is replaced by `ci.yml`'s) and re-point branch protection; safe-delete it to `scripts_dev/superseded-workflows/`. `standardize --fix` removes it (identity-guarded, only when `ci.yml` is present). |
 | CIP-5 | The jscpd copy-paste check in `publish.py` Gate 2b and CI's Mega-Linter use divergent ignore globs, so a local pass differs from CI. | Provision a single-source `.jscpd.json` (threshold 5 + ignore globs mirroring `.mega-linter.yml`'s `FILTER_REGEX_EXCLUDE`) auto-discovered by BOTH; never clobber an existing one. `standardize --fix` provisions it. |
+| CIP-6 | A `.github/workflows/*.yml` pins `claude-plugins-validation@<ref>` at a non-resolvable ref (`@main`/`@develop`/`@HEAD`/a branch name) — CPV's default branch is `master`, so `uvx --from git+…@main` 404s (`Git operation failed / Updating … (main)`) and the workflow red-CIs forever. A plugin migrated by an OLD CPV (≤v2.137, pre-#139) was pinned `@main` and never re-published, so nothing re-pins it. **This is the DOMINANT downstream CI failure.** | Re-pin to the current `v<semver>` tag or `master` — `standardize --fix` rewrites the stale ref in place (surgical, only the CPV ref), or `--force-templates` regenerates the whole workflow. A valid `master`/`v<semver>`/SHA pin is left untouched. |
 
 ### Verify (§6)
 
 ```bash
 cpv-remote-validate ci-preflight .
-# expect: CIP-1..5 PASS (or a non-blocking WARNING when a gate's tool is
+# expect: CIP-1..6 PASS (or a non-blocking WARNING when a gate's tool is
 #         absent); no BLOCK from any parity gate.
 ```
 

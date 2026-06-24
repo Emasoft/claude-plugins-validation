@@ -1438,6 +1438,138 @@ def remove_superseded_validate_yml(plugin_path: Path, dry_run: bool = False) -> 
     ]
 
 
+# =============================================================================
+# TRDD-HZSI0BZ6 — re-pin a STALE / INVALID CPV ref on a plain --fix
+# =============================================================================
+# A plugin migrated by an OLD CPV (≤v2.137, pre-#139) pins
+# `git+https://github.com/Emasoft/claude-plugins-validation@main` in its
+# `.github/workflows/*.yml` — but CPV's default branch is `master`, so
+# `uvx --from git+…@main` 404s (`Git operation failed / Updating … (main)`) and
+# the workflow red-CIs forever. `--force-templates` already re-pins these files
+# because ci.yml / release.yml / notify-marketplace.yml are in
+# _FORCE_TEMPLATE_FILES (their whole body is regenerated with `cpv_ref_resolved`).
+# But a NORMAL `--fix` only CREATES missing files; it never touches an existing
+# workflow, so a stale `@main` survives every plain `--fix`. This targeted
+# re-pin closes that gap: on ANY `--fix` run it rewrites a STALE
+# `claude-plugins-validation@<bad-ref>` to `@<cpv_ref_resolved>` in place,
+# without otherwise rewriting the workflow (a customised-but-correct workflow is
+# preserved). It is SELECTOR-scoped — it only acts on the CPV ref, never any
+# other action ref.
+#
+# "bad ref" uses the EXACT CIP-6 rule (TRDD-HZSI0BZ6): valid = `master`, a
+# `v<semver>` tag, or a 7-40 hex commit SHA; anything else (`@main` / `@develop`
+# / `@HEAD` / `@feature-x`) is stale and gets re-pinned. This rule is kept
+# self-contained HERE (not imported from cpv_ci_parity_checks) so standardize
+# has no cross-module dependency on the CIP-6 detector — the two share the rule
+# by construction (identical regexes), not by import. re2-safe: the regexes use
+# only character classes, anchors and bounded quantifiers (no lookaround).
+
+# Capture the CPV ref pinned on a `git+…/claude-plugins-validation[.git]@<ref>`
+# URL. The ref runs up to the first whitespace, `'`, `"`, or `#` (so a trailing
+# `#egg=` / inline comment / quote does not bleed into the captured ref).
+_CPV_REF_PIN_RE = re.compile(
+    r"(?P<prefix>git\+https://github\.com/Emasoft/claude-plugins-validation(?:\.git)?@)"
+    r"(?P<ref>[^\s'\"#]+)"
+)
+# A `v<semver>` tag: v + MAJOR.MINOR.PATCH, optional pre-release / build metadata.
+_CPV_VALID_SEMVER_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?$")
+# A 7-40 hex commit SHA (abbreviated or full).
+_CPV_VALID_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+
+
+def _cpv_ref_is_valid(ref: str) -> bool:
+    """Return True when ``ref`` is a CPV ref that actually resolves.
+
+    Valid = ``master`` (CPV's default branch), a ``v<semver>`` tag, or a 7-40
+    hex commit SHA. Everything else (``main`` / ``develop`` / ``HEAD`` / a
+    branch name) is treated as stale. This is the EXACT CIP-6 rule; keeping it
+    here lets the non-force re-pin and the CIP-6 detector agree without an
+    import dependency.
+    """
+    if ref == "master":
+        return True
+    if _CPV_VALID_SEMVER_TAG_RE.match(ref):
+        return True
+    return bool(_CPV_VALID_SHA_RE.match(ref))
+
+
+def _resolved_cpv_ref() -> str:
+    """Return the CPV ref the scaffolding CPV would pin (``_default_cpv_ref()``).
+
+    Imported lazily (like the other generate_plugin_repo callsites in this
+    module) so importing standardize_plugin never eagerly pulls the generator.
+    Falls back to ``master`` if the generator is somehow unavailable — the same
+    conservative default the generator itself uses (``_FALLBACK_CPV_REF``).
+    """
+    try:
+        from generate_plugin_repo import _default_cpv_ref
+
+        ref = _default_cpv_ref().strip()
+        return ref or "master"
+    except Exception:
+        return "master"
+
+
+def _repin_workflow_text(content: str, resolved: str) -> tuple[str, set[str]]:
+    """Rewrite every STALE CPV ref in ``content`` to ``@{resolved}``.
+
+    Returns ``(new_content, stale_refs)`` where ``stale_refs`` is the set of the
+    invalid refs that were replaced (empty when none). A VALID ref (``master`` /
+    ``v<semver>`` / SHA) is left exactly as-is — that is the two-sided guarantee:
+    a correctly-pinned workflow comes back byte-identical with an empty set.
+    Kept as a free function (not an in-loop closure) so the per-file replacement
+    binds ``resolved`` cleanly and is unit-testable on raw text.
+    """
+    stale_refs: set[str] = set()
+
+    def _replace(m: re.Match[str]) -> str:
+        ref = m.group("ref")
+        if _cpv_ref_is_valid(ref):
+            return m.group(0)
+        stale_refs.add(ref)
+        return f"{m.group('prefix')}{resolved}"
+
+    return _CPV_REF_PIN_RE.sub(_replace, content), stale_refs
+
+
+def repin_stale_cpv_ref(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """Re-pin a STALE/INVALID ``claude-plugins-validation@<ref>`` in every
+    ``.github/workflows/*.yml`` to the current resolved CPV ref.
+
+    TRDD-HZSI0BZ6. Runs on ANY ``--fix`` (force or not). For each workflow file
+    it rewrites ONLY the CPV ref occurrences whose ref is invalid per
+    ``_cpv_ref_is_valid``; a valid ref (``master`` / ``v<semver>`` / SHA) is
+    left untouched, so a correctly-pinned workflow is never rewritten (two-sided
+    by construction). No other content of the workflow is modified — this is a
+    surgical in-place re-pin, not a template overwrite.
+
+    Returns a list of human-readable notes, or [] when nothing was stale.
+    """
+    workflows_dir = plugin_path / ".github" / "workflows"
+    if not workflows_dir.is_dir():
+        return []
+    resolved = _resolved_cpv_ref()
+    notes: list[str] = []
+    for wf in sorted(workflows_dir.glob("*.yml")):
+        if not wf.is_file():
+            continue
+        try:
+            content = wf.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        new_content, stale_refs = _repin_workflow_text(content, resolved)
+        if not stale_refs:
+            continue
+        rel = wf.relative_to(plugin_path)
+        stale_list = ", ".join(f"@{r}" for r in sorted(stale_refs))
+        if dry_run:
+            notes.append(f"[dry-run] would re-pin stale CPV ref ({stale_list}) → @{resolved} in {rel}")
+            continue
+        wf.write_text(new_content, encoding="utf-8")
+        notes.append(f"re-pinned stale CPV ref ({stale_list}) → @{resolved} in {rel}")
+    return notes
+
+
 # Issue #143: the canonical local pre-push gate (`publish.py --gate`) gains a
 # jscpd copy-paste check at PARITY with CI's Mega-Linter COPYPASTE_JSCPD. Both
 # the local gate and CI read ONE source-of-truth config — `.jscpd.json` — so the
@@ -2225,6 +2357,15 @@ def fix_missing_files(
     if ci_emitted or (plugin_path / ".github" / "workflows" / "ci.yml").is_file():
         for note in remove_superseded_validate_yml(plugin_path, dry_run=dry_run):
             print(f"  {YELLOW}[validate.yml]{NC} {note}")
+
+    # TRDD-HZSI0BZ6: re-pin a stale/invalid CPV ref (e.g. `@main`, which 404s —
+    # CPV's default branch is `master`) in every existing .github/workflows/*.yml
+    # to the current resolved ref. --force-templates already re-pins ci/release/
+    # notify by regenerating them, but a plain --fix never touches an existing
+    # workflow, so a workflow migrated by an OLD CPV keeps its stale ref forever.
+    # Surgical in-place rewrite of ONLY the CPV ref; a valid ref is left alone.
+    for note in repin_stale_cpv_ref(plugin_path, dry_run=dry_run):
+        print(f"  {YELLOW}[cpv-ref]{NC} {note}")
 
     # Issue #143: provision the canonical .jscpd.json so the local
     # `publish.py --gate` jscpd copy-paste check reads the SAME threshold/ignore
