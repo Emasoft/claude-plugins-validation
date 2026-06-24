@@ -18,8 +18,12 @@ else ``False`` (→ STAY CRITICAL):
 * **C2 CLEAN** — re-scanning that file with CPV's own ``scan_content`` yields
   no non-suppressed CRITICAL/MAJOR execution/exfil finding.
 * **C3 NON-EXPLOITABLE** — the launched file does not dynamically load/exec
-  external/mutable code, nor accept inputs enabling RCE (listen socket,
-  eval-of-stdin/env/argv, HTTP/RPC endpoint, watch-file-and-exec, unsafe
+  external/mutable code — ``eval``/``exec``/``compile``, computed ``import``,
+  ``os.exec*``/``os.spawn*``/``posix_spawn``/``runpy``/file-based dynamic-import,
+  pipe-to-interpreter (ratified MAXIMUM-STRICTNESS, issue #152: NO
+  ``~/.claude/plugins/`` sandbox exemption — even a self-roll into the plugin's
+  own mutable cache disqualifies) — nor accept inputs enabling RCE (listen
+  socket, eval-of-stdin/env/argv, HTTP/RPC endpoint, watch-file-and-exec, unsafe
   deserialization of external data) — ``_non_exploitable``.
 * **C4 INSTALL LINE CLEAN** — the install line itself carries no separate
   exec/exfil sink beyond the persistence verb — ``_install_line_clean``.
@@ -83,10 +87,29 @@ class ResolvedTarget(NamedTuple):
 # ────────────────────────────────────────────────────────────────────────
 
 # Closed whitelist of env vars we constant-fold to the plugin root ``R``.
-# ``$HOME`` is deliberately NOT folded — a ``$HOME``-anchored target is
+# ``$HOME`` is deliberately NOT folded in general — a ``$HOME``-anchored target is
 # OUTSIDE the tree → C1 fails. Anything not on this list stays variable → C1
-# fails. ``${VAR}`` and ``$VAR`` forms both covered.
+# fails. ``${VAR}`` and ``$VAR`` forms both covered. The ONE ``$HOME`` exception
+# is the plugin-data sandbox literal handled by ``_PLUGIN_DATA_LITERAL_RE`` below.
 _PLUGIN_ROOT_ENV_NAMES: Final[tuple[str, ...]] = ("CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA")
+
+# Issue #152 — a hard-coded plugin-data sandbox literal:
+# ``<HOME>/.claude/plugins/data/<slug>/<rest>`` (``~`` / ``$HOME`` / ``${HOME}``
+# HOME forms). A cross-plugin / detached daemon installer CANNOT use the
+# ``${CLAUDE_PLUGIN_DATA}`` env var (it resolves to whichever plugin owns the
+# current turn, wrong in a launchd/systemd-spawned process), so it hard-codes its
+# own data dir. That dir is the SAME Claude-managed sandbox ``${CLAUDE_PLUGIN_DATA}``
+# resolves to, so we fold its ``<rest>`` to the plugin root ``R`` exactly like the
+# env var. The ``<slug>`` segment (group-less ``[^/]+``) is consumed UNGATED: CPV
+# must validate UNINSTALLED, marketplace-less plugins (which have NO data-dir slug
+# to match), and an attacker cannot know a victim's slug before install. FN-safety
+# is preserved downstream — the folded ``R/<rest>`` must still be an EXISTING
+# in-tree regular file that C2 (clean) + C3 (non-exploitable, incl. the strict
+# dynamic-exec block) scan; a malicious or dynamic target still STAYS CRITICAL.
+# re2-safe (no lookbehind/lookahead).
+_PLUGIN_DATA_LITERAL_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?:~|\$HOME|\$\{HOME\})/\.claude/plugins/data/[^/]+/(.+)$"
+)
 
 # ``$PWD`` / ``$(pwd)`` → R. (A daemon's WorkingDirectory or a cron line run
 # from the plugin checkout resolves $PWD to the plugin root in practice; the
@@ -137,13 +160,34 @@ def _argv_has_inline_code_flag(argv: list[str]) -> bool:
     return False
 
 
+def _interp_script_target(argv: list[str]) -> str | None:
+    """The SCANNABLE program in ``argv``. When ``argv[0]`` is a known interpreter
+    (``python3``/``bash``/``node``/…) the launched program is the SCRIPT — the
+    first non-flag token after it — NOT the interpreter binary (which is never
+    in-tree). When the program is launched directly (no interpreter wrapper)
+    ``argv[0]`` itself is the target. Returns ``None`` when an interpreter is
+    given ONLY flags (an inline ``-c`` code launch — there is no file to scan;
+    ``resolve_launched_target`` independently rejects that via
+    ``_argv_has_inline_code_flag``). re2-safe (pure-Python token walk)."""
+    if not argv:
+        return None
+    prog0 = _strip_program_name(argv[0])
+    if prog0 in _INTERPRETER_NAMES or prog0 in {"powershell", "pwsh"}:
+        for a in argv[1:]:
+            if not a.startswith("-"):
+                return a
+        return None  # interpreter + only flags → inline code → no scannable file
+    return argv[0]
+
+
 def _fold_to_plugin_root(raw: str, plugin_root: Path) -> str | None:
     """Constant-fold the closed env whitelist in ``raw`` to ``plugin_root``.
 
-    Returns a concrete path string, or ``None`` when a residual ``$VAR`` (or
-    ``$HOME``, which is NOT folded) remains — i.e. the path is unresolvable
-    and C1 must FAIL. A bare relative path (``scripts/d.py``) is resolved
-    relative to ``plugin_root``.
+    Returns a concrete path string, or ``None`` when a residual ``$VAR`` (or a
+    NON-sandbox ``$HOME``) remains — i.e. the path is unresolvable and C1 must
+    FAIL. The ONE folded ``$HOME``/``~`` form is the plugin-data sandbox literal
+    ``<HOME>/.claude/plugins/data/<slug>/<rest>`` → ``R/<rest>`` (issue #152). A
+    bare relative path (``scripts/d.py``) is resolved relative to ``plugin_root``.
     """
     s = raw.strip().strip("'\"")
     if not s:
@@ -154,10 +198,22 @@ def _fold_to_plugin_root(raw: str, plugin_root: Path) -> str | None:
         s = s.replace("${" + name + "}", root).replace("$" + name, root)
     # Fold $PWD / $(pwd) / `pwd` → R.
     s = _PWD_TOKEN_RE.sub(root, s)
-    # Any residual variable (incl. $HOME) → unresolvable.
+    # Fold the plugin-data sandbox literal ``<HOME>/.claude/plugins/data/<slug>/<rest>``
+    # → ``R/<rest>`` (issue #152) — the ONE $HOME/~ form that IS in-tree, because
+    # that sandbox dir holds the plugin's OWN staged files (the same dir
+    # ``${CLAUDE_PLUGIN_DATA}`` resolves to). Evaluate the FULL path: the <slug>
+    # wildcard segment is consumed, the <rest> is resolved under R and still
+    # C2/C3-scanned. Fall through to the residual-var / tilde guards so a <rest>
+    # that itself carries a computed $VAR is still rejected.
+    mo = _PLUGIN_DATA_LITERAL_RE.match(s)
+    if mo is not None:
+        s = str(plugin_root / mo.group(1))
+    # Any residual variable (a NON-sandbox $HOME, or a $VAR in the folded <rest>)
+    # → unresolvable.
     if _RESIDUAL_VAR_RE.search(s):
         return None
-    # Tilde is a $HOME alias → out of tree → fail.
+    # Tilde is a $HOME alias → out of tree → fail (the sandbox tilde was already
+    # folded above; any OTHER ``~`` path is genuinely out of tree).
     if s.startswith("~"):
         return None
     return s
@@ -325,7 +381,12 @@ def _resolve_launchd(
     program, argv = _plist_program(data)
     if program is None:
         return None
-    prog_path = _resolve_in_tree(program, plugin_root)
+    # The scannable program is the SCRIPT, not the interpreter — a plist
+    # ``ProgramArguments: [python3, "<…>/daemon.py"]`` launches daemon.py.
+    target = _interp_script_target(argv)
+    if target is None:
+        return None
+    prog_path = _resolve_in_tree(target, plugin_root)
     if prog_path is None:
         return None
     extras, inject = _plist_extra_sources(data, plugin_root)
@@ -395,7 +456,11 @@ def _resolve_systemd(
     program, argv, inject = _systemd_exec_program(unit_text)
     if program is None or inject:
         return None
-    prog_path = _resolve_in_tree(program, plugin_root)
+    # ``ExecStart={python} {launcher}`` → the scannable program is the script.
+    target = _interp_script_target(argv)
+    if target is None:
+        return None
+    prog_path = _resolve_in_tree(target, plugin_root)
     if prog_path is None:
         return None
     return ResolvedTarget(program_path=prog_path, argv=argv, extra_sources=[], mechanism="systemd")
@@ -642,6 +707,24 @@ _3A_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     re.compile(r"getattr\s*\(\s*__builtins__"),
     re.compile(r"globals\s*\(\s*\)\s*\["),
     re.compile(r"__builtins__\s*\["),
+    # Dynamic process-image replacement / script-run / file-based dynamic-import
+    # primitives (issue #152, ratified MAXIMUM-STRICTNESS). A boot daemon that
+    # ``os.exec*`` / ``os.spawn*`` / ``posix_spawn`` / ``runpy.run_(path|module)``
+    # / ``imp.load_*`` / ``spec_from_file_location``'s ANOTHER program is the
+    # "loads another script dynamically" clean-but-exploitable shape. There is NO
+    # ``~/.claude/plugins/`` sandbox exemption: even an exec of the plugin's OWN
+    # cache/data path disqualifies — that target is mutable / version-stamped, so
+    # what RUNS is not what was SCANNED. A FIXED-argv ``subprocess.run(["launchctl",
+    # …])`` is intentionally NOT matched here — that is the persistence INSTALL
+    # action (judged by C4), not a dynamic code-load. ``ctypes.CDLL`` is
+    # deliberately excluded (dual-use: a benign daemon loads fixed system libs).
+    # All re2-safe (no lookbehind/lookahead).
+    re.compile(r"\bos\.exec[a-z]*\s*\("),  # os.execv / execve / execvp / execl …
+    re.compile(r"\bos\.spawn[a-z]*\s*\("),  # os.spawnv / spawnl / spawnvp …
+    re.compile(r"\bos\.posix_spawnp?\s*\("),  # os.posix_spawn / posix_spawnp
+    re.compile(r"\brunpy\.run_(?:path|module)\s*\("),  # runpy.run_path / run_module
+    re.compile(r"\bimp\.load_(?:source|module|compiled)\s*\("),  # legacy dynamic import
+    re.compile(r"\bspec_from_file_location\s*\("),  # importlib file-based dynamic import
 )
 
 # Out-of-tree / mutable ``source`` / ``.`` of a path (a $VAR, /tmp, $HOME, or

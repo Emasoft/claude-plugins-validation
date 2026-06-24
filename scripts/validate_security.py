@@ -45,6 +45,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+# Issue #152 — the copy-only in-plugin-write guard (RC-164). Flags a plugin
+# script that GENERATES or EDITS a script INSIDE the plugin tree (ROOT or DATA);
+# a verbatim COPY of an already-scanned in-tree source is ALLOWED. Lenient
+# fail-safe: a destination that does not provably resolve in-tree → PASS. Closes
+# the #152 fold's soundness loop (what RUNS must equal what was SCANNED).
+from cpv_inplugin_write_guard import inplugin_script_write_findings
 from cpv_parametrize_body_predicate import is_parametrize_body_line
 from cpv_pattern_source_predicate import is_pattern_source_line
 
@@ -9181,7 +9187,8 @@ def _eval_exec_inert_string_lines(rel_path: str, content: str) -> frozenset[int]
 
 
 def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
-    """RC-65 (cloud IMDS), RC-39 (persistence), RC-70 (obfuscated exec)."""
+    """RC-65 (cloud IMDS), RC-39 (persistence), RC-70 (obfuscated exec),
+    RC-164 (copy-only in-plugin script-write guard, issue #152)."""
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
         fence_state = build_fence_state(content)
@@ -9266,6 +9273,29 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                     )
                     issues += 1
                     break
+
+        # RC-164 — Copy-only in-plugin-write guard (issue #152). Flags a write
+        # that GENERATES or EDITS a SCRIPT inside the plugin tree (ROOT or DATA).
+        # A verbatim COPY of an already-scanned in-tree source is ALLOWED; a
+        # non-script write into DATA is ALLOWED; a destination that does not
+        # PROVABLY resolve in-tree PASSES (lenient fail-safe). This closes the
+        # #152 daemon-source-scan fold's soundness loop: the fold scans the
+        # in-tree source and clears it, which is sound ONLY IF the staged file
+        # is a verbatim copy — a post-install generate/edit produces an
+        # unscanned in-plugin script that then runs. CRITICAL.
+        #
+        # The shared helper does the write-primitive + destination-resolution
+        # work (reusing cpv_persistence_target's `_resolve_in_tree`). We apply
+        # the per-line self-scan skip so CPV's OWN write-primitive pattern
+        # literals (which live in `*_PATTERNS` collections) are not self-flagged;
+        # that skip is gated on the non-spoofable `_CPV_IS_RUNNING_CPV`, so a
+        # third-party plugin's real in-plugin script write still flags.
+        for wf in inplugin_script_write_findings(content, rel_path, plugin_path):
+            if cpv_self_scan_skip_line(rel_path, content_lines, wf.line_no):
+                continue
+            level = effective_severity("critical", rel_path)
+            getattr(report, level)(f"RC-164: {wf.message}", rel_path, wf.line_no)
+            issues += 1
 
         # RC-70 — Generic obfuscation with proximity-to-exec.
         # Apply the SAME fenced-code-block + pattern-source guards the
@@ -9854,13 +9884,16 @@ def validate_security(
     # --- Phase 2e extras — Cloud IMDS, persistence, obfuscated decode-then-exec ---
     phase2e_issues = check_phase2e_extras(plugin_path, report)
     if phase2e_issues == 0:
-        report.passed("No Phase 2e extras findings (RC-39 persistence, RC-65 cloud IMDS, RC-70 obfuscated exec)")
+        report.passed(
+            "No Phase 2e extras findings (RC-39 persistence, RC-65 cloud IMDS, "
+            "RC-70 obfuscated exec, RC-164 in-plugin script write)"
+        )
     _record_step(
         17,
         "Phase 2e — extras",
         "COMPLETED",
         findings=phase2e_issues,
-        files="RC-39 persistence, RC-65 IMDS, RC-70 obfuscated-exec",
+        files="RC-39 persistence, RC-65 IMDS, RC-70 obfuscated-exec, RC-164 in-plugin-write",
     )
 
     # --- Phase 3 — ~30 MAJOR net-new rules ---
