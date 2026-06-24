@@ -1,9 +1,9 @@
 ---
 trdd-id: 933592ac-98f0-498c-9e7c-54742acaa76c
 title: Fixer/detector hardening — amvcp field report (htmlhint FP, doc-context NITs, TOC catch-22, fixer-agent robustness)
-column: dev
+column: published
 created: 2026-06-17T21:34:14+0200
-updated: 2026-06-18T03:41:09+0200
+updated: 2026-06-24T03:27:35+0200
 current-owner: claude-plugins-validation
 assignee: claude-plugins-validation
 priority: 2
