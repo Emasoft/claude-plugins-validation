@@ -1506,7 +1506,7 @@ PY
 
 ## Category 17 — CI-parity defects (#137-143) (CHECK-83..87)
 
-These five checks close the dominant migration failure mode: an upgrade that passes `validate_plugin.py --strict` LOCALLY but RED-CIs on GitHub, because `validate_plugin` does NOT run the jscpd / actionlint / mypy / `uv sync --extra dev` gates the generated `ci.yml` Lint job runs, nor the 5 static #137-143 defect detectors. **All five are satisfied by ONE command** — `cpv-remote-validate ci-preflight <plugin-root>` runs the CIP-1..5 static checks AND the live parity gates and exits non-zero on any real (non-WARNING) finding. Run it once; each `CHECK-83..87` row PASSES when the corresponding CIP finding is absent.
+These five checks close the dominant migration failure mode: an upgrade that passes `validate_plugin.py --strict` LOCALLY but RED-CIs on GitHub, because `validate_plugin` does NOT run the jscpd / actionlint / mypy / `uv sync --extra dev` gates the generated `ci.yml` Lint job runs, nor the 5 static #137-143 defect detectors. **All five rows are satisfied by ONE command** — `cpv-remote-validate ci-preflight <plugin-root>` runs the CIP-1..6 static checks (CIP-6 — the stale CPV `@main` ref — has no dedicated row; see the note after CHECK-87) AND the live parity gates and exits non-zero on any real (non-WARNING) finding. Run it once; each `CHECK-83..87` row PASSES when the corresponding CIP finding is absent.
 
 **WARNING ≠ FAIL.** `ci-preflight` DEGRADES to a non-blocking WARNING when a tool is absent (no `npx`/jscpd/actionlint/mypy on the box) — that NEVER fails a check (the #129 degrade-gracefully pattern). A real over-threshold / static-defect / resolve-failure is the only non-zero exit. (A WARNING means the gate could not be locally verified — CI still enforces it; a green preflight does not guarantee green CI when a tool was absent.)
 
@@ -1554,6 +1554,19 @@ uv run python scripts/remote_validation.py ci-preflight . ; test $? -eq 0
 ```
 **Pass when**: `ci-preflight` exits 0 with no `CIP-5` finding (a `.jscpd.json` exists, or `ci.yml` does not enable jscpd). Note: `ci-preflight` ALSO runs jscpd itself when present (degrade-WARNING if absent), so an over-threshold duplication surfaces here too.
 **On fail**: run `standardize --fix` (provisions `.jscpd.json`, never clobbering an existing one); the config is auto-discovered by both CI's Mega-Linter jscpd and the local `publish.py` Gate 2b.
+
+### Note — CIP-6: stale/non-resolvable CPV `@main` ref (BLOCKER; ALSO enforced at publish Gate 3 since v2.148.0)
+
+CIP-6 has **no dedicated CHECK row** (the matrix stays at 87 / CHECK-83..87), but the single `ci-preflight` command the CHECK-83..87 rows run ALSO executes it — so it is covered here, and it is the fix for the **dominant fleet-blocking failure**.
+
+**Why**: A plugin migrated by an OLD CPV (≤v2.137, pre-#139) pins `git+https://github.com/Emasoft/claude-plugins-validation@main` in its `.github/workflows/*.yml`. CPV's default branch is `master`, so `@main` 404s on the runner (`uvx --from git+…@main` → `Git operation failed / Updating … (main)`) and the workflow RED-CIs forever. `ci-preflight` runs **CIP-6** (`cpv_ci_parity_checks.py::_check_stale_cpv_ref`), which fires MAJOR on any CPV ref that is not `master` / a `v<semver>` tag / a 7-40 hex SHA. Since **v2.148.0** the SAME rule is folded into `validate_plugin.py` (`validate_workflow_cpv_ref`, in the validator dispatch list), so it is enforced at **publish Gate 3** — `publish.py` now REFUSES to ship a `@main`-pinned pipeline even when the migrator never ran `ci-preflight` separately. (The downstream generator has emitted a resolvable `@v<version>` pin since #139, so freshly-generated plugins never trip this; it only catches the pre-#139 legacy migrations.)
+**Verify**:
+```bash
+uv run python scripts/remote_validation.py ci-preflight . ; test $? -eq 0   # CIP-6 fires here
+uv run python scripts/validate_plugin.py . --strict ; test $? -eq 0         # publish Gate 3 (v2.148.0) also blocks a stale ref
+```
+**Pass when**: no `.github/workflows/*.yml` pins a non-resolvable CPV ref (every `git+…/claude-plugins-validation@<ref>` is `@master` / `@v<semver>` / a SHA).
+**On fail**: run `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate standardize . --fix` (the `repin_stale_cpv_ref` pass rewrites `@main`→`@v<version>`), then commit the workflow change.
 
 ---
 
@@ -1763,7 +1776,7 @@ run_all_checks() {
 
 - The function emits a Unicode-bordered Markdown table per the user's standing format preference (heavy `━` for the header row, light `─` for body rows, status column exactly 6 chars wide so PASS/FAIL aligns).
 - `cpv_check_NN` functions are placeholders. The migration orchestrator (or a thin shell wrapper that lives at `scripts/run_migration_checks.sh`) defines each one by inlining the **Verify** block of the corresponding `### CHECK-NN` section above.
-- `cpv_check_ci_preflight` (shared by CHECK-83..87) inlines ONE `uv run python scripts/remote_validation.py ci-preflight .` invocation — it runs the CIP-1..5 static detectors AND the live parity gates and exits non-zero on any real (non-WARNING) finding; a tool-absent WARNING degrades and never fails the check. Run it once; all five rows read the same exit status.
+- `cpv_check_ci_preflight` (shared by CHECK-83..87) inlines ONE `uv run python scripts/remote_validation.py ci-preflight .` invocation — it runs the CIP-1..6 static detectors (CIP-6 = stale CPV ref; no dedicated row) AND the live parity gates and exits non-zero on any real (non-WARNING) finding; a tool-absent WARNING degrades and never fails the check. Run it once; all five rows read the same exit status.
 - Exit codes:
   - `0` — all 87 checks pass (or only MINOR fails)
   - `1` — at least one BLOCKER or MAJOR check failed
@@ -1781,7 +1794,7 @@ The `plugin-fixer` agent (`agents/plugin-fixer.md`) MUST run `run_all_checks` as
 
 A BLOCKER/MAJOR fail in `run_all_checks` is equivalent to a CRITICAL/MAJOR finding in `validate_plugin.py` — the agent must address it before declaring DONE.
 
-Because step 7c now includes **CHECK-83..87** (the `ci-preflight` CI-parity gate — CIP-1..5 + the live jscpd/actionlint/mypy/`uv sync --extra dev` gates), a `--force-templates`-clean migration that is locally clean under `validate_plugin --strict` can no longer silently RED-CI on a #137-143 defect shape — the parity gap is caught BEFORE the real publish, not after the tag is cut.
+Because step 7c now includes **CHECK-83..87** (the `ci-preflight` CI-parity gate — CIP-1..6 + the live jscpd/actionlint/mypy/`uv sync --extra dev` gates), a `--force-templates`-clean migration that is locally clean under `validate_plugin --strict` can no longer silently RED-CI on a #137-143 defect shape or a stale `@main` CPV pin — the parity gap is caught BEFORE the real publish, not after the tag is cut.
 
 This closes issue #21 ask #1: "the migration agent's exit contract should be CI passes on next push."
 

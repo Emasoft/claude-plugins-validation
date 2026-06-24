@@ -4427,6 +4427,102 @@ def validate_workflow_inline_python(plugin_root: Path, report: ValidationReport)
         report.passed(f"No inline Python quoting issues in {len(yaml_files)} workflow file(s)")
 
 
+# =============================================================================
+# Publish-gate enforcement of a RESOLVABLE CPV git ref (TRDD-35BN0TEI)
+# =============================================================================
+# A plugin migrated by an OLD CPV (<=v2.137, pre-#139) pins
+# `git+https://github.com/Emasoft/claude-plugins-validation@main` in its
+# `.github/workflows/*.yml`. CPV's default branch is `master`, so `@main` does
+# NOT exist: the GitHub runner's `uvx --from git+...@main` 404s
+# (`Git operation failed / Updating ... (main)`) and the workflow red-CIs
+# forever. The CIP-6 detector (cpv_ci_parity_checks) and the `repin_stale_cpv_ref`
+# fixer (standardize_plugin) already encode this rule, but BOTH live OUTSIDE the
+# publish gate -- so a `@main` workflow passed `validate_plugin --strict`
+# (publish.py Gate 3) and got pushed anyway, red-CIing post-push. This validator
+# closes that hole: the SAME rule, enforced by the gate the publish pipeline
+# already runs, so a stale ref BLOCKS the publish instead. The fix is the existing
+# `standardize --fix` (repins in place) or the PyPI fetch form.
+#
+# THIS RULE IS DUPLICATED IN THREE PLACES (kept in sync BY CONSTRUCTION, not by
+# import -- matching the established standardize<->CIP-6 design). KEEP IDENTICAL:
+#   1. scripts/cpv_ci_parity_checks.py  (_is_resolvable_cpv_ref / CIP-6 detector)
+#   2. scripts/standardize_plugin.py    (_cpv_ref_is_valid / repin_stale_cpv_ref)
+#   3. HERE                             (_cpv_workflow_ref_is_valid / this gate)
+# (SSOT consolidation into one shared helper is a noted follow-up; TRDD-35BN0TEI.)
+# re2-safe: only character classes, anchors, bounded quantifiers -- no lookaround.
+_CPV_REF_PIN_RE = re.compile(
+    r"git\+https://github\.com/Emasoft/claude-plugins-validation(?:\.git)?@(?P<ref>[^\s'\"#]+)"
+)
+_CPV_VALID_SEMVER_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?$")
+_CPV_VALID_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+
+
+def _cpv_workflow_ref_is_valid(ref: str) -> bool:
+    """Return True when ``ref`` is a CPV git ref that actually resolves.
+
+    Valid = ``master`` (CPV's default branch), a ``v<semver>`` tag, or a 7-40 hex
+    commit SHA. Everything else (``main`` / ``develop`` / ``HEAD`` / a branch
+    name) does not resolve on the runner and red-CIs. EXACT copy of the CIP-6 /
+    repin rule (see the three-way sync note above).
+    """
+    if ref == "master":
+        return True
+    if _CPV_VALID_SEMVER_TAG_RE.match(ref):
+        return True
+    return bool(_CPV_VALID_SHA_RE.match(ref))
+
+
+def validate_workflow_cpv_ref(plugin_root: Path, report: ValidationReport) -> None:
+    """Block a STALE/INVALID CPV git ref pinned in a workflow (TRDD-35BN0TEI).
+
+    Scans ``.github/workflows/*.yml|*.yaml`` for a
+    ``git+https://github.com/Emasoft/claude-plugins-validation[.git]@<ref>`` pin
+    and reports MAJOR when ``<ref>`` does not resolve (anything but ``master`` /
+    a ``v<semver>`` tag / a 7-40 hex SHA). MAJOR blocks ``--strict``, so
+    ``publish.py`` Gate 3 refuses to ship a `@main`-pinned pipeline that would
+    red-CI on the runner. A correctly-pinned workflow -- or one with no
+    ``git+...@`` CPV pin at all (e.g. a local-script invocation) -- produces
+    ZERO findings: two-sided by construction.
+
+    Scopes to workflow CONTENT only (never the install slug), so it fires the
+    same on a fresh pre-publish source as on an installed plugin.
+    """
+    workflows_dir = plugin_root / ".github" / "workflows"
+    if not workflows_dir.is_dir():
+        return
+
+    yaml_files = list(workflows_dir.glob("*.yml")) + list(workflows_dir.glob("*.yaml"))
+    if not yaml_files:
+        return
+
+    found_any = False
+    for yaml_path in sorted(yaml_files):
+        try:
+            content = yaml_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        rel_path = str(yaml_path.relative_to(plugin_root))
+        for match in _CPV_REF_PIN_RE.finditer(content):
+            ref = match.group("ref")
+            if _cpv_workflow_ref_is_valid(ref):
+                continue
+            line_num = content[: match.start()].count("\n") + 1
+            found_any = True
+            report.major(
+                f"Workflow pins a non-resolvable CPV ref `@{ref}` "
+                f"(git+https://github.com/Emasoft/claude-plugins-validation@{ref}) -- CPV's "
+                f"default branch is `master`, so `uvx --from git+...@{ref}` 404s on the runner "
+                f"and the workflow red-CIs. Re-pin to a `@v<semver>` tag (the canonical form the "
+                f"generator emits), `@master`, or a commit SHA -- run `standardize --fix` to "
+                f"repin in place.",
+                rel_path,
+                line_num,
+            )
+
+    if not found_any and yaml_files:
+        report.passed(f"All CPV workflow refs resolve in {len(yaml_files)} workflow file(s)")
+
+
 def print_results(report: ValidationReport, verbose: bool = False, strict: bool = False) -> None:
     """Print validation results in human-readable format.
 
@@ -7388,6 +7484,10 @@ def main() -> int:
         ("validate_cross_platform", validate_cross_platform, ((), {})),
         ("validate_md_content_references", validate_md_content_references, ((), {})),
         ("validate_workflow_inline_python", validate_workflow_inline_python, ((), {})),
+        # TRDD-35BN0TEI: BLOCK a stale/non-resolvable CPV git ref (`@main` etc.)
+        # pinned in a workflow — enforced HERE (the publish gate) so publish.py
+        # Gate 3 refuses to ship a pipeline that 404s on the runner.
+        ("validate_workflow_cpv_ref", validate_workflow_cpv_ref, ((), {})),
         ("validate_pipeline_readiness", validate_pipeline_readiness, ((), {})),
         ("validate_pipeline_script_refs", validate_pipeline_script_refs, ((), {})),
         ("validate_workflow_path_broken", validate_workflow_path_broken, ((), {})),
