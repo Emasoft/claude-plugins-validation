@@ -213,8 +213,9 @@ def test_enabled_linters_real_cpv_default_set(tmp_path: Path) -> None:
 def test_cspell_enabled_present_clean_passes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """cspell enabled + on PATH + exit 0 → PASS."""
+    """cspell enabled + plugin ships a cspell config + on PATH + exit 0 → PASS."""
     root = _make_plugin(tmp_path)
+    (root / ".cspell.json").write_text('{"words": ["pyproject"]}', encoding="utf-8")
     _write_mega_linter(root, ["SPELL_CSPELL"])
     _patch_tool(monkeypatch, present={"cspell"}, run_result={"cspell": _FakeProc(0)})
     result = PreflightResult(plugin_path=root)
@@ -226,8 +227,9 @@ def test_cspell_enabled_present_clean_passes(
 def test_cspell_enabled_present_error_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """cspell enabled + on PATH + non-zero exit → FAIL with the first error line."""
+    """cspell enabled + plugin ships a cspell config + on PATH + non-zero exit → FAIL with the first error line."""
     root = _make_plugin(tmp_path)
+    (root / ".cspell.json").write_text('{"words": ["pyproject"]}', encoding="utf-8")
     _write_mega_linter(root, ["SPELL_CSPELL"])
     _patch_tool(
         monkeypatch,
@@ -242,8 +244,9 @@ def test_cspell_enabled_present_error_fails(
 
 
 def test_cspell_enabled_absent_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """cspell enabled but NOT on PATH → non-blocking WARNING (never FAIL)."""
+    """cspell enabled + config present but tool NOT on PATH → non-blocking WARNING (never FAIL)."""
     root = _make_plugin(tmp_path)
+    (root / ".cspell.json").write_text('{"words": ["pyproject"]}', encoding="utf-8")
     _write_mega_linter(root, ["SPELL_CSPELL"])
     _patch_tool(monkeypatch, present=set())
     result = PreflightResult(plugin_path=root)
@@ -605,3 +608,41 @@ def test_generated_plugin_megalinter_probes_do_not_false_block(tmp_path: Path) -
         "Mega-Linter probes false-blocked a canonical generated plugin "
         f"(probe miscalibration): {[(f.gate, f.message[:80]) for f in fails]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Regression: the cspell probe must NOT false-block a plugin with no cspell
+# config (central-verify dogfood #2, TRDD-HZSI0BZ6). CI's Mega-Linter cspell
+# ships BUNDLED technical dictionaries a bare local `cspell lint` lacks, so
+# without the plugin's own config a local cspell FAILS on ordinary tech terms
+# (pyproject / venv / pipefail / endfor — verified on a fresh scaffold) that CI
+# passes. The probe is FAIL-capable ONLY when the plugin ships a cspell config.
+# ---------------------------------------------------------------------------
+
+
+def test_cspell_no_config_warns_never_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """cspell enabled but NO plugin cspell config → WARNING, and the tool is never
+    invoked — a bare local cspell would false-block on tech terms CI's Mega-Linter
+    (bundled dictionaries) passes. Even with cspell present + erroring, the
+    no-config gate keeps it a non-blocking WARNING (the probe must not run)."""
+    root = _make_plugin(tmp_path)
+    _write_mega_linter(root, ["SPELL_CSPELL"])  # NO .cspell.json shipped
+    monkeypatch.setattr(cpv_ci_preflight.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def fail_run(argv: list[str], **_kw: object) -> _FakeProc:
+        raise AssertionError("cspell must NOT run without a plugin cspell config")
+
+    monkeypatch.setattr(cpv_ci_preflight.subprocess, "run", fail_run)
+    result = PreflightResult(plugin_path=root)
+    cpv_ci_preflight._gate_cspell(result, {cpv_ci_preflight._CSPELL_LINTER_ID})
+    assert _finding(result, "cspell").severity == "WARNING"
+
+
+def test_plugin_has_cspell_config_detects_dictionary(tmp_path: Path) -> None:
+    """`_plugin_has_cspell_config` is False with no config, True once the plugin
+    ships a recognized cspell config / word-list (the gate for the cspell probe)."""
+    root = tmp_path / "p"
+    root.mkdir()
+    assert cpv_ci_preflight._plugin_has_cspell_config(root) is False
+    (root / "project-words.txt").write_text("pyproject\n", encoding="utf-8")
+    assert cpv_ci_preflight._plugin_has_cspell_config(root) is True

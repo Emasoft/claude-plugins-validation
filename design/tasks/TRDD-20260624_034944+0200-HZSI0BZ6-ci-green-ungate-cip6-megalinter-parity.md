@@ -135,6 +135,14 @@ on the first try — CI/Release/Notify all `completed/success`, PyPI skipped-as-
 (dogfood: CPV published itself through its own canonical pipeline without failing CI,
 which is exactly what the fixer/creator agents must now do). Column → `published`.
 
+**FOLLOW-ON v2.147.1 (central-verify dogfood #2):** a deeper probe found a SECOND
+false-block — the cspell probe's bare `cspell lint .` FAILs a CI-green scaffold on
+tech terms (`pyproject`/`venv`/`endfor`, verified via `npx cspell`) that CI's
+Mega-Linter cspell (bundled dictionaries) passes. Fixed: cspell is FAIL-capable
+ONLY when the plugin ships its own cspell config (`_gate_cspell` +
+`_plugin_has_cspell_config`); else WARNING (CI still enforces; green-CI loop is the
+backstop). Two-sided + regression-tested; ships as v2.147.1.
+
 ## Verification gates
 - Two-sided tests for CIP-6 (F1) and each F4 probe (FIRES on the defect, PASSES clean).
 - FN-safe + re2-safe (no lookaround) for every new regex.
