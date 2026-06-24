@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CI-parity static checks (CIP-1..CIP-5) — the #137-143 defect detectors.
+"""CI-parity static checks (CIP-1..CIP-6) — the #137-143 defect detectors.
 
 The root cause of the #137-143 family is that the fixer/upgrade agents declare
 DONE on ``validate_plugin --strict``, which does NOT mirror the gates the
@@ -8,12 +8,12 @@ mypy / ``uv sync --extra dev``). A canonical upgrade that is *locally clean*
 therefore still red-CIs.
 
 This module is the static half of the local CI-parity preflight: it greps the
-generated workflows + ``pyproject.toml`` for the FIVE concrete defect SHAPES
+generated workflows + ``pyproject.toml`` for the SIX concrete defect SHAPES
 the #137-143 incidents shipped, each as an FN-safe **two-sided** check —
 it FIRES on the defect shape and PASSES on a clean / canon tree, and never
 false-blocks a plugin that simply does not use the workflow in question.
 
-The five checks (all grounded in shipped incidents):
+The six checks (all grounded in shipped incidents):
 
 * **CIP-1** — an *inverted* ``CLAUDE_PRIVATE_USERNAMES: ${{ github.repository_owner }}``
   in any ``.github/workflows/*.yml`` (#140). That env names the PRIVATE
@@ -36,6 +36,16 @@ The five checks (all grounded in shipped incidents):
   ``.jscpd.json`` config exists (#143). jscpd auto-reads ``.jscpd.json``; with
   none, the copy-paste gate uses jscpd's defaults and the local
   ``publish.py`` Gate-2b has no shared config to enforce parity with.
+* **CIP-6** — a ``.github/workflows/*.yml`` pins ``claude-plugins-validation``
+  at a git ref (``git+https://github.com/Emasoft/claude-plugins-validation@<ref>``
+  / ``uvx --from git+…@<ref>`` / ``…claude-plugins-validation.git@<ref>``) where
+  ``<ref>`` is NOT a resolvable CPV ref (TRDD-HZSI0BZ6; the dominant field
+  failure). CPV's default branch is ``master``, so ``@main`` does not exist and
+  ``uvx --from git+…@main`` fails ``Git operation failed / Updating … (main)``.
+  A plugin migrated by an OLD CPV (≤v2.137, pre-#139) was pinned ``@main`` and
+  never re-published, so nothing re-pins it and the workflow red-CIs forever.
+  Only ``master``, a ``v<semver>`` tag, or a 7-40 hex commit SHA passes;
+  ``@main`` / ``@develop`` / ``@HEAD`` / ``@feature-x`` FIRE.
 
 Pure stdlib (``tomllib`` for ``pyproject.toml`` — graceful fallback on
 pre-3.11 / unparseable). Every regex is re2-safe (no lookbehind / lookahead /
@@ -59,7 +69,7 @@ class ParityFinding(NamedTuple):
     """One CI-parity defect.
 
     Attributes:
-        check_id: The CIP rule id (``"CIP-1"`` … ``"CIP-5"``).
+        check_id: The CIP rule id (``"CIP-1"`` … ``"CIP-6"``).
         severity: ``"MAJOR"`` / ``"MINOR"`` / ``"WARNING"`` — the same
             severity vocabulary the validators use. A defect that fails the
             adopter's CI hard is MAJOR; a style/parity gap is MINOR.
@@ -397,19 +407,85 @@ def _check_jscpd_config(plugin_path: Path) -> list[ParityFinding]:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# CIP-6 — stale / invalid CPV ref pinned in a workflow (#TRDD-HZSI0BZ6)
+# ─────────────────────────────────────────────────────────────────────────
+
+# Capture the ref a workflow pins ``claude-plugins-validation`` at. The pin
+# always reads ``…claude-plugins-validation[.git]@<ref>`` — whether spelled as
+# ``git+https://github.com/Emasoft/claude-plugins-validation@<ref>``, an
+# ``uvx --from git+…@<ref>``, or a bare ``…claude-plugins-validation.git@<ref>``.
+# We anchor on the project name + an OPTIONAL ``.git`` + ``@`` and capture the
+# ref as a run of ref-legal characters (alnum / ``.`` / ``_`` / ``-`` / ``/``)
+# — it terminates at whitespace, a quote, ``#``, or any other delimiter. The
+# pinned-version form ``claude-plugins-validation==<ver>`` (the #137 PyPI-wheel
+# selector) has ``==`` not ``@`` and is deliberately NOT matched (it carries no
+# git ref to validate). re2-safe: no lookbehind / lookahead / backreference.
+_CPV_REF_PIN_RE = re.compile(r"claude-plugins-validation(?:\.git)?@([A-Za-z0-9._\-/]+)")
+
+# A ``v<semver>`` release tag: ``v<major>.<minor>.<patch>`` with an OPTIONAL
+# prerelease / build suffix (``-rc.1``, ``-beta``, ``+meta``). Anchored full-match
+# (``fullmatch`` at the call site) so a trailing-garbage ref does not slip through.
+_SEMVER_TAG_RE = re.compile(r"v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?")
+# A git commit SHA: 7-40 lowercase-or-uppercase hex chars (short or full form).
+_COMMIT_SHA_RE = re.compile(r"[0-9a-fA-F]{7,40}")
+
+
+def _is_resolvable_cpv_ref(ref: str) -> bool:
+    """Return True when ``ref`` is a CPV ref that ``uvx --from git+…@<ref>`` resolves.
+
+    Resolvable ⇔ ``master`` (CPV's default branch), a ``v<semver>`` release tag,
+    or a 7-40 char hex commit SHA. Everything else (``main`` / ``develop`` /
+    ``HEAD`` / a feature-branch name) is a STALE / invalid pin that red-CIs.
+    """
+    if ref == "master":
+        return True
+    if _SEMVER_TAG_RE.fullmatch(ref):
+        return True
+    return bool(_COMMIT_SHA_RE.fullmatch(ref))
+
+
+def _check_stale_cpv_ref(plugin_path: Path) -> list[ParityFinding]:
+    findings: list[ParityFinding] = []
+    for wf in _workflow_files(plugin_path):
+        text = _read_text(wf)
+        if text is None:
+            continue
+        rel = str(wf.relative_to(plugin_path))
+        for m in _CPV_REF_PIN_RE.finditer(text):
+            ref = m.group(1)
+            if _is_resolvable_cpv_ref(ref):
+                continue
+            line = text.count("\n", 0, m.start()) + 1
+            findings.append(
+                ParityFinding(
+                    "CIP-6",
+                    "MAJOR",
+                    f"{rel}:{line}: pins claude-plugins-validation at `@{ref}`, which is not "
+                    f"a resolvable CPV ref — CPV's default branch is `master`, so "
+                    f"`uvx --from git+…@{ref}` fails (`Git operation failed / Updating … "
+                    f"({ref})`) and the workflow red-CIs. Re-pin to a `v<semver>` tag (the "
+                    f"current CPV release) or `master` — run `standardize --fix` to re-pin "
+                    f"the CPV ref, or have the upgrade agent rewrite it on its next run.",
+                    rel,
+                )
+            )
+    return findings
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Public entry point
 # ─────────────────────────────────────────────────────────────────────────
 
 
 def check_ci_parity(plugin_path: Path) -> list[ParityFinding]:
-    """Run all five CI-parity static checks against a plugin tree.
+    """Run all six CI-parity static checks against a plugin tree.
 
     Each check is FN-safe two-sided — it FIRES on the #137-143 defect shape and
     PASSES on a clean / canon tree, and a plugin that does not use a given
     workflow never draws a false finding from that check.
 
-    Returns the findings in CIP-id order (1..5). An empty list means the tree
-    is parity-clean for all five dimensions.
+    Returns the findings in CIP-id order (1..6). An empty list means the tree
+    is parity-clean for all six dimensions.
     """
     plugin_path = Path(plugin_path)
     findings: list[ParityFinding] = []
@@ -418,4 +494,5 @@ def check_ci_parity(plugin_path: Path) -> list[ParityFinding]:
     findings.extend(_check_dev_extra_declared(plugin_path))
     findings.extend(_check_superseded_validate_yml(plugin_path))
     findings.extend(_check_jscpd_config(plugin_path))
+    findings.extend(_check_stale_cpv_ref(plugin_path))
     return findings

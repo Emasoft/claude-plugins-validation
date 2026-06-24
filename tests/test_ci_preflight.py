@@ -351,7 +351,7 @@ def test_clean_canon_tree_has_zero_findings(tmp_path: Path) -> None:
 
 
 def test_check_ci_parity_on_cpv_repo_is_clean() -> None:
-    """CPV's OWN tree must pass all five static checks (the real no-false-fire guard)."""
+    """CPV's OWN tree must pass all six static checks (the real no-false-fire guard)."""
     assert check_ci_parity(CPV_ROOT) == []
 
 
