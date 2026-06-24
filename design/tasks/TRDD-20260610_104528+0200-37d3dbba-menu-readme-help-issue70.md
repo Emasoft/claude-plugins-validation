@@ -1,9 +1,9 @@
 ---
 trdd-id: 37d3dbba-3425-4b02-8fc8-b27008124d60
 title: Complete pending issues — menu bug-free, README, help screens, issue #70
-column: testing
+column: published
 created: 2026-06-10T10:45:28+0200
-updated: 2026-06-10T10:45:28+0200
+updated: 2026-06-24T03:27:35+0200
 current-owner: cpv-maintainer-claude
 assignee: cpv-maintainer-claude
 task-type: bugfix

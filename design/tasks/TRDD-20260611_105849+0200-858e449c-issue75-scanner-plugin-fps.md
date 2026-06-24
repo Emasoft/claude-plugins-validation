@@ -1,9 +1,9 @@
 ---
 trdd-id: 858e449c-8c56-445b-aa05-dde27db1876b
 title: Issue #75 — security-scanner-plugin false positives after self-exemption removal (5 classes)
-column: testing
+column: published
 created: 2026-06-11T10:58:49+0200
-updated: 2026-06-11T11:30:00+0200
+updated: 2026-06-24T03:27:35+0200
 current-owner: cpv-maintainer-claude
 task-type: bugfix
 release-via: publish

@@ -1,9 +1,9 @@
 ---
 trdd-id: 8eee537a-1381-437f-8c29-4295348c69da
 title: Harden CPV fixer + upgrade agents — close the local-gate ↔ GitHub-CI parity gap (FM1) + wire green-CI/loop-state into the agents that lack them
-column: dev
+column: published
 created: 2026-06-21T21:47:27+0200
-updated: 2026-06-21T21:47:27+0200
+updated: 2026-06-24T03:27:35+0200
 current-owner: cpv-main-session
 assignee: cpv-main-session
 priority: 2

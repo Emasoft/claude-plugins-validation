@@ -1,9 +1,9 @@
 ---
 trdd-id: e9f13df1-556f-4c02-9fba-5a62ac248eda
 title: Canon-profiles — profile-aware + direction-aware canonical-pipeline model
-column: dev
+column: backburner
 created: 2026-06-16T23:40:45+0200
-updated: 2026-06-20T04:30:50+0200
+updated: 2026-06-24T03:27:35+0200
 current-owner: claude-plugins-validation
 assignee: claude-plugins-validation
 priority: 2
@@ -28,7 +28,9 @@ external-refs: ["github.com/Emasoft/claude-plugins-validation/issues/118", "gith
 
 # TRDD-e9f13df1 — Canon-profiles model
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-19
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-24
+
+**HELD (2026-06-24):** column dev→backburner. The canon-profiles CORE SHIPPED (A+B v2.128.0, C1 v2.135.0, #128-A v2.135.1, Piece D profile-awareness v2.137.0, the untested-until-release heuristic v2.136.0). The remaining #115 canon-EXTENSION tail — `gen_release_binaries_yml` + a shared `stage.sh` + a CI-smoke job, multi-language publish.py gates, and the cron-daemon test-gate trait — is JANITOR-DEPENDENT (the janitor is the consumer of binary-release + cron-daemon) and is HELD pending the new ai-maestro-janitor version's skills + a USER priority call, per the user's "wait to read the new janitor plugin version skills to decide on certain things" directive (2026-06-24). Do NOT implement the binary-release / cron-daemon pieces until that version is read.
 
 **Progress (2026-06-19, this session — user said "resume"):** Piece **A+B SHIPPED** —
 `scripts/cpv_pipeline_profile.py` (4 profiles + shape detectors: `has_build_source_submodule`,

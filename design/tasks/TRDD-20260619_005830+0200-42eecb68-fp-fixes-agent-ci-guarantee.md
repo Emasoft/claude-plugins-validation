@@ -1,9 +1,9 @@
 ---
 trdd-id: 42eecb68-e6ca-4654-beb3-aed4e7f35e92
 title: Fix #133/#134/#135 scanner FPs + harden ALL fix/upgrade/doctor/devitalizer agents to loop-until-0/0/0/0-and-CI-green + guarantee canonical-pipeline upgrade passes GitHub CI
-column: dev
+column: published
 created: 2026-06-19T00:58:30+0200
-updated: 2026-06-19T02:09:25+0200
+updated: 2026-06-24T03:27:35+0200
 current-owner: claude-plugins-validation
 task-type: bugfix
 relevant-rules: []
