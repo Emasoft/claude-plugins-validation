@@ -1,9 +1,9 @@
 ---
 trdd-id: HZSI0BZ6
 title: Make plugin agents publish without failing GitHub CI — ungate the safety net + CIP-6 stale-ref + Mega-Linter parity
-column: testing
+column: published
 created: 2026-06-24T03:49:44+0200
-updated: 2026-06-24T04:30:00+0200
+updated: 2026-06-24T04:45:03+0200
 current-owner: cpv-main-session
 assignee: cpv-main-session
 priority: 1
@@ -26,8 +26,10 @@ review-requirements: [code-review]
 runtime-targets: [macos, linux]
 impacts: [ci-pipeline]
 external-refs: ["reports/ci-green-investigation/20260624_033206+0200-remaining-ci-failure-modes.md", "github.com/Emasoft/ai-maestro-orchestrator-agent/actions/runs/27940566923", "github.com/Emasoft/ai-maestro-maintainer-agent/actions/runs/27940763588"]
-attempts: 0
-implementation-commits: []
+attempts: 1
+implementation-commits: [7ce12b1, ebbc261]
+published-version: 2.147.0
+published-at: 2026-06-24T04:30:00+0200
 ---
 
 # TRDD-HZSI0BZ6 — CI-green: ungate the safety net + CIP-6 stale-ref + Mega-Linter parity
@@ -128,8 +130,10 @@ sibling file), corrected to SIX/CIP-1..6 across all live code+docs. DOGFOOD: cle
 scaffold→PARITY-CLEAN; `@main`-poison→CIP-6 FAIL on ci.yml+release.yml (exit non-zero).
 ruff+mypy clean, +69 two-sided tests, cache-cold self-validate 0/0/0/0, serial suite green.
 
-**NEXT ACTION:** publish via `publish.py --minor` (v2.147.0), then `gh run watch` CI to
-green (fix-cause loop if red, never mute a check). On green → column `published`.
+**DONE (2026-06-24T04:45):** SHIPPED v2.147.0 (commits 7ce12b1 + bump ebbc261), CI GREEN
+on the first try — CI/Release/Notify all `completed/success`, PyPI skipped-as-expected
+(dogfood: CPV published itself through its own canonical pipeline without failing CI,
+which is exactly what the fixer/creator agents must now do). Column → `published`.
 
 ## Verification gates
 - Two-sided tests for CIP-6 (F1) and each F4 probe (FIRES on the defect, PASSES clean).
