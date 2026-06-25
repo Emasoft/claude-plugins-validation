@@ -1,9 +1,9 @@
 ---
 trdd-id: ABFRMED0
 title: Audit CPV spec validators against Claude Code changelog v2.1.170 → v2.1.191 — fix genuine gaps
-column: dev
+column: published
 created: 2026-06-25T19:39:44+0200
-updated: 2026-06-25T19:39:44+0200
+updated: 2026-06-25T21:34:39+0200
 current-owner: cpv-main-session
 assignee: cpv-main-session
 priority: 1
@@ -26,8 +26,10 @@ review-requirements: [code-review]
 runtime-targets: [macos, linux]
 impacts: []
 external-refs: ["https://code.claude.com/docs/en/changelog.md", "https://code.claude.com/docs/en/skills.md", "https://code.claude.com/docs/en/hooks.md"]
-attempts: 0
-implementation-commits: []
+attempts: 1
+implementation-commits: [436a686]
+published-version: 2.149.0
+published-at: 2026-06-25T21:34:39+0200
 ---
 
 # TRDD-ABFRMED0 — CPV spec audit vs Claude Code changelog v2.1.170 → v2.1.191
@@ -168,9 +170,13 @@ finished by hand:**
 changed scripts; 67-file / 2415-test regression on every test importing a changed
 module — ALL PASS, zero regression.
 
-**REMAINING:** update CLAUDE.md (version-history + test-file count) + cpv-spec-
-reference LOCAL memory; regen `.cpv-self-hashes.json` LAST; cache-cold
-(`CPV_SCAN_CACHE=0`) self-validate 0/0/0/0; publish.py (bump) + watch CI green.
+**DONE — SHIPPED v2.149.0, CI GREEN (feature commit 436a686 → release a764510,
+2026-06-25).** CLAUDE.md + self-hash manifest updated; fixed 2 blocking markdown
+NITs (MD004 in this TRDD + a pre-existing MD018 in the v2.148.0 35BN0TEI TRDD);
+cache-cold (`CPV_SCAN_CACHE=0`) strict self-validate 0/0/0/0; publish.py --minor
+bumped 2.148.0→2.149.0; CI (Lint 38s + Validate 3m30s + Test 7m46s serial/no-re2)
+GREEN, Release 10m48s GREEN, Notify Marketplace GREEN, PyPI skipped (dormant).
+Release: https://github.com/Emasoft/claude-plugins-validation/releases/tag/v2.149.0
 
 **Durable artifacts:** scratchpad `cc-changelog.md` / `cc-skills.md` / `cc-hooks.md`
 (fetched live); audit reports under reports/cpv-changelog-audit/.
