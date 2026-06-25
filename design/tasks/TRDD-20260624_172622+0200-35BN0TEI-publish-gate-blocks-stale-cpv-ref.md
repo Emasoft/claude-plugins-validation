@@ -126,7 +126,7 @@ claude-plugins-validation==<ver>` pipeline that 404s today (CPV isn't on PyPI).
 It is opt-in, fully built + unit-tested (ready to flip on when PyPI goes live),
 and guarding-vs-enabling it is a distribution-strategy decision for the USER —
 deliberately left untouched. The git default (`@v<version>`, resolvable since
-#139) needs zero PyPI, so the fleet-blocker is fully resolved without it.
+issue 139) needs zero PyPI, so the fleet-blocker is fully resolved without it.
 
 ## Verification gates
 - Two-sided: FIRES MAJOR on `@main`/`@develop`/`@HEAD`/`@feature-x`/`.git@main`;

@@ -1172,7 +1172,12 @@ BINARY_EXTENSIONS = {
 }
 
 # Known Claude Code skill frontmatter fields (shared by skill validators).
-# Aligned with skills.md (v2.1.121) — 15 fields.
+# Aligned with skills.md table (16 fields) + the v2.1.186 changelog grant of
+# `display-name`, `default-enabled`, `fallback`, `metadata` (which skills.md's
+# table does not yet list). The changelog states these four "now accept
+# kebab-case, snake_case, and camelCase" — so membership for THOSE FOUR is
+# casing-tolerant via `is_known_skill_frontmatter_key()` below; every other
+# key stays exact-match.
 SKILL_FRONTMATTER_FIELDS = {
     "name",
     "description",
@@ -1190,7 +1195,53 @@ SKILL_FRONTMATTER_FIELDS = {
     "effort",  # v2.1.80 — effort level for skill execution (low, medium, high, max)
     "paths",  # v2.1.84 — YAML list of globs to restrict skill activation to matching files
     "shell",  # v2.1.84 — shell for !`command` blocks: "bash" (default) or "powershell"
+    # v2.1.186 — these four accept kebab/snake/camel; canonical (kebab) form
+    # listed here, the other casings cleared by is_known_skill_frontmatter_key().
+    "display-name",  # v2.1.186 — human-readable label (skill-frontmatter alias of plugin.json `displayName`)
+    "default-enabled",  # v2.1.186 — opt-in enablement (skill-frontmatter alias of plugin.json `defaultEnabled`)
+    "fallback",  # v2.1.186 — skill fallback config
+    "metadata",  # Agent-Skills open standard (agentskills.io) free-form map; v2.1.186 `metadata.*` casing grant
 }
+
+# The v2.1.186 keys that the runtime accepts in kebab-case, snake_case, AND
+# camelCase. Membership for these (and ONLY these) is casing-insensitive;
+# every other frontmatter key is matched exactly so typos still warn.
+_CASING_TOLERANT_SKILL_KEYS = frozenset(
+    {
+        "display-name",
+        "default-enabled",
+        "fallback",
+        "metadata",
+    }
+)
+
+
+def _to_kebab(key: str) -> str:
+    """Normalize a frontmatter key to kebab-case for casing-tolerant lookup.
+
+    Handles snake_case (`display_name` -> `display-name`) and camelCase
+    (`displayName` -> `display-name`). re2-irrelevant (pure Python str ops).
+    """
+    # camelCase -> kebab: insert a hyphen before an interior uppercase run.
+    out: list[str] = []
+    for i, ch in enumerate(key):
+        if ch.isupper() and i > 0 and (key[i - 1].islower() or key[i - 1].isdigit()):
+            out.append("-")
+        out.append(ch.lower())
+    return "".join(out).replace("_", "-")
+
+
+def is_known_skill_frontmatter_key(key: str) -> bool:
+    """True iff `key` is a recognized skill frontmatter key.
+
+    Exact match against SKILL_FRONTMATTER_FIELDS for the stable keys; for the
+    four v2.1.186 casing-tolerant keys, normalize kebab/snake/camel before
+    comparing so `displayName`, `display_name`, and `display-name` all clear,
+    while an unrelated typo (`displaynam`, `defaultEnable`) still fails.
+    """
+    if key in SKILL_FRONTMATTER_FIELDS:
+        return True
+    return _to_kebab(key) in _CASING_TOLERANT_SKILL_KEYS
 
 # Skill template-substitution variables recognised by skills.md (v2.1.121).
 # Static set: keys never beginning with `$ARGUMENTS[`, `$<digit>` (positional),
