@@ -41,6 +41,17 @@ from typing import Protocol
 # Canonical built-in tool identifiers (PascalCase), verbatim from
 # tools-reference.md. Used to recognise tool-invocation syntax in a body and to
 # resolve declared rule tool-names.
+#
+# DELIBERATELY BROADER than cpv_validation_common.VALID_TOOLS, and it intentionally
+# RETAINS legacy/removed names (e.g. TeamCreate/TeamDelete, removed in v2.1.178):
+# this set drives tool-reference DETECTION + permission-glob SUPPRESSION (the
+# `_skillaudit_json_context._CLAUDE_CODE_TOOL_GLOB_RE` regex is DERIVED from it),
+# where recognising a legacy name is harmless or safer — a stale `TeamCreate(...)`
+# permission glob stays suppressed as benign permission DATA instead of being
+# mis-scanned as content. VALID_TOOLS is the opposite: the strict VALIDITY
+# allowlist of currently-valid tools (removed tools excluded, so a stale plugin
+# can't pass validation). Keep the two apart — do NOT prune CANONICAL_TOOLS to
+# match VALID_TOOLS.
 CANONICAL_TOOLS: frozenset[str] = frozenset(
     {
         "Agent",

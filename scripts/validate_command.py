@@ -45,6 +45,7 @@ from cpv_validation_common import (
     ValidationReport,
     check_token_limit,
     check_utf8_encoding,
+    is_known_skill_frontmatter_key,
     is_placeholder_secret,
     is_valid_model,
     save_report_and_print_summary,
@@ -206,9 +207,12 @@ def validate_frontmatter_exists(content: str, report: CommandValidationReport, f
 
     report.passed("Valid YAML frontmatter", filename)
 
-    # Check for unknown fields
+    # Check for unknown fields. Commands share the skill field set, so the four
+    # v2.1.186 keys (display-name/default-enabled/fallback/metadata, any casing) are
+    # accepted via is_known_skill_frontmatter_key; command-specific fields stay
+    # covered by the local KNOWN_FRONTMATTER_FIELDS.
     for key in frontmatter.keys():
-        if key not in KNOWN_FRONTMATTER_FIELDS:
+        if key not in KNOWN_FRONTMATTER_FIELDS and not is_known_skill_frontmatter_key(key):
             report.warning(
                 f"Unknown frontmatter field '{key}' (may be ignored by CLI)",
                 filename,

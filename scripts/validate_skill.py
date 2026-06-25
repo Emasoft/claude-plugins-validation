@@ -62,6 +62,7 @@ from cpv_validation_common import (  # noqa: E402  (import below conditional yam
     VALID_CONTEXT_VALUES,
     ValidationReport,
     check_token_limit,
+    is_known_skill_frontmatter_key,
     is_valid_model,
     save_report_and_print_summary,
     validate_component_name,
@@ -142,9 +143,11 @@ def validate_frontmatter(_skill_path: Path, content: str, report: ValidationRepo
 
     report.passed("Valid YAML frontmatter", "SKILL.md")
 
-    # Validate known fields
+    # Validate known fields. The four v2.1.186 keys (display-name, default-enabled,
+    # fallback, metadata) accept kebab/snake/camelCase, so use the casing-tolerant
+    # test; every other key stays exact-match so typos still warn.
     for key in frontmatter.keys():
-        if key not in KNOWN_FRONTMATTER_FIELDS:
+        if not is_known_skill_frontmatter_key(key):
             report.warning(
                 f"Unknown frontmatter field '{key}' (may be ignored by CLI)",
                 "SKILL.md",

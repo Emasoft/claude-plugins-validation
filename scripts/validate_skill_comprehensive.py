@@ -65,6 +65,7 @@ from cpv_validation_common import (
     Level,
     check_token_limit,
     has_numbered_prose_steps,
+    is_known_skill_frontmatter_key,
     is_valid_model,
     is_valid_plugin_env_var,
     load_cpv_config,
@@ -1562,7 +1563,10 @@ def validate_field_whitelist(
                     "SKILL.md",
                     category="Frontmatter",
                 )
-            else:
+            # v2.1.186: snake_case/camelCase of the four casing-tolerant keys
+            # (display-name/default-enabled/fallback/metadata) clear here too — the
+            # kebab forms already passed via ALL_KNOWN_FIELDS. strict_openspec stays strict.
+            elif not is_known_skill_frontmatter_key(key):
                 report.warning(
                     f"Unknown frontmatter field '{key}' (may be ignored by CLI)",
                     "SKILL.md",

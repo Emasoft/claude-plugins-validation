@@ -30,6 +30,20 @@ import json
 import re
 from typing import Final, Literal
 
+# Single source of truth for the Claude Code tool-name set. Importing it here is
+# cycle-safe BY CONSTRUCTION: cpv_tool_permission_match imports only stdlib
+# (fnmatch/re/dataclasses/typing) and NOTHING from the skillaudit graph, so it
+# cannot transitively re-import this module. A top-level absolute import matches
+# the sibling pattern (_skillaudit_yaml_context imports _classify_key from this
+# module the same way). This eliminates the permission-glob tool-name drift: the
+# alternation below is DERIVED from CANONICAL_TOOLS | TOOL_ALIASES, never hand-typed.
+from cpv_tool_permission_match import (  # type: ignore[import-not-found]
+    CANONICAL_TOOLS as _CANONICAL_TOOLS,
+)
+from cpv_tool_permission_match import (  # type: ignore[import-not-found]
+    TOOL_ALIASES as _TOOL_ALIASES,
+)
+
 ContextVerdict = Literal["safe_literal", "safe_doc", "safe_schema", "suspect", "unknown"]
 
 # Keys whose values are UI metadata / human documentation. The same key
@@ -150,14 +164,21 @@ _DANGEROUS_KEY_SUFFIXES: Final[frozenset[str]] = frozenset(
 # INVOCATIONS — they're DECLARATIONS of which Bash/Read/Write/etc.
 # tool calls are allowed/denied. Matching them as REGEX_DOS, FS_WRITE,
 # PRIVILEGE_ESC, CMD_INJECTION is wholly false-positive.
+#
+# The leading tool-name alternation is DERIVED from the single source of truth
+# CANONICAL_TOOLS | TOOL_ALIASES (cpv_tool_permission_match), not hand-typed, so
+# it can never drift stale vs the current tool set again (Monitor, PowerShell,
+# ToolSearch, etc. were previously omitted → their permission globs weren't
+# suppressed → rare false positives). Sorted by length DESC + re.escape each so a
+# longer name (e.g. ReadMcpResourceTool) is preferred over a shorter prefix
+# (Read) inside the alternation. The regex SHAPE around the alternation is
+# unchanged: ^ anchor, the `\([^)]*\)\*?$` tail (parenthesised param + optional
+# trailing `*`), exactly as before — only the tool-name list became derived.
+_TOOL_NAMES_FOR_GLOB_RE: Final[tuple[str, ...]] = tuple(
+    sorted(_CANONICAL_TOOLS | set(_TOOL_ALIASES), key=len, reverse=True)
+)
 _CLAUDE_CODE_TOOL_GLOB_RE: Final[re.Pattern[str]] = re.compile(
-    r"^(?:Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Task|Glob|Grep|"
-    r"WebFetch|WebSearch|TodoWrite|TodoRead|Agent|Skill|Plan|ExitPlanMode|"
-    r"EnterPlanMode|EnterWorktree|ExitWorktree|TaskCreate|TaskList|"
-    r"TaskGet|TaskOutput|TaskUpdate|TaskStop|TeamCreate|TeamDelete|"
-    r"CronCreate|CronList|CronDelete|ScheduleWakeup|ReadMcpResourceTool|"
-    r"ListMcpResourcesTool|SendMessage|LSP|Wait|Sleep|Find|"
-    r"Mkdir|Cp|Mv|Rm|Touch|Tee|Cat|Echo|Ls)"
+    r"^(?:" + "|".join(re.escape(t) for t in _TOOL_NAMES_FOR_GLOB_RE) + r")"
     r"\([^)]*\)\*?$"
 )
 

@@ -698,7 +698,11 @@ def _check_matcher_values(
     report: ValidationReport,
 ) -> None:
     """Check matcher parts against a set of known values, reporting info for unknowns."""
-    parts = re.split(r"[|()]", matcher)
+    # Split on the comma too (v2.1.191 fixed comma-separated hook matchers, e.g.
+    # "Bash,PowerShell" — both halves are valid and now fire), so each
+    # comma-separated value is validated individually instead of the whole
+    # "a,b" string being treated as one unknown token (a false-positive INFO).
+    parts = re.split(r"[|(),]", matcher)
     for part in parts:
         part = part.strip()
         # Skip empty, wildcard, and regex patterns (contain metacharacters)
