@@ -34,6 +34,13 @@ def _f(sev: str, file: str, msg: str) -> dict[str, str]:
     return {"severity": sev, "file": file, "message": msg}
 
 
+def _set(count: int, tag: str) -> list[dict[str, str]]:
+    """`count` distinct findings tagged so each iteration has a NEW signature but a
+    FIXED count — models a CI-publish loop whose failing set churns (shifting test
+    names) without ever reducing the count: PROGRESS-not-CYCLE, yet not converging."""
+    return [_f("minor", f"f{i}.md", f"{tag}-{i}") for i in range(count)]
+
+
 # --------------------------------------------------------------------------- #
 # compute_signature                                                           #
 # --------------------------------------------------------------------------- #
@@ -226,6 +233,77 @@ class TestRecordVerdicts:
 
 
 # --------------------------------------------------------------------------- #
+# record — STALLED (opt-in non-progress guard for the CI-publish loop)         #
+# --------------------------------------------------------------------------- #
+class TestStalled:
+    def test_stall_window_zero_never_stalls(self, tmp_path: Path) -> None:
+        """Default (stall_window=0): a long churning plateau NEVER stalls — the cheap
+        inner validate→fix loop keeps its no-cap behaviour (CONVERGED/CYCLE/PROGRESS only)."""
+        state = tmp_path / "s.json"
+        verdicts = [loop.record(state, _set(2, f"t{i}"))[0].split()[0] for i in range(8)]
+        assert set(verdicts) == {"PROGRESS"}
+
+    def test_flat_count_distinct_sets_stalls_after_window(self, tmp_path: Path) -> None:
+        """CI loop: count plateaus at 2 with a NEW signature each cycle (no exact CYCLE).
+        With stall_window=3, the 4th non-improving iteration is STALLED, exit 3."""
+        state = tmp_path / "s.json"
+        out = [loop.record(state, _set(2, f"t{i}"), stall_window=3) for i in range(4)]
+        verdicts = [o[0].split()[0] for o in out]
+        codes = [o[1] for o in out]
+        assert loop._STALLED_EXIT == 3
+        assert verdicts == ["PROGRESS", "PROGRESS", "PROGRESS", "STALLED"]
+        assert codes == [0, 0, 0, 3]
+        assert "stall_streak=3" in out[3][0] and "best=2" in out[3][0]
+
+    def test_strictly_improving_never_stalls(self, tmp_path: Path) -> None:
+        """FN-safety: a strictly-shrinking count (5→4→3→2→1) never stalls even with a
+        tight window — every iteration is a new best, so the streak resets to 0."""
+        state = tmp_path / "s.json"
+        verdicts = [loop.record(state, _set(c, f"t{c}"), stall_window=2)[0].split()[0] for c in (5, 4, 3, 2, 1)]
+        assert set(verdicts) == {"PROGRESS"}
+
+    def test_improvement_resets_the_streak(self, tmp_path: Path) -> None:
+        """A new best mid-plateau resets the streak, delaying STALLED.
+        counts 3,3,3,2,2,2,2 @ window 3 → STALLED only on the 7th iteration (not the 4th)."""
+        state = tmp_path / "s.json"
+        seq = [(3, "a0"), (3, "a1"), (3, "a2"), (2, "b0"), (2, "b1"), (2, "b2"), (2, "b3")]
+        out = [loop.record(state, _set(c, t), stall_window=3) for c, t in seq]
+        verdicts = [o[0].split()[0] for o in out]
+        assert verdicts == ["PROGRESS"] * 6 + ["STALLED"]
+        assert out[6][1] == 3 and "best=2" in out[6][0]
+
+    def test_cycle_outranks_stalled(self, tmp_path: Path) -> None:
+        """When an iteration is BOTH a stall point AND an exact repeat, CYCLE wins
+        (stronger, more specific). A,B,A @ window 2 → iter3 is CYCLE, not STALLED."""
+        state = tmp_path / "s.json"
+        a, b = _set(2, "A"), _set(2, "B")
+        loop.record(state, a, stall_window=2)
+        loop.record(state, b, stall_window=2)
+        line, code = loop.record(state, a, stall_window=2)  # exact repeat of iter1 AND streak would be 2
+        assert line.startswith("CYCLE iterations=3 repeat_of=1")
+        assert code == loop._CYCLE_EXIT == 2
+
+    def test_converged_outranks_stalled(self, tmp_path: Path) -> None:
+        """An empty set short-circuits to CONVERGED before the stall gate is checked."""
+        state = tmp_path / "s.json"
+        loop.record(state, _set(2, "A"), stall_window=2)
+        loop.record(state, _set(2, "B"), stall_window=2)  # streak would be 1
+        line, code = loop.record(state, [], stall_window=2)
+        assert line.startswith("CONVERGED iterations=3")
+        assert code == 0
+
+    def test_stalled_iteration_recorded_in_state(self, tmp_path: Path) -> None:
+        """A STALLED iteration persists verdict + stall_streak + best for the fix-log/summary."""
+        state = tmp_path / "s.json"
+        for i in range(4):
+            loop.record(state, _set(1, f"t{i}"), stall_window=3)
+        data = json.loads(state.read_text(encoding="utf-8"))
+        last = data["iterations"][-1]
+        assert last["verdict"] == "STALLED"
+        assert last["stall_streak"] == 3 and last["best"] == 1
+
+
+# --------------------------------------------------------------------------- #
 # CLI                                                                         #
 # --------------------------------------------------------------------------- #
 class TestCli:
@@ -266,3 +344,35 @@ class TestCli:
         state = tmp_path / "s.json"
         code = loop.main(["record", "--state", str(state), "--findings", str(tmp_path / "nope.json")])
         assert code == loop._ERROR_EXIT == 1
+
+    def test_record_stall_window_exit3(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """The CLI --stall-window drives STALLED (exit 3) on a churning, non-improving loop."""
+        state = tmp_path / "s.json"
+        code = 0
+        for i in range(4):
+            f = self._write(
+                tmp_path / f"f{i}.json",
+                [
+                    {"severity": "minor", "file": "a.md", "message": f"t{i}-0"},
+                    {"severity": "minor", "file": "b.md", "message": f"t{i}-1"},
+                ],
+            )
+            code = loop.main(["record", "--state", str(state), "--findings", str(f), "--stall-window", "3"])
+        assert code == 3
+        assert "STALLED" in capsys.readouterr().out
+
+    def test_record_no_stall_window_does_not_exit3(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """Without --stall-window the same churning loop NEVER returns STALLED (back-compat)."""
+        state = tmp_path / "s.json"
+        code = 0
+        for i in range(6):
+            f = self._write(
+                tmp_path / f"f{i}.json",
+                [
+                    {"severity": "minor", "file": "a.md", "message": f"t{i}-0"},
+                    {"severity": "minor", "file": "b.md", "message": f"t{i}-1"},
+                ],
+            )
+            code = loop.main(["record", "--state", str(state), "--findings", str(f)])
+        assert code == 0
+        assert "STALLED" not in capsys.readouterr().out

@@ -207,3 +207,38 @@ Rules that keep this honest:
 - **GitHub transient failures retry, they don't count as a fix-cycle.** A network
   timeout / runner-provisioning error is re-run (`gh run rerun <id> --failed`),
   not "fixed" — only a genuine job failure enters the fix branch.
+
+### Token discipline — the part that keeps a CI-green loop from burning millions (TRDD-DZS5K34A)
+
+A migration / CI-green loop that ingests RAW `publish.py` + CI output every cycle
+burned **16-25M tokens** per run in the field. Three mandatory disciplines stop that
+(all gate-neutral — they change HOW the loop reads output, never WHAT it enforces):
+
+- **(A) Lean output capture — NEVER pipe raw `publish.py` / `pytest` / `gh run
+  watch|view` into context.** Those emit the WHOLE suite + every gate + full CI logs,
+  and (cost ≈ turns × per-turn-context) each raw dump rides forward and is re-charged
+  on every later turn. **Redirect to a file, read back ONLY the failure summary:**
+  ```bash
+  uv run python scripts/publish.py --patch > /tmp/cpv-publish.log 2>&1; rc=$?
+  # rc!=0 → read ONLY the failed gate + failing test names, NOT the whole suite:
+  grep -nE "FAILED|^E |AssertionError|Gate [0-9].*(FAIL|BLOCK)|ERROR" /tmp/cpv-publish.log | head -40
+  gh run view <run-id> --log-failed > /tmp/cpv-ci.log 2>&1   # failed-step logs ONLY
+  grep -nE "FAIL|Error|Traceback" /tmp/cpv-ci.log | head -40
+  ```
+  Drill into one failure by `grep`-ing the log FILE — never by re-emitting it.
+- **(C) Verify the fix LOCALLY before you re-publish.** A red CI job → reproduce it
+  locally first: run the SPECIFIC failing test (`uv run python -m pytest <path>::<test>
+  -x -q > /tmp/cpv-test.log 2>&1`, read only the summary) + a lean-captured `validate
+  --strict`. Only when the local repro is GREEN do you spend another full
+  `publish.py --patch` + `gh run watch` cycle. Re-publishing on every speculative edit
+  multiplies the burn for nothing.
+- **(B) Bound the expensive cycles with `--stall-window` on the CI state file.** The
+  CI loop's second `cpv_fix_loop_state.py` state file opts into the non-progress guard:
+  `record --state <ci-loopstate.json> --findings <ci-jobs.json> --stall-window 5`. A
+  `CYCLE` (exact-repeat failing set) OR a `STALLED` (no new-best failing-job count for
+  5 consecutive real release+CI cycles, exit 3) → return `[PARTIAL]` with the `gh run
+  view` URL. STALLED catches the **churning** failing set the exact-repeat guard
+  misses (each cycle a slightly different failing test → never an exact repeat → would
+  otherwise loop forever). This is a PROGRESS gate on the *costly* publish cycles, NOT
+  an iteration cap on the cheap inner validate→fix loop — that loop keeps NO
+  `--stall-window` (a count can plateau there while the set productively churns).

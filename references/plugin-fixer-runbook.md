@@ -47,10 +47,18 @@ Run these, in order, with `cwd` = plugin root:
 2. **Smoke-test publish (zero side-effects):** `uv run python scripts/publish.py --print-gates`
    then `--dry-run` (both exit 0 if argparse + imports + full pipeline parse).
    Catches "publish.py exists but is broken" failures the validator cannot see.
-3. **Real publish + CI watch (the actual exit gate):** `uv run python scripts/publish.py --patch`
-   (bumps + commits + pushes the tag), capture the tag, then
-   `gh run watch <run_id> --exit-status`. On non-zero, print `[PARTIAL]` with
-   the failing job's log URL and exit.
+3. **Real publish + CI watch (the actual exit gate) — LEAN-CAPTURED.** `uv run python
+   scripts/publish.py --patch > /tmp/cpv-publish.log 2>&1` (bumps + commits + pushes
+   the tag), capture the tag, then `gh run watch <run_id> --exit-status`. **NEVER
+   ingest raw publish.py / pytest / CI output into context** — redirect to a file and
+   read back ONLY the failure summary (`grep -nE "FAILED|^E |Gate.*(FAIL|BLOCK)|ERROR"
+   /tmp/cpv-publish.log | head -40`; `gh run view <id> --log-failed`). On non-zero,
+   FIRST reproduce + fix the failing job LOCALLY (the one failing test + a lean
+   `validate --strict`) and confirm green BEFORE re-publishing; track the failing-job
+   set with a SECOND `cpv_fix_loop_state.py` state file **`--stall-window 5`** (a
+   `CYCLE` or a `STALLED` verdict → print `[PARTIAL]` with the `gh run view` URL and
+   exit). Full discipline: `iterative-fix-loop.md` §"Token discipline" — this is the
+   16-25M-token burn fix (TRDD-DZS5K34A).
 4. **Conditional marketplace gate:** if `.claude-plugin/marketplace.json` is at
    the plugin root (Layout C), the same publish.py already bumped both
    manifests → one tag covers both. Otherwise (Layout A) locate the upstream
