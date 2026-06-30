@@ -52,7 +52,7 @@ CLI
 ---
     cpv_fix_loop_state.py reset   --state <state.json>
     cpv_fix_loop_state.py record  --state <state.json> --findings <report.json>
-                                  [--include-warnings] [--label "<note>"]
+                                  [--include-warnings] [--label "<note>"] [--stall-window K]
     cpv_fix_loop_state.py summary --state <state.json>
 
 ``record`` prints one verdict line and sets the exit code:
@@ -60,6 +60,12 @@ CLI
 * ``CONVERGED iterations=<N>``                          exit 0  → go to final verify
 * ``PROGRESS  iterations=<N> findings=<C>``             exit 0  → fix a batch, loop
 * ``CYCLE     iterations=<N> repeat_of=<M> findings=<C>`` exit 2 → STOP, return [BLOCKED]
+* ``STALLED   iterations=<N> stall_streak=<S> best=<B> findings=<C>`` exit 3 → STOP, [PARTIAL]
+
+``--stall-window K`` (default 0 = disabled) is the OPT-IN non-progress guard for the
+EXPENSIVE CI-publish loop ONLY: K consecutive iterations with no new-best finding
+count → STALLED. It is NOT used on the cheap inner validate→fix loop (a count-stall
+would falsely stop a productively-churning inner loop — see ``record``).
 
 ``--findings`` accepts a CPV ``--json`` report (a dict with a ``findings`` list)
 **or** a bare JSON list of finding objects. Per finding it reads the severity
@@ -96,6 +102,7 @@ _MESSAGE_KEYS = ("message", "msg", "text", "title", "description")
 _US = "\x1f"
 
 _CYCLE_EXIT = 2
+_STALLED_EXIT = 3
 _ERROR_EXIT = 1
 
 
@@ -207,12 +214,26 @@ def record(
     findings: list[dict[str, str]],
     *,
     label: str = "",
+    stall_window: int = 0,
 ) -> tuple[str, int]:
     """Append one iteration to the state file and return ``(verdict_line, exit_code)``.
 
     Verdict precedence: CONVERGED (empty set) > CYCLE (signature already seen in a
-    PRIOR iteration) > PROGRESS (a new signature). Convergence is checked before
-    the cycle guard so the terminal clean state is never mislabeled a cycle.
+    PRIOR iteration) > STALLED (opt-in: no new best for ``stall_window`` iterations)
+    > PROGRESS (a new signature). Convergence is checked before the cycle guard so
+    the terminal clean state is never mislabeled a cycle; CYCLE outranks STALLED
+    because an exact-repeat is the stronger, more specific signal.
+
+    ``stall_window`` is OPT-IN (default 0 = disabled) and is meant ONLY for the
+    EXPENSIVE CI-publish loop, where each iteration is a real release + CI run: a
+    finding/job count that never reaches a new best (strict new minimum) for K such
+    cycles means the fixes are not converging CI → STALLED, return ``[PARTIAL]`` for
+    a human. It is deliberately NOT used on the cheap inner validate→fix loop, where
+    the count can legitimately plateau while the SET productively churns (fix a
+    CRITICAL → expose a MINOR); a count-stall would falsely stop that progressing
+    loop, so the inner loop stays signature-based (CONVERGED/CYCLE only, no
+    ``stall_window``). The streak resets on ANY strict improvement, so a loop that
+    keeps reducing the count never stalls.
     """
     state = _load_state(state_path)
     iterations: list[dict[str, Any]] = state["iterations"]
@@ -234,6 +255,39 @@ def record(
         )
         _atomic_write_json(state_path, state)
         return (f"CYCLE iterations={n} repeat_of={m} findings={count}", _CYCLE_EXIT)
+
+    # Stall (opt-in) = the count has not reached a NEW best (strict new minimum) for
+    # `stall_window` consecutive iterations, INCLUDING this one. `stall_streak` is the
+    # number of trailing iterations since the last strict improvement; it resets to 0
+    # the moment a new lowest count appears, so a genuinely-progressing loop never
+    # stalls. The first iteration counts as the baseline improvement (inf → its count).
+    if stall_window > 0:
+        counts = [int(it.get("findings", 0)) for it in iterations] + [count]
+        running_min: float = float("inf")
+        last_improve_idx = -1
+        for i, c in enumerate(counts):
+            if c < running_min:
+                running_min = c
+                last_improve_idx = i
+        stall_streak = (len(counts) - 1) - last_improve_idx
+        best = int(running_min)
+        if stall_streak >= stall_window:
+            iterations.append(
+                {
+                    "n": n,
+                    "signature": sig,
+                    "findings": count,
+                    "label": label,
+                    "verdict": "STALLED",
+                    "stall_streak": stall_streak,
+                    "best": best,
+                }
+            )
+            _atomic_write_json(state_path, state)
+            return (
+                f"STALLED iterations={n} stall_streak={stall_streak} best={best} findings={count}",
+                _STALLED_EXIT,
+            )
 
     iterations.append({"n": n, "signature": sig, "findings": count, "label": label, "verdict": "PROGRESS"})
     _atomic_write_json(state_path, state)
@@ -257,7 +311,7 @@ def _cmd_record(args: argparse.Namespace) -> int:
         print(f"ERROR could not read findings JSON {findings_path}: {exc}", file=sys.stderr)
         return _ERROR_EXIT
     findings = select_findings(payload, include_warnings=args.include_warnings)
-    verdict, code = record(Path(args.state), findings, label=args.label or "")
+    verdict, code = record(Path(args.state), findings, label=args.label or "", stall_window=args.stall_window)
     print(verdict)
     return code
 
@@ -271,7 +325,12 @@ def _cmd_summary(args: argparse.Namespace) -> int:
     print(f"{'iter':>4}  {'verdict':<9}  {'findings':>8}  {'sig':<12}  label")
     for it in iterations:
         sig = str(it.get("signature", ""))[:12]
-        extra = f" (repeat_of={it['repeat_of']})" if it.get("repeat_of") else ""
+        if it.get("repeat_of"):
+            extra = f" (repeat_of={it['repeat_of']})"
+        elif it.get("verdict") == "STALLED":
+            extra = f" (stalled best={it.get('best', '?')})"
+        else:
+            extra = ""
         print(
             f"{it.get('n', '?'):>4}  {str(it.get('verdict', '')):<9}  "
             f"{it.get('findings', '?'):>8}  {sig:<12}  {it.get('label', '')}{extra}"
@@ -299,6 +358,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Count WARNING findings toward the loop set (default: blocking severities only).",
     )
     rec.add_argument("--label", default="", help="Optional human note recorded with this iteration.")
+    rec.add_argument(
+        "--stall-window",
+        type=int,
+        default=0,
+        help="Opt-in CI-publish-loop guard: STALLED after this many consecutive "
+        "iterations with no new-best finding count (0 = disabled; NEVER used on the "
+        "inner fix loop, where the count can plateau while the set productively churns).",
+    )
     rec.set_defaults(func=_cmd_record)
 
     s = sub.add_parser("summary", help="Print the recorded iteration history.")
