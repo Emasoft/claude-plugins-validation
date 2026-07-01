@@ -80,18 +80,25 @@ MAIN_ROOT="$(git worktree list 2>/dev/null | head -n1 | awk '{print $1}')"
 [ -z "$MAIN_ROOT" ] && MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"   # fallback only for non-git
 TS="$(date +%Y%m%d_%H%M%S%z)"
 SLUG="$(basename "<plugin_or_project_path>")"
-REPORT="$MAIN_ROOT/reports/validate_cache/${TS}-${SLUG}.md"
-mkdir -p "$(dirname "$REPORT")"
+REPORT_DIR="$MAIN_ROOT/reports/validate_cache"
+mkdir -p "$REPORT_DIR"
+FINDINGS_JSON="$REPORT_DIR/${TS}-${SLUG}.json"
+LEDGER_JSON="$REPORT_DIR/${TS}-${SLUG}.ledger.json"
+LEDGER_TXT="$REPORT_DIR/${TS}-${SLUG}.ledger.txt"
 # ALWAYS go through the launcher — direct invocation of validate_cache.py
 # from the plugin cache will fail with "remote location" environment-isolation error.
 CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
   python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
-  cache "<plugin_or_project_path>" --report "$REPORT"
+  cache "<plugin_or_project_path>" --json "$FINDINGS_JSON"
+# Build the compact ledger — groups findings by file, splits into mech/intel buckets,
+# pre-tags each WARNING BLOCKING/advisory. Read ledger.txt, never the full JSON.
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_fix_ledger.py" build \
+  --json "$FINDINGS_JSON" --out "$LEDGER_JSON" --text "$LEDGER_TXT"
 ```
 
 `${CLAUDE_PROJECT_DIR}` and `${CLAUDE_PLUGIN_ROOT}` are real env vars Claude Code exports across every Bash subprocess. `MAIN_ROOT` is a per-Bash-call shell variable; if a later Phase needs the main-repo root, RE-COMPUTE it at the top of that Bash call rather than relying on it persisting.
 
-The script prints only the compact summary + path. Read the report file with `Read` to get the per-rule details.
+Read `<ledger.txt>` — NEVER the full JSON findings. The ledger groups findings by file, pre-tags each WARNING `BLOCKING`/`advisory`, and splits into `mech` (auto-fixable, zero LLM) and `intel` (needs model) buckets. **`from_report` mode:** run `--json` validation first to produce the findings JSON + ledger, then enter Phase 2 directly (skip the stale `.md` report).
 
 ### Phase 2 — Fix
 
@@ -101,20 +108,40 @@ The script prints only the compact summary + path. Read the report file with `Re
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_fix_loop_state.py" reset --state <loopstate.json>
 ```
 
-Group findings by CA-NN rule. For each group, consult `skills/fix-validation/references/cache-fixes.md#ca-nn` for the fix recipe, then apply edits via `Edit`.
+**MECH first — zero-LLM set.** Run the deterministic codemod on every `mech`-bucket finding (`fixable:true` in the ledger) before touching any file:
 
-Priority order (every CA finding is a WARNING since v2.102.0 — order is by cache impact, not severity): CA-01 → CA-02 → CA-03 (prefix-invalidating, highest impact) → CA-04 → CA-05 (cost/latency) → CA-06 (compaction-aware) → CA-07 (`context: fork`/`branch` re-primes from cold — advisory; only fix when the fork is not earning its cost).
+```bash
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_codemod.py" apply \
+  --json <findings.json> --apply
+```
 
-Re-read each file BEFORE editing it (auto-compaction may have stale state in your context). After each batch, re-run the validator and verify the fixed findings are gone.
+This clears every deterministically-fixable CA finding at zero model cost (idempotent, per-file backup, skips vendored). After the MECH pass, re-validate (Phase 3) to get the delta JSON + delta ledger, then proceed to the `intel` residual only.
+
+**INTEL — fix-as-you-go, one file at a time, read ONCE.** For each file in the ledger's `intel` bucket (`BLOCKING` WARNINGs first — those pre-tagged `BLOCKING` in the ledger):
+
+- Read ONLY the finding line ranges (`Read` with `offset`+`limit` around the ledger line — NEVER the whole file).
+- Apply ALL of that file's CA fixes in the SAME turn (`Edit`).
+- Never re-read a file you already fixed this pass.
+- The fix recipe is the ledger's inline `suggestion`; open `skills/fix-validation/references/cache-fixes.md#ca-nn` ONCE per rule-TYPE you do not recognise, not once per finding.
+
+Priority order within the `intel` bucket (by cache impact, not severity — every CA finding is a WARNING since v2.102.0): CA-01 → CA-02 → CA-03 (prefix-invalidating, highest impact) → CA-04 → CA-05 (cost/latency) → CA-06 (compaction-aware) → CA-07 (`context: fork`/`branch` re-primes from cold — advisory; only fix when the fork is not earning its cost).
 
 ### Phase 3 — Re-validate
 
-Re-run the validator (via the same launcher invocation as Phase 1, ADDING `--json <findings.json>` so the finding set is machine-readable) against the same target, then record the iteration into the loop-state file:
+Re-run the validator against the same target, rebuild the compact delta ledger, then record the iteration:
 
 ```bash
+# One Bash call — substitute actual <findings.json>/<ledger.*> paths from Phase 1.
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \
+  cache "<plugin_or_project_path>" --json <findings.json>
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_fix_ledger.py" build \
+  --json <findings.json> --out <ledger.json> --text <ledger.txt>
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_fix_loop_state.py" \
-  record --state <loopstate.json> --findings <findings.json>   # → CONVERGED | PROGRESS | CYCLE
+  record --state <loopstate.json> --findings <findings.json>  # → CONVERGED | PROGRESS | CYCLE
 ```
+
+Read the DELTA `<ledger.txt>` — NEVER the raw JSON. Feed the delta ledger's `intel` bucket back to Phase 2's MECH+INTEL pass.
 
 Every CA finding is a WARNING, so the verdict is VALID from the start — termination is by EMPTY FINDINGS SET, not by verdict: iterate (back to Phase 2) until the cache scan reports zero CA-01..CA-07 findings (`CONVERGED`, or the only ones left are intentional `model:` pins / justified `context: fork`/`branch` declarations the user explicitly chose to keep). Replace any single-step "if a rule keeps re-firing" guess with the deterministic verdict: `cpv_fix_loop_state.py record` compares the finding multiset against EVERY prior iteration (not just N-1, so a 2-cycle CA-01↔CA-NN re-fire is caught — the single-step heuristic #132 proved insufficient), and the on-disk state survives a context-exhaustion crash. A `CYCLE` verdict (this finding set equals ANY prior iteration) means STOP repeating the futile fix and report the residual CA finding(s) with a written explanation (`PARTIAL`), rather than guessing further fixes. Never re-apply a fix the multiset proved futile.
 
@@ -220,7 +247,7 @@ Max 2 lines back. Never paste code, scan output, or long lists.
 
 ## Constraints
 
-- ALWAYS use the path-only stdout default — let the validator auto-save the report; read it with `Read` rather than re-running with `--verbose` and capturing 50KB of stdout.
+- ALWAYS redirect validator output to `<findings.json>` via `--json <findings.json>` and build the compact ledger immediately after; read `<ledger.txt>` with `Read` — NEVER ingest the raw `<findings.json>` or re-run with `--verbose`.
 - ALWAYS commit each batch of fixes separately with a `fix(cache-CA-NN): ...` message — keeps the audit trail clean.
 - NEVER edit files outside the target plugin/project tree.
 - NEVER skip the re-validate step. The fix is only proven by the re-run, not by the edit landing.
