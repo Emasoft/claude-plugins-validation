@@ -67,11 +67,16 @@ NEVER implement fan-out (or any token-saving reuse) via a skill `context: fork`.
 **Standing constraints:** never relax `--strict`, never suppress a security rule; each new codemod
 transform FN-safe with two-sided tests; regen self-hashes LAST; number every table row.
 
-**NEXT ACTION:** P7 4/4 — verify the cache-optimizer retrofit diff when its worker lands + commit it;
-then COMPACT (clean checkpoint; context heavy). Then P8: choice-tree router in fix-validation, TRIM
-`plugin-fixer.md` body (3691w → pointer; §7d CI detail duplicates iterative-fix-loop.md), update
-docs/README/CLAUDE.md counts (scripts 122→123, test files 378→~380 — verify), regen hashes LAST, ONE
-batched `publish.py --minor` + watch CI green (lean-captured).
+**NEXT ACTION:** P8 (P7 COMPLETE — all 4 retrofits committed + central-verified: `53228d4` +
+`b896db3`). P8 steps, in order: (1) choice-tree router in `skills/fix-validation` encoding
+validate→ledger→MECH(zero-LLM)→INTEL-fix-as-you-go(read-once)→delta→terminate(CONVERGED/CYCLE/STALLED);
+(2) TRIM `plugin-fixer.md` body 3691w→pointer — the §7d CI-green detail DUPLICATES
+`iterative-fix-loop.md`; replace with a load-the-skill pointer BUT keep the loop-control the agent
+OWNS (do NOT break the P3 loop I wrote); (3) docs/README/CLAUDE.md counts (scripts 122→123, test files
+378→~380 — verify with `ls scripts/*.py | wc -l` / `ls tests/test_*.py | wc -l`); (4) regen hashes
+LAST; (5) ONE batched `publish.py --minor` + watch CI green (lean-captured). Do NOT publish before
+(1)-(4). Token-win already gated by `ae338f0` (ledger 78% smaller). SURFACE the fork finding to the
+user at the end (forks save tokens only from a lean dispatcher — the batch fans out from bloated main).
 
 **Fork finding (fact-based, surfaced to user):** forks save tokens ONLY from a LEAN dispatcher
 (reusing its warm skill+ledger). The batch fans out from the BLOATED main session, where fresh lean
@@ -107,7 +112,12 @@ token wins are P1-P3; forks are documented for the narrow lean-dispatcher case. 
   read-once. CENTRAL-VERIFIED (read the diffs): ALL security invariants preserved (FLAG-not-suppress,
   never-mute/relax-`--strict`, provably-inert-or-FLAG, rotate+purge, clean-room success gate,
   oscillation guard, CI-green loop). Contract tests green (leaks 42, devitalizer 111, marketplace 5).
-  +1 benign advisory body-size WARNING (leaks 2176w, non-blocking). cache-optimizer (4th) PENDING.
+  +1 benign advisory body-size WARNING (leaks 2176w, non-blocking).
+- P7 4/4 DONE (`b896db3`) — cache-optimizer retrofit: Phase-1 ledger + Phase-2 MECH-first zero-LLM
+  codemod + INTEL fix-as-you-go read-once + Phase-3 delta-ledger loop-state. CENTRAL-VERIFIED:
+  CA-01..07 recipes / priority order / CA-07 advisory / loop-state / Phase-4 user-approval all
+  preserved; 102 tests green. **P7 COMPLETE.** Body-size advisory WARNINGs now 7 (all non-blocking;
+  P8 trims plugin-fixer 3691w — the only clear duplication; the others' prose is necessary).
 
 ## Plan steps (each = local commit; ONE batched publish at end)
 

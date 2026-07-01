@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-07-01T12:37:37+00:00",
+  "computed_at": "2026-07-01T12:39:49+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:a2de55c2b32047c887a0754f7083a875a5ddf1c5669610bd925eaab3938d53ba",
@@ -117,7 +117,7 @@
     "design/tasks/TRDD-20260624_172622+0200-35BN0TEI-publish-gate-blocks-stale-cpv-ref.md": "sha256:48895250b13e7d4fdb442a88bbacebad40b8ae5d157a41cd73dcf6a99b280c9c",
     "design/tasks/TRDD-20260625_193944+0200-ABFRMED0-changelog-spec-audit-2.1.170-191.md": "sha256:72226fe4be2f7c9b503acd82e7d68314f2735c412edb48ea65d7e51d929d7273",
     "design/tasks/TRDD-20260630_112353+0200-DZS5K34A-plugin-fixer-token-burn.md": "sha256:6c3495ef5aa8a30510a26102f9fee924624fc8bdf0cab1e9dfced0a2e72e43a0",
-    "design/tasks/TRDD-20260701_130039+0200-GVMOKJBB-fix-pipeline-token-economy.md": "sha256:d4b3b0eea8f6d5930991663c42a350437d8d2f55868835d94334c45decea156e",
+    "design/tasks/TRDD-20260701_130039+0200-GVMOKJBB-fix-pipeline-token-economy.md": "sha256:63726319ec5f77dbbb7249b809cadb611c248b65ddab3968a3a6023f355cde25",
     "design/tasks/TRDD-26446eed-ea5e-43e7-886c-8512866d92be-semantic-channel-source.md": "sha256:b20480b2cf4e0a97cc06e53a32a39a4d09a4740b94c92804298a8286d88d991c",
     "design/tasks/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md": "sha256:e2f55a383481238d738aaea92cfdbcb0ce34e6f1bdeab22a3b641cfca583431d",
     "design/tasks/TRDD-2be75e88-3c23-4c91-9e4e-5ce315b497dc-scope-validators.md": "sha256:6aba8e45a304a4b8b33177decdc271a7e1677098d7b5e09903f132f73cabff68",
