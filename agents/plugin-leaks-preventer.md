@@ -37,33 +37,45 @@ Load skills on demand with the Skill tool (any agent may invoke any skill; the `
 
 Confirm the target IS a plugin per the `plugin-validation-skill` shape-detection reference (detection table, hard-refusal protocol). If `.claude-plugin/plugin.json` is missing, do NOT scaffold a manifest, add a marketplace, or publish — return `[BLOCKED — Phase 0 plugin-shape detection]` and ask the user whether to wrap the content into a new plugin or add it to an existing one.
 
-## Phase 1 — scan
+## Phase 1 — scan → COMPACT ledger (read the ledger, NEVER the full report)
 
-Run the security scan via the LAUNCHER `remote_validation.py security <plugin-root> --strict --json --report <tmp>` — NEVER call `validate_security.py` directly (the isolation guard refuses with a "remote location" error). Read the report; collect every finding.
+**One-time setup (before the FIRST pass only):** reset the oscillation guard — `uv run scripts/cpv_fix_loop_state.py reset --state <loopstate.json>`.
+
+**The repeatable scan (steps 1-3 — Phase 3's delta re-scan re-runs THESE, not the reset):** run the security scan via the LAUNCHER — NEVER call `validate_security.py` directly (the isolation guard refuses with a "remote location" error). Emit the findings as JSON and DISTILL them to a compact surface; do NOT ingest the full `.md` report each iteration (re-reading the whole report every pass is a top token sink — cost approximates turns times per-turn-context, since each raw report rides forward and is re-charged on every later turn):
+
+1. `remote_validation.py security <plugin-root> --strict --json > <findings.json>` — `--json` is a BOOLEAN flag, so JSON goes to STDOUT (the isolation guard still applies; do not add `--report`).
+2. Build the compact ledger `uv run scripts/cpv_fix_ledger.py build --json <findings.json> --out <ledger.json> --text <ledger.txt>` and read `<ledger.txt>` — it groups findings BY FILE (`L<line> <LEVEL> [<category>]` plus the inline `suggestion`) so you never re-read the full report. **If a security JSON shape does not fit the ledger builder, read `<findings.json>` compactly instead** (group by file; keep only `file:line` / `level` / `rule_id` / `message`). Either way, NEVER the `.md` report.
+3. Record the verdict `uv run scripts/cpv_fix_loop_state.py record --state <loopstate.json> --findings <findings.json>`.
+
+**MECH auto-fix does NOT apply in this agent.** Leak and missing-safeguard findings are never `fixable:true`, so the ledger's `mech` bucket is empty and every finding lands in `intel` (needs security judgement) — there is NO zero-LLM `cpv_codemod.py` step here. The ledger is used ONLY to read the finding surface compactly and to drive the read-once, file-centric fix pass (Phase 3).
 
 ## Phase 2 — collect Bucket-B / Bucket-C findings
 
-Filter to the LEAK + MISSING-SAFEGUARD classes the gate blocks on (CRITICAL / MAJOR / MINOR + blocking NITs — `--strict` blocks on NITs too):
+From the compact ledger's `intel` bucket (NOT the full report), filter to the LEAK + MISSING-SAFEGUARD classes the gate blocks on (CRITICAL / MAJOR / MINOR + blocking NITs — `--strict` blocks on NITs too):
 
 - **Bucket B — secret / credential LEAK**: hardcoded secrets, every provider secret/token/webhook/key literal, Claude/Anthropic credential env-name literals, credential references, leaked private path / username, and any external "verified secret" finding.
 - **Bucket C — missing-safeguard / exposed vulnerability**: insecure TLS, SSRF / DNS-rebind, path traversal, unsafe deserialization / XML external entities, SQL / XSS injection, insecure crypto, regex-DoS, sandbox / permission-bypass (`dangerouslyDisableSandbox`, `permissionMode` bypass), unsafe config parse, and prompt-injection on a plugin that reads untrusted content.
 
-For each, capture `file:line` + `rule_id` + the matched span + its bucket (B / C / both). **Execution-class (Bucket A) findings are NOT this agent's job** — note them in the report and recommend the `plugin-devitalizer` agent (the two agents are complementary; a plugin can need both).
+The ledger already carries each finding's `file` / `line` / `level` / `category`, so tag each by bucket (B / C / both) straight from that compact surface — do NOT re-open the `.md` report to collect them. **Execution-class (Bucket A) findings are NOT this agent's job** — note them in the report and recommend the `plugin-devitalizer` agent (the two agents are complementary; a plugin can need both).
 
-## Phase 3 — per-finding redact-or-harden (the loop)
+## Phase 3 — per-FILE redact-or-harden (the loop: read-once, fix-as-you-go)
 
-For each finding, in priority order (CRITICAL, MAJOR, MINOR, NIT):
+Work the ledger's `intel` findings **FILE-CENTRIC, one file at a time** (blocking findings first: CRITICAL, MAJOR, MINOR, then blocking NIT). A file with five findings is read ONCE and fixed in ONE turn — never finding-by-finding, never re-read.
 
-  1. **CLASSIFY** via the `harden-and-redact` decision gate: secret-not-needed / secret-needed-at-runtime / secret-already-committed-live / missing-safeguard-safely-fixable / ambiguous-or-intended.
-  2. **If redactable / hardenable** → apply the MINIMAL edit in the SAME turn (read-and-fix together; locate the exact span with SERENA / grepika and replace only that span): redact the secret to a placeholder, OR insert the runtime-read, OR add the safe parser / sanitizer / containment guard. Preserve behavior.
-  3. **If ambiguous / intended / verified-live-secret** → DO NOT edit. Record a FLAGGED entry with the exact remediation choice for the user (harden it / accept the finding / it is intended / **rotate + purge git history** for a verified live secret — redacting the working-tree file alone is insufficient).
-  4. **RE-SCAN** (Phase 1, `--strict`) and confirm THIS finding is gone AND no new finding appeared. If a new finding appeared, or it merely demoted to a blocking NIT, iterate on this finding before moving on.
+For each file in the intel bucket:
+
+  1. **Read ONLY the finding line ranges** — `tldr slice <file> <fn> <line>` or `Read` with `offset`+`limit` around each ledger line (a small margin). NEVER read the whole file (a whole-file read rides forward every later turn — cost approximates turns times per-turn-context). Locate the exact span with SERENA / grepika when the ledger line is coarse.
+  2. **CLASSIFY each of that file's findings** via the `harden-and-redact` decision gate: secret-not-needed / secret-needed-at-runtime / secret-already-committed-live / missing-safeguard-safely-fixable / ambiguous-or-intended.
+  3. **Apply ALL of that file's edits in the SAME turn** — minimal span only, preserving behavior — then move on and **never re-read a file you already fixed**:
+     - **redactable / hardenable** → redact the secret to a placeholder, OR insert the runtime-read, OR add the safe parser / sanitizer / containment guard. The exact Bucket-B B1-B6 / Bucket-C C1-C5 recipe lives in `harden-and-redact` — open it ONCE per recipe TYPE you do not recognise, not once per finding.
+     - **ambiguous / intended / verified-live-secret** → DO NOT edit. Record a FLAGGED entry with the exact remediation choice for the user (harden it / accept the finding / it is intended / **rotate + purge git history** for a verified live secret — redacting the working-tree file alone is insufficient).
+  4. **DELTA re-scan** when this pass's intel files are done — re-run Phase 1's scan steps (`--strict`; NOT the one-time reset) to get a NEW, smaller ledger, and record the verdict. Read the DELTA ledger, never a fresh full report. Confirm the fixed findings are gone AND no new finding appeared; a new finding — or a mere demotion to a blocking NIT — is the NEXT pass's intel, so iterate.
 
 When in doubt, treat the value as a real secret / the input as untrusted — FLAG, do not guess. A false "this was just an example key" that ships a live credential, or a "fix" that silently changes behavior, is far worse than a flagged finding the user resolves manually.
 
 ## Phase 4 — final verification (MANDATORY, NON-SKIPPABLE)
 
-Run the security scan ONE MORE TIME as a clean-room re-check, independent of the loop's exit state. Its output is what you return. SUCCESS only when the scan shows zero CRITICAL / MAJOR / MINOR / NIT from Bucket-B and Bucket-C rules — OR every remaining one is an explicitly-FLAGGED item the user must decide (e.g. a verified live secret awaiting rotate + purge). ANY un-flagged blocking leak / safeguard finding → back to Phase 3.
+Run the security scan ONE MORE TIME as a clean-room re-check, independent of the loop's exit state — via the same `--strict --json` → compact ledger/summary surface (never the full `.md` report). Its output is what you return. SUCCESS only when the scan shows zero CRITICAL / MAJOR / MINOR / NIT from Bucket-B and Bucket-C rules — OR every remaining one is an explicitly-FLAGGED item the user must decide (e.g. a verified live secret awaiting rotate + purge). ANY un-flagged blocking leak / safeguard finding → back to Phase 3.
 
 **Oscillation is the ONLY loop-termination escape.** If iteration N produces the same finding set as N-1, stop and return `[BLOCKED]` with the iteration count, remaining findings, and suspected cause. There is NO hardcoded iteration or time cap — a heavily-flagged plugin legitimately needs many passes.
 
@@ -80,7 +92,7 @@ Write the per-finding before/after + outcome (redacted → runtime-read / harden
 - **NEVER devitalize execution-class threats here.** Detection signatures, attack-test patterns, command / shell execution, reverse shells, eval-exec of a payload, obfuscated or runtime-decoded code, and curl-pipe-to-shell installs are Bucket-A — note them and recommend `plugin-devitalizer`; do not attempt to neutralize them in this agent.
 - **Minimal edits only.** Touch only the flagged span and the minimum context the fix needs (replace the literal with the runtime-read; swap the unsafe loader for the safe one; add the containment guard). No opportunistic refactors. One source of truth.
 - **Prove clean after EVERY edit.** A fix that clears the target finding but introduces a different one (or downgrades it to a blocking NIT) is NOT done — iterate. The loop's exit is "the scanner is clean", not "I made an edit".
-- **Token budget.** Locate spans with SERENA / grepika / tldr; offload bounded analysis to the LLM Externalizer (`mcp__plugin_llm-externalizer_llm-externalizer__*`); never read files speculatively (only those the CURRENT report points at).
+- **Token budget.** Read the COMPACT ledger, never the full `.md` report; read only the line ranges the CURRENT ledger points at (`tldr slice` / `Read` offset+limit), never whole files, never speculatively. Locate spans with SERENA / grepika / tldr; offload bounded analysis to the LLM Externalizer (`mcp__plugin_llm-externalizer_llm-externalizer__*`).
 
 ## Model note
 
