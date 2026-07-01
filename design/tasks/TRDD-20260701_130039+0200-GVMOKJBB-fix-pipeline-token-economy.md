@@ -67,9 +67,15 @@ NEVER implement fan-out (or any token-saving reuse) via a skill `context: fork`.
 **Standing constraints:** never relax `--strict`, never suppress a security rule; each new codemod
 transform FN-safe with two-sided tests; regen self-hashes LAST; number every table row.
 
-**NEXT ACTION:** Phase 5 — fork fan-out from a LEAN dispatcher (Agent-tool `subagent_type:"fork"`
-from a lean plugin-fixer, disjoint file slices; NEVER a skill `context: fork`). Then P7 retrofit,
-P8 router/docs/publish.
+**NEXT ACTION:** Phase 7 — retrofit devitalizer/leaks/cache/marketplace loops to the ledger +
+fix-as-you-go pattern (parallel workers). Then P8 router/docs/body-trim/publish.
+
+**Fork finding (fact-based, surfaced to user):** forks save tokens ONLY from a LEAN dispatcher
+(reusing its warm skill+ledger). The batch fans out from the BLOATED main session, where fresh lean
+workers + on-disk slices are correct — forking bloated-main is NOT a win, and forking merely for
+parallelism when one context fits costs N× tokens (WALL-CLOCK tradeoff, not a token saving). So the
+token wins are P1-P3; forks are documented for the narrow lean-dispatcher case. NEVER a skill
+`context: fork` (isolated, cold-write).
 
 **Progress:**
 - P1 DONE (`42e8c7c`) — `cpv_fix_ledger.py` + 35 tests. Ledger `{summary, mech:{file:[{line,level,

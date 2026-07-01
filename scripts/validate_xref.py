@@ -133,6 +133,11 @@ BUILTIN_AGENTS: frozenset[str] = frozenset(
         "explore",  # fast read-only search agent
         "plan",  # software architect planning agent
         "statusline-setup",  # built-in agent for status line config
+        # Agent-tool forked subagent (gated by CLAUDE_CODE_FORK_SUBAGENT): the
+        # `fork` subagent_type inherits the parent conversation instead of a
+        # named agent — it has NO agents/fork.md BY DESIGN, so a dispatch to it
+        # is NOT a ghost dispatch. (sub-agents.md "Fork the current conversation".)
+        "fork",
     }
 )
 

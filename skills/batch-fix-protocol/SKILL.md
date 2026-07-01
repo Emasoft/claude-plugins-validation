@@ -23,6 +23,28 @@ for the design rationale.
 
 > 1. Top-level index (`index.json`) · 2. Per-shard manifest (`shard-K.json`) · 3. Per-shard status (`shard-K.status.json`) · Schema version bumps
 
+## Fork vs fresh worker — the token-honest dispatch choice (TRDD-GVMOKJBB)
+
+Fan-out is a LAST resort, not a default (cost ≈ turns × per-turn-context):
+
+1. **One plugin that fits one context → NO fan-out.** Sequential fix-as-you-go in ONE lean
+   fixer (read each file once, fix in the same turn) is cheapest — a single warm context reused.
+   Forking merely for parallelism here costs N× the context (a wall-clock tradeoff, NOT a token
+   saving).
+2. **A plugin that EXCEEDS one context → fan out**, and pick the worker by the dispatcher:
+   - **`subagent_type:"fork"` (Agent tool) — ONLY from a LEAN dispatcher** that already loaded the
+     exact context the worker needs (the fix skill + the ledger). A fork inherits the dispatcher's
+     WHOLE conversation at cache-read rate, so it pays off only when that conversation is small and
+     relevant. NEVER fork the bloated main session (it carries all of main's skills/MCP/CLAUDE.md
+     forward).
+   - **Fresh lean worker + on-disk slice — the correct choice from a bloated/cold context.** The
+     `/cpv-batch-fix` path spawns N `plugin-fixer`s from the MAIN session, so this is the batch
+     default: hand each worker its shard manifest / ledger slice ON DISK (a file path, not context
+     inheritance) with a curated tool surface (no MCP).
+3. **NEVER a skill `context: fork`.** That runs a skill in an ISOLATED fresh subagent with no
+   conversation history (docs: skills#run-skills-in-a-subagent) → it COLD-writes cache = wastes
+   tokens. It is the OPPOSITE of the Agent-tool fork despite the shared word.
+
 ## Prerequisites
 
 - A plugin with validation findings (typically from `validate_plugin.py --json`)
