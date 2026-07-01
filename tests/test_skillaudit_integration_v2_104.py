@@ -345,51 +345,80 @@ def _findings_key(f: dict[str, Any]) -> tuple:
     )
 
 
-class TestParity:
-    def test_parity_old_vs_new_engine_on_cpv_scripts(self, monkeypatch) -> None:
-        """Scanning a real subset of CPV's scripts/ tree with all v2.104.0
-        features OFF should match scanning with the defaults ON.
+def _parity_target_files() -> list[Path]:
+    """The scripts/ files the OLD-vs-NEW parity check compares.
 
-        We scope to a small subset (3-5 files) to keep runtime short
-        but representative — same file mix as a real plugin would
-        present to the scanner.
+    SAME set the pre-parametrization mega-test iterated over: a fixed
+    trio of representative CPV source files, filtered to those present on
+    disk. Used as BOTH the ``@pytest.mark.parametrize`` argument (one
+    case per file — so pytest-split / xdist distribute the per-file scan
+    and no single ~60s case survives) AND the fixture-count guard, so the
+    file set has exactly one source of truth.
+    """
+    candidates = [
+        SCRIPTS_DIR / "cpv_skillaudit_native.py",
+        SCRIPTS_DIR / "cpv_validation_common.py",
+        SCRIPTS_DIR / "cpv_parallel_runner.py",
+    ]
+    return [f for f in candidates if f.is_file()]
+
+
+# Resolved once at collection time; feeds the parametrize decorator AND
+# the count-guard test below (single source of truth for the file set).
+_PARITY_TARGET_FILES = _parity_target_files()
+
+
+class TestParity:
+    def test_parity_fixture_has_enough_files(self) -> None:
+        """The parity file set must retain its representative breadth.
+
+        Pre-parametrization this was an inline ``assert len(target_files)
+        >= 2`` inside the single mega-test. Once the scan is parametrized
+        per file, a shrunk set would just make pytest collect fewer cases
+        (or silently skip on an empty set) instead of failing — so this
+        standalone guard preserves the total-count guarantee the
+        mega-test carried.
+        """
+        assert len(_PARITY_TARGET_FILES) >= 2, "test fixture is missing source files"
+
+    @pytest.mark.parametrize(
+        "target_file",
+        _PARITY_TARGET_FILES,
+        ids=[str(f.relative_to(REPO)) for f in _PARITY_TARGET_FILES],
+    )
+    def test_parity_old_vs_new_engine_on_cpv_scripts(self, target_file: Path, monkeypatch) -> None:
+        """Scanning ONE real scripts/ file with all v2.104.0 features OFF
+        must match scanning it with the defaults ON.
+
+        Parametrized to one case PER FILE (was a single case looping the
+        whole trio) so pytest-split / xdist distribute the per-file scan
+        and no single ~60s case remains. The OLD-vs-NEW comparison is
+        byte-identical to the pre-parametrization assertion: ``_findings_key``
+        tags every finding with its file, so per-file equality and the old
+        aggregate-sorted equality are the same guarantee — N cases instead
+        of one loop over the same N files.
         """
         import cpv_skillaudit_native as native
 
-        # Pick a small but real subset to scan. Two files from
-        # scripts/ + one from rules/ gives enough variety to exercise
-        # all rule categories without taking 30+ seconds.
-        target_files = [
-            SCRIPTS_DIR / "cpv_skillaudit_native.py",
-            SCRIPTS_DIR / "cpv_validation_common.py",
-            SCRIPTS_DIR / "cpv_parallel_runner.py",
-        ]
-        target_files = [f for f in target_files if f.is_file()]
-        assert len(target_files) >= 2, "test fixture is missing source files"
-
-        def scan_each(files: list[Path]) -> list[tuple]:
-            """Scan each file via scan_content + collect normalised keys."""
-            keys: list[tuple] = []
-            for fp in files:
-                content = fp.read_text(encoding="utf-8", errors="ignore")
-                for f in native.scan_content(content, str(fp)):
-                    keys.append(_findings_key(f))
-            return sorted(keys)
+        def scan_one(fp: Path) -> list[tuple]:
+            """Scan ONE file via scan_content + collect normalised keys."""
+            content = fp.read_text(encoding="utf-8", errors="ignore")
+            return sorted(_findings_key(f) for f in native.scan_content(content, str(fp)))
 
         # OLD engine path — every feature disabled.
         monkeypatch.setenv("CPV_SCAN_CACHE", "0")
         monkeypatch.setenv("CPV_BINARY_SCAN", "0")
         monkeypatch.setenv("CPV_RE2_DISABLE", "1")
-        old_keys = scan_each(target_files)
+        old_keys = scan_one(target_file)
 
         # NEW engine path — defaults (everything on).
         monkeypatch.delenv("CPV_SCAN_CACHE", raising=False)
         monkeypatch.delenv("CPV_BINARY_SCAN", raising=False)
         monkeypatch.delenv("CPV_RE2_DISABLE", raising=False)
-        new_keys = scan_each(target_files)
+        new_keys = scan_one(target_file)
 
         assert old_keys == new_keys, (
-            f"v2.104.0 introduces a parity regression\n"
+            f"v2.104.0 introduces a parity regression on {target_file}\n"
             f"OLD: {old_keys[:5]}...\n"
             f"NEW: {new_keys[:5]}...\n"
             f"diff_old_only: {set(old_keys) - set(new_keys)}\n"
