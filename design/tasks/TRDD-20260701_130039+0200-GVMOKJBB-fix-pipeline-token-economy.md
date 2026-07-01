@@ -67,11 +67,17 @@ NEVER implement fan-out (or any token-saving reuse) via a skill `context: fork`.
 **Standing constraints:** never relax `--strict`, never suppress a security rule; each new codemod
 transform FN-safe with two-sided tests; regen self-hashes LAST; number every table row.
 
-**NEXT ACTION:** Phase 1 — write `scripts/cpv_fix_ledger.py` + `tests/test_cpv_fix_ledger.py`
-(consume validator JSON → compact by-file ledger w/ MECH/INTEL split + blocking tag). Verify
-(ruff+mypy+pytest), commit locally.
+**NEXT ACTION:** Phase 2 — extend `scripts/cpv_codemod.py` with a fix_id→deterministic-transform
+map so the MECH set (fixable:true) auto-applies with ZERO LLM. GROUNDED FACT (P1): the real
+invocation is `remote_validation.py plugin . --strict --json` where `--json` is a BOOLEAN flag
+emitting JSON to STDOUT — wrapper `{exit_code, counts, results, security_gates}` — NOT `--json <path>`.
 
-**Progress:** none yet (plan just approved).
+**Progress:** P1 DONE — `scripts/cpv_fix_ledger.py` + `tests/test_cpv_fix_ledger.py` (ruff+mypy
+clean, 35 two-sided tests). Ledger schema: `{summary:{critical,major,minor,nit,warning,total,mech,
+intel,blocking}, mech:{<file>:[{line,level,category,fix_id,suggestion}]}, intel:{<file>:[{line,
+level,category,blocking,suggestion}]}}`; MECH=fixable:true, INTEL=fixable:false; `blocking` mirrors
+iterative-fix-loop.md FN-safe (unknown WARNING → blocking). Report:
+`reports/fix-ledger/20260701_131808+0200-phase1.md`.
 
 ## Plan steps (each = local commit; ONE batched publish at end)
 
@@ -90,10 +96,10 @@ transform FN-safe with two-sided tests; regen self-hashes LAST; number every tab
   `marketplace-fixer` to ledger + fix-as-you-go + fork; STALLED on expensive outer loops.
   FLAG-not-suppress unchanged.
 - **P8** Choice-tree router in `skills/fix-validation`; cache discipline (no model pins;
-  idempotent ledger/loop-state = no double-work); **verify CPV's own CA-07 detector +
-  cache-fixes docs distinguish skill `context: fork` (cold → flag) from Agent-tool
-  `subagent_type:"fork"` mentions (warm → do NOT flag)** — serves the "optimize the cache" goal
-  and CPV's detection-accuracy mandate; docs/README/CLAUDE.md; regen hashes LAST;
+  idempotent ledger/loop-state = no double-work); **CA-07 fork-distinction VERIFIED 2026-07-01
+  (no change needed):** `validate_cache.py:538-577` matches `context: fork` in FRONTMATTER ONLY →
+  correctly flags skill `context: fork`, cannot mis-flag Agent-tool `subagent_type:"fork"`;
+  `ca-rules.md`/`cache-fixes.md` accurate; docs/README/CLAUDE.md; regen hashes LAST;
   batched `publish.py --minor` + CI green.
 
 ## Verification
