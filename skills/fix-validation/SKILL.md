@@ -20,11 +20,14 @@ Central error-to-fix lookup. Maps validation errors to fix guides in `references
 
 ## Instructions
 
-1. Read report → pick `plugin-error-index.md` or `marketplace-error-index.md`.
-2. Match error → jump to fix guide via TOC.
-3. For `category: architecture`, use `migrate-marketplace-architecture`.
+The token-economical fix flow (validate → ledger → MECH → INTEL read-once → delta → terminate):
 
-Checklist: read report → match → apply → re-validate.
+1. **Validate → compact ledger, not the full report.** `remote_validation.py <mode> <root> --strict --json > <findings.json>`, then `cpv_fix_ledger.py build --json <findings.json> --text <ledger.txt>`; read `<ledger.txt>` (by-file, MECH/INTEL split, BLOCKING pre-tagged) — never ingest the full `.md` report each iteration (cost ≈ turns × per-turn-context).
+2. **MECH first (zero-LLM).** Auto-apply the `mech` bucket with `cpv_codemod.py apply --json <findings.json> --apply` before spending any model tokens.
+3. **INTEL fix-as-you-go, read-once.** Per `intel` file: read ONLY the finding line ranges (`tldr slice` / `Read` offset+limit), apply ALL its fixes in the SAME turn, never re-read. The recipe is the ledger's inline `suggestion`; open `plugin-error-index.md` / `marketplace-error-index.md` ONCE per rule-TYPE (jump via TOC), not per finding. For `category: architecture`, use `migrate-marketplace-architecture`.
+4. **Delta re-validate → terminate.** Re-validate, rebuild the delta ledger, feed `cpv_fix_loop_state.py record` (CONVERGED / CYCLE / STALLED). Full loop: [iterative-fix-loop](references/iterative-fix-loop.md).
+
+Checklist: validate→ledger → MECH-first → INTEL read-once → delta → terminate.
 
 ## Output
 
