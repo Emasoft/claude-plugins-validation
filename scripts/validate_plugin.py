@@ -2641,9 +2641,22 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
         if scripts_dir.is_dir():
             for py_file in scripts_dir.glob("*.py"):
                 if _has_shebang(py_file) and not os.access(py_file, os.X_OK):
-                    report.warning(
+                    # fixable=True + fix_id="chmod-exec" is an ADDITIVE fix-routing
+                    # tag (Phase 2, TRDD-GVMOKJBB) — the WARNING severity and the
+                    # message text are unchanged. This finding's own precondition
+                    # (`_has_shebang(py_file)`) GUARANTEES a shebang is present, so
+                    # cpv_codemod's `chmod-exec` transform (chmod +x a shebang file)
+                    # is a 100%-deterministic clear. No OTHER "not executable"
+                    # finding is shebang-gated (a `.sh`/`bin/` file may lack a
+                    # shebang), so none is tagged — they stay INTEL per the
+                    # conservative "unsure ⇒ leave it intel" rule. `warning()` does
+                    # not forward fixable/fix_id, so add() is used directly.
+                    report.add(
+                        "WARNING",
                         f"scripts/{py_file.name} has shebang but is not executable — run: chmod +x scripts/{py_file.name}",
                         f"scripts/{py_file.name}",
+                        fixable=True,
+                        fix_id="chmod-exec",
                     )
 
     # Check shebangs on script files — scripts without shebangs may not run cross-platform
@@ -4623,7 +4636,26 @@ def print_json(report: ValidationReport) -> None:
             "info": sum(1 for r in report.results if r.level == "INFO"),
             "passed": sum(1 for r in report.results if r.level == "PASSED"),
         },
-        "results": [{"level": r.level, "message": r.message, "file": r.file, "line": r.line} for r in report.results],
+        "results": [
+            {
+                "level": r.level,
+                "message": r.message,
+                "file": r.file,
+                "line": r.line,
+                # Additive fix-routing metadata (Phase 2, TRDD-GVMOKJBB): forward
+                # the fixable/fix_id SSOT so cpv_fix_ledger's MECH bucket and
+                # cpv_codemod's `apply --json` can consume it. Emitted ONLY when
+                # set (mirroring ValidationResult.to_dict), so a NON-fixable
+                # finding's dict is byte-identical to before — the 4 keys above,
+                # always present. Without this forward, a validator can TAG a
+                # finding fixable but the tag is silently dropped here and never
+                # reaches the JSON consumer (this emitter had drifted from the
+                # schema, dropping fixable/fix_id/category/suggestion/phase).
+                **({"fixable": True} if r.fixable else {}),
+                **({"fix_id": r.fix_id} if (r.fixable and r.fix_id) else {}),
+            }
+            for r in report.results
+        ],
     }
     # RT4-plugin-gate-weaker-than-security — additive, machine-observable
     # security-gate signal mirroring validate_security's --json contract
