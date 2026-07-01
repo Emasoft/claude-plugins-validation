@@ -988,6 +988,7 @@ dev = [
     "pyyaml>=6.0",
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
+    "pytest-split>=0.9",
     "ruff>=0.14.14",
 ]
 
@@ -3761,8 +3762,9 @@ def gen_ci_yml(p: PluginParams) -> str:
     (setup_branch_rules.DEFAULT_PLUGIN_CHECK_CONTEXTS) requires the THREE bare
     contexts "Lint" / "Validate" / "Test". The first two are produced by jobs
     whose display name is exactly that. "Test", however, is a MATRIX (ubuntu +
-    macOS) — a matrix job reports SUFFIXED contexts ("Test matrix
-    (ubuntu-latest)" / "Test matrix (macos-latest)"), never a bare "Test". To
+    macOS, each split into serial pytest-split shards) — a matrix job reports
+    SUFFIXED contexts ("Test matrix (ubuntu-latest, 1)" / "Test matrix
+    (macos-latest, 2)"), never a bare "Test". To
     keep the required bare "Test" context satisfiable (root-cause #3: otherwise
     the PR is stuck "pending" forever / auto-merge never fires), a lightweight
     AGGREGATE GATE job named EXACTLY "Test" (`needs: [test]`) succeeds iff the
@@ -3771,7 +3773,7 @@ def gen_ci_yml(p: PluginParams) -> str:
     Jobs:
       - lint           : actionlint (workflow syntax) + Mega-Linter — reports "Lint"
       - validate       : uvx cpv-remote-validate plugin . --strict (issue #11) — reports "Validate"
-      - test           : pytest MATRIX (ubuntu + macOS) — reports "Test matrix (<os>)"
+      - test           : pytest MATRIX (ubuntu + macOS, serial shards) — reports "Test matrix (<os>, <shard>)"
       - test-gate       : aggregate gate, `needs: [test]` — reports the required bare "Test"
       - commitlint     : conventional-commit gate (pull_request only)
 
@@ -3818,8 +3820,8 @@ def gen_ci_yml(p: PluginParams) -> str:
 # Required-context contract (cpv-setup-branch-rules wires the branch ruleset
 # to the bare contexts Lint / Validate / Test — TRDD-bbff5bc5):
 #   * "Lint" and "Validate" are produced by jobs named exactly that.
-#   * "Test" is a MATRIX (ubuntu + macOS), so the matrix lanes report
-#     "Test matrix (<os>)", NOT a bare "Test". The aggregate gate job named
+#   * "Test" is a MATRIX (ubuntu + macOS, serial shards), so the matrix lanes
+#     report "Test matrix (<os>, <shard>)", NOT a bare "Test". The aggregate job named
 #     exactly "Test" (needs: [test]) produces the required bare "Test" context
 #     and succeeds only if the matrix passed. Do NOT rename these without also
 #     updating setup_branch_rules.DEFAULT_PLUGIN_CHECK_CONTEXTS.
@@ -4008,18 +4010,26 @@ jobs:
 
   test:
     # NOTE: this is the test MATRIX. Its display name is "Test matrix" so the
-    # lanes report "Test matrix (ubuntu-latest)" / "Test matrix (macos-latest)"
+    # lanes report "Test matrix (ubuntu-latest, 1)" / "Test matrix (macos-latest, 2)"
     # — NOT a bare "Test". The bare "Test" required context is produced by the
     # `test-gate` aggregate job below (root-cause #3). The job ID stays `test`.
     name: Test matrix
-    # macOS matrix added v2.86.0 (issue #22) — catches darwin-specific
-    # regressions that ubuntu-only runs miss (pathlib casing, mtime
-    # resolution, BSD `ps` vs procps-ng output). fail-fast: false so
-    # each OS reports its own failure.
+    # Two matrix dimensions:
+    #   * os: [ubuntu-latest, macos-latest] — macOS added v2.86.0 (issue #22),
+    #     catches darwin-specific regressions ubuntu-only runs miss (pathlib
+    #     casing, mtime resolution, BSD `ps` vs procps-ng output).
+    #   * group: [1, 2] — duration-balanced SERIAL test shards via pytest-split
+    #     (TRDD-K7P2XR4Q). Each shard runs pytest WITHOUT -n (serial), so an
+    #     order-dependent serial-pollution bug still surfaces within a shard;
+    #     count-based split (no committed .test_durations needed — pytest-split
+    #     degrades gracefully, fine for a small downstream suite). N=2 keeps the
+    #     per-shard setup overhead modest on small suites.
+    # fail-fast: false so every (os, shard) leg reports its own failure.
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        group: [1, 2]
     runs-on: ${{{{ matrix.os }}}}
     # Hard cap so a hung test / dependency install doesn't burn the 360-min
     # default. The warm uv cache keeps installs fast; 25 min covers a cold
@@ -4042,10 +4052,23 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Run tests
+      - name: Run tests (shard ${{{{ matrix.group }}}} of 2)
         run: |
           if [ -d "tests" ] && ls tests/test_*.py 1>/dev/null 2>&1; then
-            uv run pytest tests/ -v
+            set +e
+            uv run pytest tests/ --splits 2 --group ${{{{ matrix.group }}}} -v
+            code=$?
+            set -e
+            # Exit 5 = pytest "no tests collected": a legitimately-empty shard
+            # when the suite has fewer tests than splits (common on small
+            # downstream suites — the split simply put every test in the other
+            # group). That is NOT a failure — treat it as a pass; propagate any
+            # other non-zero code as a real failure.
+            if [ "$code" -eq 5 ]; then
+              echo "Empty shard (no tests landed in this split) — OK"
+              exit 0
+            fi
+            exit $code
           else
             echo "No test files found, skipping"
           fi

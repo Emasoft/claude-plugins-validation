@@ -254,6 +254,14 @@ class TestGenWorkflows:
         assert "cpv-remote-validate" in content
         # Must support merge queue / auto-merge
         assert "merge_group:" in content
+        # Test job is a duration-balanced SERIAL matrix (TRDD-K7P2XR4Q): the
+        # macOS os-dimension (issue #22 darwin-regression catch, PRESERVED) is
+        # crossed with a pytest-split group dimension. Each shard runs serially
+        # (no -n) so an order-dependent serial-pollution bug still surfaces
+        # within a shard.
+        assert "macos-latest" in content, "macOS matrix coverage must be preserved"
+        assert "group: [1, 2]" in content, "pytest-split group matrix dimension"
+        assert "--splits 2 --group ${{ matrix.group }}" in content, "per-shard serial split run"
 
     def test_notify_yml_contains_marketplace_repo(self):
         """gen_notify_marketplace_yml output references marketplace repo."""
