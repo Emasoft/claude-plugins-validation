@@ -952,6 +952,10 @@ class TestBuiltinAgents:
         """`oracle` was wrongly in the old builtin list — must NOT be in BUILTIN_AGENTS (it's a ghost agent)."""
         assert "oracle" not in BUILTIN_AGENTS
 
+    def test_fork_is_builtin(self):
+        """`fork` (Agent-tool forked subagent, CLAUDE_CODE_FORK_SUBAGENT) is a built-in — it inherits the parent conversation and has no agents/fork.md, so a dispatch to it is never a ghost (TRDD-GVMOKJBB)."""
+        assert "fork" in BUILTIN_AGENTS
+
 
 class TestResolveDispatchRef:
     """Tests for _resolve_dispatch_ref(): built-in / in-plugin / cross-plugin / ghost."""
@@ -981,6 +985,16 @@ class TestResolveDispatchRef:
         """A reference that matches nothing returns ghost."""
         status, _ = _resolve_dispatch_ref("ghost-name", {"other-agent"})
         assert status == "ghost"
+
+    def test_builtin_fork_resolves(self):
+        """`subagent_type: fork` resolves as ok via BUILTIN_AGENTS — a built-in forked subagent, NOT a ghost dispatch to a missing agents/fork.md (TRDD-GVMOKJBB)."""
+        status, _ = _resolve_dispatch_ref("fork", set())
+        assert status == "ok"
+
+    def test_fork_ok_but_missing_named_agent_still_ghost(self):
+        """Two-sided: `fork` clears (built-in) while a genuinely-missing NAMED agent still returns ghost — the fork exemption does not weaken RC-GHOST-DISPATCH-001."""
+        assert _resolve_dispatch_ref("fork", set())[0] == "ok"
+        assert _resolve_dispatch_ref("fork-worker", set())[0] == "ghost"
 
     def test_same_plugin_namespaced_resolves(self):
         """`<my-plugin>:agent` where my-plugin matches plugin_name resolves like a bare reference."""

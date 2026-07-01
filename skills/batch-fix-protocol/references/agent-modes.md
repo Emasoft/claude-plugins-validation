@@ -38,10 +38,19 @@ single file:
 
 Workflow:
 
-1. Read the shard manifest (`scopes[i].findings[]` lists your findings).
+1. Read the shard manifest (`scopes[i].findings[]` lists your findings) — that IS
+   your compact finding surface (a per-scope slice; never read the full report).
+   Each scope's findings already carry file+line; optionally normalise via
+   `cpv_fix_ledger.py build` for the by-file MECH/INTEL split.
 2. Do NOT browse outside your scopes, do NOT re-run `validate_plugin.py`,
    do NOT read other shards' manifests — other shards edit concurrently.
-3. Fix each finding via the `fix-validation` error-to-fix mappings.
+3. **MECH first, then INTEL fix-as-you-go.** Auto-apply the deterministic set for
+   your scope — `cpv_codemod.py apply --json <scope-findings.json> --apply` (zero
+   LLM) — then fix the INTEL residual ONE FILE AT A TIME: read only each finding's
+   line ranges (`tldr slice`/`Read` offset+limit — never the whole file), apply ALL
+   of that file's fixes in the same turn (`fastedit`/`Edit`), never re-read a file.
+   Route recipes via the `fix-validation` error-to-fix mappings (open a rule-TYPE's
+   recipe once, not per finding).
 4. When you create a sibling skill, declare it via `per_file[].errors[]`
    (e.g. `created sibling skill skills/<orig>-alpha/SKILL.md (split from
    skills/<orig>/)`) so the aggregator's report shows the rename.

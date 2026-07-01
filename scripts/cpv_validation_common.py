@@ -431,13 +431,18 @@ VALID_PERMISSION_MODES: frozenset[str] = frozenset(
     }
 )
 
-# Built-in agent types provided by Claude Code (sub-agents.md L29-74)
+# Built-in agent types provided by Claude Code (sub-agents.md L29-74).
+# NOTE: validate_xref.py keeps its own normalized `BUILTIN_AGENTS` for the
+# ghost-dispatch detector — keep the two in sync when Claude Code adds a built-in.
 BUILTIN_AGENT_TYPES = {
     "Explore",
     "Plan",
     "general-purpose",
     "statusline-setup",
     "Claude Code Guide",
+    # Agent-tool forked subagent (gated by CLAUDE_CODE_FORK_SUBAGENT): inherits
+    # the parent conversation, has no agents/fork.md by design — never a ghost.
+    "fork",
 }
 
 # Bundled slash commands shipped by Claude Code (v2.1.121).
