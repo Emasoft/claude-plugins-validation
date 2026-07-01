@@ -1,9 +1,9 @@
 ---
 trdd-id: GVMOKJBB
 title: Fix-pipeline token-economy redesign — ledger + MECH-auto-split + fix-as-you-go + fork fan-out
-column: dev
+column: published
 created: 2026-07-01T13:00:39+0200
-updated: 2026-07-01T13:00:39+0200
+updated: 2026-07-01T15:12:00+0200
 current-owner: cpv-main-session
 assignee: cpv-main-session
 priority: 0
@@ -27,9 +27,9 @@ runtime-targets: [macos, linux]
 impacts: [ci-pipeline]
 external-refs: []
 attempts: 0
-implementation-commits: []
-published-version: null
-published-at: null
+implementation-commits: [678cc56, f5b985b, ae338f0, 53228d4, a9e8765, b877c54, d26c987, 8e3d579]
+published-version: 2.150.0
+published-at: 2026-07-01T15:12:00+0200
 ---
 
 # TRDD-GVMOKJBB — Fix-pipeline token-economy redesign
@@ -67,7 +67,9 @@ NEVER implement fan-out (or any token-saving reuse) via a skill `context: fork`.
 **Standing constraints:** never relax `--strict`, never suppress a security rule; each new codemod
 transform FN-safe with two-sided tests; regen self-hashes LAST; number every table row.
 
-**NEXT ACTION:** P8 (P7 COMPLETE — all 4 retrofits committed + central-verified: `53228d4` +
+**✅ COMPLETE — v2.150.0 PUBLISHED + CI GREEN** (2026-07-01; release `8e3d579`; CI run 28520021325 + Release run 28520021126 both `--exit-status` 0; serial suite 10398 passed/0 failed). All 8 phases shipped. The b13 cross-test break (my P2 `apply` subcommand vs test_audit_fix_b13's all-dispatch invariant) was caught by the pre-publish FULL SERIAL run + fixed architecturally in `d26c987`. Nothing pending. Historical NEXT ACTION below (now DONE).
+
+**NEXT ACTION (DONE):** P8 (P7 COMPLETE — all 4 retrofits committed + central-verified: `53228d4` +
 `b896db3`). P8 steps, in order: (1) choice-tree router in `skills/fix-validation` encoding
 validate→ledger→MECH(zero-LLM)→INTEL-fix-as-you-go(read-once)→delta→terminate(CONVERGED/CYCLE/STALLED);
 (2) TRIM `plugin-fixer.md` body 3691w→pointer — the §7d CI-green detail DUPLICATES
