@@ -45,13 +45,17 @@ def test_all_subcommand_includes_add_standard_sections(monkeypatch, tmp_path):
     assert rc == 0
     # Guard: pre-fix this list lacked 'add-standard-sections'.
     assert "add-standard-sections" in dispatched
-    # Every parser choice except the umbrella 'all' must be reachable via 'all'.
+    # Every TRANSFORM subcommand must be reachable via 'all'. Two are excluded:
+    # the umbrella 'all' itself, and the JSON-driven 'apply' (TRDD-GVMOKJBB — a
+    # fix_id-dispatched MECH applier that REQUIRES a --strict --json findings
+    # report; 'all' runs transforms against a plugin_root with no findings file,
+    # so it cannot and must not dispatch 'apply').
     standalone = {
         c
         for action in cpv_codemod._build_parser()._actions
         if getattr(action, "dest", "") == "subcommand"
         for c in (action.choices or [])
-        if c != "all"
+        if c not in ("all", "apply")
     }
     assert standalone.issubset(set(dispatched)), standalone - set(dispatched)
 
