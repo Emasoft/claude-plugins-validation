@@ -1,9 +1,9 @@
 ---
 trdd-id: K7P2XR4Q
 title: Shard CI test job into duration-balanced serial matrix + optimize the 60s parity test + fleet template
-column: dispatch
+column: published
 created: 2026-07-01T17:06:26+0200
-updated: 2026-07-01T17:06:26+0200
+updated: 2026-07-01T21:14:21+0200
 current-owner: cpv-main-session
 task-type: infra
 release-via: publish
@@ -20,6 +20,8 @@ external-refs: []
 # TRDD-K7P2XR4Q — Shard CI test job into a duration-balanced serial matrix (+ parity-test optimization + fleet template)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-01
+
+**✅ DONE — SHIPPED v2.151.0 (2026-07-01), CI GREEN.** Commits 52ca8d8 (impl) + 4ac96fd (docs); release green. **MEASURED: CI 7m37s→3m41s (~2.07×, −52%); Test job ~7min→~3m19s; Validate (3m38s) is now the CI bottleneck (next lever).** Shipped as COUNT-BASED split — committing pytest-split's 1.3MB `.test_durations` tripped CPV's own abs-path check (its test-ids contain `/etc/passwd`), so it was gitignored; count-based round-robin still distributes the heavy tests and its imbalance is harmless since Validate dominates the total. Everything below is the original design/plan, retained for history.
 
 **Origin.** User: "7 minutes to run the tests? that is too much. is there some
 way to run them in parallel?" Then chose scope = **CPV + fleet template** via
