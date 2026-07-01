@@ -123,3 +123,4 @@ rck-*-merge-pending.md
 # The unanchored `reports/` / `reports_dev/` rules already match the repo-root
 # directories *and* any nested copy, so anchored `/reports/` duplicates added
 # nothing and were removed to keep a single source of truth.
+.test_durations
