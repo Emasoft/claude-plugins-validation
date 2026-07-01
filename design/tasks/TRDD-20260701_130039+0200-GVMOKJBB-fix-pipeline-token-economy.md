@@ -67,8 +67,11 @@ NEVER implement fan-out (or any token-saving reuse) via a skill `context: fork`.
 **Standing constraints:** never relax `--strict`, never suppress a security rule; each new codemod
 transform FN-safe with two-sided tests; regen self-hashes LAST; number every table row.
 
-**NEXT ACTION:** Phase 7 — retrofit devitalizer/leaks/cache/marketplace loops to the ledger +
-fix-as-you-go pattern (parallel workers). Then P8 router/docs/body-trim/publish.
+**NEXT ACTION:** P7 4/4 — verify the cache-optimizer retrofit diff when its worker lands + commit it;
+then COMPACT (clean checkpoint; context heavy). Then P8: choice-tree router in fix-validation, TRIM
+`plugin-fixer.md` body (3691w → pointer; §7d CI detail duplicates iterative-fix-loop.md), update
+docs/README/CLAUDE.md counts (scripts 122→123, test files 378→~380 — verify), regen hashes LAST, ONE
+batched `publish.py --minor` + watch CI green (lean-captured).
 
 **Fork finding (fact-based, surfaced to user):** forks save tokens ONLY from a LEAN dispatcher
 (reusing its warm skill+ledger). The batch fans out from the BLOATED main session, where fresh lean
@@ -94,6 +97,17 @@ token wins are P1-P3; forks are documented for the narrow lean-dispatcher case. 
 - **P8 item:** `agents/plugin-fixer.md` body is now 3691w — the §7d CI-green detail DUPLICATES
   `iterative-fix-loop.md`; trim the agent body to a pointer in P8 (leaner fixer = lower per-turn
   cost = the redesign's own goal).
+- P5 DONE (`f5b985b`) — batch_shard MECH-first + read-once; token-honest fork-vs-fresh choice tree.
+  SURFACED + FIXED a real CPV FP: `RC-GHOST-DISPATCH-001` (validate_xref) falsely flagged the
+  built-in `subagent_type:"fork"` as a ghost dispatch → added `fork` to `BUILTIN_AGENTS` +
+  the `BUILTIN_AGENT_TYPES` SSOT; FN-safe two-sided (a real missing NAMED agent still fires).
+- GATE DONE (`ae338f0`) — durable token-win test: ledger = 21.9% of the raw findings surface it
+  replaces each iteration (78% smaller), lossless (compression, not truncation).
+- P7 3/4 DONE (`53228d4`) — devitalizer/leaks/marketplace retrofit to compact ledger + file-centric
+  read-once. CENTRAL-VERIFIED (read the diffs): ALL security invariants preserved (FLAG-not-suppress,
+  never-mute/relax-`--strict`, provably-inert-or-FLAG, rotate+purge, clean-room success gate,
+  oscillation guard, CI-green loop). Contract tests green (leaks 42, devitalizer 111, marketplace 5).
+  +1 benign advisory body-size WARNING (leaks 2176w, non-blocking). cache-optimizer (4th) PENDING.
 
 ## Plan steps (each = local commit; ONE batched publish at end)
 
