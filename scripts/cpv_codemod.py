@@ -33,6 +33,13 @@ Subcommands:
   * ``external-skip-list`` — auto-add ``external/``, vendored paths to
     the plugin's CPV exclusion list in ``.claude-plugin/plugin.json``
   * ``all`` — run every applicable subcommand in safe order
+  * ``apply`` — read a CPV ``--strict --json`` findings report, select the
+    ``fixable: true`` entries, and dispatch each by ``fix_id`` to its
+    deterministic transform (Phase 2, TRDD-GVMOKJBB). ``fixable``/``fix_id``
+    are the SSOT the validators set at finding-build time; the fix ledger's
+    MECH bucket is exactly this set. Only the ``chmod-exec`` fix_id is wired
+    today (chmod +x a file that has a shebang). Dry-run by default; ``--apply``
+    performs the change with the same per-file backup + vendored-skip guards.
 """
 
 from __future__ import annotations
@@ -40,6 +47,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import re
 import shutil
 import sys
@@ -47,6 +55,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Protocol
 
 # ── Vendored-path skip list (matches issue #16 category F) ────────────────────
 VENDORED_DIR_NAMES = frozenset(
@@ -98,6 +107,22 @@ def _is_vendored(rel_path: Path, submodule_paths: set[str]) -> bool:
         if rel_str == sm or rel_str.startswith(sm + "/"):
             return True
     return False
+
+
+def _file_has_shebang(path: Path) -> bool:
+    """True iff ``path`` begins with a ``#!`` shebang.
+
+    Mirrors ``validate_plugin._has_shebang`` byte-for-byte (reads the first two
+    bytes) so the ``chmod-exec`` transform's precondition is identical to the
+    one the validator uses when it EMITS the ``fix_id="chmod-exec"`` finding —
+    the transform can never disagree with the finding about whether a shebang
+    is present.
+    """
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(2) == b"#!"
+    except OSError:
+        return False
 
 
 def _walk_markdown(plugin_root: Path) -> Iterable[Path]:
@@ -446,6 +471,193 @@ def _apply_external_skip_list(plugin_root: Path, *, apply: bool) -> SkipListResu
     return SkipListResult(changed=True, ok=True, summary=f"Added {added} vendored path(s) to cpv.exclude_paths")
 
 
+# ── fix_id-dispatched apply mode (Phase 2, TRDD-GVMOKJBB) ─────────────────────
+# ``fixable=True`` + a stable ``fix_id`` are the SSOT a validator sets AT
+# FINDING-BUILD TIME to mean "this finding is mechanically auto-fixable" (the
+# fix ledger's MECH bucket is exactly this set). ``apply --json`` reads a CPV
+# ``--strict --json`` report, selects those entries, and dispatches each by
+# ``fix_id`` to a deterministic transform. The dry-run / --apply / per-file
+# backup / vendored-skip contract is identical to the content transforms above.
+
+
+@dataclass(frozen=True)
+class FixOutcome:
+    """One fixable finding's ``apply`` result — one printed line's worth.
+
+    ``changed`` is True when a fix WAS applied (``--apply``) OR WOULD be applied
+    (dry-run) — the finding is genuinely actionable now. Every skip (already
+    fixed, vendored, missing file, no shebang, outside the tree, chmod error) is
+    ``changed=False``. ``detail`` is the human-readable reason.
+    """
+
+    fix_id: str
+    file: str
+    changed: bool
+    detail: str
+
+
+def _apply_fix_chmod_exec(
+    result: dict[str, Any],
+    plugin_root: Path,
+    backup_root: Path,
+    submodules: set[str],
+    *,
+    apply: bool,
+) -> FixOutcome:
+    """Make a shebang-carrying script executable (the ``chmod-exec`` fix_id).
+
+    Deterministic + idempotent: acts only on a file that (a) resolves INSIDE the
+    plugin tree, (b) is not vendored, (c) exists, (d) begins with a shebang, and
+    (e) is not already executable for the current user. Any failed guard is a
+    no-op skip (fail-safe — never chmod a look-alike). ``mode | 0o111`` mirrors
+    the finding's own remediation advice (``chmod +x``); a second run finds the
+    file already executable and skips, so ``apply`` is idempotent.
+    """
+    fix_id = "chmod-exec"
+    rel = result.get("file")
+    if not rel or not isinstance(rel, str):
+        return FixOutcome(fix_id, str(rel), False, "skip (finding has no file)")
+    rel_path = Path(rel)
+    # Resolve the finding's plugin-relative (or absolute) ``file`` to an on-disk
+    # path AND to a path relative to the plugin root (for the vendored check +
+    # the backup mirror). A target outside the plugin tree is skipped — ``apply``
+    # never touches a file outside the scanned plugin.
+    target = rel_path if rel_path.is_absolute() else plugin_root / rel_path
+    try:
+        rel_for_tree = target.resolve().relative_to(plugin_root.resolve())
+    except (ValueError, OSError):
+        return FixOutcome(fix_id, rel, False, "skip (outside plugin root)")
+    if _is_vendored(rel_for_tree, submodules):
+        return FixOutcome(fix_id, rel, False, "skip (vendored)")
+    if not target.is_file():
+        return FixOutcome(fix_id, rel, False, "skip (file not found)")
+    if not _file_has_shebang(target):
+        # The transform's core guard: never chmod a file lacking a shebang. This
+        # is exactly why only the shebang-GATED validator finding is tagged
+        # chmod-exec — a non-shebang look-alike is left untouched.
+        return FixOutcome(fix_id, rel, False, "skip (no shebang)")
+    if os.access(target, os.X_OK):
+        # Idempotency: the finding's condition is ``not os.access(.., X_OK)``, so
+        # an already-executable file is nothing to fix (a 2nd run is a no-op).
+        return FixOutcome(fix_id, rel, False, "skip (already executable)")
+    if not apply:
+        return FixOutcome(fix_id, rel, True, "would chmod +x (dry-run)")
+    try:
+        mode = target.stat().st_mode
+        # Back up FIRST (copy2 preserves the pre-chmod mode → the original
+        # non-executable permission stays restorable), mirroring the content
+        # transforms' backup-before-write discipline.
+        _backup_file(target, plugin_root, backup_root)
+        os.chmod(target, mode | 0o111)
+    except OSError as exc:
+        return FixOutcome(fix_id, rel, False, f"skip (chmod failed: {exc})")
+    return FixOutcome(fix_id, rel, True, "chmod +x applied")
+
+
+class _FixHandler(Protocol):
+    """Call signature every ``fix_id`` handler in the dispatch table honors."""
+
+    def __call__(
+        self,
+        result: dict[str, Any],
+        plugin_root: Path,
+        backup_root: Path,
+        submodules: set[str],
+        *,
+        apply: bool,
+    ) -> FixOutcome: ...
+
+
+# fix_id → handler. A finding whose fix_id is absent here is a fixable finding
+# with no wired transform yet: ``apply`` reports it and skips it (never crashes,
+# never guesses). Add a transform above, register it here, tag the finding at
+# its validator build site — the three stay in lockstep.
+_FIX_ID_DISPATCH: dict[str, _FixHandler] = {
+    "chmod-exec": _apply_fix_chmod_exec,
+}
+
+
+def _extract_apply_results(data: Any) -> list[Any]:
+    """Locate the results list in a findings JSON (wrapper or bare list).
+
+    Accepts the standard ``{"results": [...]}`` wrapper ``remote_validation.py``
+    emits, or a bare list of result dicts. Anything else yields an empty list
+    (an empty run — never a crash). Mirrors ``cpv_fix_ledger._extract_results``.
+    """
+    if isinstance(data, dict):
+        results = data.get("results")
+        return results if isinstance(results, list) else []
+    if isinstance(data, list):
+        return data
+    return []
+
+
+# Detail string for a fixable finding whose fix_id has no wired transform. A
+# module constant so the per-line emitter and the summary tally agree by
+# construction (never a fragile duplicated literal).
+_NO_TRANSFORM_DETAIL = "skip (no transform registered)"
+
+
+def _apply_one_finding(
+    r: Any,
+    plugin_root: Path,
+    backup_root: Path,
+    submodules: set[str],
+    *,
+    apply: bool,
+) -> FixOutcome | None:
+    """Dispatch ONE report entry. ``None`` ⇒ the entry is not a fixable finding.
+
+    A fixable entry whose ``fix_id`` has no registered transform yields a
+    ``_NO_TRANSFORM_DETAIL`` skip (reported, never guessed). Extracting this
+    keeps ``_run_apply``'s loop flat.
+    """
+    if not (isinstance(r, dict) and r.get("fixable")):
+        return None  # NON-fixable / INFO / PASSED — apply never touches them.
+    fix_id = r.get("fix_id")
+    handler = _FIX_ID_DISPATCH.get(fix_id) if isinstance(fix_id, str) else None
+    if handler is None:
+        label = fix_id if isinstance(fix_id, str) and fix_id else "<no-fix_id>"
+        return FixOutcome(label, str(r.get("file")), False, _NO_TRANSFORM_DETAIL)
+    return handler(r, plugin_root, backup_root, submodules, apply=apply)
+
+
+def _run_apply(plugin_root: Path, findings_path: Path, *, apply: bool) -> int:
+    """Apply the ``fixable: true`` findings from a CPV ``--strict --json`` report.
+
+    Selects fixable entries, dispatches each by ``fix_id``, prints one line per
+    fixable finding. Dry-run by default (``--apply`` writes). Returns 0 on a
+    processed report, 1 on a read/parse error (never a traceback). NON-fixable
+    findings are ignored entirely — ``apply`` only ever acts on the MECH set.
+    """
+    try:
+        data = json.loads(findings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        print(f"error: cannot read findings JSON {findings_path}: {exc}", file=sys.stderr)
+        return 1
+
+    submodules = _read_gitmodules(plugin_root)
+    backup_root = _backup_dir(plugin_root)
+    fixable_seen = changed = unregistered = 0
+    for r in _extract_apply_results(data):
+        outcome = _apply_one_finding(r, plugin_root, backup_root, submodules, apply=apply)
+        if outcome is None:
+            continue
+        fixable_seen += 1
+        if outcome.changed:
+            changed += 1
+        if outcome.detail == _NO_TRANSFORM_DETAIL:
+            unregistered += 1
+        print(f"[apply] {outcome.fix_id} {outcome.file}: {outcome.detail}")
+
+    mode = "applied" if apply else "would apply"
+    tail = f" ({unregistered} with no registered transform)" if unregistered else ""
+    print(f"\n[apply] {mode} {changed} fix(es) across {fixable_seen} fixable finding(s){tail}")
+    if apply and changed and backup_root.exists():
+        print(f"[apply] backup → {backup_root.relative_to(plugin_root)}/")
+    return 0
+
+
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 def _process_file(
     file_path: Path,
@@ -528,6 +740,8 @@ Examples:
   cpv-codemod backtick-to-link --plugin ./my-plugin --apply      # apply with backup
   cpv-codemod add-toc --plugin ./my-plugin --apply --min-lines 80
   cpv-codemod all --plugin ./my-plugin --apply
+  cpv-codemod apply --json findings.json                         # dry-run the fixable set
+  cpv-codemod apply --json findings.json --apply                 # chmod-exec etc. with backup
 
 Safety contract:
   * Dry-run is the DEFAULT. --apply is required to write any file.
@@ -548,17 +762,29 @@ Safety contract:
             "dedup-trailing-blanks",
             "external-skip-list",
             "all",
+            "apply",
         ],
     )
     parser.add_argument(
+        # Required for every subcommand EXCEPT `apply` (which defaults it to the
+        # CWD — see main()). Kept optional at the argparse layer so `apply` can
+        # run as `apply --json findings.json` from the plugin root; the
+        # requiredness for the transform subcommands is enforced in main().
         "--plugin",
-        required=True,
+        required=False,
+        default=None,
         type=Path,
-        help="Path to the plugin root (must contain .claude-plugin/plugin.json or markdown files)",
+        help="Path to the plugin root (required for every subcommand except `apply`, which defaults to CWD)",
     )
     parser.add_argument("--apply", action="store_true", help="Write changes (default is dry-run with diff preview)")
     parser.add_argument(
         "--min-lines", type=int, default=50, help="add-toc: minimum file line count to receive a TOC (default 50)"
+    )
+    parser.add_argument(
+        "--json",
+        type=Path,
+        default=None,
+        help="apply: path to a CPV `--strict --json` findings report; applies its fixable:true entries by fix_id",
     )
     return parser
 
@@ -566,10 +792,25 @@ Safety contract:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    plugin_root = args.plugin.expanduser().resolve()
+
+    # --plugin is required for every subcommand EXCEPT `apply`, where the
+    # findings report already carries plugin-root-relative file paths, so
+    # running `apply` from the plugin root needs no --plugin (defaults to CWD).
+    # parser.error() exits 2 — identical to the old required=True behavior.
+    if args.plugin is not None:
+        plugin_root = args.plugin.expanduser().resolve()
+    elif args.subcommand == "apply":
+        plugin_root = Path.cwd().resolve()
+    else:
+        parser.error("--plugin is required")
     if not plugin_root.is_dir():
         print(f"error: plugin root not a directory: {plugin_root}", file=sys.stderr)
         return 2
+
+    if args.subcommand == "apply":
+        if args.json is None:
+            parser.error("apply requires --json <findings.json>")
+        return _run_apply(plugin_root, args.json.expanduser().resolve(), apply=args.apply)
 
     if args.subcommand == "all":
         # Every applicable subcommand in safe order: content transforms

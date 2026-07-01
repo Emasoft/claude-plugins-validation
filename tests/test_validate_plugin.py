@@ -928,6 +928,30 @@ class TestPrintResults:
         assert data["counts"]["passed"] == 1
         assert len(data["results"]) == 2
 
+    def test_print_json_forwards_fixable_fix_id_tag(self, capsys):
+        """print_json forwards the fixable/fix_id SSOT (Phase 2, TRDD-GVMOKJBB).
+
+        Two-sided: a fixable finding carries fixable=True + fix_id in the JSON
+        (so cpv_fix_ledger / cpv_codemod apply can consume it), AND a NON-fixable
+        finding carries NEITHER key (its dict is byte-identical to before the
+        relay was fixed). Without the forward, a tagged finding is silently
+        stripped here and never reaches the codemod.
+        """
+        report = ValidationReport()
+        report.add("WARNING", "has shebang but is not executable", "scripts/foo.py", fixable=True, fix_id="chmod-exec")
+        report.warning("plain advisory", "README.md")
+        print_json(report)
+        data = json.loads(capsys.readouterr().out)
+        by_file = {r.get("file"): r for r in data["results"]}
+        # Side 1: the tag flows through.
+        fixable = by_file["scripts/foo.py"]
+        assert fixable["fixable"] is True
+        assert fixable["fix_id"] == "chmod-exec"
+        # Side 2: a non-fixable finding gains no fix-routing keys.
+        advisory = by_file["README.md"]
+        assert "fixable" not in advisory
+        assert "fix_id" not in advisory
+
 
 class TestValidateReadmeAndLicense:
     """Tests for validate_readme and validate_license."""

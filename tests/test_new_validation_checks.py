@@ -17,8 +17,11 @@ Covers:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
+
+import pytest
 
 # Add scripts directory to path for imports
 scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
@@ -185,6 +188,58 @@ def test_script_without_shebang_reports_minor(tmp_path: Path):
     validate_scripts(plugin_dir, report)
     minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
     assert any("shebang" in m.lower() for m in minor_msgs)
+
+
+# ---------------------------------------------------------------------------
+# Check 4b: the "has shebang but is not executable" WARNING carries the
+# additive fixable/fix_id="chmod-exec" tag (Phase 2, TRDD-GVMOKJBB). Two-sided:
+# it STILL fires at WARNING severity with unchanged text, AND now carries the
+# tag; a look-alike (already-executable shebang script) produces NO chmod-exec
+# finding. Unix-only: the emitting branch is gated on `not IS_WINDOWS`.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="exec-bit check is Unix-only (validate_scripts gates on not IS_WINDOWS)")
+def test_shebang_not_executable_warning_is_tagged_chmod_exec(tmp_path: Path):
+    """A shebang script that is NOT executable still WARNs and now carries fixable/fix_id='chmod-exec'."""
+    plugin_dir = tmp_path / "plugin"
+    (plugin_dir / ".claude-plugin").mkdir(parents=True)
+    (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name": "test"}')
+    scripts_d = plugin_dir / "scripts"
+    scripts_d.mkdir()
+    script = scripts_d / "hello.py"
+    script.write_text("#!/usr/bin/env python3\nprint('hi')\n")
+    os.chmod(script, 0o644)  # shebang present, NOT executable → the finding fires
+    report = ValidationReport()
+    validate_scripts(plugin_dir, report)
+    hits = [r for r in report.results if r.level == "WARNING" and "has shebang but is not executable" in r.message]
+    # Side 1: the finding STILL fires, at unchanged WARNING severity.
+    assert len(hits) == 1
+    r = hits[0]
+    assert r.file == "scripts/hello.py"
+    # Side 2: the additive tag is present (severity + message untouched).
+    assert r.fixable is True
+    assert r.fix_id == "chmod-exec"
+    serialized = r.to_dict()
+    assert serialized.get("fixable") is True
+    assert serialized.get("fix_id") == "chmod-exec"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="exec-bit check is Unix-only")
+def test_executable_shebang_script_emits_no_chmod_exec_finding(tmp_path: Path):
+    """A shebang script that IS executable is a look-alike: no chmod-exec finding is emitted."""
+    plugin_dir = tmp_path / "plugin"
+    (plugin_dir / ".claude-plugin").mkdir(parents=True)
+    (plugin_dir / ".claude-plugin" / "plugin.json").write_text('{"name": "test"}')
+    scripts_d = plugin_dir / "scripts"
+    scripts_d.mkdir()
+    script = scripts_d / "ok.py"
+    script.write_text("#!/usr/bin/env python3\nprint('ok')\n")
+    os.chmod(script, 0o755)  # shebang present AND executable → nothing to fix
+    report = ValidationReport()
+    validate_scripts(plugin_dir, report)
+    tagged = [r for r in report.results if r.fixable and r.fix_id == "chmod-exec"]
+    assert tagged == []
 
 
 # ===========================================================================
