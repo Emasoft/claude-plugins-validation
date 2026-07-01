@@ -429,6 +429,165 @@ def _resolve_value(parsed: object, path: tuple[str, ...]) -> object:
     return cur
 
 
+def is_benign_plugin_userconfig_location(file_path: str, source: str, line_idx: int) -> bool:
+    """True iff ``line_idx`` sits inside the ``userConfig`` subtree of a
+    ``.claude-plugin/plugin.json`` manifest at a config-UI-documentation
+    location — a userConfig-descendant KEY name, or a benign metadata string
+    VALUE (``title`` / ``description`` / ``label`` / ``enum`` option label / …)
+    — and NOT on a line that holds a DANGEROUS-key (``command`` / ``args`` /
+    ``env`` / …) string value.
+
+    Rationale (issue #154): a plugin manifest's ``userConfig`` object is the
+    plugin's CONFIG-UI schema. Its descendant field key names and their
+    title / description / label / enum string values are documentation
+    rendered to the HUMAN in the plugin-config UI — NONE of it is injected
+    into any agent's or the model's context (it is NOT instruction-loadable,
+    unlike a ``SKILL.md`` body, an MCP tool ``description``, or an agent /
+    command file). So the agent_manipulation / prompt-injection family — whose
+    threat REQUIRES the matched string to be read into an agent context —
+    cannot be delivered through it, and a match there (e.g.
+    ``CROSS_TOOL_ACCESS`` on a field named ``context_window_tokens``, or
+    ``INDIRECT_PROMPT_INJECT`` in a field's help text) is a false positive.
+
+    The caller gates on the rule family; this predicate only answers "is this
+    a benign userConfig config-UI location". FN-safe by construction:
+
+    * It is confined to the ``userConfig`` subtree of the manifest — a match
+      anywhere else in ``plugin.json`` (or in any other file) returns ``False``.
+    * A DANGEROUS-key string VALUE on the matched line is NOT a benign
+      location (``command`` / ``args`` / ``env`` / … flow into execution), so
+      the same text inside ``userConfig.<key>.command`` keeps firing.
+    * Any parse failure returns ``False`` (never clears on doubt).
+    """
+    norm = file_path.replace("\\", "/").lower()
+    parts = norm.split("/")
+    # Only the plugin manifest: basename plugin.json directly under a
+    # ``.claude-plugin`` directory. NOT settings.json / package.json / .mcp.json
+    # / any other .json — those have different (and sometimes executable) schemas.
+    if len(parts) < 2 or parts[-1] != "plugin.json" or parts[-2] != ".claude-plugin":
+        return False
+
+    cleaned = _strip_jsonc_comments(source)
+    try:
+        parsed = json.loads(cleaned)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("userConfig"), dict):
+        return False
+
+    span = _plugin_userconfig_line_span(cleaned)
+    if span is None:
+        return False
+    uc_start, uc_end = span
+    line = line_idx + 1  # 1-based, matching _walk_with_lines' line numbering
+    if not (uc_start <= line <= uc_end):
+        return False
+
+    # A DANGEROUS-key string VALUE on the matched line keeps firing even inside
+    # userConfig — ``command`` / ``args`` / ``env`` / … flow into execution, so
+    # a manipulation/injection match co-located with one is NOT cleared. Only
+    # covering paths INSIDE the userConfig subtree veto (a same-line coincidence
+    # cannot occur here because the line is already within the userConfig span,
+    # but the ``userConfig`` prefix guard keeps the intent explicit).
+    for path, start_line, end_line in _walk_with_lines(parsed, cleaned):
+        if start_line <= line <= end_line and path[:1] == ("userConfig",) and _classify_key(path) == "suspect":
+            return False
+    return True
+
+
+def _object_value_brace_index(source: str, key_end: int) -> int | None:
+    """Given ``key_end`` just past a closing key quote, return the index of the
+    ``{`` opening that key's OBJECT value (skipping whitespace and the ``:``
+    separator), or ``None`` when the value is not an object.
+    """
+    n = len(source)
+    j = key_end
+    while j < n and source[j] in " \t\r\n":
+        j += 1
+    if j >= n or source[j] != ":":
+        return None
+    j += 1
+    while j < n and source[j] in " \t\r\n":
+        j += 1
+    return j if j < n and source[j] == "{" else None
+
+
+def _plugin_userconfig_line_span(source: str) -> tuple[int, int] | None:
+    """Return the 1-based ``(start_line, end_line)`` of the top-level
+    ``userConfig`` object VALUE block in a ``plugin.json`` ``source``, or
+    ``None``.
+
+    Char-by-char and string-aware (so a ``{`` inside a string value never
+    shifts the brace depth), it finds the ``"userConfig"`` key at object depth
+    1, then brace-matches its ``{ … }`` value. ``start_line`` is the line of
+    the opening brace (== the ``"userConfig":`` line), so the whole block —
+    including every descendant field KEY line — is covered.
+    """
+    n = len(source)
+    key_token = '"userConfig"'  # includes the closing quote → exact-key match
+    i = 0
+    in_str = False
+    depth = 0
+    while i < n:
+        ch = source[i]
+        if in_str:
+            if ch == "\\" and i + 1 < n:
+                i += 2
+            else:
+                in_str = ch != '"'
+                i += 1
+            continue
+        if ch == '"':
+            # A top-level ``"userConfig"`` key (depth 1) whose value is an
+            # object → brace-match it. ``"userConfigExtra"`` does not match
+            # (the char after ``userConfig`` is ``E``, not ``"``).
+            if depth == 1 and source.startswith(key_token, i):
+                brace = _object_value_brace_index(source, i + len(key_token))
+                if brace is not None:
+                    return _brace_match_line_span(source, brace)
+            in_str = True
+        elif ch in "{[":
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+        i += 1
+    return None
+
+
+def _brace_match_line_span(source: str, open_idx: int) -> tuple[int, int] | None:
+    """Given ``open_idx`` positioned at a ``{``, return the 1-based
+    ``(start_line, end_line)`` spanning to its matching ``}`` (string-aware),
+    or ``None`` if the braces are unbalanced.
+    """
+    n = len(source)
+    start_line = source.count("\n", 0, open_idx) + 1
+    i = open_idx
+    in_str = False
+    depth = 0
+    while i < n:
+        ch = source[i]
+        if in_str:
+            if ch == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if ch == '"':
+                in_str = False
+            i += 1
+            continue
+        if ch == '"':
+            in_str = True
+            i += 1
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return (start_line, source.count("\n", 0, i) + 1)
+        i += 1
+    return None
+
+
 def _strip_jsonc_comments(source: str) -> str:
     """Remove ``// …`` line comments and ``/* … */`` block comments.
 
