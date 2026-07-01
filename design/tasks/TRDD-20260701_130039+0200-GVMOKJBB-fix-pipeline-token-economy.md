@@ -67,17 +67,27 @@ NEVER implement fan-out (or any token-saving reuse) via a skill `context: fork`.
 **Standing constraints:** never relax `--strict`, never suppress a security rule; each new codemod
 transform FN-safe with two-sided tests; regen self-hashes LAST; number every table row.
 
-**NEXT ACTION:** Phase 2 — extend `scripts/cpv_codemod.py` with a fix_id→deterministic-transform
-map so the MECH set (fixable:true) auto-applies with ZERO LLM. GROUNDED FACT (P1): the real
-invocation is `remote_validation.py plugin . --strict --json` where `--json` is a BOOLEAN flag
-emitting JSON to STDOUT — wrapper `{exit_code, counts, results, security_gates}` — NOT `--json <path>`.
+**NEXT ACTION:** Phase 5 — fork fan-out from a LEAN dispatcher (Agent-tool `subagent_type:"fork"`
+from a lean plugin-fixer, disjoint file slices; NEVER a skill `context: fork`). Then P7 retrofit,
+P8 router/docs/publish.
 
-**Progress:** P1 DONE — `scripts/cpv_fix_ledger.py` + `tests/test_cpv_fix_ledger.py` (ruff+mypy
-clean, 35 two-sided tests). Ledger schema: `{summary:{critical,major,minor,nit,warning,total,mech,
-intel,blocking}, mech:{<file>:[{line,level,category,fix_id,suggestion}]}, intel:{<file>:[{line,
-level,category,blocking,suggestion}]}}`; MECH=fixable:true, INTEL=fixable:false; `blocking` mirrors
-iterative-fix-loop.md FN-safe (unknown WARNING → blocking). Report:
-`reports/fix-ledger/20260701_131808+0200-phase1.md`.
+**Progress:**
+- P1 DONE (`42e8c7c`) — `cpv_fix_ledger.py` + 35 tests. Ledger `{summary, mech:{file:[{line,level,
+  category,fix_id,suggestion}]}, intel:{file:[{line,level,category,blocking,suggestion}]}}`;
+  MECH=fixable:true, INTEL=fixable:false; `blocking` FN-safe (unknown WARNING → blocking). Real
+  invocation grounded: `remote_validation.py plugin <root> --strict --json` = BOOLEAN flag → JSON on STDOUT.
+- P2 DONE (`c9defd6`) — `fixable`/`fix_id` SSOT: tagged `chmod-exec` (shebang-gated → deterministic
+  clear; others left INTEL); `cpv_codemod apply --json` = zero-LLM MECH applier; FIXED a relay bug
+  (print_json silently dropped fixable/fix_id). 372+206 tests.
+- P3/4/6 DONE (this commit) — loop rewrite in `agents/plugin-fixer.md §The loop` +
+  `skills/fix-validation/references/iterative-fix-loop.md`: validate→JSON→compact ledger (read the
+  LEDGER, NOT the full report); MECH-first `cpv_codemod apply`; INTEL fix-as-you-go, one file
+  read-once fixed-same-turn; delta re-validate; optional free-mode llm-ext pinpoint. ALL gates
+  preserved (oscillation guard, WARNING rule, DZS5K34A CI-loop/STALLED, final verify, 7c/7d).
+  cache-cold 0/0/0/0.
+- **P8 item:** `agents/plugin-fixer.md` body is now 3691w — the §7d CI-green detail DUPLICATES
+  `iterative-fix-loop.md`; trim the agent body to a pointer in P8 (leaner fixer = lower per-turn
+  cost = the redesign's own goal).
 
 ## Plan steps (each = local commit; ONE batched publish at end)
 

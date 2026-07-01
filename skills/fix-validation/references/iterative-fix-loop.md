@@ -16,9 +16,9 @@
 Copy this checklist into your fix log and tick each item as you go:
 
 - [ ] Resolve the target (plugin/marketplace path via Path Resolution Protocol, or parse report)
-- [ ] Run validation with `--strict`
-- [ ] Apply fix batch in priority order (CRITICAL → MAJOR → MINOR → NIT)
-- [ ] Re-validate AFTER every batch (never chain speculative fixes)
+- [ ] Run validation with `--strict --json`, build the compact ledger (`cpv_fix_ledger.py build`), read the LEDGER not the full report
+- [ ] Auto-apply the MECH set first (`cpv_codemod.py apply --json … --apply`, zero LLM), then fix the INTEL residual fix-as-you-go (one file at a time, read once, fix in the same turn)
+- [ ] Re-validate AFTER every batch (never chain speculative fixes); read the DELTA ledger, never a fresh full report
 - [ ] Evaluate every remaining WARNING against the publish-blocker rules
 - [ ] Fix publish-blocker WARNINGs; leave truly-advisory WARNINGs with per-entry justification
 - [ ] Stop when findings empty AND no blocking warnings (CONVERGED), OR escalate when the finding set RECURS vs **any** prior iteration (oscillation — tracked deterministically by `scripts/cpv_fix_loop_state.py`, not just vs N-1). NO fixed iteration cap.
@@ -42,10 +42,14 @@ This file is the SUPPORTING DATA that loop consults: the WARNING-evaluation rule
 the migration-only step detail (7c/7d), and the output contract, all below. The
 shape the agent's behaviour follows:
 
-1. **Validate** (`--strict --json <findings.json>`), then `cpv_fix_loop_state.py record`
-   for the deterministic verdict.
-2. **`PROGRESS`** → fix ONE batch in priority order (CRITICAL → MAJOR → MINOR → NIT),
-   loading only the `plugin-error-index.md` fix-recipe a finding points at; re-validate.
+1. **Validate → ledger** (`--strict --json > <findings.json>`, then `cpv_fix_ledger.py build`
+   → compact by-file `<ledger.txt>`; `cpv_fix_loop_state.py record` for the deterministic verdict).
+   Read the LEDGER, never the full `.md` report (see "Compact ledger + fix-as-you-go" below).
+2. **`PROGRESS`** → **MECH first** (`cpv_codemod.py apply --json … --apply` clears the
+   `fixable:true` set at zero LLM cost), then **INTEL fix-as-you-go**: one file at a time, read
+   only the ledger's line ranges, fix ALL of that file's findings in the same turn, never re-read;
+   the recipe is inline (`suggestion`), open `plugin-error-index.md` once per rule-TYPE; re-validate
+   (the next ledger is the DELTA).
 3. **`CONVERGED`** (blocking set empty) → evaluate WARNINGs (rules below); fix
    publish-blockers; then the mandatory final verify (+ migration 7c/7d when dispatched
    for an upgrade — and publish-until-CI-green).
@@ -65,6 +69,33 @@ Key properties:
 - Re-validate after EVERY batch, not once at the end. Validator output changes as fixes land — a finding that seemed low-priority may upgrade once a blocking issue clears.
 - Fix in priority order within a single batch, but always re-validate before the next batch — don't chain speculative fixes based on stale reports.
 - Stop when the report is clean of findings AND free of publish-blocking warnings.
+
+## Compact ledger + fix-as-you-go
+
+The inner validate→fix loop used to ingest the FULL `.md` report every iteration and read the
+per-error recipe once per finding — a top token sink (cost ≈ turns × per-turn-context: every raw
+report rides forward and is re-charged on each later turn). The ledger + fix-as-you-go discipline
+removes that (TRDD-GVMOKJBB); it changes HOW the loop reads and applies findings and relaxes NO gate.
+
+- **The ledger IS the finding surface.** `cpv_fix_ledger.py build --json <findings.json> --out
+  <ledger.json> --text <ledger.txt>` reshapes the validator JSON into a COMPACT by-file view: each
+  finding is `L<line> <LEVEL> [<category>] <suggestion>`, grouped by file, split into a `mech`
+  bucket (`fixable:true`, auto-fixed by codemod) and an `intel` bucket (needs the model), with each
+  WARNING pre-tagged `BLOCKING`/`advisory` (same rule as this file's categories — the agent never
+  re-reads the 40-line table). Read `<ledger.txt>`; NEVER re-ingest the full report.
+- **MECH before INTEL.** `cpv_codemod.py apply --json <findings.json> --apply` deterministically
+  clears the `mech` set (idempotent, per-file backup, skips vendored) at ZERO model cost. Run it
+  first so the model only ever works the INTEL residual.
+- **Read once, fix in the same turn.** For each file in the `intel` bucket, read ONLY the ledger's
+  line ranges (`tldr slice`/`Read` offset+limit — never the whole file), apply ALL of that file's
+  fixes in one turn (`fastedit` for a symbol body, else `Edit`), then never re-read it. File-centric,
+  not finding-centric — a file with 5 findings is read once, not five times.
+- **Delta re-validate.** After a pass, re-validate → a NEW (smaller) ledger; the loop-state guard
+  records the signature as before. Read the delta ledger, never a fresh full report.
+- **Optional pinpoint (large files, imprecise lines).** When a finding's `line` is `null`/coarse and
+  the file is large, you MAY use FREE-mode `llm-externalizer` to locate the exact span — but only
+  when its tools are present; otherwise use the ledger line directly. Never a hard dependency (the
+  ledger already carries file+line for nearly every finding).
 
 ## Entry points — plugin path vs report path
 
