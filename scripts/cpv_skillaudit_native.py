@@ -1292,6 +1292,39 @@ _SCHEMA_FIELD_THREAT_RULES: frozenset[str] = _INTENT_HARD_SIGNAL_RULES | frozens
     {"MCP_SCHEMA_POISON", "TOOL_POISONING"}
 )
 
+# issue #154 — the agent_manipulation / prompt-injection rule family whose
+# threat REQUIRES the matched string to be read into an agent's or the model's
+# context (an instruction-loadable surface, or a tool-metadata field an LLM
+# reads when deciding to call a tool). A `.claude-plugin/plugin.json`
+# `userConfig` schema is CONFIG-UI documentation rendered to the HUMAN in the
+# plugin-config UI — never injected into any agent context — so these rules are
+# FALSE POSITIVES on a benign userConfig location (a field key name, or a
+# title/description/label/enum string value; see
+# `_skillaudit_json_context.is_benign_plugin_userconfig_location`). This differs
+# from `_SCHEMA_FIELD_THREAT_RULES` above, which DEMOTE-not-suppress on a
+# genuinely instruction-loadable metadata `description` (an MCP tool schema the
+# model reads): userConfig is NOT such a surface, so the family fully clears
+# there. Execution / secret / exfil-to-a-real-sink rules are deliberately NOT in
+# this set — they stay fully live (a `userConfig.<key>.command` string a hook
+# runs still fires), and the predicate additionally vetoes any DANGEROUS-key
+# value line.
+_USERCONFIG_INERT_MANIPULATION_RULES: frozenset[str] = frozenset(
+    {
+        "CROSS_TOOL_ACCESS",
+        "TOOL_SHADOW",
+        "AGENT_MEMORY_MOD",
+        "TOOL_POISONING",
+        "MCP_SCHEMA_POISON",
+        "PROMPT_INJECT",
+        "INDIRECT_PROMPT_INJECT",
+        "A2A_AGENT_IMPERSONATION",
+        "A2A_TASK_HIJACK",
+        "A2A_CROSS_AGENT_INJECT",
+        "A2A_DATA_LEAK",
+        "A2A_CAPABILITY_ABUSE",
+    }
+)
+
 
 # Path basenames that are ALWAYS instruction-loadable — content there
 # IS read by Claude Code as agent instructions, so prompt-injection /
@@ -2019,6 +2052,32 @@ def _context_classifier_dispatch(
     # CRITICAL (see `_is_benign_cgroup_detection_read`). FN-safe two-sided.
     if rule_id == "CONTAINER_ESCAPE" and _is_benign_cgroup_detection_read(match, content):
         return "suppress"
+    # issue #154 — agent_manipulation / prompt-injection family on a
+    # `.claude-plugin/plugin.json` `userConfig` config-UI location. The
+    # userConfig schema — its descendant field KEY names and their
+    # title/description/label/enum string values — is documentation rendered to
+    # the HUMAN in the plugin-config UI; it is NEVER injected into an agent's or
+    # the model's context (not instruction-loadable), so a rule whose threat
+    # requires an instruction-loadable / tool-metadata surface (CROSS_TOOL_ACCESS,
+    # TOOL_SHADOW, INDIRECT_PROMPT_INJECT, …) cannot be delivered through it. The
+    # canonical FP: CROSS_TOOL_ACCESS on a userConfig field named
+    # `context_window_tokens` (the KEY substring `context_window` has no
+    # string-value covering path → the JSON classifier returns `unknown` → the
+    # heuristic chain keeps it MAJOR). FN-safe: `is_benign_plugin_userconfig_location`
+    # confines the clear to the userConfig subtree of the MANIFEST (not
+    # settings.json / package.json / any other .json), does NOT clear a
+    # DANGEROUS-key (command/args/env/…) value line, and only the
+    # manipulation/injection family is affected — execution / secret / exfil
+    # rules stay fully live.
+    if rule_id in _USERCONFIG_INERT_MANIPULATION_RULES and fp_lower.endswith(".json"):
+        try:
+            from _skillaudit_json_context import (  # type: ignore[import-not-found]
+                is_benign_plugin_userconfig_location as _uc_benign,
+            )
+        except ImportError:
+            return ""
+        if _uc_benign(file_path, content, line_idx):
+            return "suppress"
     # Point 1 (v2.114.0): an extension-less script (git hook, configure,
     # runme) reaches here with no classifier-recognised extension. The
     # per-language classifiers dispatch AND internally gate on the file
