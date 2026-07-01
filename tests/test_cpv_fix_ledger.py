@@ -439,3 +439,43 @@ def test_cli_requires_subcommand() -> None:
     """Invoking with no sub-command exits non-zero (argparse enforces it)."""
     with pytest.raises(SystemExit):
         ledger.main([])
+
+
+# --------------------------------------------------------------------------
+# Token-economy gate — the ledger the loop re-reads each iteration is a small
+# fraction of the raw findings surface it replaces, WITHOUT losing findings
+# (compression, not truncation). This is the measured P1 win (TRDD-GVMOKJBB);
+# the assertion is a conservative ceiling so the win cannot silently regress.
+# --------------------------------------------------------------------------
+
+
+def test_ledger_text_far_smaller_but_lossless() -> None:
+    """The compact ledger text is well under half the raw findings surface it replaces (measured ~22%) yet preserves every file and the full finding count — compression, not truncation (TRDD-GVMOKJBB)."""
+    verbose = (
+        "the component declares a value that does not match the documented Claude Code plugin "
+        "spec for this position; at load time the runtime silently ignores or mis-handles it, "
+        "which usually indicates an authoring mistake to correct before publishing."
+    )
+    paths = ["skills/a/SKILL.md", "agents/b.md", "commands/c.md", "scripts/d.py"]
+    results = [
+        _result(
+            ["MAJOR", "MINOR", "NIT", "WARNING"][k],
+            f"{fi}.{k} {verbose}",
+            file=f,
+            line=10 + k * 7,
+            category="cat",
+            suggestion=f"Correct the value at {f}:{10 + k * 7} to the documented form; see the plugin spec.",
+        )
+        for fi, f in enumerate(paths)
+        for k in range(4)
+    ]
+    findings = _wrap(results)
+    raw_bytes = len(json.dumps(findings))
+    built = ledger.build_ledger(findings)
+    text = ledger.render_text(built)
+    # SMALLER: the loop re-reads this every iteration instead of the full findings/report.
+    assert len(text) < raw_bytes * 0.5, f"ledger {len(text)}B not < 50% of findings {raw_bytes}B"
+    # LOSSLESS (the paired negative): every file and the full count survive the compaction.
+    assert built["summary"]["total"] == len(results)
+    for f in paths:
+        assert f in text
