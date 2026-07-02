@@ -5200,6 +5200,105 @@ def _is_mid_job_build_artifact(
         return False
     return False
 
+
+# ── RC-WORKFLOW-PATH-BROKEN download-artifact awareness (TRDD-V7K2QF8M) ────────
+# A path CONSUMED by a run: step but PRODUCED at runtime by an earlier
+# actions/download-artifact step can never exist in the repo checkout — the
+# action materialises the artifacts under its `with.path:` directory at job
+# runtime. Flagging such a path "does not exist on disk" is a FP on the standard
+# fan-in shape: a matrix of jobs uploads per-shard reports, then an aggregate job
+# downloads them into e.g. `reports-in/` and merges (exactly CPV's own free-CI
+# matrix-shard Validate job). Signal (b)'s _collect_jobs_run_text only harvests
+# `run:` bodies, so it is BLIND to a download-artifact step (a `uses:` step) — a
+# separate structural pass is needed. Kept PER-JOB (artifacts live on one
+# runner; a download in job A does not populate job B's checkout) and NARROW
+# (only the download-artifact action, only its explicit non-`.` path dir) so a
+# genuinely-broken repo reference in the same job still fires.
+_DOWNLOAD_ARTIFACT_ACTION: str = "download-artifact"
+
+
+def _collect_jobs_artifact_dirs(content: str) -> list[tuple[int, int, set[str]]]:
+    """Return one ``(job_start_line, job_end_line, artifact_dirs)`` triple per
+    workflow JOB that has at least one ``run:`` body, where ``artifact_dirs`` is
+    the set of directories that job's ``actions/download-artifact`` steps
+    materialise (their explicit ``with.path:`` value; an omitted/`.`/empty path
+    is DELIBERATELY not recorded — extraction into the CWD cannot be mapped to a
+    known dir, so suppressing on it would risk masking a real broken ref).
+
+    The job line span is computed exactly as in ``_collect_jobs_run_text`` (from
+    the job's ``run:`` bodies) — a job with no ``run:`` body can hold no flagged
+    token, so it needs no entry. Best-effort structural parse via
+    ``yaml.safe_load``; on any parse failure the list is empty and the caller
+    falls back to flagging (FN-safe — a real broken ref is never silently
+    dropped by a parse failure)."""
+    try:
+        doc = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return []
+    if not isinstance(doc, dict):
+        return []
+    jobs = doc.get("jobs")
+    if not isinstance(jobs, dict):
+        return []
+
+    results: list[tuple[int, int, set[str]]] = []
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            continue
+        run_bodies: list[str] = []
+        artifact_dirs: set[str] = set()
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            if isinstance(step.get("run"), str):
+                run_bodies.append(step["run"])
+            uses = step.get("uses")
+            if isinstance(uses, str) and _DOWNLOAD_ARTIFACT_ACTION in uses:
+                with_block = step.get("with")
+                if isinstance(with_block, dict) and isinstance(with_block.get("path"), str):
+                    d = _strip_leading_dotslash(with_block["path"].strip()).rstrip("/")
+                    if d and d != ".":
+                        artifact_dirs.add(d)
+        # No run body → no flaggable token here; no artifact dir → nothing to
+        # suppress. Either way this job contributes no suppression span.
+        if not run_bodies or not artifact_dirs:
+            continue
+        first_line, _ = _locate_run_body(content, run_bodies[0], 0)
+        last_line = first_line
+        cursor = 0
+        for body in run_bodies:
+            ln, cursor = _locate_run_body(content, body, cursor)
+            last_line = max(last_line, ln + body.count("\n"))
+        results.append((first_line, last_line, artifact_dirs))
+    return results
+
+
+def _is_downloaded_artifact_path(
+    token: str,
+    line_no: int,
+    jobs_artifact_dirs: list[tuple[int, int, set[str]]],
+) -> bool:
+    """True iff the literal ``token`` at ``line_no`` resolves UNDER a directory
+    that an ``actions/download-artifact`` step in its SAME job materialises at
+    runtime — so the path is produced, not a broken repo reference.
+
+    FN-safe: a token outside every download-artifact ``path:`` dir (a genuine
+    missing file) is not suppressed, and a matching path in a DIFFERENT job than
+    the download step still flags (per-job scoping — artifacts are per-runner)."""
+    cleaned = _strip_leading_dotslash(token)
+    for job_start, job_end, artifact_dirs in jobs_artifact_dirs:
+        if not (job_start <= line_no <= job_end):
+            continue
+        for d in artifact_dirs:
+            if cleaned == d or cleaned.startswith(d + "/"):
+                return True
+        return False
+    return False
+
+
 # Trailing shell control operators that frequently glue onto path-like
 # tokens because shlex.split does NOT consume them as token separators —
 # they are shell metacharacters, not whitespace. Without stripping them,
@@ -5513,9 +5612,21 @@ def validate_workflow_path_broken(plugin_root: Path, report: ValidationReport) -
         # missing. Computed once per file.
         jobs_run_text = _collect_jobs_run_text(content)
 
+        # TRDD-V7K2QF8M: a path materialised at runtime by an actions/download-
+        # artifact step (under its with.path: dir) is not a repo file — collect
+        # those per-job dirs once so the token loop can skip them. Signal (b)'s
+        # run-text pass is blind to a `uses:` download step, so this is separate.
+        jobs_artifact_dirs = _collect_jobs_artifact_dirs(content)
+
         run_blocks = _collect_run_blocks(content)
         for body, body_start_line in run_blocks:
             for token, line_no in _scan_workflow_run_body(body, body_start_line):
+                # A runtime-downloaded artifact path is produced on the runner,
+                # never present in the repo checkout — do not flag it. FN-safe:
+                # a token outside every download-artifact path: dir (a genuine
+                # missing file) falls through and is still validated below.
+                if _is_downloaded_artifact_path(token, line_no, jobs_artifact_dirs):
+                    continue
                 if _is_workflow_glob(token):
                     # Resolve the glob from the plugin root. Use
                     # ``recursive=False`` so ``*`` does NOT cross directory
