@@ -42,8 +42,20 @@ jobs:
       - name: Type check
         run: uv run mypy scripts/ --ignore-missing-imports
 
-  validate:
-    name: Validate
+  # ── Validate family (TRDD-V7K2QF8M) ────────────────────────────────────────
+  # The single "Validate" job was decomposed for a FREE CI speedup: the two
+  # inter-deduping security passes (skillaudit + exec-class merge) were ~72% of
+  # its wall time, so they now run over a disjoint file partition on parallel
+  # free ubuntu-latest runners (validate-shard), alongside a validate-light job
+  # that runs every NON-security validator. The fail-closed "validate" aggregate
+  # below unions the reports and produces the REQUIRED bare "Validate" check.
+  # Required-check names stay Lint / Validate / Test — NO branch-ruleset change.
+  validate-light:
+    # Runs the full pipeline EXCEPT the two security passes; emits every
+    # non-security finding as JSON and exits 0 (the verdict is deferred to the
+    # aggregate, so counts are pooled with the shards in ONE place — a
+    # non-skillaudit MAJOR must be counted together with skillaudit, never split).
+    name: Validate Light
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -58,23 +70,23 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run plugin validation (strict)
-        run: |
-          set +e
-          uv run python scripts/validate_plugin.py . --verbose --strict
-          exit_code=$?
-          set -e
-          # Exit codes: 0=pass, 1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT (all block in strict mode)
-          if [ $exit_code -eq 0 ]; then
-            echo "Validation passed"
-            exit 0
-          else
-            echo "::error::Validation failed (exit code $exit_code)"
-            exit $exit_code
-          fi
+      - name: Emit non-security findings (skillaudit + exec-class skipped)
+        run: uv run python scripts/validate_plugin.py . --strict --skip-skillaudit --skip-exec-class --json > light.json
 
-  test-shard:
-    name: Test Shard ${{ matrix.group }}
+      - name: Upload light report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: validate-light
+          path: light.json
+          if-no-files-found: error
+          retention-days: 1
+
+  validate-shard:
+    # Runs ONLY skillaudit + exec-class, over this shard's file subset
+    # (partitioned by a sha1 hash of each file's relative posix path, the SAME
+    # key both passes use — so a same-file skillaudit+exec pair co-locates in ONE
+    # shard and its dedup fires identically to a single run). Emit-only, exits 0.
+    name: Validate Shard ${{ matrix.group }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -93,7 +105,95 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run tests (shard ${{ matrix.group }} of 4)
+      - name: Emit security findings for shard ${{ matrix.group }} of 4
+        run: uv run python scripts/validate_plugin.py . --security-shard ${{ matrix.group }}/4 --json > sa-${{ matrix.group }}.json
+
+      - name: Upload shard report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: validate-shard-${{ matrix.group }}
+          path: sa-${{ matrix.group }}.json
+          if-no-files-found: error
+          retention-days: 1
+
+  validate:
+    # Aggregate gate that produces the required bare "Validate" status check. The
+    # branch ruleset requires a check named exactly "Validate"; the jobs above
+    # report "Validate Light" / "Validate Shard N", NOT a bare "Validate". This
+    # job depends on all of them and is fail-closed: any upstream failure, any
+    # missing report artifact, or any finding in the merged report FAILS the
+    # required "Validate" check. The union(light + shards) SUMMARY is byte-for-byte
+    # identical to a single `validate_plugin.py . --strict` run (proven by
+    # tests/test_security_shard_parity.py). Do NOT rename this job without also
+    # updating the branch ruleset's required status checks.
+    name: Validate
+    runs-on: ubuntu-latest
+    needs: [validate-light, validate-shard]
+    if: always()
+    timeout-minutes: 15
+    steps:
+      - name: Fail closed if any validate job did not succeed
+        run: |
+          if [ "${{ needs.validate-light.result }}" != "success" ] || [ "${{ needs.validate-shard.result }}" != "success" ]; then
+            echo "::error::a validate job failed or was cancelled (light=${{ needs.validate-light.result }} shard=${{ needs.validate-shard.result }})"
+            exit 1
+          fi
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57  # v8.0.0
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Download all validate reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          path: reports-in
+          merge-multiple: true
+
+      - name: Assert all validate reports are present
+        # Fail-closed on a missing/corrupt artifact — never let an absent shard
+        # report read as "0 findings" and silently pass the gate.
+        run: |
+          missing=0
+          for f in reports-in/light.json reports-in/sa-1.json reports-in/sa-2.json reports-in/sa-3.json reports-in/sa-4.json; do
+            if [ ! -f "$f" ]; then echo "::error::missing validate report: $f"; missing=1; fi
+          done
+          [ $missing -eq 0 ] || exit 1
+
+      - name: Merge reports and enforce the strict verdict
+        # --merge-report short-circuits before the pipeline: it unions the JSON
+        # results, prints the compact SUMMARY, and returns the strict exit code
+        # (0=pass, 1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT — all block). The leading
+        # `.` satisfies the required positional; it is ignored in merge mode.
+        run: uv run python scripts/validate_plugin.py . --merge-report reports-in/light.json reports-in/sa-1.json reports-in/sa-2.json reports-in/sa-3.json reports-in/sa-4.json --strict
+
+  test-shard:
+    name: Test Shard ${{ matrix.group }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57  # v8.0.0
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests (shard ${{ matrix.group }} of 8)
         # serial + no-re2 WITHIN each shard is deliberate (TRDD-K7P2XR4Q): each
         # shard runs pytest WITHOUT -n (serial) and without the google-re2
         # `performance` extra (bare `uv sync` omits it), so the order-dependent
@@ -102,7 +202,9 @@ jobs:
         # catch is cross-shard ordering pollution (a polluter in one shard, its
         # victim in another) — that is covered by the mandatory LOCAL full-serial
         # pre-publish run, which is the authoritative cross-shard ordering gate.
-        run: uv run pytest tests/ --splits 4 --group ${{ matrix.group }} -v
+        # Bumped 4→8 shards (TRDD-V7K2QF8M): spreads the ~20 heavy integration
+        # tests to ~2-3 per shard; free wall-wise (unlimited parallel free jobs).
+        run: uv run pytest tests/ --splits 8 --group ${{ matrix.group }} -v
 
   test:
     # Aggregate gate that produces the required bare "Test" status check. The
