@@ -19,7 +19,7 @@ publish-target: claude-plugins-validation
 test-requirements: [unit, lint, typecheck]
 relevant-rules: []
 impacts: [ci-pipeline]
-implementation-commits: []
+implementation-commits: [c80b8c0, a2ebe4a]
 external-refs: []
 ---
 
@@ -29,13 +29,13 @@ external-refs: []
 
 **Goal:** cut total CI wall FREE (standard `ubuntu-latest` 4-vCPU public-repo runners + more parallel JOBS — NEVER a paid larger runner). Target 3m41s → ~2m06s (~1.7×).
 
-**Current state:** plan fully designed + source-verified. Implementation NOT started. Nothing committed.
+**Current state:** code+ci.yml committed (c80b8c0, a2ebe4a); serial tests GREEN (10426). ✅ BLOCKER CLEARED: the RC-WORKFLOW-PATH-BROKEN FP on `reports-in/*.json` was a real detector gap (issue-#116 produced-path scan harvests only `run:` bodies → blind to the `actions/download-artifact` `uses:` step). FIXED in `validate_plugin.py` (`_collect_jobs_artifact_dirs` + `_is_downloaded_artifact_path` — suppress a token under a download-artifact `with.path:` dir in its SAME job; PER-JOB + explicit-non-`.`-path only, so broken-ref-outside-dir / no-download-job / cross-job / omitted-path all STILL fire). +7 two-sided tests (`tests/test_workflow_path_download_artifact.py`), ruff+mypy clean, cache-cold self-validate **0/0/0/0**. Remaining: docs done (CLAUDE.md v2.152.0) → regen self-hashes LAST → commit by name → `publish.py --minor` → watch CI green → MEASURE wall ≥1.3× vs 3m41s → correct memory `lesson_ci_validate_job_not_worth_optimizing` → `column: complete`.
 
 **Durable evidence to read before acting:**
 - `reports/validate-profiling/20260702_185714+0200-free-matrix-shard-plan.md` — the FULL plan (job graph, exact edits w/ file:line, parity proof, projections). THE spec.
 - `reports/validate-profiling/20260702_181635+0200-validate-selfscan-profile.md` — the profile (skillaudit = 72% of the 209s self-scan, per-file-independent).
 
-**NEXT ACTION:** dispatch ONE opus implementation agent to make the coupled code changes + the mandatory parity test (change inventory below), following the plan report verbatim. Then main-session: verify diff, write ci.yml, full local serial test run, `publish.py --minor`, watch CI green, MEASURE actual wall (gate on measured ratio ≥1.3×, NOT test-pass count), update the memory note + CLAUDE.md, regen self-hashes LAST.
+**NEXT ACTION:** await the background full-serial test (authoritative cross-shard gate; log at scratchpad/serial-test-run.log via bg task bxx8taaq1). On green → `publish.py --minor` → watch CI to green → MEASURE actual total-CI wall, gate ≥1.3× vs 3m41s → regen `.cpv-self-hashes.json` LAST → cache-cold `CPV_SCAN_CACHE=0 validate_plugin.py . --strict` self-validate = 0/0/0/0 → correction-protocol update to memory note `lesson_ci_validate_job_not_worth_optimizing` (free lever SUPERSEDES "not worth it") + update CLAUDE.md inventory + set `column: complete`.
 
 **Load-bearing facts / gotchas:**
 - skillaudit is per-file-independent (`cpv_skillaudit_native.py:4157-4189`); `scan_path` already delegates to `_scan_path_serial/_parallel(root, files)` which take explicit file lists → subset = sort-by-relative-posix + `files[k::N]`.
