@@ -4487,6 +4487,57 @@ def scan_path(plugin_root: Path) -> tuple[list[dict[str, Any]], int]:
     return _scan_path_parallel(plugin_root, files)
 
 
+def _shard_of(rel_posix: str, shard_total: int) -> int:
+    """Map a file's plugin-relative POSIX path to a shard index ``[0, shard_total)``.
+
+    The partition is a stable, CONTENT-INDEPENDENT hash of the RELATIVE PATH —
+    NOT the rglob position — so the same file lands in the same shard no matter
+    which scanner enumerated it. This is load-bearing for CI matrix-sharding
+    parity: the skillaudit file-subset selection (``scan_path_subset``) AND
+    validate_plugin's execution-class finding filter must agree on a file's
+    shard, so that a skillaudit finding and an exec-class finding that would
+    DEDUP against each other in a single run stay co-located in ONE shard (they
+    always share the same ``.file`` string, hence the same shard). A plain
+    rglob-index slice ``files[k::N]`` would NOT satisfy this — skillaudit and
+    validate_security walk the tree with DIFFERENT ``_iter_scannable_files``
+    implementations, so an index has no cross-scanner meaning, whereas a path
+    hash does. ``sha1`` (not the builtin, per-process-salted ``hash()``) keeps
+    the mapping byte-identical across runners and processes.
+    """
+    digest = hashlib.sha1(rel_posix.encode("utf-8")).hexdigest()  # noqa: S324 — partitioning, not security
+    return int(digest, 16) % shard_total
+
+
+def scan_path_subset(
+    plugin_root: Path, shard_index: int, shard_total: int
+) -> tuple[list[dict[str, Any]], int]:
+    """Scan ONLY the files in shard ``shard_index`` of ``shard_total`` (0-based).
+
+    A disjoint, exhaustive partition of the scannable files by
+    ``_shard_of(relative-posix-path)``. Reuses ``_scan_path_serial`` /
+    ``_scan_path_parallel`` VERBATIM on the subset, so each file is scanned
+    exactly as in a single ``scan_path`` run — the UNION of all N shards'
+    findings is the same multiset ``scan_path`` produces (order aside; the
+    downstream SUMMARY is a count, order-independent). An empty shard returns
+    ``([], 0)``. Files are sorted by relative-posix path before filtering only
+    for determinism of the ``_scan_path_serial`` input order within a shard
+    (rglob yield order is not guaranteed stable across runners).
+    """
+    files = [
+        p
+        for p in sorted(
+            _iter_scannable_files(plugin_root),
+            key=lambda p: p.relative_to(plugin_root).as_posix(),
+        )
+        if _shard_of(p.relative_to(plugin_root).as_posix(), shard_total) == shard_index
+    ]
+    if not files:
+        return [], 0
+    if not _parallel_enabled() or len(files) < _parallel_threshold():
+        return _scan_path_serial(plugin_root, files)
+    return _scan_path_parallel(plugin_root, files)
+
+
 def _scan_path_serial(plugin_root: Path, files: list[Path]) -> tuple[list[dict[str, Any]], int]:
     """Serial scan loop — routes through `_scan_one_file_skillaudit`.
 
@@ -4650,6 +4701,54 @@ def run_skillaudit_scan(plugin_path: Path) -> SkillAuditScanResult:
         )
     raw_findings, files_scanned = scan_path(plugin_path)
     # Filter out suppressed findings (informational, not actionable).
+    actionable: list[SkillAuditFinding] = []
+    for f in raw_findings:
+        if f.get("suppressed"):
+            continue
+        sev = _to_cpv_severity(str(f.get("severity", "medium")))
+        actionable.append(
+            SkillAuditFinding(
+                severity=sev,
+                rule_id=str(f.get("ruleId", "skillaudit.unknown")),
+                message=str(f.get("name", "") or f.get("description", "")),
+                file_path=str(f.get("file", "")),
+                line_number=int(f["line"]) if isinstance(f.get("line"), int) and f["line"] > 0 else None,
+                category=str(f.get("category", "")),
+                raw=f,
+            )
+        )
+    return SkillAuditScanResult(
+        invoked=True,
+        findings=tuple(actionable),
+        skipped_reason="",
+        files_scanned=files_scanned,
+    )
+
+
+def run_skillaudit_scan_subset(
+    plugin_path: Path, shard_index: int, shard_total: int
+) -> SkillAuditScanResult:
+    """Shard-scoped clone of ``run_skillaudit_scan`` — scans ONLY this shard's
+    file subset (see ``scan_path_subset``).
+
+    Behaviour is otherwise byte-identical to ``run_skillaudit_scan``: missing
+    rule catalog → ``invoked=False`` (CRITICAL downstream, never silently
+    skipped); suppressed findings filtered; per-finding CPV-severity mapping
+    unchanged. The UNION of all N shards' ``findings`` reproduces
+    ``run_skillaudit_scan``'s findings multiset exactly. Kept as a deliberate
+    clone (not a refactor of ``run_skillaudit_scan``) so the single-run entry
+    point stays untouched — zero regression risk to the existing scan path.
+    """
+    if not _get_rules():
+        return SkillAuditScanResult(
+            invoked=False,
+            findings=(),
+            skipped_reason=(
+                f"skillaudit rule catalog missing at {_RULES_PATH}; "
+                "this is a CPV install integrity issue, not a runtime opt-out"
+            ),
+        )
+    raw_findings, files_scanned = scan_path_subset(plugin_path, shard_index, shard_total)
     actionable: list[SkillAuditFinding] = []
     for f in raw_findings:
         if f.get("suppressed"):

@@ -61,6 +61,7 @@ from cpv_validation_common import (
     is_vendored_path,
     load_cpv_config,
     path_is_unshipped,
+    print_compact_summary,
     removed_cpv_size_keys_present,
     save_report_and_print_summary,
     tracked_but_gitignored_paths,
@@ -2277,7 +2278,9 @@ def validate_encoding(plugin_root: Path, report: ValidationReport) -> None:
 
 
 # TRDD-e3e74f69 telemetry hookup
-def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
+def _run_skillaudit_native(
+    plugin_root: Path, report: ValidationReport, *, shard: tuple[int, int] | None = None
+) -> None:
     """Run the MANDATORY native skillaudit scan (v2.99.1 hookup).
 
     The scanner runs in-process — zero subprocess, zero network, zero
@@ -2303,9 +2306,15 @@ def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
     )
     from cpv_skillaudit_native import (  # noqa: PLC0415
         run_skillaudit_scan,
+        run_skillaudit_scan_subset,
     )
 
-    result = run_skillaudit_scan(plugin_root)
+    if shard is not None:
+        # CI matrix-shard mode (TRDD-V7K2QF8M) — scan ONLY this shard's file
+        # subset. The union of all N shards reproduces the single-run findings.
+        result = run_skillaudit_scan_subset(plugin_root, shard[0], shard[1])
+    else:
+        result = run_skillaudit_scan(plugin_root)
 
     # Apply the same self-scan filter chain validate_security.py uses
     # when running its Check 27. Best-effort import — if validate_security
@@ -2442,7 +2451,9 @@ _EXECCLASS_RCE_RULE_IDS: frozenset[str] = frozenset(
 )
 
 
-def _run_security_execclass_gate(plugin_root: Path, report: ValidationReport) -> None:
+def _run_security_execclass_gate(
+    plugin_root: Path, report: ValidationReport, *, shard: tuple[int, int] | None = None
+) -> None:
     """Run the in-process EXECUTION-CLASS security pass in plugin mode.
 
     Closes RT4-plugin-gate-weaker-than-security: the user-facing plugin gate
@@ -2543,10 +2554,22 @@ def _run_security_execclass_gate(plugin_root: Path, report: ValidationReport) ->
     # on the exact (level, message, file, line) tuple so re-running a scanner
     # the skillaudit-native pass already emitted does not double-count.
     existing = {(r.level, r.message, r.file, r.line) for r in report.results}
+    # CI matrix-shard mode (TRDD-V7K2QF8M): _shard_of is the SAME path-hash
+    # partition skillaudit's subset selection used, so a skillaudit/exec DEDUP
+    # collision (always the same `.file`) is co-located in ONE shard and deduped
+    # identically to a single run. Imported unconditionally (cheap dict lookup —
+    # module already loaded) to keep the loop body branch-light and mypy-simple.
+    from cpv_skillaudit_native import _shard_of  # noqa: PLC0415
+
     for r in exec_report.results:
         if r.level not in ("CRITICAL", "MAJOR", "MINOR", "NIT"):
             continue
         if not _is_execclass(r.message):
+            continue
+        # Keep ONLY findings whose file belongs to THIS shard. A finding with no
+        # path is assigned deterministically via _shard_of("") so it lands in
+        # exactly one shard — never dropped, never double-counted across shards.
+        if shard is not None and _shard_of(Path(r.file).as_posix() if r.file else "", shard[1]) != shard[0]:
             continue
         key = (r.level, r.message, r.file, r.line)
         if key in existing:
@@ -7155,6 +7178,100 @@ def _run_cache_audit_separate(plugin_root: Path, main_report_path: str | None, r
     return pointer
 
 
+def _parse_shard_spec(spec: str) -> tuple[int, int]:
+    """Parse a 1-based ``K/N`` shard spec into a 0-based ``(index, total)``.
+
+    Fail-fast on a malformed spec (fail-fast invariant — a silently-misparsed
+    shard would scan the WRONG file subset and break union parity, the exact
+    failure the parity test exists to catch).
+    """
+    try:
+        k_str, n_str = spec.split("/", 1)
+        k, n = int(k_str), int(n_str)
+    except (ValueError, AttributeError) as exc:
+        raise SystemExit(f"--security-shard expects K/N (e.g. 2/4), got {spec!r}: {exc}") from exc
+    if n < 1 or k < 1 or k > n:
+        raise SystemExit(f"--security-shard K/N requires 1 <= K <= N, got {spec!r}")
+    return k - 1, n
+
+
+def _run_security_shard(plugin_root: Path, spec: str) -> int:
+    """``--security-shard K/N`` emit-only mode (TRDD-V7K2QF8M).
+
+    Scans ONLY shard K (1-based) of N for the two INTER-DEDUPING security passes
+    — skillaudit + the execution-class merge — over this shard's file subset,
+    emits the partial report as JSON, and exits 0. The VALID/INVALID verdict is
+    DEFERRED to the ``--merge-report`` aggregate: a shard is a partial view and
+    must never emit a verdict. Runs NEITHER the structural validators NOR the
+    holistic/network passes (those are the ``validate-light`` job). Co-locating
+    BOTH security passes here is what makes the union byte-identical to a single
+    run — a skillaudit/exec dedup collision (always same-file) lands in ONE
+    shard and is deduped there exactly as in the single run.
+    """
+    shard_index, shard_total = _parse_shard_spec(spec)
+    report = ValidationReport()
+    _run_skillaudit_native(plugin_root, report, shard=(shard_index, shard_total))
+    _run_security_execclass_gate(plugin_root, report, shard=(shard_index, shard_total))
+    print_json(report)
+    return 0
+
+
+def _load_emit_results(path: str) -> list[dict[str, Any]]:
+    """Load + validate ONE shard/light ``--json`` emit; return its ``results`` list.
+
+    Fail-fast on an unreadable / non-JSON / structurally-wrong emit — a dropped
+    or corrupt shard artifact must surface as a hard error in the aggregate,
+    NEVER be silently treated as "0 findings" (which would flip an INVALID
+    plugin to VALID by losing a shard).
+    """
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"--merge-report: cannot read/parse {path!r}: {exc}") from exc
+    results = data.get("results")
+    if not isinstance(results, list):
+        raise SystemExit(f"--merge-report: {path!r} has no 'results' list (corrupt shard emit)")
+    return results
+
+
+def _run_merge_report(paths: list[str], strict: bool) -> int:
+    """``--merge-report`` fail-closed aggregate mode (TRDD-V7K2QF8M).
+
+    Unions the results of the shard/light ``--json`` emits into ONE
+    ``ValidationReport``, prints the SAME compact summary a normal plugin run
+    prints, and returns the (strict) verdict exit code — so the CI aggregate
+    reproduces the single-run verdict exactly. Each input is a ``print_json``
+    emit (``{exit_code, counts, results:[...], ...}``); results are
+    reconstructed with the fields print_json carries (level/message/file/line +
+    optional fixable/fix_id). category/suggestion/phase are summary-irrelevant
+    (the SUMMARY is a per-level COUNT + verdict, both driven only by ``level``).
+
+    Fail-fast on a missing/corrupt/empty input — a dropped shard artifact must
+    surface as a hard error, NEVER as a silent "0 findings" clean pass.
+    """
+    merged = ValidationReport()
+    files_seen = 0
+    for pat in paths:
+        matches = sorted(_glob.glob(pat)) or ([pat] if Path(pat).is_file() else [])
+        if not matches:
+            raise SystemExit(f"--merge-report: no file matched {pat!r} (a dropped shard artifact is fail-closed)")
+        for path in matches:
+            for d in _load_emit_results(path):
+                merged.add(
+                    d["level"],
+                    d["message"],
+                    d.get("file"),
+                    d.get("line"),
+                    fixable=bool(d.get("fixable", False)),
+                    fix_id=d.get("fix_id"),
+                )
+            files_seen += 1
+    if files_seen == 0:
+        raise SystemExit("--merge-report: no input JSON emits found (fail-closed)")
+    print_compact_summary(merged, "Plugin Validation", security_gates=True)
+    return merged.exit_code_strict() if strict else merged.exit_code
+
+
 def main() -> int:
     """Main entry point.
 
@@ -7220,6 +7337,32 @@ def main() -> int:
             "cross-marketplace dependency-allowlist enforcement. Overrides "
             "auto-discovery. See plugin-dependencies.md:54-79."
         ),
+    )
+    # CI matrix-shard modes (TRDD-V7K2QF8M) — split the Validate CI job across
+    # free parallel runners with ZERO verdict change. Emit-only / aggregate.
+    parser.add_argument(
+        "--skip-skillaudit",
+        action="store_true",
+        help="CI shard mode: skip the in-process skillaudit pass (run by the validate-shard matrix).",
+    )
+    parser.add_argument(
+        "--skip-exec-class",
+        action="store_true",
+        help="CI shard mode: skip the execution-class security merge (run by the validate-shard matrix).",
+    )
+    parser.add_argument(
+        "--security-shard",
+        type=str,
+        default=None,
+        metavar="K/N",
+        help="CI shard mode (K/N, 1-based): emit ONLY skillaudit + exec-class findings for this file shard as --json, exit 0.",
+    )
+    parser.add_argument(
+        "--merge-report",
+        nargs="+",
+        default=None,
+        metavar="JSON",
+        help="CI aggregate mode: union shard/light --json emits, print the summary, exit on the strict verdict.",
     )
     parser.add_argument("path", nargs="?", help="Plugin root path (default: parent of scripts/)")
     args = parser.parse_args()
@@ -7370,6 +7513,18 @@ def main() -> int:
     marketplace_only = args.marketplace_only
     skip_platform_checks = args.skip_platform_checks
 
+    # ── CI matrix-shard modes (TRDD-V7K2QF8M) ─────────────────────────────
+    # Short-circuit the full pipeline for the CI-only emit/aggregate modes.
+    # `_gi` (GitignoreFilter) is already built above, so the shard's self-scan
+    # skip filter behaves identically to the normal run. Parity with a single
+    # `validate_plugin . --strict` is guaranteed by construction (disjoint
+    # path-hash partition + order-independent SUMMARY counts) and GATED by
+    # tests/test_security_shard_parity.py.
+    if args.merge_report is not None:
+        return _run_merge_report(args.merge_report, args.strict)
+    if args.security_shard is not None:
+        return _run_security_shard(plugin_root, args.security_shard)
+
     # TRDD-20108ab7 (2026-05-10): resolve --marketplace-context (if any) so
     # validate_manifest sees the explicit hosting marketplace and skips
     # auto-discovery. Malformed/missing marketplace.json at the override path
@@ -7433,7 +7588,10 @@ def main() -> int:
     # supply chain, container escape, persistence, crypto theft, etc.)
     # in addition to validate_security.py Check 27. Iron rule preserved:
     # missing rule catalog → CRITICAL via cpv_skillaudit_native.report_findings.
-    _run_skillaudit_native(plugin_root, report)
+    # CI matrix-shard: --skip-skillaudit defers this pass to the validate-shard
+    # matrix (TRDD-V7K2QF8M); the validate-light job runs everything else.
+    if not getattr(args, "skip_skillaudit", False):
+        _run_skillaudit_native(plugin_root, report)
     # RT4-plugin-gate-weaker-than-security — make the user-facing plugin gate at
     # least as strong as the `security` subcommand for the EXECUTION class.
     # Without this, a plain os.system("curl … | bash") passed the plugin gate
@@ -7444,7 +7602,10 @@ def main() -> int:
     # Serial here (same rationale as skillaudit above): it arms/disarms the
     # validate_security self-scan module-flag, so it must complete BEFORE the
     # parallel batch's readers fire.
-    _run_security_execclass_gate(plugin_root, report)
+    # CI matrix-shard: --skip-exec-class defers this pass to the validate-shard
+    # matrix (TRDD-V7K2QF8M), co-located with skillaudit so their dedup matches.
+    if not getattr(args, "skip_exec_class", False):
+        _run_security_execclass_gate(plugin_root, report)
     # Print the repo-lint banner up front so output ordering is stable
     # whether or not the rest of the validators run in parallel. The lint
     # engine itself runs INSIDE the parallel batch below.
@@ -7574,6 +7735,14 @@ def main() -> int:
     # Output
     if args.json:
         print_json(report)
+        # CI matrix-shard (TRDD-V7K2QF8M): the validate-light job
+        # (--skip-skillaudit/--skip-exec-class) emits its PARTIAL findings but
+        # DEFERS the VALID/INVALID verdict to the `--merge-report` aggregate, so
+        # it must exit 0 — a non-zero here would fail the light job before the
+        # security shards are even merged. A normal --json run (no skip flags)
+        # keeps returning the verdict below, unchanged.
+        if getattr(args, "skip_skillaudit", False) or getattr(args, "skip_exec_class", False):
+            return 0
     else:
         if args.report:
             save_report_and_print_summary(
