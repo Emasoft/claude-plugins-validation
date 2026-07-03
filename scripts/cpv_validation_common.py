@@ -419,7 +419,8 @@ VALID_CONTEXT_VALUES = {"fork"}
 
 # Valid permission-mode values, used by agent frontmatter ``permissionMode``
 # and by settings ``permissions.defaultMode`` (permission-modes.md L17-22).
-# The same 6 values apply to both surfaces — single source of truth.
+# The same values apply to both surfaces — single source of truth.
+# ``manual`` was added in Claude Code v2.1.200 (defaultMode / --permission-mode).
 VALID_PERMISSION_MODES: frozenset[str] = frozenset(
     {
         "default",
@@ -428,6 +429,7 @@ VALID_PERMISSION_MODES: frozenset[str] = frozenset(
         "auto",
         "dontAsk",
         "bypassPermissions",
+        "manual",
     }
 )
 

@@ -5705,6 +5705,205 @@ def check_untested_until_release(plugin_root: Path, report: ValidationReport) ->
         )
 
 
+# ── Test-coverage audit (issue #155) — advisory, NON-BLOCKING ────────────────
+# Generic test-file shapes across the Claude-Code plugin ecosystem (Python
+# pytest/unittest + JS/TS jest/vitest/mocha). No runner-name assumptions.
+_COVERAGE_TEST_GLOBS: tuple[str, ...] = (
+    "test_*.py",
+    "*_test.py",
+    "*.test.js",
+    "*.test.jsx",
+    "*.test.ts",
+    "*.test.tsx",
+    "*.spec.js",
+    "*.spec.jsx",
+    "*.spec.ts",
+    "*.spec.tsx",
+)
+
+# A hook SCRIPT (testable executable) vs hooks.json / *.md (config + docs).
+_COVERAGE_HOOK_SCRIPT_EXTS: frozenset[str] = frozenset(
+    {".py", ".sh", ".bash", ".js", ".mjs", ".cjs", ".ts"}
+)
+
+# Path segments that never hold the plugin's OWN test suite — skip them during
+# test discovery so a vendored/installed package's tests can't be counted as the
+# plugin's coverage (nor slow the scan on a huge dependency tree).
+_COVERAGE_SKIP_SEGMENTS: frozenset[str] = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".venv",
+        "venv",
+        "node_modules",
+        "site-packages",
+        "__pycache__",
+        ".tox",
+        ".nox",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+    }
+)
+
+# Cap the total test-file content read for the content-mention fallback so a
+# pathologically large suite can't slow this advisory check down. Filename
+# matching stays unbounded (cheap).
+_COVERAGE_CONTENT_SCAN_CAP = 5_000_000
+
+
+def _coverage_path_is_vendored(path: Path, root: Path) -> bool:
+    """True if any segment of ``path`` (relative to ``root``) is a vendored /
+    build / VCS directory that never holds the plugin's own test suite."""
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        return False
+    return any(seg in _COVERAGE_SKIP_SEGMENTS for seg in rel.parts)
+
+
+def _coverage_enumerate_components(plugin_root: Path) -> list[tuple[str, str]]:
+    """Testable components as (display-path, match-token) by generic layout.
+
+    Mirrors the per-directory glob idiom of validate_scripts/validate_commands/
+    validate_agents/validate_hooks/validate_skills (there is no shared
+    enumeration helper — each inlines its own glob). The token is the stem a
+    conventional test filename/content would reference.
+    """
+    components: list[tuple[str, str]] = []
+
+    scripts_dir = plugin_root / "scripts"
+    if scripts_dir.is_dir():
+        for py in sorted(scripts_dir.glob("*.py")):
+            components.append((str(py.relative_to(plugin_root)), py.stem.lower()))
+
+    hooks_dir = plugin_root / "hooks"
+    if hooks_dir.is_dir():
+        for hook in sorted(hooks_dir.rglob("*")):
+            if (
+                hook.is_file()
+                and hook.suffix.lower() in _COVERAGE_HOOK_SCRIPT_EXTS
+                and not _coverage_path_is_vendored(hook, plugin_root)
+            ):
+                components.append((str(hook.relative_to(plugin_root)), hook.stem.lower()))
+
+    skills_dir = plugin_root / "skills"
+    if skills_dir.is_dir():
+        # A skill's identity is its directory name, not the literal "SKILL".
+        for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
+            components.append(
+                (str(skill_md.relative_to(plugin_root)), skill_md.parent.name.lower())
+            )
+
+    for comp_dir_name in ("commands", "agents"):
+        comp_dir = plugin_root / comp_dir_name
+        if comp_dir.is_dir():
+            for md in sorted(comp_dir.glob("*.md")):
+                components.append((str(md.relative_to(plugin_root)), md.stem.lower()))
+
+    return components
+
+
+def _coverage_discover_tests(plugin_root: Path) -> list[Path]:
+    """Test files anywhere under the plugin, by conventional filename patterns,
+    excluding vendored/installed-package trees (so their tests never count as
+    the plugin's own coverage)."""
+    test_files: list[Path] = []
+    seen: set[Path] = set()
+    for pattern in _COVERAGE_TEST_GLOBS:
+        for tf in plugin_root.rglob(pattern):
+            if tf.is_file() and tf not in seen and not _coverage_path_is_vendored(tf, plugin_root):
+                seen.add(tf)
+                test_files.append(tf)
+    return test_files
+
+
+def _coverage_test_blobs(test_files: list[Path]) -> tuple[str, str]:
+    """(filename-blob, bounded-content-blob), both lowercased, for matching.
+
+    Filename matching is cheap and unbounded; the content scan is capped
+    (``_COVERAGE_CONTENT_SCAN_CAP``) so a huge suite can't slow this advisory
+    down. Any read error is swallowed — best-effort, never crashes the run.
+    """
+    name_blob = "\n".join(tf.name.lower() for tf in test_files)
+    content_parts: list[str] = []
+    total = 0
+    for tf in test_files:
+        if total >= _COVERAGE_CONTENT_SCAN_CAP:
+            break
+        try:
+            text = tf.read_text(encoding="utf-8", errors="ignore").lower()
+        except OSError:
+            continue
+        content_parts.append(text)
+        total += len(text)
+    return name_blob, "\n".join(content_parts)
+
+
+def check_test_coverage(plugin_root: Path, report: ValidationReport) -> None:
+    """Advisory WARNING (NON-BLOCKING): flag shipped components that have no
+    discoverable test, in a plugin that DOES ship a test suite (issue #155).
+
+    A green CI "Test" job does not prove real coverage — a plugin can ship many
+    scripts behind a suite that exercises only one of them. This enumerates
+    testable components by GENERIC Claude-Code conventions (``scripts/*.py``,
+    ``hooks/`` script files, ``skills/*/SKILL.md``, ``commands/*.md``,
+    ``agents/*.md``) and cross-references them against tests discovered
+    generically (the conventional ``test_*.py`` / ``*_test.py`` /
+    ``*.test.{js,ts}`` / ``*.spec.{js,ts}`` filename patterns, anywhere under the
+    plugin), matching a component to a test by filename stem or content mention.
+
+    UNIVERSAL: zero marketplace / ai-maestro / author-naming-convention
+    assumptions — only the standard plugin directory layout and the conventional
+    test-file shapes. WARN-only: emitted through ``report.warning(...)``, which
+    ``exit_code_strict()`` never blocks on — it NEVER changes the VALID/INVALID
+    verdict or a ``--strict`` / publish outcome.
+
+    CONSERVATIVE (does not spam): it fires ONLY when the plugin already ships at
+    least one test file — i.e. it opted into testing but its suite looks thin. A
+    plugin with no test suite at all gets ZERO findings here (nagging every
+    test-less plugin would be noise, and issue #155 is specifically about the
+    deceptive green-suite case, which by definition has a suite). Matching is
+    generous (a component counts as covered on any filename-stem OR content
+    mention), so the check under-warns rather than over-warns — the safe
+    direction for an advisory.
+    """
+    components = _coverage_enumerate_components(plugin_root)
+    if not components:
+        # Nothing testable — not an error (mirrors the no-directory convention).
+        return
+
+    test_files = _coverage_discover_tests(plugin_root)
+    if not test_files:
+        # No test suite at all → stay silent (conservative: only audit plugins
+        # that have opted into testing; see the docstring).
+        return
+
+    name_blob, content_blob = _coverage_test_blobs(test_files)
+    untested = [
+        rel_path
+        for rel_path, token in components
+        if token and token not in name_blob and token not in content_blob
+    ]
+    if not untested:
+        return
+
+    # ONE advisory WARNING (count + capped list). Wording deliberately avoids the
+    # fix-ledger publish-blocking-marker substrings and carries the proven
+    # "Advisory only — this WARNING does not block the publish." phrasing of its
+    # WARN-only sibling check_untested_until_release.
+    shown = untested[:20]
+    more = len(untested) - len(shown)
+    listing = ", ".join(shown) + (f", … (+{more} more)" if more else "")
+    report.warning(
+        f"[RC-TEST-COVERAGE] {len(untested)} of {len(components)} testable "
+        f"component(s) have no discoverable test (the plugin ships a suite of "
+        f"{len(test_files)} test file(s), so its coverage looks thin): {listing}. "
+        "Advisory only — this WARNING does not block the publish."
+    )
+
+
 # Files generated by `generate_plugin_repo.gen_*` that are pure
 # infrastructure (publish pipeline, retry helper, pre-push hook, CI / release
 # / notify workflows, changelog config, mega-linter config). Plugins are NOT
@@ -7639,6 +7838,12 @@ def main() -> int:
         # changes the verdict / blocks --strict). The standard canonical
         # release.yml produces ZERO findings (no compiled-artifact build/stage).
         ("check_untested_until_release", check_untested_until_release, ((), {})),
+        # issue #155 — NON-BLOCKING advisory: shipped components (scripts/hooks/
+        # skills/commands/agents) with no discoverable test, in a plugin that
+        # DOES ship a test suite. WARNING-level (never changes the verdict /
+        # blocks --strict). Universal: generic conventions, zero marketplace /
+        # ai-maestro assumptions.
+        ("check_test_coverage", check_test_coverage, ((), {})),
         ("validate_canonical_pipeline_drift", validate_canonical_pipeline_drift, ((), {})),
         ("validate_legacy_pipeline_scripts", validate_legacy_pipeline_scripts, ((), {})),
         ("validate_pep723_invocations", validate_pep723_invocations, ((), {})),

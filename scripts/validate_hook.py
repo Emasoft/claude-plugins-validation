@@ -144,12 +144,16 @@ COMMON_TOOL_NAMES = {
     "ReadMcpResourceTool",
 }
 
-# Common notification types
+# Common notification types.
+# ``agent_needs_input`` / ``agent_completed`` are the agent-lifecycle triggers
+# added in Claude Code v2.1.198.
 COMMON_NOTIFICATION_TYPES = {
     "permission_prompt",
     "idle_prompt",
     "auth_success",
     "elicitation_dialog",
+    "agent_needs_input",
+    "agent_completed",
 }
 
 # Compact trigger types
