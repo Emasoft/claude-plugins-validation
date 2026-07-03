@@ -1,9 +1,9 @@
 ---
 trdd-id: V7K2QF8M
 title: Free CI speedup — matrix-shard the Validate skillaudit scan + Test 4→8
-column: dev
+column: failed
 created: 2026-07-02T19:01:10+0200
-updated: 2026-07-02T19:01:10+0200
+updated: 2026-07-03T02:28:15+0200
 current-owner: main-session
 assignee: main-session
 task-type: infra
@@ -19,13 +19,21 @@ publish-target: claude-plugins-validation
 test-requirements: [unit, lint, typecheck]
 relevant-rules: []
 impacts: [ci-pipeline]
-implementation-commits: [c80b8c0, a2ebe4a]
+implementation-commits: [c80b8c0, a2ebe4a, 24a7278]
 external-refs: []
 ---
 
 # TRDD-V7K2QF8M — Free CI speedup: matrix-shard Validate skillaudit + Test 4→8
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-02
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-03
+
+**RESOLVED 2026-07-03:** reverted a2ebe4a + c80b8c0 (clean auto-merge; kept RC-WORKFLOW fix 24a7278); shipping v2.152.1 to restore green ~3m41s CI. Perf goal UNMET → column: failed.
+
+**⛔ INCIDENT (2026-07-03): v2.152.0 SHIPPED but CI went RED + the perf win FAILED → REVERT decided.**
+- **CI red:** the `Validate` aggregate failed `--strict` with **MAJOR:1** = `"JSON syntax error in light.json: Expecting value: line 1 column 1 (char 0)"` — a SELF-SCAN artifact: the emit step `-o light.json` writes into the checkout ROOT, and CPV's own JSON-syntax validator scanned that empty/in-progress output file inside `.`. The LOCAL cache-cold self-validate wrote `-o /tmp/out.txt` (OUTSIDE the tree) so it NEVER saw it → the local-vs-CI gap was the **OUTPUT-FILE LOCATION**, not re2 / not shard-parity. (Same class as the v2.107.1 "validator scanned its own report" gotcha.)
+- **Perf FAILED:** Test Shard 8 = **3m25s** (8-way count-round-robin can't split the heavy test cluster); total CI ≈ 3m40s ≈ the 3m41s baseline → **NO ≥1.3× win**. This CONFIRMS the Amdahl cap in [[lesson-ci-validate-job-not-worth-optimizing]]: Validate→~58s is moot while Test (~3m20s) dominates. The "free matrix-shard supersedes not-worth-it" thesis is **REFUTED by measurement**.
+- **DECISION — REVERT:** restore the v2.151.0 green 3m41s CI by reverting the matrix-shard (ci.yml `a2ebe4a` + validate/skillaudit sharding `c80b8c0`); **KEEP** the RC-WORKFLOW-PATH-BROKEN download-artifact detector fix (`24a7278` — independent, two-sided tested, valid FP-reduction); ship as **v2.152.1**. **REINFORCE (not supersede)** the memory note with this empirical refutation.
+- **NEXT (clean context):** (1) `git revert --no-commit a2ebe4a c80b8c0` keeping 24a7278 (or hand-restore ci.yml to v2.151.0 + strip the dead `--security-shard`/`--merge-report`/`scan_path_subset` helpers); (2) cache-cold self-validate **0/0/0/0** writing `-o /tmp/...` OUTSIDE the tree; (3) full LOCAL serial tests green; (4) `publish.py --patch` → v2.152.1; (5) watch CI **GREEN** + confirm ~3m41s; (6) REINFORCE [[lesson-ci-validate-job-not-worth-optimizing]] with the measured refutation; (7) TRDD → `failed` (perf goal unmet) with this post-mortem; regen self-hashes LAST.
 
 **Goal:** cut total CI wall FREE (standard `ubuntu-latest` 4-vCPU public-repo runners + more parallel JOBS — NEVER a paid larger runner). Target 3m41s → ~2m06s (~1.7×).
 
