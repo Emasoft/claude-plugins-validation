@@ -1483,6 +1483,46 @@ def _is_documentation_only_path(file_path: str) -> bool:
     return False
 
 
+# issue #156 — the A2A ("agent-to-agent") attack family. An A2A agent-
+# impersonation / card-spoofing / task-hijack / cross-agent-injection /
+# data-leak / capability-abuse attack is delivered ONLY through an actual
+# Agent-Card / A2A-manifest STRUCTURE — a JSON/YAML agent descriptor (with
+# card fields like ``name`` / ``description`` / ``url`` / ``capabilities``)
+# that the A2A discovery layer parses. Narrative prose that merely NAMES the
+# concept ("blocked by … agent-identity", "impersonate an agent") CANNOT
+# deliver the attack, because there is no A2A discovery layer reading a
+# markdown paragraph as an agent card. See ``_is_noninstruction_loadable_markdown``.
+_A2A_RULES: frozenset[str] = frozenset(
+    {
+        "A2A_AGENT_IMPERSONATION",
+        "A2A_TASK_HIJACK",
+        "A2A_CROSS_AGENT_INJECT",
+        "A2A_DATA_LEAK",
+        "A2A_CAPABILITY_ABUSE",
+    }
+)
+
+
+def _is_noninstruction_loadable_markdown(file_path: str) -> bool:
+    """True iff ``file_path`` is a Markdown file whose basename is NOT one of
+    the instruction-loadable basenames (``skill.md`` / ``claude.md`` /
+    ``agents.md``).
+
+    A ``design/**/TRDD-*.md`` design doc, ``README.md``, ``notes.md``,
+    ``docs/x.md`` — anything ending ``.md`` / ``.markdown`` that is not
+    ``skill.md`` / ``claude.md`` / ``agents.md`` — qualifies. Those three
+    instruction-loadable basenames are EXCLUDED: they reach the agent as
+    instructions, so the A2A family must keep firing there (issue #156).
+    """
+    norm = file_path.replace("\\", "/").lower()
+    if norm.startswith("./"):
+        norm = norm[2:]
+    if not norm.endswith((".md", ".markdown")):
+        return False
+    basename = norm.split("/")[-1]
+    return basename not in _INSTRUCTION_LOADABLE_BASENAMES
+
+
 _CLASSIFIER_EXTENSIONS: tuple[str, ...] = (
     ".py",
     ".json",
@@ -2235,6 +2275,32 @@ def _context_classifier_dispatch(
     #   defeat the rule's entire purpose. KEEP at declared severity.
     if classifier_verdict == "safe_doc":
         is_doc_only = _is_documentation_only_path(file_path)
+        # issue #156 — the A2A ("agent-to-agent") attack family requires an
+        # actual Agent-Card / A2A-manifest STRUCTURE (a JSON/YAML agent
+        # descriptor the discovery layer parses) to land; narrative prose that
+        # merely NAMES "agent identity" / "impersonation" / "task hijack" as a
+        # topic cannot deliver the attack. So an A2A_* match in the ``safe_doc``
+        # (markdown prose / docstring / full-line comment) context of a
+        # NON-instruction-loadable Markdown file — a ``design/**/TRDD-*.md``,
+        # ``README.md``, ``notes.md``, ``docs/x.md``, … (any basename not in
+        # ``_INSTRUCTION_LOADABLE_BASENAMES``) — is a pure false positive and is
+        # fully SUPPRESSED, not demoted-to-NIT (which a demote would leave to
+        # publish-block ``--strict``). This is NARROWER than the general
+        # execution-class carve-out below, which stays DEMOTE per the "a
+        # skill/command/hook can point the agent at any in-repo file and say
+        # 'run this recipe'" reachability model: that argument holds for a
+        # RUNNABLE payload (``curl … | bash``, reverse shell), but an A2A
+        # card-spoof is not a runnable recipe — it is data the A2A layer would
+        # have to ingest as a structured agent card, which markdown prose is not.
+        # PRESERVED DETECTION (issue #156 hard guarantees):
+        #   * A2A in an INSTRUCTION-LOADABLE ``.md`` (skill.md / claude.md /
+        #     agents.md) still fires — the basename guard excludes those.
+        #   * A2A in a real JSON/YAML agent-card STRUCTURE reaches this
+        #     classifier as ``safe_schema`` / ``suspect`` on a ``.json`` /
+        #     ``.yaml`` file — a different branch this markdown-only check
+        #     never touches.
+        if rule_id in _A2A_RULES and _is_noninstruction_loadable_markdown(file_path):
+            return "suppress"
         if rule_id in _INTENT_HARD_SIGNAL_RULES:
             # Issue #38 — markdown prose in DOCUMENTATION-ONLY paths is
             # never loaded by Claude Code as an agent instruction (only
