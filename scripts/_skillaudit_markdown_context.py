@@ -2590,6 +2590,141 @@ def _is_inert_inline_code_doc_signature(
     return any(sig_re.search(s) for s in _BACKTICK_SPAN_RE.findall(line))
 
 
+# ── (#156) A2A_AGENT_IMPERSONATION prose co-occurrence ──────────────────────
+#
+# Catalog pattern 7 is ``agent[_-]?(?:id|identity).*(?:spoof|fake|clone|copy|steal)``.
+# The ``.*`` is UNBOUNDED and the verb alternation is UNANCHORED, so an English
+# sentence that names ``agent-identity`` as a TOPIC and — hundreds of characters
+# later, in a different ``;``-separated clause — happens to contain the substring
+# ``copy`` inside an ordinary compound (``secondary-copy``) matches in full. The
+# reporter's real line (issue #156) is exactly that shape, and the resulting
+# demoted-NIT blocks ``--strict`` for every plugin shipping design/architecture
+# prose.
+#
+# A catalog word boundary does NOT fix this: ``\bcopy`` still matches
+# ``secondary-copy`` because ``-``→``c`` IS a word boundary — the same trap as the
+# #136 ``no-sudo`` FP. The provable inertness signals are STRUCTURAL:
+#
+#   1. a genuine card-spoof BINDS the id-noun to the verb inside ONE expression
+#      (``agent_id = spoof(…)``, ``agent-identity spoofing``, ``agent_id … to
+#      clone it``) — the two sit a few dozen characters apart, not a quarter of a
+#      kilobyte of unrelated prose apart; and
+#   2. a hyphenated-compound TAIL (``secondary-copy``) is a noun, never the verb
+#      "copy" — just as ``no-sudo`` is a policy token, never a ``sudo`` call.
+#
+# So a match is inert only when EVERY (noun, verb) pair on the line fails BOTH
+# aliveness tests. Because the greedy ``.*`` makes the catalog match end at the
+# LAST verb on the line, every pair is checked — not just the final one — so a
+# real compact spoof earlier on the same line can never hide behind a distant
+# benign ``-copy`` (the #136 "check EVERY occurrence" lesson).
+_A2A_ID_NOUN_RE: Final[re.Pattern[str]] = re.compile(r"agent[_-]?(?:id|identity)", re.IGNORECASE)
+_A2A_SPOOF_VERB_RE: Final[re.Pattern[str]] = re.compile(r"spoof|fake|clone|copy|steal", re.IGNORECASE)
+# Any structural agent-card token keeps the finding visible regardless of shape.
+_A2A_CARD_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"agent[_-]?card", re.IGNORECASE)
+# Inflections that still read as the verb (``cloned``/``copying``/``spoofs``…).
+_A2A_VERB_INFLECTIONS: Final[frozenset[str]] = frozenset({"", "s", "d", "ed", "er", "ers", "ing"})
+# A verb bound into the same expression as the noun. `agent_id = spoof(v)` → 3.
+_A2A_ADJACENT_GAP: Final[int] = 8
+# A standalone verb still plausibly governing the noun across a short phrase:
+# ``agent_id field to the victim value to clone it`` → 30.
+_A2A_MAX_PROSE_GAP: Final[int] = 40
+
+
+def _a2a_verb_is_standalone(text: str, start: int, end: int) -> bool:
+    """True iff the verb occurrence ``text[start:end]`` is a real standalone verb
+    rather than a fragment of a larger word or the tail of a hyphenated compound.
+
+    Rejects ``secondary-copy`` (compound tail), ``xcopy`` (glued prefix) and
+    ``copyright`` (unrelated longer word); accepts ``spoof``, ``cloned``,
+    ``copying``, ``fakes``, ``stealing``.
+    """
+    prev = text[start - 1] if start > 0 else ""
+    # Tail of a hyphenated compound: `secondary-copy`, `read-only-clone`.
+    if prev == "-" and start >= 2 and (text[start - 2].isalnum() or text[start - 2] == "_"):
+        return False
+    # Glued to a word on the left: `xcopy`, `deepclone`.
+    if prev.isalnum() or prev == "_":
+        return False
+    # Glued to a word on the right, unless it is a plain inflection: `copyright`.
+    tail_end = end
+    while tail_end < len(text) and text[tail_end].isalpha():
+        tail_end += 1
+    return text[end:tail_end].lower() in _A2A_VERB_INFLECTIONS
+
+
+def _a2a_has_bound_spoof_expression(
+    line: str,
+    base: int,
+    nouns: list[re.Match[str]],
+    verbs: list[re.Match[str]],
+) -> bool:
+    """True iff SOME (noun, verb) pair binds into one spoof expression.
+
+    Alive on either signal: the verb is glued to the noun (``agent_id-clone``,
+    ``agent_id = spoof(v)``), or it is a standalone verb governing the noun across
+    a short phrase (``agent_id … to clone it``). Every pair is examined, so a real
+    compact spoof cannot hide behind a distant benign ``-copy``.
+
+    ``base`` is the match's offset inside ``line``. The standalone test MUST run
+    against the full LINE, not the match: the catalog's greedy ``.*`` ends the
+    match AT the verb, so the characters that turn ``copy`` into ``copyright``
+    lie outside the match and would otherwise be invisible.
+    """
+    for noun in nouns:
+        for verb in verbs:
+            if verb.start() < noun.end():
+                continue
+            gap = verb.start() - noun.end()
+            if gap <= _A2A_ADJACENT_GAP:
+                return True
+            if gap <= _A2A_MAX_PROSE_GAP and _a2a_verb_is_standalone(line, base + verb.start(), base + verb.end()):
+                return True
+    return False
+
+
+def _is_inert_a2a_identity_prose(
+    fence_state: tuple[int, int, str] | None,
+    line: str,
+    match: str,
+    rule_id: str,
+) -> bool:
+    """True iff an ``A2A_AGENT_IMPERSONATION`` match is a provably-inert prose
+    co-occurrence of the ``agent-id``/``agent-identity`` noun and a spoof verb
+    that belongs to a different clause.
+
+    FN-safety (two-sided, and deliberately PATH-INDEPENDENT — the shape decides,
+    not the file, so a real spoof in a SKILL.md keeps firing exactly as before):
+
+    * ANY fence → ``False``. A ```json / ```yaml fence IS the agent-card shape and
+      a ```python fence is live code, so both keep firing.
+    * An ``agentCard`` / ``agent_card`` token anywhere on the LINE → ``False``.
+      The LINE, not the match: the catalog's greedy ``.*`` ends the match at the
+      verb, so a card token to its left or right would otherwise be invisible.
+    * ANY bound spoof expression (see ``_a2a_has_bound_spoof_expression``) →
+      ``False``.
+    * Only pattern-7-shaped matches are considered — the match must carry BOTH the
+      id-noun AND a spoof verb — so ``impersonat.*agent`` / ``pose as another
+      agent`` / ``trusted-agent … fake`` are never cleared by this branch.
+
+    Fail-safe: if the match cannot be located inside ``line`` (a multi-line or
+    normalised match), we keep the finding VISIBLE rather than guess.
+    """
+    if rule_id != "A2A_AGENT_IMPERSONATION":
+        return False
+    if fence_state is not None:
+        return False
+    if _A2A_CARD_TOKEN_RE.search(line):
+        return False
+    base = line.find(match)
+    if base < 0:
+        return False
+    nouns = list(_A2A_ID_NOUN_RE.finditer(match))
+    verbs = list(_A2A_SPOOF_VERB_RE.finditer(match))
+    if not nouns or not verbs:
+        return False
+    return not _a2a_has_bound_spoof_expression(line, base, nouns, verbs)
+
+
 def _certain_benign_literal(
     line: str,
     lines: list[str],
@@ -2646,6 +2781,18 @@ def _certain_benign_literal(
     #        in an executable code fence AND on a leaked JWT secret / token
     #        literal (`JWT_SECRET=…` / `eyJ…eyJ…`).
     if _is_inert_jwt_vuln_doc(fence_state, match, rule_id):
+        return True
+
+    # (#156) A2A_AGENT_IMPERSONATION where the `agent-id`/`agent-identity` noun
+    #        and the spoof verb sit in DIFFERENT prose clauses — the catalog's
+    #        unbounded `.*` joined `agent-identity` to the `copy` inside the
+    #        ordinary compound `secondary-copy` ~250 chars later. Markdown prose
+    #        cannot fabricate an Agent Card. KEEPS firing inside ANY fence (a
+    #        ```json/```yaml fence IS the card shape), on an `agentCard` token,
+    #        and on a bound expression (`agent_id = spoof(v)` /
+    #        `agent-identity spoofing` / `agent_id … to clone it`) on EVERY
+    #        surface, SKILL.md included.
+    if _is_inert_a2a_identity_prose(fence_state, line, match, rule_id):
         return True
 
     # (#80 + #83.2) PROTOTYPE_POLLUTION is JS/TS-only — categorically
