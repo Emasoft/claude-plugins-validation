@@ -19,12 +19,12 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.153.0` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `2.153.1` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
 | **agents** | **15** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
 | **scripts** | **123** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver; `cpv_fix_loop_state.py` deterministic full-history fix-loop oscillation detector; `cpv_ci_preflight.py` + `cpv_ci_parity_checks.py` local CI-parity preflight — the `ci-preflight` subcommand (CIP-1..6 static defect detectors incl. CIP-6 stale/invalid CPV-ref `@main`, + degrade-gracefully Mega-Linter sub-linter parity probes bandit[-ll]/checkov/trivy/cspell/shellcheck/shfmt); `cpv_persistence_target.py` the INTRINSIC daemon-installer source-scan discriminator — resolve-launched-program→clean→non-exploitable, shared by skillaudit PERSISTENCE + RC-39; `cpv_inplugin_write_guard.py` the RC-164 copy-only in-plugin-write guard — flags a plugin script that generates/edits a script file landing inside the plugin tree, reusing the `cpv_persistence_target.py` in-tree resolver; `cpv_fix_ledger.py` the compact by-file findings ledger — validator `--strict --json` → MECH(`fixable:true`)/INTEL split so the fix loop reads a small ledger, NOT the full report, each iteration; `cpv_codemod.py` gained an `apply --json` MECH auto-applier) |
-| **test files** | **384** | `ls tests/test_*.py`; ~10448 tests |
+| **test files** | **385** | `ls tests/test_*.py`; ~10472 tests |
 
 **The 15 agents:** cache-optimizer-agent · cpv-doctor-agent ·
 cpv-main-menu-agent · cpv-spark · cpv · marketplace-fixer · plugin-creator ·
@@ -126,6 +126,43 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v2.153.1 — clear the `A2A_AGENT_IMPERSONATION` FP on a prose clause co-occurrence (closes #156, filed by the ai-maestro-janitor Claude relaying a cross-plugin publish blocker)**
+— the scanner fired CRITICAL→demoted-NIT (and a NIT blocks `--strict`) on a TRDD design-doc line with zero
+runtime involvement, hard-blocking a publish that had **0 CRITICAL / 0 MAJOR / 0 MINOR**. GROUND TRUTH (I cloned
+the reporter's repo read-only rather than trust the issue text — the issue said line 64; the real trigger is line
+**62**): catalog pattern 7 is `agent[_-]?(?:id|identity).*(?:spoof|fake|clone|copy|steal)`, whose `.*` is
+UNBOUNDED and whose verb alternation is UNANCHORED — so `agent[_-]?id` matched inside the prose topic label
+`agent-identity`, the greedy `.*` ran ~250 chars across THREE `;`-separated clauses, and landed on `copy` inside
+the ordinary compound `secondary-copy`. **A catalog word boundary CANNOT fix this** — `\bcopy` still matches
+`secondary-copy` because `-`→`c` IS a word boundary (the exact #136 `no-sudo` trap), which is why the fix is a
+markdown-context discriminator, not a pattern tweak. **Rejected: excluding `design/**`** — that tree genuinely
+ships, agents read TRDDs (so it is instruction-adjacent, and `_is_instruction_loadable_path_md` already defaults
+an unknown `.md` to loadable), and a path carve-out would be an ai-maestro assumption in a UNIVERSAL validator;
+the reporter independently rejected it too. FIX (detection-accuracy, FN-safe, **NO rule suppressed, `--strict`
+NOT relaxed**, and deliberately **PATH-INDEPENDENT** — the SHAPE decides, so a real spoof in a SKILL.md keeps
+firing byte-identically): new `_skillaudit_markdown_context._is_inert_a2a_identity_prose()` clears ONLY a
+pattern-7-shaped match that is outside ANY fence, carries no `agentCard`/`agent_card` token on the line, and has
+NO bound spoof expression — where "bound" = a verb glued to the id-noun (≤8 chars, so `agent_id-clone` /
+`agent_id = spoof(v)` stay visible) OR a STANDALONE verb governing it across a short phrase (≤40 chars). Every
+(noun, verb) pair is examined, not just the last, because the greedy `.*` ends the match at the FINAL verb (the
+issue-#136 "check EVERY occurrence" lesson) — so a real compact spoof can never hide behind a distant benign `-copy`.
+**Central adversarial verification caught TWO real FN holes my first draft opened**, both fixed + regression-locked:
+(a) the standalone-verb test ran against the truncated MATCH, so `copyright` looked like the verb `copy` (the
+match ends AT the verb; `right` lies outside it) → it now reads the full LINE; (b) the `agentCard` guard also
+only read the MATCH, so a card token to its left/right was invisible → it now reads the LINE. Verified two-sided
+through the REAL scanner with a stashed-baseline A/B over 20 cases: all 5 FP shapes clear, and all 15 real-threat
+siblings fire IDENTICALLY before and after (compact assignment, adjacent `spoofing`, short-phrase `clone`, glued
+`agent_id-clone` / `agent-id_spoof`, inflection `cloned`, json/yaml/python fences — incl. the SAME inert
+`secondary-copy` text inside a fence — both SKILL.md cases, sibling patterns 3/4/5, and a compact spoof hidden
+behind a later `-copy`). A probe FAIL on a multi-line yaml fixture was proven PRE-EXISTING (identical at baseline:
+`.` never crosses a newline under the catalog's `(?im)` flags — no DOTALL), i.e. my fixture's bug, not a
+regression. NO catalog change → no re2-audit regen. +24 two-sided tests (`tests/test_issue_156_a2a_identity_prose.py`).
+Also closed **#155** as ALREADY SHIPPED in v2.153.0 (verified in-tree: `check_test_coverage` at
+`validate_plugin.py:5844`, registered at :7846, emits `[RC-TEST-COVERAGE]` at :5900, `tests/test_coverage_audit.py`
+12 tests) — no code written for it. version 2.153.1, scripts 123, test files 385, ~10472 tests.
+[[feedback-never-suppress-never-relax-gate]] [[feedback-opus-for-security-analysis]] [[claim-verification]]
+[[feedback-cpv-is-universal-not-ai-maestro]] [[lesson-regen-hashes-last-markdown-poison]] [[maintain-project-claude-md]]
 
 **v2.153.0 — ships the #155 canonical-pipeline test-coverage audit gate (WARN-only, universal) + a 2-fix CC spec-sync (v2.1.192–2.1.200)**
 — (a) **#155 test-coverage audit gate:** new `check_test_coverage` in `validate_plugin.py` (registered in the plugin gate; emits `[RC-TEST-COVERAGE]`) — a **WARN-only** canonical-pipeline check (`report.warning`, **non-blocking** per `exit_code_strict()`, so it NEVER fails `--strict`), **UNIVERSAL** (walks generic component dirs `scripts/`+`hooks/`+`skills/`+`commands/`+`agents/` against generic test globs, with **zero ai-maestro/TRDD assumptions** per [[feedback-cpv-is-universal-not-ai-maestro]]), and **conservative** — it fires ONLY when a plugin ships ≥1 test yet leaves ≥1 testable component untested (a plugin with no tests at all, or with full coverage, stays silent → no noise on tiny plugins). Backed by `tests/test_coverage_audit.py` (12 tests). Addresses issue **#155**. (b) **CC spec-sync 2.1.192–2.1.200:** two FN-safe **allowlist-widening** FP-fixes — `+manual` to `VALID_PERMISSION_MODES` (`cpv_validation_common.py`, per CC **v2.1.200** `defaultMode`/`--permission-mode`) and `+agent_needs_input`/`+agent_completed` notification triggers to `COMMON_NOTIFICATION_TYPES` (`validate_hook.py`, per CC **v2.1.198**); the remaining changelog deltas 1/4/5/6/7/8 were already-handled or N/A. Backed by `tests/test_cc_spec_sync_2192_2200.py` (7 tests). **NOT a security / `--strict` change** — a WARN-only feature + pure FP-reduction (allowlist widening only; no rule suppressed, gate not relaxed per [[feedback-never-suppress-never-relax-gate]]). TRDD-T7WCV3PK + TRDD-S9NKP4WQ. version 2.153.0, scripts 123, test files 384, ~10448 tests. [[maintain-project-claude-md]] [[feedback-cpv-is-universal-not-ai-maestro]] [[feedback-never-suppress-never-relax-gate]]
