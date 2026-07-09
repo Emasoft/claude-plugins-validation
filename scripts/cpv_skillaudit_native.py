@@ -513,7 +513,6 @@ _PLACEHOLDER_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
         r"YOUR_",
-        r"YOUR\s+",
         r"xxx+",
         r"REPLACE",
         r"<your[_-]",
@@ -535,6 +534,19 @@ _PLACEHOLDER_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"(?:AKIA|ASIA)[A-Z0-9]{8,}EXAMPLE\b",
         r"wJalrXUtnFEMI",
     )
+) + (
+    # issue #159 — the space-form placeholder `YOUR API KEY` / `YOUR TOKEN` must
+    # match CASE-SENSITIVELY. Under re.IGNORECASE the bare `YOUR\s+` also matched
+    # the ordinary English word "your " ("your own change", "your data"), and
+    # `_has_placeholder` then hard-suppressed the finding on that line — silencing
+    # agent-manipulation / prompt-injection matches on instruction-loadable
+    # agent/command files (a false negative; exec-class stays visible because the
+    # `_line_is_exec_sink` guard skips the placeholder-suppress for those). The
+    # underscore/hyphen placeholder forms remain covered case-insensitively by
+    # `YOUR_` and the `your[_-]...` siblings above; only the space form needs the
+    # uppercase shape (a placeholder is conventionally ALL-CAPS). Requiring an
+    # uppercase letter after the space excludes title-case prose ("Your Own").
+    re.compile(r"\bYOUR\s+[A-Z]"),
 )
 
 _DOC_CONTEXT_WORDS: tuple[re.Pattern[str], ...] = tuple(
@@ -1632,9 +1644,7 @@ def _is_memory_authoring_skill(file_path: str, content: str) -> bool:
 # bare-word `monkey.?patch` pattern, MAJOR-blocking a publish.
 _CSPELL_DICT_EXTS: tuple[str, ...] = (".txt", ".dict", ".dic", ".wordlist", ".wl")
 # cspell's documented conventional word-list names that carry no `cspell` token.
-_CSPELL_CONVENTIONAL_BASENAMES: frozenset[str] = frozenset(
-    {"project-words.txt", "custom-words.txt"}
-)
+_CSPELL_CONVENTIONAL_BASENAMES: frozenset[str] = frozenset({"project-words.txt", "custom-words.txt"})
 
 
 def _is_cspell_dictionary(file_path: str) -> bool:
@@ -1736,8 +1746,7 @@ def _is_benign_cgroup_detection_read(match: str, content: str) -> bool:
 # (the finding stays whatever it is today — typically NIT, which blocks
 # ``--strict``).
 _AUDIT_CONSENT_SENTINEL: str = (
-    "warning: the following code could be malicious. "
-    "audit it for safety before executing it!"
+    "warning: the following code could be malicious. audit it for safety before executing it!"
 )
 
 
