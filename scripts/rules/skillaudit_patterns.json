@@ -936,7 +936,7 @@
         "(?:ignore|forget|discard|disregard)\\s+(?:all|any|every|your|the|previous)\\s+(?:prior|previous|above|earlier|original|preceding)?\\s*(?:instruction|rule|guideline|constraint|restriction|safety|guardrail|system\\s*prompt)",
         "(?:new|updated|revised|corrected|real|actual|true)\\s+(?:system\\s*)?(?:instruction|directive|rule|guideline|policy|prompt|persona)\\s*[:=]",
         "\\[(?:SYSTEM|ADMIN|OVERRIDE|INVISIBLE)\\]",
-        "<!--\\s*(?:INSTRUCTION|PROMPT|SYSTEM|OVERRIDE|AI|AGENT|COMMAND)",
+        "<!--\\s*(?:INSTRUCTION|PROMPT|SYSTEM|OVERRIDE|AI|AGENT|COMMAND)(?:[^-\\w]|$)",
         "(?:when|if)\\s+(?:an?|the)?\\s*(?:AI|agent|assistant|model|LLM|GPT|Claude)\\s+(?:reads?|sees?|processes?|encounters?|parses?)\\s+this",
         "(?:this\\s+(?:message|text|content|data)\\s+is\\s+(?:for|intended\\s+for|meant\\s+for|directed\\s+at))\\s+(?:the\\s+)?(?:AI|agent|assistant|model)",
         "(?:do\\s+not|don'?t|never)\\s+(?:reveal|show|display|tell|mention|disclose|share)\\s+(?:this|these)\\s+(?:instruction|directive|command|message|text|content)\\s+(?:to|with)\\s+(?:the\\s+)?(?:user|human|person|operator|client)",
