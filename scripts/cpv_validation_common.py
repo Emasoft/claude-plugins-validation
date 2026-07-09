@@ -1751,6 +1751,32 @@ ALLOWED_DOC_PATH_PREFIXES = {
 # System binary paths — expected for tool detection, not portability issues
 _SYSTEM_BINARY_PREFIXES = ("/usr/bin/", "/usr/local/bin/", "/opt/homebrew/bin/", "/bin/", "/sbin/", "/usr/sbin/")
 
+# FHS system-directory roots (issue #158). An absolute path under one of these
+# is a fixed operating-system location that CANNOT be rewritten to a
+# plugin-relative form (`${CLAUDE_PLUGIN_ROOT}/usr/bin` is meaningless), so a
+# portability finding on a colon-joined `PATH`-shaped run of them
+# (`/usr/bin:/bin:/usr/sbin:/sbin`, e.g. an observed launchd/daemon PATH quoted
+# in a design doc) is never actionable. Deliberately EXCLUDES /root (root's
+# home), /home and /Users (user homes) so a leaked dev/home path in a run still
+# fires — those are the real leak the rule guards.
+_SYSTEM_PATH_ROOTS = (
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/etc",
+    "/tmp",
+    "/var",
+    "/opt",
+    "/lib",
+    "/lib64",
+    "/dev",
+    "/proc",
+    "/sys",
+    "/run",
+    "/snap",
+    "/boot",
+)
+
 # Directories typically gitignored — backtick path checker skips these (runtime artifacts)
 _GITIGNORED_DIR_PATTERNS = (
     "_dev/",
@@ -7444,6 +7470,42 @@ def validate_no_private_info(
         report.info(f"Found {issues_found} private info issue(s) in {files_checked} files")
 
 
+def _segment_is_system_path(segment: str) -> bool:
+    """True if a single path segment is a non-rewritable FHS system location.
+
+    A segment qualifies when it IS one of ``_SYSTEM_PATH_ROOTS`` exactly or is a
+    child of one (``<root>/...``). A ``/Users/...``, ``/home/...`` or
+    ``/root/...`` segment does NOT qualify (those roots are excluded), so a run
+    containing one still fires.
+    """
+    return any(segment == root or segment.startswith(root + "/") for root in _SYSTEM_PATH_ROOTS)
+
+
+def _is_system_path_run(matched_text: str) -> bool:
+    """True if ``matched_text`` is a colon-joined ``PATH``-shaped run (issue #158).
+
+    A run qualifies ONLY when it has ≥2 non-empty segments and EVERY segment is
+    an FHS system directory (see ``_segment_is_system_path``). This clears the
+    exact false positive #158 reported — an observed daemon ``PATH`` value like
+    ``/usr/bin:/bin:/usr/sbin:/sbin`` quoted in a design doc, which the two
+    existing ``/``-terminated prefix allowlists miss because a ``PATH`` element
+    is followed by ``:`` not ``/``.
+
+    FN-safe: a run that mixes in a ``/Users/…``, ``/home/…`` or ``/root/…``
+    segment (a real dev/home-path leak) has a non-system segment → returns
+    False → the finding still fires (and that segment ALSO fires the separate
+    home-directory-path pattern). An empty segment (leading/trailing/double
+    colon = an implicit ``.`` CWD element) also fails the check, so a suspicious
+    empty ``PATH`` element is never cleared.
+    """
+    if ":" not in matched_text:
+        return False
+    segments = matched_text.split(":")
+    if len(segments) < 2:
+        return False
+    return all(seg and _segment_is_system_path(seg) for seg in segments)
+
+
 def scan_file_for_absolute_paths(
     filepath: Path,
     report: ValidationReport,
@@ -7555,8 +7617,15 @@ def scan_file_for_absolute_paths(
                 continue
 
             issues_found += 1
-            # System binary paths are expected for tool detection — downgrade to INFO
-            if desc == "system absolute path" and any(matched_text.startswith(p) for p in _SYSTEM_BINARY_PREFIXES):
+            # System binary paths are expected for tool detection — downgrade to INFO.
+            # Issue #158: ALSO downgrade a colon-joined `PATH`-shaped run of system
+            # dirs (`/usr/bin:/bin:/usr/sbin:/sbin`) — an observed OS PATH value has
+            # no plugin-relative form, so a portability finding on it is never
+            # actionable. `_is_system_path_run` is FN-safe (a /Users, /home or /root
+            # segment in the run keeps it firing).
+            if desc == "system absolute path" and (
+                any(matched_text.startswith(p) for p in _SYSTEM_BINARY_PREFIXES) or _is_system_path_run(matched_text)
+            ):
                 report.info(f"System binary path: '{matched_text[:60]}' (OK for tool detection)", rel_path)
                 issues_found -= 1  # Don't count this as an issue
                 continue

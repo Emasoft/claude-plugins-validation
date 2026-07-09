@@ -12,10 +12,18 @@ These tests pin the contract:
   - Empty selection (no detected languages, or `languages=[]` filter) is
     a no-op — no executor created, no error.
 
-Wall-time assertions use a generous slack (5x) so the suite stays green
-on slow CI runners. The point is to catch a regression to serial
-execution (where wall time would equal the SUM of per-task sleeps),
-not to assert nanosecond-level timing.
+The wall-time test uses a RELATIVE same-run baseline (time a serial run
+via the ``CPV_LINT_PARALLEL=0`` escape hatch AND a parallel run, then
+compare) rather than an absolute threshold. An absolute bound flaked on
+the 4-shard CI matrix: under CPU/IO oversubscription the parallel path's
+overhead pushed wall time above the serial floor, so the two
+distributions overlapped and no fixed number could discriminate. The
+relative comparison is contention-independent — both runs pay the same
+cache/detection/merge overhead (inflated equally under load), so only the
+~2×sleep critical-path overlap distinguishes them, and ``time.sleep``
+needs no CPU so the overlap holds even on a starved runner. The point is
+to catch a regression to serial execution (where the two runs would take
+about the same time), not to assert nanosecond-level timing.
 """
 
 from __future__ import annotations
@@ -94,44 +102,71 @@ def test_lint_repo_uses_threadpool_executor():
 # ---------------------------------------------------------------------------
 
 
-def test_lint_repo_wall_time_is_slowest_linter_not_sum(tmp_path: Path):
-    """With 3 sleeping linters configured (0.4s + 0.4s + 0.4s = 1.2s
-    serial), parallel execution should finish in ~0.4s, not ~1.2s.
+def test_lint_repo_wall_time_is_slowest_linter_not_sum(tmp_path: Path, monkeypatch):
+    """Parallel dispatch must be meaningfully faster than serial dispatch.
 
-    Use 5x slack on the upper bound so a slow CI runner doesn't trip
-    the assertion. The point: anything below 1.0s proves parallelism
-    is engaged (the serial path is mathematically incapable of going
-    below 1.2s even on infinitely fast hardware).
+    Runs the SAME three 0.4s sleeping linters twice against the same tree:
+    once forced serial (``CPV_LINT_PARALLEL=0`` — three sleeps back-to-back,
+    ~1.2s of blocking) and once parallel (default — the three sleeps overlap
+    into ~one). Each run uses its OWN isolated cache dir so neither is a
+    cache-hit (a shared cache would let the second run skip the linters).
+
+    The assertion is RELATIVE, not an absolute threshold: parallel must be at
+    least one ``sleep_s`` faster than serial. This is robust on the
+    oversubscribed 4-shard CI matrix where an absolute bound flaked — both
+    runs pay the same cache/detection/merge overhead (inflated equally under
+    load), so the ≥2×sleep critical-path difference from the sleeps is the
+    only thing that varies, and ``time.sleep`` needs no CPU so the overlap
+    survives a starved scheduler. A regression to serial dispatch makes the
+    two runs about equal and trips the assertion.
     """
-    # Three small files, one per language category.
-    (tmp_path / "main.py").write_text("x = 1\n")
-    (tmp_path / "deploy.sh").write_text("#!/bin/bash\necho hi\n")
-    (tmp_path / "README.md").write_text("# Hello\n")
+    # Three small files, one per language category, in a dedicated repo dir so
+    # the sibling cache dirs (below) are never picked up by language detection.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "main.py").write_text("x = 1\n")
+    (repo / "deploy.sh").write_text("#!/bin/bash\necho hi\n")
+    (repo / "README.md").write_text("# Hello\n")
 
     sleep_s = 0.4
-    fake_dispatch = {
-        "python": _make_sleeping_lint("python", sleep_s),
-        "shell": _make_sleeping_lint("shell", sleep_s),
-        "markdown": _make_sleeping_lint("markdown", sleep_s),
-    }
 
-    report = ValidationReport()
-    # Phase D — isolated cache so concurrent xdist workers don't
-    # contend on ~/.cache/cpv/scanner-results/ and defeat the
-    # parallelism this test is pinning.
-    iso_cache = ScannerCache(cache_dir=tmp_path / "lint-cache")
-    with patch.object(cpv_lint_engine, "_DISPATCH", fake_dispatch):
-        t0 = time.perf_counter()
-        passed = lint_repo(tmp_path, report, strict_missing_tools=False, cache=iso_cache)
-        elapsed = time.perf_counter() - t0
+    def _fresh_dispatch() -> dict:
+        # A fresh set each run so completion side effects don't leak between runs.
+        return {
+            "python": _make_sleeping_lint("python", sleep_s),
+            "shell": _make_sleeping_lint("shell", sleep_s),
+            "markdown": _make_sleeping_lint("markdown", sleep_s),
+        }
 
-    assert passed is True
-    serial_lower_bound = sleep_s * 3
-    parallel_upper_bound = serial_lower_bound  # if we hit this, parallelism is broken
-    assert elapsed < parallel_upper_bound, (
-        f"lint_repo wall time was {elapsed:.2f}s; "
-        f"3 x {sleep_s}s sleeps in serial would already take {serial_lower_bound}s. "
-        f"Parallelism is not engaged."
+    def _timed_run(*, force_serial: bool, cache_subdir: str) -> tuple[float, bool]:
+        # CPV_LINT_PARALLEL=0 forces the serial fan-out; "1" the parallel pool.
+        # Set it explicitly so a CI env that pins it globally can't skew the run.
+        monkeypatch.setenv("CPV_LINT_PARALLEL", "0" if force_serial else "1")
+        report = ValidationReport()
+        # A distinct isolated cache per run, kept OUTSIDE repo/ (sibling of it):
+        # a shared cache would make the SECOND run a cache-hit (no sleeps) and
+        # measure nothing, and a cache dir inside repo/ would pollute the second
+        # run's language detection. Isolation also keeps concurrent xdist workers
+        # off ~/.cache/cpv/.
+        iso_cache = ScannerCache(cache_dir=tmp_path / cache_subdir)
+        with patch.object(cpv_lint_engine, "_DISPATCH", _fresh_dispatch()):
+            t0 = time.perf_counter()
+            passed = lint_repo(repo, report, strict_missing_tools=False, cache=iso_cache)
+            return time.perf_counter() - t0, passed
+
+    elapsed_serial, passed_serial = _timed_run(force_serial=True, cache_subdir="cache-serial")
+    elapsed_parallel, passed_parallel = _timed_run(force_serial=False, cache_subdir="cache-parallel")
+
+    assert passed_serial is True
+    assert passed_parallel is True
+    # Genuine parallelism overlaps the three sleeps, saving ~2×sleep_s of wall
+    # time; requiring parallel to beat serial by at least ONE sleep_s leaves a
+    # full sleep of headroom while still failing if dispatch regressed to serial
+    # (which makes the two runs ~equal).
+    assert elapsed_parallel < elapsed_serial - sleep_s, (
+        f"parallel lint wall time {elapsed_parallel:.2f}s was not at least "
+        f"{sleep_s}s faster than serial {elapsed_serial:.2f}s — parallel dispatch "
+        f"appears not engaged (regression to serial execution?)."
     )
 
 
