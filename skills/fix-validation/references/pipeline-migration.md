@@ -616,9 +616,9 @@ uv run python scripts/validate_plugin.py . --strict
 
 ---
 
-## §6 — #137-143 CI-parity defects
+## §6 — CI-parity defects (#137-143, plus RC-1/RC-9 from the 2026-07-13 forensics)
 
-These six defects all share ONE failure shape: the upgrade passes
+These eight defects all share ONE failure shape: the upgrade passes
 `validate_plugin --strict` LOCALLY but FAILS the adopting plugin's GitHub
 CI — because `validate_plugin` does NOT run the jscpd / actionlint /
 `mypy --strict` / `uv sync --extra dev` gates the generated `ci.yml` Lint
@@ -628,9 +628,12 @@ of these constructs during a manual upgrade step.
 
 ### Local detector (§6)
 
-Run the CI-parity preflight LOCALLY before declaring DONE — it runs the
-gates `validate_plugin` skips AND statically detects all six defects
-below (CIP-1..6):
+**Since v2.157.0 you no longer have to REMEMBER to run this — it is
+`publish.py` Gate 3b, and it runs BEFORE the bump/commit/tag/push.** That
+is deliberate: prose in an agent prompt is advisory (an agent can skip it,
+pass every other gate, push, tag, cut a release, and only THEN go red),
+whereas a gate is mechanical. Run it by hand anyway when you are *fixing*
+a plugin rather than publishing it:
 
 ```bash
 cpv-remote-validate ci-preflight <plugin-path>
@@ -642,7 +645,7 @@ Every gate DEGRADES to a non-blocking WARNING when its tool is absent
 (never false-blocks); a real defect BLOCKS. A non-crash run is NOT
 CI-parity proof on its own — read the per-check verdicts.
 
-### The six defects (§6)
+### The eight defects (§6)
 
 | # | Defect | One-line fix |
 |---|--------|--------------|
@@ -652,12 +655,14 @@ CI-parity proof on its own — read the per-check verdicts.
 | CIP-4 | A superseded standalone `validate.yml` survives after the consolidated `ci.yml` was added; its pre-existing shellcheck SC2086 then fails `ci.yml`'s actionlint Lint job. | Remove the CPV-shipped `validate.yml` (its Validate job is replaced by `ci.yml`'s) and re-point branch protection; safe-delete it to `scripts_dev/superseded-workflows/`. `standardize --fix` removes it (identity-guarded, only when `ci.yml` is present). |
 | CIP-5 | The jscpd copy-paste check in `publish.py` Gate 2b and CI's Mega-Linter use divergent ignore globs, so a local pass differs from CI. | Provision a single-source `.jscpd.json` (threshold 5 + ignore globs mirroring `.mega-linter.yml`'s `FILTER_REGEX_EXCLUDE`) auto-discovered by BOTH; never clobber an existing one. `standardize --fix` provisions it. |
 | CIP-6 | A `.github/workflows/*.yml` pins `claude-plugins-validation@<ref>` at a non-resolvable ref (`@main`/`@develop`/`@HEAD`/a branch name) — CPV's default branch is `master`, so `uvx --from git+…@main` 404s (`Git operation failed / Updating … (main)`) and the workflow red-CIs forever. A plugin migrated by an OLD CPV (≤v2.137, pre-#139) was pinned `@main` and never re-published, so nothing re-pins it. **This is the DOMINANT downstream CI failure.** | Re-pin to the current `v<semver>` tag or `master` — `standardize --fix` rewrites the stale ref in place (surgical, only the CPV ref), or `--force-templates` regenerates the whole workflow. A valid `master`/`v<semver>`/SHA pin is left untouched. |
+| CIP-7 | The `commitlint` job has **no `dependabot[bot]` exemption** AND the repo ships no commitlint config disabling `body-max-line-length`. With no config, `wagoid/commitlint-github-action` falls back to `@commitlint/config-conventional` (`body-max-line-length` = **100**), and Dependabot's auto-generated commit body embeds a YAML dependency block that ALWAYS exceeds it. **⇒ EVERY Dependabot PR of EVERY canonical-pipeline plugin fails CI, forever, with no plugin change** — the single largest ongoing red-signal source (4 of the 18 failures in the 2026-07-13 forensics). WARNING-level: it is a migration nudge for a repo scaffolded before v2.157.0, not a publish gate. | Ship the canonical `.commitlintrc.json` (sets `"body-max-line-length": [0]` — a BOT's machine-generated body length carries no signal). `standardize --fix` provisions it, never clobbering an existing one. Do NOT weaken the `type-enum` rule: a **human's** badly-typed commit must still fail (that gate was observed working correctly). |
+| CIP-8 | A workflow runs a **sharded** pytest matrix (`pytest … --splits N --group K`) but the project does not declare **`pytest-split`** in its dev extra, so every shard dies with `pytest: error: unrecognized arguments: --splits --group`. Fires ONLY when the sharded invocation is actually present — a non-sharded matrix must NOT require the dependency. WARNING-level (migration nudge). | Add `pytest-split` to `[project.optional-dependencies].dev` and refresh the lockfile. `standardize --fix` couples the two so the sharded matrix and the dependency can never disagree. |
 
 ### Verify (§6)
 
 ```bash
 cpv-remote-validate ci-preflight .
-# expect: CIP-1..6 PASS (or a non-blocking WARNING when a gate's tool is
+# expect: CIP-1..8 PASS (or a non-blocking WARNING when a gate's tool is
 #         absent); no BLOCK from any parity gate.
 ```
 

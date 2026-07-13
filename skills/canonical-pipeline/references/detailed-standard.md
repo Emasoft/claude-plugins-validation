@@ -29,7 +29,9 @@
 | `.gitignore` | YES | Must include `.claude/`, `.tldr/`, `llm_externalizer_output/` |
 | `README.md` | YES | Must have `<!--BADGES-START-->` / `<!--BADGES-END-->` markers |
 | `cliff.toml` | YES | git-cliff changelog configuration |
-| `scripts/publish.py` | YES | 11-stage release pipeline + --gate mode + --install-hook |
+| `.commitlintrc.json` | YES | Sets `"body-max-line-length": [0]` (v2.157.0). WITHOUT it, commitlint falls back to `@commitlint/config-conventional` (limit 100) and **every Dependabot PR fails CI forever** — its machine-generated body always exceeds 100 chars. The `type-enum` rule stays ON: a *human's* badly-typed commit must still fail. Detected by CIP-7. |
+| `.cspell.json` | YES | Project dictionary (v2.157.0). Mega-Linter ships SPELL enabled, so WITHOUT a dictionary CI hard-errors on the plugin's own proper nouns (agent/skill names). **AUTHOR-OWNED**: `standardize --fix` augments, never clobbers — so it is deliberately NOT in `_FORCE_TEMPLATE_FILES`. It is a dictionary, not a mute button: a real typo must still fail. |
+| `scripts/publish.py` | YES | 11-stage release pipeline + --gate mode + --install-hook. Since v2.157.0 includes **Gate 3b — the CI-parity preflight**, run BEFORE the bump/commit/tag/push so a parity defect cannot strand a half-published repo. A missing tool degrades to WARNING and never false-blocks. |
 | `git-hooks/pre-push` | YES | Thin bash delegator to `publish.py --gate` |
 | `CHANGELOG.md` | YES | Auto-generated changelog |
 | `LICENSE` | YES | License file (MIT recommended) |
