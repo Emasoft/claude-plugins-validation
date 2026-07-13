@@ -155,9 +155,20 @@ def test_ci_yml_test_job_runs_matrix_with_macos():
 
 
 def test_publish_py_uses_atomic_push():
-    """Generated publish.py must use `git push --atomic origin HEAD <tag>`."""
+    """Generated publish.py must push HEAD + every release tag in ONE atomic push.
+
+    The refs became DYNAMIC in v2.156.0 (the push now also carries the
+    `{name}--v{version}` dependency-resolution tag), so this asserts the INVARIANT
+    — an atomic push whose refs are HEAD + the tags — instead of the old literal
+    `git push --atomic origin HEAD`, which no longer appears verbatim. The
+    atomicity guarantee itself is unchanged.
+    """
     py = gen_publish_py(_params())
-    assert "git push --atomic origin HEAD" in py
+    assert '"git", "push", "--atomic", "origin", *push_refs' in py
+    assert 'push_refs = ["HEAD", tag]' in py
+    # The dependency tag must ride in the SAME push — never a separate one, or a
+    # release could ship with the plain tag and not the dependency tag.
+    assert "dep_tag" in py
     # Old separated form must NOT survive.
     assert 'git", "push", "origin", "HEAD", "--tags"' not in py
 

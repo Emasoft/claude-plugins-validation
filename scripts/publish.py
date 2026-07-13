@@ -1989,6 +1989,28 @@ def _local_tag_exists(plugin_root: Path, tag_name: str) -> bool:
     return result.returncode == 0 and tag_name in result.stdout.split()
 
 
+def _dependency_tag_name(plugin_root: Path, tag_name: str) -> str | None:
+    """The ``{plugin-name}--v{version}`` tag Claude Code resolves dependencies against.
+
+    ``tag_name`` is the plain release tag (``v2.155.0``); the version is its suffix.
+    The plugin name is read from the manifest — never hardcoded — so a rename cannot
+    silently desync the tag from the plugin it names. Returns None when the name is
+    unreadable, in which case the caller warns and skips rather than inventing one.
+
+    This is the exact name ``claude plugin tag`` produces.
+    """
+    manifest = plugin_root / ".claude-plugin" / "plugin.json"
+    if not manifest.is_file():
+        return None
+    try:
+        name = json.loads(manifest.read_text(encoding="utf-8")).get("name")
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not name:
+        return None
+    return f"{name}--v{tag_name.removeprefix('v')}"
+
+
 def _remote_tag_exists(plugin_root: Path, tag_name: str) -> bool:
     """True when ``tag_name`` exists on origin (per ``git ls-remote``).
 
@@ -2279,6 +2301,21 @@ def stage_commit_tag_push(
     else:
         run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=plugin_root)
         print(f"{GREEN}✓ Tag {tag_name} created{NC}")
+
+    # The DEPENDENCY-RESOLUTION tag. Claude Code resolves a version-constrained
+    # dependency ONLY against `{name}--v*` tags and IGNORES the plain `vX.Y.Z` one,
+    # so without this CPV itself cannot be depended upon: a dependent fails to
+    # install with `no-matching-tag` and is DISABLED. CPV's own detector
+    # (RC-DEP-TAG-*) flags exactly this — dogfood it rather than exempt ourselves.
+    dep_tag_name = _dependency_tag_name(plugin_root, tag_name)
+    if dep_tag_name is None:
+        print(f"{YELLOW}  WARNING: plugin name unreadable — skipping the dependency tag.{NC}")
+    elif _local_tag_exists(plugin_root, dep_tag_name):
+        print(f"{YELLOW}  Tag {dep_tag_name} already exists locally — skipping.{NC}")
+    else:
+        run(["git", "tag", "-a", dep_tag_name, "-m", dep_tag_name.replace("--v", " ")], cwd=plugin_root)
+        print(f"{GREEN}✓ Dependency tag {dep_tag_name} created{NC}")
+
     print(f"\n{BLUE}═══ Gate 12: Push to origin (branch + tags) ═══{NC}")
     # TRDD-bbff5bc5: gh-auth precheck — fail fast with actionable error if
     # the maintainer's gh CLI is missing/unauthed/lacks push perm.
@@ -2352,7 +2389,9 @@ def stage_commit_tag_push(
     # retry; 4xx-class permanent errors fall through immediately.
     print(f"  $ git push --atomic origin HEAD {tag_name}")
     git_with_retry(
-        ["git", "push", "--atomic", "origin", "HEAD", tag_name],
+        # Both tags in ONE atomic push: a release can never ship with the plain tag
+        # and not the dependency tag (which is exactly how this defect hid).
+        ["git", "push", "--atomic", "origin", "HEAD", tag_name, *([dep_tag_name] if dep_tag_name else [])],
         cwd=plugin_root,
         env=os.environ.copy(),
         capture_output=False,

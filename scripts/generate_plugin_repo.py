@@ -2985,6 +2985,32 @@ def _local_tag_exists(root: Path, tag: str) -> bool:
     return r.returncode == 0
 
 
+def _plugin_name(root: Path) -> str | None:
+    """Read the plugin name from .claude-plugin/plugin.json."""
+    pj = root / ".claude-plugin" / "plugin.json"
+    if not pj.is_file():
+        return None
+    try:
+        data = json.loads(pj.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    name = data.get("name")
+    return str(name) if name else None
+
+
+def _dependency_tag_name(root: Path, new_ver: str) -> str | None:
+    """The `{plugin-name}--v{version}` tag Claude Code resolves dependencies against.
+
+    Derived from the manifest, never hardcoded, so renaming the plugin cannot silently
+    desync the tag from the plugin it names. Returns None when the name is unreadable,
+    in which case the caller warns and skips rather than inventing a name.
+
+    This is the exact name `claude plugin tag` produces.
+    """
+    name = _plugin_name(root)
+    return f"{name}--v{new_ver}" if name else None
+
+
 def stage_bump(root: Path, new_ver: str, dry_run: bool) -> None:
     """Step 7: Bump version. Idempotent — skips when local already matches target.
 
@@ -3159,10 +3185,25 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     """
     cprint(f"\n{BOLD}[10/11] Committing and pushing...{NC}")
     tag = f"v{new_ver}"
+    # The DEPENDENCY-RESOLUTION tag. Since Claude Code 2.1.110 a version-constrained
+    # dependency ({"name": "<plugin>", "version": ">=1.2"}) is resolved by listing this
+    # repo's tags, keeping only those starting with "<plugin>--v", and fetching the
+    # highest one satisfying the range. The plain vX.Y.Z tag is IGNORED by that
+    # resolver, so a plugin shipping only vX.Y.Z cannot be depended upon: every
+    # dependent fails to install with `no-matching-tag` and is DISABLED.
+    #
+    # It stays invisible until someone installs clean (an already-installed dependent
+    # keeps working), which is exactly how it went unnoticed in the wild. So both tags
+    # are created and pushed in the SAME atomic push -- a release can never ship with
+    # one and not the other. NOTE the separator is a DOUBLE hyphen (`--v`); a single
+    # `-v` does not match the resolver's prefix filter.
+    dep_tag = _dependency_tag_name(root, new_ver)
     expected_subject = f"chore: bump version to {new_ver}"
     head_subject = _head_commit_message(root)
     tree_clean = _git_porcelain_clean(root)
     tag_exists = _local_tag_exists(root, tag)
+    dep_tag_exists = dep_tag is not None and _local_tag_exists(root, dep_tag)
+    push_refs = ["HEAD", tag] + ([dep_tag] if dep_tag else [])
 
     if dry_run:
         if head_subject == expected_subject and tree_clean:
@@ -3173,7 +3214,13 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
             cprint(f"  Would skip tag (already exists locally): {tag}")
         else:
             cprint(f"  Would tag: {tag}")
-        cprint(f"  Would push (atomic): origin HEAD {tag}")
+        if dep_tag is None:
+            cprint(f"  {YELLOW}Would SKIP the dependency tag - plugin name unreadable.{NC}")
+        elif dep_tag_exists:
+            cprint(f"  Would skip dependency tag (already exists locally): {dep_tag}")
+        else:
+            cprint(f"  Would tag (dependency resolution): {dep_tag}")
+        cprint(f"  Would push (atomic): origin {' '.join(push_refs)}")
         return
 
     if head_subject == expected_subject and tree_clean:
@@ -3188,6 +3235,17 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     else:
         run(["git", "tag", "-a", tag, "-m", f"Release {tag}"], cwd=root)
 
+    if dep_tag is None:
+        # Warn loudly rather than silently omitting it: a silent skip is precisely how
+        # this defect survived unnoticed across many releases.
+        cprint(f"  {YELLOW}WARNING: cannot read the plugin name from "
+               f".claude-plugin/plugin.json - SKIPPING the dependency tag. Dependent "
+               f"plugins will fail to resolve this release with `no-matching-tag`.{NC}")
+    elif dep_tag_exists:
+        cprint(f"  {YELLOW}Tag {dep_tag} already exists locally — skipping.{NC}")
+    else:
+        run(["git", "tag", "-a", dep_tag, "-m", f"{_plugin_name(root)} {new_ver}"], cwd=root)
+
     # gh-auth precheck — fail fast with actionable error if gh missing/unauthed.
     owner, repo = _resolve_owner_repo(root)
     _ensure_gh_auth(owner, repo)
@@ -3198,12 +3256,13 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     # transaction in the wire protocol; the server rolls back if any ref
     # update fails. git_with_retry still wraps the call so transient
     # network hiccups (4xx-class permanent errors fall through immediately).
-    cprint(f"  {BLUE}$ git push --atomic origin HEAD {tag}{NC}")
+    cprint(f"  {BLUE}$ git push --atomic origin {' '.join(push_refs)}{NC}")
     git_with_retry(
-        ["git", "push", "--atomic", "origin", "HEAD", tag],
+        ["git", "push", "--atomic", "origin", *push_refs],
         cwd=str(root), capture_output=False,
     )
-    cprint(f"  {GREEN}Pushed {tag} atomically.{NC}")
+    _pushed = tag if dep_tag is None else f"{tag} + {dep_tag}"
+    cprint(f"  {GREEN}Pushed {_pushed} atomically.{NC}")
 
 def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     """Step 11: Create GitHub release via gh CLI.

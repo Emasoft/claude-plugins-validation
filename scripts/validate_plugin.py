@@ -5844,6 +5844,121 @@ def _coverage_test_blobs(test_files: list[Path]) -> tuple[str, str]:
     return name_blob, "\n".join(content_parts)
 
 
+def _git_tags(plugin_root: Path) -> list[str] | None:
+    """Local git tags, or None when this is not a git repo / git is unavailable."""
+    if not (plugin_root / ".git").exists():
+        return None
+    try:
+        r = subprocess.run(
+            ["git", "tag", "--list"],
+            capture_output=True,
+            text=True,
+            cwd=str(plugin_root),
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    return [t.strip() for t in r.stdout.splitlines() if t.strip()]
+
+
+def check_dependency_resolution_tags(plugin_root: Path, report: ValidationReport) -> None:
+    """Advisory WARNING (NON-BLOCKING): this plugin cannot be DEPENDED UPON.
+
+    Since Claude Code 2.1.110 a version-constrained dependency --
+    ``{"name": "<plugin>", "version": ">=1.2"}`` -- is resolved by listing the
+    dependency repo's tags, keeping only those starting with ``<plugin>--v``, and
+    fetching the highest one satisfying the range. A plain ``vX.Y.Z`` tag is
+    IGNORED by that resolver.
+
+    So a plugin that publishes ONLY ``vX.Y.Z`` tags cannot be depended upon: every
+    dependent fails to install with ``no-matching-tag`` and is DISABLED.
+
+    WHY THIS DETECTOR EXISTS: that failure is INVISIBLE from the depending side --
+    an already-installed dependent keeps working because the dependency is already
+    on disk. It only surfaces on a clean install or in CI. It silently broke a real
+    plugin pair for months (claude-plugins-validation#163, claude-menu-system#2)
+    while every local check stayed green.
+
+    Two signals, both offline and both fail-quiet:
+
+    1. PIPELINE (works on an UNINSTALLED, tag-less source): the plugin ships a
+       canonical ``scripts/publish.py`` that creates a ``v{version}`` tag but never
+       a ``{name}--v{version}`` one. Fix: ``standardize --fix --force-templates``.
+    2. TAGS (only when a real git repo is present): the repo has release tags but
+       ZERO ``{name}--v*`` tags. Also catches the SINGLE-hyphen near-miss
+       (``{name}-v1.2.3``), which several real tags in the wild get wrong -- it does
+       not match the resolver's ``{name}--v`` prefix filter and resolves nothing.
+
+    WARN-only, deliberately. The docs do not make the tag mandatory for a plugin
+    nobody depends on, and CPV must not invent a publish gate Claude Code does not
+    have -- but a plugin that IS depended upon is silently broken without it, so
+    staying quiet is not an option either.
+    """
+    name = None
+    manifest_path = plugin_root / ".claude-plugin" / "plugin.json"
+    if manifest_path.is_file():
+        try:
+            name = json.loads(manifest_path.read_text(encoding="utf-8")).get("name")
+        except (json.JSONDecodeError, OSError):
+            name = None
+    if not name:
+        return
+
+    # --- Signal 1: the release pipeline never emits the dependency tag ----------
+    publish_py = plugin_root / "scripts" / "publish.py"
+    if publish_py.is_file():
+        try:
+            body = publish_py.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            body = ""
+        # The canonical pipeline tags `v{new_ver}`. If it does so but never builds a
+        # `--v` dependency tag, a release will ship undependable.
+        creates_plain_tag = '"git", "tag"' in body or "git tag -a" in body
+        creates_dep_tag = "--v" in body and ("dependency_tag" in body or "dep_tag" in body)
+        if creates_plain_tag and not creates_dep_tag:
+            report.warning(
+                f"[RC-DEP-TAG-PIPELINE] scripts/publish.py tags releases as 'v{{version}}' but never "
+                f"as '{name}--v{{version}}'. Claude Code resolves a version-constrained dependency "
+                f"ONLY against '{name}--v*' tags, so any plugin depending on this one will fail to "
+                f"install with `no-matching-tag` and be DISABLED. This stays invisible until someone "
+                f"installs clean. Fix: refresh the canonical pipeline with `cpv-remote-validate "
+                f"standardize <plugin> --fix --force-templates` (it now tags both refs in one atomic "
+                f"push), or run `claude plugin tag --push` at each release."
+            )
+
+    # --- Signal 2: the repo has releases but no resolvable tags -----------------
+    tags = _git_tags(plugin_root)
+    if not tags:
+        return
+    dep_prefix = f"{name}--v"
+    if any(t.startswith(dep_prefix) for t in tags):
+        return  # resolvable — nothing to say
+
+    release_tags = [t for t in tags if re.fullmatch(r"v?\d+\.\d+\.\d+.*", t)]
+    if not release_tags:
+        return  # no releases yet; nothing to resolve against
+
+    # The single-hyphen near-miss is worth calling out by name: it LOOKS right.
+    near_miss = [t for t in tags if t.startswith(f"{name}-v")]
+    detail = (
+        f" Found '{near_miss[0]}', which uses a SINGLE hyphen — the resolver requires a "
+        f"DOUBLE hyphen ('{dep_prefix}...') and ignores the single-hyphen form."
+        if near_miss
+        else ""
+    )
+    report.warning(
+        f"[RC-DEP-TAG-MISSING] this repo has {len(release_tags)} release tag(s) but no "
+        f"'{dep_prefix}*' tag. Claude Code resolves a version-constrained dependency ONLY against "
+        f"'{dep_prefix}*' tags, so any plugin depending on this one fails to install with "
+        f"`no-matching-tag` and is DISABLED.{detail} Fix: backfill the tag for the current release "
+        f"with `claude plugin tag --push` (creates '{dep_prefix}<version>'), and make every future "
+        f"release emit it."
+    )
+
+
 def check_test_coverage(plugin_root: Path, report: ValidationReport) -> None:
     """Advisory WARNING (NON-BLOCKING): flag shipped components that have no
     discoverable test, in a plugin that DOES ship a test suite (issue #155).
@@ -7847,6 +7962,11 @@ def main() -> int:
         # blocks --strict). Universal: generic conventions, zero marketplace /
         # ai-maestro assumptions.
         ("check_test_coverage", check_test_coverage, ((), {})),
+        # WARNING-level (never blocks --strict): a plugin publishing only `vX.Y.Z`
+        # tags cannot be DEPENDED UPON — Claude Code resolves version-constrained
+        # dependencies solely against `{name}--v*` tags. Invisible from the
+        # depending side until a clean install (#163 / claude-menu-system#2).
+        ("check_dependency_resolution_tags", check_dependency_resolution_tags, ((), {})),
         ("validate_canonical_pipeline_drift", validate_canonical_pipeline_drift, ((), {})),
         ("validate_legacy_pipeline_scripts", validate_legacy_pipeline_scripts, ((), {})),
         ("validate_pep723_invocations", validate_pep723_invocations, ((), {})),
