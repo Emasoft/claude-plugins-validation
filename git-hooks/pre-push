@@ -199,6 +199,22 @@ def extract_version(filepath: Path) -> str | None:
         return None
 
 
+def extract_name(filepath: Path) -> str | None:
+    """Extract the ``name`` field from a JSON file, or return None.
+
+    Used to allow the ``{name}--v{version}`` dependency-resolution tag through the
+    tag guard. Returns None on any read/parse problem, in which case the guard
+    simply falls back to allowing only ``v{version}`` — a failure to read the name
+    must never widen what is accepted.
+    """
+    try:
+        data = json.loads(filepath.read_text(encoding="utf-8"))
+        name = data.get("name")
+        return str(name) if name else None
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Main logic
 # ---------------------------------------------------------------------------
@@ -283,18 +299,31 @@ def main() -> int:
     local_version = extract_version(repo_root / ".claude-plugin" / "plugin.json")
     if local_version:
         if tag_only_push:
-            # For tag pushes: every pushed tag must match "v<local_version>"
+            # For tag pushes: every pushed tag must name THIS version. A release
+            # legitimately pushes TWO tags:
+            #   v<version>                  — the human-facing release tag
+            #   <plugin-name>--v<version>   — the DEPENDENCY-RESOLUTION tag that
+            #                                 Claude Code resolves a
+            #                                 version-constrained dependency
+            #                                 against (it IGNORES the plain tag).
+            # Both are pushed in one atomic push, so the guard must accept both.
+            # It stays strict: a tag naming any OTHER version, or any other shape,
+            # is still blocked — this widens the allowlist, it does not disable it.
             expected_tag = f"v{local_version}"
-            mismatched = [t for t in tag_refs if t != expected_tag]
+            allowed = {expected_tag}
+            plugin_name = extract_name(repo_root / ".claude-plugin" / "plugin.json")
+            if plugin_name:
+                allowed.add(f"{plugin_name}--v{local_version}")
+            mismatched = [t for t in tag_refs if t not in allowed]
             if mismatched:
                 cprint(f"{RED}========================================{NC}")
                 cprint(f"{RED}  BLOCKED: Tag name does not match plugin version!{NC}")
                 cprint(f"{RED}  Pushed tag(s): {', '.join(mismatched)}{NC}")
-                cprint(f"{RED}  Expected: {expected_tag}{NC}")
+                cprint(f"{RED}  Expected one of: {', '.join(sorted(allowed))}{NC}")
                 cprint(f"{RED}  Run: uv run python scripts/publish.py --patch{NC}")
                 cprint(f"{RED}========================================{NC}")
                 return 1
-            cprint(f"{GREEN}Tag matches local version: {expected_tag}{NC}")
+            cprint(f"{GREEN}Tag(s) match local version: {', '.join(sorted(tag_refs))}{NC}")
         else:
             # For branch pushes: local version must be strictly greater than remote.
             # Resolve origin/HEAD dynamically so this works on main OR master
