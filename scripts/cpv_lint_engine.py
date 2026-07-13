@@ -46,6 +46,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from pathlib import Path
 
 # Local helpers — the scripts/ dir is on sys.path when validate_plugin.py
@@ -415,6 +416,59 @@ def _effective_timeout(call_site_default: float) -> float:
     except ValueError:
         return call_site_default
     return override if override > 0 else call_site_default
+
+
+# Aggregate wall-clock ceiling for the WHOLE REPO LINT phase (issue #162). The
+# #148 per-linter ceiling bounds each linter spawn, but NOT their SUM: ~17 linters
+# each capped at 60-180s is ~34 min, and on a cold CI runner uv/npm serialize the
+# concurrent first-run `uvx`/`npx` fetches on a global cache lock — so the parallel
+# fan-out degrades toward serial and the phase marches to ~27-34 min, past the CI
+# job's own `timeout-minutes`. GitHub then SIGKILLs the job, leaving the orphaned
+# `uv`/`python` children seen in #162. This budget caps the SUM so the phase can
+# NEVER approach the job wall-clock, no matter how many linters go cold at once.
+_REPO_LINT_PHASE_TIMEOUT_ENV = "PLUGIN_REPO_LINT_PHASE_TIMEOUT"
+# 600s: ~17× the ~35s warm run and ~4× a plausibly-slow-but-healthy cold run, yet
+# well under the typical 25-30 min validate-job ceiling — so it will not false-skip
+# a healthy cold run, but always fires before the job timeout on a cold linter storm.
+_DEFAULT_PHASE_TIMEOUT = 600.0
+
+
+def _phase_timeout() -> float:
+    """Resolve the aggregate wall-clock budget for the whole REPO LINT phase.
+
+    Returns ``PLUGIN_REPO_LINT_PHASE_TIMEOUT`` (seconds, float) when set to a
+    positive number; otherwise ``_DEFAULT_PHASE_TIMEOUT``. An empty, zero,
+    negative, or non-numeric value falls back to the default — mirroring
+    ``_effective_timeout`` so a typo can never DISABLE the guard or set a
+    near-zero ceiling that skips every language.
+    """
+    raw = os.environ.get(_REPO_LINT_PHASE_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return _DEFAULT_PHASE_TIMEOUT
+    try:
+        override = float(raw)
+    except ValueError:
+        return _DEFAULT_PHASE_TIMEOUT
+    return override if override > 0 else _DEFAULT_PHASE_TIMEOUT
+
+
+def _phase_budget_skip_message(budget: float, skipped: list[str]) -> str:
+    """The single WARNING emitted when the phase budget is exhausted (issue #162).
+
+    Shared by the parallel and serial paths so both report identically. The skip
+    is a WARNING (never blocking) — the same degrade as a per-linter timeout, and
+    consistent with ``PLUGIN_SKIP_REPO_LINT``; the authoritative CI lint is the
+    downstream Mega-Linter pass, so a budget-forced skip is visible, not silent.
+    """
+    return (
+        f"REPO LINT phase budget ({budget:g}s) exhausted before linting every "
+        f"language — skipped: {', '.join(skipped)}. Each linter is still "
+        "individually bounded; this aggregate ceiling "
+        "(PLUGIN_REPO_LINT_PHASE_TIMEOUT) stops a cold-runner linter storm from "
+        "blowing the CI job's own timeout (issue #162). Raise it, warm the tool "
+        "cache, or set PLUGIN_SKIP_REPO_LINT=1 if a downstream linter (e.g. "
+        "Mega-Linter) already covers these."
+    )
 
 
 def _repo_lint_disabled() -> bool:
@@ -2259,6 +2313,12 @@ def lint_repo(
     parallel_env = os.environ.get("CPV_LINT_PARALLEL", "1").strip().lower()
     parallel_enabled = parallel_env not in {"0", "false", "no", ""}
 
+    # Issue #162 — the aggregate wall-clock ceiling for the whole phase. Bounds
+    # the SUM of the (individually #148-bounded) linters so a cold-runner linter
+    # storm can never march REPO LINT past the CI job's own `timeout-minutes`.
+    # Shared by both the parallel and serial paths below.
+    phase_budget = _phase_timeout()
+
     results: list[tuple[str, ValidationReport, str, bool]] = []
     if parallel_enabled:
         # max_workers caps at 8 to keep the system responsive on machines
@@ -2267,18 +2327,42 @@ def lint_repo(
         # spawn syscall and disk IO — both of which scale well beyond 8
         # in practice but plateau in benefit past that point.
         max_workers = min(8, len(sorted_langs))
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            # `executor.map` preserves input order and is the simplest
-            # way to fan out + collect; we re-sort below anyway in case
-            # the dispatch order changes in a future refactor.
-            for outcome in ex.map(_run_one, sorted_langs):
+        # Manual executor lifecycle (NOT a `with` block): on a budget timeout we
+        # must `shutdown(wait=False, cancel_futures=True)` to return promptly. A
+        # `with` block's __exit__ calls shutdown(wait=True), which would re-block
+        # on the very in-flight linters we are trying to escape (issue #162).
+        ex = ThreadPoolExecutor(max_workers=max_workers)
+        try:
+            # `executor.map` preserves input order and yields results as they
+            # arrive; `timeout=` is measured from THIS call, making it a true
+            # aggregate deadline across every language. On exhaustion __next__
+            # raises FuturesTimeoutError, and the languages not yet yielded
+            # (sorted_langs[len(results):]) are exactly the ones we skip.
+            for outcome in ex.map(_run_one, sorted_langs, timeout=phase_budget):
                 results.append(outcome)
+        except FuturesTimeoutError:
+            skipped = sorted_langs[len(results):]
+            report.warning(_phase_budget_skip_message(phase_budget, skipped))
+        finally:
+            # cancel_futures kills the QUEUED languages immediately; the
+            # ≤max_workers in-flight linters are each already per-linter-bounded,
+            # so they finish/die on their own ceiling in the background — we do
+            # not wait on them (wait=False), so the phase returns promptly.
+            ex.shutdown(wait=False, cancel_futures=True)
     else:
         # Serial fallback — preserves byte-identical semantics by calling
         # the same per-language work function (`_run_one`) one at a time,
         # in canonical alphabetical order. Same cache, same dispatch,
         # same report merge order — only the executor is removed.
-        for lang in sorted_langs:
+        phase_start = time.monotonic()
+        for idx, lang in enumerate(sorted_langs):
+            # Check BEFORE starting each language so the phase stops launching new
+            # work once the budget is spent; the language already running is
+            # bounded by its own per-linter ceilings, so the overrun is finite.
+            # `idx > 0` guarantees at least one language always runs.
+            if idx > 0 and time.monotonic() - phase_start >= phase_budget:
+                report.warning(_phase_budget_skip_message(phase_budget, sorted_langs[idx:]))
+                break
             results.append(_run_one(lang))
 
     # Replay in canonical (alphabetical) order so logs are stable
