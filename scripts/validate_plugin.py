@@ -1800,6 +1800,9 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "schemas",
         "bin",  # plugins.md L192 — executables on PATH while plugin enabled
         "monitors",  # plugins-reference.md — background monitor definitions (v2.1.105+)
+        "themes",  # plugins-reference.md "Directory | Purpose" table — color theme definitions.
+        # A DEFAULT component dir (peer of skills/ agents/ commands/ output-styles/ bin/); it was
+        # missing here, so a plugin shipping themes/ drew a publish-blocking RC-NONSTD-DIR-001 MAJOR.
         "servers",  # MCP server bundles per docs example: ${CLAUDE_PLUGIN_ROOT}/servers/db-server
         "templates",
         "tests",

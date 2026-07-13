@@ -624,10 +624,11 @@ VALID_TOOLS = {
     "ScheduleWakeup",  # self-paced /loop — reschedules; surfaces session_crons in Stop input (tools-reference)
     "ShareOnboardingGuide",  # uploads ONBOARDING.md; backs /team-onboarding (tools-reference)
     "WaitForMcpServers",  # v2.1.142 — waits for connecting MCP servers (tools-reference)
-    # NOTE: `PushNotification` is not currently enumerated in tools-reference.md L13-49.
-    # It was added to CPV under the rationale of v2.1.110 remote-control push support
-    # but remains unverified against the official tools table. Kept here so authors
-    # who use it do not trip a CPV MAJOR; revisit when tools-reference.md confirms.
+    "ReportFindings",  # v2.1.196 — structured code-review findings (tools-reference)
+    "SendUserFile",  # sends a session file to the user with an optional caption (tools-reference)
+    # `PushNotification` was previously carried on an UNVERIFIED rationale (a note here
+    # claimed it was absent from tools-reference and asked for a revisit). Re-checked
+    # against the live tools-reference table: it IS enumerated there. Note resolved.
     "PushNotification",
     "SlashCommand",  # v1.0.123 — enables Claude to invoke your slash commands
     "MCPSearch",  # v2.1.7 — MCP-specific tool search (distinct from generic ToolSearch)
