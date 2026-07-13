@@ -24,10 +24,112 @@ import re
 import sys
 from pathlib import Path
 
+from generate_plugin_repo import CPV_SUMMARY_MARKER
+
 # -- Constants ----------------------------------------------------------------
 
 # Reserved marketplace names that will be rejected by the validator
 RESERVED_NAMES = frozenset({"official", "anthropic", "claude", "test", "example", "demo"})
+
+# ── RC-8: the "the validator ACTUALLY RAN" proof markers ─────────────────────
+#
+# The handler these markers serve replaces one that was MISLEADING and, worse,
+# FAIL-OPEN — the same defect wave 1 fixed in generate_plugin_repo.py's ci.yml /
+# release.yml, still live here for MARKETPLACE repos:
+#
+#   * It reported ANY non-zero exit as "CRITICAL/MAJOR/MINOR/NIT". A cold
+#     `uvx --from git+…` build that dies on a transient GitHub git-fetch exits 1
+#     — byte-identical to a CRITICAL verdict — so an infra flake was triaged as a
+#     validation failure.
+#   * It treated ANY exit `>= 5` as "advisory WARNING-level" and PASSED. But CPV's
+#     exit codes stop at 4 (cpv_validation_common: OK 0 / CRITICAL 1 / MAJOR 2 /
+#     MINOR 3 / NIT 4 — WARNING never gets an exit code of its own), so `>= 5` is
+#     NEVER a verdict: `uvx: command not found` (127) or an OOM-killed run (137)
+#     SILENTLY GREENED the gate. That is a fail-OPEN hole, not a cosmetic
+#     mislabel — the marketplace CI would pass having validated nothing.
+#
+# Because uvx itself also exits 1/2, the exit code ALONE cannot separate a real
+# verdict from a crash. Each handler therefore also requires the validator's own
+# machine-readable output line as PROOF that it ran and produced a verdict.
+#
+# Each marker below is emitted UNCONDITIONALLY on the exact code path the
+# workflow uses (no --json, no --report) — verified against the source, not
+# assumed:
+#   * `plugin`      → validate_plugin.py's `SUMMARY: CRITICAL=…` (print_report).
+#   * `marketplace` → validate_marketplace.py's format_report() header, printed
+#                     by the `else:` branch of main() when no --report is passed.
+#   * pipeline      → validate_marketplace_pipeline.py's format_text_report()
+#                     `SUMMARY: <n> CRITICAL, …` line, likewise unconditional.
+# The plugin marker is IMPORTED (not re-typed) so the plugin-side and
+# marketplace-side handlers can never drift apart.
+CPV_PLUGIN_VERDICT_MARKER = CPV_SUMMARY_MARKER
+CPV_MARKETPLACE_VERDICT_MARKER = "Marketplace Validation Report"
+CPV_PIPELINE_VERDICT_MARKER = "SUMMARY: "
+
+# The infra-failure message every handler prints. One constant so all three sites
+# say the same thing — the whole point of RC-8 is that an operator can tell an
+# infra crash from a findings verdict at a glance.
+_CPV_INFRA_FAILURE_ECHO = (
+    "CPV validator FAILED TO RUN (exit $EXITVAR) — infra/network/install failure, "
+    "NOT a validation verdict. No findings were produced; do not read this as "
+    "CRITICAL/MAJOR/MINOR/NIT. See the log above (a cold 'uvx --from git+...' build "
+    "can fail on a transient GitHub git-fetch)."
+)
+
+
+def _cpv_verdict_shell(
+    *,
+    label: str,
+    exit_var: str,
+    report_path: str,
+    marker: str,
+    indent: str,
+    pass_echo: str,
+    findings_action: str,
+    infra_action: str,
+) -> str:
+    """Emit the shell that CLASSIFIES a CPV validator's exit code (RC-8).
+
+    Three outcomes, and only three:
+
+    * exit 0                          → pass. The marker is deliberately NOT
+      required here, so a clean run can never be false-blocked by a future change
+      to the validator's output format.
+    * exit 1-4 **and** the marker      → real findings → fail, labelled findings.
+    * anything else                   → the validator FAILED TO RUN → fail,
+      labelled infra/network.
+
+    Fail-CLOSED by design: an infra failure is not "no findings", so it must never
+    green the gate — but it is now reported as what it actually is.
+
+    Args:
+        label: human name of the gate, used in the echoed messages.
+        exit_var: the shell variable holding the captured exit code (no ``$``).
+        report_path: the file the validator's combined output was captured to.
+        marker: the proof-of-verdict line to grep for.
+        indent: the leading whitespace every emitted line carries (YAML block).
+        pass_echo: what to echo on a clean run.
+        findings_action: the shell statement to run on a real findings verdict
+            (``exit $exit_code`` at top level; ``failed=$((failed + 1))`` in a loop).
+        infra_action: ditto for the infra-failure branch.
+    """
+    v = f"${exit_var}"
+    infra_echo = _CPV_INFRA_FAILURE_ECHO.replace("$EXITVAR", v)
+    lines = [
+        f'cat "{report_path}"',
+        f"if [ {v} -eq 0 ]; then",
+        f'  echo "{pass_echo}"',
+        f"elif [ {v} -ge 1 ] && [ {v} -le 4 ] \\",
+        f'     && grep -q "{marker}" "{report_path}"; then',
+        f'  echo "::error::{label} failed (exit {v}: CRITICAL/MAJOR/MINOR/NIT found)"',
+        f"  {findings_action}",
+        "else",
+        f'  echo "::error::{label} — {infra_echo}"',
+        f"  {infra_action}",
+        "fi",
+    ]
+    return "\n".join(indent + ln for ln in lines)
+
 
 # Kebab-case pattern: lowercase letters, digits, hyphens only
 KEBAB_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$")
@@ -349,8 +451,21 @@ def _validate_workflow() -> str:
     Both invocations use the same github+uvx pattern used by every other
     CPV template (see scripts/generate_plugin_repo.py ci.yml / release.yml /
     validate.yml), so the rules and the CPV version stay in sync.
+
+    RC-8: all THREE validator steps classify the exit code through
+    :func:`_cpv_verdict_shell`, so an infra/network crash (a cold `uvx --from
+    git+…` build that dies on a transient GitHub git-fetch, `uvx: command not
+    found`, an OOM kill) is reported AS an infra failure and FAILS the job. The
+    handler it replaces silently PASSED on any exit >= 5 — a fail-open hole that
+    greened the marketplace CI while validating nothing.
+
+    The workflow body is a plain (non-f) string because it contains GitHub's
+    `${{ … }}` expressions, which an f-string would require escaping. The three
+    run-blocks are therefore spliced in via placeholder substitution rather than
+    interpolation.
     """
-    return """name: Marketplace Validation
+    return (
+        """name: Marketplace Validation
 
 on:
   push:
@@ -382,33 +497,36 @@ jobs:
         run: uv python install 3.12
 
       - name: Validate marketplace (remote CPV, --strict)
-        # Fetches the current CPV marketplace validator from GitHub. Blocks
-        # on CRITICAL(1)/MAJOR(2)/MINOR(3)/NIT(4); WARNING(5+) is advisory.
+        # Fetches the current CPV marketplace validator from GitHub. Blocks on
+        # CRITICAL(1)/MAJOR(2)/MINOR(3)/NIT(4). RC-8: an exit code outside 1-4,
+        # or a 1-4 with no verdict line, means the validator never RAN (a failed
+        # uvx/git fetch exits 1 or 2 exactly like a findings verdict) — that is
+        # an infra failure and it FAILS the job, it does not silently pass.
         # Works for BOTH Layout A and Layout B marketplaces.
+        # The report is captured OUTSIDE the checkout ($RUNNER_TEMP) so the
+        # validator can never scan its own half-written output.
         run: |
           set +e
           uvx --from git+https://github.com/Emasoft/claude-plugins-validation \\
               --with pyyaml \\
-              cpv-remote-validate marketplace . --strict
+              cpv-remote-validate marketplace . --strict \\
+              > "$RUNNER_TEMP/cpv-marketplace-report.txt" 2>&1
           exit_code=$?
           set -e
-          if [ $exit_code -eq 0 ]; then
-            echo "Marketplace validation passed"
-          elif [ $exit_code -ge 5 ]; then
-            echo "Only WARNING findings (exit $exit_code) — advisory, not blocking"
-          else
-            echo "::error::Marketplace validation failed with exit $exit_code (CRITICAL/MAJOR/MINOR/NIT)"
-            exit $exit_code
-          fi
+__CPV_MARKETPLACE_BLOCK__
 
       - name: Detect Layout B (nested plugins)
         id: layout
+        # `"$GITHUB_OUTPUT"` is QUOTED: shellcheck SC2086 flags the bare form, so
+        # an unquoted redirect made the emitted workflow fail `actionlint` —
+        # exactly the "the scaffold cannot pass its own canonical lint" class this
+        # wave exists to kill. (Pre-existing; found while fixing RC-8 here.)
         run: |
           if [ -d "plugins" ] && find plugins -mindepth 2 -maxdepth 2 -name plugin.json -path '*/.claude-plugin/plugin.json' -print -quit | grep -q .; then
-            echo "is_layout_b=true" >> $GITHUB_OUTPUT
+            echo "is_layout_b=true" >> "$GITHUB_OUTPUT"
             echo "Layout B detected — plugins nested under plugins/"
           else
-            echo "is_layout_b=false" >> $GITHUB_OUTPUT
+            echo "is_layout_b=false" >> "$GITHUB_OUTPUT"
             echo "Layout A (or no nested plugins) — skipping per-plugin validation"
           fi
 
@@ -429,17 +547,11 @@ jobs:
             set +e
             uvx --from git+https://github.com/Emasoft/claude-plugins-validation \\
                 --with pyyaml \\
-                cpv-remote-validate plugin "$plugin_dir" --strict
+                cpv-remote-validate plugin "$plugin_dir" --strict \\
+                > "$RUNNER_TEMP/cpv-plugin-report.txt" 2>&1
             rc=$?
             set -e
-            if [ $rc -eq 0 ]; then
-              echo "$plugin_dir: passed"
-            elif [ $rc -ge 5 ]; then
-              echo "$plugin_dir: WARNING only (advisory)"
-            else
-              echo "::error::$plugin_dir failed validation (exit $rc)"
-              failed=$((failed + 1))
-            fi
+__CPV_PLUGIN_BLOCK__
           done
           if [ $failed -gt 0 ]; then
             echo "::error::$failed nested plugin(s) failed validation"
@@ -448,24 +560,63 @@ jobs:
 
       - name: Validate marketplace pipeline wiring (remote CPV)
         # Also run the marketplace_pipeline validator to check publish.py,
-        # cliff.toml, CI workflows, tag discipline, and secrets. Advisory if
-        # the marketplace does not ship a CPV pipeline yet.
+        # cliff.toml, CI workflows, tag discipline, and secrets. Its exit codes
+        # are the same 0-4 verdict scale (see its report.exit_code(): A→0, B/C→3,
+        # D→2, F→1), so the same RC-8 classification applies: a code outside 1-4,
+        # or a 1-4 with no verdict line, is an infra failure — fail, don't pass.
         run: |
           set +e
           uvx --from git+https://github.com/Emasoft/claude-plugins-validation \\
               --with pyyaml \\
-              cpv-remote-validate validate_marketplace_pipeline . --strict
+              cpv-remote-validate validate_marketplace_pipeline . --strict \\
+              > "$RUNNER_TEMP/cpv-pipeline-report.txt" 2>&1
           exit_code=$?
           set -e
-          if [ $exit_code -eq 0 ]; then
-            echo "Marketplace pipeline validation passed"
-          elif [ $exit_code -ge 5 ]; then
-            echo "Only WARNING findings (advisory, not blocking)"
-          else
-            echo "::error::Marketplace pipeline validation failed (exit $exit_code)"
-            exit $exit_code
-          fi
-"""
+__CPV_PIPELINE_BLOCK__
+""".replace(
+            "__CPV_MARKETPLACE_BLOCK__",
+            _cpv_verdict_shell(
+                label="Marketplace validation",
+                exit_var="exit_code",
+                report_path="$RUNNER_TEMP/cpv-marketplace-report.txt",
+                marker=CPV_MARKETPLACE_VERDICT_MARKER,
+                indent=" " * 10,
+                pass_echo="Marketplace validation passed",
+                findings_action="exit $exit_code",
+                infra_action="exit 1",
+            ),
+        )
+        .replace(
+            "__CPV_PLUGIN_BLOCK__",
+            _cpv_verdict_shell(
+                label="$plugin_dir",
+                exit_var="rc",
+                report_path="$RUNNER_TEMP/cpv-plugin-report.txt",
+                marker=CPV_PLUGIN_VERDICT_MARKER,
+                indent=" " * 12,
+                pass_echo="$plugin_dir: passed",
+                # Inside the per-plugin loop: COUNT the failure and keep going, so
+                # one broken nested plugin does not hide the others. The loop's
+                # trailing `if [ $failed -gt 0 ]` still fails the job. An infra
+                # crash counts too — it is NOT a pass.
+                findings_action="failed=$((failed + 1))",
+                infra_action="failed=$((failed + 1))",
+            ),
+        )
+        .replace(
+            "__CPV_PIPELINE_BLOCK__",
+            _cpv_verdict_shell(
+                label="Marketplace pipeline validation",
+                exit_var="exit_code",
+                report_path="$RUNNER_TEMP/cpv-pipeline-report.txt",
+                marker=CPV_PIPELINE_VERDICT_MARKER,
+                indent=" " * 10,
+                pass_echo="Marketplace pipeline validation passed",
+                findings_action="exit $exit_code",
+                infra_action="exit 1",
+            ),
+        )
+    )
 
 
 def _update_catalog_workflow(name: str) -> str:
@@ -511,11 +662,14 @@ jobs:
 
       - name: Check for changes
         id: changes
+        # `"$GITHUB_OUTPUT"` is QUOTED — the bare form trips shellcheck SC2086, so
+        # the emitted workflow failed `actionlint`. A scaffold that cannot pass its
+        # own canonical lint is exactly the defect this wave exists to kill.
         run: |
           if git diff --quiet README.md; then
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
           else
-            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Commit and push
@@ -539,10 +693,16 @@ jobs:
           fi
 
       - name: Summary
+        # ONE block redirect, and the target QUOTED. The bare `$GITHUB_STEP_SUMMARY`
+        # tripped shellcheck SC2086, and three consecutive `>>` to the same file trip
+        # SC2129 — both fail `actionlint`, so the emitted workflow could not pass the
+        # canonical lint it ships with.
         run: |
-          echo "## Catalog Update Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "README.md regenerated from marketplace.json" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Catalog Update Summary"
+            echo ""
+            echo "README.md regenerated from marketplace.json"
+          } >> "$GITHUB_STEP_SUMMARY"
 """
 
 

@@ -599,6 +599,9 @@ def run_audit(plugin_path: Path) -> list[AuditItem]:
     results.extend(audit_readme_badges(plugin_path))
     results.extend(audit_pyproject(plugin_path))
     results.extend(audit_jscpd_config(plugin_path))
+    results.extend(audit_cspell_config(plugin_path))
+    results.extend(audit_commitlint_config(plugin_path))
+    results.extend(audit_inverted_private_usernames(plugin_path))
     results.extend(audit_python_version(plugin_path))
     results.extend(audit_drift(plugin_path))
     return results
@@ -626,6 +629,9 @@ def print_audit_report(results: list[AuditItem], plugin_path: Path) -> None:
         "badges": "README Badges",
         "pyproject": "pyproject.toml Sections",
         "jscpd": "Copy-paste Gate (jscpd ↔ CI parity)",
+        "cspell": "Spell Gate (cspell ↔ CI parity)",
+        "commitlint": "Commit Gate (commitlint ↔ CI parity)",
+        "ci-env": "CI Validate Env (inverted CLAUDE_PRIVATE_USERNAMES)",
         "python": "Python Version",
         "drift": "Project Drift (deps vs imports)",
     }
@@ -685,6 +691,9 @@ def save_report_to_file(results: list[AuditItem], plugin_path: Path, report_path
         "badges": "README Badges",
         "pyproject": "pyproject.toml Sections",
         "jscpd": "Copy-paste Gate (jscpd ↔ CI parity)",
+        "cspell": "Spell Gate (cspell ↔ CI parity)",
+        "commitlint": "Commit Gate (commitlint ↔ CI parity)",
+        "ci-env": "CI Validate Env (inverted CLAUDE_PRIVATE_USERNAMES)",
         "python": "Python Version",
         "drift": "Project Drift (deps vs imports)",
     }
@@ -1111,13 +1120,155 @@ def _apply_notify_marketplace_overrides(
 # the migration installs (release.yml, ci.yml) run `uv sync --extra dev`, so the
 # plugin's [project.optional-dependencies].dev must declare these tools. The
 # AUDIT path WARNs when they're missing (audit_pyproject); the --fix path
-# auto-provisions them (provision_dev_extra). The set below is the DETECTION
-# list (what CI needs); the EXACT provisioned literal is _PROVISION_DEV_EXTRA,
-# which must stay byte-identical to the generator's default.
+# auto-provisions them (provision_dev_extra). The set below is the ALWAYS-REQUIRED
+# DETECTION list (what CI needs unconditionally); the EXACT provisioned literal is
+# _PROVISION_DEV_EXTRA, which must stay byte-identical to the generator's default.
 _CANONICAL_DEV_EXTRA_TOOLS: tuple[str, ...] = ("mypy", "pytest", "ruff")
 _WORKFLOW_PATHS_REQUIRING_DEV_EXTRAS: frozenset[str] = frozenset(
     {".github/workflows/release.yml", ".github/workflows/ci.yml"}
 )
+
+# ─────────────────────────────────────────────────────────────────────────
+# RC-9 — a SHARDED pytest matrix requires the `pytest-split` distribution
+# ─────────────────────────────────────────────────────────────────────────
+# CI-failure forensics 2026-07-13, run 28959141245:
+#
+#     pytest: error: unrecognized arguments: --splits --group
+#
+# The canonical ci.yml emits a SHARDED test matrix (`pytest … --splits N --group K`),
+# but `--splits`/`--group` exist ONLY when `pytest-split` is installed. The
+# generator has declared it since the shard landed — but THIS module's dev-extra
+# provisioner did not, so a plugin migrated with `--force-templates` got the
+# sharded ci.yml AND a dev extra without `pytest-split`: every shard died.
+# That migration path is how RC-9 actually reached CI.
+#
+# The coupling is therefore made CONDITIONAL AND STRUCTURAL: the requirement is
+# derived from the workflows ON DISK (does any of them run `pytest … --splits`?),
+# which is exactly the condition under which the flags are used. Because
+# fix_missing_files writes the force-templated ci.yml BEFORE provisioning the dev
+# extra, the same on-disk probe answers correctly for BOTH paths — the canonical
+# (sharded) migration AND a plain --fix on a repo already carrying a sharded
+# workflow. A plugin whose CI is NOT sharded never has `pytest-split` added
+# (that would be inventing a dependency it does not use).
+#
+# The rule is the CIP-8 detector's rule (cpv_ci_parity_checks). Like the CIP-6
+# re-pin above, it is kept SELF-CONTAINED here — the two agree by construction
+# (identical regex + identical "declared anywhere a `uv sync` would install it"
+# semantics), not by import, so this migrator has no cross-module dependency on
+# the detector. re2-safe: character classes + bounded quantifiers, no lookaround.
+_PYTEST_SPLITS_RE = re.compile(r"\bpytest\b[^\n]*--splits\b")
+_PYTEST_SPLIT_DIST = "pytest-split"
+# Mirrors generate_plugin_repo.PYTEST_SPLIT_REQUIREMENT; used only if the lazy
+# import fails (CPV installed as a wheel with the generator unavailable).
+_FALLBACK_PYTEST_SPLIT_REQUIREMENT = "pytest-split>=0.9"
+
+
+def _pytest_split_requirement() -> str:
+    """The EXACT `pytest-split` requirement literal the generator emits.
+
+    Imported lazily from ``generate_plugin_repo`` (which exports it precisely so
+    the scaffold and this migrator cannot desync); falls back to the mirrored
+    literal when the generator is unavailable.
+    """
+    try:
+        from generate_plugin_repo import PYTEST_SPLIT_REQUIREMENT
+
+        return str(PYTEST_SPLIT_REQUIREMENT).strip() or _FALLBACK_PYTEST_SPLIT_REQUIREMENT
+    except Exception:
+        return _FALLBACK_PYTEST_SPLIT_REQUIREMENT
+
+
+def _workflow_files(plugin_path: Path) -> list[Path]:
+    """Every `.github/workflows/*.yml|*.yaml` file, sorted (missing dir → [])."""
+    workflows = plugin_path / ".github" / "workflows"
+    if not workflows.is_dir():
+        return []
+    return sorted(p for p in workflows.iterdir() if p.is_file() and p.suffix in (".yml", ".yaml"))
+
+
+def _workflow_runs_sharded_pytest(plugin_path: Path) -> bool:
+    """Whether any workflow runs a SHARDED pytest (`pytest … --splits`)."""
+    for wf in _workflow_files(plugin_path):
+        try:
+            text = wf.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if _PYTEST_SPLITS_RE.search(text):
+            return True
+    return False
+
+
+def _normalize_dist_name(name: str) -> str:
+    """PEP-503 normalization: lowercase, runs of `-_.` collapsed to a single `-`.
+
+    So `pytest_split`, `PyTest.Split` and `pytest-split` are ONE name — but
+    `pytest-splitter` (a DIFFERENT distribution) stays distinct and can never
+    satisfy the requirement.
+    """
+    return re.sub(r"[-_.]+", "-", name.strip().lower())
+
+
+def _requirement_dist_name(spec: str) -> str:
+    """The normalized distribution name of a PEP-508 requirement string."""
+    return _normalize_dist_name(re.split(r"[<>=~!\[;\s]", spec, 1)[0])
+
+
+def _project_declares_pytest_split(plugin_path: Path) -> bool:
+    """Whether `pytest-split` is declared ANYWHERE a `uv sync` would install it.
+
+    Checks ``[project].dependencies``, EVERY ``optional-dependencies`` extra, and
+    every PEP-735 ``[dependency-groups]`` group — the CIP-8 detector's exact
+    surface. Broad on purpose: a plugin that already declares it (in a
+    `test` extra, say) must NOT have a duplicate injected into `dev`.
+
+    Returns False when pyproject is absent/unparseable — "no signal" means the
+    provisioner does nothing anyway (it bails on an unreadable pyproject).
+    """
+    pyproject = plugin_path / "pyproject.toml"
+    if not pyproject.is_file():
+        return False
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:
+        return False
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    if not isinstance(data, dict):
+        return False
+
+    specs: list[str] = []
+
+    def _collect(container: object) -> None:
+        """Collect every requirement string from a list, or from a dict of lists."""
+        if isinstance(container, list):
+            specs.extend(s for s in container if isinstance(s, str))
+        elif isinstance(container, dict):
+            for value in container.values():
+                if isinstance(value, list):
+                    specs.extend(s for s in value if isinstance(s, str))
+
+    project = data.get("project")
+    if isinstance(project, dict):
+        _collect(project.get("dependencies"))
+        _collect(project.get("optional-dependencies"))
+    _collect(data.get("dependency-groups"))
+
+    return any(_requirement_dist_name(spec) == _PYTEST_SPLIT_DIST for spec in specs)
+
+
+def _required_dev_extra_tools(plugin_path: Path) -> tuple[str, ...]:
+    """The dev-extra tools THIS plugin's CI actually needs.
+
+    The always-required canonical trio, plus ``pytest-split`` iff a workflow runs
+    a sharded pytest. Deriving the requirement from the workflows on disk is what
+    makes the matrix ↔ dependency coupling impossible to desync (RC-9).
+    """
+    tools = list(_CANONICAL_DEV_EXTRA_TOOLS)
+    if _workflow_runs_sharded_pytest(plugin_path):
+        tools.append(_PYTEST_SPLIT_DIST)
+    return tuple(tools)
 
 
 def _canonical_dev_extras_missing(plugin_path: Path) -> list[str]:
@@ -1134,6 +1285,11 @@ def _canonical_dev_extras_missing(plugin_path: Path) -> list[str]:
     ci.yml / release.yml (which run ``uv sync --extra dev``) with no dev extra
     fails CI with "Extra `dev` is not defined …". (The prior behaviour wrongly
     returned [] for an absent dev extra, masking exactly this defect.)
+
+    RC-9: ``pytest-split`` joins the list iff a workflow runs a sharded pytest
+    AND the distribution is declared NOWHERE a `uv sync` would install it (not
+    just the `dev` extra) — so a plugin that already declares it elsewhere never
+    gets a duplicate.
     """
     pyproject = plugin_path / "pyproject.toml"
     if not pyproject.is_file():
@@ -1161,21 +1317,39 @@ def _canonical_dev_extras_missing(plugin_path: Path) -> list[str]:
         for spec in dev:
             if not isinstance(spec, str):
                 continue
-            # PEP-508 name = everything before any version/extras/marker suffix.
-            # Case-insensitive per PEP-503.
-            name = re.split(r"[<>=~!\[;]", spec, 1)[0].strip().lower()
+            # PEP-508 name = everything before any version/extras/marker suffix,
+            # PEP-503-normalized (so `pytest_split` counts as `pytest-split`).
+            name = _requirement_dist_name(spec)
             if name:
                 declared.add(name)
-    return [tool for tool in _CANONICAL_DEV_EXTRA_TOOLS if tool not in declared]
+
+    missing: list[str] = []
+    for tool in _required_dev_extra_tools(plugin_path):
+        if tool == _PYTEST_SPLIT_DIST:
+            # Satisfiable from ANY dependency surface, not just the dev extra.
+            if not _project_declares_pytest_split(plugin_path):
+                missing.append(tool)
+        elif tool not in declared:
+            missing.append(tool)
+    return missing
 
 
 # Issue #142 Defect #2 (provision half): the EXACT literal dev-extra list the
 # generator (generate_plugin_repo.py) sets as the default. It MUST match the
 # generator byte-for-byte so a `standardize --fix` adoption and a freshly
-# scaffolded plugin declare the same `dev` extra. Unpinned by design — the
-# generator owns any future pinning, and provisioning must not invent floors
-# the generator does not also emit.
-_PROVISION_DEV_EXTRA: tuple[str, ...] = ("pytest", "ruff", "mypy")
+# scaffolded plugin declare the same `dev` extra. The canonical trio is unpinned
+# by design — the generator owns any future pinning, and provisioning must not
+# invent floors the generator does not also emit. `pytest-split` IS pinned,
+# because the generator pins it (PYTEST_SPLIT_REQUIREMENT) — mirroring the
+# generator is not inventing a floor.
+_PROVISION_DEV_EXTRA: tuple[str, ...] = ("pytest", "ruff", "mypy", _PYTEST_SPLIT_DIST)
+
+
+def _dev_extra_spec(tool: str) -> str:
+    """The requirement literal to EMIT for a provisioned dev-extra tool."""
+    if tool == _PYTEST_SPLIT_DIST:
+        return _pytest_split_requirement()
+    return tool
 
 
 def _format_dev_extra_entries(tools: list[str]) -> str:
@@ -1183,9 +1357,11 @@ def _format_dev_extra_entries(tools: list[str]) -> str:
 
     Returns e.g. ``    "pytest",\n    "ruff",\n    "mypy",`` (4-space indent,
     trailing comma per entry) so the result drops straight into a
-    ``dev = [\n…\n]`` block matching the generator's formatting.
+    ``dev = [\n…\n]`` block matching the generator's formatting. A tool whose
+    canonical requirement carries a version floor (``pytest-split``) is rendered
+    with it (``    "pytest-split>=0.9",``).
     """
-    return "".join(f'    "{tool}",\n' for tool in tools)
+    return "".join(f'    "{_dev_extra_spec(tool)}",\n' for tool in tools)
 
 
 def provision_dev_extra(plugin_path: Path, dry_run: bool = False) -> list[str]:
@@ -1570,6 +1746,158 @@ def repin_stale_cpv_ref(plugin_path: Path, dry_run: bool = False) -> list[str]:
     return notes
 
 
+# =============================================================================
+# CIP-1 MIGRATION — drop the INVERTED `CLAUDE_PRIVATE_USERNAMES` CI env (#140)
+# =============================================================================
+# CI-failure forensics 2026-07-13 (RC-2, 3 failures across 2 repos):
+#
+#     [CRITICAL] Private path leaked: username 'emasoft' in path - 'Emasoft'
+#     SUMMARY: CRITICAL=22 …  →  Validate job FAILS under --strict
+#
+# An old canonical template set, on the CPV validate step:
+#
+#     CLAUDE_PRIVATE_USERNAMES: ${{ github.repository_owner }}
+#
+# That env names the PRIVATE usernames CPV must FLAG as leaks. Setting it to the
+# PUBLIC repo owner therefore told CPV to flag every legitimate
+# `github.com/<owner>/…` URL and the owner's no-reply email as a private-path
+# leak → 22 false CRITICALs → red CI, forever, on every legacy repo. The
+# generator dropped the line in v2.137.1, but a repo migrated before that keeps
+# it: CIP-1 only DETECTS it. This migrator REMOVES it.
+#
+# THE FIX IS DELETION, not correction: a CI runner has no developer
+# local-username to protect, so the correct canonical value is *no line at all*
+# (`PLUGIN_SKIP_GITHUB_INTEGRITY: '1'` stays). The leak rule itself is NOT
+# weakened — it keeps firing on a genuine leak; we are removing a *misconfigured
+# input* that was feeding it the wrong username list.
+#
+# TWO-SIDED BY CONSTRUCTION — the regex is anchored to the YAML mapping form
+# `CLAUDE_PRIVATE_USERNAMES: ${{ github.repository_owner }}` (the CIP-1 detector's
+# exact shape, kept in sync here by construction, not by import — the CIP-6
+# precedent). The CORRECT LOCAL idiom `CLAUDE_PRIVATE_USERNAMES="$(whoami)"` is a
+# SHELL ASSIGNMENT (`=`, no `: ${{ … }}`) and can never match, so a workflow — or
+# a docs/`run:` block — carrying the local scan idiom is left byte-identical.
+
+# The whole LINE, so the removal is line-exact. `(?m)` + `^…$` anchor it to a
+# standalone YAML mapping entry; a trailing comment is tolerated. re2-safe.
+_INVERTED_PRIVATE_USERNAMES_LINE_RE = re.compile(
+    r"(?m)^[ \t]*CLAUDE_PRIVATE_USERNAMES[ \t]*:[ \t]*\$\{\{[ \t]*github\.repository_owner[ \t]*\}\}[ \t]*(?:#[^\n]*)?$"
+)
+# A YAML `env:` block opener (the only parent we will ever remove, and only when
+# dropping the inverted line would leave it childless — a childless `env:` is a
+# null mapping GitHub Actions rejects).
+_ENV_BLOCK_RE = re.compile(r"^[ \t]*env[ \t]*:[ \t]*(?:#[^\n]*)?$")
+
+
+def _indent_of(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def _strip_inverted_private_usernames(text: str) -> tuple[str, int]:
+    """Remove every inverted ``CLAUDE_PRIVATE_USERNAMES`` line from a workflow.
+
+    Returns ``(new_text, removed_count)``. When removing the line would leave its
+    parent ``env:`` mapping with no keys at all, the ``env:`` opener (and any
+    comment lines that belonged only to it) is removed too — a childless ``env:``
+    is a null value the Actions schema rejects, so a "fix" that produced one
+    would trade a validation failure for a syntax failure.
+
+    A workflow with no inverted line comes back byte-identical with a count of 0
+    — the positive-control half of the two-sided guarantee.
+    """
+    lines = text.splitlines(keepends=True)
+    drop: set[int] = {
+        i for i, line in enumerate(lines) if _INVERTED_PRIVATE_USERNAMES_LINE_RE.match(line.rstrip("\r\n"))
+    }
+    removed = len(drop)
+    if not removed:
+        return text, 0
+
+    for i in sorted(drop):
+        indent = _indent_of(lines[i])
+        # Walk up to the nearest line at a SHALLOWER indent — the block's parent.
+        parent: int | None = None
+        for j in range(i - 1, -1, -1):
+            stripped = lines[j].strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if _indent_of(lines[j]) < indent:
+                parent = j
+                break
+        if parent is None or not _ENV_BLOCK_RE.match(lines[parent].rstrip("\r\n")):
+            continue
+        # Does the env: block keep any (non-dropped, non-comment) key?
+        p_indent = _indent_of(lines[parent])
+        block: list[int] = []
+        survivors = 0
+        for k in range(parent + 1, len(lines)):
+            stripped = lines[k].strip()
+            if not stripped:
+                continue
+            if _indent_of(lines[k]) <= p_indent:
+                break
+            block.append(k)
+            if k not in drop and not stripped.startswith("#"):
+                survivors += 1
+        if survivors == 0:
+            drop.add(parent)
+            drop.update(k for k in block if lines[k].strip().startswith("#"))
+
+    return "".join(line for i, line in enumerate(lines) if i not in drop), removed
+
+
+def remove_inverted_private_usernames(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """CIP-1 MIGRATION: drop the inverted ``CLAUDE_PRIVATE_USERNAMES`` env from
+    every ``.github/workflows/*.yml|*.yaml``.
+
+    Runs on ANY ``--fix`` (force or not): ``--force-templates`` regenerates
+    ci.yml / release.yml and so drops it there, but a plain ``--fix`` never
+    touches an existing workflow, and a NON-canonical workflow (one not in
+    ``_FORCE_TEMPLATE_FILES``) keeps the defect even under ``--force-templates``.
+    This surgical rewrite closes both gaps.
+
+    Surgical: ONLY the offending line (plus a parent ``env:`` that the removal
+    would leave childless) is touched. A workflow without the inverted env is
+    left byte-identical — never rewritten, never reformatted.
+
+    Returns human-readable notes, or [] when nothing was inverted.
+    """
+    notes: list[str] = []
+    for wf in _workflow_files(plugin_path):
+        try:
+            content = wf.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        new_content, removed = _strip_inverted_private_usernames(content)
+        if not removed or new_content == content:
+            continue
+        rel = wf.relative_to(plugin_path)
+        what = f"{removed} inverted CLAUDE_PRIVATE_USERNAMES line(s)"
+        if dry_run:
+            notes.append(
+                f"[dry-run] would remove {what} from {rel} — it sets the env to the PUBLIC "
+                f"repo owner, but that env lists PRIVATE usernames to redact, so CPV flags "
+                f"every owner GitHub URL as a leak and CI fails under --strict (#140)"
+            )
+            continue
+        wf.write_text(new_content, encoding="utf-8")
+        notes.append(f"removed {what} from {rel} (#140 — CI has no local username to protect)")
+    return notes
+
+
+def audit_inverted_private_usernames(plugin_path: Path) -> list[AuditItem]:
+    """Audit the CIP-1 inverted-env defect (#140) — WARN-only, never mutates.
+
+    Surfaces whatever ``remove_inverted_private_usernames(..., dry_run=True)``
+    would do, so the audit text and the --fix behaviour cannot drift (the
+    ``audit_jscpd_config`` pattern).
+    """
+    notes = remove_inverted_private_usernames(plugin_path, dry_run=True)
+    if not notes:
+        return [AuditItem("ci-env", ".github/workflows", "PASS", "no inverted CLAUDE_PRIVATE_USERNAMES env")]
+    return [AuditItem("ci-env", ".github/workflows", "WARN", note) for note in notes]
+
+
 # Issue #143: the canonical local pre-push gate (`publish.py --gate`) gains a
 # jscpd copy-paste check at PARITY with CI's Mega-Linter COPYPASTE_JSCPD. Both
 # the local gate and CI read ONE source-of-truth config — `.jscpd.json` — so the
@@ -1694,6 +2022,770 @@ def provision_jscpd_config(plugin_path: Path, dry_run: bool = False) -> list[str
         return []
     config.write_text(_render_canonical_jscpd_config(), encoding="utf-8")
     return [f"created {_JSCPD_CONFIG_REL} (jscpd copy-paste threshold 5, parity with CI)"]
+
+
+# =============================================================================
+# RC-1 / CIP-7 — the commitlint config a commitlint GATE cannot run without
+# =============================================================================
+# CI-failure forensics 2026-07-13: the single biggest ongoing red-signal source
+# (4 failures, and one on EVERY future Dependabot PR across the whole fleet):
+#
+#     ✖ body's lines must not be longer than 100 characters [body-max-line-length]
+#
+# With NO commitlint config in the repo, `wagoid/commitlint-github-action` falls
+# back to bare `@commitlint/config-conventional`, whose `body-max-line-length` is
+# 100 — and Dependabot's machine-generated commit body embeds a long YAML
+# dependency block. The generator now ships `.commitlintrc.json`
+# (gen_commitlintrc_json) disabling that ONE cosmetic rule, but a MIGRATED repo
+# gets the fixed ci.yml and no config, so RC-1 persists on every one of them.
+#
+# NOT force-templated ON PURPOSE. `.commitlintrc.json` is an author-owned config
+# (they may add their own `type-enum`, `scope-enum`, …), and
+# `_FORCE_TEMPLATE_FILES` is a blind overwrite — it would destroy those rules.
+# This provisioner follows the `.jscpd.json` / `.cspell.json` precedent instead:
+# CREATE when absent, AUGMENT when the one rule is simply not mentioned, and
+# NEVER overwrite a value the author set deliberately.
+#
+# The gate is NOT weakened: `type-enum`, `subject-empty`, `header-max-length`,
+# `type-case` … all stay enforced, so RC-5 (a genuinely non-conventional commit
+# type) still fails CI exactly as before. Only the *body line length* of a
+# machine-generated body — which carries zero signal — stops gating.
+_COMMITLINT_CONFIG_REL = ".commitlintrc.json"
+# Every config form commitlint auto-discovers. If the author owns one in ANOTHER
+# form we leave the whole dimension alone (adding a second config would be
+# ambiguous, and rewriting theirs would clobber it) — the `.cspell.json`
+# precedent.
+_COMMITLINT_CONFIG_NAMES: tuple[str, ...] = (
+    ".commitlintrc.json",
+    ".commitlintrc",
+    ".commitlintrc.yml",
+    ".commitlintrc.yaml",
+    ".commitlintrc.js",
+    ".commitlintrc.cjs",
+    ".commitlintrc.mjs",
+    ".commitlintrc.ts",
+    "commitlint.config.js",
+    "commitlint.config.cjs",
+    "commitlint.config.mjs",
+    "commitlint.config.ts",
+)
+# A workflow that actually RUNS commitlint. Without a commitlint gate there is
+# nothing to configure, and shipping a config would be unrequested noise.
+_COMMITLINT_GATE_RE = re.compile(r"(?i)(?:wagoid/commitlint-github-action|\bcommitlint\b[^\n]*--)")
+_BODY_MAX_LINE_LENGTH = "body-max-line-length"
+# Mirrors gen_commitlintrc_json; used only if the lazy generator import fails.
+_FALLBACK_COMMITLINT_CONFIG = (
+    '{\n  "extends": ["@commitlint/config-conventional"],\n'
+    '  "rules": {\n    "' + _BODY_MAX_LINE_LENGTH + '": [0]\n  }\n}\n'
+)
+
+
+def _render_canonical_commitlintrc() -> str:
+    """The canonical `.commitlintrc.json`, from the generator (single source of
+    truth), so a scaffolded plugin and a migrated one ship the same file.
+
+    ``gen_commitlintrc_json`` ignores its ``PluginParams`` (the config carries no
+    plugin-specific value), but the dataclass still has required fields — they are
+    filled with inert placeholders that never reach the output. A test pins this
+    against the fallback literal, so a generator change cannot silently desync the
+    migrated file from the scaffolded one.
+    """
+    try:
+        from generate_plugin_repo import PluginParams, gen_commitlintrc_json
+
+        return gen_commitlintrc_json(
+            PluginParams(name="placeholder", description="", author="", author_email="")
+        )
+    except Exception:
+        return _FALLBACK_COMMITLINT_CONFIG
+
+
+def _workflow_runs_commitlint(plugin_path: Path) -> bool:
+    """Whether any workflow runs a commitlint gate."""
+    for wf in _workflow_files(plugin_path):
+        try:
+            text = wf.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if _COMMITLINT_GATE_RE.search(text):
+            return True
+    return False
+
+
+def _existing_commitlint_config(plugin_path: Path) -> Path | None:
+    """The commitlint config the repo already owns, if any.
+
+    Includes the `package.json` → `"commitlint"` key form (commitlint reads it),
+    reported as the package.json path.
+    """
+    for name in _COMMITLINT_CONFIG_NAMES:
+        candidate = plugin_path / name
+        if candidate.is_file():
+            return candidate
+    pkg = plugin_path / "package.json"
+    if pkg.is_file():
+        try:
+            data = json.loads(pkg.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if isinstance(data, dict) and "commitlint" in data:
+            return pkg
+    return None
+
+
+def provision_commitlintrc_config(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """Provision (or augment) `.commitlintrc.json` so a commitlint gate does not
+    red-CI on every Dependabot PR (RC-1 / CIP-7).
+
+    Only acts when the repo actually RUNS commitlint. Then:
+
+    * no commitlint config in any form → CREATE the canonical `.commitlintrc.json`.
+    * `.commitlintrc.json` present, `body-max-line-length` NOT mentioned → AUGMENT
+      its `rules` object with `"body-max-line-length": [0]` (text edit; every
+      other rule and key preserved verbatim).
+    * `.commitlintrc.json` present and the author SET that rule → report, never
+      overwrite. A deliberate author value is not ours to change.
+    * a config in another form (js / yaml / package.json) → leave it alone
+      entirely and say so.
+
+    Returns human-readable action/finding lines ([] when nothing is actionable).
+    """
+    if not _workflow_runs_commitlint(plugin_path):
+        return []
+
+    existing = _existing_commitlint_config(plugin_path)
+
+    if existing is None:
+        note = (
+            f"{_COMMITLINT_CONFIG_REL} missing — the commitlint gate falls back to bare "
+            f"@commitlint/config-conventional ({_BODY_MAX_LINE_LENGTH} = 100), so EVERY "
+            f"Dependabot PR fails CI on its machine-generated commit body (RC-1); "
+            f"run --fix to provision it"
+        )
+        if dry_run:
+            return [note]
+        (plugin_path / _COMMITLINT_CONFIG_REL).write_text(_render_canonical_commitlintrc(), encoding="utf-8")
+        return [f"created {_COMMITLINT_CONFIG_REL} (disables {_BODY_MAX_LINE_LENGTH}; every other rule enforced)"]
+
+    if existing.name != _COMMITLINT_CONFIG_REL:
+        rel = existing.relative_to(plugin_path)
+        return [
+            f"commitlint config is author-owned ({rel}) — NOT modified. If Dependabot PRs "
+            f"fail on {_BODY_MAX_LINE_LENGTH}, disable that one rule there: `[0]`."
+        ]
+
+    try:
+        original = existing.read_text(encoding="utf-8")
+        data = json.loads(original)
+    except (OSError, json.JSONDecodeError):
+        return [
+            f"{_COMMITLINT_CONFIG_REL} is not valid JSON — commitlint will hard-error. NOT "
+            f"modified (a file this tool cannot parse is never rewritten); fix it by hand."
+        ]
+    if not isinstance(data, dict):
+        return []
+
+    rules = data.get("rules")
+    if isinstance(rules, dict) and _BODY_MAX_LINE_LENGTH in rules:
+        # The author set it. Even a NON-disabling value is theirs to keep — we
+        # surface the consequence instead of overriding a deliberate choice.
+        if rules[_BODY_MAX_LINE_LENGTH] in ([0], [0, "always", 0]):
+            return []
+        return [
+            f"{_COMMITLINT_CONFIG_REL} sets {_BODY_MAX_LINE_LENGTH} = "
+            f"{json.dumps(rules[_BODY_MAX_LINE_LENGTH])} — NOT modified (an explicit author "
+            f"value is never overwritten). Dependabot PRs will keep failing on it (RC-1); "
+            f"set it to [0] to disable that one cosmetic rule."
+        ]
+
+    note = (
+        f"{_COMMITLINT_CONFIG_REL} does not disable {_BODY_MAX_LINE_LENGTH} — Dependabot's "
+        f"machine-generated commit body fails the gate (RC-1); run --fix to add the rule"
+    )
+    if dry_run:
+        return [note]
+
+    rule_entry = f'"{_BODY_MAX_LINE_LENGTH}": [0]'
+    if isinstance(rules, dict):
+        # AUGMENT the existing `rules` object — insert right after its opening
+        # brace so every existing rule is preserved verbatim.
+        m = re.search(r'(?ms)"rules"\s*:\s*\{', original)
+        if not m:
+            return []  # tomllib-style disagreement — refuse to guess.
+        tail = original[m.end() :]
+        sep = "" if tail.lstrip().startswith("}") else ","
+        new_text = original[: m.end()] + f"\n    {rule_entry}{sep}" + tail
+    else:
+        # No `rules` key at all — insert one after the top-level `{`.
+        brace = original.find("{")
+        if brace < 0:
+            return []
+        tail = original[brace + 1 :]
+        sep = "" if tail.lstrip().startswith("}") else ","
+        new_text = original[: brace + 1] + f'\n  "rules": {{\n    {rule_entry}\n  }}{sep}' + tail
+
+    # Corruption guard: a text edit on the author's file must never leave it
+    # unparseable (commitlint would then hard-error on every commit — the very CI
+    # failure this provisioner exists to prevent). Verify BOTH that it still
+    # parses AND that it gained the rule; on any doubt, leave the file untouched.
+    try:
+        verified = json.loads(new_text)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(verified, dict):
+        return []
+    got = verified.get("rules")
+    if not isinstance(got, dict) or got.get(_BODY_MAX_LINE_LENGTH) != [0]:
+        return []
+
+    existing.write_text(new_text, encoding="utf-8")
+    return [f"augmented {_COMMITLINT_CONFIG_REL} — disabled {_BODY_MAX_LINE_LENGTH} (RC-1)"]
+
+
+def audit_commitlint_config(plugin_path: Path) -> list[AuditItem]:
+    """Audit the commitlint gate parity (RC-1 / CIP-7) — WARN-only, never mutates.
+
+    Mirrors ``audit_jscpd_config``: the audit text IS what ``--fix`` would do
+    (``dry_run=True``), so the two cannot drift.
+    """
+    notes = provision_commitlintrc_config(plugin_path, dry_run=True)
+    if not notes:
+        return [AuditItem("commitlint", _COMMITLINT_CONFIG_REL, "PASS", "commitlint gate parity OK")]
+    return [AuditItem("commitlint", _COMMITLINT_CONFIG_REL, "WARN", note) for note in notes]
+
+
+# =============================================================================
+# cspell PROJECT DICTIONARY — the SPELL local↔CI parity hole (RC-3)
+# =============================================================================
+#
+# The canonical `.mega-linter.yml` ENABLES `SPELL_CSPELL`, but CPV shipped NO
+# project dictionary with it. In CI, cspell then falls back to Mega-Linter's
+# default word list, which knows nothing of a plugin's own proper nouns (its
+# name, its agent/skill/command names, project vocabulary like `wikimem` or
+# `TRDD`) — so every one of them is an "Unknown word" and the Lint job goes RED.
+# Worse, the LOCAL preflight could not reproduce it: a bare local `cspell` with
+# no config trips on ordinary tech terms (pyproject / venv / pipefail / endfor)
+# that CI passes, so `cpv_ci_preflight._gate_cspell` SKIPPED the probe entirely.
+# Net effect: the author's preflight said GREEN and GitHub CI then said RED —
+# a defect the author could not see until CI ran.
+#
+# The fix is ONE source of truth, exactly like `.jscpd.json` (issue #143):
+# cspell auto-discovers `.cspell.json` at the repo root, so the SAME dictionary
+# is read by the local probe AND by CI's Mega-Linter cspell. Parity then holds
+# BY CONSTRUCTION — a word this file accepts is accepted on both sides, and a
+# word it does not is rejected on both sides — which is what lets the preflight
+# probe stop skipping and actually FAIL on a real spelling error.
+#
+# `_CSPELL_BASE_WORDS` seeds the ordinary tech terms a bare cspell trips on
+# (verified on a fresh scaffold). That seeding is load-bearing for the
+# never-false-block contract: it is what stops the now-live local probe from
+# flagging words CI would have passed. It can never make CI *stricter* than
+# local, because CI reads this very file.
+#
+# NEVER clobbers an existing config — the author owns their dictionary:
+#   * no cspell config at all      → CREATE the canonical `.cspell.json`.
+#   * `.cspell.json` already there → AUGMENT its `words` array with the missing
+#     plugin terms only (format-preserving text edit, like provision_dev_extra);
+#     every other key, comment, and existing word is preserved verbatim.
+#   * any OTHER cspell config form (yaml / jsonc / word-list) → LEAVE IT ALONE.
+#     cspell discovers exactly ONE config; writing a second would be ambiguous.
+# `.cspell.json` is deliberately NOT in _FORCE_TEMPLATE_FILES — a template
+# refresh must not overwrite a dictionary the author has curated.
+_CSPELL_CONFIG_REL = ".cspell.json"
+
+# Every cspell config / dictionary filename cspell auto-discovers.
+# MUST STAY IN SYNC with `cpv_ci_preflight._CSPELL_CONFIG_NAMES` — that tuple is
+# the preflight probe's "does this plugin have a config?" gate, and this one is
+# what standardize provisions against. A drift between them means standardize
+# would write a second, ambiguous config next to one the preflight already
+# recognized. `tests/test_cspell_parity.py` pins the two tuples equal.
+_CSPELL_CONFIG_NAMES: tuple[str, ...] = (
+    ".cspell.json",
+    "cspell.json",
+    ".cspell.jsonc",
+    "cspell.jsonc",
+    ".cspell.config.json",
+    "cspell.config.json",
+    "cspell.config.yaml",
+    "cspell.config.yml",
+    "cspell.config.js",
+    "cspell.config.cjs",
+    "cspell.config.mjs",
+    ".cspell.yaml",
+    ".cspell.yml",
+    "cspell.yaml",
+    "cspell.yml",
+    ".cspell-words.txt",
+    "project-words.txt",
+)
+
+# Paths cspell must not spell-check. Mirrors the canonical `.mega-linter.yml`'s
+# FILTER_REGEX_EXCLUDE (dev submodules, fixtures, vendored trees) and its
+# SPELL_CSPELL_FILTER_REGEX_EXCLUDE ('(uv\.lock|\.json)'), so the LOCAL
+# `cspell lint .` sees the same file set CI's Mega-Linter feeds cspell.
+# `useGitignore` covers the rest: CI only ever sees tracked files, while a local
+# `cspell lint .` would otherwise walk gitignored trees (reports/, .venv/) and
+# false-block on noise that CI never reads.
+_CSPELL_IGNORE_PATHS: tuple[str, ...] = (
+    "**/*.json",
+    "**/uv.lock",
+    "**/package-lock.json",
+    "**/*.lock",
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/venv/**",
+    "**/__pycache__/**",
+    "**/tests_dev/**",
+    "**/docs_dev/**",
+    "**/scripts_dev/**",
+    "**/samples_dev/**",
+    "**/examples_dev/**",
+    "**/builds_dev/**",
+    "**/downloads_dev/**",
+    "**/libs_dev/**",
+    "**/reports/**",
+    "**/reports_dev/**",
+    "**/llm_externalizer_output/**",
+    "**/.claude/**",
+    "**/.tldr/**",
+    "**/tests/fixtures/**",
+    "**/test/fixtures/**",
+    "**/spec/fixtures/**",
+    "**/__fixtures__/**",
+    "**/testdata/**",
+    "**/fixtures/**",
+)
+
+# The project-vocabulary seed. TWO groups, both load-bearing:
+#
+#  (a) ORDINARY TECH TERMS a bare cspell rejects but CI's Mega-Linter cspell
+#      accepts (pyproject / venv / pipefail / toplevel / endfor — verified on a
+#      fresh scaffold). Without these the now-live local probe would FALSE-BLOCK
+#      a plugin whose CI is green. This is the never-false-block half.
+#  (b) The CPV / Claude-Code / AI-Maestro vocabulary every standardized plugin's
+#      docs use (skillaudit, devitalizer, wikimem, TRDD, uvx, megalinter …).
+#
+# Lowercase by convention: a lowercase cspell dictionary word matches the
+# lowercase, Capitalized and UPPERCASE forms of the same token, so `trdd` also
+# accepts `TRDD`. Words shorter than 4 chars are omitted — cspell's default
+# `minWordLength` is 4, so it never flags them and listing them is dead weight.
+#
+# HOW THIS LIST IS DERIVED — MEASURE, never guess. Scaffold a pristine plugin
+# and run the REAL checker against it:
+#
+#     npx cspell lint .        # in a freshly generated plugin
+#
+# Every word it reports is a word the GENERATOR'S OWN TEMPLATES emit, so a fresh
+# scaffold would fail its own publish gate (Gate 3b) on a box that has cspell on
+# PATH. Add exactly those, then re-run to exit 0. Two-sided check, mandatory:
+# inject a real typo afterwards and confirm cspell still exits 1 on it. That is
+# what proves this is a DICTIONARY and not a mute button — if a typo stops being
+# caught, a word here is too broad. (Last measured 2026-07-13: 21 words, all from
+# the emitted `publish.py` / `cpv_network_resilience.py` / `cliff.toml` templates.)
+_CSPELL_BASE_WORDS: tuple[str, ...] = (
+    # -- Python / packaging toolchain ---------------------------------------
+    "addopts",
+    "asyncio",
+    "autouse",
+    "caplog",
+    "conftest",
+    "dataclass",
+    "dataclasses",
+    "dotenv",
+    "hatchling",
+    "isort",
+    "kwargs",
+    "levelname",
+    "mkdtemp",
+    "monkeypatch",
+    "mypy",
+    "pathlib",
+    "pycache",
+    "pyproject",
+    "pyright",
+    "pytest",
+    "pyyaml",
+    "redef",
+    "rglob",
+    "ruff",
+    "setuptools",
+    "stacklevel",
+    "stype",
+    "testdata",
+    "tomli",
+    "tomllib",
+    "venv",
+    "virtualenv",
+    "xdist",
+    # -- shell / CI / lint toolchain ----------------------------------------
+    "actionlint",
+    "bandit",
+    "checkov",
+    "commitlint",
+    "cspell",
+    "dependabot",
+    "endfor",
+    "gitleaks",
+    "jscpd",
+    "jsonlint",
+    "markdownlint",
+    "megalinter",
+    "pipefail",
+    "shellcheck",
+    "shfmt",
+    "toplevel",
+    "trivy",
+    "trufflehog",
+    "yamllint",
+    "zizmor",
+    # -- JS / node toolchain -------------------------------------------------
+    "esbuild",
+    "eslint",
+    "jsdelivr",
+    "nodejs",
+    "pnpm",
+    "prettier",
+    "tsconfig",
+    "unpkg",
+    # -- Claude Code / plugin ecosystem -------------------------------------
+    "anthropic",
+    "claude",
+    "gitignore",
+    "jsonc",
+    "kebab",
+    "monorepo",
+    "semver",
+    "subagent",
+    "subagents",
+    # -- POSIX / process / crypto -------------------------------------------
+    # The emitted `publish.py` and `cpv_network_resilience.py` templates shell
+    # out, reap child processes and surface TLS errors verbatim.
+    "getpid",
+    "gnutls",
+    "pids",
+    "ppid",
+    "publickey",
+    # -- CPV / AI-Maestro project vocabulary --------------------------------
+    "aimaestro",
+    "bypassable",
+    "cprint",
+    "defence",
+    "desync",
+    "devitalize",
+    "devitalizer",
+    "fastweb",
+    "frontmatter",
+    "janitor",
+    "kanban",
+    "maestro",
+    "memgrep",
+    "pdata",
+    "postprocessors",
+    "precheck",
+    "prrd",
+    "skillaudit",
+    "spoofable",
+    "topo",
+    "trdd",
+    "trdds",
+    "unparseable",
+    "wikimem",
+)
+
+# A plugin-term token must be ≥ this long to be worth listing (cspell's default
+# minWordLength — shorter tokens are never flagged, so seeding them is noise).
+_CSPELL_MIN_WORD_LEN = 4
+
+
+def _cspell_tokens(text: str) -> list[str]:
+    """Split an identifier into the lowercase alphabetic tokens cspell checks.
+
+    cspell tokenizes on non-letters, so `plugin-devitalizer` is checked as the
+    two words `plugin` and `devitalizer` — those, not the hyphenated compound,
+    are what a dictionary entry must cover. Tokens shorter than
+    `_CSPELL_MIN_WORD_LEN` are dropped (cspell never flags them).
+    """
+    return [t.lower() for t in re.findall(r"[A-Za-z]+", text) if len(t) >= _CSPELL_MIN_WORD_LEN]
+
+
+def _cspell_plugin_terms(plugin_path: Path) -> list[str]:
+    """Collect the plugin's OWN proper nouns — the words CI flags and a generic
+    dictionary can never know.
+
+    Sources, all offline and never-failing (a missing/unparseable file simply
+    contributes nothing — this must work on an UNINSTALLED, marketplace-less
+    source tree):
+
+    * the repo directory name and the manifest `name` (the plugin's own name
+      appears in its README, its badges, and every doc heading),
+    * the manifest `author` (a proper noun in the README byline),
+    * every agent / command file stem and every skill directory name.
+
+    Returned lowercase + deduped, sorted for a stable file.
+    """
+    raw: list[str] = [plugin_path.name]
+
+    manifest = plugin_path / ".claude-plugin" / "plugin.json"
+    if manifest.is_file():
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            data = None
+        if isinstance(data, dict):
+            name = data.get("name")
+            if isinstance(name, str):
+                raw.append(name)
+            author = data.get("author")
+            if isinstance(author, str):
+                raw.append(author)
+            elif isinstance(author, dict) and isinstance(author.get("name"), str):
+                raw.append(author["name"])
+
+    for sub in ("agents", "commands"):
+        d = plugin_path / sub
+        if d.is_dir():
+            raw.extend(p.stem for p in sorted(d.glob("*.md")))
+    skills = plugin_path / "skills"
+    if skills.is_dir():
+        raw.extend(p.name for p in sorted(skills.iterdir()) if p.is_dir())
+
+    terms: set[str] = set()
+    for item in raw:
+        terms.update(_cspell_tokens(item))
+    return sorted(terms)
+
+
+def _cspell_seed_words(plugin_path: Path) -> list[str]:
+    """The full canonical word list: the base vocabulary + this plugin's own terms."""
+    return sorted(set(_CSPELL_BASE_WORDS) | set(_cspell_plugin_terms(plugin_path)))
+
+
+def _render_canonical_cspell_config(plugin_path: Path) -> str:
+    """Render the canonical `.cspell.json` (2-space indent + trailing LF).
+
+    A single renderer so the provisioned file and any test/assertion compare the
+    SAME bytes. Deliberately declares NO `dictionaries` list: cspell always
+    merges its own bundled default dictionaries, and naming a dictionary package
+    the local install lacks would produce a diagnostic CI does not have — the
+    opposite of parity. The `words` list plus cspell's built-ins is the whole
+    contract, and both sides read it from this one file.
+    """
+    config: dict[str, object] = {
+        "version": "0.2",
+        "language": "en",
+        # CI only ever spell-checks tracked files; a local `cspell lint .` would
+        # otherwise walk gitignored trees and fail on content CI never sees.
+        "useGitignore": True,
+        "ignorePaths": list(_CSPELL_IGNORE_PATHS),
+        "words": _cspell_seed_words(plugin_path),
+    }
+    return json.dumps(config, indent=2) + "\n"
+
+
+def _existing_cspell_config(plugin_path: Path) -> Path | None:
+    """Return the cspell config the plugin already ships, or None.
+
+    Checks the recognized filenames in order, then a `.cspell/` directory (a
+    word-list folder cspell auto-discovers). The FIRST hit wins — the caller
+    only needs to know *whether* the author already owns a config, and which
+    file it is when that file is the canonical `.cspell.json` it may augment.
+    """
+    for name in _CSPELL_CONFIG_NAMES:
+        candidate = plugin_path / name
+        if candidate.is_file():
+            return candidate
+    dot_dir = plugin_path / ".cspell"
+    if dot_dir.is_dir():
+        return dot_dir
+    return None
+
+
+def _cspell_config_parses(config: Path) -> bool:
+    """True when an existing `.cspell.json` is a JSON object we can safely edit.
+
+    Kept separate from `_cspell_words_missing` so the caller can tell "nothing to
+    add" (missing == []) apart from "cannot understand this file" — otherwise an
+    unparseable dictionary would silently report as fully provisioned, and a
+    corrupt `.cspell.json` is WORSE than none (cspell hard-errors on every file).
+    """
+    try:
+        data = json.loads(config.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return isinstance(data, dict)
+
+
+def _cspell_words_missing(config: Path, seeds: list[str]) -> list[str]:
+    """Return the seed words absent from an existing `.cspell.json`'s `words`.
+
+    Case-insensitive (cspell matches a lowercase dictionary word against any
+    casing). Only called once `_cspell_config_parses` has vouched for the file, so
+    a parse failure here is defensive and yields [] — the caller must never mutate
+    a file it cannot understand.
+    """
+    try:
+        data = json.loads(config.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    words = data.get("words")
+    have = {w.lower() for w in words if isinstance(w, str)} if isinstance(words, list) else set()
+    return [w for w in seeds if w.lower() not in have]
+
+
+def _format_cspell_word_entries(words: list[str], indent: str = "    ") -> str:
+    """Render word names as the inner lines of a JSON array, one per line.
+
+    Comma-SEPARATED with NO trailing comma after the last entry. Unlike TOML
+    (where `_format_dev_extra_entries` can end every line with a comma), a
+    trailing comma is INVALID JSON — it would make the file cspell writes
+    unparseable by cspell itself. Returns e.g. ``    "alpha",\\n    "beta"``
+    with no leading or trailing newline; the caller supplies those.
+    """
+    return ",\n".join(f'{indent}"{w}"' for w in words)
+
+
+def provision_cspell_config(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """Provision (or augment) the canonical `.cspell.json` so the local cspell
+    probe and CI's Mega-Linter SPELL_CSPELL read ONE dictionary.
+
+    RC-3. Mirrors the #142 / #143 provisioners (identity-guarded,
+    format-preserving, audit path WARN-only):
+
+    * ``dry_run=False`` (the --fix path):
+      - no cspell config at all → CREATE `.cspell.json` with the canonical
+        content (base vocabulary + this plugin's own agent/skill/command terms).
+      - `.cspell.json` present → AUGMENT its `words` array with the missing seed
+        words ONLY. Every other key and every existing word is preserved
+        verbatim (text edit, not a re-serialize — a re-serialize would reflow the
+        author's file and drop any JSONC comments).
+      - a DIFFERENT cspell config form present → leave it entirely alone.
+    * ``dry_run=True`` (the AUDIT path): never mutate; surface what --fix would do.
+
+    Returns a list of human-readable action/finding lines (empty when nothing is
+    actionable: the dictionary is already complete, or the author owns a
+    non-`.cspell.json` config form).
+    """
+    existing = _existing_cspell_config(plugin_path)
+    seeds = _cspell_seed_words(plugin_path)
+
+    # An author-owned config in some OTHER form (yaml / jsonc / word-list dir).
+    # cspell discovers exactly one config; adding `.cspell.json` beside it would
+    # be ambiguous, and rewriting theirs would clobber it. Report nothing, do
+    # nothing — the preflight probe already treats their config as present and
+    # will run cspell against it for real.
+    if existing is not None and existing.name != _CSPELL_CONFIG_REL:
+        return []
+
+    if existing is None:
+        note = (
+            f"{_CSPELL_CONFIG_REL} missing — the canonical .mega-linter.yml ENABLES "
+            f"SPELL_CSPELL, so CI's cspell will hard-error on this plugin's own proper "
+            f"nouns (name, agents, skills, commands) with no dictionary to read; "
+            f"run --fix to provision it"
+        )
+        if dry_run:
+            return [note]
+        (plugin_path / _CSPELL_CONFIG_REL).write_text(
+            _render_canonical_cspell_config(plugin_path), encoding="utf-8"
+        )
+        return [f"created {_CSPELL_CONFIG_REL} ({len(seeds)} words, parity with CI Mega-Linter cspell)"]
+
+    # `.cspell.json` exists but we cannot parse it. NEVER mutate a file we do not
+    # understand — but never stay silent either: a corrupt dictionary is WORSE than
+    # a missing one (cspell hard-errors on every file), and an audit that reported
+    # PASS here would hide it. Surface it in BOTH paths; the author fixes it by hand.
+    if not _cspell_config_parses(existing):
+        return [
+            f"{_CSPELL_CONFIG_REL} is not valid JSON — cspell will hard-error on every "
+            f"file it reads. NOT modified (a file this tool cannot parse is never "
+            f"rewritten); fix the JSON by hand, then re-run."
+        ]
+
+    # AUGMENT its `words` array with what is missing.
+    missing = _cspell_words_missing(existing, seeds)
+    if not missing:
+        return []
+    if dry_run:
+        return [
+            f"{_CSPELL_CONFIG_REL} is missing {len(missing)} project term(s) "
+            f"({', '.join(missing[:5])}{'…' if len(missing) > 5 else ''}) — CI's cspell "
+            f"will flag them; run --fix to augment the words list"
+        ]
+
+    original = existing.read_text(encoding="utf-8")
+    addition = _format_cspell_word_entries(missing)
+    # Reaching here PROVES the file is strict JSON: `_cspell_words_missing`
+    # json.loads()-ed it (a parse failure returns [] → the early exit above), so
+    # the text edit below operates on a known-good document and the parse-verify
+    # at the end is a true corruption guard, not a JSONC false alarm.
+    words_re = re.compile(r'(?ms)(?P<head>"words"\s*:\s*\[)(?P<body>.*?)(?P<tail>\])')
+    m = words_re.search(original)
+    if m:
+        # AUGMENT the existing array: keep every existing entry verbatim, close
+        # it with a comma if it does not already carry one, then append the
+        # missing words. `body.rstrip()` drops the whitespace that sat before the
+        # closing bracket so the injected entries land on their own lines.
+        body = m.group("body")
+        stripped = body.rstrip()
+        if stripped and not stripped.endswith(","):
+            stripped += ","
+        new_body = (stripped + "\n" if stripped else "\n") + addition + "\n  "
+        new_text = (
+            original[: m.start()] + m.group("head") + new_body + m.group("tail") + original[m.end() :]
+        )
+        note = f"augmented {_CSPELL_CONFIG_REL} words with {len(missing)} project term(s)"
+    else:
+        # No `words` key at all — insert one right after the opening brace. Every
+        # other key is untouched. A file with no top-level `{` is not a cspell
+        # JSON config we can safely edit → refuse to mutate.
+        brace = original.find("{")
+        if brace < 0:
+            return []
+        block = '\n  "words": [\n' + addition + "\n  ],"
+        new_text = original[: brace + 1] + block + original[brace + 1 :]
+        note = f"added a words list to {_CSPELL_CONFIG_REL} with {len(missing)} project term(s)"
+
+    if new_text == original:
+        return []
+
+    # Corruption guard: a text edit on someone else's file must never leave it
+    # unparseable — cspell would then hard-error on EVERY file and we would have
+    # created the very CI failure this provisioner exists to prevent. Verify the
+    # result is still valid JSON AND that it actually gained the words; on any
+    # doubt, leave the author's file exactly as it was.
+    try:
+        verified = json.loads(new_text)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(verified, dict):
+        return []
+    got = verified.get("words")
+    if not isinstance(got, list):
+        return []
+    have = {w.lower() for w in got if isinstance(w, str)}
+    if not all(w.lower() in have for w in missing):
+        return []
+
+    existing.write_text(new_text, encoding="utf-8")
+    return [note]
+
+
+def audit_cspell_config(plugin_path: Path) -> list[AuditItem]:
+    """Audit the cspell SPELL gate parity (RC-3) — WARN-only.
+
+    Surfaces, without mutating anything, whatever `provision_cspell_config(...,
+    dry_run=True)` would do, so the audit text and the --fix behaviour can never
+    drift (the `audit_jscpd_config` pattern). A PASS is emitted when the plugin
+    already ships a complete dictionary (or an author-owned config in another
+    form), so a fully-canonical plugin still reports the dimension.
+    """
+    notes = provision_cspell_config(plugin_path, dry_run=True)
+    if not notes:
+        return [AuditItem("cspell", _CSPELL_CONFIG_REL, "PASS", "cspell SPELL gate parity OK")]
+    return [AuditItem("cspell", _CSPELL_CONFIG_REL, "WARN", note) for note in notes]
 
 
 # =============================================================================
@@ -2345,8 +3437,16 @@ def fix_missing_files(
     # is only ever reached under --fix/--force-templates, so mutating pyproject
     # here is authorized; the AUDIT-only path (run_audit) still merely WARNs via
     # audit_pyproject and never mutates.
+    #
+    # RC-9 widens the trigger: a plugin whose EXISTING ci.yml already runs a
+    # SHARDED pytest (`--splits`) needs `pytest-split` in the dev extra even when
+    # this run emits no workflow at all — that is the plain-`--fix`-on-an-already-
+    # migrated-repo case, and without it every shard dies with
+    # `pytest: error: unrecognized arguments: --splits --group`. The probe reads
+    # the workflows ON DISK, and the force-templated (sharded) ci.yml is written
+    # ABOVE this point, so one probe answers correctly for both paths.
     workflow_emitted = bool(_WORKFLOW_PATHS_REQUIRING_DEV_EXTRAS & (missing_files | force_overwrite))
-    if workflow_emitted:
+    if workflow_emitted or _workflow_runs_sharded_pytest(plugin_path):
         for note in provision_dev_extra(plugin_path, dry_run=dry_run):
             print(f"  {GREEN}[dev-extra]{NC} {note}")
 
@@ -2367,6 +3467,16 @@ def fix_missing_files(
     for note in repin_stale_cpv_ref(plugin_path, dry_run=dry_run):
         print(f"  {YELLOW}[cpv-ref]{NC} {note}")
 
+    # CIP-1 (#140): drop the INVERTED `CLAUDE_PRIVATE_USERNAMES: ${{ github.
+    # repository_owner }}` env from every workflow. It tells CPV that the PUBLIC
+    # owner is a PRIVATE username, so every legitimate owner GitHub URL is flagged
+    # as a leak (22 false CRITICALs → red CI). --force-templates regenerates
+    # ci.yml/release.yml and drops it there; this ALSO fixes a plain --fix and any
+    # non-canonical workflow. Surgical: only that line (never the correct LOCAL
+    # `CLAUDE_PRIVATE_USERNAMES="$(whoami)"` shell idiom, which cannot match).
+    for note in remove_inverted_private_usernames(plugin_path, dry_run=dry_run):
+        print(f"  {YELLOW}[ci-env]{NC} {note}")
+
     # Issue #143: provision the canonical .jscpd.json so the local
     # `publish.py --gate` jscpd copy-paste check reads the SAME threshold/ignore
     # config CI's Mega-Linter does (gate parity). Create-if-absent, never clobber
@@ -2374,6 +3484,24 @@ def fix_missing_files(
     # the gate is part of the canonical publish.py the migration installs.
     for note in provision_jscpd_config(plugin_path, dry_run=dry_run):
         print(f"  {GREEN}[jscpd]{NC} {note}")
+
+    # RC-3: provision the canonical .cspell.json so the local cspell probe and
+    # CI's Mega-Linter SPELL_CSPELL (which the canonical .mega-linter.yml ENABLES)
+    # read the SAME dictionary — closing the local-GREEN / CI-RED parity hole.
+    # Create-if-absent, augment-if-present, never clobber the author's config;
+    # runs unconditionally under --fix because SPELL_CSPELL is part of the
+    # canonical .mega-linter.yml the migration installs.
+    for note in provision_cspell_config(plugin_path, dry_run=dry_run):
+        print(f"  {GREEN}[cspell]{NC} {note}")
+
+    # RC-1 / CIP-7: provision `.commitlintrc.json` when the repo runs a commitlint
+    # gate. With no config the gate falls back to bare config-conventional
+    # (body-max-line-length = 100) and EVERY Dependabot PR fails on its
+    # machine-generated body. Create-if-absent / augment-if-silent; an explicit
+    # author value is never overwritten (which is also why `.commitlintrc.json` is
+    # deliberately NOT in _FORCE_TEMPLATE_FILES — that list is a blind overwrite).
+    for note in provision_commitlintrc_config(plugin_path, dry_run=dry_run):
+        print(f"  {GREEN}[commitlint]{NC} {note}")
 
     return created
 

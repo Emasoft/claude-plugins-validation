@@ -523,6 +523,11 @@ def test_megalinter_absent_tools_never_block_preflight(
         ["SPELL_CSPELL", "REPOSITORY_CHECKOV", "REPOSITORY_TRIVY", "PYTHON_BANDIT", "BASH_SHELLCHECK", "BASH_SHFMT"],
     )
     (root / "scripts" / "x.sh").write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+    # A cspell dictionary is shipped so this test isolates what it claims to test —
+    # TOOL ABSENCE. Without one the plugin carries the separate RC-3 config DEFECT
+    # (SPELL enabled, no dictionary → CI hard-errors on its proper nouns), which is
+    # a FAIL by design and has nothing to do with whether the binary is installed.
+    (root / ".cspell.json").write_text('{"words": ["pyproject"]}', encoding="utf-8")
     # Everything absent — and no static CIP defect (no workflows).
     monkeypatch.setattr(cpv_ci_preflight.shutil, "which", lambda _name: None)
     result = run_ci_preflight(root)
@@ -584,47 +589,117 @@ def test_argv_bandit_filters_to_medium_severity() -> None:
     assert "-ll" in argv, f"bandit probe must filter to MEDIUM+ severity (-ll): {argv}"
 
 
-def test_generated_plugin_megalinter_probes_do_not_false_block(tmp_path: Path) -> None:
-    """The Mega-Linter probes produce NO FAIL on a freshly-scaffolded plugin
-    (CI-green by construction). On a bare runner every tool is absent → WARNING →
-    no FAIL; on a dev box with the tool present it catches a probe miscalibration
-    (the bandit-on-LOW false-block this regression locks)."""
+def _scaffold(tmp_path: Path, name: str = "ml-clean-sample") -> Path:
+    """Scaffold a real canonical plugin via the generator."""
     import generate_plugin_repo as gen
 
     params = gen.PluginParams(
-        name="ml-clean-sample",
+        name=name,
         description="x",
         author="A",
         author_email="a@a.a",
         github_owner="Emasoft",
     )
-    target = tmp_path / "ml-clean-sample"
+    target = tmp_path / name
     target.mkdir(parents=True)
     gen.generate_plugin_repo(target, params)
+    return target
+
+
+def test_generated_plugin_megalinter_probes_do_not_false_block(tmp_path: Path) -> None:
+    """The NON-cspell Mega-Linter probes produce NO FAIL on a freshly-scaffolded
+    plugin (CI-green by construction). On a bare runner every tool is absent →
+    WARNING → no FAIL; on a dev box with the tool present it catches a probe
+    miscalibration (the bandit-on-LOW false-block this regression locks).
+
+    cspell is asserted separately below: RC-3 established that the canonical
+    scaffold is NOT CI-green on the SPELL dimension — `.mega-linter.yml` ENABLES
+    SPELL_CSPELL while no dictionary is shipped — so a cspell FAIL there is the
+    defect being reported, not a false-block."""
+    target = _scaffold(tmp_path)
     result = PreflightResult(plugin_path=target)
     cpv_ci_preflight._gate_megalinter(result)
-    fails = [f for f in result.findings if f.severity == "FAIL"]
+    fails = [f for f in result.findings if f.severity == "FAIL" and f.gate != "cspell"]
     assert fails == [], (
         "Mega-Linter probes false-blocked a canonical generated plugin "
         f"(probe miscalibration): {[(f.gate, f.message[:80]) for f in fails]}"
     )
 
 
+def test_generated_plugin_cspell_defect_is_closed_by_the_provisioner(tmp_path: Path) -> None:
+    """RC-3 remediation, end to end, on a LEGACY plugin — the provisioner closes it.
+
+    The canonical `.mega-linter.yml` enables SPELL_CSPELL, so a plugin shipping no
+    dictionary carries the parity defect and the probe FAILs on it (this is the
+    local-GREEN / CI-RED hole made visible). Running the standardize provisioner —
+    the exact remediation the FAIL names — writes `.cspell.json`, after which the
+    probe no longer FAILs: it becomes a real cspell run (PASS/FAIL on spelling) or,
+    on a box with no cspell binary, a non-blocking WARNING.
+
+    WAVE-2 RECONCILIATION. This test used to scaffold a plugin and assert the
+    FRESH SCAFFOLD failed the gate; its docstring claimed to be
+    "generator-agnostic … passes whether or not generate_plugin_repo also learns
+    to emit `.cspell.json`". That claim was WRONG — the FAIL assertion below only
+    holds while the generator ships NO dictionary. The generator now emits it
+    (`gen_cspell_json`), so a fresh scaffold is clean and this test's premise is
+    gone.
+
+    Rather than delete the coverage, the test now does explicitly what it always
+    depended on implicitly: it REMOVES the dictionary to simulate a LEGACY plugin
+    (one scaffolded by a pre-wave-2 CPV, of which the fleet is full) and proves the
+    provisioner still remediates it. Every original assertion is preserved. The
+    fresh-scaffold-is-already-clean half is covered by
+    `tests/test_wave2_generator_publish_gate.py::test_LOOP_CLOSED_freshly_scaffolded_plugin_passes_the_cspell_gate`.
+    """
+    import standardize_plugin
+
+    target = _scaffold(tmp_path, name="ml-cspell-sample")
+
+    # Simulate a LEGACY plugin: scaffolded before the generator learned to emit
+    # the dictionary. (On a fresh scaffold the file is now present — that is the
+    # wave-2 fix, and it is what makes this removal necessary to reach the defect.)
+    legacy_dict = target / ".cspell.json"
+    if legacy_dict.is_file():
+        legacy_dict.unlink()
+
+    # Before: the defect is reported, with its remediation.
+    before = PreflightResult(plugin_path=target)
+    cpv_ci_preflight._gate_cspell(before, {cpv_ci_preflight._CSPELL_LINTER_ID})
+    f = _finding(before, "cspell")
+    assert f.severity == "FAIL"
+    assert "standardize --fix" in f.message
+
+    # Remediate exactly as the FAIL instructs.
+    notes = standardize_plugin.provision_cspell_config(target, dry_run=False)
+    assert notes, "the provisioner must create the dictionary the FAIL asked for"
+    assert (target / ".cspell.json").is_file()
+
+    # After: no FAIL from the missing-dictionary branch — the probe now runs for real.
+    after = PreflightResult(plugin_path=target)
+    cpv_ci_preflight._gate_cspell(after, {cpv_ci_preflight._CSPELL_LINTER_ID})
+    g = _finding(after, "cspell")
+    assert g.severity in {"PASS", "WARNING"}, g.message
+    assert "ships no cspell dictionary" not in g.message
+
+
 # ---------------------------------------------------------------------------
-# Regression: the cspell probe must NOT false-block a plugin with no cspell
-# config (central-verify dogfood #2, TRDD-HZSI0BZ6). CI's Mega-Linter cspell
-# ships BUNDLED technical dictionaries a bare local `cspell lint` lacks, so
-# without the plugin's own config a local cspell FAILS on ordinary tech terms
-# (pyproject / venv / pipefail / endfor — verified on a fresh scaffold) that CI
-# passes. The probe is FAIL-capable ONLY when the plugin ships a cspell config.
+# RC-3 (supersedes the TRDD-HZSI0BZ6 "no-config → WARNING skip"): the no-config
+# case is now a FAIL, not a silent skip. The old contract said "a bare local
+# cspell would false-block on tech terms, so skip" — but CPV's canonical
+# `.mega-linter.yml` ENABLES SPELL_CSPELL and shipped no dictionary, so CI
+# hard-errored on every plugin proper noun while the local preflight said GREEN.
+# That combination IS the parity hole. The tool is still NEVER invoked without a
+# config (the false-block reasoning stands); what changed is that the missing
+# dictionary is now reported as the CI-parity DEFECT it is, with the mechanical
+# `standardize --fix` remediation that provisions the `.cspell.json` BOTH the
+# probe and CI's Mega-Linter cspell then read.
 # ---------------------------------------------------------------------------
 
 
-def test_cspell_no_config_warns_never_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """cspell enabled but NO plugin cspell config → WARNING, and the tool is never
-    invoked — a bare local cspell would false-block on tech terms CI's Mega-Linter
-    (bundled dictionaries) passes. Even with cspell present + erroring, the
-    no-config gate keeps it a non-blocking WARNING (the probe must not run)."""
+def test_cspell_no_config_fails_never_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """cspell enabled but NO plugin cspell config → FAIL (the RC-3 parity hole),
+    and the tool is STILL never invoked — a bare local cspell would false-block on
+    tech terms CI's Mega-Linter passes, so the defect is reported statically."""
     root = _make_plugin(tmp_path)
     _write_mega_linter(root, ["SPELL_CSPELL"])  # NO .cspell.json shipped
     monkeypatch.setattr(cpv_ci_preflight.shutil, "which", lambda name: f"/usr/bin/{name}")
@@ -635,7 +710,9 @@ def test_cspell_no_config_warns_never_runs(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr(cpv_ci_preflight.subprocess, "run", fail_run)
     result = PreflightResult(plugin_path=root)
     cpv_ci_preflight._gate_cspell(result, {cpv_ci_preflight._CSPELL_LINTER_ID})
-    assert _finding(result, "cspell").severity == "WARNING"
+    f = _finding(result, "cspell")
+    assert f.severity == "FAIL"
+    assert "standardize --fix" in f.message
 
 
 def test_plugin_has_cspell_config_detects_dictionary(tmp_path: Path) -> None:

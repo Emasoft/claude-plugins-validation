@@ -67,21 +67,20 @@ def _build_synthetic_plugin(tmp_path: Path, version: str = "1.0.0", *, with_pypr
             encoding="utf-8",
         )
 
-    # Copy bump_version.py and its transitive Python dependencies. publish.py
-    # imports gitignore_filter (local module under scripts/), and may also
-    # transitively pull in cpv_validation_common. We copy the full set so the
-    # subprocess can resolve every import without a venv install.
-    for name in (
-        "bump_version.py",
-        "publish.py",
-        "gitignore_filter.py",
-        "cpv_validation_common.py",
-        "cpv_management_common.py",
-        "cpv_network_resilience.py",
-    ):
-        src = PROJECT_ROOT / "scripts" / name
-        if src.is_file():
-            shutil.copy2(src, plugin_root / "scripts" / name)
+    # Copy the WHOLE scripts/ tree, not a hand-listed subset.
+    #
+    # This used to enumerate bump_version.py + publish.py + its then-known
+    # imports. That list is a DRIFT TRAP: the moment publish.py gained a new
+    # module-level import (`cpv_ci_preflight`, for the CI-parity gate), the
+    # subprocess died with `ModuleNotFoundError` — in a test file nobody had
+    # touched, for a dependency nobody had to declare. The old loop even
+    # guarded with `if src.is_file()`, so a name that stopped existing would
+    # have been skipped in SILENCE.
+    #
+    # Copying the tree makes the fixture track publish.py's real import graph
+    # for free: it cannot go stale, and there is no second list to maintain.
+    # (`rules/` comes along too, which the skillaudit catalog needs.)
+    shutil.copytree(PROJECT_ROOT / "scripts", plugin_root / "scripts", dirs_exist_ok=True)
     return plugin_root
 
 

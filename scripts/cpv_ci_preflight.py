@@ -27,8 +27,16 @@ It runs, IN ORDER, the parity gates ``validate_plugin`` omits:
   listed → clean PASS "linter not enabled, skipped"), and only adds LOCAL
   visibility — it NEVER changes the default-enabled Mega-Linter set and NEVER
   weakens any gate. Tool on PATH → run → FAIL on a real error; tool absent →
-  WARNING.
-* **(f) the six static CI-parity checks** from ``cpv_ci_parity_checks``.
+  WARNING. The cspell probe additionally FAILs when SPELL_CSPELL is enabled but
+  the plugin ships NO cspell dictionary (RC-3): CI's cspell then hard-errors on
+  the plugin's own proper nouns while the local probe could not reproduce it —
+  the local-GREEN / CI-RED parity hole. `standardize --fix` provisions the
+  `.cspell.json` that BOTH sides read; see ``_gate_cspell``.
+* **(f) the static CI-parity checks** from ``cpv_ci_parity_checks``. The COUNT and
+  the id range are deliberately NOT written here: both are DERIVED at runtime from
+  that module (see ``_cip_check_ids``). A hardcoded range went stale once already —
+  it announced a smaller range for a release after two further checks had shipped,
+  telling the user fewer checks ran than actually did.
 
 THE DEGRADE-GRACEFULLY CONTRACT (the #129 pattern applied to the whole
 preflight): a TOOL being ABSENT ALWAYS degrades to a non-blocking WARNING — it
@@ -50,6 +58,7 @@ Run via the launcher:
 from __future__ import annotations
 
 import argparse
+import inspect
 import re
 import shutil
 import subprocess
@@ -58,6 +67,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import cpv_ci_parity_checks
 from cpv_ci_parity_checks import ParityFinding, check_ci_parity
 
 __all__ = ["PreflightFinding", "PreflightResult", "run_ci_preflight", "main"]
@@ -652,24 +662,25 @@ def _gate_megalinter_tool(
 def _argv_cspell(tool_bin: str, root: Path) -> list[str]:
     # Mirror Mega-Linter SPELL_CSPELL: spell-check the tree. `--no-progress`
     # keeps output terse; `--no-summary` avoids a non-error trailer; cspell exits
-    # non-zero when it finds an unknown word. Only invoked when the plugin ships
-    # its own cspell config (see _gate_cspell) — without one a bare cspell uses
-    # only its minimal default dictionary and false-blocks on ordinary tech terms.
+    # non-zero when it finds an unknown word. Invoked only when the plugin ships
+    # a cspell config (see _gate_cspell) — cspell auto-discovers it, and CI's
+    # Mega-Linter cspell reads that SAME file, so the two runs agree by
+    # construction. Without one there is no dictionary to reproduce CI with, and
+    # a bare cspell on its default dictionary would false-block on ordinary tech
+    # terms; that case is a DEFECT reported by _gate_cspell, not a probe run.
     _ = root
     return [tool_bin, "lint", "--no-progress", "--no-summary", "."]
 
 
 # cspell config files a local `cspell lint` auto-discovers. Their presence is the
-# gate for the cspell probe (see _gate_cspell): WITHOUT one, a bare local cspell
-# runs on its minimal default dictionary and FAILS on ordinary tech terms
-# (pyproject / venv / pipefail / toplevel / endfor / …) that CI's Mega-Linter
-# cspell — which ships BUNDLED technical dictionaries the local invocation lacks —
-# passes. So a bare local cspell cannot faithfully reproduce CI's cspell, and
-# running it would false-block a CI-green plugin (verified: a freshly-scaffolded
-# plugin trips `endfor`/`pipefail`/`pyproject`). The probe is therefore
-# FAIL-capable only when the plugin ships its own config (a local run then
-# reproduces the plugin's intended spell-check); with no config it degrades to a
-# non-blocking WARNING and CI's Mega-Linter still enforces cspell.
+# gate for the cspell probe (see _gate_cspell), and — because CI's Mega-Linter
+# cspell auto-discovers the SAME file — their presence is ALSO what makes local
+# and CI agree on which words are known.
+#
+# MUST STAY IN SYNC with `standardize_plugin._CSPELL_CONFIG_NAMES`, the tuple
+# standardize provisions against; a drift means standardize writes a second,
+# ambiguous config next to one this probe already recognized.
+# `tests/test_cspell_parity.py` pins the two tuples equal.
 _CSPELL_CONFIG_NAMES = (
     ".cspell.json",
     "cspell.json",
@@ -702,14 +713,32 @@ def _plugin_has_cspell_config(root: Path) -> bool:
 def _gate_cspell(result: PreflightResult, enabled: set[str] | None) -> None:
     """Mega-Linter SPELL_CSPELL parity probe.
 
-    cspell is special among the probes: CI's Mega-Linter cspell applies BUNDLED
-    technical dictionaries a bare local `cspell lint` does NOT have, so without
-    the plugin's own cspell config a local run FAILS on ordinary tech terms
-    (pyproject / venv / endfor / …) that CI passes — a false-block. So this probe
-    is FAIL-capable ONLY when the plugin ships its own cspell config (a local run
-    then reproduces the plugin's intended spell-check); with no config it degrades
-    to a non-blocking WARNING (CI's Mega-Linter still enforces cspell — and the
-    agent's post-publish green-CI loop catches any real cspell failure).
+    RC-3 — this probe used to SKIP (a non-blocking WARNING) whenever the plugin
+    shipped no cspell config, and CPV's canonical `.mega-linter.yml` enables
+    SPELL_CSPELL while emitting no dictionary. That combination WAS the parity
+    hole: the author's local preflight said GREEN and GitHub CI then said RED on
+    every plugin-specific proper noun, with no way to see it beforehand.
+
+    The three cases, and why each severity is what it is:
+
+    * SPELL_CSPELL not enabled (or no `.mega-linter.yml`) → clean PASS "skipped".
+      CI does not run cspell, so there is nothing to reproduce.
+    * enabled, but the plugin ships NO cspell config → **FAIL**. This is a real,
+      static, offline-detectable CI-parity DEFECT of exactly the CIP-3 kind
+      ("the canonical CI enables a gate whose config the plugin never shipped"):
+      CI's cspell has no dictionary for the plugin's own name / agents / skills /
+      commands, so it hard-errors on them. It is NOT a probe run — the tool is
+      deliberately never invoked here, because a bare local cspell on its default
+      dictionary would false-block on ordinary tech terms. The remediation is one
+      mechanical command (`standardize --fix`), which provisions `.cspell.json`.
+    * enabled + a config present → RUN cspell for real. cspell auto-discovers the
+      config and CI's Mega-Linter cspell reads that SAME file, so the local run
+      now faithfully reproduces CI: a word the dictionary accepts passes on both
+      sides, a word it does not fails on both. A genuine misspelling FAILs here,
+      before the push.
+
+    A missing cspell BINARY still degrades to a non-blocking WARNING inside
+    `_gate_megalinter_tool` — an agent box without cspell must never be blocked.
     """
     if enabled is None or _CSPELL_LINTER_ID not in enabled:
         result.add(
@@ -721,14 +750,14 @@ def _gate_cspell(result: PreflightResult, enabled: set[str] | None) -> None:
     if not _plugin_has_cspell_config(result.plugin_path):
         result.add(
             "cspell",
-            _SEV_WARNING,
-            "cspell is enabled but the plugin ships no cspell config "
-            "(.cspell.json / project-words.txt / .cspell/) — a bare local cspell "
-            "uses only its default dictionary and would FAIL on ordinary tech terms "
-            "(pyproject/venv/pipefail/endfor) that CI's Mega-Linter cspell (bundled "
-            "dictionaries) passes. SKIPPED locally to avoid a false-block; CI's "
-            "Mega-Linter still enforces cspell. Add a .cspell.json / project-words.txt "
-            "for full local parity.",
+            _SEV_FAIL,
+            ".mega-linter.yml ENABLES cspell (SPELL_CSPELL) but the plugin ships no "
+            "cspell dictionary (.cspell.json / project-words.txt / .cspell/). CI's "
+            "cspell will hard-error on this plugin's own proper nouns (its name, its "
+            "agent/skill/command names, its project vocabulary) — it has no dictionary "
+            "to read. This is the local-GREEN / CI-RED parity hole: run "
+            "`standardize --fix` to provision the canonical .cspell.json, which BOTH "
+            "this probe and CI's Mega-Linter cspell then read.",
         )
         return
     _gate_megalinter_tool(
@@ -887,14 +916,45 @@ def _gate_megalinter(result: PreflightResult) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Gate (f) — the six static CI-parity checks
+# Gate (f) — the static CI-parity checks (CIP-1..N, N derived — never hardcoded)
 # ─────────────────────────────────────────────────────────────────────────
+
+# Every `"CIP-<n>"` finding-code literal in cpv_ci_parity_checks. The ids are
+# DERIVED from that module's source rather than hardcoded here, because a
+# hardcoded range is exactly what went stale: this PASS message kept announcing
+# the pre-CIP-7 range after CIP-7 (RC-1) and CIP-8 (RC-9) had shipped, so a user
+# was told SIX checks ran when EIGHT did. Adding a CIP-9 now updates the message
+# automatically — and a test asserts no literal range survives in this file.
+_CIP_CODE_LITERAL_RE = re.compile(r'"CIP-(\d+)"')
+
+
+def _cip_check_ids() -> list[int]:
+    """The CIP check numbers ``cpv_ci_parity_checks`` actually implements.
+
+    Derived by reading that module's source for its ``"CIP-<n>"`` finding-code
+    literals. Returns [] when the source is unavailable (a zipped/compiled
+    install) — the caller then degrades to a count-free message rather than
+    printing a number it cannot stand behind.
+    """
+    try:
+        source = inspect.getsource(cpv_ci_parity_checks)
+    except (OSError, TypeError):
+        return []
+    return sorted({int(n) for n in _CIP_CODE_LITERAL_RE.findall(source)})
+
+
+def _cip_all_passed_message() -> str:
+    """The PASS message for a parity-clean tree, with the DERIVED check range."""
+    ids = _cip_check_ids()
+    if not ids:
+        return "All static CI-parity checks passed."
+    return f"All {len(ids)} static CI-parity checks (CIP-{ids[0]}..{ids[-1]}) passed."
 
 
 def _gate_static_checks(result: PreflightResult) -> None:
     cip_findings: list[ParityFinding] = check_ci_parity(result.plugin_path)
     if not cip_findings:
-        result.add("ci-parity", _SEV_PASS, "All six static CI-parity checks (CIP-1..6) passed.")
+        result.add("ci-parity", _SEV_PASS, _cip_all_passed_message())
         return
     for f in cip_findings:
         severity = _SEV_FAIL if f.severity in _CIP_SEVERITY_IS_BLOCKING else _SEV_WARNING

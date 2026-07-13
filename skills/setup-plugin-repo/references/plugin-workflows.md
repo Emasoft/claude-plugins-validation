@@ -87,23 +87,51 @@ jobs:
         # Fetches CPV from GitHub via uvx so downstream plugins do not need
         # to vendor scripts/validate_plugin.py. Matches publish.py's local
         # gate so CI and local gate agree. Issue #11.
+        #
+        # RC-8 — DO NOT "SIMPLIFY" THIS HANDLER BACK. The obvious-looking form
+        # (`elif [ $exit_code -ge 5 ]; then echo "WARNING only"; exit 0`) is
+        # FAIL-OPEN: CPV's exit codes STOP AT 4 (OK 0 / CRITICAL 1 / MAJOR 2 /
+        # MINOR 3 / NIT 4 — WARNING never gets an exit code of its own), so
+        # `>= 5` is never a verdict. It only ever matches a CRASH: `uvx: command
+        # not found` (127), an OOM kill (137). Those SILENTLY GREENED the gate,
+        # so CI passed having validated nothing.
+        #
+        # And the exit code ALONE cannot fix it: a cold `uvx --from git+…` build
+        # that dies on a transient GitHub git-fetch exits 1 — byte-identical to a
+        # CRITICAL verdict. So the handler ALSO requires CPV's own machine-readable
+        # `SUMMARY: CRITICAL=` line as PROOF that the validator actually ran.
+        #
+        #   exit 0                         → pass (the marker is NOT required here,
+        #                                    so a clean run can never be false-blocked)
+        #   exit 1-4 AND a SUMMARY line    → real findings → fail, labelled findings
+        #   anything else                  → the validator FAILED TO RUN → fail,
+        #                                    labelled infra/network
+        #
+        # The report is captured OUTSIDE the checkout ($RUNNER_TEMP) so the
+        # validator cannot scan its own half-written output.
         run: |
           set +e
           uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
               --with pyyaml \
-              cpv-remote-validate plugin . --strict
+              cpv-remote-validate plugin . --strict \
+              > "$RUNNER_TEMP/cpv-validation-report.txt" 2>&1
           exit_code=$?
           set -e
+          cat "$RUNNER_TEMP/cpv-validation-report.txt"
           if [ $exit_code -eq 0 ]; then
             echo "Validation passed"
             exit 0
-          elif [ $exit_code -ge 5 ]; then
-            echo "Only WARNING-level findings (exit $exit_code) — advisory, not blocking"
-            exit 0
-          else
-            echo "::error::Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT)"
+          fi
+          # CPV's verdict exit codes are 1-4. Anything else — and any 1-4 with no
+          # SUMMARY line — means the validator never produced a verdict (a failed
+          # uvx/git fetch exits 1 or 2 exactly like a findings verdict).
+          if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ] \
+             && grep -q "SUMMARY: CRITICAL=" "$RUNNER_TEMP/cpv-validation-report.txt"; then
+            echo "::error::Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT found)"
             exit $exit_code
           fi
+          echo "::error::CPV validator FAILED TO RUN (exit $exit_code) — infra/network/install failure, NOT a validation verdict. No findings were produced; do not read this as CRITICAL/MAJOR/MINOR/NIT. See the log above (a cold 'uvx --from git+...' build can fail on a transient GitHub git-fetch)."
+          exit 1
 
   test:
     name: Test

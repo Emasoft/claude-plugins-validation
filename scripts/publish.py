@@ -42,6 +42,7 @@ from typing import Any, Callable
 # when publish.py is invoked directly (e.g. `uv run python scripts/publish.py`).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from cpv_ci_preflight import run_ci_preflight  # noqa: E402
 from cpv_network_resilience import gh_with_retry, git_with_retry  # noqa: E402
 from cpv_validation_common import build_report_path  # noqa: E402
 
@@ -710,6 +711,13 @@ GATES: list[tuple[str, str]] = [
         "lint via cpv_lint_engine since v2.64.0; blocks on "
         "CRITICAL/MAJOR/MINOR/NIT; WARNING advisory only",
     ),
+    (
+        "Gate 3b",
+        "CI-parity preflight (cpv_ci_preflight.py) — the jscpd / actionlint / "
+        "mypy / uv-sync-dev / Mega-Linter / CIP-1..8 gates CI's Lint job runs "
+        "but validate_plugin does NOT; a MISSING TOOL degrades to WARNING and "
+        "never blocks",
+    ),
     ("Gate 4", "Marketplace validation (validate_marketplace.py --strict) — Layout B only"),
     ("Gate 5", "Marketplace-registration check — verifies plugin is wired to its marketplace"),
     ("Gate 6", "Version consistency (plugin.json / pyproject.toml / __version__)"),
@@ -1263,6 +1271,75 @@ def stage_validate_plugin(plugin_root: Path) -> int:
         )
         return vresult.returncode
     print(f"{GREEN}✓ Plugin validation passed (zero errors){NC}")
+    return 0
+
+
+def stage_ci_preflight(plugin_root: Path) -> int:
+    """Gate 3b: CI-parity preflight — the gates ``validate_plugin --strict`` omits.
+
+    WHY THIS GATE EXISTS (CI-failure forensics, 2026-07-13). ``cpv_ci_preflight``
+    already mirrored CI's Lint job (jscpd / actionlint / mypy / ``uv sync --extra
+    dev`` / the enabled Mega-Linter sub-linters / the CIP static defect
+    detectors) — but NOTHING invoked it. It was "enforced" only by prose in
+    ``agents/plugin-fixer.md`` and ``agents/plugin-creator.md``, which an agent
+    can simply skip. A publish could therefore pass every other gate, bump,
+    commit, TAG, PUSH, cut a GitHub release — and only THEN go red on GitHub,
+    with the broken pipeline already shipped to every consumer. Wiring the
+    preflight in as a real gate is the structural fix: prose is advice, a gate is
+    enforcement.
+
+    PLACEMENT IS LOAD-BEARING. This runs inside the Gate 2-5 preflight block, so
+    it is strictly BEFORE the version bump (Gate 7), the commit (Gate 10), the
+    tag (Gate 11) and the push (Gate 12). A parity failure therefore aborts with
+    the working tree untouched — it can never leave a half-published state (a
+    tag pushed for a release that was never cut).
+
+    A MISSING TOOL NEVER BLOCKS A PUBLISH. ``PreflightResult.exit_code`` is 1
+    only when a gate actually FAILED; every tool-absent case degrades to a
+    non-blocking WARNING and keeps the exit code at 0 (the degrade-gracefully
+    contract — see the ``cpv_ci_preflight`` module docstring). A machine without
+    actionlint / npx / checkov publishes exactly as it did before; it just gets
+    less LOCAL parity coverage, which CI still enforces. That property is what
+    makes this gate safe to add unconditionally, and it is pinned by a test —
+    do not "improve" this into a hard tool requirement.
+
+    There is deliberately NO skip flag and NO env bypass: Gate 0 rejects
+    ``CPV_SKIP_*`` / ``SKIP_*`` / ``NO_VERIFY`` outright, and a gate you can turn
+    off is the prose-enforcement problem all over again.
+
+    Returns 0 when parity-clean (PASS/WARNING only), 1 when a real CI gate would
+    fail.
+    """
+    print(f"\n{BLUE}═══ Gate 3b: CI-parity preflight (gates validate_plugin omits) ═══{NC}")
+    result = run_ci_preflight(plugin_root)
+
+    if result.exit_code != 0:
+        print(
+            f"\n{RED}✗ CI-parity preflight FAILED — PUBLISH BLOCKED{NC}\n"
+            f"{RED}  These gates would fail GitHub CI AFTER the tag and release were pushed:{NC}",
+            file=sys.stderr,
+        )
+        for f in result.fails:
+            loc = f" [{f.file}]" if f.file else ""
+            print(f"{RED}    ✗ {f.gate}{loc}: {f.message}{NC}", file=sys.stderr)
+        print(
+            f"{RED}  Fix the cause, then re-run. Reproduce locally with:{NC}\n"
+            f"{RED}    uv run python scripts/remote_validation.py ci-preflight .{NC}",
+            file=sys.stderr,
+        )
+        return result.exit_code
+
+    if result.warnings:
+        # Tool-absent WARNINGs are expected on a lean box and are NOT failures.
+        # Surface them so the maintainer knows which gates CI will be the FIRST
+        # to run — but never block on them.
+        print(
+            f"  {YELLOW}{len(result.warnings)} parity gate(s) could not run locally "
+            f"(tool absent) — CI still enforces them:{NC}"
+        )
+        for f in result.warnings:
+            print(f"    {YELLOW}! {f.gate}: {f.message}{NC}")
+    print(f"{GREEN}✓ CI-parity preflight passed ({len(result.passes)} gate(s) clean){NC}")
     return 0
 
 
@@ -2499,9 +2576,20 @@ def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: P
 
 
 # Canonical replay order for the parallel preflight block. The terminal sees
-# Gate 2 → 3 → 4 → 5 in this exact order regardless of which thread finishes
-# first, so logs stay diff-friendly across runs and are easy to skim.
-_PARALLEL_GATE_ORDER: tuple[str, ...] = ("tests", "validate", "mkpl_validate", "mkpl_reg")
+# Gate 2 → 3 → 3b → 4 → 5 in this exact order regardless of which thread
+# finishes first, so logs stay diff-friendly across runs and are easy to skim.
+# `ci_preflight` (Gate 3b) sits right after `validate` because it is the same
+# question asked of a different gate set ("would CI pass?"), and every gate in
+# this tuple is READ-ONLY with respect to the working tree — the preflight's
+# `uv sync` probe uses `--frozen --dry-run`, so it cannot dirty uv.lock and
+# race Gate 1's clean-tree verdict.
+_PARALLEL_GATE_ORDER: tuple[str, ...] = (
+    "tests",
+    "validate",
+    "ci_preflight",
+    "mkpl_validate",
+    "mkpl_reg",
+)
 
 
 # ── Phase E (v2.79.0): background prefetch during preflight ──────────────────
@@ -2708,13 +2796,19 @@ def run_preflight_parallel(
     *,
     prefetch: _PrefetchResults | None = None,
 ) -> int:
-    """Run Gates 2/3/4/5 concurrently with per-thread output capture.
+    """Run Gates 2/3/3b/4/5 concurrently with per-thread output capture.
 
     Phase C (v2.77.0): replaces the previous sequential Gate-2 → Gate-3 →
-    Gate-4 → Gate-5 dispatch. The four gates are independent (none mutates
-    on-disk state that another reads), so running them on a 4-worker thread
-    pool drops preflight wall time from ``sum(gates)`` to ``max(gates)``
-    — typically a 25–60s reduction depending on test-suite size.
+    Gate-4 → Gate-5 dispatch. The gates are independent (none mutates
+    on-disk state that another reads), so running them on a thread pool sized
+    to the gate count drops preflight wall time from ``sum(gates)`` to
+    ``max(gates)`` — typically a 25–60s reduction depending on test-suite size.
+
+    Gate 3b (the CI-parity preflight) joined this block in the wave-2 CI-failure
+    root-fix. It is read-only like its siblings (its ``uv sync`` probe is
+    ``--frozen --dry-run``), and running it here — rather than sequentially —
+    keeps its jscpd/mypy/actionlint subprocesses overlapped with pytest instead
+    of adding their wall time to the publish.
 
     Output handling:
 
@@ -2730,7 +2824,7 @@ def run_preflight_parallel(
 
     Failure semantics:
 
-    * The pool waits for ALL four gates to finish (so we don't leave
+    * The pool waits for ALL gates to finish (so we don't leave
       validators running after we already have a hard failure to report).
     * Captured output is replayed in canonical order REGARDLESS of which
       gates failed.
@@ -2741,7 +2835,10 @@ def run_preflight_parallel(
       fails MAJOR, the user sees CRITICAL.
     * If every gate passes, returns 0.
     """
-    print(f"\n{BLUE}═══ Running Gates 2-5 concurrently (Phase C parallel preflight) ═══{NC}")
+    print(
+        f"\n{BLUE}═══ Running Gates 2-5 (incl. 3b) concurrently "
+        f"(Phase C parallel preflight) ═══{NC}"
+    )
 
     # Phase E (v2.79.0): Gate 5 may consume the prefetched marketplace.json
     # instead of doing its own synchronous fetch. Pass prefetch results
@@ -2754,14 +2851,17 @@ def run_preflight_parallel(
     stage_callables: dict[str, Callable[[], int]] = {
         "tests": lambda: stage_run_tests(plugin_root),
         "validate": lambda: stage_validate_plugin(plugin_root),
+        "ci_preflight": lambda: stage_ci_preflight(plugin_root),
         "mkpl_validate": lambda: stage_validate_marketplace(plugin_root, layout),
         "mkpl_reg": lambda: stage_marketplace_registration_check(plugin_root, prefetch=pf),
     }
 
-    # Submit all four gates simultaneously. max_workers=4 is the exact
-    # number of tasks — no point sizing the pool larger.
+    # Submit every gate simultaneously. The pool is sized to the exact number of
+    # tasks (derived, never hardcoded — Gate 3b was added to _PARALLEL_GATE_ORDER
+    # and a stale literal `4` here would have silently serialized one gate behind
+    # another).
     captured: dict[str, tuple[int, str, str]] = {}
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    with ThreadPoolExecutor(max_workers=len(stage_callables)) as ex:
         futures = {name: ex.submit(_run_stage_captured, fn) for name, fn in stage_callables.items()}
         # Wait for all to finish — DON'T short-circuit on first failure.
         # We want a clean per-gate replay even when multiple gates fail,
@@ -2801,7 +2901,7 @@ def run_preflight_parallel(
 def main() -> int:
     gate_summary = "\n".join(f"  {name}: {desc}" for name, desc in GATES)
     parser = argparse.ArgumentParser(
-        description="Publish pipeline: 14-gate fail-fast release with auto-bump (bypass-proof)",
+        description="Publish pipeline: 15-gate fail-fast release with auto-bump (bypass-proof)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Gates (all mandatory, run in order):
@@ -2866,21 +2966,26 @@ Examples:
 
     # ── Gates 1-6: preflight ──
     # Order: clean tree → tests → validate (lint+structure+plugin checks) →
-    # marketplace → consistency. Since v2.64.0, validate_plugin.py owns
-    # repo-wide lint via cpv_lint_engine, so there is no separate lint
-    # stage — the validator catches lint errors AND structural issues in a
-    # single pass with one source of truth.
+    # CI-parity preflight → marketplace → consistency. Since v2.64.0,
+    # validate_plugin.py owns repo-wide lint via cpv_lint_engine, so there is
+    # no separate lint stage — the validator catches lint errors AND
+    # structural issues in a single pass with one source of truth.
     #
     # Phase C (v2.77.0): Gate 1 still runs first sequentially — the clean
     # working tree must be verified before tests run, otherwise pytest
     # could pick up uncommitted state (or auto-commit the lockfile via
     # the in-place `git add uv.lock`/`git commit` branch). After Gate 1
-    # passes, Gates 2/3/4/5 run concurrently in a thread pool; their
+    # passes, Gates 2/3/3b/4/5 run concurrently in a thread pool; their
     # output is captured per-thread and replayed in canonical order so
     # the terminal stays readable. Gate 6 runs sequentially after the
     # parallel block to keep version-consistency strictly downstream of
     # the validators (avoids racing against any in-flight validator
     # subprocess that may touch on-disk state).
+    #
+    # EVERY gate in this block precedes the bump (Gate 7) / commit (Gate 10) /
+    # tag (Gate 11) / push (Gate 12). That ordering is what lets Gate 3b abort
+    # a CI-parity defect with the tree untouched, instead of discovering it on
+    # GitHub after the release was already cut.
     rc = stage_check_working_tree(root)
     if rc != 0:
         return rc

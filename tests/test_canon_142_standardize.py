@@ -180,13 +180,23 @@ def test_d2_provision_creates_dev_extra_when_absent(tmp_path):
 
 
 def test_d2_provision_uses_exact_generator_literal_order(tmp_path):
-    """The provisioned list matches the generator's exact literal ['pytest','ruff','mypy']."""
-    assert _PROVISION_DEV_EXTRA == ("pytest", "ruff", "mypy")
+    """The provisioned list matches the generator's literal, in order.
+
+    RC-9 (2026-07-13 CI forensics) added a FOURTH, CONDITIONAL entry to
+    ``_PROVISION_DEV_EXTRA``: ``pytest-split``, provisioned ONLY when a workflow
+    runs a sharded pytest (``pytest … --splits``). The canonical trio is
+    unchanged, and the second half of this test is the positive control for the
+    conditionality — this fixture ships no sharded workflow, so the emitted dev
+    extra is still EXACTLY ['pytest','ruff','mypy'] and no dependency the plugin
+    does not use is invented.
+    """
+    assert _PROVISION_DEV_EXTRA == ("pytest", "ruff", "mypy", "pytest-split")
     root = _make_plugin(tmp_path, dev=None)
     provision_dev_extra(root, dry_run=False)
     data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     dev = data["project"]["optional-dependencies"]["dev"]
-    # Unpinned, exact order, exact membership — byte-compatible with the generator default.
+    # Unpinned, exact order, exact membership — byte-compatible with the generator
+    # default. NOT sharded ⇒ pytest-split is correctly absent.
     assert dev == ["pytest", "ruff", "mypy"], dev
 
 
