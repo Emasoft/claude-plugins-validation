@@ -4217,6 +4217,15 @@ jobs:
           # CRITICAL private-path leak, red-lighting --strict CI. In CI there is
           # no developer local-username to protect; the public owner is public.
           PLUGIN_SKIP_GITHUB_INTEGRITY: "1"
+          # Issue #162: cap the AGGREGATE REPO LINT wall-clock. Each linter is
+          # already per-linter-bounded, but on a cold runner uv/npm serialize the
+          # concurrent uvx/npx first-run fetches on a global cache lock, so the
+          # ~17-linter fan-out degrades toward serial and the phase can march past
+          # this job's own timeout-minutes with orphaned uv/python children. 600s
+          # is well under this job's ceiling yet ~17x the warm ~35s run, so it
+          # never false-skips a healthy cold run. Raise it to tune, or set
+          # PLUGIN_SKIP_REPO_LINT=1 if Mega-Linter already lints this repo.
+          PLUGIN_REPO_LINT_PHASE_TIMEOUT: "600"
         run: |
           {validate_block}
 
@@ -4426,6 +4435,15 @@ jobs:
           # a CRITICAL private-path leak, red-lighting --strict CI. In CI there
           # is no developer local-username to protect; the public owner is public.
           PLUGIN_SKIP_GITHUB_INTEGRITY: "1"
+          # Issue #162: cap the AGGREGATE REPO LINT wall-clock. Each linter is
+          # already per-linter-bounded, but on a cold runner uv/npm serialize the
+          # concurrent uvx/npx first-run fetches on a global cache lock, so the
+          # ~17-linter fan-out degrades toward serial and the phase can march past
+          # this job's own timeout-minutes with orphaned uv/python children. 600s
+          # is well under this job's ceiling yet ~17x the warm ~35s run, so it
+          # never false-skips a healthy cold run. Raise it to tune, or set
+          # PLUGIN_SKIP_REPO_LINT=1 if Mega-Linter already lints this repo.
+          PLUGIN_REPO_LINT_PHASE_TIMEOUT: "600"
         run: |
           {validate_block}
 
