@@ -168,6 +168,9 @@ OPTIONAL_PLUGIN_FIELDS = {
     "monitors",
     # v2.1.121 — additional manifest-schema fields callable from marketplace entries.
     "themes",
+    # v2.1.152 — plugin suggestion signals (`relevance` → topic + signals).
+    # Shape-checked by validate_relevance_block() below.
+    "relevance",
     # `$schema` is allowed at any JSON object that supports JSON-Schema validation
     # (CC ignores the field at load time).
     "$schema",
@@ -625,6 +628,359 @@ def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResul
     return results
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# v2.1.152 — the `relevance` block (plugin-relevance.md).
+#
+# An OPTIONAL object on a marketplace plugin entry carrying the signals Claude
+# Code uses to SUGGEST the plugin. `claude plugin validate` reports unknown keys
+# under `relevance` / `relevance.signals` as WARNINGS (the docs state they are
+# ignored at load time so older clients keep loading the marketplace), flags a
+# non-object `relevance`, and REJECTS a `signals.hosts` entry carrying a scheme,
+# a port, or a path — CPV mirrors that behaviour exactly.
+# ─────────────────────────────────────────────────────────────────────────────
+_KNOWN_RELEVANCE_FIELDS: frozenset[str] = frozenset({"topic", "signals"})
+_KNOWN_RELEVANCE_SIGNAL_FIELDS: frozenset[str] = frozenset({"cwd", "cli", "hosts", "filesRead", "manifestDeps"})
+
+# Max characters for `relevance.topic`.
+_RELEVANCE_TOPIC_MAX_LEN = 64
+
+# signal name → (max entries in the array, max chars per entry).
+# For `manifestDeps` the per-entry cap applies to EACH of its `file`/`pattern`
+# regex source strings.
+_RELEVANCE_SIGNAL_LIMITS: dict[str, tuple[int, int]] = {
+    "cwd": (10, 256),
+    "cli": (10, 64),
+    "hosts": (20, 128),
+    "filesRead": (10, 256),
+    "manifestDeps": (10, 256),
+}
+
+# A `hosts` entry must be a BARE lowercase hostname: no scheme ("https://"), no
+# port (":443"), no path ("/v1"). Checking for the three offending characters is
+# exact — "://" implies both ":" and "/", so the ":" and "/" tests subsume it,
+# but each is reported by name so the message can say WHICH part is illegal.
+_RELEVANCE_HOST_ILLEGAL_PARTS: tuple[tuple[str, str], ...] = (
+    ("://", "a scheme"),
+    ("/", "a path"),
+    (":", "a port"),
+)
+
+
+def _validate_relevance_manifest_dep(
+    entry: Any,
+    idx: int,
+    plugin_id: str,
+    json_path: str,
+) -> list[ValidationResult]:
+    """Shape-check one `relevance.signals.manifestDeps` element.
+
+    Each element is an object {"file": <regex str>, "pattern": <regex str>};
+    both keys are required and each source string is capped at 256 chars.
+    """
+    results: list[ValidationResult] = []
+    where = f"relevance.signals.manifestDeps[{idx}]"
+    if not isinstance(entry, dict):
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-RELEVANCE-TYPE] entry '{plugin_id}' {where} must be an "
+                    f'object {{"file": <regex>, "pattern": <regex>}}, got {type(entry).__name__}'
+                ),
+                file=json_path,
+                suggestion=f'Replace {where} with {{"file": "package.json", "pattern": "react"}}.',
+            )
+        )
+        return results
+
+    _, max_len = _RELEVANCE_SIGNAL_LIMITS["manifestDeps"]
+    for key in ("file", "pattern"):
+        value = entry.get(key)
+        if value is None:
+            results.append(
+                ValidationResult(
+                    level="MAJOR",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-RELEVANCE-TYPE] entry '{plugin_id}' {where} is missing "
+                        f"the required '{key}' field (a JS RegExp source string)"
+                    ),
+                    file=json_path,
+                    suggestion=f"Add a '{key}' regex string to {where}.",
+                )
+            )
+        elif not isinstance(value, str):
+            results.append(
+                ValidationResult(
+                    level="MAJOR",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-RELEVANCE-TYPE] entry '{plugin_id}' {where}.{key} must be "
+                        f"a regex source string, got {type(value).__name__}"
+                    ),
+                    file=json_path,
+                    suggestion=f"Quote the {where}.{key} value as a JS RegExp source string.",
+                )
+            )
+        elif len(value) > max_len:
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-RELEVANCE-LIMIT] entry '{plugin_id}' {where}.{key} is "
+                        f"{len(value)} chars, exceeding the documented {max_len}-char limit"
+                    ),
+                    file=json_path,
+                    suggestion=f"Shorten the {where}.{key} regex to at most {max_len} chars.",
+                )
+            )
+    return results
+
+
+def _validate_relevance_signal_array(
+    signal: str,
+    value: Any,
+    plugin_id: str,
+    json_path: str,
+) -> list[ValidationResult]:
+    """Shape-check one KNOWN `relevance.signals.<signal>` array and its entries."""
+    results: list[ValidationResult] = []
+    where = f"relevance.signals.{signal}"
+    if not isinstance(value, list):
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-RELEVANCE-TYPE] entry '{plugin_id}' {where} must be an array, got {type(value).__name__}"
+                ),
+                file=json_path,
+                suggestion=f"Wrap the {where} value in an array, e.g. {where}: [...].",
+            )
+        )
+        return results
+
+    max_entries, max_len = _RELEVANCE_SIGNAL_LIMITS[signal]
+    if len(value) > max_entries:
+        results.append(
+            ValidationResult(
+                level="MINOR",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-RELEVANCE-LIMIT] entry '{plugin_id}' {where} has {len(value)} "
+                    f"entries, exceeding the documented maximum of {max_entries}"
+                ),
+                file=json_path,
+                suggestion=f"Keep at most {max_entries} entries in {where}.",
+            )
+        )
+
+    for idx, item in enumerate(value):
+        if signal == "manifestDeps":
+            results.extend(_validate_relevance_manifest_dep(item, idx, plugin_id, json_path))
+            continue
+
+        if not isinstance(item, str):
+            results.append(
+                ValidationResult(
+                    level="MAJOR",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-RELEVANCE-TYPE] entry '{plugin_id}' {where}[{idx}] must be a "
+                        f"string, got {type(item).__name__}"
+                    ),
+                    file=json_path,
+                    suggestion=f"Replace {where}[{idx}] with a string value.",
+                )
+            )
+            continue
+
+        if len(item) > max_len:
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-RELEVANCE-LIMIT] entry '{plugin_id}' {where}[{idx}] "
+                        f"'{item}' is {len(item)} chars, exceeding the documented "
+                        f"{max_len}-char limit"
+                    ),
+                    file=json_path,
+                    suggestion=f"Shorten {where}[{idx}] to at most {max_len} chars.",
+                )
+            )
+
+        if signal == "hosts":
+            illegal = [label for part, label in _RELEVANCE_HOST_ILLEGAL_PARTS if part in item]
+            if illegal:
+                results.append(
+                    ValidationResult(
+                        level="MAJOR",
+                        category="plugin",
+                        message=(
+                            f"[RC-MKPL-RELEVANCE-HOST] entry '{plugin_id}' {where}[{idx}] "
+                            f"'{item}' must be a bare hostname but includes {illegal[0]}. "
+                            "Claude Code rejects a hosts entry carrying a scheme, a port, "
+                            "or a path."
+                        ),
+                        file=json_path,
+                        suggestion=(
+                            f"Use the bare lowercase hostname in {where}[{idx}] "
+                            '(e.g. "api.stripe.com", not "https://api.stripe.com/v1").'
+                        ),
+                    )
+                )
+
+    return results
+
+
+def validate_relevance_block(
+    relevance: Any,
+    plugin_id: str,
+    json_path: str,
+) -> list[ValidationResult]:
+    """Validate a marketplace entry's optional `relevance` block (v2.1.152).
+
+    Mirrors `claude plugin validate`: unknown keys under `relevance` and
+    `relevance.signals` are WARNINGs (ignored at load time), type violations are
+    MAJOR, a `hosts` entry with a scheme/port/path is MAJOR, and a documented
+    count/length limit overrun is MINOR. A missing/empty `signals` object means
+    the plugin can never be suggested — advisory WARNING, never an error.
+    """
+    results: list[ValidationResult] = []
+
+    if not isinstance(relevance, dict):
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-RELEVANCE-TYPE] entry '{plugin_id}' 'relevance' must be an "
+                    f"object with optional 'topic' and 'signals' keys, got {type(relevance).__name__}"
+                ),
+                file=json_path,
+                suggestion=('Use the documented shape: "relevance": {"topic": "Terraform", "signals": {...}}.'),
+            )
+        )
+        return results
+
+    for key in sorted(relevance.keys()):
+        if key not in _KNOWN_RELEVANCE_FIELDS:
+            results.append(
+                ValidationResult(
+                    level="WARNING",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-RELEVANCE-UNKNOWN] entry '{plugin_id}' relevance has unknown "
+                        f"key '{key}'. Unknown fields under 'relevance' are ignored at load time; "
+                        f"known keys: {sorted(_KNOWN_RELEVANCE_FIELDS)}."
+                    ),
+                    file=json_path,
+                    suggestion=f"Remove the '{key}' key from 'relevance', or move it under 'signals'.",
+                )
+            )
+
+    topic = relevance.get("topic")
+    if topic is not None:
+        if not isinstance(topic, str):
+            results.append(
+                ValidationResult(
+                    level="MAJOR",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-RELEVANCE-TYPE] entry '{plugin_id}' relevance.topic must be a "
+                        f"string, got {type(topic).__name__}"
+                    ),
+                    file=json_path,
+                    suggestion='Set relevance.topic to a short string, e.g. "Terraform".',
+                )
+            )
+        elif len(topic) > _RELEVANCE_TOPIC_MAX_LEN:
+            results.append(
+                ValidationResult(
+                    level="MINOR",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-RELEVANCE-LIMIT] entry '{plugin_id}' relevance.topic is "
+                        f"{len(topic)} chars, exceeding the documented "
+                        f"{_RELEVANCE_TOPIC_MAX_LEN}-char limit"
+                    ),
+                    file=json_path,
+                    suggestion=f"Shorten relevance.topic to at most {_RELEVANCE_TOPIC_MAX_LEN} chars.",
+                )
+            )
+
+    if "signals" not in relevance:
+        results.append(
+            ValidationResult(
+                level="WARNING",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-RELEVANCE-UNKNOWN] entry '{plugin_id}' relevance has no 'signals' "
+                    "object, so the plugin can never be suggested. At least one signal "
+                    f"({sorted(_KNOWN_RELEVANCE_SIGNAL_FIELDS)}) is needed to make it suggestible."
+                ),
+                file=json_path,
+                suggestion=('Add e.g. "signals": {"cli": ["terraform"], "filesRead": ["**/*.tf"]}.'),
+            )
+        )
+        return results
+
+    signals = relevance["signals"]
+    if not isinstance(signals, dict):
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-RELEVANCE-TYPE] entry '{plugin_id}' relevance.signals must be an "
+                    f"object, got {type(signals).__name__}"
+                ),
+                file=json_path,
+                suggestion=('Use the documented shape: "signals": {"cli": ["terraform"]}.'),
+            )
+        )
+        return results
+
+    if not signals:
+        results.append(
+            ValidationResult(
+                level="WARNING",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-RELEVANCE-UNKNOWN] entry '{plugin_id}' relevance.signals is empty, "
+                    "so the plugin can never be suggested. At least one signal "
+                    f"({sorted(_KNOWN_RELEVANCE_SIGNAL_FIELDS)}) is needed to make it suggestible."
+                ),
+                file=json_path,
+                suggestion=('Add e.g. "signals": {"cli": ["terraform"], "filesRead": ["**/*.tf"]}.'),
+            )
+        )
+        return results
+
+    for signal in sorted(signals.keys()):
+        if signal not in _KNOWN_RELEVANCE_SIGNAL_FIELDS:
+            results.append(
+                ValidationResult(
+                    level="WARNING",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-RELEVANCE-UNKNOWN] entry '{plugin_id}' relevance.signals has "
+                        f"unknown key '{signal}'. Unknown fields under 'relevance.signals' are "
+                        f"ignored at load time; known signals: {sorted(_KNOWN_RELEVANCE_SIGNAL_FIELDS)}."
+                    ),
+                    file=json_path,
+                    suggestion=f"Remove the '{signal}' key from relevance.signals.",
+                )
+            )
+            continue
+        results.extend(_validate_relevance_signal_array(signal, signals[signal], plugin_id, json_path))
+
+    return results
+
+
 def validate_plugin_entry(
     plugin: dict[str, Any],
     index: int,
@@ -716,6 +1072,12 @@ def validate_plugin_entry(
     repository = plugin.get("repository")
     if repository is not None:
         results.extend(validate_repository_url(repository, plugin_id, json_path))
+
+    # Validate the optional `relevance` block (v2.1.152 — plugin suggestion
+    # signals). Absent `relevance` is the overwhelmingly common case and is
+    # completely unaffected.
+    if "relevance" in plugin:
+        results.extend(validate_relevance_block(plugin["relevance"], plugin_id, json_path))
 
     # v2.81.0 (TRDD-c0ee9543, Phase A) — strict allowlist enforcement.
     # Replaces the prior INFO-level unknown-field branch: `claude plugin
