@@ -104,7 +104,7 @@
         "\\bexecSync\\b",
         "\\bspawn\\s*\\(",
         "\\beval\\s*\\(",
-        "(?:\\bnew\\s+)?\\bFunction\\s*\\(\\s*[`'\"]",
+        "(?:\\bnew\\s+)?\\b(?-i:Function)\\s*\\(\\s*[`'\"]",
         "\\bos\\.system\\b",
         "\\bsubprocess\\.(?:call|run|Popen)\\b",
         "\\b(?:os\\.popen|subprocess\\.get(?:status)?output|commands\\.get(?:status)?output|asyncio\\.create_subprocess_shell)\\s*\\("
