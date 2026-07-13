@@ -18,6 +18,7 @@ Every clear below is paired with a still-fires case:
 from __future__ import annotations
 
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -53,19 +54,22 @@ STRIPE_RELEVANCE = {
 # ---------------------------------------------------------------------------
 
 
+_RC_CODE_RE = re.compile(r"\[(RC-[A-Z0-9-]+)\]")
+
+
 def _codes(results: list) -> list[str]:
-    """Extract every RC-MKPL-* code present in a result list."""
+    """Extract every bracketed RC-* code present in a result list.
+
+    Parsed with a regex rather than matched against a hardcoded list of known
+    codes: an allowlist silently yields [] for any code it has not been taught,
+    so a NEW rule code would make every `_codes(...) == [...]` assertion fail
+    confusingly — and, far worse, every `_codes(...) == []` assertion pass
+    VACUOUSLY. The harness must not be able to go stale relative to the code
+    it is testing.
+    """
     out: list[str] = []
     for r in results:
-        for code in (
-            "RC-MKPL-RELEVANCE-TYPE",
-            "RC-MKPL-RELEVANCE-HOST",
-            "RC-MKPL-RELEVANCE-UNKNOWN",
-            "RC-MKPL-RELEVANCE-LIMIT",
-            "RC-MKPL-UNKNOWN-FIELD",
-        ):
-            if code in (r.message or ""):
-                out.append(code)
+        out.extend(_RC_CODE_RE.findall(r.message or ""))
     return out
 
 
@@ -129,7 +133,7 @@ def test_topic_alone_without_signals_is_only_advisory() -> None:
     results = _check({"topic": "Terraform"})
     assert len(results) == 1
     assert results[0].level == "WARNING"
-    assert _codes(results) == ["RC-MKPL-RELEVANCE-UNKNOWN"]
+    assert _codes(results) == ["RC-MKPL-RELEVANCE-NO-SIGNALS"]
 
 
 def test_at_max_limits_is_clean() -> None:
@@ -259,47 +263,74 @@ def test_unknown_key_under_signals_is_warning() -> None:
 def test_empty_signals_is_advisory_warning_not_an_error() -> None:
     results = _check({"topic": "Terraform", "signals": {}})
     assert [r.level for r in results] == ["WARNING"]
-    assert _codes(results) == ["RC-MKPL-RELEVANCE-UNKNOWN"]
+    assert _codes(results) == ["RC-MKPL-RELEVANCE-NO-SIGNALS"]
     assert "never be suggested" in results[0].message
 
 
+def test_signals_with_only_unknown_keys_is_flagged_inert() -> None:
+    """Only-unknown keys is as inert as an empty object, and must say so.
+
+    Previously each unknown key warned individually but nothing reported that
+    the block as a whole can never produce a suggestion.
+    """
+    results = _check({"signals": {"bogusSignal": ["x"]}})
+    assert _codes(results) == ["RC-MKPL-RELEVANCE-UNKNOWN", "RC-MKPL-RELEVANCE-NO-SIGNALS"]
+    assert all(r.level == "WARNING" for r in results)
+
+
 # ---------------------------------------------------------------------------
-# MINOR — RC-MKPL-RELEVANCE-LIMIT
+# RC-MKPL-RELEVANCE-LIMIT — WARNING, deliberately NON-BLOCKING.
+#
+# The docs enumerate what `claude plugin validate` rejects (unknown keys ->
+# warning; non-object relevance; a hosts entry with scheme/port/path). A
+# documented per-signal MAXIMUM is NOT among them, so Claude Code loads a
+# marketplace that overruns one. A MINOR blocks --strict, so emitting MINOR
+# would make CPV block a publish that Claude Code accepts. These assertions
+# pin the severity so nobody "tightens" it back into an over-block.
 # ---------------------------------------------------------------------------
 
 
-def test_topic_over_64_chars_is_minor() -> None:
+def test_topic_over_64_chars_is_non_blocking_warning() -> None:
     results = _check({"topic": "T" * 65, "signals": {"cli": ["terraform"]}})
-    assert [r.level for r in results] == ["MINOR"]
+    assert [r.level for r in results] == ["WARNING"]
     assert _codes(results) == ["RC-MKPL-RELEVANCE-LIMIT"]
 
 
-def test_too_many_entries_is_minor() -> None:
+def test_too_many_entries_is_non_blocking_warning() -> None:
     for signal, over in (("cwd", 11), ("cli", 11), ("hosts", 21), ("filesRead", 11)):
         results = _check({"signals": {signal: ["x"] * over}})
-        assert [r.level for r in results] == ["MINOR"], signal
+        assert [r.level for r in results] == ["WARNING"], signal
         assert _codes(results) == ["RC-MKPL-RELEVANCE-LIMIT"], signal
         assert f"relevance.signals.{signal}" in results[0].message
 
 
-def test_too_many_manifestdeps_is_minor() -> None:
+def test_too_many_manifestdeps_is_non_blocking_warning() -> None:
     dep = {"file": "package\\.json", "pattern": "stripe"}
     results = _check({"signals": {"manifestDeps": [dep] * 11}})
-    assert [r.level for r in results] == ["MINOR"]
+    assert [r.level for r in results] == ["WARNING"]
     assert _codes(results) == ["RC-MKPL-RELEVANCE-LIMIT"]
 
 
-def test_entry_over_length_limit_is_minor() -> None:
+def test_entry_over_length_limit_is_non_blocking_warning() -> None:
     for signal, length in (("cwd", 257), ("cli", 65), ("hosts", 129), ("filesRead", 257)):
         results = _check({"signals": {signal: ["a" * length]}})
-        assert [r.level for r in results] == ["MINOR"], signal
+        assert [r.level for r in results] == ["WARNING"], signal
         assert _codes(results) == ["RC-MKPL-RELEVANCE-LIMIT"], signal
 
 
-def test_manifestdeps_regex_over_256_chars_is_minor() -> None:
+def test_manifestdeps_regex_over_256_chars_is_non_blocking_warning() -> None:
     results = _check({"signals": {"manifestDeps": [{"file": "a" * 257, "pattern": "b" * 257}]}})
-    assert [r.level for r in results] == ["MINOR", "MINOR"]
+    assert [r.level for r in results] == ["WARNING", "WARNING"]
     assert _codes(results) == ["RC-MKPL-RELEVANCE-LIMIT", "RC-MKPL-RELEVANCE-LIMIT"]
+
+
+def test_manifestdeps_entry_unknown_key_warns() -> None:
+    """A typo'd sibling of file/pattern is ignored at load time — say so."""
+    dep = {"file": "package\\.json", "pattern": "stripe", "bogus": 1}
+    results = _check({"signals": {"manifestDeps": [dep]}})
+    assert _codes(results) == ["RC-MKPL-RELEVANCE-UNKNOWN"]
+    assert results[0].level == "WARNING"
+    assert "'bogus'" in results[0].message
 
 
 # ---------------------------------------------------------------------------
