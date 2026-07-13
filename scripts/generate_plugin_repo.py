@@ -185,6 +185,21 @@ _CPV_PYPI_DIST = "claude-plugins-validation"
 # `from __future__ import annotations`, so the annotation must resolve at def
 # time. They are grouped with the other `gen_*`/param-consuming helpers there.
 
+# ── Sharded test matrix ↔ dev-extra COUPLING (RC-9, CI-failure forensics) ────
+# The emitted ci.yml runs the test suite as a pytest-split SHARD MATRIX
+# (`pytest --splits N --group K`). Those flags come from the `pytest-split`
+# plugin — pytest does not know them natively, so a repo whose dev extra omits
+# the dependency dies with `pytest: error: unrecognized arguments: --splits
+# --group` (real failure: ai-maestro-web-scenario-tester run 28959141245).
+# The shard count and the requirement therefore live in ONE place and are
+# consumed by BOTH gen_ci_yml (the matrix) and gen_pyproject_toml (the dev
+# extra), so the two can never desync in a later edit. If a future template
+# ever emits a NON-sharded matrix, drop the `--splits`/`--group` flags AND this
+# requirement together (tests/test_canon_rc1_rc8_rc9_template.py pins the
+# biconditional).
+TEST_SHARD_COUNT = 2
+PYTEST_SPLIT_REQUIREMENT = "pytest-split>=0.9"
+
 
 def resolve_language(arg: str, target: Path) -> str:
     """Resolve the --language CLI argument to a concrete language string.
@@ -605,6 +620,81 @@ def cpv_uvx_pyyaml_shell_fragment(p: PluginParams, *, indent: str, cont: str) ->
     return f"--with pyyaml {cont}\n{indent}"
 
 
+# The machine-readable verdict line every CPV plugin run prints
+# (`validate_plugin.print_report`). Its PRESENCE is the proof that the validator
+# actually ran and produced a verdict — see gen_cpv_validate_run_block.
+CPV_SUMMARY_MARKER = "SUMMARY: CRITICAL="
+
+
+def gen_cpv_validate_run_block(p: PluginParams, report_path: str) -> str:
+    """Return the `run:` body of the remote-CPV validation step (10-space indent).
+
+    Shared by gen_ci_yml (Validate job) and gen_release_yml (release job) so the
+    two error handlers can never diverge.
+
+    RC-8 (CI-failure forensics, 2026-07-13) — the handler this replaces was
+    MISLEADING and, worse, FAIL-OPEN:
+
+    * It printed ``CRITICAL/MAJOR/MINOR/NIT found`` for ANY non-zero exit. A cold
+      ``uvx --from git+…`` build that dies on a transient GitHub git-fetch
+      (``Failed to resolve `--with` requirement / Git operation failed``) exits 1
+      — byte-identical to a CRITICAL verdict — so an infra flake was reported as
+      a validation failure and triage went down the wrong path
+      (ai-maestro-orchestrator-agent run 27940567560).
+    * ci.yml's handler treated ANY exit ``>= 5`` as "advisory WARNING-level" and
+      exited 0. But CPV's exit codes stop at 4 (``cpv_validation_common``:
+      EXIT_OK 0 / CRITICAL 1 / MAJOR 2 / MINOR 3 / NIT 4 — WARNING never gets an
+      exit code of its own), so ``>= 5`` is NEVER a verdict: a
+      ``uvx: command not found`` (127) or an OOM-killed run (137) SILENTLY
+      PASSED the gate. release.yml's handler had the same hole in the other
+      direction (it only errored on 1-4 and fell through to publish otherwise).
+
+    Because uvx itself also exits 1/2, the exit code ALONE cannot separate the
+    two cases. The block therefore additionally requires CPV's own SUMMARY line
+    as PROOF the validator ran:
+
+    * exit 0                          → pass (never blocked; the marker is not
+                                        required, so this can never false-block a
+                                        clean run).
+    * exit 1-4 **and** a SUMMARY line → real findings → fail, labelled findings.
+    * anything else                   → the validator FAILED TO RUN → fail,
+                                        labelled infra/network.
+
+    Fail-closed by design: an infra failure is NOT "no findings", so it must
+    never green the gate — but it is now reported as what it actually is.
+
+    Args:
+        p: the plugin params (selects the git/pypi CPV source).
+        report_path: where to capture the validator's combined output. ci.yml
+            keeps it OUT of the checkout (``$RUNNER_TEMP``) so the validator
+            cannot scan its own report; release.yml writes it into the workspace
+            because the file is uploaded as a release asset (issue #121).
+    """
+    cpv_from = cpv_uvx_from_arg(p)
+    cpv_pyyaml = cpv_uvx_pyyaml_shell_fragment(p, indent=" " * 14, cont="\\")
+    return f"""set +e
+          uvx --from {cpv_from} \\
+              {cpv_pyyaml}cpv-remote-validate plugin . --strict \\
+              > "{report_path}" 2>&1
+          exit_code=$?
+          set -e
+          cat "{report_path}"
+          if [ $exit_code -eq 0 ]; then
+            echo "Validation passed"
+            exit 0
+          fi
+          # CPV's verdict exit codes are 1-4. Anything else — and any 1-4 with no
+          # SUMMARY line — means the validator never produced a verdict (a failed
+          # uvx/git fetch exits 1 or 2 exactly like a findings verdict).
+          if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ] \\
+             && grep -q "{CPV_SUMMARY_MARKER}" "{report_path}"; then
+            echo "::error::Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT found)"
+            exit $exit_code
+          fi
+          echo "::error::CPV validator FAILED TO RUN (exit $exit_code) — infra/network/install failure, NOT a validation verdict. No findings were produced; do not read this as CRITICAL/MAJOR/MINOR/NIT. See the log above (a cold 'uvx --from git+...' build can fail on a transient GitHub git-fetch)."
+          exit 1"""
+
+
 # =============================================================================
 # LANGUAGE-SPECIFIC MANIFEST GENERATORS
 # =============================================================================
@@ -988,7 +1078,13 @@ dev = [
     "pyyaml>=6.0",
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
-    "pytest-split>=0.9",
+    # REQUIRED by ci.yml's sharded test matrix: it runs
+    # `pytest --splits N --group K`, and those flags exist only when
+    # pytest-split is installed (without it every shard dies with
+    # "pytest: error: unrecognized arguments: --splits --group").
+    # Emitted from generate_plugin_repo.PYTEST_SPLIT_REQUIREMENT, the same
+    # constant that drives the matrix — do not drop one without the other.
+    "{PYTEST_SPLIT_REQUIREMENT}",
     "ruff>=0.14.14",
 ]
 
@@ -1530,6 +1626,12 @@ Pipeline stages (all fail-fast — any non-zero exit aborts):
       the canonical CPV validator from GitHub so this plugin never vendors
       a local copy and never drifts from upstream rules)
    4. Run tests (pytest)
+  4b. CI-parity preflight (uvx cpv-remote-validate ci-preflight . — the
+      jscpd / actionlint / mypy / uv-sync-dev / Mega-Linter / static-CIP gates
+      that CI's Lint job runs but `validate_plugin --strict` does NOT). Runs
+      BEFORE the bump/commit/tag/push, so a pipeline defect can never leave a
+      half-published state. A MISSING local tool degrades to a WARNING and never
+      blocks the publish.
    5. Marketplace-registration check (Layout A: notify workflow + PAT secret +
       remote marketplace.json registration + remote receiver workflow;
       Layout B: must run from marketplace root + nested plugin must be listed)
@@ -2640,6 +2742,47 @@ def stage_validate(root: Path) -> None:
     cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
 
 
+def stage_ci_preflight(root: Path) -> None:
+    """Step 4b: CI-parity preflight via REMOTE CPV. MANDATORY — no skip.
+
+    WHY THIS STAGE EXISTS. `validate_plugin --strict` (stage 4) does NOT run the
+    gates this plugin's own GitHub-CI Lint job runs: jscpd copy-paste, actionlint,
+    mypy, the `uv sync --extra dev` resolve, the enabled Mega-Linter sub-linters,
+    and CPV's static CI-parity defect detectors. Without this stage a publish
+    passes every LOCAL gate, bumps the version, commits, TAGS, PUSHES, and cuts a
+    GitHub release — and only THEN goes red on GitHub, with the broken pipeline
+    already shipped to everyone who installs the plugin.
+
+    PLACEMENT IS LOAD-BEARING: this runs BEFORE stage_bump / stage_commit_and_push
+    / stage_gh_release, so a parity failure aborts with the working tree untouched
+    instead of leaving a half-published release behind.
+
+    A MISSING TOOL NEVER BLOCKS THE PUBLISH. `ci-preflight` exits non-zero ONLY
+    when a gate actually FAILED; every tool-absent case (no npx, no actionlint,
+    no checkov, ...) degrades to a non-blocking WARNING and still exits 0. So a
+    lean machine publishes exactly as before — it just gets less LOCAL coverage,
+    which CI still enforces. Do not "harden" this into a hard tool requirement.
+    """
+    cprint(f"\n{BOLD}[4b/11] CI-parity preflight (remote CPV)...{NC}")
+    if not shutil.which("uvx"):
+        cprint(f"  {RED}BLOCKED: uvx not found on PATH.{NC}")
+        cprint(f"  {RED}Install via: brew install uv  or  pip install uv{NC}")
+        sys.exit(1)
+    rc = subprocess.run([
+        "uvx", "--from",
+        "git+https://github.com/Emasoft/claude-plugins-validation",
+        "--with", "pyyaml",
+        "cpv-remote-validate", "ci-preflight", ".",
+    ], cwd=str(root)).returncode
+    if rc != 0:
+        cprint(f"  {RED}BLOCKED: CI-parity preflight FAILED.{NC}")
+        cprint(f"  {RED}The gates listed above would fail GitHub CI — and without this{NC}")
+        cprint(f"  {RED}stage they would only have failed AFTER the tag and release were{NC}")
+        cprint(f"  {RED}pushed. Fix the causes, then re-run publish.py.{NC}")
+        sys.exit(1)
+    cprint(f"  {GREEN}CI-parity preflight passed.{NC}")
+
+
 # ── Marketplace-registration helpers (mirror of CPV's own publish.py Gate 6) ─
 
 def _find_parent_marketplace(plugin_root: Path) -> Path | None:
@@ -3401,16 +3544,22 @@ def main() -> int:
 
     # Gate 0: reject bypass attempts BEFORE running any other stage.
     # Pipeline order (per the cornerstone rule "every push is a bump"):
-    #   lint+typecheck → tests → validate → marketplace-reg → consistency →
-    #   bump → badge → changelog → commit → push → github release
+    #   lint+typecheck → tests → validate → ci-preflight → marketplace-reg →
+    #   consistency → bump → badge → changelog → commit → push → github release
     # Lint runs before tests (cheap fails first). Tests run before validate
     # so behavioral regressions fail the test suite before the structural
     # validator inspects the manifest.
+    #
+    # EVERY check above runs BEFORE stage_bump. That ordering is the whole point
+    # of stage_ci_preflight: a CI-parity defect aborts the publish with the tree
+    # untouched, instead of being discovered on GitHub after the tag was pushed
+    # and the release was cut.
     stage_bypass_guard()
     stage_check_clean(root)
     stage_lint(root)
     stage_tests(root)  # MANDATORY — no skip flag, no exceptions
     stage_validate(root)
+    stage_ci_preflight(root)  # MANDATORY — the gates validate_plugin omits
     stage_marketplace_registration(root)  # Gate 6 parity with CPV's own publish.py
     stage_consistency(root)
     stage_bump(root, new_ver, args.dry_run)
@@ -3427,24 +3576,27 @@ if __name__ == "__main__":
     sys.exit(main())
 '''
     # Root-cause #2 + issue #137: route every CPV callsite in the generated
-    # publish.py (G3 validate, Stage-4 validate, the branch-rules install)
-    # through `cpv_uvx_from_arg(p)`. For the default `git` source this returns
-    # the pinned `git+https://…@<ref>` form (byte-identical to the historical
-    # output — the cold uvx-from-git build stays cached per tag and a stricter
-    # future CPV release cannot silently break this gate). For the `pypi` source
-    # it returns `claude-plugins-validation==<ver>`. The bare URL appears
-    # exactly 3× in the template; a single exact-literal replace routes all of
-    # them.
+    # publish.py (G3 validate, Stage-4 validate, Stage-4b ci-preflight, the
+    # branch-rules install) through `cpv_uvx_from_arg(p)`. For the default `git`
+    # source this returns the pinned `git+https://…@<ref>` form (byte-identical
+    # to the historical output — the cold uvx-from-git build stays cached per tag
+    # and a stricter future CPV release cannot silently break this gate). For the
+    # `pypi` source it returns `claude-plugins-validation==<ver>`. `str.replace`
+    # rewrites EVERY occurrence, so a new CPV callsite added to the template is
+    # routed automatically — but it must spell the URL as the exact bare literal
+    # below, and it must spell `--with pyyaml` as one of the three forms handled
+    # just after, or the pypi variant would ship a stale `--with pyyaml` shim.
     result = template.replace(
         "git+https://github.com/Emasoft/claude-plugins-validation",
         cpv_uvx_from_arg(p),
     )
     # Issue #137: the published `pypi` wheel declares pyyaml as a runtime
-    # dependency, so drop the `--with pyyaml` shim from all 3 inline argv lists
-    # in the generated publish.py. The two distinct argv spellings in the
-    # template are removed by exact-literal replace; the `git` source leaves
-    # them untouched (byte-identical output). The newline+indent in each match
-    # keeps the surrounding argv structure intact.
+    # dependency, so drop the `--with pyyaml` shim from every inline argv list in
+    # the generated publish.py. The three distinct argv spellings in the template
+    # are removed by exact-literal replace (each is applied to ALL of its
+    # occurrences); the `git` source leaves them untouched (byte-identical
+    # output). The newline+indent in each match keeps the surrounding argv
+    # structure intact.
     if not cpv_uvx_needs_pyyaml(p):
         result = result.replace(
             '                "--with",\n                "pyyaml",\n',
@@ -3852,8 +4004,11 @@ def gen_ci_yml(p: PluginParams) -> str:
       should not waste a full mega-linter run.
     * commitlint on PRs rejects non-conventional commits at the door so
       git-cliff's --bump and the CHANGELOG generator never see a junk
-      subject line. Falls back to @commitlint/config-conventional when
-      the repo has no .commitlintrc.json.
+      subject line. It reads the repo's `.commitlintrc.json`
+      (:func:`gen_commitlintrc_json`) — config-conventional with
+      `body-max-line-length` disabled, so a bot's machine-generated commit
+      body cannot fail the gate (RC-1) while a human's badly-typed subject
+      still does.
     * macOS matrix on the test job catches darwin-specific regressions
       (pathlib casing, mtime resolution, BSD `ps` vs procps-ng output).
       `fail-fast: false` so each OS reports its own failure even when
@@ -3868,12 +4023,16 @@ def gen_ci_yml(p: PluginParams) -> str:
     * First-party `actions/*` are SHA-pinned too (not only third-party), so
       a hostile first-party tag rewrite cannot swap action code.
     """
-    # Issue #137: route the CPV reference through the source selector. `git`
-    # → the pinned `git+…@<ref>` form + the `--with pyyaml` continuation
-    # (byte-identical to the historical output); `pypi` → the wheel spec with
-    # the pyyaml shim dropped.
-    cpv_from = cpv_uvx_from_arg(p)
-    cpv_pyyaml = cpv_uvx_pyyaml_shell_fragment(p, indent=" " * 14, cont="\\")
+    # Issue #137 routing (git vs pypi CPV source) + the RC-8 exit-code triage
+    # now live in the shared gen_cpv_validate_run_block, so ci.yml and
+    # release.yml can never drift apart on either. The report is captured to
+    # $RUNNER_TEMP — OUTSIDE the checkout — so the validator never scans its own
+    # (empty, half-written) output file (the v2.152.1 self-scan gotcha).
+    validate_block = gen_cpv_validate_run_block(p, "$RUNNER_TEMP/cpv-validation-report.txt")
+    # Sharded test matrix (RC-9): the shard count drives BOTH the matrix
+    # dimension and the `--splits` flag, and pins the pytest-split dev-extra
+    # requirement in gen_pyproject_toml.
+    shard_groups = ", ".join(str(i) for i in range(1, TEST_SHARD_COUNT + 1))
     return f"""name: CI
 
 # Required-context contract (cpv-setup-branch-rules wires the branch ruleset
@@ -3953,6 +4112,14 @@ jobs:
           # zizmor artipacked: don't persist the token in .git/config (issue #151).
           persist-credentials: false
       - name: Conventional-commits gate
+        # Reads the repo's .commitlintrc.json (RC-1): config-conventional with
+        # `body-max-line-length` OFF. Dependabot's machine-generated commit body
+        # embeds a multi-line YAML dependency block that ALWAYS exceeds the
+        # 100-char default, so with the bare fallback config EVERY Dependabot PR
+        # on EVERY canonical-pipeline plugin failed this gate, forever. The gate
+        # itself is NOT weakened — type-enum / subject rules still reject a
+        # badly-typed human commit.
+        #
         # Pinned to the COMMIT sha of v6.2.1, not the annotated-tag-object sha.
         # `git rev-parse v6.2.1` returns the tag OBJECT (6cf16ef…), which is NOT
         # a commit — `gh api .../commits/6cf16ef…` 404s and zizmor flags
@@ -4051,21 +4218,7 @@ jobs:
           # no developer local-username to protect; the public owner is public.
           PLUGIN_SKIP_GITHUB_INTEGRITY: "1"
         run: |
-          set +e
-          uvx --from {cpv_from} \\
-              {cpv_pyyaml}cpv-remote-validate plugin . --strict
-          exit_code=$?
-          set -e
-          if [ $exit_code -eq 0 ]; then
-            echo "Validation passed"
-            exit 0
-          elif [ $exit_code -ge 5 ]; then
-            echo "Only WARNING-level findings (exit $exit_code) — advisory, not blocking"
-            exit 0
-          else
-            echo "::error::Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT)"
-            exit $exit_code
-          fi
+          {validate_block}
 
   test:
     # NOTE: this is the test MATRIX. Its display name is "Test matrix" so the
@@ -4083,12 +4236,16 @@ jobs:
     #     count-based split (no committed .test_durations needed — pytest-split
     #     degrades gracefully, fine for a small downstream suite). N=2 keeps the
     #     per-shard setup overhead modest on small suites.
+    #     `--splits`/`--group` come from the pytest-split plugin, which the dev
+    #     extra MUST declare (RC-9) — pyproject.toml's `dev` list and this matrix
+    #     are both driven by generate_plugin_repo.TEST_SHARD_COUNT /
+    #     PYTEST_SPLIT_REQUIREMENT so they cannot desync.
     # fail-fast: false so every (os, shard) leg reports its own failure.
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        group: [1, 2]
+        group: [{shard_groups}]
     runs-on: ${{{{ matrix.os }}}}
     # Hard cap so a hung test / dependency install doesn't burn the 360-min
     # default. The warm uv cache keeps installs fast; 25 min covers a cold
@@ -4111,11 +4268,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Run tests (shard ${{{{ matrix.group }}}} of 2)
+      - name: Run tests (shard ${{{{ matrix.group }}}} of {TEST_SHARD_COUNT})
         run: |
           if [ -d "tests" ] && ls tests/test_*.py 1>/dev/null 2>&1; then
             set +e
-            uv run pytest tests/ --splits 2 --group ${{{{ matrix.group }}}} -v
+            uv run pytest tests/ --splits {TEST_SHARD_COUNT} --group ${{{{ matrix.group }}}} -v
             code=$?
             set -e
             # Exit 5 = pytest "no tests collected": a legitimately-empty shard
@@ -4185,18 +4342,17 @@ def gen_release_yml(p: PluginParams) -> str:
       verify integrity.
     """
     # Use p.python_version instead of hardcoded 3.12
-    # Issue #137: route the CPV reference through the source selector. Unlike
-    # gen_ci_yml — whose `run:` block uses REAL backslash continuations (`\\` in
-    # the f-string → a literal `\` in the emitted YAML, a genuine multi-line
-    # shell command) — this block's source lines end in a SINGLE `\`, which is a
-    # PYTHON source line-continuation: it eats the newline + the next line's
-    # leading indent and emits one FLATTENED shell line. To keep the `git`
-    # output BYTE-IDENTICAL to the historical flattened form, the pyyaml shim is
-    # gated as a FLAT inline fragment (`--with pyyaml` + the exact inter-token
-    # spacing the original two `\`-continued lines produced), NOT the
-    # newline-bearing shell fragment helper. `pypi` drops it entirely.
-    cpv_from = cpv_uvx_from_arg(p)
-    cpv_pyyaml = ("--with pyyaml" + " " * 15) if cpv_uvx_needs_pyyaml(p) else ""
+    # Issue #137 (git-vs-pypi CPV source) + RC-8 (exit-code triage) both live in
+    # the SHARED gen_cpv_validate_run_block, so this workflow and ci.yml cannot
+    # drift apart on either. The report is written into the WORKSPACE (not
+    # $RUNNER_TEMP like ci.yml) because it is uploaded as a release asset below
+    # (issue #121) — the historical filename is kept so the asset name is stable.
+    #
+    # Historical note: this block used to be built with SINGLE-`\` Python source
+    # continuations, which eat the newline and emit one FLATTENED shell line. The
+    # shared helper emits real multi-line shell continuations instead; the
+    # command is identical, only its line-wrapping changed.
+    validate_block = gen_cpv_validate_run_block(p, "validation-report.txt")
     return f"""name: Release
 
 on:
@@ -4246,8 +4402,12 @@ jobs:
       - name: Run full plugin validation (remote CPV, --strict)
         # Fetches CPV from GitHub so downstream plugins do not need to vendor
         # scripts/validate_plugin.py. Matches publish.py's local gate and the
-        # CI validate job. --strict blocks on CRITICAL/MAJOR/MINOR/NIT (exit
-        # codes 1-4); WARNING (exit 5+) is advisory only.
+        # CI validate job. --strict blocks on CRITICAL/MAJOR/MINOR/NIT (CPV's
+        # verdict exit codes 1-4; WARNING never gets an exit code of its own).
+        # RC-8: any OTHER exit code means the validator FAILED TO RUN (a cold
+        # uvx-from-git build can die on a transient GitHub git-fetch) — the
+        # handler below says so instead of mislabelling it as findings, and
+        # fails the release rather than publishing an unvalidated tag.
         # Issue #11: removed local scripts/validate_plugin.py invocation.
         # Root-cause #2: CPV is PINNED to @{p.cpv_ref_resolved} (same ref the
         # CI validate job and publish.py use) so the cold uvx-from-git build is
@@ -4267,17 +4427,7 @@ jobs:
           # is no developer local-username to protect; the public owner is public.
           PLUGIN_SKIP_GITHUB_INTEGRITY: "1"
         run: |
-          set +e
-          uvx --from {cpv_from} \
-              {cpv_pyyaml}cpv-remote-validate plugin . --strict \
-              > validation-report.txt 2>&1
-          exit_code=$?
-          set -e
-          cat validation-report.txt
-          if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ]; then
-            echo "::error::Validation failed with exit code $exit_code (CRITICAL/MAJOR/MINOR/NIT found)"
-            exit $exit_code
-          fi
+          {validate_block}
 
       - name: Run tests
         run: |
@@ -4503,6 +4653,133 @@ def gen_jscpd_json(p: PluginParams) -> str:
   ]
 }
 """
+
+
+def gen_commitlintrc_json(p: PluginParams) -> str:
+    """Generate ``.commitlintrc.json`` — the conventional-commit config (RC-1).
+
+    WHY THIS FILE EXISTS (CI-failure forensics, 2026-07-13): with no commitlint
+    config in the repo, ``wagoid/commitlint-github-action`` falls back to bare
+    ``@commitlint/config-conventional``, whose ``body-max-line-length`` is 100.
+    Dependabot's auto-generated commit body embeds a multi-line YAML dependency
+    block (``- dependency-name: …`` / ``update-type: …``) that ALWAYS exceeds
+    100 chars, so the gate failed on EVERY Dependabot PR of EVERY
+    canonical-pipeline plugin, forever, with no plugin change — the single
+    largest ongoing red-CI signal in the fleet (4 of the 18 sampled failures,
+    e.g. ai-maestro-maintainer-agent run 29217061586).
+
+    THE FIX, and why it is this one rather than an actor exemption: the obvious
+    alternative is to skip the whole commitlint job for ``github.actor ==
+    'dependabot[bot]'``. That was rejected because (a) it exempts an ACTOR from
+    the gate entirely rather than disabling the one meaningless RULE — the bot's
+    commits stop being linted at all; (b) it does not survive the common case
+    where a HUMAN pushes a fixup onto the Dependabot branch (the actor is then
+    the human, the action re-lints the bot's commit, and the gate fails again);
+    and (c) it needs a per-bot allowlist (renovate, pre-commit-ci, …) that must
+    be maintained. Disabling ``body-max-line-length`` fixes the class once, for
+    every actor and every event.
+
+    THE GATE IS NOT WEAKENED. Only the body's *line length* — a purely cosmetic
+    rule with zero signal on a machine-generated body (and routinely hostile to
+    a pasted URL or stack trace in a human body) — is switched off. Every rule
+    that carries meaning still fires: ``type-enum`` (the RC-5 failure, a
+    correctly-rejected non-conventional type), ``subject-empty``,
+    ``header-max-length``, ``type-case``, … A badly-typed human commit still
+    fails CI exactly as before.
+    """
+    _ = p  # unused but kept for consistent signature
+    return """{
+  "extends": ["@commitlint/config-conventional"],
+  "rules": {
+    "body-max-line-length": [0]
+  }
+}
+"""
+
+
+def gen_cspell_json(p: PluginParams, files: list[tuple[str, str, bool]]) -> str:
+    """Generate ``.cspell.json`` — the project spell-check dictionary (RC-3).
+
+    WHY THIS FILE EXISTS. ``gen_mega_linter_yml`` enables ``SPELL_CSPELL``, so
+    CI's Mega-Linter spell-checks the repo. With no project dictionary, cspell
+    falls back to its bundled word list — which knows nothing of the plugin's own
+    proper nouns (its name, its author, its agent/skill/command names) nor of
+    ordinary tech vocabulary (``pyproject``, ``venv``, ``pipefail``, ``mypy``) —
+    and the Lint job goes RED on a plugin that has nothing wrong with it.
+
+    WHY IT IS EMITTED HERE AND NOT ONLY BY ``standardize --fix``. Wave 1 taught
+    ``standardize`` to provision this file and taught
+    ``cpv_ci_preflight._gate_cspell`` to FAIL when SPELL_CSPELL is enabled with
+    no dictionary. But the GENERATOR emitted no cspell config — so a FRESHLY
+    SCAFFOLDED plugin failed a gate it had done nothing to deserve, and only a
+    separate ``standardize --fix`` run could clear it. A scaffold that cannot
+    pass its own canonical pipeline is a broken scaffold. Emitting the dictionary
+    here closes that loop: a generated plugin is CI-parity-clean out of the box.
+
+    THE WORD LIST IS NOT DUPLICATED HERE. ``standardize_plugin`` owns the
+    canonical dictionary (``_CSPELL_BASE_WORDS``) and the canonical ignore list
+    (``_CSPELL_IGNORE_PATHS``); this function IMPORTS both. Two divergent copies
+    of a word list is precisely the drift bug the RC-3 fix exists to kill — the
+    generated file and the standardize-provisioned file must be the SAME file, or
+    the local probe and CI disagree again. ``tests/test_wave2_generator_publish_gate.py``
+    pins the two renderers byte-identical on a real scaffold, so a shape change in
+    either one fails the build rather than silently drifting.
+
+    NOT REGISTERED IN ``standardize_plugin._FILE_TO_GENERATOR``, on purpose. That
+    map force-templates a file by calling ``gen_func(params)``, and this generator
+    takes a SECOND argument, so registering it there would raise TypeError. It
+    must stay out of the map anyway: force-templating a dictionary would CLOBBER
+    words the author curated. An existing plugin's dictionary is provisioned (and
+    AUGMENTED, never overwritten) by ``standardize_plugin.provision_cspell_config``
+    — that is the legacy-plugin path; this function is the scaffold path.
+    ``tests/test_wave2_generator_publish_gate.py`` pins the exclusion.
+
+    Args:
+        p: the plugin params (supplies the plugin's name + author — proper nouns
+            that appear in the README byline and every doc heading).
+        files: the scaffold's file list SO FAR. The plugin's own component names
+            are read back OUT of it (``agents/*.md`` / ``commands/*.md`` stems and
+            ``skills/<dir>/`` names), mirroring what
+            ``standardize_plugin._cspell_plugin_terms`` reads off disk. Deriving
+            them from the emitted list — rather than hardcoding "the-skills-menu"
+            — means a component added to the scaffold later is dictionary-seeded
+            automatically, with no second place to remember to update.
+    """
+    # LAZY import, matching the convention standardize_plugin already uses for
+    # its own generate_plugin_repo callsites: the two modules reference each
+    # other, and a module-level import here would risk a cycle.
+    from standardize_plugin import _CSPELL_BASE_WORDS, _CSPELL_IGNORE_PATHS, _cspell_tokens
+
+    # The plugin's OWN proper nouns — the words a generic dictionary can never
+    # know. Same SOURCES as standardize_plugin._cspell_plugin_terms, which reads
+    # them off a plugin that already exists on disk; at scaffold time the tree is
+    # not written yet, so we read the equivalent facts from the params + the
+    # file list being built.
+    raw: list[str] = [p.name]
+    if p.author:
+        raw.append(p.author)
+    for rel, _content, _is_exec in files:
+        parts = rel.split("/")
+        if len(parts) >= 2 and parts[0] in ("agents", "commands") and rel.endswith(".md"):
+            raw.append(parts[-1][: -len(".md")])
+        elif len(parts) >= 2 and parts[0] == "skills":
+            raw.append(parts[1])
+
+    terms: set[str] = set()
+    for item in raw:
+        terms.update(_cspell_tokens(item))
+
+    config: dict[str, object] = {
+        "version": "0.2",
+        "language": "en",
+        # CI only ever spell-checks tracked files; a local `cspell lint .` would
+        # otherwise walk gitignored trees (reports/, .venv/) and fail on content
+        # CI never sees — the opposite of parity.
+        "useGitignore": True,
+        "ignorePaths": list(_CSPELL_IGNORE_PATHS),
+        "words": sorted(set(_CSPELL_BASE_WORDS) | terms),
+    }
+    return json.dumps(config, indent=2) + "\n"
 
 
 def gen_markdownlint_json(p: PluginParams) -> str:
@@ -4961,6 +5238,12 @@ def generate_all_files(
                 # G2b — one source of truth so the local gate and CI agree on
                 # the jscpd threshold/ignores (no green-gate-then-red-CI gap).
                 (".jscpd.json", gen_jscpd_json(p), False),
+                # RC-1: config-conventional with `body-max-line-length` OFF.
+                # Without this file the commitlint job falls back to the bare
+                # config, whose 100-char body limit EVERY Dependabot commit body
+                # exceeds — failing CI on every bot PR, forever. The meaningful
+                # rules (type-enum, subject-*) stay fully enforced.
+                (".commitlintrc.json", gen_commitlintrc_json(p), False),
                 (".markdownlint.json", gen_markdownlint_json(p), False),
                 (".github/workflows/ci.yml", gen_ci_yml(p), False),
                 (".github/workflows/release.yml", gen_release_yml(p), False),
@@ -4978,6 +5261,16 @@ def generate_all_files(
             files.append(
                 (".github/workflows/notify-marketplace.yml", gen_notify_marketplace_yml(p), False)
             )
+        # RC-3: the cspell project dictionary, read by BOTH CI's Mega-Linter
+        # SPELL_CSPELL step AND cpv_ci_preflight's local cspell probe — one
+        # source of truth, so local and CI can never disagree about which words
+        # are known. It is appended LAST, and deliberately so: its word list is
+        # seeded from the plugin's own component names, which it reads back out
+        # of `files`. Emitting it earlier would silently miss every component
+        # appended after it. Python-only, alongside `.mega-linter.yml` — a
+        # non-python scaffold ships no Mega-Linter config, so nothing enables
+        # SPELL_CSPELL and a dictionary would be dead weight.
+        files.append((".cspell.json", gen_cspell_json(p, files), False))
     else:
         # Minimal non-python scaffold — leaves CI/publish to the plugin author,
         # but ships a README section explaining the expected commands.

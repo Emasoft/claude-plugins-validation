@@ -1752,6 +1752,19 @@ ALLOWED_DOC_PATH_PREFIXES = {
 # System binary paths — expected for tool detection, not portability issues
 _SYSTEM_BINARY_PREFIXES = ("/usr/bin/", "/usr/local/bin/", "/opt/homebrew/bin/", "/bin/", "/sbin/", "/usr/sbin/")
 
+# The same locations named as a BARE directory, with no trailing slash. Every
+# entry above ends in `/`, so `startswith()` alone matches `/usr/bin/python` but
+# NOT a bare `/usr/bin` — which then fell through to MINOR and blocked `--strict`
+# (exit 3) wherever a plugin merely *named* the directory. That is the same
+# never-actionable finding the prefix list already exists to suppress: a bare
+# `/usr/bin` is a fixed OS location with no plugin-relative form
+# (`${CLAUDE_PLUGIN_ROOT}/usr/bin` is meaningless — see the #158 note below).
+# DERIVED, never hand-maintained: a second literal list would drift out of sync
+# with the prefixes the moment either is edited.
+# FN-safe by EXACT match: `/usr/binfoo` matches neither the prefix nor the bare
+# form and still fires, and no home root (`/Users`, `/home`, `/root`) is listed.
+_SYSTEM_BINARY_DIRS = tuple(prefix.rstrip("/") for prefix in _SYSTEM_BINARY_PREFIXES)
+
 # FHS system-directory roots (issue #158). An absolute path under one of these
 # is a fixed operating-system location that CANNOT be rewritten to a
 # plugin-relative form (`${CLAUDE_PLUGIN_ROOT}/usr/bin` is meaningless), so a
@@ -7507,6 +7520,73 @@ def _is_system_path_run(matched_text: str) -> bool:
     return all(seg and _segment_is_system_path(seg) for seg in segments)
 
 
+# Comment markers of the CONFIG formats that really have them (RC-6).
+# Deliberately per-format — a marker is only honoured for a format that actually
+# uses it, so `#` is never blanket-applied. JSON proper has NO comments and is
+# therefore absent; `.json5` is the commented JSON dialect (`//` line comments).
+# `--` (SQL/Lua) is not a comment marker in ANY of these formats, so it is absent
+# too. `;` is a genuine full-line comment in INI/CFG (configparser honours both
+# `#` and `;`).
+_CONFIG_COMMENT_MARKERS: dict[str, tuple[str, ...]] = {
+    ".yml": ("#",),
+    ".yaml": ("#",),
+    ".toml": ("#",),
+    ".ini": ("#", ";"),
+    ".cfg": ("#", ";"),
+    ".json5": ("//",),
+}
+
+
+def _is_config_file_comment_line(filepath: Path, content: str, match_start: int) -> bool:
+    """True if ``match_start`` lies on a full-line COMMENT of a config file (RC-6).
+
+    A "comment line" is a line whose FIRST non-whitespace run is the comment
+    marker of THAT file's format. This is what makes the trailing-comment trap
+    safe: ``key: /opt/x   # note`` starts with ``key:``, so it is a VALUE line and
+    is NOT cleared — only a line that is a comment in its entirety.
+
+    Narrow by construction:
+
+    * Only the formats in ``_CONFIG_COMMENT_MARKERS`` — a file type with no
+      comment syntax (``.json``) can never satisfy this, and neither can source
+      code (``.py`` / ``.sh``), where a path in a comment is still a leak risk
+      (it can carry a real username).
+    * The CALLER additionally restricts the clear to the ``system absolute path``
+      pattern, so a ``/Users/<name>/…`` or ``C:\\Users\\<name>\\…`` home path in a
+      config comment still fires, and the separate CRITICAL private-username scan
+      never consults this helper at all.
+
+    Known, accepted limitation: a line inside a multi-line string/block scalar
+    (a TOML ``\"\"\"…\"\"\"`` body, a YAML ``|`` block) that itself begins with the
+    marker is treated as a comment. Inside a YAML block scalar that is CORRECT
+    (the block is usually a script, where ``#`` is a shell comment); inside a TOML
+    multi-line string it would clear a system-path portability nit in string data.
+    That residue is bounded to a non-leak, non-executable portability finding on a
+    fixed OS path — the narrowest possible over-clear, and it cannot touch a home
+    path or a security rule.
+    """
+    markers = _CONFIG_COMMENT_MARKERS.get(filepath.suffix.lower())
+    if not markers:
+        return False
+
+    line_start = content.rfind("\n", 0, match_start) + 1
+    line_end = content.find("\n", match_start)
+    if line_end == -1:
+        line_end = len(content)
+    line = content[line_start:line_end]
+
+    stripped = line.lstrip()
+    if not any(stripped.startswith(marker) for marker in markers):
+        return False
+
+    # The match must lie in the comment BODY (at or after the marker). Belt-and-
+    # braces: on a comment line every match already does, but this makes it
+    # impossible for a future pattern that can match leading whitespace to be
+    # cleared by a marker that starts after it.
+    marker_offset = line_start + (len(line) - len(stripped))
+    return match_start >= marker_offset
+
+
 def scan_file_for_absolute_paths(
     filepath: Path,
     report: ValidationReport,
@@ -7617,6 +7697,36 @@ def scan_file_for_absolute_paths(
             ):
                 continue
 
+            # RC-6 — a system path inside a full-line COMMENT of a config file is
+            # PROSE about a path, not a path the plugin uses: it is neither an
+            # executable value nor a data field, so the rule's remediation
+            # (`${CLAUDE_PLUGIN_ROOT}`) is inexpressible and the finding is never
+            # actionable. Observed: `.mega-linter.yml` line 41 — a `#` comment
+            # explaining that a workaround "would mean … hardcoding /usr/bin paths"
+            # raised a MINOR, and a MINOR blocks `--strict` (exit 3), so a code
+            # COMMENT blocked the plugin's publish.
+            #
+            # This is an FP fix, NOT a suppression, and is narrow on three axes:
+            #   1. Only `system absolute path` (/usr, /opt, /etc, /var, …). A
+            #      `/Users/<name>/…` or `C:\Users\<name>\…` home path in a config
+            #      comment STILL fires — a comment can carry a real username, and
+            #      that is the leak the rule exists to catch.
+            #   2. Only a line whose first non-whitespace run IS the comment marker.
+            #      A VALUE line with a trailing comment (`key: /opt/x  # note`) is
+            #      not a comment line and still fires.
+            #   3. Only config formats (.yml/.yaml/.toml/.ini/.cfg/.json5) — a path
+            #      in a `.py`/`.sh` comment keeps firing (source-code prose is still
+            #      a leak surface), and .json has no comments at all.
+            # The CRITICAL private-username scan runs in a separate loop above and
+            # is not reachable from here, so it cannot be weakened by this clear.
+            if desc == "system absolute path" and _is_config_file_comment_line(filepath, content, m_start):
+                report.info(
+                    f"System path in a config comment: '{matched_text[:60]}' - prose, not a path the plugin uses",
+                    rel_path,
+                    line_num,
+                )
+                continue
+
             issues_found += 1
             # System binary paths are expected for tool detection — downgrade to INFO.
             # Issue #158: ALSO downgrade a colon-joined `PATH`-shaped run of system
@@ -7625,7 +7735,9 @@ def scan_file_for_absolute_paths(
             # actionable. `_is_system_path_run` is FN-safe (a /Users, /home or /root
             # segment in the run keeps it firing).
             if desc == "system absolute path" and (
-                any(matched_text.startswith(p) for p in _SYSTEM_BINARY_PREFIXES) or _is_system_path_run(matched_text)
+                any(matched_text.startswith(p) for p in _SYSTEM_BINARY_PREFIXES)
+                or matched_text in _SYSTEM_BINARY_DIRS
+                or _is_system_path_run(matched_text)
             ):
                 report.info(f"System binary path: '{matched_text[:60]}' (OK for tool detection)", rel_path)
                 issues_found -= 1  # Don't count this as an issue

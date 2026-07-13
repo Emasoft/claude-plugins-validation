@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CI-parity static checks (CIP-1..CIP-6) — the #137-143 defect detectors.
+"""CI-parity static checks (CIP-1..CIP-8) — the #137-143 + RC-1/RC-9 detectors.
 
 The root cause of the #137-143 family is that the fixer/upgrade agents declare
 DONE on ``validate_plugin --strict``, which does NOT mirror the gates the
@@ -8,12 +8,19 @@ mypy / ``uv sync --extra dev``). A canonical upgrade that is *locally clean*
 therefore still red-CIs.
 
 This module is the static half of the local CI-parity preflight: it greps the
-generated workflows + ``pyproject.toml`` for the SIX concrete defect SHAPES
-the #137-143 incidents shipped, each as an FN-safe **two-sided** check —
+generated workflows + ``pyproject.toml`` for the concrete defect SHAPES the
+#137-143 incidents (CIP-1..6) and the 2026-07-13 CI-failure forensics
+(CIP-7 = RC-1, CIP-8 = RC-9) shipped, each as an FN-safe **two-sided** check —
 it FIRES on the defect shape and PASSES on a clean / canon tree, and never
 false-blocks a plugin that simply does not use the workflow in question.
 
-The six checks (all grounded in shipped incidents):
+CIP-1..6 detect defects the CANONICAL TEMPLATE no longer emits, and are MAJOR
+because they hard-fail the adopter's CI. CIP-7 / CIP-8 are pure MIGRATION
+detectors for repos scaffolded by an older CPV — the current generator already
+emits the fix — so they are **WARNING** level: they surface the defect without
+inventing a publish-blocking gate for a plugin that never asked for one.
+
+The checks (all grounded in shipped incidents):
 
 * **CIP-1** — an *inverted* ``CLAUDE_PRIVATE_USERNAMES: ${{ github.repository_owner }}``
   in any ``.github/workflows/*.yml`` (#140). That env names the PRIVATE
@@ -46,6 +53,21 @@ The six checks (all grounded in shipped incidents):
   never re-published, so nothing re-pins it and the workflow red-CIs forever.
   Only ``master``, a ``v<semver>`` tag, or a 7-40 hex commit SHA passes;
   ``@main`` / ``@develop`` / ``@HEAD`` / ``@feature-x`` FIRE.
+* **CIP-7** — a commitlint gate with NEITHER a bot exemption NOR a commitlint
+  config that disables ``body-max-line-length`` (RC-1, CI-failure forensics
+  2026-07-13). With no config, ``wagoid/commitlint-github-action`` falls back to
+  ``@commitlint/config-conventional`` (``body-max-line-length`` = 100), and
+  Dependabot's auto-generated commit body embeds a YAML dependency block that
+  ALWAYS exceeds it — so EVERY Dependabot PR of EVERY canonical-pipeline plugin
+  fails CI, forever, with no plugin change (4 of the 18 sampled failures; e.g.
+  ai-maestro-maintainer-agent run 29217061586). The canonical template now ships
+  ``.commitlintrc.json``; this check finds the repos that predate it.
+* **CIP-8** — a workflow runs a SHARDED pytest matrix (``pytest … --splits N``)
+  but the project does not declare **pytest-split** (RC-9). Those flags come
+  from that plugin, so every shard dies with ``pytest: error: unrecognized
+  arguments: --splits --group`` (ai-maestro-web-scenario-tester run
+  28959141245). Fires ONLY when the sharded invocation is actually present — a
+  non-sharded matrix must NOT require the dependency.
 
 Pure stdlib (``tomllib`` for ``pyproject.toml`` — graceful fallback on
 pre-3.11 / unparseable). Every regex is re2-safe (no lookbehind / lookahead /
@@ -69,10 +91,14 @@ class ParityFinding(NamedTuple):
     """One CI-parity defect.
 
     Attributes:
-        check_id: The CIP rule id (``"CIP-1"`` … ``"CIP-6"``).
+        check_id: The CIP rule id (``"CIP-1"`` … ``"CIP-8"``).
         severity: ``"MAJOR"`` / ``"MINOR"`` / ``"WARNING"`` — the same
             severity vocabulary the validators use. A defect that fails the
-            adopter's CI hard is MAJOR; a style/parity gap is MINOR.
+            adopter's CI hard is MAJOR; a style/parity gap is MINOR; a
+            migration nudge for an older-CPV repo (CIP-7 / CIP-8) is WARNING —
+            ``cpv_ci_preflight`` maps MAJOR/MINOR to FAIL and WARNING to
+            advisory, so a detector must never invent a blocking gate the
+            plugin's own pipeline does not have.
         message: A human-readable description naming the file and the fix.
         file: The plugin-relative path the finding is about (``""`` when no
             single file applies).
@@ -473,19 +499,258 @@ def _check_stale_cpv_ref(plugin_path: Path) -> list[ParityFinding]:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# CIP-7 — commitlint gate with no bot exemption and no config override (RC-1)
+# ─────────────────────────────────────────────────────────────────────────
+
+# The workflow runs commitlint at all: the canonical action, or a direct CLI
+# invocation. Anchored on the tool name so an unrelated `commit` step never
+# matches. re2-safe.
+_COMMITLINT_USE_RE = re.compile(
+    r"(?:wagoid/commitlint-github-action|\bcommitlint\s+--|\bnpx\s+[^\n]*commitlint\b)"
+)
+
+# A guard that keeps the bot OUT of the gate. Two accepted shapes, matching how
+# the exemption is actually written in the wild:
+#   * an `if:` line naming dependabot (job- or step-level guard), and
+#   * an exclusion expression naming dependabot on any line (covers a multi-line
+#     `if: >-` guard whose actor test sits on a continuation line).
+# Any renovate/pre-commit-ci exemption is deliberately NOT recognised — this
+# check is about the DEFAULT-config defect, and the fix CPV ships
+# (.commitlintrc.json) covers every bot at once.
+_COMMITLINT_IF_DEPENDABOT_RE = re.compile(r"(?im)^\s*if\s*:[^\n]*dependabot")
+_COMMITLINT_EXCLUDES_DEPENDABOT_RE = re.compile(
+    r"(?i)(?:!=\s*['\"]?dependabot|!\s*contains\([^)]*dependabot)"
+)
+
+# Commitlint config discovery. JSON forms are PARSED (we can prove whether the
+# rule is off); every other form (js/ts/yaml/cjs/mjs) is inspected TEXTUALLY and
+# accepted as soon as it mentions the rule — we cannot evaluate JS, and an
+# author who names the rule has addressed it. Lenient on purpose: a WARNING that
+# nags a repo which already fixed the problem is noise.
+_COMMITLINT_JSON_CONFIGS = (".commitlintrc", ".commitlintrc.json", "commitlint.config.json")
+_COMMITLINT_TEXT_CONFIGS = (
+    ".commitlintrc.js",
+    ".commitlintrc.cjs",
+    ".commitlintrc.mjs",
+    ".commitlintrc.ts",
+    ".commitlintrc.yml",
+    ".commitlintrc.yaml",
+    "commitlint.config.js",
+    "commitlint.config.cjs",
+    "commitlint.config.mjs",
+    "commitlint.config.ts",
+)
+_BODY_MAX_LINE_LENGTH = "body-max-line-length"
+
+
+def _rule_is_disabled(rules: object) -> bool:
+    """True when a parsed commitlint ``rules`` object switches the rule OFF.
+
+    A commitlint rule is ``[level, …]`` and level 0 = disabled. We accept the
+    bare ``0`` spelling too (``"body-max-line-length": 0``), which commitlint
+    also honours.
+    """
+    if not isinstance(rules, dict):
+        return False
+    if _BODY_MAX_LINE_LENGTH not in rules:
+        return False
+    value = rules[_BODY_MAX_LINE_LENGTH]
+    if isinstance(value, bool):  # bool is an int subclass — never a valid level
+        return False
+    if isinstance(value, int):
+        return value == 0
+    if isinstance(value, list) and value:
+        level = value[0]
+        return isinstance(level, int) and not isinstance(level, bool) and level == 0
+    return False
+
+
+def _commitlint_body_length_overridden(plugin_path: Path) -> bool:
+    """True when the repo carries a commitlint config that neutralises RC-1."""
+    import json
+
+    for name in _COMMITLINT_JSON_CONFIGS:
+        path = plugin_path / name
+        if not path.is_file():
+            continue
+        text = _read_text(path)
+        if text is None:
+            continue
+        try:
+            data = json.loads(text)
+        except ValueError:
+            # Unparseable config — treat as "author owns this file", do not nag.
+            return True
+        if isinstance(data, dict) and _rule_is_disabled(data.get("rules")):
+            return True
+    for name in _COMMITLINT_TEXT_CONFIGS:
+        path = plugin_path / name
+        if not path.is_file():
+            continue
+        text = _read_text(path)
+        if text is not None and _BODY_MAX_LINE_LENGTH in text:
+            return True
+    pkg = plugin_path / "package.json"
+    if pkg.is_file():
+        text = _read_text(pkg)
+        if text is not None:
+            try:
+                data = json.loads(text)
+            except ValueError:
+                data = None
+            if isinstance(data, dict):
+                cfg = data.get("commitlint")
+                if isinstance(cfg, dict) and _rule_is_disabled(cfg.get("rules")):
+                    return True
+    return False
+
+
+def _check_commitlint_bot_gate(plugin_path: Path) -> list[ParityFinding]:
+    gating: list[str] = []
+    for wf in _workflow_files(plugin_path):
+        text = _read_text(wf)
+        if text is None:
+            continue
+        if not _COMMITLINT_USE_RE.search(text):
+            continue
+        # An explicit bot exemption in THIS workflow already prevents the defect.
+        if _COMMITLINT_IF_DEPENDABOT_RE.search(text) or _COMMITLINT_EXCLUDES_DEPENDABOT_RE.search(
+            text
+        ):
+            continue
+        gating.append(str(wf.relative_to(plugin_path)))
+    if not gating:
+        return []
+    if _commitlint_body_length_overridden(plugin_path):
+        return []
+    return [
+        ParityFinding(
+            "CIP-7",
+            "WARNING",
+            f"{', '.join(gating)} run a commitlint gate with NO bot exemption, and the repo "
+            f"ships no commitlint config disabling `{_BODY_MAX_LINE_LENGTH}` — so the gate "
+            f"falls back to @commitlint/config-conventional, whose 100-char body limit every "
+            f"Dependabot commit body exceeds (its auto-generated YAML dependency block). "
+            f"EVERY Dependabot PR on this repo fails CI, forever, with no plugin change "
+            f"(RC-1). Add the canonical `.commitlintrc.json` "
+            f'({{\"extends\": [\"@commitlint/config-conventional\"], \"rules\": '
+            f'{{\"{_BODY_MAX_LINE_LENGTH}\": [0]}}}}) — the meaningful rules (type-enum, '
+            f"subject-*) stay fully enforced, so a badly-typed human commit still fails.",
+            ".commitlintrc.json",
+        )
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# CIP-8 — sharded pytest matrix without the pytest-split dependency (RC-9)
+# ─────────────────────────────────────────────────────────────────────────
+
+# A pytest invocation carrying the pytest-split flags. `--splits` is the
+# load-bearing token (it is meaningless without the plugin); we anchor on a
+# pytest command line so an unrelated `--splits` in prose never matches.
+# re2-safe (no lookaround; `[^\n]*` is linear).
+_PYTEST_SPLITS_RE = re.compile(r"\bpytest\b[^\n]*--splits\b")
+_PYTEST_SPLIT_DIST = "pytest-split"
+
+
+def _requirement_name(spec: str) -> str:
+    """Return the normalized distribution name of a PEP 508 requirement string."""
+    name = re.split(r"[<>=!~;\[\s(]", spec.strip(), maxsplit=1)[0]
+    return name.strip().lower().replace("_", ".").replace(".", "-")
+
+
+def _declares_pytest_split(plugin_path: Path) -> bool | None:
+    """Whether the project declares pytest-split anywhere a `uv sync` would install.
+
+    Scans ``[project].dependencies``, every ``[project.optional-dependencies]``
+    extra, and every PEP-735 ``[dependency-groups]`` group — a plugin may put the
+    test tooling in any of them, and CIP-8 must not nag one that put it somewhere
+    valid.
+
+    Returns None when undeterminable (no pyproject / no tomllib / unparseable);
+    the caller treats None as "no signal" and does NOT fire.
+    """
+    pyproject = plugin_path / "pyproject.toml"
+    if not pyproject.is_file():
+        return None
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    text = _read_text(pyproject)
+    if text is None:
+        return None
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    def _lists(container: object) -> list[list[object]]:
+        if isinstance(container, list):
+            return [container]
+        if isinstance(container, dict):
+            return [v for v in container.values() if isinstance(v, list)]
+        return []
+
+    project = data.get("project")
+    candidates: list[list[object]] = []
+    if isinstance(project, dict):
+        candidates.extend(_lists(project.get("dependencies")))
+        candidates.extend(_lists(project.get("optional-dependencies")))
+    candidates.extend(_lists(data.get("dependency-groups")))
+    for reqs in candidates:
+        for req in reqs:
+            if isinstance(req, str) and _requirement_name(req) == _PYTEST_SPLIT_DIST:
+                return True
+    return False
+
+
+def _check_pytest_split_declared(plugin_path: Path) -> list[ParityFinding]:
+    sharding: list[str] = []
+    for wf in _workflow_files(plugin_path):
+        text = _read_text(wf)
+        if text is None:
+            continue
+        if _PYTEST_SPLITS_RE.search(text):
+            sharding.append(str(wf.relative_to(plugin_path)))
+    # No sharded invocation → the dependency is NOT required. The two must stay
+    # coupled in BOTH directions, so a non-sharded matrix never draws a finding.
+    if not sharding:
+        return []
+    declares = _declares_pytest_split(plugin_path)
+    if declares is None or declares:
+        return []
+    return [
+        ParityFinding(
+            "CIP-8",
+            "WARNING",
+            f"{', '.join(sharding)} run a SHARDED pytest matrix (`pytest … --splits`), but "
+            f"pyproject.toml declares no `{_PYTEST_SPLIT_DIST}` dependency — the flags come "
+            f"from that plugin, so every shard dies with `pytest: error: unrecognized "
+            f"arguments: --splits --group` (RC-9). Add `{_PYTEST_SPLIT_DIST}>=0.9` to the "
+            f"`[project.optional-dependencies].dev` extra the workflow installs (that is what "
+            f"the canonical template emits), or drop the `--splits`/`--group` flags.",
+            "pyproject.toml",
+        )
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Public entry point
 # ─────────────────────────────────────────────────────────────────────────
 
 
 def check_ci_parity(plugin_path: Path) -> list[ParityFinding]:
-    """Run all six CI-parity static checks against a plugin tree.
+    """Run all eight CI-parity static checks against a plugin tree.
 
-    Each check is FN-safe two-sided — it FIRES on the #137-143 defect shape and
-    PASSES on a clean / canon tree, and a plugin that does not use a given
-    workflow never draws a false finding from that check.
+    Each check is FN-safe two-sided — it FIRES on the defect shape and PASSES on
+    a clean / canon tree, and a plugin that does not use a given workflow never
+    draws a false finding from that check.
 
-    Returns the findings in CIP-id order (1..6). An empty list means the tree
-    is parity-clean for all six dimensions.
+    Returns the findings in CIP-id order (1..8). An empty list means the tree
+    is parity-clean for all eight dimensions.
     """
     plugin_path = Path(plugin_path)
     findings: list[ParityFinding] = []
@@ -495,4 +760,6 @@ def check_ci_parity(plugin_path: Path) -> list[ParityFinding]:
     findings.extend(_check_superseded_validate_yml(plugin_path))
     findings.extend(_check_jscpd_config(plugin_path))
     findings.extend(_check_stale_cpv_ref(plugin_path))
+    findings.extend(_check_commitlint_bot_gate(plugin_path))
+    findings.extend(_check_pytest_split_declared(plugin_path))
     return findings

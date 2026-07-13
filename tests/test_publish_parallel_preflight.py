@@ -69,29 +69,50 @@ def _make_sleeping_stage(name: str, sleep_s: float, *, rc: int = 0, log: list[st
 
 
 # ---------------------------------------------------------------------------
-# 1. All four gates run concurrently — wall time ≈ slowest, not sum
+# 1. All preflight gates run concurrently — wall time ≈ slowest, not sum
 # ---------------------------------------------------------------------------
 
 
 def test_gates_2_3_4_5_run_concurrently(tmp_path: Path):
-    """Each of the 4 gates sleeps 1.0s. Serial execution would take ~4s.
+    """Each of the gates sleeps 1.0s. Serial execution would take ~N seconds.
 
     Parallel execution should finish in ~1.0s. We allow up to 2.5s before
     flagging a regression to serial dispatch — that gives ample slack for
     thread-startup overhead, GIL contention, and slow CI runners while
-    still catching a 4x serial regression.
+    still catching an Nx serial regression.
+
+    Wave-2: Gate 3b (`stage_ci_preflight`) joined this pool. It MUST be stubbed
+    like every other gate — an unstubbed gate would shell out to the real
+    jscpd/mypy/actionlint subprocesses and blow the time budget, turning a
+    dispatch-latency test into a flaky toolchain test. Every gate in
+    `_PARALLEL_GATE_ORDER` is stubbed below, and the assertion at the end pins
+    that invariant so the next added gate cannot silently unstub itself.
     """
     plugin_root = tmp_path
     layout = "A"
 
     fake_tests = _make_sleeping_stage("tests", 1.0)
     fake_validate = _make_sleeping_stage("validate", 1.0)
+    fake_ci_preflight = _make_sleeping_stage("ci_preflight", 1.0)
     fake_mkpl_v = _make_sleeping_stage("mkpl_validate", 1.0)
     fake_mkpl_r = _make_sleeping_stage("mkpl_reg", 1.0)
+
+    stubbed = {
+        "tests": "stage_run_tests",
+        "validate": "stage_validate_plugin",
+        "ci_preflight": "stage_ci_preflight",
+        "mkpl_validate": "stage_validate_marketplace",
+        "mkpl_reg": "stage_marketplace_registration_check",
+    }
+    assert set(stubbed) == set(publish._PARALLEL_GATE_ORDER), (
+        "a gate was added to the parallel pool but not stubbed here — it would "
+        "run for real and make this timing test flaky"
+    )
 
     with (
         patch.object(publish, "stage_run_tests", fake_tests),
         patch.object(publish, "stage_validate_plugin", fake_validate),
+        patch.object(publish, "stage_ci_preflight", fake_ci_preflight),
         patch.object(publish, "stage_validate_marketplace", fake_mkpl_v),
         patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r),
     ):
@@ -102,7 +123,7 @@ def test_gates_2_3_4_5_run_concurrently(tmp_path: Path):
     assert rc == 0, f"All gates returned 0 but orchestrator returned {rc}"
     assert elapsed < 2.5, (
         f"Parallel preflight took {elapsed:.2f}s — expected ~1.0s. "
-        f"Likely regressed to serial dispatch (would take ~4s)."
+        f"Likely regressed to serial dispatch (would take ~{len(stubbed)}s)."
     )
 
 

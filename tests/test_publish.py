@@ -472,6 +472,30 @@ def test_print_gates_lists_all_14_gates(capsys):
     assert "WARNING is the only severity" in out
 
 
+def _gate(label: str) -> tuple[str, str]:
+    """Look a gate up BY LABEL, not by list position.
+
+    These tests used to index `publish.GATES[N]` and assert the entry's label was
+    "Gate N" — i.e. they assumed list position == gate number. That assumption
+    broke the moment a LETTERED sub-gate was inserted (wave-2 added "Gate 3b"
+    between Gate 3 and Gate 4, deliberately lettered so Gates 4-13 keep their
+    numbers — the same convention the pre-push hook's "Gate 2b" established).
+    The numbers were all preserved; only the positional proxy was wrong.
+
+    Looking up by label pins exactly what these tests meant to pin ("Gate N is
+    <thing>") and is immune to the next sub-gate insertion.
+    """
+    matches = [(name, desc) for name, desc in publish.GATES if name == label]
+    assert len(matches) == 1, f"expected exactly one {label!r} in GATES, found {len(matches)}"
+    return matches[0]
+
+
+def test_gate_numbers_are_unique_and_ordered():
+    """A lettered sub-gate must never renumber a numbered gate."""
+    numbered = [name for name, _ in publish.GATES if not name[-1].isalpha()]
+    assert numbered == [f"Gate {i}" for i in range(14)]
+
+
 def test_gate_8_is_integrity_manifest_refresh():
     """Gate 8 must regenerate .plugin-self-hashes.json (issue #18 regression).
 
@@ -482,7 +506,7 @@ def test_gate_8_is_integrity_manifest_refresh():
 
     v2.64.0: lint gate retired, gates renumbered — was Gate 9, now Gate 8.
     """
-    label, desc = publish.GATES[8]
+    label, desc = _gate("Gate 8")
     assert label == "Gate 8"
     assert "self-hashes" in desc.lower() or "integrity" in desc.lower()
     assert "issue #18" in desc.lower()
@@ -558,19 +582,32 @@ class TestCpvPublishPipelineOrder:
         v2.64.0 retired the standalone lint gate; lint moved into
         validate_plugin.py via cpv_lint_engine, so tests slid up to Gate 2.
         """
-        label, desc = publish.GATES[2]
+        label, desc = _gate("Gate 2")
         assert label == "Gate 2"
         assert "test" in desc.lower() or "pytest" in desc.lower()
 
     def test_gate_3_is_plugin_validate(self):
         """Gate 3 must be plugin validation (owns repo-wide lint since v2.64.0)."""
-        label, desc = publish.GATES[3]
+        label, desc = _gate("Gate 3")
         assert label == "Gate 3"
         assert "validat" in desc.lower()
 
+    def test_gate_3b_is_the_ci_parity_preflight(self):
+        """Gate 3b must be the CI-parity preflight (wave-2 CI-failure root-fix).
+
+        It runs the jscpd / actionlint / mypy / uv-sync-dev / Mega-Linter / CIP
+        gates that CI's Lint job runs but `validate_plugin --strict` does NOT —
+        the gap that let a publish tag, push and release, and only THEN go red.
+        """
+        label, desc = _gate("Gate 3b")
+        assert label == "Gate 3b"
+        assert "parity" in desc.lower()
+        # The degrade-gracefully contract must stay documented on the gate itself.
+        assert "warning" in desc.lower() and "never block" in desc.lower()
+
     def test_gate_7_is_bump(self):
         """Gate 7 must be the bump stage (was Gate 8 before v2.64.0)."""
-        label, desc = publish.GATES[7]
+        label, desc = _gate("Gate 7")
         assert label == "Gate 7"
         assert "bump" in desc.lower()
 
@@ -580,7 +617,7 @@ class TestCpvPublishPipelineOrder:
         v2.64.0 retired the lint gate; the changelog gate moved from slot 10
         to slot 9.
         """
-        label, desc = publish.GATES[9]
+        label, desc = _gate("Gate 9")
         assert label == "Gate 9"
         assert "git-cliff" in desc.lower()
         assert "--bump" in desc
@@ -593,10 +630,10 @@ class TestCpvPublishPipelineOrder:
         v2.64.0 retired the lint gate; commit/tag/push/release shifted from
         slots 11-14 down to 10-13.
         """
-        assert "commit" in publish.GATES[10][1].lower()
-        assert "tag" in publish.GATES[11][1].lower()
-        assert "push" in publish.GATES[12][1].lower()
-        assert "release" in publish.GATES[13][1].lower()
+        assert "commit" in _gate("Gate 10")[1].lower()
+        assert "tag" in _gate("Gate 11")[1].lower()
+        assert "push" in _gate("Gate 12")[1].lower()
+        assert "release" in _gate("Gate 13")[1].lower()
 
 
 class TestCpvStageChangelogUsesBumpUnreleased:

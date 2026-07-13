@@ -12,6 +12,7 @@ WARNING, and INFO finding the validator can emit.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -54,6 +55,12 @@ def project(tmp_path: Path) -> Path:
     _git(root, "config", "user.email", "t@example.com")
     _git(root, "config", "user.name", "T")
     _git(root, "config", "commit.gpgsign", "false")
+    # Neutralise the developer's GLOBAL excludes file. The gitignore-hygiene
+    # checks shell out to git, which consults ~/.gitignore_global — so a dev
+    # who ignores `**/.claude/settings.local.json` there sees the path report
+    # as already-covered and the expected INFO never fires. Green in CI (no
+    # global excludes), red only on their machine.
+    _git(root, "config", "core.excludesFile", os.devnull)
     (root / ".claude").mkdir()
     return root
 
