@@ -409,10 +409,27 @@ class TestEndToEndSuppressedThroughScanner:
         ci = [f for f in fs if (f.get("ruleId") or f.get("rule_id")) == "CMD_INJECTION"]
         assert ci and all(f.get("suppressed") for f in ci)
 
-    def test_case3_suppressed(self) -> None:
+    def test_case3_no_visible_shell_exec(self) -> None:
+        """#3 — the cloud-product prose yields NO VISIBLE SHELL_EXEC.
+
+        v2.154.0 (issue #161) strengthened this: the catalog now pins the JS
+        constructor case-sensitively (``(?-i:Function)``), so the lowercase
+        English word no longer MATCHES at all — the finding is cleared upstream
+        of the markdown discriminator rather than fired-then-suppressed. The
+        discriminator remains (still asserted directly by
+        ``test_case3_cloud_function_product_name``) as defense in depth.
+
+        The invariant that actually matters to a user is "nothing visible", and
+        it holds whether the clear happens at the pattern or the classifier
+        layer — so assert THAT, not the intermediate mechanism.
+
+        Positive control for this absence assertion:
+        ``test_real_os_system_curl_pipe_NOT_suppressed`` below proves the same
+        harness still counts a real SHELL_EXEC.
+        """
         fs = self._scan("- A cloud function (`AWS Lambda`, `Cloudflare Worker`).", "skills/i/references/n.md")
         se = [f for f in fs if (f.get("ruleId") or f.get("rule_id")) == "SHELL_EXEC"]
-        assert se and all(f.get("suppressed") for f in se)
+        assert not [f for f in se if not f.get("suppressed")]
 
     def test_case4_suppressed(self) -> None:
         fs = self._scan("- The diagram has **multiple groups (3+)** and the reader will", "skills/d/references/g.md")
