@@ -637,6 +637,15 @@ def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResul
 # ignored at load time so older clients keep loading the marketplace), flags a
 # non-object `relevance`, and REJECTS a `signals.hosts` entry carrying a scheme,
 # a port, or a path — CPV mirrors that behaviour exactly.
+#
+# SEVERITY (load-bearing — do NOT promote these to MINOR):
+# the docs ENUMERATE what `claude plugin validate` rejects (the three items
+# above). A documented per-signal MAXIMUM is NOT among them, so Claude Code
+# loads a marketplace that overruns one. A MINOR blocks `--strict`, so emitting
+# MINOR here would make CPV BLOCK a publish that Claude Code accepts — inventing
+# a gate the spec does not have, which is exactly the false-positive class CPV
+# exists to eliminate. Limit overruns are therefore a NON-BLOCKING WARNING:
+# still visible, never a publish blocker. (Same call as RC-TEST-COVERAGE.)
 # ─────────────────────────────────────────────────────────────────────────────
 _KNOWN_RELEVANCE_FIELDS: frozenset[str] = frozenset({"topic", "signals"})
 _KNOWN_RELEVANCE_SIGNAL_FIELDS: frozenset[str] = frozenset({"cwd", "cli", "hosts", "filesRead", "manifestDeps"})
@@ -694,6 +703,24 @@ def _validate_relevance_manifest_dep(
         )
         return results
 
+    # Unknown keys INSIDE a manifestDeps entry warn too, for the same reason they
+    # do one level up: a typo'd sibling of file/pattern is silently ignored at
+    # load time, and staying silent about it is how an author's intent is lost.
+    for key in sorted(entry.keys()):
+        if key not in ("file", "pattern"):
+            results.append(
+                ValidationResult(
+                    level="WARNING",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-RELEVANCE-UNKNOWN] entry '{plugin_id}' {where} has unknown key "
+                        f"'{key}'. A manifestDeps entry carries only 'file' and 'pattern'."
+                    ),
+                    file=json_path,
+                    suggestion=f"Remove the '{key}' key from {where}.",
+                )
+            )
+
     _, max_len = _RELEVANCE_SIGNAL_LIMITS["manifestDeps"]
     for key in ("file", "pattern"):
         value = entry.get(key)
@@ -726,7 +753,7 @@ def _validate_relevance_manifest_dep(
         elif len(value) > max_len:
             results.append(
                 ValidationResult(
-                    level="MINOR",
+                    level="WARNING",
                     category="plugin",
                     message=(
                         f"[RC-MKPL-RELEVANCE-LIMIT] entry '{plugin_id}' {where}.{key} is "
@@ -766,7 +793,7 @@ def _validate_relevance_signal_array(
     if len(value) > max_entries:
         results.append(
             ValidationResult(
-                level="MINOR",
+                level="WARNING",
                 category="plugin",
                 message=(
                     f"[RC-MKPL-RELEVANCE-LIMIT] entry '{plugin_id}' {where} has {len(value)} "
@@ -800,7 +827,7 @@ def _validate_relevance_signal_array(
         if len(item) > max_len:
             results.append(
                 ValidationResult(
-                    level="MINOR",
+                    level="WARNING",
                     category="plugin",
                     message=(
                         f"[RC-MKPL-RELEVANCE-LIMIT] entry '{plugin_id}' {where}[{idx}] "
@@ -834,6 +861,32 @@ def _validate_relevance_signal_array(
                 )
 
     return results
+
+
+def _relevance_not_suggestible(
+    reason: str,
+    plugin_id: str,
+    json_path: str,
+) -> ValidationResult:
+    """The entry carries a `relevance` block that can never produce a suggestion.
+
+    Its own code (RC-MKPL-RELEVANCE-NO-SIGNALS) rather than -UNKNOWN: this is a
+    statement about the block being INERT, not about an unrecognised key, and
+    conflating the two under one code makes the findings impossible to filter or
+    triage apart. Advisory only — a suggestion-less `relevance` block is valid,
+    just pointless.
+    """
+    return ValidationResult(
+        level="WARNING",
+        category="plugin",
+        message=(
+            f"[RC-MKPL-RELEVANCE-NO-SIGNALS] entry '{plugin_id}' relevance {reason}, so the plugin "
+            "can never be suggested. At least one signal "
+            f"({sorted(_KNOWN_RELEVANCE_SIGNAL_FIELDS)}) is needed to make it suggestible."
+        ),
+        file=json_path,
+        suggestion=('Add e.g. "signals": {"cli": ["terraform"], "filesRead": ["**/*.tf"]}.'),
+    )
 
 
 def validate_relevance_block(
@@ -900,7 +953,7 @@ def validate_relevance_block(
         elif len(topic) > _RELEVANCE_TOPIC_MAX_LEN:
             results.append(
                 ValidationResult(
-                    level="MINOR",
+                    level="WARNING",
                     category="plugin",
                     message=(
                         f"[RC-MKPL-RELEVANCE-LIMIT] entry '{plugin_id}' relevance.topic is "
@@ -912,20 +965,12 @@ def validate_relevance_block(
                 )
             )
 
+    # NOTE: test membership, not `.get()`. An explicit `"signals": null` must
+    # reach the isinstance check below and raise a MAJOR ("must be an object,
+    # got NoneType"); `.get()` would collapse null into the missing-key branch
+    # and silently downgrade that to a WARNING.
     if "signals" not in relevance:
-        results.append(
-            ValidationResult(
-                level="WARNING",
-                category="plugin",
-                message=(
-                    f"[RC-MKPL-RELEVANCE-UNKNOWN] entry '{plugin_id}' relevance has no 'signals' "
-                    "object, so the plugin can never be suggested. At least one signal "
-                    f"({sorted(_KNOWN_RELEVANCE_SIGNAL_FIELDS)}) is needed to make it suggestible."
-                ),
-                file=json_path,
-                suggestion=('Add e.g. "signals": {"cli": ["terraform"], "filesRead": ["**/*.tf"]}.'),
-            )
-        )
+        results.append(_relevance_not_suggestible("has no 'signals' object", plugin_id, json_path))
         return results
 
     signals = relevance["signals"]
@@ -944,22 +989,7 @@ def validate_relevance_block(
         )
         return results
 
-    if not signals:
-        results.append(
-            ValidationResult(
-                level="WARNING",
-                category="plugin",
-                message=(
-                    f"[RC-MKPL-RELEVANCE-UNKNOWN] entry '{plugin_id}' relevance.signals is empty, "
-                    "so the plugin can never be suggested. At least one signal "
-                    f"({sorted(_KNOWN_RELEVANCE_SIGNAL_FIELDS)}) is needed to make it suggestible."
-                ),
-                file=json_path,
-                suggestion=('Add e.g. "signals": {"cli": ["terraform"], "filesRead": ["**/*.tf"]}.'),
-            )
-        )
-        return results
-
+    known_signal_count = 0
     for signal in sorted(signals.keys()):
         if signal not in _KNOWN_RELEVANCE_SIGNAL_FIELDS:
             results.append(
@@ -976,7 +1006,16 @@ def validate_relevance_block(
                 )
             )
             continue
+        known_signal_count += 1
         results.extend(_validate_relevance_signal_array(signal, signals[signal], plugin_id, json_path))
+
+    # Zero KNOWN signals means the plugin can never be suggested — whether the
+    # object is empty OR carries only unknown (load-time-ignored) keys. The
+    # latter was previously silent: every unknown key warned individually, but
+    # nothing said the block as a whole is inert.
+    if known_signal_count == 0:
+        reason = "declares an empty 'signals' object" if not signals else "declares no KNOWN signal"
+        results.append(_relevance_not_suggestible(reason, plugin_id, json_path))
 
     return results
 
