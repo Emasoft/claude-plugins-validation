@@ -336,6 +336,9 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         # v2.70.x changelog catch-up (CC v2.1.122..v2.1.136)
         "skillOverrides",  # v2.1.129 — values: off | user-invocable-only | name-only
         "parentSettingsBehavior",  # v2.1.133 — admin-tier 'first-wins' | 'merge' for SDK managedSettings
+        # CC v2.1.196..v2.1.209 spec sweep
+        "axScreenReader",  # v2.1.208 — opt-in plain-text rendering for screen readers
+        "vimInsertModeRemaps",  # v2.1.208 — two-key insert-mode sequences (e.g. `jj` -> Esc)
     }
 )
 

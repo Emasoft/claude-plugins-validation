@@ -935,3 +935,80 @@ class TestMergeSubreportForwardsMetadata:
         merged = parent.results[-1]
         assert merged.category == ""
         assert merged.suggestion is None
+
+
+# =============================================================================
+# CC v2.1.207 — autoMode is no longer read from settings.local.json
+# =============================================================================
+
+
+class TestAutoModeIgnoredInLocalSettings:
+    """[RC-AUTOMODE-LOCAL-SETTINGS] — the v2.1.207 silent-ignore.
+
+    Two-sided: it must fire on the file the changelog names, and stay silent on
+    every other shape. The negative side carries the weight — a rule that fires
+    on a legal file would push users to 'fix' working config.
+    """
+
+    def test_auto_mode_in_settings_local_is_warning(self, project: Path) -> None:
+        """autoMode in settings.local.json is a WARNING (silently ignored since v2.1.207)."""
+        _commit(project, ".gitignore", ".claude/settings.local.json\n")
+        _write_untracked(project, ".claude/settings.local.json", json.dumps({"autoMode": True}) + "\n")
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        assert any("RC-AUTOMODE-LOCAL-SETTINGS" in m for m in _messages(report, "WARNING"))
+
+    def test_auto_mode_warning_is_not_blocking(self, project: Path) -> None:
+        """The finding is advisory — it must not raise CRITICAL/MAJOR/MINOR."""
+        _commit(project, ".gitignore", ".claude/settings.local.json\n")
+        _write_untracked(project, ".claude/settings.local.json", json.dumps({"autoMode": False}) + "\n")
+        report = ValidationReport()
+        validate_settings_local_json(project / ".claude" / "settings.local.json", report)
+        assert not report.has_critical
+        levels = {r.level for r in report.results}
+        assert not levels & {"MAJOR", "MINOR"}
+
+    def test_fires_on_presence_not_truthiness(self, project: Path) -> None:
+        """`autoMode: false` is ignored just as hard as `true` — flag the KEY, not the value."""
+        _commit(project, ".gitignore", ".claude/settings.local.json\n")
+        _write_untracked(project, ".claude/settings.local.json", json.dumps({"autoMode": False}) + "\n")
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        assert any("RC-AUTOMODE-LOCAL-SETTINGS" in m for m in _messages(report, "WARNING"))
+
+    def test_settings_local_without_auto_mode_is_clean(self, project: Path) -> None:
+        """No autoMode key -> no finding. The rule must not fire on an unrelated file."""
+        _commit(project, ".gitignore", ".claude/settings.local.json\n")
+        _write_untracked(project, ".claude/settings.local.json", json.dumps({"model": "opus"}) + "\n")
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        assert not any("RC-AUTOMODE-LOCAL-SETTINGS" in m for m in _messages(report, "WARNING"))
+
+    def test_look_alike_key_does_not_fire(self, project: Path) -> None:
+        """`useAutoModeDuringPlan` is a DIFFERENT, still-valid key — substring match would be a FP."""
+        _commit(project, ".gitignore", ".claude/settings.local.json\n")
+        _write_untracked(
+            project,
+            ".claude/settings.local.json",
+            json.dumps({"useAutoModeDuringPlan": True}) + "\n",
+        )
+        report = ValidationReport()
+        validate_local_scope(project, report)
+        assert not any("RC-AUTOMODE-LOCAL-SETTINGS" in m for m in _messages(report, "WARNING"))
+
+
+class TestNewSettingsKeysV2_1_208:
+    """axScreenReader / vimInsertModeRemaps (CC v2.1.208) are known keys, not typos."""
+
+    def test_new_v2_1_208_keys_are_known(self) -> None:
+        """Both keys are in KNOWN_SETTINGS_KEYS so the typo detector stays quiet."""
+        from cc_scope_rules import KNOWN_SETTINGS_KEYS
+
+        assert {"axScreenReader", "vimInsertModeRemaps"} <= KNOWN_SETTINGS_KEYS
+
+    def test_invented_key_is_still_unknown(self) -> None:
+        """Two-sided: the allowlist must not have become a rubber stamp."""
+        from cc_scope_rules import KNOWN_SETTINGS_KEYS
+
+        assert "axScreenReaderr" not in KNOWN_SETTINGS_KEYS
+        assert "notARealSetting" not in KNOWN_SETTINGS_KEYS
