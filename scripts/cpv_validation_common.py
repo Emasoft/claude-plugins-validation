@@ -879,6 +879,52 @@ PLUGIN_ENV_VAR_PATTERNS = (
 )
 
 
+# ---------------------------------------------------------------------------
+# The dependency-resolution tag `{name}--v{version}` — ONE predicate, TWO callers
+# ---------------------------------------------------------------------------
+# `validate_plugin` (the RC-DEP-TAG-PIPELINE warning) and `standardize_plugin`
+# (the #165 migration) must agree EXACTLY on "does this publish.py already mint
+# the tag?". They used to carry two hand-synced copies with a comment begging the
+# next author to mirror any change. This is that single definition instead: a
+# disagreement here would let the migration "fix" a file the validator still
+# flags, or skip one it does not.
+#
+# WHY THE SHAPE, NOT THE NAME (issue #168): the previous predicate was
+#
+#     "--v" in body and ("dependency_tag" in body or "dep_tag" in body)
+#
+# and it was wrong twice over. The `"--v" in body` half is decorative — EVERY
+# publish.py contains `--verbose` / `--version` / `--verify`, so it is true
+# always. That left the VARIABLE NAME as the entire discriminator: a plugin that
+# builds the tag correctly from the manifest but calls it `resolver_tag` was
+# reported as never emitting the tag it demonstrably ships (and its releases were
+# resolvable all along). That inverts the incentive — hard-code the plugin name
+# and you pass; derive it from the manifest, which is what we tell people to do,
+# and you get flagged.
+#
+# So key on the CONSTRUCTION SHAPE: the `--v` separator immediately followed by a
+# format/concat token — `{` (f-string), `"`/`'` (string concat), `%` (%-format),
+# `+`. A CLI flag cannot produce that: `--verbose` is followed by a letter. This
+# is what "the tag is being BUILT here" looks like regardless of what the author
+# named the variable.
+DEP_TAG_CONSTRUCT_RE = re.compile(r"""--v(?=[{"'%]|\s*\+)""")
+
+
+def publish_py_creates_dependency_tag(text: str) -> bool:
+    """True when this ``publish.py`` builds a ``{name}--v{version}`` tag at all.
+
+    Name-agnostic by construction (see the module comment above). Matches the
+    real shapes found in the wild::
+
+        f"{name}--v{new_ver}"          # f-string        → `--v{`
+        name + "--v" + version         # concat          → `--v"`
+        "%s--v%s" % (name, version)    # %-format        → `--v%`
+
+    and never matches ``--verbose`` / ``--version`` / ``--verify``.
+    """
+    return bool(DEP_TAG_CONSTRUCT_RE.search(text))
+
+
 def is_valid_plugin_env_var(name: str) -> bool:
     """Check if an env var name is a recognized plugin env var (exact or pattern match)."""
     if name in VALID_PLUGIN_ENV_VARS:
