@@ -72,7 +72,7 @@ Every "Claude Code" cell runs inside a session with CPV installed. Every
 | 7 | **Fix marketplace findings / migrate marketplace layout** (A ⇄ B ⇄ C) | Dispatch `marketplace-fixer`, or `Skill(claude-plugins-validation:migrate-marketplace-architecture)` | — |
 | 8 | **Devitalize security threats** (convert flagged execution-class code into provably-inert data — passes the gate by neutralizing the shape, never by suppressing a rule) | Dispatch `plugin-devitalizer` (scan → devitalize → re-scan loop; flags load-bearing code instead of breaking it) | — (rewriting needs write access; run in Claude Code) |
 | 9 | **Prevent leaks & harden a plugin** (redact exposed secrets / runtime-read the needed ones; implement missing safeguards — safe config parse, input sanitization, launch/deploy params, prompt-injection pre-scan; never suppress a rule, flags what it can't safely fix) | Dispatch `plugin-leaks-preventer` (scan → redact/harden → re-scan loop) | — (rewriting needs write access; run in Claude Code) |
-| 10 | **Optimize prompt cache** (CA-01..CA-06 — dynamic placeholders, hook mutations, model-fork, unbounded output) | Audit: `Skill(claude-plugins-validation:cache-validation-skill)` or `/cpv-batch-caching-audit`. Fix: dispatch `cache-optimizer-agent` or `/cpv-batch-caching-optimize` | `… cache /path` (audit only) |
+| 10 | **Optimize prompt cache** (CA-01..CA-07 — dynamic placeholders, hook mutations, model-fork, `context: fork`, unbounded output) | Audit: `Skill(claude-plugins-validation:cache-validation-skill)` or `/cpv-batch-caching-audit`. Fix: dispatch `cache-optimizer-agent` or `/cpv-batch-caching-optimize` | `… cache /path` (audit only) |
 | 11 | **Create a new plugin / marketplace / skill / agent / command / hook / MCP** | Dispatch `plugin-creator`, or `Skill(claude-plugins-validation:create-plugin)` · `Skill(…:scaffold-skill)` · `…:scaffold-agent` · `…:scaffold-command` · `…:add-hook` · `…:register-mcp` | — |
 | 12 | **Publish a plugin to GitHub + add it to a marketplace** | Dispatch `plugin-creator` (scaffolds repo + CI/CD + publishes), or chain `Skill(…:setup-plugin-repo)` → `Skill(…:setup-github-marketplace)` → `Skill(…:link-plugin-marketplace)` → `Skill(…:publish-to-marketplace)` | — |
 | 13 | **Bring an old plugin up to the current CPV pipeline standard** | Dispatch `plugin-creator`, or `Skill(claude-plugins-validation:standardize-plugin)` / `Skill(…:canonical-pipeline)` | `… standardize /path` |
@@ -97,7 +97,7 @@ arg to `cpv-remote-validate` (standalone) or
 - **Components:** `skill` · `agent` · `command` · `hook` · `mcp` · `lsp` · `rules`
 - **Security & supply-chain:** `security` (5 external scanners + skillaudit) · `telemetry` (OTEL risks)
 - **Quality & docs:** `scoring` · `docs` · `encoding` · `xref` · `enterprise`
-- **Cache:** `cache` (CA-01..CA-06 audit)
+- **Cache:** `cache` (CA-01..CA-07 audit)
 - **Marketplace:** `marketplace` (Layouts A/B/C) · `settings-marketplace`
 - **End-user `.claude/`:** `local-scope` · `project-scope`
 - **Health & lint:** `doctor` (`--install-scanners`) · `lint` (15 languages)
@@ -142,7 +142,7 @@ specialists it can dispatch directly.
 | `marketplace-fixer` | Fix marketplace findings + migrate layout |
 | `plugin-devitalizer` | Convert flagged execution-class findings into provably-inert data (never suppress/relax the gate; flags load-bearing code) |
 | `plugin-leaks-preventer` | Redact leaked secrets (runtime-read the needed ones) + implement missing safeguards; never suppress/relax the gate; flags what it can't safely fix |
-| `cache-optimizer-agent` | Apply CA-01..CA-06 cache fixes |
+| `cache-optimizer-agent` | Apply CA-01..CA-07 cache fixes |
 | `plugin-creator` | Scaffold plugins/marketplaces, publish to GitHub |
 | `plugin-manager` | Plugin lifecycle (install/update/enable/disable/doctor) |
 | `plugin-diagnoser` | Deep diagnostic (all scanners + staleness + sync) |

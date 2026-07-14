@@ -7650,7 +7650,7 @@ def _run_cache_audit_separate(plugin_root: Path, main_report_path: str | None, r
     """CALL (not integrate) the cache validator: write its own report + a pointer.
 
     Per the user's design choice (TRDD-25b9be90 follow-up, v2.102.0): the cache
-    audit (CA-01..CA-06, all WARNING since v2.102.0) runs as a SEPARATE step
+    audit (CA-01..CA-07, all WARNING since v2.102.0) runs as a SEPARATE step
     that writes its OWN report file. Only a one-line pointer lands in the main
     report — the cache findings never enter the main report's results, counts,
     or VALID/INVALID verdict. The standalone ``cpv-cache-optimize`` audit/fix
@@ -7700,7 +7700,7 @@ def _run_cache_audit_separate(plugin_root: Path, main_report_path: str | None, r
         tmp_cache_path.write_text(buffer.getvalue())
         os.replace(tmp_cache_path, cache_path)
         if warning_count:
-            pointer = f"Cache audit: {warning_count} WARNING(s) (CA-01..CA-06, non-blocking) — see {cache_path}"
+            pointer = f"Cache audit: {warning_count} WARNING(s) (CA-01..CA-07, non-blocking) — see {cache_path}"
         else:
             pointer = f"Cache audit: clean (0 cache-discipline warnings) — see {cache_path}"
     else:
@@ -7708,7 +7708,7 @@ def _run_cache_audit_separate(plugin_root: Path, main_report_path: str | None, r
         # only; the dedicated `cpv-cache-optimize` command writes a real report.
         if warning_count:
             pointer = (
-                f"Cache audit: {warning_count} WARNING(s) (CA-01..CA-06, non-blocking) — "
+                f"Cache audit: {warning_count} WARNING(s) (CA-01..CA-07, non-blocking) — "
                 "run `cpv-cache-optimize` (or pass --report) to save the cache report"
             )
         else:
@@ -8145,7 +8145,7 @@ def main() -> int:
     detected_languages = validate_project_languages(plugin_root, report)
     validate_lockfiles(plugin_root, report, detected_languages)
 
-    # Prompt-cache audit (CA-01..CA-06, all WARNING) — CALLED, not integrated.
+    # Prompt-cache audit (CA-01..CA-07, all WARNING) — CALLED, not integrated.
     # Writes its OWN report and contributes only a one-line pointer to the main
     # report; cache findings never affect the VALID/INVALID verdict. The
     # standalone `cpv-cache-optimize` audit/fix commands act on these findings.

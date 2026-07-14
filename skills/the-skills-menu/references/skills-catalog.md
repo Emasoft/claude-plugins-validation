@@ -27,7 +27,7 @@ universal-loader pattern makes every skill available to every agent.
 |-------|--------|---------|-----------------|
 | `plugin-validation-skill` | plugin path | structural findings + RC-NN codes | First step of any diagnose / fix flow |
 | `skill-validation-skill` | SKILL.md path | single-skill findings (Nixtla strict mode) | Pin a single skill's frontmatter + body |
-| `cache-validation-skill` | plugin path | CA-01..CA-06 cache-pattern findings | Cache audit / pre-publish check |
+| `cache-validation-skill` | plugin path | CA-01..CA-07 cache-pattern findings | Cache audit / pre-publish check |
 | `semantic-validation-skill` | skill/agent path | AI-driven A-F grade (opus[1m] only — expensive) | Explicit opt-in for semantic grading |
 
 ## Fix / migration skills
@@ -94,7 +94,7 @@ plugin / plugin URL / marketplace local/URL / list / `@listfile`
 | `cpv-batch-validate` | plugin / marketplace / list | per-plugin status table + DONE summary | Fleet-wide validation snapshot |
 | `cpv-batch-security-audit` | plugin / marketplace / list | per-plugin security status + DONE summary | Fleet-wide supply-chain risk snapshot |
 | `cpv-batch-caching-audit` | plugin / marketplace / list | per-plugin CA-* findings (read-only) | Fleet-wide caching snapshot, no fixes |
-| `cpv-batch-caching-optimize` | plugin / marketplace / list | per-plugin caching before/after + DONE | Apply CA-01..CA-06 fixes across many plugins |
+| `cpv-batch-caching-optimize` | plugin / marketplace / list | per-plugin caching before/after + DONE | Apply CA-01..CA-07 fixes across many plugins |
 | `cpv-batch-fix` | plugin / marketplace / list | per-plugin fix status + DONE | Apply validation fixes (single-plugin → per-shard; marketplace → per-plugin fan-out) |
 | `cpv-batch-validate-and-fix` | plugin / marketplace / list | per-plugin before/after + FP-verified count | Same-turn validate + fix (~3× cheaper than separate passes) |
 | `cpv-batch-full-scan-and-fix` | plugin / marketplace / list | per-plugin before/after + by_checker | Maximum-coverage same-turn sweep (validate + security + cache + fix) |

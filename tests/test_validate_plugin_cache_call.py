@@ -87,7 +87,7 @@ class TestRunCacheAuditSeparate:
     def test_cache_findings_are_NOT_merged_into_main_report(self, tmp_path: Path) -> None:
         """CA-* findings stay in the separate report — never in the main results.
 
-        The INFO pointer legitimately references "CA-01..CA-06", so it is
+        The INFO pointer legitimately references "CA-01..CA-07", so it is
         excluded; we assert that no actual CA FINDING (WARNING-level, e.g.
         "CA-04: agent declares model:") leaked into the main report.
         """

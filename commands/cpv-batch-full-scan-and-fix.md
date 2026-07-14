@@ -138,7 +138,7 @@ for plugin_index in group:
         2. For each file, trigger EVERY applicable checker:
            a. `validate_plugin` schema/structure rules
            b. `validate_security` (5 external scanners + AI/security rules)
-           c. `validate_cache` (CA-01..CA-06)
+           c. `validate_cache` (CA-01..CA-07)
            d. Any other in-scope checker (lint, xref, encoding, …)
         3. Classify each finding via the v2.100.x context
            classifier (Python AST / JSON schema / Markdown fence /

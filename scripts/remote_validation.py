@@ -169,7 +169,7 @@ _COMMANDS: dict[str, str] = {
     "agent": "Agent definition validation",
     "command": "Command definition validation",
     "security": "Security vulnerability scan",
-    "cache": "Prompt-cache invalidation audit (CA-01..CA-06)",
+    "cache": "Prompt-cache invalidation audit (CA-01..CA-07)",
     "settings-marketplace": "Validate marketplace JSON in settings.json",
     "telemetry": "OTEL telemetry supply-chain risk validation",
     "scoring": "Quality score calculation",

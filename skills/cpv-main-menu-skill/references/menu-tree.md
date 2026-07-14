@@ -454,7 +454,7 @@ the typed key from THIS table; the rendered menu is presentation only):
 |-----|----------------|-------------------------------------------------------------------------------------|
 | 1   | validate       | Validate — Check that a plugin / marketplace / component is well-formed             |
 | 2   | fix            | Fix — Auto-fix issues that a previous validation found                              |
-| 3   | cache_optimize | Optimize for Cache — Prompt-cache invalidation audit + cache-aware refactor (CA-01..CA-06) |
+| 3   | cache_optimize | Optimize for Cache — Prompt-cache invalidation audit + cache-aware refactor (CA-01..CA-07) |
 | 4   | diagnose       | Diagnose — Deep audit + AI-graded quality review (semantic, opus, on request)       |
 | 5   | update         | Update — Upgrade plugin to latest canonical pipeline standard                       |
 | 6   | create         | Create — Scaffold plugin, marketplace, skill, agent, command, hook, MCP server      |
@@ -981,7 +981,7 @@ Fixed key→action map (slug `validate-batch`):
 |-----|-------------------|-----------------------------------------------------------------------------------------------------|
 | 1   | batch_validate    | Validate (read-only, fan-out) — /cpv-batch-validate (plugin-validator batch_validate)              |
 | 2   | batch_security    | Security audit (5 ext. scanners) — /cpv-batch-security-audit (plugin-validator batch_security)     |
-| 3   | batch_cache_audit | Caching audit (CA-01..CA-06) — /cpv-batch-caching-audit (cache-optimizer-agent batch_audit)        |
+| 3   | batch_cache_audit | Caching audit (CA-01..CA-07) — /cpv-batch-caching-audit (cache-optimizer-agent batch_audit)        |
 | 4   | batch_cache_opt   | Caching optimize (audit + fix) — /cpv-batch-caching-optimize (cache-optimizer-agent batch_fix)     |
 | 5   | batch_fix         | Fix (per-plugin) — /cpv-batch-fix (plugin-fixer batch_per_plugin)                                  |
 | 6   | batch_val_fix     | Validate + fix (same-turn) — /cpv-batch-validate-and-fix (plugin-fixer same_turn_validate_fix)     |
@@ -2022,10 +2022,10 @@ See §3.1.5.7.3 — same recipe.
 ### 3.3 Optimize for Cache sub-menu
 
 Promoted from drill-in to top-level in v2.90.0: prompt-cache invalidation
-audit + cache-aware refactor (CA-01..CA-06) is a distinct workflow from
+audit + cache-aware refactor (CA-01..CA-07) is a distinct workflow from
 generic Fix (§3.2), with its own audit + optimize loop.
 
-Since v2.102.0 every CA-01..CA-06 finding is a **WARNING** — the cache audit
+Since v2.102.0 every CA-01..CA-07 finding is a **WARNING** — the cache audit
 is advisory (cost/latency optimization), never publish-blocking. CA-04 covers
 a `model:` frontmatter pin on ANY component (agents, commands AND skills);
 `model: inherit` is exempt. To fix the findings, pick row 2 (auto-fix) or use
@@ -2043,8 +2043,8 @@ Fixed key→action map (slug `cache`):
 
 | Key | Action ID    | Label shown to user                                                                          |
 |-----|--------------|-----------------------------------------------------------------------------------------------|
-| 1   | cache_audit  | Audit only (CA-01..CA-06) — Pure read-only audit, produces report with per-rule findings     |
-| 2   | cache_fix    | Audit + auto-fix (loop) — Dispatch cache-optimizer-agent to fix CA-01..CA-06 in priority     |
+| 1   | cache_audit  | Audit only (CA-01..CA-07) — Pure read-only audit, produces report with per-rule findings     |
+| 2   | cache_fix    | Audit + auto-fix (loop) — Dispatch cache-optimizer-agent to fix CA-01..CA-07 in priority     |
 | 3   | cache_broader| Audit + broader cache-aware refactoring — Audit + fix + Phase 4 (CLAUDE.md split, etc.)      |
 | 4   | cache_project| Audit project root (not a plugin) — Scans .claude/ + CLAUDE.md (no .claude-plugin/ required) |
 | A   | ask          | Ask the agent                                                                                 |

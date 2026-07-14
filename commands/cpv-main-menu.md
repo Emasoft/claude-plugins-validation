@@ -66,7 +66,7 @@ emits it via `systemMessage`. Cancel/Exit is key `0`:
 
 - **1 — Validate** — Check that a plugin / marketplace / component is well-formed
 - **2 — Fix** — Auto-fix issues that a previous validation found
-- **3 — Optimize for Cache** — Prompt-cache invalidation audit + cache-aware refactor (CA-01..06)
+- **3 — Optimize for Cache** — Prompt-cache invalidation audit + cache-aware refactor (CA-01..07)
 - **4 — Diagnose** — Deep audit + AI-graded quality review (semantic, opus, on request)
 - **5 — Update** — Upgrade plugin to latest canonical pipeline standard
 - **6 — Create** — Scaffold plugin, marketplace, skill, agent, command, hook, MCP

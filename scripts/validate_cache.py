@@ -19,7 +19,7 @@ Usage::
 Exit codes (standard CPV severity-coded):
 
     0 - No blocking issues. Since v2.102.0 EVERY cache-discipline finding
-        (CA-01 .. CA-06) is reported at WARNING severity — a cache miss costs
+        (CA-01 .. CA-07) is reported at WARNING severity — a cache miss costs
         tokens/latency but never makes a plugin invalid, so the cache audit
         alone always exits 0.
     1 - CRITICAL — invocation error ONLY (target path missing / not a
@@ -992,7 +992,7 @@ def _build_cache_work_units(plugin_root: Path) -> list[_CacheWorkUnit]:
 
 
 def scan_plugin_for_cache(plugin_root: Path) -> ValidationReport:
-    """Run all CA-01 .. CA-06 checks against a plugin tree.
+    """Run all CA-01 .. CA-07 checks against a plugin tree.
 
     Two execution paths:
       * Serial path (default when ``CPV_CACHE_PARALLEL=0`` is set) —
@@ -1138,7 +1138,7 @@ def main() -> int:
     from cpv_validation_common import launcher_epilog
 
     parser = argparse.ArgumentParser(
-        description="Validate prompt-cache discipline (CA-01..CA-06) for a Claude Code plugin",
+        description="Validate prompt-cache discipline (CA-01..CA-07) for a Claude Code plugin",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Checks performed (every finding is a WARNING — non-blocking):
@@ -1153,7 +1153,7 @@ Checks performed (every finding is a WARNING — non-blocking):
         context (audit/error-checking) or many-file reads justify the cost.
 
 Exit codes:
-  0 - No blocking issues. All CA-01..CA-06 findings are WARNING, so a clean
+  0 - No blocking issues. All CA-01..CA-07 findings are WARNING, so a clean
       OR warning-only audit both exit 0.
   1 - CRITICAL — invocation error only (path missing / not a directory /
       no .claude-plugin/plugin.json). The CA-NN rules never raise CRITICAL.

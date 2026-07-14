@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-caching-audit
-description: Fan out cache-optimizer-agent across every plugin in a marketplace, a list of plugins, or a single plugin. Accepts local paths and GitHub URLs. One cache-optimizer-agent per plugin running in batch_audit mode (read-only — Phase 1 of the cache pipeline). Detects the six prompt-cache-invalidation patterns (CA-01..CA-06) per plugin without applying fixes. Parallel main-session dispatch (default 8, cap 16).
+description: Fan out cache-optimizer-agent across every plugin in a marketplace, a list of plugins, or a single plugin. Accepts local paths and GitHub URLs. One cache-optimizer-agent per plugin running in batch_audit mode (read-only — Phase 1 of the cache pipeline). Detects the seven prompt-cache-invalidation patterns (CA-01..CA-07) per plugin without applying fixes. Parallel main-session dispatch (default 8, cap 16).
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---
@@ -138,7 +138,7 @@ After every plugin has reported:
 
    ```text
    Run `/cpv-batch-caching-optimize {target}` to dispatch optimization
-   agents that will fix the CA-01..CA-06 findings.
+   agents that will fix the CA-01..CA-07 findings.
    ```
 
 End the turn. The CMS Stop hook emits the final table via systemMessage.
@@ -157,5 +157,5 @@ rows.
 
 - TRDD-3dcbb37c §1-5 — full design
 - `agents/cache-optimizer-agent.md` — `batch_audit` mode contract
-- `skills/cache-validation-skill/SKILL.md` — CA-01..CA-06 pattern catalog
+- `skills/cache-validation-skill/SKILL.md` — CA-01..CA-07 pattern catalog
 - `commands/cpv-batch-caching-optimize.md` — sibling fix-mode command
