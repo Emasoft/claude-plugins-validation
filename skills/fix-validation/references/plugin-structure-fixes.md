@@ -1944,3 +1944,66 @@ When auto-discovery finds nothing, CPV emits INFO and skips the allowlist check 
 // AFTER
 { "allowCrossMarketplaceDependenciesOn": ["other-mkt"] }
 ```
+
+---
+
+## 18. CC v2.1.207 plugin options (v2.158.0)
+
+Claude Code v2.1.207 changed two things about plugin options. `validate_plugin.py` covers the
+two surfaces it owns — **monitors** and **inline `plugin.json` hooks** (the shell-injection
+rule) — plus the project-settings advisory. The same shell-injection rule on `hooks/hooks.json`
+is in [hook-fixes.md](hook-fixes.md) §14, and on MCP `headersHelper` in [mcp-fixes.md](mcp-fixes.md) §14.
+
+### CRITICAL: `[RC-USERCFG-SHELL-INJECT]` — monitor or inline hook interpolates a plugin option
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_plugin.py` (monitors + inline `plugin.json` `hooks`) |
+| **Severity** | CRITICAL (blocking) |
+| **Message** | `[RC-USERCFG-SHELL-INJECT] <where> interpolates ${user_config.<key>} into a SHELL-FORM command. Claude Code v2.1.207 REJECTS this (shell-injection fix) …` |
+
+**Fix (monitor):** a monitor's command is always shell-form — there is no `args` array to move
+the value into. Read the option **inside the script**, from `$CLAUDE_PLUGIN_OPTION_<KEY>` or a
+config file:
+
+```jsonc
+// BEFORE — rejected; the monitor never runs
+{ "monitors": [{ "command": "tail -f ${user_config.log_path} | grep ERROR" }] }
+
+// AFTER — the script reads the option itself
+{ "monitors": [{ "command": "${CLAUDE_PLUGIN_ROOT}/scripts/watch-errors.sh" }] }
+```
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+: "${CLAUDE_PLUGIN_OPTION_LOG_PATH:?plugin option log_path is not set}"
+tail -f "$CLAUDE_PLUGIN_OPTION_LOG_PATH" | grep --line-buffered ERROR
+```
+
+**Fix (inline `plugin.json` hook):** identical to a `hooks/hooks.json` hook — switch to exec
+form (`args`) or read `$CLAUDE_PLUGIN_OPTION_<KEY>` in the script. See
+[hook-fixes.md](hook-fixes.md) §14 for both recipes.
+
+Do **not** attempt to escape or quote the value. The rejection is on the SHAPE, not on the
+value, so a quoted interpolation is still rejected — and would still be wrong the first time a
+value contains a quote.
+
+### WARNING: `[RC-USERCFG-PROJECT-SETTINGS]` — `pluginConfigs` in project-level settings
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_plugin.py` |
+| **Severity** | WARNING (advisory — does not block the publish) |
+| **Message** | `[RC-USERCFG-PROJECT-SETTINGS] .claude/settings.json sets 'pluginConfigs', but since Claude Code v2.1.207 plugin option values are NO LONGER read from project-level settings …` |
+
+**Fix:** since v2.1.207 only **user** settings (`~/.claude/settings.json`), `--settings`, and
+**managed** settings supply plugin option values. A `pluginConfigs` block left in
+`.claude/settings.json` or `.claude/settings.local.json` is silently ignored at runtime — the
+plugin falls back to its defaults with no error, which is exactly the failure that is hard to
+diagnose from the outside. Move the block to the user settings file, pass it via `--settings`,
+or ship it as managed settings.
+
+This is a WARNING rather than an error because a checked-in project settings file may
+legitimately carry the values for a *different* Claude Code version, or for humans to copy —
+CPV tells you they are inert, it does not decide for you.

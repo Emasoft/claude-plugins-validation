@@ -1059,3 +1059,67 @@ After fixing, re-run `validate_mcp.py` (or `cpv-validate-plugin <path>`) and con
   }
 }
 ```
+
+---
+
+## 14. CC v2.1.207: `${user_config.*}` in a `headersHelper` command (v2.158.0)
+
+### CRITICAL: `[RC-USERCFG-SHELL-INJECT]` — headersHelper interpolates a plugin option
+
+**Message shape**
+
+```text
+[RC-USERCFG-SHELL-INJECT] .mcp.json server 'my-server' headersHelper interpolates
+${user_config.api_token} into a SHELL-FORM command. Claude Code v2.1.207 REJECTS this
+(shell-injection fix) — the hook/monitor/helper will not run, and a config value carrying
+shell metacharacters would otherwise execute as code. Fix: read the value inside the helper
+script itself (from a config file, or from the MCP server's `env` block) instead of
+interpolating it into the headersHelper command.
+```
+
+A `headersHelper` is a shell-form command whose stdout supplies the MCP request headers.
+Splicing a user-supplied option value into that string lets the value carry shell
+metacharacters that the shell executes. Since CC v2.1.207 the helper is **rejected outright**,
+so the server gets no headers and the connection fails — this is a runtime breakage, not just
+a hardening nit.
+
+**`headersHelper` has no exec form.** Unlike a hook, it cannot be rewritten as an `args`
+array. The only fix is to keep the value out of the command line and read it inside the helper.
+
+```jsonc
+// BEFORE — rejected
+{
+  "mcpServers": {
+    "my-server": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headersHelper": "${CLAUDE_PLUGIN_ROOT}/scripts/auth-headers.sh ${user_config.api_token}"
+    }
+  }
+}
+
+// AFTER — the value reaches the helper through the server's own env block
+{
+  "mcpServers": {
+    "my-server": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headersHelper": "${CLAUDE_PLUGIN_ROOT}/scripts/auth-headers.sh",
+      "env": { "API_TOKEN": "${CLAUDE_PLUGIN_OPTION_API_TOKEN}" }
+    }
+  }
+}
+```
+
+```bash
+#!/usr/bin/env bash
+# scripts/auth-headers.sh — prints the headers JSON on stdout
+set -euo pipefail
+: "${API_TOKEN:?API_TOKEN is not set (declare it in the server's env block)}"
+printf '{"Authorization": "Bearer %s"}\n' "$API_TOKEN"
+```
+
+Reading the secret inside the helper is strictly better anyway: it never appears in a command
+line, so it cannot leak through `ps`, a crash dump, or a shell history file.
+
+---

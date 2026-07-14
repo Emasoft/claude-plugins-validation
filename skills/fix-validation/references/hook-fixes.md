@@ -2077,3 +2077,79 @@ PSS-specific examples (what the PSS v3.1.0 → v3.1.1 fix actually did):
 This is the canonical reference fix — mimic its shape.
 
 ---
+
+## 14. CC v2.1.207: `${user_config.*}` in a shell-form command (v2.158.0)
+
+### CRITICAL: `[RC-USERCFG-SHELL-INJECT]` — hook interpolates a plugin option into a shell string
+
+**Message shape**
+
+```text
+[RC-USERCFG-SHELL-INJECT] hooks.json PreToolUse hook interpolates ${user_config.api_token}
+into a SHELL-FORM command. Claude Code v2.1.207 REJECTS this (shell-injection fix) — the
+hook/monitor/helper will not run, and a config value carrying shell metacharacters would
+otherwise execute as code. Fix: use exec form (move the value into the 'args' array, which
+is spawned directly with no shell) or read it from the $CLAUDE_PLUGIN_OPTION_<KEY>
+environment variable inside the script.
+```
+
+**Why it is CRITICAL, not a warning.** A shell-form `command` is a single string handed to a
+shell. Interpolating a user-supplied option value into it lets the VALUE carry shell
+metacharacters — a separator followed by a destructive command, a command substitution that
+downloads and runs a remote script, backticks — that the shell then executes —
+the value escapes its argument slot and becomes code. Claude Code v2.1.207 now refuses to run
+such a command, so the hook is **broken at runtime** in addition to being unsafe. This is not
+a style nit and it does not clear with `--strict` off.
+
+**Two legal fixes. Pick either — do NOT try to escape or quote the value.** Quoting is not a
+fix: the rejection is on the shape, not on the current value, so a quoted interpolation is
+still rejected (and still wrong the day the value contains a quote).
+
+#### Fix A — exec form (`args` array), preferred when the value is an argument
+
+```jsonc
+// BEFORE — rejected
+{
+  "type": "command",
+  "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post-event.sh --token ${user_config.api_token}"
+}
+
+// AFTER — legal: argv vector, no shell parses the value
+{
+  "type": "command",
+  "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post-event.sh",
+  "args": ["--token", "${user_config.api_token}"]
+}
+```
+
+The `args` array (CC v2.1.139) spawns the program directly with an argv vector. No shell is
+involved, so the value can never become code. **Exec form is legal and CPV never flags it** —
+flagging it would condemn the very construct the spec prescribes as the fix.
+
+#### Fix B — read the option inside the script, preferred when the value is a secret
+
+Every declared `userConfig` key is exported to the hook process as
+`$CLAUDE_PLUGIN_OPTION_<KEY>` (uppercased). Read it in the script and keep it out of the
+command line entirely — which also keeps it out of `ps` output and shell history:
+
+```jsonc
+{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post-event.sh" }
+```
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+: "${CLAUDE_PLUGIN_OPTION_API_TOKEN:?plugin option api_token is not set}"
+curl -sS -H "Authorization: Bearer $CLAUDE_PLUGIN_OPTION_API_TOKEN" "$ENDPOINT"
+```
+
+#### Fix-agent checklist
+
+- [ ] Grep the plugin for `${user_config.` across `hooks/hooks.json`, `plugin.json` (inline
+      `hooks`), `.mcp.json` (`headersHelper`), and any `monitors` block.
+- [ ] For each hit, decide: is the value an **argument** (→ Fix A) or a **secret** (→ Fix B)?
+- [ ] Never "fix" by quoting, escaping, or `printf %q` — the shape is rejected, not the value.
+- [ ] Leave existing **exec-form** interpolations alone; they are correct.
+- [ ] Re-validate: `cpv hook <plugin>` must report zero `RC-USERCFG-SHELL-INJECT`.
+
+---
