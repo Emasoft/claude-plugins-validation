@@ -80,7 +80,8 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" /path/to/my-plugin \
 ### When NOT to use
 
 - For one-off tasks — use a slash command or agent instead. MCP servers add startup overhead.
-- For tools that need plugin-author secrets at runtime — use `userConfig` + `${user_config.KEY}` substitution to inject them safely (never hardcode).
+- For tools that need plugin-author secrets at runtime — use `userConfig` and substitute `${user_config.KEY}` in the MCP server's `env` block (or in its exec-form `args` array) to inject them safely (never hardcode).
+  Since Claude Code **v2.1.207**, `${user_config.*}` is **rejected in a `headersHelper` shell-form command** (shell-injection fix: an option value interpolated into a shell string is attacker-controlled shell input). A `headersHelper` script must read the secret itself — from the server's `env` block or a config file — not receive it interpolated into its command line.
 
 ## Resources
 

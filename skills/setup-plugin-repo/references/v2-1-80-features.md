@@ -47,7 +47,7 @@ User-configurable values prompted at plugin enable time. Keys must be valid iden
 
 - **`title`** (string) — **REQUIRED**. Missing title fails install with `userConfig.<key>.title: Invalid input: expected string, received undefined`
 - **`type`** (string) — **REQUIRED**, must be exactly one of `"string" | "number" | "boolean" | "directory" | "file"`. Missing/invalid type fails install with `userConfig.<key>.type: Invalid option: expected one of "string"|"number"|"boolean"|"directory"|"file"`. Note: `"integer"`, `"array"`, `"object"` are NOT accepted by the runtime.
-- **`description`** (string) — **REQUIRED** per the spec (`plugins-reference.md:473`, "Required: Yes"). CPV's `validate_user_config` (the `required_sub = {type, title, description}` set) emits a MAJOR for a missing `description`, which blocks `--strict` validation. Always include it.
+- **`description`** (string) — **REQUIRED** per the spec (`plugins-reference.md:479`, "Required: Yes"). CPV's `validate_user_config` (the `required_sub = {type, title, description}` set) emits a MAJOR for a missing `description`, which blocks `--strict` validation. Always include it.
 - **`sensitive`** (boolean) — optional; set `true` for secrets so they are routed to the system keychain instead of `CLAUDE_PLUGIN_OPTION_*` expansion
 - **`default`** — optional; when present must match the declared `type`
 
@@ -93,7 +93,11 @@ Authoring rule: when scaffolding a new userConfig entry, ALWAYS include all thre
 }
 ```
 
-Access values in hooks/MCP/LSP via `${user_config.WORKSPACE_DIR}`, and (non-sensitive only) as `${CLAUDE_PLUGIN_OPTION_WORKSPACE_DIR}`.
+Access values in MCP/LSP configs via `${user_config.WORKSPACE_DIR}` (including an exec-form `args` array and an MCP server's `env` block), and (non-sensitive only) as `${CLAUDE_PLUGIN_OPTION_WORKSPACE_DIR}`.
+
+Since Claude Code **v2.1.207**, `${user_config.*}` is **rejected in a shell-form command** — a hook `command`, a monitor `command`, and an MCP `headersHelper` command (shell-injection fix: an option value interpolated into a shell string is attacker-controlled shell input). Do not emit that shape. Instead: a hook uses exec form (pass the value in the `args` array) or reads `$CLAUDE_PLUGIN_OPTION_<KEY>` inside the script; a monitor or a `headersHelper` reads the value inside the script (config file, or the server's `env` block).
+
+Plugin option values (`pluginConfigs`) are also no longer read from project-level `.claude/settings.json` as of v2.1.207 — only user, `--settings`, and managed settings are honored.
 
 Validator: `scripts/validate_plugin.py` — `validate_manifest` enforces the 5-type whitelist and required-`title`/`type` fields (CPV v2.22.4+).
 
