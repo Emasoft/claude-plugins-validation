@@ -2056,22 +2056,6 @@ def _yaml_top_level_keys(text: str) -> list[str]:
     return keys
 
 
-def _yaml_custom_top_level_keys(plugin_text: str, canon_text: str) -> list[str]:
-    """Top-level keys the PLUGIN declares that canon does not — its own config.
-
-    A plugin sitting on an OLDER canon has only canon keys (they are a subset), so
-    this is empty and the overwrite proceeds — a stale file still gets refreshed.
-    """
-    canon_keys = set(_yaml_top_level_keys(canon_text))
-    seen: set[str] = set()
-    custom: list[str] = []
-    for key in _yaml_top_level_keys(plugin_text):
-        if key not in canon_keys and key not in seen:
-            seen.add(key)
-            custom.append(key)
-    return custom
-
-
 def _yaml_key_blocks(text: str) -> dict[str, str]:
     """Map each top-level key to its FULL block: leading comments + key + body.
 
