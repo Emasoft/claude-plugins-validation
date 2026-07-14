@@ -65,7 +65,11 @@ User-configurable values prompted at plugin enable time. Keys must be valid iden
 }
 ```
 
-Access values in hooks/MCP/LSP string substitutions via `${user_config.KEY}`. Each key is also exported as `CLAUDE_PLUGIN_OPTION_<KEY>` (see below).
+Access values in MCP/LSP config string substitutions via `${user_config.KEY}` (including an exec-form `args` array and an MCP server's `env` block). Each key is also exported as `CLAUDE_PLUGIN_OPTION_<KEY>` (see below).
+
+Since Claude Code **v2.1.207**, `${user_config.*}` is **rejected in a shell-form command** — a hook `command`, a monitor `command`, and an MCP `headersHelper` command (shell-injection fix: an option value interpolated into a shell string is attacker-controlled shell input). Never scaffold that shape. Instead: a hook uses exec form (pass the value in the `args` array) or reads `$CLAUDE_PLUGIN_OPTION_<KEY>` inside the script; a monitor or a `headersHelper` reads the value inside the script (config file, or the server's `env` block).
+
+Plugin option values (`pluginConfigs`) are also no longer read from project-level `.claude/settings.json` as of v2.1.207 — only user, `--settings`, and managed settings are honored.
 
 Validator: `scripts/validate_plugin.py` — `validate_user_config_structure()`.
 

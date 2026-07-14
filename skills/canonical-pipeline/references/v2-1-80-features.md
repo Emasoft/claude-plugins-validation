@@ -90,7 +90,11 @@ User-configurable values prompted at plugin enable time. Keys must be valid iden
 }
 ```
 
-Values are readable from hook/MCP/LSP configs via `${user_config.API_ENDPOINT}`, and (non-sensitive only) as `CLAUDE_PLUGIN_OPTION_API_ENDPOINT`.
+Values are readable from MCP/LSP server configs via `${user_config.API_ENDPOINT}` (including an exec-form `args` array and an MCP server's `env` block), and (non-sensitive only) as `CLAUDE_PLUGIN_OPTION_API_ENDPOINT`.
+
+Since Claude Code **v2.1.207**, `${user_config.*}` is **rejected in a shell-form command** — a hook `command`, a monitor `command`, and an MCP `headersHelper` command (shell-injection fix: an option value interpolated into a shell string is attacker-controlled shell input). Do not emit that shape. Instead: a hook uses exec form (pass the value in the `args` array) or reads `$CLAUDE_PLUGIN_OPTION_<KEY>` inside the script; a monitor or a `headersHelper` reads the value inside the script (config file, or the server's `env` block).
+
+Plugin option values (`pluginConfigs`) are also no longer read from project-level `.claude/settings.json` as of v2.1.207 — only user, `--settings`, and managed settings are honored.
 
 Validator: `scripts/validate_plugin.py` — `validate_user_config_structure` enforces the 5-type whitelist (`USER_CONFIG_TYPE_ENUM`) and the required-`title`/`type` fields.
 
@@ -126,10 +130,10 @@ For every key declared under `userConfig`, Claude Code auto-exports an env var n
 Use them in pipeline-aware places:
 
 ```jsonc
-// hook config expression
+// hook config expression — the script reads BOTH values from its own environment
 {
   "type": "command",
-  "command": "curl -H \"Authorization: Bearer ${CLAUDE_PLUGIN_OPTION_API_TOKEN}\" ${CLAUDE_PLUGIN_OPTION_API_ENDPOINT}/events"
+  "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post-event.sh"
 }
 ```
 
@@ -138,7 +142,15 @@ Use them in pipeline-aware places:
 Default region: `${CLAUDE_PLUGIN_OPTION_REGION}`.
 ```
 
-Sensitive keys are omitted from the env var expansion for safety.
+Note what the hook example does NOT do: it never interpolates an option into the
+command string. Interpolating a SECRET (`...Bearer ${CLAUDE_PLUGIN_OPTION_API_TOKEN}...`)
+is wrong twice over, and CPV flags it. First, it does not even work — sensitive keys are
+omitted from the env-var expansion for safety (they live in the keychain), so the header
+would expand to a bearer prefix with nothing after it. Second, a value interpolated into a
+shell-form command lands in the process's argv, where any `ps` on the machine can read it —
+that is a token leak, and it is what CPV's `TOKEN_STEAL` rule is for. Let the script read
+what it needs from its own environment (non-sensitive keys) or from the keychain (sensitive
+ones); a value read inside a process is never exposed on a command line.
 
 Validator: the `PLUGIN_ENV_VAR_PATTERNS` allowlist in
 `scripts/cpv_validation_common.py` matches `^CLAUDE_PLUGIN_OPTION_[A-Z][A-Z0-9_]*$`.

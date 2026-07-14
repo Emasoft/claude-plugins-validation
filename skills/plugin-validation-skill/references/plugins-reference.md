@@ -289,7 +289,7 @@ The following `monitors/monitors.json` watches a deployment status endpoint and 
 [
   {
     "name": "deploy-status",
-    "command": "${CLAUDE_PLUGIN_ROOT}/scripts/poll-deploy.sh ${user_config.api_endpoint}",
+    "command": "${CLAUDE_PLUGIN_ROOT}/scripts/poll-deploy.sh",
     "description": "Deployment status changes"
   },
   {
@@ -300,6 +300,12 @@ The following `monitors/monitors.json` watches a deployment status endpoint and 
   }
 ]
 ```
+
+Note that `poll-deploy.sh` takes no endpoint argument. A monitor `command` is a
+shell-form command, and **since Claude Code v2.1.207 `${user_config.*}` is rejected
+in a monitor command** (shell-injection fix — an option value interpolated into a
+shell string is attacker-controlled shell input). The script reads the option value
+itself instead: see [User configuration](#user-configuration).
 
 To declare monitors inline, set `experimental.monitors` in `plugin.json` to the same array. To load from a non-default path, set `experimental.monitors` to a relative path string such as `"./config/monitors.json"`. Monitors are an [experimental component](#experimental-components).
 
@@ -317,7 +323,7 @@ To declare monitors inline, set `experimental.monitors` in `plugin.json` to the 
 | :----- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `when` | Controls when the monitor starts. `"always"` starts it at session start and on plugin reload, and is the default. `"on-skill-invoke:<skill-name>"` starts it the first time the named skill in this plugin is dispatched |
 
-The `command` value supports the same [variable substitutions](#environment-variables) as MCP and LSP server configs: `${CLAUDE_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_DATA}`, `${user_config.*}`, and any `${ENV_VAR}` from the environment. Prefix the command with `cd "${CLAUDE_PLUGIN_ROOT}" && ` if the script needs to run from the plugin's own directory.
+The `command` value supports the [path variable substitutions](#environment-variables) `${CLAUDE_PLUGIN_ROOT}` and `${CLAUDE_PLUGIN_DATA}`, plus any `${ENV_VAR}` from the environment. It does **not** support `${user_config.*}`: since Claude Code v2.1.207 that substitution is **rejected in a monitor command** (shell-injection fix). Have the monitor script read the option value itself — see [User configuration](#user-configuration). Prefix the command with `cd "${CLAUDE_PLUGIN_ROOT}" && ` if the script needs to run from the plugin's own directory.
 
 Disabling a plugin mid-session does not stop monitors that are already running. They stop when the session ends.
 
@@ -477,9 +483,17 @@ Keys must be valid identifiers. Each option supports these fields:
 | `multiple`    | No       | For `string` type, allow an array of strings                                             |
 | `min` / `max` | No       | Bounds for `number` type                                                                 |
 
-Each value is available for substitution as `${user_config.KEY}` in MCP and LSP server configs, hook commands, and monitor commands. Non-sensitive values can also be substituted in skill and agent content. All values are exported to plugin subprocesses as `CLAUDE_PLUGIN_OPTION_<KEY>` environment variables.
+Each value is available for substitution as `${user_config.KEY}` in MCP and LSP server configs — including an exec-form `args` array and an MCP server's `env` block. Non-sensitive values can also be substituted in skill and agent content. All values are exported to plugin subprocesses as `CLAUDE_PLUGIN_OPTION_<KEY>` environment variables.
 
-Non-sensitive values are stored in `settings.json` under `pluginConfigs[<plugin-id>].options`. Sensitive values go to the system keychain (or `~/.claude/.credentials.json` where the keychain is unavailable). Keychain storage is shared with OAuth tokens and has an approximately 2 KB total limit, so keep sensitive values small.
+**Since Claude Code v2.1.207, `${user_config.*}` is REJECTED in a shell-form command** — a hook `command`, a monitor `command`, and an MCP `headersHelper` command. This is a shell-injection fix: an option value interpolated into a shell string is attacker-controlled shell input. Use the legal alternative for each surface:
+
+| Surface | Instead of `${user_config.KEY}` in the shell string |
+| :------ | :---------------------------------------------------- |
+| Hook    | Use exec form — pass the value as an element of the `args` array — or read `$CLAUDE_PLUGIN_OPTION_<KEY>` inside the script |
+| Monitor | Read the value inside the script (from a config file, or from the `CLAUDE_PLUGIN_OPTION_<KEY>` environment variable exported to plugin subprocesses) |
+| MCP `headersHelper` | Read the value inside the script (from a config file, or from the server's `env` block, where `${user_config.*}` is still substituted) |
+
+Non-sensitive values are stored in `settings.json` under `pluginConfigs[<plugin-id>].options`. **Since Claude Code v2.1.207, `pluginConfigs` is no longer read from project-level `.claude/settings.json`** — only user settings, `--settings`, and managed settings are honored, so a plugin option value cannot be supplied by a checked-in project settings file. Sensitive values go to the system keychain (or `~/.claude/.credentials.json` where the keychain is unavailable). Keychain storage is shared with OAuth tokens and has an approximately 2 KB total limit, so keep sensitive values small.
 
 ### Channels
 
