@@ -285,6 +285,37 @@ def _flag_plugin_only_keys_local(data: dict[str, Any], report: ValidationReport,
             )
 
 
+def _flag_auto_mode_ignored_local(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
+    """WARNING: ``autoMode`` in settings.local.json is dead since CC v2.1.207.
+
+    Verbatim from the v2.1.207 changelog: "Changed auto mode to no longer read
+    ``autoMode`` from ``.claude/settings.local.json`` (repo-resident); use
+    ``~/.claude/settings.json`` instead."
+
+    The value is not rejected — it is IGNORED, with no error. So a user who set
+    it here still sees auto mode off and has nothing to grep for; that silence is
+    the whole reason this rule exists. WARNING, not MAJOR, for the same reason
+    ``[RC-USERCFG-PROJECT-SETTINGS]`` is: a settings file the user owns is not a
+    shipped plugin artifact, and CPV must not invent a publish gate over it.
+
+    Scoped to ``settings.local.json`` ONLY — that is the single file the
+    changelog names. Do not widen this to ``.claude/settings.json`` without a
+    spec line that says so; an invented rule is worse than a missing one.
+    """
+    if "autoMode" not in data:
+        return
+    report.warning(
+        (
+            f"[RC-AUTOMODE-LOCAL-SETTINGS] {file_label} sets 'autoMode', but since Claude Code "
+            "v2.1.207 auto mode is NO LONGER read from .claude/settings.local.json (repo-resident). "
+            "The value is silently ignored at runtime — no error, and auto mode simply stays off. "
+            "Fix: move it to the user settings file (~/.claude/settings.json). "
+            "Advisory only — this WARNING does not block the publish."
+        ),
+        file_label,
+    )
+
+
 def _suggest_typically_shared_keys(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """Hint that some keys should probably live in shared project settings."""
     for key in sorted(_TYPICALLY_SHARED_KEYS):
@@ -348,6 +379,7 @@ def validate_settings_local_json(settings_path: Path, report: ValidationReport) 
     _flag_global_config_keys_local(data, report, file_label)
     _flag_plugin_only_keys_local(data, report, file_label)
     _flag_permissions_default_mode_local(data, report, file_label)
+    _flag_auto_mode_ignored_local(data, report, file_label)
     _suggest_typically_shared_keys(data, report, file_label)
     _flag_deprecated_keys(data, report, file_label)
     _flag_missing_schema_local(data, report, file_label)
