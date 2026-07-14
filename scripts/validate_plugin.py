@@ -61,6 +61,7 @@ from cpv_validation_common import (
     is_vendored_path,
     load_cpv_config,
     path_is_unshipped,
+    publish_py_creates_dependency_tag,
     removed_cpv_size_keys_present,
     save_report_and_print_summary,
     tracked_but_gitignored_paths,
@@ -5967,11 +5968,17 @@ def check_dependency_resolution_tags(plugin_root: Path, report: ValidationReport
 
     1. PIPELINE (works on an UNINSTALLED, tag-less source): the plugin ships a
        canonical ``scripts/publish.py`` that creates a ``v{version}`` tag but never
-       a ``{name}--v{version}`` one. Fix: ``standardize --fix --force-templates``.
+       a ``{name}--v{version}`` one. Fix: ``standardize <plugin> --fix``.
     2. TAGS (only when a real git repo is present): the repo has release tags but
        ZERO ``{name}--v*`` tags. Also catches the SINGLE-hyphen near-miss
        (``{name}-v1.2.3``), which several real tags in the wild get wrong -- it does
        not match the resolver's ``{name}--v`` prefix filter and resolves nothing.
+
+    REALITY BEATS STATIC ANALYSIS (issue #168): Signal 1 is a STATIC read of one
+    file. When the repo ALREADY carries a real ``{name}--v*`` tag, the plugin has
+    demonstrably shipped resolver tags -- whatever the pipeline looks like, it is
+    not missing them -- so Signal 1 stays quiet. Ground truth wins over a guess
+    about the source that produced it.
 
     WARN-only, deliberately. The docs do not make the tag mandatory for a plugin
     nobody depends on, and CPV must not invent a publish gate Claude Code does not
@@ -5988,34 +5995,45 @@ def check_dependency_resolution_tags(plugin_root: Path, report: ValidationReport
     if not name:
         return
 
+    # Ground truth first: does this repo ALREADY carry a resolver tag? A plugin whose
+    # releases have demonstrably shipped `{name}--v*` is not missing them, so neither
+    # signal has anything to say. Fail-quiet outside a git repo (`_git_tags` -> None),
+    # which is exactly the uninstalled/tag-less source Signal 1 exists to cover.
+    dep_prefix = f"{name}--v"
+    tags = _git_tags(plugin_root)
+    ships_dep_tag = any(t.startswith(dep_prefix) for t in tags or ())
+
     # --- Signal 1: the release pipeline never emits the dependency tag ----------
     publish_py = plugin_root / "scripts" / "publish.py"
-    if publish_py.is_file():
+    if publish_py.is_file() and not ships_dep_tag:
         try:
             body = publish_py.read_text(encoding="utf-8", errors="replace")
         except OSError:
             body = ""
         # The canonical pipeline tags `v{new_ver}`. If it does so but never builds a
         # `--v` dependency tag, a release will ship undependable.
+        #
+        # The predicate keys on the CONSTRUCTION SHAPE, never on the variable NAME
+        # (issue #168): a plugin that builds the tag correctly from its manifest but
+        # calls it `resolver_tag` was being told it "never" tags, while its releases
+        # had carried the tag for months. See `publish_py_creates_dependency_tag`.
         creates_plain_tag = '"git", "tag"' in body or "git tag -a" in body
-        creates_dep_tag = "--v" in body and ("dependency_tag" in body or "dep_tag" in body)
-        if creates_plain_tag and not creates_dep_tag:
+        if creates_plain_tag and not publish_py_creates_dependency_tag(body):
             report.warning(
                 f"[RC-DEP-TAG-PIPELINE] scripts/publish.py tags releases as 'v{{version}}' but never "
                 f"as '{name}--v{{version}}'. Claude Code resolves a version-constrained dependency "
                 f"ONLY against '{name}--v*' tags, so any plugin depending on this one will fail to "
                 f"install with `no-matching-tag` and be DISABLED. This stays invisible until someone "
-                f"installs clean. Fix: refresh the canonical pipeline with `cpv-remote-validate "
-                f"standardize <plugin> --fix --force-templates` (it now tags both refs in one atomic "
-                f"push), or run `claude plugin tag --push` at each release."
+                f"installs clean. Fix: run `cpv-remote-validate standardize <plugin> --fix` — a plain "
+                f"`--fix` surgically injects the resolver-tag stage into your EXISTING publish.py "
+                f"(both refs then go out in one atomic push), overwriting no template and leaving "
+                f"the rest of your pipeline untouched."
             )
 
     # --- Signal 2: the repo has releases but no resolvable tags -----------------
-    tags = _git_tags(plugin_root)
     if not tags:
         return
-    dep_prefix = f"{name}--v"
-    if any(t.startswith(dep_prefix) for t in tags):
+    if ships_dep_tag:
         return  # resolvable — nothing to say
 
     release_tags = [t for t in tags if re.fullmatch(r"v?\d+\.\d+\.\d+.*", t)]
@@ -6034,9 +6052,11 @@ def check_dependency_resolution_tags(plugin_root: Path, report: ValidationReport
         f"[RC-DEP-TAG-MISSING] this repo has {len(release_tags)} release tag(s) but no "
         f"'{dep_prefix}*' tag. Claude Code resolves a version-constrained dependency ONLY against "
         f"'{dep_prefix}*' tags, so any plugin depending on this one fails to install with "
-        f"`no-matching-tag` and is DISABLED.{detail} Fix: backfill the tag for the current release "
-        f"with `claude plugin tag --push` (creates '{dep_prefix}<version>'), and make every future "
-        f"release emit it."
+        f"`no-matching-tag` and is DISABLED.{detail} Fix: (1) make every FUTURE release emit it — "
+        f"run `cpv-remote-validate standardize <plugin> --fix`, a plain `--fix` that surgically "
+        f"injects the resolver-tag stage into your EXISTING publish.py, overwriting no template; "
+        f"(2) backfill the CURRENT release — `git tag {dep_prefix}<version> <release-commit> && "
+        f"git push origin {dep_prefix}<version>`."
     )
 
 

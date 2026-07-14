@@ -13,13 +13,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import difflib
 import fnmatch
 import json
 import os
 import re
 import stat
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeGuard
 
 if TYPE_CHECKING:
     from generate_plugin_repo import PluginParams
@@ -1778,23 +1779,50 @@ def repin_stale_cpv_ref(plugin_path: Path, dry_run: bool = False) -> list[str]:
 # `--fix`, never force-overwrites publish.py, and is a no-op on a publish.py that
 # already carries the stage (idempotent by the detection predicate below).
 
-# Detection predicate — kept BY CONSTRUCTION identical to `validate_plugin.
-# check_dependency_resolution_tags`'s `creates_dep_tag` (the RC-DEP-TAG-PIPELINE
-# signal). If the two ever disagree, a migration could "fix" a file the validator
-# still flags, or skip one it does not. Any change here must be mirrored there.
-_DEP_TAG_MARKERS: tuple[str, ...] = ("dependency_tag", "dep_tag")
+# Detection predicate — the ONE definition lives in `cpv_validation_common.
+# publish_py_creates_dependency_tag`, shared with `validate_plugin.
+# check_dependency_resolution_tags` (the RC-DEP-TAG-PIPELINE signal). Two hand-synced
+# copies drifted before (issue #167): this one keyed on the VARIABLE NAME
+# (`dependency_tag` / `dep_tag`), so a publish.py that builds the tag correctly but
+# names it `resolver_tag` read as "never mints the tag" — and the migration would then
+# inject a SECOND stage into a file that already had one, pushing two tag refs. The
+# SSOT keys on the CONSTRUCTION SHAPE (`--v` + a format/concat token) instead, so the
+# author's choice of variable name cannot change the verdict.
+#
+# THE FOUR RELEASE-PUSH SHAPES IN THE WILD (measured across the real fleet, #167) —
+# any regex pinned to one of them silently skips the rest, and a silent skip is the
+# exact defect this migration exists to fix:
+#
+#   A  ["git", "push", "--atomic", "origin", "HEAD", tag, dep_tag]   (already migrated)
+#   B  ["git", "push", "--atomic", "origin", "HEAD", tag, resolver_tag]  (ditto, other name)
+#   C  ["git", "push", "--atomic", "origin", "HEAD", tag]
+#   D  ["git", "push", "origin", "HEAD"] THEN ["git", "push", "origin", f"v{new_version}"]
+#
+# So the anchor is found with the AST, not a regex: locate the `git push` argv list
+# that carries the RELEASE TAG ref (a `*tag*` variable, or an `f"v{...}"` literal) and
+# extend THAT list. Shape D's first call pushes only HEAD and is correctly ignored.
 
-# The push argv the canonical pre-v2.156 publish.py builds. This is the ONE line
-# the migration rewrites. `--atomic` is optional so a plugin on an older canon
-# (non-atomic push) still migrates; the trailing `"HEAD", tag]` is required — it
-# is what proves this is the release push and that `tag`/`new_ver` are in scope.
-_PUBLISH_PUSH_ARGV_RE = re.compile(
-    r'\[\s*"git",\s*"push",(?:\s*"--atomic",)?\s*"origin",\s*"HEAD",\s*tag\s*\]'
-)
+# A `git push` argv element that names the release tag.
+_TAG_NAME_HINT = "tag"
+# A `git push` flag that pushes refs in BULK — there is no single ref list to extend,
+# so such a call is never a migration anchor.
+_BULK_PUSH_FLAGS: frozenset[str] = frozenset({"--tags", "--follow-tags", "--mirror", "--all"})
 
-# The enclosing `def` of the push. Its signature must bind BOTH `root` and
-# `new_ver` — the two names the injected helper call needs.
-_PUBLISH_DEF_RE = re.compile(r"^def\s+\w+\((?P<sig>[^)]*)\)")
+# The names the injected helper call is bound to, in priority order. DETECTED from the
+# push's real scope (params, locals assigned above it, and module globals) — never
+# assumed. The pre-#167 code demanded parameters literally named `root` and `new_ver`,
+# which refused every vintage that names them otherwise (`new_version`, `REPO_ROOT`) or
+# pushes from a parameterless `main()`.
+#
+# ROOT: the helper READS `<root>/.claude-plugin/plugin.json`, so the MANIFEST-bearing
+# root is what it needs. `plugin_root` is therefore preferred over `git_root` in the
+# two-root vintages: the manifest lives under the plugin root, while git works from ANY
+# directory inside the repo (it discovers `.git` upward). The manifest-bearing root is
+# correct for BOTH uses; the git root is correct for only one.
+_ROOT_NAME_PRIORITY: tuple[str, ...] = ("plugin_root", "root", "repo_root", "git_root")
+# VERSION: the version BEING RELEASED, so `new_ver`/`new_version` outrank a bare,
+# possibly-ambient `version`.
+_VERSION_NAME_PRIORITY: tuple[str, ...] = ("new_ver", "new_version", "version", "ver")
 
 # The stage, injected verbatim at module level of the plugin's publish.py. It is
 # SELF-CONTAINED (needs only json / subprocess / Path, all of which the caller
@@ -1877,12 +1905,21 @@ def _cpv_dependency_push_refs(root: Path, new_ver: str) -> list[str]:
 def _publish_py_has_dependency_tag_stage(text: str) -> bool:
     """True when this publish.py ALREADY mints the `{name}--v{ver}` dependency tag.
 
-    The idempotence gate: a second `--fix` run sees the stage it injected (the
-    injected source contains both `--v` and `dependency_tag`/`dep_tag`) and does
-    nothing. It also recognises the CANONICAL v2.156+ stage, so a plugin already
-    refreshed from the template is never double-patched.
+    Delegates to the SSOT predicate (`cpv_validation_common.
+    publish_py_creates_dependency_tag`) so the migration and the validator can never
+    disagree about whether a file needs the stage.
+
+    The idempotence gate: a second `--fix` run sees the stage it injected and does
+    nothing. It recognises the CANONICAL v2.156+ stage AND any hand-rolled equivalent
+    under ANY variable name, so a plugin that already ships the tag is never
+    double-patched into pushing two conflicting refs (issue #167).
+
+    Imported lazily, matching this module's established pattern (`main()` does the
+    same) — `cpv_validation_common` is only importable once `scripts/` is on the path.
     """
-    return "--v" in text and any(marker in text for marker in _DEP_TAG_MARKERS)
+    from cpv_validation_common import publish_py_creates_dependency_tag
+
+    return publish_py_creates_dependency_tag(text)
 
 
 def _publish_py_creates_release_tag(text: str) -> bool:
@@ -1895,13 +1932,127 @@ def _publish_py_creates_release_tag(text: str) -> bool:
     return '"git", "tag"' in text or "git tag -a" in text
 
 
+def _unmigratable_note(reason: str) -> str:
+    """The report line for a publish.py this migration will NOT touch.
+
+    ALWAYS non-empty: a silent skip is the exact defect #165/#167 exist to fix, so an
+    unrecognised file must be LOUD. It names the reason and tells the maintainer how to
+    add the stage by hand — the two shortcuts a reader would otherwise reach for are
+    BOTH wrong, so they are called out explicitly rather than left to be rediscovered:
+    `--force-templates` overwrites a customized publish.py (which is precisely why such
+    a plugin cannot run it), and `claude plugin tag` takes a plugin PATH, not a tag
+    name, so it silently mints nothing.
+    """
+    return (
+        "scripts/publish.py lacks the dependency-resolution tag ({name}--v{version}) "
+        "and CANNOT be migrated automatically — " + reason + ". Its releases are "
+        "un-dependable. ADD THE STAGE BY HAND: read `name` from "
+        ".claude-plugin/plugin.json, build the `{name}--v{version}` ref, create it with "
+        "`git tag -a`, and push it in the SAME `git push` as the release tag. Do NOT "
+        "run `standardize --force-templates` (it OVERWRITES a customized publish.py) "
+        "and do NOT run `claude plugin tag` (it takes a plugin PATH, not a tag name, so "
+        "it will not mint this ref)."
+    )
+
+
+def _abs_offset(lines: list[str], lineno: int, col_offset: int) -> int:
+    """Absolute character index in the source for an AST ``(lineno, col_offset)``.
+
+    ``ast`` column offsets are UTF-8 BYTE offsets within their line, so a line carrying
+    a non-ASCII character (these files are full of em-dashes) would splice at the wrong
+    place if the value were used as a character index. Decoding the byte prefix converts
+    it back to a character count.
+    """
+    line_start = sum(len(line) for line in lines[: lineno - 1])
+    prefix = lines[lineno - 1].encode("utf-8")[:col_offset].decode("utf-8")
+    return line_start + len(prefix)
+
+
+def _is_release_tag_push(node: ast.AST) -> TypeGuard[ast.List]:
+    """True when ``node`` is a ``["git", "push", ...]`` argv list carrying the release tag.
+
+    The tag ref is either a variable whose name contains `tag` (shapes A/B/C) or an
+    ``f"v{...}"`` literal (shape D's second call). A bulk-push flag disqualifies the
+    call: `git push --tags` has no per-ref list to extend, so extending it would be a
+    no-op that still reported success.
+    """
+    if not isinstance(node, ast.List) or len(node.elts) < 2:
+        return False
+    head = node.elts[:2]
+    if not all(isinstance(e, ast.Constant) and e.value == want for e, want in zip(head, ("git", "push"))):
+        return False
+    has_tag_ref = False
+    for elt in node.elts[2:]:
+        if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+            if elt.value in _BULK_PUSH_FLAGS:
+                return False
+            continue
+        if isinstance(elt, ast.Name) and _TAG_NAME_HINT in elt.id.lower():
+            has_tag_ref = True
+        elif isinstance(elt, ast.JoinedStr):
+            lead = elt.values[0] if elt.values else None
+            if isinstance(lead, ast.Constant) and isinstance(lead.value, str) and lead.value.startswith("v"):
+                has_tag_ref = True
+    return has_tag_ref
+
+
+def _param_names(func: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    """Every parameter name bound by ``func``."""
+    a = func.args
+    names = {arg.arg for arg in (*a.posonlyargs, *a.args, *a.kwonlyargs)}
+    for extra in (a.vararg, a.kwarg):
+        if extra is not None:
+            names.add(extra.arg)
+    return names
+
+
+def _stored_names(node: ast.AST, before_lineno: int | None = None) -> set[str]:
+    """Names ``node`` binds by assignment (optionally: only those above ``before_lineno``).
+
+    Covers every binding form at once — plain/annotated/augmented assignment, `for`
+    targets, `with ... as`, walrus — because they all surface as a `Name` in a `Store`
+    context.
+    """
+    names: set[str] = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store):
+            if before_lineno is None or sub.lineno < before_lineno:
+                names.add(sub.id)
+    return names
+
+
+def _module_level_names(tree: ast.Module) -> set[str]:
+    """Module-level (global) names. They are bound at import, so they are always in
+    scope at the push regardless of where in the file they are written."""
+    names: set[str] = set()
+    for stmt in tree.body:
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        names |= _stored_names(stmt)
+    return names
+
+
+def _pick_name(priority: tuple[str, ...], available: set[str]) -> str | None:
+    """The highest-priority name actually in scope, matched case-insensitively.
+
+    Case-insensitive so a module constant (`REPO_ROOT`) matches the same slot as a
+    parameter (`repo_root`); the ORIGINAL spelling is returned, since that is what has
+    to appear in the emitted call.
+    """
+    lowered = {name.lower(): name for name in sorted(available)}
+    for want in priority:
+        if want in lowered:
+            return lowered[want]
+    return None
+
+
 def _inject_dependency_tag_stage(text: str) -> tuple[str | None, str]:
     """Inject the dependency-tag stage into ``text`` (a publish.py source).
 
     Returns ``(new_text, note)``. ``new_text`` is None when the file must NOT be
-    rewritten — either because nothing needs doing, or because the file's shape is
-    not recognisable and a partial edit would be worse than none (FAIL-FAST: we
-    never half-migrate a release pipeline). ``note`` is always the line to report.
+    rewritten — either because nothing needs doing (empty note), or because the file's
+    shape is not recognisable and a partial edit would be worse than none (FAIL-FAST: we
+    never half-migrate a release pipeline; the note is then always non-empty and LOUD).
 
     EXACTLY TWO edits, no more:
       1. the two helpers, inserted at module level above the function that pushes;
@@ -1914,19 +2065,10 @@ def _inject_dependency_tag_stage(text: str) -> tuple[str | None, str]:
     if _publish_py_has_dependency_tag_stage(text):
         return None, ""
 
-    manual_fix = (
-        "run `claude plugin tag --push` at each release, or refresh publish.py with "
-        "--force-templates"
-    )
-
-    matches = list(_PUBLISH_PUSH_ARGV_RE.finditer(text))
-    if len(matches) != 1:
-        found = "no" if not matches else f"{len(matches)}"
-        return None, (
-            f"scripts/publish.py lacks the dependency-resolution tag ({{name}}--v{{version}}) "
-            f"and CANNOT be migrated automatically — {found} recognisable release-push argv "
-            f"found. Its releases are un-dependable: {manual_fix}."
-        )
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        return None, _unmigratable_note(f"it does not parse as Python ({exc.msg})")
 
     # The injected helpers call json / subprocess and annotate with Path. A publish.py
     # missing any of those imports would not even compile after the edit — refuse.
@@ -1936,47 +2078,76 @@ def _inject_dependency_tag_stage(text: str) -> tuple[str | None, str]:
         if needle not in text
     ]
     if missing:
-        return None, (
-            f"scripts/publish.py lacks the dependency-resolution tag ({{name}}--v{{version}}) "
-            f"and CANNOT be migrated automatically — it does not import {', '.join(missing)}. "
-            f"Its releases are un-dependable: {manual_fix}."
+        return None, _unmigratable_note(f"it does not import {', '.join(missing)}")
+
+    # Exactly ONE release-push target, or we refuse: with several equally-plausible
+    # anchors there is no way to know which push ships the release, and extending the
+    # wrong one would report success while still shipping an un-dependable release.
+    pushes = [node for node in ast.walk(tree) if _is_release_tag_push(node)]
+    if len(pushes) != 1:
+        found = "no" if not pushes else str(len(pushes))
+        return None, _unmigratable_note(
+            f"its release-push shape was not recognised — {found} `git push` argv carrying "
+            "the release tag found, expected exactly 1"
+        )
+    push = pushes[0]
+    push_lineno = push.lineno
+
+    # The enclosing MODULE-LEVEL def: the helpers go above it, so they land at module
+    # level (they must, to be callable) and below the module's own imports (they must,
+    # to be importable).
+    enclosing: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+    for stmt in tree.body:
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+            if stmt.lineno <= push_lineno <= (stmt.end_lineno or stmt.lineno):
+                enclosing = stmt
+                break
+    if enclosing is None:
+        return None, _unmigratable_note("the release push is not inside a module-level function")
+
+    # A decorator sits ABOVE its `def`; inserting between the two is a syntax error.
+    anchor_lineno = min([d.lineno for d in enclosing.decorator_list] + [enclosing.lineno])
+    if anchor_lineno <= 1:
+        return None, _unmigratable_note(
+            "the release push's function starts at line 1, leaving no room to insert the "
+            "helpers below the module's imports"
         )
 
-    push = matches[0]
+    # The names the emitted call binds to, DETECTED from the push's real scope: the
+    # params and locals of every function enclosing it (nested defs included), plus the
+    # module globals. Nothing is assumed about how this vintage spells them.
+    scope: set[str] = _module_level_names(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            if node.lineno <= push_lineno <= (node.end_lineno or node.lineno):
+                scope |= _param_names(node)
+                scope |= _stored_names(node, before_lineno=push_lineno)
+
+    root_name = _pick_name(_ROOT_NAME_PRIORITY, scope)
+    version_name = _pick_name(_VERSION_NAME_PRIORITY, scope)
+    absent = [
+        f"no {label} name (expected one of: {', '.join(priority)})"
+        for label, value, priority in (
+            ("root", root_name, _ROOT_NAME_PRIORITY),
+            ("version", version_name, _VERSION_NAME_PRIORITY),
+        )
+        if value is None
+    ]
+    if absent:
+        return None, _unmigratable_note("the release push's scope has " + " and ".join(absent))
+
     lines = text.splitlines(keepends=True)
-    # Offset → line index of the matched push argv.
-    push_line_idx = text.count("\n", 0, push.start())
+    end = _abs_offset(lines, push.end_lineno or push_lineno, push.end_col_offset or 0)
+    new_text = text[:end] + f" + _cpv_dependency_push_refs({root_name}, {version_name})" + text[end:]
 
-    # Walk up to the enclosing module-level `def`, and prove `root` + `new_ver` are
-    # in scope there (they are the arguments the injected call needs).
-    def_idx = None
-    for i in range(push_line_idx, -1, -1):
-        m = _PUBLISH_DEF_RE.match(lines[i])
-        if m:
-            sig = m.group("sig")
-            if "root" in sig and "new_ver" in sig:
-                def_idx = i
-            break
-    # `def_idx == 0` would put the helpers ABOVE the module's own imports, which the
-    # injected code needs — refuse rather than emit a file that cannot import.
-    if not def_idx:
-        return None, (
-            f"scripts/publish.py lacks the dependency-resolution tag ({{name}}--v{{version}}) "
-            f"and CANNOT be migrated automatically — the release push is not inside a "
-            f"module-level function taking (root, new_ver). Its releases are un-dependable: "
-            f"{manual_fix}."
-        )
-
+    # The argv edit adds no NEWLINE, so the original line numbering still holds — but
+    # re-splitting keeps the two edits order-independent regardless.
+    new_lines = new_text.splitlines(keepends=True)
+    insert_idx = anchor_lineno - 1
     # Insert ABOVE any comment block glued to the def, so we never orphan a comment
     # from the function it documents.
-    insert_idx = def_idx
-    while insert_idx > 0 and lines[insert_idx - 1].startswith("#"):
+    while insert_idx > 0 and new_lines[insert_idx - 1].startswith("#"):
         insert_idx -= 1
-
-    new_text = text[: push.end()] + " + _cpv_dependency_push_refs(root, new_ver)" + text[push.end() :]
-    # Re-split AFTER the argv edit: the edit is below the insertion point in every
-    # recognised shape, but re-splitting keeps the two edits order-independent.
-    new_lines = new_text.splitlines(keepends=True)
     new_lines.insert(insert_idx, _DEP_TAG_STAGE_SOURCE)
     return "".join(new_lines), (
         "injected the dependency-resolution tag stage ({name}--v{version}) into "
