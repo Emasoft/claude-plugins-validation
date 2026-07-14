@@ -78,6 +78,11 @@ from validate_command import validate_command as validate_command_full
 from validate_documentation import validate_documentation as validate_documentation_full
 from validate_encoding import validate_encoding as validate_encoding_full
 from validate_hook import (
+    find_user_config_interpolations,
+    hook_is_exec_form,
+    user_config_shell_finding,
+)
+from validate_hook import (
     validate_hooks as validate_hook_file,
 )
 from validate_hook_precedence import validate_hook_precedence as validate_hook_precedence_file
@@ -844,6 +849,23 @@ def _validate_monitors_array(
                 f"monitors[{i}] missing required 'command' field (plugins-reference.md:302-318)",
                 source_label,
             )
+        # CC v2.1.207 — `${user_config.*}` in a monitor command is REJECTED
+        # (shell-injection fix). A monitor's `command` is a SHELL-FORM string and
+        # the monitor schema has NO exec-form companion (its only fields are
+        # name/command/description/when — see `known` above), so EVERY occurrence
+        # of the token here is the rejected shape; unlike a hook, there is no legal
+        # form to spare and therefore no discriminator to apply. The changelog's
+        # fix for a monitor is to read the value INSIDE the script (from a config
+        # file, or from the $CLAUDE_PLUGIN_OPTION_<KEY> env var). CRITICAL because
+        # Claude Code now refuses to run the monitor at all: it is broken as well
+        # as unsafe (a config value carrying shell metacharacters would otherwise
+        # be executed as code by the shell that parses the command string).
+        monitor_tokens = find_user_config_interpolations(entry.get("command"))
+        if monitor_tokens:
+            report.critical(
+                user_config_shell_finding("monitor", monitor_tokens, f"monitors[{i}].command"),
+                source_label,
+            )
         # description — required
         if not isinstance(entry.get("description"), str) or not entry.get("description"):
             report.major(
@@ -880,6 +902,62 @@ def _validate_monitors_array(
                     "(recognized: name, command, description, when)",
                     source_label,
                 )
+
+
+def _collect_command_hook_dicts(node: Any) -> list[dict[str, Any]]:
+    """Every dict carrying a ``command`` key anywhere under ``node``.
+
+    The inline ``hooks`` object in plugin.json nests the actual hook dicts a few
+    levels down (event name -> matcher groups -> a ``hooks`` array), and the
+    wrapper shape varies (a bare event->list map, or a ``{"hooks": {...}}``
+    wrapper). Walking for the SHAPE we care about — a dict with a ``command`` —
+    instead of hard-coding one nesting means a hook can never hide from the
+    v2.1.207 rule behind a wrapper variant. Missing a hook here would be a false
+    negative on a SECURITY rule, so the walk is deliberately shape-driven.
+    """
+    found: list[dict[str, Any]] = []
+    if isinstance(node, dict):
+        if "command" in node:
+            found.append(node)
+        for value in node.values():
+            found.extend(_collect_command_hook_dicts(value))
+    elif isinstance(node, list):
+        for item in node:
+            found.extend(_collect_command_hook_dicts(item))
+    return found
+
+
+def validate_inline_hooks_user_config(manifest: dict[str, Any], report: ValidationReport) -> None:
+    """CC v2.1.207: ``${user_config.*}`` in a SHELL-FORM inline hook command.
+
+    Covers the hooks declared INLINE in plugin.json (``"hooks": {...}``). Hooks
+    declared in ``hooks/hooks.json`` are covered by validate_hook's own
+    ``validate_command_hook`` — the inline object never reaches that validator,
+    so without this the rule would have a hole exactly where an author put their
+    hooks in the manifest instead of the sidecar file.
+
+    THE DISCRIMINATOR IS THE FORM. ``hook_is_exec_form`` (imported from the
+    validate_hook SSOT — never re-derived) is what decides: exec form spawns the
+    program with an argv vector so no shell parses the value, and moving the token
+    into ``args`` is exactly the fix the changelog prescribes. Flagging it would
+    flag the remedy. Shell form hands one string to a shell, where a config value
+    carrying `; rm -rf ~` becomes code — Claude Code now rejects it outright, so
+    the hook is broken as well as unsafe. CRITICAL.
+    """
+    hooks_value = manifest.get("hooks")
+    if not isinstance(hooks_value, dict):
+        # A string / array value is a PATH to a hooks file, whose contents are
+        # validated by validate_hook. Only the inline object form lands here.
+        return
+    for hook in _collect_command_hook_dicts(hooks_value):
+        if hook_is_exec_form(hook):
+            continue
+        tokens = find_user_config_interpolations(hook.get("command"))
+        if tokens:
+            report.critical(
+                user_config_shell_finding("hook", tokens, "plugin.json inline hook command"),
+                ".claude-plugin/plugin.json",
+            )
 
 
 def validate_monitors_entries(manifest: dict[str, Any], plugin_root: Path, report: ValidationReport) -> None:
@@ -1727,6 +1805,9 @@ def validate_manifest(
     validate_user_config_structure(manifest, report)
     validate_channels_structure(manifest, plugin_root, report)
     validate_monitors_entries(manifest, plugin_root, report)
+    # CC v2.1.207 shell-injection rule for hooks declared INLINE in plugin.json
+    # (the sidecar hooks/hooks.json is covered by validate_hook itself).
+    validate_inline_hooks_user_config(manifest, report)
 
     return cast(dict[str, Any], manifest)
 
@@ -6022,6 +6103,60 @@ def check_test_coverage(plugin_root: Path, report: ValidationReport) -> None:
     )
 
 
+# Project-level settings files. Since CC v2.1.207 these are NO LONGER a source of
+# plugin option values: "Plugin option values (pluginConfigs) are no longer read
+# from project-level .claude/settings.json; only user, --settings, and managed
+# settings are honored." `settings.local.json` is the same project scope (the
+# gitignored personal override), so it is read from the same place and is equally
+# ignored — both are listed, or the check would have a hole for the file authors
+# are most likely to have put their own config in.
+_PROJECT_SETTINGS_FILES = ("settings.json", "settings.local.json")
+
+
+def check_project_settings_plugin_configs(plugin_root: Path, report: ValidationReport) -> None:
+    """Advisory WARNING (NON-BLOCKING): ``pluginConfigs`` in project settings is DEAD (CC v2.1.207).
+
+    Claude Code v2.1.207 stopped reading plugin option values from PROJECT-level
+    ``.claude/settings.json``; only USER settings, ``--settings``, and MANAGED
+    settings are honored. A plugin that ships (or documents) its option values in
+    its own project settings is therefore configuring nothing: the keys are read
+    by no one, the plugin silently falls back to its defaults, and the failure is
+    INVISIBLE — nothing errors, the values are simply ignored.
+
+    WARN-only, deliberately: this is a dead setting, not a broken plugin, and CPV
+    must not invent a publish gate Claude Code does not have. ``report.warning``
+    is never blocking under ``exit_code_strict()``, so it can never flip a verdict
+    or fail ``--strict``. But silence is not an option either — a silently-ignored
+    config is precisely the class of bug an author cannot see without being told.
+    """
+    settings_dir = plugin_root / ".claude"
+    if not settings_dir.is_dir():
+        return
+    for filename in _PROJECT_SETTINGS_FILES:
+        settings_path = settings_dir / filename
+        if not settings_path.is_file():
+            continue
+        try:
+            data = json.loads(settings_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            # A malformed / unreadable settings file is reported by the JSON-syntax
+            # validator. Do not double-report it here, and do not guess at its
+            # contents — a regex fallback over broken JSON would invent findings.
+            continue
+        if isinstance(data, dict) and "pluginConfigs" in data:
+            report.warning(
+                "[RC-USERCFG-PROJECT-SETTINGS] .claude/"
+                f"{filename} sets 'pluginConfigs', but since Claude Code v2.1.207 plugin "
+                "option values are NO LONGER read from project-level settings — only user "
+                "settings, --settings, and managed settings are honored. These values are "
+                "silently ignored at runtime (the plugin falls back to its defaults, with no "
+                "error). Fix: move them to the user settings file (~/.claude/settings.json), "
+                "pass them via --settings, or ship them as managed settings. "
+                "Advisory only — this WARNING does not block the publish.",
+                f".claude/{filename}",
+            )
+
+
 # Files generated by `generate_plugin_repo.gen_*` that are pure
 # infrastructure (publish pipeline, retry helper, pre-push hook, CI / release
 # / notify workflows, changelog config, mega-linter config). Plugins are NOT
@@ -7962,6 +8097,12 @@ def main() -> int:
         # blocks --strict). Universal: generic conventions, zero marketplace /
         # ai-maestro assumptions.
         ("check_test_coverage", check_test_coverage, ((), {})),
+        # CC v2.1.207 — NON-BLOCKING advisory: `pluginConfigs` in project-level
+        # .claude/settings.json is no longer read (only user / --settings /
+        # managed settings are). The values are silently ignored at runtime, so
+        # the author gets no error — hence the WARNING. WARNING-level never
+        # changes the verdict / blocks --strict.
+        ("check_project_settings_plugin_configs", check_project_settings_plugin_configs, ((), {})),
         # WARNING-level (never blocks --strict): a plugin publishing only `vX.Y.Z`
         # tags cannot be DEPENDED UPON — Claude Code resolves version-constrained
         # dependencies solely against `{name}--v*` tags. Invisible from the

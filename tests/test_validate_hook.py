@@ -2701,21 +2701,32 @@ class TestV22HookMatcherValues:
         )
 
     def test_user_config_substitution_not_flagged(self, tmp_path: Path) -> None:
-        """plugins-reference.md L423-432: `${user_config.<KEY>}` is the plugin
-        userConfig substitution token (surfaced at runtime as
-        CLAUDE_PLUGIN_OPTION_<KEY>). A hook command that uses it must not
-        draw any CRITICAL, MAJOR, or "unknown substitution" finding.
+        """plugins-reference.md L423-432: `${user_config.<KEY>}` is a KNOWN
+        substitution token — in EXEC form (the only form CC still accepts).
+
+        RECONCILED to Claude Code v2.1.207 (issue #166), which REJECTS the token
+        in a SHELL-FORM command as a shell-injection fix. The original fixture
+        here was shell form (`{"command": "${user_config.api_token}"}`) and
+        asserted no CRITICAL — that contract is now the OPPOSITE of the spec, and
+        the shell-form case is covered (positively) in
+        tests/test_issue_166_cc_2_1_207.py.
+
+        What this test still pins is the part of the old contract that SURVIVED:
+        the token is a recognised substitution (never "unknown substitution"), and
+        in exec form — the fix the changelog prescribes — it draws no finding at
+        all. Guarding that here keeps the v2.1.207 rule from over-reaching into
+        the legal form.
         """
         report = ValidationReport()
-        hook = {"type": "command", "command": "${user_config.api_token}"}
+        hook = {"type": "command", "command": "node", "args": ["${user_config.api_token}"]}
         ok = validate_command_hook(hook, "PreToolUse", tmp_path, report)
         assert ok is True
         assert not report.has_critical, (
-            f"${{user_config.KEY}} must not produce CRITICAL; got "
+            f"${{user_config.KEY}} in EXEC form must not produce CRITICAL; got "
             f"{[r.message for r in report.results if r.level == 'CRITICAL']}"
         )
         assert not report.has_major, (
-            f"${{user_config.KEY}} must not produce MAJOR; got "
+            f"${{user_config.KEY}} in EXEC form must not produce MAJOR; got "
             f"{[r.message for r in report.results if r.level == 'MAJOR']}"
         )
         assert not any("unknown substitution" in r.message.lower() for r in report.results), (

