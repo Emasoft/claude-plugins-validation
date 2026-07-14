@@ -7,7 +7,7 @@
   "rows": [
     {"key": "1", "action_id": "batch_validate",    "label": "Validate (read-only, fan-out) — /cpv-batch-validate"},
     {"key": "2", "action_id": "batch_security",    "label": "Security audit (5 ext. scanners) — /cpv-batch-security-audit"},
-    {"key": "3", "action_id": "batch_cache_audit", "label": "Caching audit (CA-01..CA-06) — /cpv-batch-caching-audit"},
+    {"key": "3", "action_id": "batch_cache_audit", "label": "Caching audit (CA-01..CA-07) — /cpv-batch-caching-audit"},
     {"key": "4", "action_id": "batch_cache_opt",   "label": "Caching optimize (audit + fix) — /cpv-batch-caching-optimize"},
     {"key": "5", "action_id": "batch_fix",         "label": "Fix (per-plugin) — /cpv-batch-fix"},
     {"key": "6", "action_id": "batch_val_fix",     "label": "Validate + fix (same-turn) — /cpv-batch-validate-and-fix"},

@@ -7,7 +7,7 @@
   "rows": [
     {"key": "1", "action_id": "validate",       "label": "Validate — Check that a plugin / marketplace / component is well-formed"},
     {"key": "2", "action_id": "fix",            "label": "Fix — Auto-fix issues that a previous validation found"},
-    {"key": "3", "action_id": "cache_optimize", "label": "Optimize for Cache — Prompt-cache invalidation audit + cache-aware refactor (CA-01..CA-06)"},
+    {"key": "3", "action_id": "cache_optimize", "label": "Optimize for Cache — Prompt-cache invalidation audit + cache-aware refactor (CA-01..CA-07)"},
     {"key": "4", "action_id": "diagnose",       "label": "Diagnose — Deep audit + AI-graded quality review (semantic, opus, on request)"},
     {"key": "5", "action_id": "update",         "label": "Update — Upgrade plugin to latest canonical pipeline standard"},
     {"key": "6", "action_id": "create",         "label": "Create — Scaffold plugin, marketplace, skill, agent, command, hook, MCP server"},

@@ -119,8 +119,8 @@ forks (e.g. a menu), prefer a post-turn `Stop`-hook emitter (the externalised
 
 ## Why these specific seven
 
-CA-01..CA-06 came from real-world incident reports and the cache-audit
-corpus — each corresponds to a measurable cache-MISS pattern that scaled
+The first six (CA-01 through CA-06) came from real-world incident reports and
+the cache-audit corpus — each corresponds to a measurable cache-MISS pattern that scaled
 out to >10x the expected token cost (the documented set as of CC v2.1.121).
 CA-07 (v2.102.0) is CPV's addition: `context: fork`/`branch` re-primes the
 whole prefix from cold, the single largest avoidable cache cost when it is

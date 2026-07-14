@@ -1,4 +1,4 @@
-"""Tests for the prompt-cache audit validator (CA-01..CA-06).
+"""Tests for the prompt-cache audit validator (CA-01..CA-07).
 
 Each rule has a positive test (fires on the documented breakage pattern)
 and a negative test (does NOT fire on benign-but-similar code). FP guards
