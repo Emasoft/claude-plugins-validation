@@ -46,6 +46,12 @@ from cpv_validation_common import (
     validate_env_var_syntax,
 )
 
+# CC v2.1.207 `${user_config.*}` shell-injection rule. The grammar and the
+# per-surface remediation live in validate_hook (the single source of truth) and
+# are IMPORTED, never re-derived here: a second copy of a security grammar drifts,
+# and a drifted copy of a security rule is a false negative.
+from validate_hook import find_user_config_interpolations, user_config_shell_finding
+
 # ENV_VAR_PATTERN / is_absolute_path / validate_env_var_syntax are imported from
 # cpv_validation_common (single source of truth) and stay importable from this
 # module (`from validate_mcp import is_absolute_path`) because an imported name
@@ -357,6 +363,25 @@ def validate_mcp_server(
             )
         else:
             validate_path_value(headers_helper, report, f"{ctx}:headersHelper", plugin_root)
+
+            # CC v2.1.207 — `${user_config.*}` in `headersHelper` is REJECTED
+            # (shell-injection fix). `headersHelper` is a SHELL-FORM command
+            # string and the MCP server schema gives it NO exec-form companion
+            # (there is no `headersHelperArgs`), so EVERY occurrence of the token
+            # here is the rejected shape — there is no legal form to spare, which
+            # is why this surface (unlike hooks) needs no form discriminator.
+            # The changelog's fix for it is to read the value INSIDE the helper
+            # script (from a config file, or from the server's `env` block).
+            # Runtime consequence: Claude Code refuses to run the helper, so the
+            # server never gets its auth headers — broken as well as unsafe.
+            helper_tokens = find_user_config_interpolations(headers_helper)
+            if helper_tokens:
+                report.critical(
+                    user_config_shell_finding(
+                        "headersHelper", helper_tokens, f"Server {server_name} headersHelper"
+                    )
+                )
+
             # Probe executability when it resolves under the plugin root — a
             # non-executable helper would fail at runtime, same as `command`.
             if plugin_root and "${CLAUDE_PLUGIN_ROOT}" in headers_helper:

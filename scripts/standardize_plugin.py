@@ -917,6 +917,15 @@ def _force_template_skip_reason(
         # Byte-identical; nothing to skip (and nothing to downgrade).
         return None
 
+    # Issue #165 — a canon YAML file is MERGED, never blind-overwritten (see
+    # _merge_canon_yaml, which the caller invokes). A blind overwrite deletes the
+    # author's own keys AND the comment paragraphs justifying them — the real
+    # `.mega-linter.yml` case, where CKV_DOCKER_2 and its 8-line rationale were
+    # silently dropped. The merge is handled in the caller's overwrite path, so
+    # there is nothing to SKIP here.
+    if rel_path in _CANON_YAML_MERGE_FILES:
+        return None
+
     # Diff order MUST be (expected=CANON, actual=PLUGIN) so a marker on a `+`
     # line means "the PLUGIN added hardening" (ahead) and a marker on a `-`
     # line means "CANON carries hardening the plugin lacks" (behind) — the
@@ -1744,6 +1753,443 @@ def repin_stale_cpv_ref(plugin_path: Path, dry_run: bool = False) -> list[str]:
         wf.write_text(new_content, encoding="utf-8")
         notes.append(f"re-pinned stale CPV ref ({stale_list}) → @{resolved} in {rel}")
     return notes
+
+
+# =============================================================================
+# Issue #165 — inject the DEPENDENCY-RESOLUTION TAG stage into an EXISTING publish.py
+# =============================================================================
+# Since Claude Code 2.1.110 a version-constrained plugin dependency
+# (`{"name": "x", "version": ">=1.2"}`) is resolved by listing the dependency
+# repo's tags, keeping ONLY those starting with `{plugin-name}--v`, and fetching
+# the highest one satisfying the range. The plain `vX.Y.Z` tag is IGNORED by that
+# resolver — so a plugin that publishes only `vX.Y.Z` CANNOT BE DEPENDED UPON:
+# every dependent fails to install with `no-matching-tag` and is DISABLED.
+#
+# CPV's GENERATED publish.py has minted that tag since v2.156.0
+# (generate_plugin_repo.gen_publish_py). But standardize is deliberately
+# PROFILE-AWARE (issues #145 / #140) and REFUSES to overwrite an EXISTING
+# scripts/publish.py — so every plugin that ALREADY has one (i.e. every plugin
+# that would need this migration) is standardized WITHOUT ever gaining the stage.
+# There was no upgrade path short of `--force-templates`, which is precisely the
+# thing a customized/ahead-of-canon plugin cannot safely run.
+#
+# This closes that gap the same way `repin_stale_cpv_ref` (above) closes the
+# stale-@main one: detect → ONE targeted in-place edit → report. It runs on ANY
+# `--fix`, never force-overwrites publish.py, and is a no-op on a publish.py that
+# already carries the stage (idempotent by the detection predicate below).
+
+# Detection predicate — kept BY CONSTRUCTION identical to `validate_plugin.
+# check_dependency_resolution_tags`'s `creates_dep_tag` (the RC-DEP-TAG-PIPELINE
+# signal). If the two ever disagree, a migration could "fix" a file the validator
+# still flags, or skip one it does not. Any change here must be mirrored there.
+_DEP_TAG_MARKERS: tuple[str, ...] = ("dependency_tag", "dep_tag")
+
+# The push argv the canonical pre-v2.156 publish.py builds. This is the ONE line
+# the migration rewrites. `--atomic` is optional so a plugin on an older canon
+# (non-atomic push) still migrates; the trailing `"HEAD", tag]` is required — it
+# is what proves this is the release push and that `tag`/`new_ver` are in scope.
+_PUBLISH_PUSH_ARGV_RE = re.compile(
+    r'\[\s*"git",\s*"push",(?:\s*"--atomic",)?\s*"origin",\s*"HEAD",\s*tag\s*\]'
+)
+
+# The enclosing `def` of the push. Its signature must bind BOTH `root` and
+# `new_ver` — the two names the injected helper call needs.
+_PUBLISH_DEF_RE = re.compile(r"^def\s+\w+\((?P<sig>[^)]*)\)")
+
+# The stage, injected verbatim at module level of the plugin's publish.py. It is
+# SELF-CONTAINED (needs only json / subprocess / Path, all of which the caller
+# proves are imported) so it cannot depend on a helper a given publish.py vintage
+# happens to lack. Written to be ruff-clean under the canonical line-length.
+_DEP_TAG_STAGE_SOURCE = '''\
+# ── DEPENDENCY-RESOLUTION TAG (added by `cpv standardize --fix`, CPV issue #165) ──
+# Since Claude Code 2.1.110 a version-constrained dependency on this plugin
+# ({"name": "<this-plugin>", "version": ">=1.2"}) is resolved by listing THIS repo's
+# tags, keeping ONLY those starting with "<this-plugin>--v", and fetching the highest
+# one satisfying the range. The plain vX.Y.Z tag is IGNORED by that resolver.
+#
+# So without the tag below, releases of this plugin are UN-DEPENDABLE: every dependent
+# fails to install with `no-matching-tag` and is DISABLED. The breakage is invisible
+# from the depending side (an already-installed dependent keeps working), which is how
+# it stayed hidden for months in the wild — do NOT remove this stage because "nothing
+# seems to need it". NOTE the separator is a DOUBLE hyphen (`--v`); the single-hyphen
+# `-v` form seen on some ecosystem tags matches the resolver's prefix filter and is
+# therefore silently useless.
+
+
+def _cpv_dependency_tag_name(root: Path, new_ver: str) -> str | None:
+    """The `{plugin-name}--v{version}` tag Claude Code resolves dependencies against.
+
+    The name is read from the MANIFEST, never from the directory name, so renaming
+    the checkout (or the plugin) cannot silently desync the tag from the plugin it
+    names. Returns None when the name is unreadable — the caller then WARNS loudly
+    rather than inventing a name, because a SILENT skip is exactly how this defect
+    survived unnoticed across many releases.
+    """
+    manifest = root / ".claude-plugin" / "plugin.json"
+    if not manifest.is_file():
+        return None
+    try:
+        name = json.loads(manifest.read_text(encoding="utf-8")).get("name")
+    except (json.JSONDecodeError, OSError):
+        return None
+    return f"{name}--v{new_ver}" if name else None
+
+
+def _cpv_dependency_push_refs(root: Path, new_ver: str) -> list[str]:
+    """Create the dependency-resolution tag locally and return it as a push-ref list.
+
+    Idempotent: an existing tag is left alone. Returns [] when the tag cannot be
+    built, so the release still pushes rather than crashing the pipeline.
+
+    It is called from INSIDE the release push's argv so the tag lands in the SAME
+    push as the release tag — a release can never ship with one ref and not the other.
+    """
+    dep_tag = _cpv_dependency_tag_name(root, new_ver)
+    if dep_tag is None:
+        print(
+            "  WARNING: cannot read the plugin name from .claude-plugin/plugin.json "
+            "- SKIPPING the dependency tag. Plugins depending on this one will fail "
+            "to resolve this release with `no-matching-tag`."
+        )
+        return []
+    probe = subprocess.run(
+        ["git", "rev-parse", "--verify", f"refs/tags/{dep_tag}"],
+        capture_output=True,
+        text=True,
+        cwd=str(root),
+        check=False,
+        timeout=10,
+    )
+    if probe.returncode != 0:
+        subprocess.run(
+            ["git", "tag", "-a", dep_tag, "-m", dep_tag.replace("--v", " ")],
+            cwd=str(root),
+            check=True,
+            timeout=10,
+        )
+        print(f"  Dependency tag {dep_tag} created.")
+    return [dep_tag]
+
+
+'''
+
+
+def _publish_py_has_dependency_tag_stage(text: str) -> bool:
+    """True when this publish.py ALREADY mints the `{name}--v{ver}` dependency tag.
+
+    The idempotence gate: a second `--fix` run sees the stage it injected (the
+    injected source contains both `--v` and `dependency_tag`/`dep_tag`) and does
+    nothing. It also recognises the CANONICAL v2.156+ stage, so a plugin already
+    refreshed from the template is never double-patched.
+    """
+    return "--v" in text and any(marker in text for marker in _DEP_TAG_MARKERS)
+
+
+def _publish_py_creates_release_tag(text: str) -> bool:
+    """True when this publish.py creates a release tag at all.
+
+    Mirrors validate_plugin's `creates_plain_tag`. A publish.py that tags nothing
+    has no release to make dependable — there is nothing to migrate, so we leave
+    it completely alone rather than inventing a tagging stage it never had.
+    """
+    return '"git", "tag"' in text or "git tag -a" in text
+
+
+def _inject_dependency_tag_stage(text: str) -> tuple[str | None, str]:
+    """Inject the dependency-tag stage into ``text`` (a publish.py source).
+
+    Returns ``(new_text, note)``. ``new_text`` is None when the file must NOT be
+    rewritten — either because nothing needs doing, or because the file's shape is
+    not recognisable and a partial edit would be worse than none (FAIL-FAST: we
+    never half-migrate a release pipeline). ``note`` is always the line to report.
+
+    EXACTLY TWO edits, no more:
+      1. the two helpers, inserted at module level above the function that pushes;
+      2. the release push's argv list, extended with the helper's ref list.
+
+    Nothing else in the plugin's file is touched.
+    """
+    if not _publish_py_creates_release_tag(text):
+        return None, ""
+    if _publish_py_has_dependency_tag_stage(text):
+        return None, ""
+
+    manual_fix = (
+        "run `claude plugin tag --push` at each release, or refresh publish.py with "
+        "--force-templates"
+    )
+
+    matches = list(_PUBLISH_PUSH_ARGV_RE.finditer(text))
+    if len(matches) != 1:
+        found = "no" if not matches else f"{len(matches)}"
+        return None, (
+            f"scripts/publish.py lacks the dependency-resolution tag ({{name}}--v{{version}}) "
+            f"and CANNOT be migrated automatically — {found} recognisable release-push argv "
+            f"found. Its releases are un-dependable: {manual_fix}."
+        )
+
+    # The injected helpers call json / subprocess and annotate with Path. A publish.py
+    # missing any of those imports would not even compile after the edit — refuse.
+    missing = [
+        mod
+        for mod, needle in (("json", "import json"), ("subprocess", "import subprocess"), ("Path", "import Path"))
+        if needle not in text
+    ]
+    if missing:
+        return None, (
+            f"scripts/publish.py lacks the dependency-resolution tag ({{name}}--v{{version}}) "
+            f"and CANNOT be migrated automatically — it does not import {', '.join(missing)}. "
+            f"Its releases are un-dependable: {manual_fix}."
+        )
+
+    push = matches[0]
+    lines = text.splitlines(keepends=True)
+    # Offset → line index of the matched push argv.
+    push_line_idx = text.count("\n", 0, push.start())
+
+    # Walk up to the enclosing module-level `def`, and prove `root` + `new_ver` are
+    # in scope there (they are the arguments the injected call needs).
+    def_idx = None
+    for i in range(push_line_idx, -1, -1):
+        m = _PUBLISH_DEF_RE.match(lines[i])
+        if m:
+            sig = m.group("sig")
+            if "root" in sig and "new_ver" in sig:
+                def_idx = i
+            break
+    # `def_idx == 0` would put the helpers ABOVE the module's own imports, which the
+    # injected code needs — refuse rather than emit a file that cannot import.
+    if not def_idx:
+        return None, (
+            f"scripts/publish.py lacks the dependency-resolution tag ({{name}}--v{{version}}) "
+            f"and CANNOT be migrated automatically — the release push is not inside a "
+            f"module-level function taking (root, new_ver). Its releases are un-dependable: "
+            f"{manual_fix}."
+        )
+
+    # Insert ABOVE any comment block glued to the def, so we never orphan a comment
+    # from the function it documents.
+    insert_idx = def_idx
+    while insert_idx > 0 and lines[insert_idx - 1].startswith("#"):
+        insert_idx -= 1
+
+    new_text = text[: push.end()] + " + _cpv_dependency_push_refs(root, new_ver)" + text[push.end() :]
+    # Re-split AFTER the argv edit: the edit is below the insertion point in every
+    # recognised shape, but re-splitting keeps the two edits order-independent.
+    new_lines = new_text.splitlines(keepends=True)
+    new_lines.insert(insert_idx, _DEP_TAG_STAGE_SOURCE)
+    return "".join(new_lines), (
+        "injected the dependency-resolution tag stage ({name}--v{version}) into "
+        "scripts/publish.py — releases were un-dependable without it (CC 2.1.110+)"
+    )
+
+
+def migrate_publish_py_dependency_tag(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """Give an EXISTING ``scripts/publish.py`` the ``{name}--v{ver}`` tag stage (#165).
+
+    Runs on ANY ``--fix`` — NOT gated behind ``--force-templates``, because the
+    plugins that need this are exactly the ones that cannot safely force-template
+    (a customized or ahead-of-canon publish.py). publish.py is never overwritten:
+    this is a surgical in-place injection of ONE stage, in the idiom of
+    ``repin_stale_cpv_ref``.
+
+    Idempotent: a publish.py that already mints the tag (canonical or previously
+    injected) comes back byte-identical and reports nothing.
+    """
+    publish = plugin_path / "scripts" / "publish.py"
+    if not publish.is_file():
+        return []
+    try:
+        text = publish.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    new_text, note = _inject_dependency_tag_stage(text)
+    if new_text is None:
+        # A note with no rewrite = the shape is unrecognised (surfaced so the
+        # maintainer can act). An empty note = genuinely nothing to do.
+        return [note] if note else []
+    if dry_run:
+        return [f"[dry-run] would {note}"]
+    publish.write_text(new_text, encoding="utf-8")
+    return [note]
+
+
+# =============================================================================
+# Issue #165 — MERGE (never clobber) the canon config files under --force-templates
+# =============================================================================
+# `--force-templates` blind-overwrites the shared-canon config files, which DELETES
+# a plugin's own linter suppressions AND the rationale comments justifying them.
+# Issue #145 fixed exactly one symptom (MD025); the general class stayed open. Two
+# real cases from a migrating plugin:
+#
+#   * .markdownlint.json — `"MD010": {"code_blocks": false}` was deleted. It is
+#     LOAD-BEARING: that plugin's skill documents Makefile recipes, which REQUIRE
+#     literal tabs; without the suppression markdownlint blocks `--strict` forever.
+#   * .mega-linter.yml — a `CKV_DOCKER_2` skip was dropped along with the 8-line
+#     comment explaining why it is safe.
+#
+# So: merge canon IN, keep the plugin's own keys. For JSON that is exact (no
+# comments to lose). For YAML it is NOT — a round-trip-safe merge needs a
+# comment-preserving loader (ruamel.yaml), which is NOT a CPV dependency and will
+# not be added for this. Instead, a YAML canon file carrying CUSTOM top-level keys
+# is SKIPPED (left byte-identical) rather than silently stripped: losing the
+# author's suppression is a worse outcome than missing a canon refresh, and the
+# skip is visible.
+
+# Canon YAML files whose custom keys must never be clobbered.
+_CANON_YAML_MERGE_FILES: frozenset[str] = frozenset({".mega-linter.yml"})
+
+# A top-level YAML mapping key (column 0, no leading space). Deliberately shallow:
+# it is all that can be judged reliably without a real YAML parser, and it is what
+# distinguishes an author's added config block from a canon one.
+_YAML_TOP_LEVEL_KEY_RE = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_.\-]*)\s*:")
+
+
+def _yaml_top_level_keys(text: str) -> list[str]:
+    """The top-level mapping keys of ``text``, in order, without a YAML parser."""
+    keys: list[str] = []
+    for line in text.splitlines():
+        m = _YAML_TOP_LEVEL_KEY_RE.match(line)
+        if m:
+            keys.append(m.group("key"))
+    return keys
+
+
+def _yaml_custom_top_level_keys(plugin_text: str, canon_text: str) -> list[str]:
+    """Top-level keys the PLUGIN declares that canon does not — its own config.
+
+    A plugin sitting on an OLDER canon has only canon keys (they are a subset), so
+    this is empty and the overwrite proceeds — a stale file still gets refreshed.
+    """
+    canon_keys = set(_yaml_top_level_keys(canon_text))
+    seen: set[str] = set()
+    custom: list[str] = []
+    for key in _yaml_top_level_keys(plugin_text):
+        if key not in canon_keys and key not in seen:
+            seen.add(key)
+            custom.append(key)
+    return custom
+
+
+def _yaml_key_blocks(text: str) -> dict[str, str]:
+    """Map each top-level key to its FULL block: leading comments + key + body.
+
+    A key's "block" starts at the first line of the comment paragraph directly
+    above it (an unbroken run of ``#`` lines) and runs to just before the next
+    top-level key. The leading comments are part of the block ON PURPOSE — a
+    canon key is worthless without the rationale that explains it, and an
+    author's rationale is exactly what issue #165 was about losing.
+    """
+    lines = text.splitlines()
+    key_at: list[tuple[int, str]] = []
+    for idx, line in enumerate(lines):
+        m = _YAML_TOP_LEVEL_KEY_RE.match(line)
+        if m:
+            key_at.append((idx, m.group("key")))
+
+    blocks: dict[str, str] = {}
+    for pos, (idx, key) in enumerate(key_at):
+        # Walk UP over the unbroken run of comment lines directly above the key.
+        start = idx
+        while start > 0:
+            above = lines[start - 1].strip()
+            if above.startswith("#"):
+                start -= 1
+                continue
+            break
+        # Never swallow a comment paragraph that belongs to the PREVIOUS key's
+        # body (i.e. one that starts before that key's own line).
+        if pos > 0:
+            start = max(start, key_at[pos - 1][0] + 1)
+        end = key_at[pos + 1][0] if pos + 1 < len(key_at) else len(lines)
+        # Trim the trailing blank lines that separate blocks.
+        while end > idx + 1 and not lines[end - 1].strip():
+            end -= 1
+        blocks.setdefault(key, "\n".join(lines[start:end]))
+    return blocks
+
+
+def _merge_canon_yaml(plugin_text: str, canon_text: str) -> tuple[str, list[str], list[str]]:
+    """Merge canon INTO a plugin's YAML config using the PLUGIN file as the base.
+
+    Returns ``(merged_text, kept_keys, added_keys)``.
+
+    THE DIRECTION IS THE WHOLE FIX (issue #165). The obvious merge — start from
+    the canon file and port the plugin's bits across — cannot preserve comments
+    without a round-trip YAML loader (``ruamel.yaml``, which CPV does not depend
+    on). Inverting the base removes the need for one entirely: we start from the
+    PLUGIN's own file and only APPEND the canon keys it is missing. Every byte the
+    author wrote — values, key order, and the comment paragraphs justifying them —
+    survives because we never rewrite a line they own.
+
+    A canon key the plugin ALREADY declares is left exactly as the plugin has it,
+    even when the value differs. That is deliberate: we cannot distinguish "the
+    author customized this" from "this is an older canon value", and the real case
+    proves which way to err — the maintainer plugin extended canon's
+    ``REPOSITORY_CHECKOV_ARGUMENTS: "--skip-check CKV2_GHA_1"`` to
+    ``"...,CKV_DOCKER_2"`` because every Dockerfile it ships is an ephemeral
+    run-once container for which a HEALTHCHECK is meaningless. Overwriting that
+    value re-breaks their lint gate. Missing a canon refresh is an inconvenience;
+    silently deleting a load-bearing suppression is a broken build. The kept keys
+    are RETURNED so the caller can name them and the author can reconcile.
+    """
+    plugin_keys = _yaml_top_level_keys(plugin_text)
+    plugin_key_set = set(plugin_keys)
+    canon_blocks = _yaml_key_blocks(canon_text)
+    plugin_blocks = _yaml_key_blocks(plugin_text)
+
+    added: list[str] = []
+    kept: list[str] = []
+    for key in _yaml_top_level_keys(canon_text):
+        if key in plugin_key_set:
+            if plugin_blocks.get(key, "").strip() != canon_blocks.get(key, "").strip():
+                kept.append(key)
+        elif key not in added:
+            added.append(key)
+
+    if not added:
+        return plugin_text, kept, []
+
+    body = plugin_text.rstrip("\n")
+    appended = "\n\n".join(canon_blocks[k] for k in added)
+    merged = (
+        f"{body}\n\n"
+        "# --- Added by `cpv standardize --force-templates` (canonical pipeline) ---\n"
+        f"{appended}\n"
+    )
+    return merged, kept, added
+
+
+def _merge_canon_json(plugin_text: str, canon_text: str) -> tuple[str | None, list[str]]:
+    """Merge canon INTO a plugin's JSON config, preserving the plugin's own keys.
+
+    Returns ``(merged_text, preserved_keys)``. ``merged_text`` is None when the
+    plugin's file is not a JSON object (nothing to preserve — the caller then
+    overwrites with canon, which is the pre-existing behaviour and an improvement
+    on a broken config).
+
+    Canon WINS on a key canon declares — that is the point of `--force-templates`,
+    and a plugin that deliberately diverges on a canon key has
+    `cpv.pipeline.intentional_divergence` / the at-or-ahead-of-canon skip for that.
+    A key canon does NOT declare is the plugin's OWN (e.g. an `MD010` suppression a
+    skill's Makefile recipes depend on) and is carried over verbatim.
+    """
+    try:
+        plugin_obj = json.loads(plugin_text)
+        canon_obj = json.loads(canon_text)
+    except json.JSONDecodeError:
+        return None, []
+    if not isinstance(plugin_obj, dict) or not isinstance(canon_obj, dict):
+        return None, []
+
+    merged = dict(canon_obj)
+    preserved: list[str] = []
+    for key, value in plugin_obj.items():
+        if key not in canon_obj:
+            merged[key] = value
+            preserved.append(key)
+    return json.dumps(merged, indent=2) + "\n", preserved
 
 
 # =============================================================================
@@ -3358,6 +3804,39 @@ def fix_missing_files(
                 print(f"  {YELLOW}{skip_line}{NC}")
                 continue
 
+            # Issue #165 — MERGE, don't clobber, a canon JSON config. A plugin's own
+            # keys (e.g. `"MD010": {"code_blocks": false}`, load-bearing for a skill
+            # that documents tab-indented Makefile recipes) are carried over; canon
+            # wins only on the keys canon itself declares. JSON has no comments, so
+            # this merge loses nothing.
+            if rel_path.endswith(".json") and file_path.is_file():
+                merged, preserved = _merge_canon_json(file_path.read_text(encoding="utf-8"), content)
+                if merged is not None and preserved:
+                    content = merged
+                    print(f"  {GREEN}[merge]{NC} {rel_path} — preserved custom key(s): {', '.join(preserved)}")
+
+            # Issue #165 — same for a canon YAML config, but the plugin's file is the
+            # BASE (see _merge_canon_yaml): we only APPEND the canon keys it lacks, so
+            # its values AND the comment paragraphs justifying them survive verbatim.
+            # This is what saves the real `.mega-linter.yml` case — the author extended
+            # canon's `REPOSITORY_CHECKOV_ARGUMENTS` with `,CKV_DOCKER_2` (a HEALTHCHECK
+            # skip, load-bearing because every Dockerfile they ship is an ephemeral
+            # run-once container) and a blind overwrite deleted it plus its 8-line
+            # rationale. A custom KEY detector cannot see this: the divergence is a
+            # custom VALUE inside a key canon also declares.
+            if rel_path in _CANON_YAML_MERGE_FILES and file_path.is_file():
+                merged_yaml, kept, added = _merge_canon_yaml(file_path.read_text(encoding="utf-8"), content)
+                content = merged_yaml
+                if added:
+                    print(f"  {GREEN}[merge]{NC} {rel_path} — added canon key(s): {', '.join(added)}")
+                if kept:
+                    print(
+                        f"  {YELLOW}[merge]{NC} {rel_path} — kept YOUR value for {', '.join(kept)} "
+                        f"(canon differs; reconcile by hand if you did not customize it)"
+                    )
+                if not added and not kept:
+                    print(f"  {GREEN}[merge]{NC} {rel_path} — already at canon")
+
         if dry_run:
             tag = f"[dry-run] Would {op_kind}"
             print(f"  {BLUE}{tag}{NC} {file_path} ({len(content)} bytes){' [exec]' if is_executable else ''}")
@@ -3466,6 +3945,17 @@ def fix_missing_files(
     # Surgical in-place rewrite of ONLY the CPV ref; a valid ref is left alone.
     for note in repin_stale_cpv_ref(plugin_path, dry_run=dry_run):
         print(f"  {YELLOW}[cpv-ref]{NC} {note}")
+
+    # Issue #165: give an EXISTING scripts/publish.py the `{name}--v{version}`
+    # dependency-resolution tag stage. CC 2.1.110+ resolves a version-constrained
+    # dependency ONLY against that tag, so a pipeline without it publishes releases
+    # nobody can depend on. The GENERATED template has minted it since v2.156.0, but
+    # standardize never overwrites an existing publish.py (#145/#140) — so a plugin
+    # that already had one could never gain the stage. Surgical in-place injection,
+    # on ANY --fix (a plugin that cannot safely --force-templates is exactly the one
+    # that needs this), idempotent, and publish.py is NOT overwritten.
+    for note in migrate_publish_py_dependency_tag(plugin_path, dry_run=dry_run):
+        print(f"  {YELLOW}[dep-tag]{NC} {note}")
 
     # CIP-1 (#140): drop the INVERTED `CLAUDE_PRIVATE_USERNAMES: ${{ github.
     # repository_owner }}` env from every workflow. It tells CPV that the PUBLIC
