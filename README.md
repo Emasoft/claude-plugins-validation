@@ -76,11 +76,11 @@ Throughout this table, **`cpv`** is the standalone alias =
 | **Fix findings (don't hand-edit)** | Mechanical per-rule remediation; CPV ships the fixer so you never hand-patch | `plugin-fixer` agent (validate → fix loop), or fleet-wide `/cpv-batch-fix` · `/cpv-batch-validate-and-fix` | — (fixing needs write access) |
 | **Devitalize threats (don't suppress)** | Convert flagged execution-class code into provably-inert data so a plugin passes the security gate by neutralizing the shape — never by muting a rule or relaxing `--strict`; load-bearing code is flagged, not broken | `plugin-devitalizer` agent (scan → devitalize → re-scan loop) | — (rewriting needs write access) |
 | **Prevent leaks & harden (don't suppress)** | Redact exposed secrets and runtime-read the genuinely-needed ones (env / exported / GitHub / keychain); implement missing safeguards (safe config parse, input sanitization, launch/deploy params, prompt-injection pre-scan); never mute a rule; flags what it can't safely fix | `plugin-leaks-preventer` agent (scan → redact/harden → re-scan loop) | — (rewriting needs write access) |
-| **Optimize prompt cache** | CA-01..CA-06 — dynamic placeholders, hook mutations, model-fork, unbounded output | Audit: `/cpv-batch-caching-audit` · `Skill(…:cache-validation-skill)`. Fix: `cache-optimizer-agent` · `/cpv-batch-caching-optimize` | `cpv cache /path` (audit only) |
+| **Optimize prompt cache** | CA-01..CA-07 — dynamic placeholders, hook mutations, model-fork, `context: fork` cold re-prime, unbounded output | Audit: `/cpv-batch-caching-audit` · `Skill(…:cache-validation-skill)`. Fix: `cache-optimizer-agent` · `/cpv-batch-caching-optimize` | `cpv cache /path` (audit only) |
 | **Create** | Scaffold a plugin / marketplace / skill / agent / command / hook / MCP | `plugin-creator` agent, or `Skill(claude-plugins-validation:create-plugin)` · `…:scaffold-skill` · `…:scaffold-agent` | — |
 | **Publish to GitHub + add to marketplace** | Scaffold repo + CI/CD, publish, link into a marketplace | `plugin-creator` agent (end-to-end) | — |
 | **Migrate marketplace layout** | Fix marketplace findings + convert Layout A ⇄ B ⇄ C | `marketplace-fixer` agent, or `Skill(…:migrate-marketplace-architecture)` | — |
-| **Standardize** | Bring an old plugin up to the current CPV pipeline (CI/CD, hooks, publish.py) | `plugin-creator` agent, or `Skill(…:standardize-plugin)` / `Skill(…:canonical-pipeline)` | `cpv standardize /path` |
+| **Standardize** | Bring an old plugin up to the current CPV pipeline (CI/CD, hooks, publish.py) — including the `{name}--v{version}` dependency-resolver tag, injected into an *existing* `publish.py` without overwriting it; canon config files are **merged**, never clobbered | `plugin-creator` agent, or `Skill(…:standardize-plugin)` / `Skill(…:canonical-pipeline)` | `cpv standardize /path --fix` |
 | **Manage installed plugins** | Install / update / enable / disable / list / search / health-check | `plugin-manager` agent, or `Skill(…:plugin-management)` | `cpv doctor` (health-check only) |
 | **Deep diagnostic** | All scanners + pipeline-staleness + cross-platform + marketplace-registration + cache-sync | `plugin-diagnoser` agent; for `.claude/` scope `/cpv-batch-scope-diagnose` | `cpv doctor` |
 | **AI semantic grade** *(opt-in, expensive)* | Descriptions that won't trigger, unclear instructions, workflows with no exit — ~10–50× token cost, asks first | `semantic-validator` agent | — (needs Opus) |
@@ -102,6 +102,7 @@ CPV ships **25 on-disk `validate_*.py` scripts** covering **190+ rules** across 
 | **Compatibility** | Windows/macOS/Linux path issues, encoding problems, broken references |
 | **Quality** | Missing documentation, no license, inconsistent versions, dead links |
 | **v2.1.80+ Plugin Features** | `Monitor` tool, `userConfig` (5-type whitelist + required `title`/`type`), `channels` (server cross-ref), `CLAUDE_PLUGIN_OPTION_<KEY>` env vars, inline marketplace in `settings.json`, `managed-settings.d/` drop-ins, plugin skill `name` field (v2.1.98) — full reference: [`skills/create-plugin/references/v2-1-80-features.md`](skills/create-plugin/references/v2-1-80-features.md) |
+| **v2.1.207 Plugin Options** *(v2.158.0+)* | `${user_config.*}` interpolated into a **shell-form** hook / monitor / MCP `headersHelper` command — Claude Code now rejects it, so the plugin is broken at runtime, not merely unsafe. Blocking CRITICAL; exec form stays legal — see below |
 | **Empirical Loading Bugs** *(v2.23.0+)* | Silent-failure modes in CC's plugin loader that `claude plugin validate` doesn't catch — see below |
 
 ### Empirical Plugin-Loading Bugs CPV Catches
@@ -115,6 +116,32 @@ Through extensive empirical testing of Claude Code's plugin loader (April 2026),
 5. **`mcpServers: "./.mcp.json"` redundancy** — points the override at the auto-discovered default file. Harmless single load (no cascade like hooks) but redundant and confusing. CPV emits MINOR nudge.
 
 All five rules are documented with empirical evidence in [`skills/fix-validation/references/empirical-loading-bugs.md`](skills/fix-validation/references/empirical-loading-bugs.md) (13 test plugin scenarios, debug-log excerpts, runtime probes).
+
+### CC v2.1.207 — plugin options (v2.158.0+)
+
+Claude Code v2.1.207 shipped a shell-injection fix that silently breaks two shapes plugins were previously encouraged to use. CPV catches both.
+
+**`[RC-USERCFG-SHELL-INJECT]` — CRITICAL (blocking).** `${user_config.*}` interpolated into a **shell-form** command is now *rejected* by Claude Code on three surfaces: **hooks**, **monitors**, and MCP **`headersHelper`**. A shell-form command is a single string handed to a shell, so an option value carrying shell metacharacters — a command separator followed by a destructive command, a command substitution that downloads and runs a remote script, backticks — escapes its argument slot and executes as code. A plugin shipping this shape is broken at runtime, not merely unsafe — hence CRITICAL rather than a warning.
+
+**Exec form stays legal and is never flagged.** The same token inside an `args` array is spawned with an argv vector that no shell parses — it is the fix the spec prescribes, and flagging it would condemn the remedy:
+
+```jsonc
+// REJECTED by CC ≥ 2.1.207 — the value is spliced into a shell string
+{ "type": "command", "command": "./scripts/post.sh --token ${user_config.api_token}" }
+
+// LEGAL — argv vector, no shell involved
+{ "type": "command", "command": "./scripts/post.sh", "args": ["--token", "${user_config.api_token}"] }
+```
+
+Per-surface remediation, straight from the changelog:
+
+| Surface | Fix |
+|---------|-----|
+| **Hook** | Use exec form (move the value into the `args` array), or read `$CLAUDE_PLUGIN_OPTION_<KEY>` inside the script |
+| **Monitor** | Read the value inside the script (config file, or `$CLAUDE_PLUGIN_OPTION_<KEY>`) |
+| **MCP `headersHelper`** | Read the value inside the helper script (config file, or the server's `env` block) |
+
+**`[RC-USERCFG-PROJECT-SETTINGS]` — WARNING (advisory, does not block).** Plugin option values are no longer read from project-level `.claude/settings.json` / `.claude/settings.local.json` — only user settings, `--settings`, and managed settings are honored. A `pluginConfigs` block left in a project settings file is now *silently ignored*: the plugin falls back to its defaults with no error. Move those values to `~/.claude/settings.json`, pass them via `--settings`, or ship them as managed settings.
 
 ### Cross-marketplace dependency allowlist (TRDD-20108ab7)
 
@@ -154,7 +181,7 @@ All in-process checks run as pure Python — no API calls, no tokens consumed, n
 
 **v2.48 — Marketplace tree-scan-once with dedup.** `--marketplace <spec>` now stages every plugin under one tmpdir, runs `fclones` ONCE on the entire corpus, deletes duplicate hardlinks (cache untouched — hardlinks share inodes safely), then scans each plugin's deduped staging. Findings on canonical files automatically propagate to peer plugins that originally contained a copy of the same content (no coverage hole from dedup). Real-world: ai-maestro-plugins (10 plugins) sees ~1,849 duplicate files / ~21 MB saved per scan run.
 
-**v2.48 — `cpv-main-menu`.** Single interactive entry-point routes through every CPV command via nested AskUserQuestion sub-menus (Validate / GitHub / Fix / Create / Manage / GitHub setup / Semantic / Help). Every menu/sub-menu includes a Cancel/Exit option. Use this when you can't remember which slash command to invoke directly.
+**v2.48 — `cpv-main-menu`.** Single interactive entry-point routing through every CPV command via nested numbered sub-menus. Every menu/sub-menu includes a Cancel/Exit option. Use this when you can't remember which slash command to invoke directly. Since v2.90.0 the menus are rendered post-turn by `claude-menu-system`'s Stop hook — not by `AskUserQuestion` — so a menu costs zero tokens no matter how large it is; see [Menu Architecture](#menu-architecture).
 
 **v2.101.0 — Batch / fleet skills + scope-aware doctor.** Ten new user-invocable slash commands (TRDD-3dcbb37c + TRDD-a175f78d) for fleet-scale operations across many plugins in parallel. The main session fans out N parallel subagent dispatches from ONE message (the only place the Agent tool can parallelise per Anthropic spec). Universal input grammar — accepts single plugin path/URL, marketplace path/URL, comma-separated list, an `@listfile` prefix pointing to a text file of one input per line, single skill folder, skill pack, or mixed `marketplace.json` entries (plugins + skills + skill-packs all expandable). Reference-counted clone cleanup; bounded scan for repos with 100k+ skills.
 
@@ -162,8 +189,8 @@ All in-process checks run as pure Python — no API calls, no tokens consumed, n
 |---------|-------|--------------|
 | `/cpv-batch-validate` | plugin-validator (`batch_validate`) | Read-only validate, fan-out, per-plugin reports |
 | `/cpv-batch-security-audit` | plugin-validator (`batch_security_audit`) | All 5 external scanners + native skillaudit, fan-out |
-| `/cpv-batch-caching-audit` | cache-optimizer-agent (`batch_audit`) | CA-01..CA-06 audit-only across N plugins |
-| `/cpv-batch-caching-optimize` | cache-optimizer-agent (`batch_fix`) | CA-01..CA-06 audit + auto-fix in priority order |
+| `/cpv-batch-caching-audit` | cache-optimizer-agent (`batch_audit`) | CA-01..CA-07 audit-only across N plugins |
+| `/cpv-batch-caching-optimize` | cache-optimizer-agent (`batch_fix`) | CA-01..CA-07 audit + auto-fix in priority order |
 | `/cpv-batch-fix` | plugin-fixer (`batch_per_plugin`) | One plugin-fixer per plugin |
 | `/cpv-batch-validate-and-fix` | plugin-fixer (`batch_same_turn_validate_fix`) | Single-pass read; scan + verify FPs + fix in one turn (~3-5× cheaper) |
 | `/cpv-batch-full-scan-and-fix` | plugin-fixer (`batch_same_turn_full`) | Combined validate + security + caching + fix in one turn |
@@ -185,7 +212,7 @@ CPV validates plugins against the official Claude Code specification. If you are
 - [Plugins reference](https://code.claude.com/docs/en/plugins-reference) -- plugin.json schema, CLI commands, component specs
 - [CLI commands reference](https://code.claude.com/docs/en/plugins-reference#cli-commands-reference) -- install, uninstall, enable, disable, update
 - [Skills reference](https://code.claude.com/docs/en/skills) -- SKILL.md frontmatter, substitutions, dynamic context
-- [Hooks reference](https://code.claude.com/docs/en/hooks) -- 27 hook events, matchers, hook types
+- [Hooks reference](https://code.claude.com/docs/en/hooks) -- hook events, matchers, hook types (CPV models 31 events and 5 types)
 - [Claude Code release notes](https://docs.anthropic.com/en/release-notes/claude-code) -- latest changes and plugin updates
 
 ---
@@ -271,11 +298,11 @@ Any of these can be passed as the first argument to `cpv-remote-validate`. Short
 |---------|----------------|
 | `plugin` | **Everything.** Runs all 17 sub-validators + linting. Start here. |
 | `skill` | **Skills.** SKILL.md frontmatter, required sections, description quality. 190+ rules. |
-| `hook` | **Hooks.** 31 event types (incl. v2.1.152 `MessageDisplay`), 5 hook types (incl. v2.1.118+ `mcp_tool`), the v2.1.157 exec-form `args` field (its script is lint-scanned), script paths, bash portability. |
+| `hook` | **Hooks.** 31 event types (incl. v2.1.152 `MessageDisplay`), 5 hook types (incl. v2.1.118+ `mcp_tool`), the v2.1.157 exec-form `args` field (its script is lint-scanned), the v2.1.207 `${user_config.*}` shell-form rejection, script paths, bash portability. |
 | `agent` | **Agents.** Frontmatter fields, naming, tools, model, skills. |
 | `command` | **Commands.** Frontmatter, tool names, arguments, naming. |
 | `security` | **Security.** Injection, path traversal, secrets, prompt injection, exfiltration. v2.48: 5 external scanners + fclones cross-plugin dedup. |
-| `cache` | **Prompt-cache audit (v2.27.0+).** CA-01..CA-06 — dynamic placeholders, hook mutations, model-fork, unbounded output. |
+| `cache` | **Prompt-cache audit (v2.27.0+).** CA-01..CA-07 — dynamic placeholders, hook mutations, model-fork, `context: fork` cold re-prime, unbounded output. |
 | `telemetry` | **OTEL telemetry supply-chain risks.** otelHeadersHelper, OTEL_LOG_RAW_API_BODIES, OTEL_LOG_USER_PROMPTS in plugin env. |
 | `scoring` | **Quality score.** Weighted across structure, docs, security, testing. |
 | `marketplace` | **Marketplace.** Manifest structure, plugin entries, source references. Supports Layouts A/B/C. |
@@ -283,7 +310,7 @@ Any of these can be passed as the first argument to `cpv-remote-validate`. Short
 | `local-scope` | **Local scope.** (v2.21.0+) Validates non-git-tracked `.claude/` elements under a project — `settings.local.json`, gitignored agents/skills/commands/rules, `enabledPlugins` from local settings. Each tracked element is passed to the FULL per-element validator. |
 | `project-scope` | **Project scope.** (v2.21.0+) Validates git-tracked `.claude/` elements — `settings.json`, tracked agents/skills/commands/rules/hooks, `.mcp.json`, `CLAUDE.md`. Same deep per-element pipeline. |
 | `enterprise` | **Enterprise.** Author, license, SPDX, keywords, metadata. |
-| `mcp` | **MCP.** Transport types, required fields, OAuth, paths. |
+| `mcp` | **MCP.** Transport types, required fields, OAuth, paths, `headersHelper` (incl. the v2.1.207 `${user_config.*}` shell-form rejection). |
 | `lsp` | **LSP.** Command paths, language IDs, file patterns. |
 | `docs` | **Documentation.** README sections, links, images. |
 | `encoding` | **Encoding.** UTF-8, BOM, line endings, binary detection. |
@@ -291,7 +318,20 @@ Any of these can be passed as the first argument to `cpv-remote-validate`. Short
 | `xref` | **Cross-references.** Agent refs, versions, scripts. |
 | `doctor` | **Health check.** Plugins, settings, marketplaces. `--install-scanners` (v2.48) installs all 5 external scanners + fclones with one command. |
 | `lint` | **Lint only.** All 15 languages (Python, JS, Shell, Go, Rust, etc.). |
-| `standardize` | **Audit + fix.** Standardize a plugin against CPV pipeline conventions (CI/CD, hooks, publish.py). |
+| `standardize` | **Audit + fix.** Standardize a plugin against CPV pipeline conventions (CI/CD, hooks, publish.py). Under a plain `--fix` it also migrates an **existing** `publish.py` so it pushes the `{name}--v{version}` dependency-resolver tag (see below). |
+
+#### Standardize: the resolver tag, and why canon configs are merged (v2.158.0+)
+
+**The dependency-resolver tag.** A version-constrained plugin dependency resolves **only** against a `{plugin-name}--v{version}` git tag (double hyphen, CC 2.1.110). Miss it and a dependent install fails with `no-matching-tag` and the plugin is disabled — a release that looks fine and is silently un-dependable. CPV's *generator* has always minted this tag, but `standardize` is profile-aware and deliberately refuses to overwrite an existing `publish.py`, so every plugin that already had one was being standardized without ever gaining the tag stage. A plain `cpv standardize /path --fix` now injects **only** that stage into the existing file, idempotently, so the resolver tag lands in the **same atomic push** as the release tag — a release can never ship with one ref and not the other. A `publish.py` too customized to migrate safely is left byte-identical and reported, never half-migrated.
+
+**Canon config files are merged, not clobbered.** `--force-templates` used to overwrite a shared-canon config wholesale, silently deleting linter suppressions the plugin's build depended on. It now merges, with a rule per format — and prints exactly what it did either way:
+
+| Canon file | Merge rule | On a key both declare |
+|---|---|---|
+| **JSON** (`.jscpd.json`, …) | Canon is the base; **your extra keys are carried over** verbatim and reported. JSON has no comments, so nothing else can be lost. | **Canon wins** — that is the point of `--force-templates`. Mark a deliberate divergence with `cpv.pipeline.intentional_divergence` to opt out entirely. |
+| **`.mega-linter.yml`** | **Your file is the base**; only the canon keys you *lack* are appended. Your values, key order, and the comment blocks justifying them survive verbatim. | **Your value wins and the key is reported.** |
+
+The YAML asymmetry is deliberate. The real-world divergence is not a custom *key* — it is a custom **value inside a key canon also declares** (`REPOSITORY_CHECKOV_ARGUMENTS` extended with an extra skip-check, justified by an eight-line comment). CPV cannot tell "the author customized this" from "this is stale canon", and the outcomes are not symmetric: deleting a load-bearing suppression breaks your build, while missing a canon refresh merely annoys you. Reconcile the reported keys by hand if you wanted canon's value.
 
 ### Options
 
@@ -428,12 +468,13 @@ CPV treats **plugins** and **marketplaces** as two distinct concerns with dedica
 
 #### Supported Marketplace Layouts
 
-CPV validates and supports two marketplace layouts — both are first-class:
+CPV validates and supports three marketplace layouts — all three are first-class, and `marketplace-fixer` converts between them:
 
 | Layout | Shape | When to use |
 |--------|-------|-------------|
 | **Layout A — Hub and spoke** | One marketplace repo that references plugins living in **separate GitHub repos** (one repo per plugin). | Multiple authors, plugins from different organizations, plugins with independent release cadences. |
 | **Layout B — Nested single-repo** | One marketplace repo that contains **all its plugins as subdirectories**, with a single author and full CPV release discipline: `publish.py`, `cliff.toml`, `CHANGELOG.md`, CI, single-version bumps. | Single author, atomic cross-plugin releases, unified CI pipeline. |
+| **Layout C — Marketplace-in-plugin** | A single plugin repo that also ships its own `.claude-plugin/marketplace.json`, serving itself. | One self-contained plugin distributed without a separate hub repo. |
 
 Full layout specifications and decision criteria: [`skills/create-plugin/references/marketplace-layouts.md`](skills/create-plugin/references/marketplace-layouts.md).
 
@@ -489,7 +530,7 @@ Top-level menu (8 verbs the user actually wants to do):
 |---|-----------------------|----------------------------------------------------------------------|
 | 1 | Validate              | Check that a plugin / marketplace / component is well-formed         |
 | 2 | Fix                   | Auto-fix issues that a previous validation found                     |
-| 3 | Optimize for Cache    | Prompt-cache invalidation audit + cache-aware refactor (CA-01..06)   |
+| 3 | Optimize for Cache    | Prompt-cache invalidation audit + cache-aware refactor (CA-01..07)   |
 | 4 | Diagnose              | Deep audit + AI-graded quality review (semantic, opus, on request)   |
 | 5 | Update                | Upgrade plugin to latest canonical pipeline standard                 |
 | 6 | Create                | Scaffold plugin, marketplace, skill, agent, command, hook, MCP       |
@@ -521,9 +562,9 @@ For CI/CD and scripting, the Python validators are still callable directly (no m
 | Validation scripts | 25 | Python validators (20 plugin + 3 marketplace/settings + 2 scope) covering plugin packages, marketplaces, and end-user `.claude/` configuration |
 | Management scripts | 6 | Plugin lifecycle, marketplace operations, scaffolding (`manage_*.py`) |
 | Agents | 15 | AI-powered validation, fixing, devitalization, leak-prevention / hardening, management, and batch orchestration, plus the `cpv` general router |
-| Skills | 46 (12 user-invocable + 34 agent-loaded) | Validation, management, publishing, fix, migration, devitalization, leak-prevention / hardening, auto-notify, batch / fleet (v2.101.0), scope-aware doctor (v2.101.0), the-skills-menu router, and main-menu workflows |
+| Skills | 47 (13 user-invocable + 34 agent-loaded) | Validation, management, publishing, fix, migration, devitalization, leak-prevention / hardening, auto-notify, batch / fleet (v2.101.0), scope-aware doctor (v2.101.0), the-skills-menu router, and main-menu workflows |
 | Commands | 13 user-invocable | `/cpv-main-menu` (canonical entry), 10 `/cpv-batch-*` fleet skills (v2.101.0), `/cpv-pre-install-scan`, `/the-skills-menu-create` |
-| Tests | 5700+ | Full coverage across all modules |
+| Tests | 10,800+ across 401 files | Full coverage across all modules |
 
 </details>
 
@@ -552,7 +593,7 @@ For CI/CD and scripting, the Python validators are still callable directly (no m
 | `validate_marketplace_pipeline.py` | `validate_marketplace_pipeline` | Marketplace release pipeline validator (publish.py, CI, CHANGELOG) |
 | `validate_settings_marketplace.py` | `settings-marketplace` | Inline marketplace-in-settings validator |
 | `validate_security.py` | `security` | Security vulnerability scanner (5 external scanners + fclones dedup) |
-| `validate_cache.py` | `cache` | Prompt-cache invalidation audit (CA-01..CA-06, v2.27.0+) |
+| `validate_cache.py` | `cache` | Prompt-cache invalidation audit (CA-01..CA-07, v2.27.0+) |
 | `validate_telemetry.py` | `telemetry` | OTEL telemetry supply-chain risk validator |
 | `validate_scoring.py` | `scoring` | Quality score calculator |
 | `validate_enterprise.py` | `enterprise` | Enterprise compliance validator |
@@ -613,16 +654,25 @@ CPV uses `uv` to run scripts (`uv run`), install Python linters (`ruff`, `mypy`)
 
 ### Optional tools (enhance linting)
 
-CPV validates scripts in **6 languages**. For each language, it tries the local install first, then `uvx`/`npx`. If no linter is found, CPV reports what's missing and skips that check.
+CPV lints **15 languages**. For each one it tries the local install first, then `uvx`/`npx`. If no linter is found, CPV reports what's missing and skips that check — it never silently passes a file it could not lint.
 
 | Language | Linter | How to Install |
 |----------|--------|----------------|
 | **Python** (.py) | ruff + mypy | Included via `uv` — always available |
-| **Shell** (.sh, .bash) | shellcheck | `brew install shellcheck` or [shellcheck.net](https://www.shellcheck.net/) |
 | **JavaScript/TypeScript** (.js, .ts) | eslint | `npm install -g eslint` or [nodejs.org](https://nodejs.org/) |
+| **Shell** (.sh, .bash) | shellcheck | `brew install shellcheck` or [shellcheck.net](https://www.shellcheck.net/) |
 | **PowerShell** (.ps1) | PSScriptAnalyzer | `pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'` |
-| **Go** (.go) | go vet | [go.dev/dl](https://go.dev/dl/) |
-| **Rust** (Cargo.toml) | cargo check | [rustup.rs](https://rustup.rs/) |
+| **Go** (.go) | gofmt | [go.dev/dl](https://go.dev/dl/) |
+| **Rust** (.rs / Cargo.toml) | cargo fmt | [rustup.rs](https://rustup.rs/) |
+| **Markdown** (.md) | markdownlint-cli2 | `npm install -g markdownlint-cli2` |
+| **YAML** (.yml, .yaml) | yamllint | `uvx yamllint` or `brew install yamllint` |
+| **Dockerfile** | hadolint | `brew install hadolint` |
+| **CSS** (.css) | stylelint | `npm install -g stylelint` |
+| **HTML** (.html) | htmlhint | `npm install -g htmlhint` |
+| **SQL** (.sql) | sqlfluff | `uvx sqlfluff` or `pipx install sqlfluff` |
+| **XML** (.xml) | xmllint | Ships with libxml2 (preinstalled on macOS/Linux) |
+| **JSON** (.json) | Python stdlib | Always available — no install |
+| **TOML** (.toml) | Python stdlib (`tomllib`) | Always available — no install |
 
 Other optional tools:
 

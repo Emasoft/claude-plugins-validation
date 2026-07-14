@@ -195,13 +195,14 @@ Fix and push again. Do NOT leave failing CI as the final state.
 
 ## Generated-Pipeline Reliability Contract (v2.134.0)
 
-The generator applies five reliability fixes so a scaffolded/upgraded plugin's first GitHub CI run is GREEN, not the user's failure notification. The upgrade path MUST re-apply these (and re-run CI to green) so an upgraded plugin matches what a fresh scaffold emits:
+The generator applies six reliability fixes so a scaffolded/upgraded plugin's first GitHub CI run is GREEN — and its release is actually installable — rather than the user's failure notification. The upgrade path MUST re-apply these (and re-run CI to green) so an upgraded plugin matches what a fresh scaffold emits:
 
 1. **CI pins the CPV ref** — the generated `ci.yml`/`release.yml`/`publish.py` pin the CPV install to an explicit **`@v<ver>` git tag** (the `git+` install URL carries a `@v<ver>` suffix), NOT CPV HEAD. So a new CPV release never silently red-lights a downstream plugin. The upgrade flow updates the pin DELIBERATELY (and re-runs CI to green) rather than letting every plugin track HEAD.
 2. **Validate steps skip the live integrity fetch + carry a real timeout** — every CPV-validate step sets `env: { PLUGIN_SKIP_GITHUB_INTEGRITY: "1" }` and a `timeout-minutes`. On a fresh-checkout runner the local manifest already matches the code, so the `raw.githubusercontent.com` anchor adds latency/hang risk but no security. **Never add `CLAUDE_PRIVATE_USERNAMES` to a CI step** (issue #140): that env names the usernames CPV treats as PRIVATE, so seeding it with the public `${{ github.repository_owner }}` makes CPV flag every `github.com/<owner>/` URL + the owner no-reply email as a CRITICAL private-path leak and fails the validate job under `--strict`. A CI runner has no developer local-username to protect — the `CLAUDE_PRIVATE_USERNAMES="$(whoami)"` form is for LOCAL scans only.
 3. **The `test` matrix is fronted by an aggregate gate job named exactly `Test`** (`needs: [test]`, succeeds only if the matrix passed). A bare required `Test` context against a matrix that reports `Test (ubuntu-latest)` / `Test (macos-latest)` is NEVER satisfied → PRs stuck pending forever; the aggregate job satisfies the required branch context.
 4. **`notify-marketplace` no-ops when `MARKETPLACE_PAT` is absent** — the job is guarded so a repo without the secret does not surface a red associated workflow on the release.
 5. **"Done" = green CI, not "files generated"** — the creator/fixer agents PUBLISH then watch every required run with `gh run watch <run-id> --exit-status`, treating a red run as the next fix iteration (read failing job → fix the cause on the plugin side → re-publish → re-watch; `gh run rerun --failed` for transient infra; NEVER mute a check). See `agents/plugin-creator.md` "CI-green guarantee phase" and `agents/plugin-fixer.md` §7d.
+6. **`publish.py` pushes the dependency-resolver tag `{name}--v{version}`** (DOUBLE hyphen, CC 2.1.110) alongside `v{version}`, in one atomic push (`git push origin HEAD v{version} {name}--v{version}`). A version-constrained dependency resolves ONLY against `{plugin-name}--v{version}`; without it a dependent install fails `no-matching-tag` and is DISABLED, while the release still looks fine. **This is the upgrade path's job on an EXISTING plugin:** `standardize` is profile-aware and refuses to overwrite an existing `publish.py`, so a plugin that already had one never gained the stage — since v2.158.0 a plain `--fix` injects only that stage into the existing file (idempotent; a `publish.py` too customized to migrate safely is left byte-identical and reported, never half-migrated). Do NOT hand-roll `claude plugin tag --push`: wrong layer, and `claude plugin tag <name>` takes a **path**, not a tag name — it silently creates nothing.
 
 ## Mega-Linter Configuration
 
@@ -209,6 +210,8 @@ The `.mega-linter.yml` config must include:
 - `COPYPASTE_JSCPD_ARGUMENTS: "--threshold 5"` — 0% is too strict for plugin repos
 - `REPOSITORY_CHECKOV_ARGUMENTS: "--skip-check CKV2_GHA_1"` — flags missing top-level workflow permissions, but we set permissions per-job
 - `.gitignore` must include `megalinter-reports/` and `mega-linter.log`
+
+**`--force-templates` MERGES this file; it does not overwrite it (issue #165, v2.158.0).** The plugin's `.mega-linter.yml` is the BASE — only the canon keys it LACKS are appended, so its values, key order, and the comment paragraphs justifying them survive verbatim. On a shared key the plugin's value is KEPT and reported. The divergence that motivated this is a custom **value inside a key canon also declares** (an author extending `REPOSITORY_CHECKOV_ARGUMENTS` with `,CKV_DOCKER_2` for ephemeral run-once Dockerfiles) — invisible to a custom-KEY detector, and a blind overwrite deleted it and turned their build red. Canon **JSON** configs merge the other way round: canon wins on canon-declared keys, the plugin's own extra keys are preserved and reported.
 
 ## Copy-paste Gate Parity: `.jscpd.json` (issue #143)
 
@@ -233,11 +236,11 @@ instead of only on CI after the release is already tagged.
 
 Under `--fix`, `standardize` CREATES `.jscpd.json` (the canonical threshold-5
 config) when it is ABSENT, and LEAVES an existing one untouched — your tuned
-config is never clobbered on a plain `--fix` (only `--force-templates`, which
-refreshes the whole publish.py template, overwrites it). The AUDIT (no `--fix`)
-path only WARNs: it surfaces a missing `.jscpd.json` and a `scripts/publish.py`
-that predates the gate (refresh it with `--force-templates`), and never mutates
-anything.
+config is never clobbered on a plain `--fix`. Only `--force-templates` refreshes
+it, and since v2.158.0 that refresh MERGES rather than overwrites: canon wins on
+the keys canon declares, and your own extra keys are preserved and reported. The
+AUDIT (no `--fix`) path only WARNs: it surfaces a missing `.jscpd.json` and a
+`scripts/publish.py` that predates the gate, and never mutates anything.
 
 ## Common Fixes Reference
 

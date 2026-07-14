@@ -78,6 +78,9 @@ Primary fix guide: [plugin-structure-fixes.md](plugin-structure-fixes.md)
 | `Layout C: self-entry source is not "./"` (v2.32.0+) **[NEW]** | plugin-structure-fixes §15 (Layout C) |
 | `Layout C: version mismatch between plugin.json and marketplace.json` (v2.32.0+) **[NEW]** | plugin-structure-fixes §15 (Layout C) |
 | `'dependencies[i].marketplace' = '<x>' is not in the hosting marketplace's allowCrossMarketplaceDependenciesOn allowlist` (TRDD-20108ab7, 2026-05-10, plugin-dependencies.md:54-79) **[NEW]** | plugin-structure-fixes "Cross-marketplace dependency blocked" — Add `<x>` to root marketplace.json's `allowCrossMarketplaceDependenciesOn` array, OR remove `marketplace` sub-field on the dep, OR pass `--marketplace-context PATH` if hosting context was wrong. |
+| `[RC-USERCFG-SHELL-INJECT] monitors[i].command interpolates ${user_config.<key>} into a SHELL-FORM command` (CRITICAL, CC v2.1.207) **[NEW v2.158.0]** | plugin-structure-fixes §18 — a monitor has NO exec form; read the option inside the script (`$CLAUDE_PLUGIN_OPTION_<KEY>` or a config file). Never quote/escape the value — the SHAPE is rejected. |
+| `[RC-USERCFG-SHELL-INJECT] plugin.json inline <Event> hook interpolates ${user_config.<key>}` (CRITICAL, CC v2.1.207) **[NEW v2.158.0]** | [hook-fixes.md](hook-fixes.md) §14 — exec form (`args` array), or read `$CLAUDE_PLUGIN_OPTION_<KEY>` in the script. Exec form is legal and must NOT be flagged. |
+| `[RC-USERCFG-PROJECT-SETTINGS] .claude/settings.json sets 'pluginConfigs'` (WARNING, non-blocking, CC v2.1.207) **[NEW v2.158.0]** | plugin-structure-fixes §18 — move the block to user settings (`~/.claude/settings.json`), `--settings`, or managed settings; project-level values are silently ignored at runtime. |
 
 Common crash-category CRITICALs (from `validate_scoring.py`) land here too when the plugin validator raises an exception.
 
@@ -166,6 +169,7 @@ Primary fix guide: [hook-fixes.md](hook-fixes.md)
 | `unset VIRTUAL_ENV` + plain `python3` antipattern **[NEW]** (TRDD-0028dd34) | hook-fixes §13.7 — switch to `uv run --script`; the `unset` becomes unnecessary |
 | HTTP hook on latency-sensitive event with long timeout **[NEW]** (TRDD-0028dd34) | hook-fixes §13.8 — add `"async": true` for fire-and-forget OR cap timeout at 5s |
 | Path-traversal in hook command (`..` segments escape plugin root) **[NEW]** (TRDD-0028dd34) | hook-fixes §13.11 — rewrite path to anchor at `${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PROJECT_DIR}` without `..`, or declare cross-plugin dependency in plugin.json |
+| `[RC-USERCFG-SHELL-INJECT] hooks.json <Event> hook interpolates ${user_config.<key>} into a SHELL-FORM command` (CRITICAL, CC v2.1.207) **[NEW v2.158.0]** | hook-fixes §14 — exec form (move the value into the `args` array) OR read `$CLAUDE_PLUGIN_OPTION_<KEY>` inside the script. **Exec form is LEGAL** and is never flagged; do not "fix" it. Quoting/escaping is NOT a fix. |
 
 ---
 
@@ -230,6 +234,7 @@ Primary fix guide: [mcp-fixes.md](mcp-fixes.md)
 | Deprecated `sse` transport MINOR | mcp-fixes §3 |
 | Cross-source duplicate server name (`MCP server '<name>' is declared in <src1> and <src2>`) **[NEW]** | mcp-fixes §13 |
 | `mcpServers: "./.mcp.json"` redundancy nudge **[NEW 2026-04-18]** | mcp-fixes §12a |
+| `[RC-USERCFG-SHELL-INJECT] server '<name>' headersHelper interpolates ${user_config.<key>}` (CRITICAL, CC v2.1.207) **[NEW v2.158.0]** | mcp-fixes §14 — `headersHelper` has NO exec form; read the value inside the helper script (the server's `env` block, or a config file). |
 
 ---
 
