@@ -34,7 +34,6 @@ from standardize_plugin import (  # noqa: E402
     _merge_canon_json,
     _merge_canon_yaml,
     _publish_py_has_dependency_tag_stage,
-    _yaml_custom_top_level_keys,
     migrate_publish_py_dependency_tag,
 )
 
@@ -461,27 +460,19 @@ def test_force_templates_merges_markdownlint_json(tmp_path: Path) -> None:
     assert merged["MD013"] is False, "canon key was not merged in"
 
 
-def test_yaml_custom_top_level_keys_detected() -> None:
-    """POSITIVE: a plugin's own top-level YAML key is detected as custom."""
-    canon = "APPLY_FIXES: none\nENABLE_LINTERS:\n  - PYTHON_RUFF\n"
-    plugin = (
-        "APPLY_FIXES: none\n"
-        "ENABLE_LINTERS:\n"
-        "  - PYTHON_RUFF\n"
-        "# CKV_DOCKER_2 (HEALTHCHECK) is skipped: this image is a short-lived\n"
-        "# CI job, not a long-running service, so a healthcheck is meaningless.\n"
-        "REPOSITORY_CHECKOV_ARGUMENTS:\n"
-        "  - --skip-check\n"
-        "  - CKV_DOCKER_2\n"
-    )
-    assert _yaml_custom_top_level_keys(plugin, canon) == ["REPOSITORY_CHECKOV_ARGUMENTS"]
+def test_yaml_stale_plugin_still_receives_the_canon_keys_it_lacks(tmp_path: Path) -> None:
+    """NEGATIVE: a merely-STALE file still gets canon's newer keys imported.
 
-
-def test_yaml_no_custom_keys_when_plugin_is_merely_stale() -> None:
-    """NEGATIVE: a stale-but-canon-only YAML file reports NO custom keys (so it refreshes)."""
+    Preserving the author's values must not degrade into "never refresh anything":
+    a key canon adds and the plugin does not have is still pulled in.
+    """
     canon = "APPLY_FIXES: none\nENABLE_LINTERS:\n  - PYTHON_RUFF\n  - SPELL_CSPELL\n"
-    plugin = "APPLY_FIXES: all\nENABLE_LINTERS:\n  - PYTHON_RUFF\n"
-    assert _yaml_custom_top_level_keys(plugin, canon) == []
+    plugin = "APPLY_FIXES: none\n"
+
+    merged, _kept, added = _merge_canon_yaml(plugin, canon)
+
+    assert added == ["ENABLE_LINTERS"]
+    assert "SPELL_CSPELL" in merged
 
 
 def test_yaml_merge_preserves_a_custom_value_inside_a_canon_key(tmp_path: Path) -> None:
