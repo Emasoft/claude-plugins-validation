@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Bumps the plugin version AND runs the full publish pipeline (TRDD-bbff5bc5 — single entry point). `publish.py` is the canonical entry point — it bumps the version in `plugin.json` + `pyproject.toml` + `__version__` vars, refreshes the README badge, regenerates the CHANGELOG, refreshes `.plugin-self-hashes.json` (if present), commits + tags + pushes, then creates the GitHub release. Every gate must pass before any push (no `--skip-*` flags exist). Loaded by `cpv-main-menu-agent` via the Manage → Bump version menu branch.
+Bumps the plugin version AND runs the full publish pipeline (TRDD-bbff5bc5 — single entry point). `publish.py` is the canonical entry point — it bumps the version in `plugin.json` + `pyproject.toml` + `__version__` vars, refreshes the README badge, regenerates the CHANGELOG, refreshes `.plugin-self-hashes.json` (if present), commits + tags + pushes, then creates the GitHub release. Every gate must pass before any push (no `--skip-*` flags exist). Loaded dynamically via the-skills-menu, reached via the Manage → Bump version menu branch.
 
 ## Prerequisites
 

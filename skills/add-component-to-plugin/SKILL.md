@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Adds a new component (skill / agent / command / hook / mcp) to an existing plugin without re-running the generator or hand-editing scaffolds. Each component lands as a minimal but valid stub with frontmatter that passes `validate_plugin` / `validate_skill` out of the box. Loaded by `cpv-main-menu-agent` via the Manage → Add component menu branch.
+Adds a new component (skill / agent / command / hook / mcp) to an existing plugin without re-running the generator or hand-editing scaffolds. Each component lands as a minimal but valid stub with frontmatter that passes `validate_plugin` / `validate_skill` out of the box. Loaded dynamically via the-skills-menu, reached via the Manage → Add component menu branch.
 
 ## Prerequisites
 

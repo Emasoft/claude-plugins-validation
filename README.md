@@ -477,9 +477,9 @@ When used as a Claude Code plugin, **agents are the primary way to interact with
 | **plugin-devitalizer** | Converts flagged execution-class code into provably-inert data so a plugin passes the security gate by neutralizing the threat shape — never by muting a rule or relaxing `--strict`; load-bearing code is flagged, not broken | "Devitalize the execution-class findings", "Make this threat inert without losing functionality" |
 | **plugin-leaks-preventer** | Redacts leaked secrets (runtime-reads the genuinely-needed ones) and implements missing safeguards — passes the security gate by removing leaks and hardening, never by muting a rule; flags what it can't safely fix | "Redact the leaked secret in my plugin", "Harden the unsafe yaml.load my scan flagged" |
 
-This table lists the primary user-facing agents; CPV ships 15 in total (the
-rest — `cache-optimizer-agent`, `cpv-doctor-agent`, `cpv-main-menu-agent`,
-`cpv-spark`, `cpv` — are dispatched for you by the menu or by other agents).
+This table lists the primary user-facing agents; CPV ships 14 in total (the
+rest — `cache-optimizer-agent`, `cpv-doctor-agent`, `cpv-spark`, `cpv` — are
+dispatched for you by the menu or by other agents).
 You never need to remember command names: run **`/cpv-main-menu`** for an
 interactive menu, or just tell any Claude what you need and the right agent
 takes over and guides you with plain-text questions.

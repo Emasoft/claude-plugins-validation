@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Converts a folder of standalone Claude Code components into a single installable plugin. Useful for recovering from "Phase 0 plugin-shape detection refused" — wrap the detected components into a real plugin shape that loads correctly. Also useful for rolling skills / agents / commands from disparate projects into a shared plugin, or migrating ad-hoc component folders to publishable plugins without hand-editing manifests. The script discovers every supported component type, validates the selection, then scaffolds a fresh plugin and copies the components into their canonical locations. Loaded by `cpv-main-menu-agent` via the Create → Pack components menu branch.
+Converts a folder of standalone Claude Code components into a single installable plugin. Useful for recovering from "Phase 0 plugin-shape detection refused" — wrap the detected components into a real plugin shape that loads correctly. Also useful for rolling skills / agents / commands from disparate projects into a shared plugin, or migrating ad-hoc component folders to publishable plugins without hand-editing manifests. The script discovers every supported component type, validates the selection, then scaffolds a fresh plugin and copies the components into their canonical locations. Loaded dynamically via the-skills-menu, reached via the Create → Pack components menu branch.
 
 ## Prerequisites
 

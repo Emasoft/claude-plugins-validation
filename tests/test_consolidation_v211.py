@@ -9,7 +9,7 @@ v2.90.0 (TRDD-c50531c2 — menu unification) is the latest re-shape:
 
 Validates that:
 - Exactly 1 command exists in commands/ (`cpv-main-menu.md`).
-- That command delegates to `cpv-main-menu-agent`.
+- That command runs INLINE in the main session (no subagent fork).
 - The 23 deleted user-facing commands are no longer in commands/.
 - The 14 commands-turned-skills no longer exist in commands/.
 - Old obsolete commands (from earlier waves) are also still gone.
@@ -55,15 +55,17 @@ def _parse_frontmatter(path: Path) -> dict | None:
 
 DIRECT_SCRIPT_COMMANDS: list[str] = []
 
-# --- Agent commands (with agent field) ---
+# --- Agent commands (commands with an `agent:` field) ---
 #
-# v2.90.0 (TRDD-c50531c2): only ONE slash command remains. It delegates to
-# `cpv-main-menu-agent`, which itself does the menu orchestration via the
-# `cpv-main-menu-skill` reference table.
+# Post-de-fork: NO command delegates to an agent. `/cpv-main-menu` now runs
+# INLINE in the main session (its frontmatter carries no `agent:`/`context:`),
+# and `cpv-main-menu-agent` was deleted. The fork was a stalled-migration
+# leftover the project's own CA-07 rule flags — it cold-re-primed the prompt
+# cache for zero benefit, since the claude-menu-system Stop hook already renders
+# the menu. Deliberate design change, not drift. The set is therefore empty,
+# like DIRECT_SCRIPT_COMMANDS above.
 
-AGENT_COMMANDS = {
-    "cpv-main-menu": "cpv-main-menu-agent",
-}
+AGENT_COMMANDS: dict[str, str] = {}
 
 # --- Commands deleted in v2.90.0 (TRDD-c50531c2 menu unification) ---
 #

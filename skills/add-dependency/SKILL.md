@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Adds one or more plugin dependencies to a target plugin's `plugin.json::dependencies` array. Two input modes that can be combined; the engine deduplicates by name (last-write-wins), sorts the result alphabetically, writes atomically, and rolls back from a `.bak` if the post-write validation introduces any new CRITICAL/MAJOR finding. Loaded by `cpv-main-menu-agent` via the Create → Add dependencies menu branch.
+Adds one or more plugin dependencies to a target plugin's `plugin.json::dependencies` array. Two input modes that can be combined; the engine deduplicates by name (last-write-wins), sorts the result alphabetically, writes atomically, and rolls back from a `.bak` if the post-write validation introduces any new CRITICAL/MAJOR finding. Loaded dynamically via the-skills-menu, reached via the Create → Add dependencies menu branch.
 
 ## Prerequisites
 

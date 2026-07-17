@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Shrinks every CPV-style plugin install by moving dev-only folders into per-plugin git submodules. Claude Code's plugin installer does NOT pass `--recurse-submodules`, so the submodule content never reaches the user — only the `.gitmodules` pointer (~86 bytes) does. Verified empirically against PSS (`perfect-skill-suggester`): the gigabytes of Rust source that lives in PSS's `rust/` submodule never ship to end users. This skill generalises the pattern to N submodules per plugin. Loaded by `cpv-main-menu-agent` via the Manage → Strip dev parts menu branch.
+Shrinks every CPV-style plugin install by moving dev-only folders into per-plugin git submodules. Claude Code's plugin installer does NOT pass `--recurse-submodules`, so the submodule content never reaches the user — only the `.gitmodules` pointer (~86 bytes) does. Verified empirically against PSS (`perfect-skill-suggester`): the gigabytes of Rust source that lives in PSS's `rust/` submodule never ship to end users. This skill generalises the pattern to N submodules per plugin. Loaded dynamically via the-skills-menu, reached via the Manage → Strip dev parts menu branch.
 
 Implements TRDD-793ac32a — exploits Claude Code's no-recurse-submodules shallow clone (PSS pattern).
 

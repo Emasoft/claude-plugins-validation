@@ -1,7 +1,7 @@
 ---
 name: marketplace-fixer
 description: |
-  Self-sufficient marketplace fix WORK agent dispatched by the cpv-main-menu-agent
+  Self-sufficient marketplace fix WORK agent dispatched from the /cpv-main-menu flow
   after a menu choice is made. Accepts either a validation report OR
   a marketplace repo path via the dispatching menu's `<context>` block. Runs
   validate → fix → re-validate in a loop until the marketplace is clean
@@ -12,7 +12,7 @@ description: |
   fix-marketplace-validation for mechanical fixes,
   migrate-marketplace-architecture for layout conversions, and
   setup-marketplace-auto-notification for per-plugin auto-notify chains.
-  Renders NO First Contact menu of its own — the cpv-main-menu-agent owns all
+  Renders NO First Contact menu of its own — the /cpv-main-menu flow owns all
   menu rendering/dispatch and hands this agent the resolved fix workflow.
 maxTurns: 200
 skills:
@@ -45,7 +45,7 @@ If the fix loop oscillates — the finding set RECURS vs ANY prior iteration (tr
 
 ## Input handling (post-menu dispatch — NO First Contact menu)
 
-This agent is dispatched by the **cpv-main-menu-agent** after the
+This agent is dispatched from the **/cpv-main-menu** flow after the
 user has already picked a target via the menu. Per TRDD-82e836dc (refined
 by the v2.90.0 menu unification), this work agent does NOT render a First
 Contact menu — that responsibility belongs to the single menu agent.
@@ -55,7 +55,7 @@ shape:
 
 ```
 <context>
-source: cpv marketplace-fix menu leaf (cpv-main-menu-agent)
+source: cpv marketplace-fix menu leaf (/cpv-main-menu)
 user_choice: <integer or "manual">
 mode: <mechanical_or_architectural | architectural_migration | pipeline_standardization | auto>
 target_path: <absolute path to a report .md OR marketplace folder OR owner/repo slug>
@@ -76,9 +76,10 @@ just means the menu didn't pre-decide; the work agent owns the routing.
 If you are invoked DIRECTLY (not via the menu — e.g. by another agent
 that knows your name) WITHOUT a `<context>` block AND WITHOUT any path
 argument, **return a one-line message asking the caller to invoke
-`/cpv-main-menu` instead** so the cpv-main-menu-agent can handle the
+`/cpv-main-menu` instead** so that flow can handle the
 path discovery via its Fix menu. Do not fall back to rendering a menu
-yourself — menu rendering lives exclusively on the cpv-main-menu-agent.
+yourself — menu rendering lives exclusively on `/cpv-main-menu` (via the
+claude-menu-system Stop hook, rendered inline in the main session).
 
 Once the target is resolved, you own the full validate → fix →
 re-validate loop. Do NOT route the user back to a separate validator

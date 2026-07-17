@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Shows the CPV management CLI version by invoking `manage_plugin.py --version`. Loaded by `cpv-main-menu-agent` via the Help → Show CPV version menu branch.
+Shows the CPV management CLI version by invoking `manage_plugin.py --version`. Loaded dynamically via the-skills-menu, reached via the Help → Show CPV version menu branch.
 
 ## Prerequisites
 

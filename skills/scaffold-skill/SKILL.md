@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Adds a new skill to an existing plugin. The scaffold lands at `<plugin-path>/skills/<skill-name>/SKILL.md` with valid frontmatter so the plugin still passes `validate_plugin` immediately. Loaded by `cpv-main-menu-agent` via the Create → Add skill menu branch.
+Adds a new skill to an existing plugin. The scaffold lands at `<plugin-path>/skills/<skill-name>/SKILL.md` with valid frontmatter so the plugin still passes `validate_plugin` immediately. Loaded dynamically via the-skills-menu, reached via the Create → Add skill menu branch.
 
 ## Prerequisites
 

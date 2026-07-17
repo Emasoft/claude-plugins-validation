@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Bulk-applies the inverse of CPV's detection regexes — read-only audit becomes read-write fix at zero LLM cost. Designed for high-volume mechanical fixes where the plugin-fixer agent is the wrong tool because the work is line-local and predictable. Addresses [GitHub issue #17](https://github.com/Emasoft/claude-plugins-validation/issues/17) and the high-volume Categories C and D of [issue #16](https://github.com/Emasoft/claude-plugins-validation/issues/16). Loaded by `cpv-main-menu-agent` via the Fix → Deterministic codemod menu branch.
+Bulk-applies the inverse of CPV's detection regexes — read-only audit becomes read-write fix at zero LLM cost. Designed for high-volume mechanical fixes where the plugin-fixer agent is the wrong tool because the work is line-local and predictable. Addresses [GitHub issue #17](https://github.com/Emasoft/claude-plugins-validation/issues/17) and the high-volume Categories C and D of [issue #16](https://github.com/Emasoft/claude-plugins-validation/issues/16). Loaded dynamically via the-skills-menu, reached via the Fix → Deterministic codemod menu branch.
 
 See [subcommands](references/subcommands.md) for detail.
 > Subcommand table · Safety contract · Recommended workflow · When the codemod is the WRONG tool · Recovery

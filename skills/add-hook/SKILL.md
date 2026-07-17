@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Adds a new hook entry to a plugin's `hooks/hooks.json`. The scaffold is idempotent — re-running with the same event+command is a no-op. The new hook command MUST be cross-platform: prefer Python or Node.js delegation. Bash-only constructs (`set -euo pipefail`, `[[ ]]`, `$(<file)`, process substitution, brace expansion) will trigger `validate_hook` MAJOR findings. Loaded by `cpv-main-menu-agent` via the Create → Add hook menu branch.
+Adds a new hook entry to a plugin's `hooks/hooks.json`. The scaffold is idempotent — re-running with the same event+command is a no-op. The new hook command MUST be cross-platform: prefer Python or Node.js delegation. Bash-only constructs (`set -euo pipefail`, `[[ ]]`, `$(<file)`, process substitution, brace expansion) will trigger `validate_hook` MAJOR findings. Loaded dynamically via the-skills-menu, reached via the Create → Add hook menu branch.
 
 ## Prerequisites
 
