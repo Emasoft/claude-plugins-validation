@@ -89,13 +89,22 @@ STATUS_NA: str = "N/A"
 SCRIPTS_DIR: Path = Path(__file__).resolve().parent
 REPO_ROOT: Path = SCRIPTS_DIR.parent
 
-# The 6 external scanners cpv_install_scanners can install. Names MUST match the
-# binary names ``shutil.which`` resolves to AND the keys of
-# ``cpv_install_scanners.install_all_scanners()`` — the Cisco AI-Defense tool
-# installs a shim named ``skill-scanner`` (via ``uv tool install
-# cisco-ai-skill-scanner``), NOT ``cisco-skill-scanner``. Using the wrong name
-# here made ``check_external_scanners`` report the Cisco scanner perpetually
+# The 6 BASELINE, always-on external scanners whose presence on PATH defines
+# "full-speed" operation. Each name MUST be a real binary name ``shutil.which``
+# resolves to AND a key of ``cpv_install_scanners.install_all_scanners()`` — the
+# Cisco AI-Defense tool installs a shim named ``skill-scanner`` (via ``uv tool
+# install cisco-ai-skill-scanner``), NOT ``cisco-skill-scanner``. Using the wrong
+# name here made ``check_external_scanners`` report the Cisco scanner perpetually
 # missing even when installed (it would never reach SET / 6-of-6).
+#
+# This is a strict SUBSET of install_all_scanners() keys, NOT the whole set — two
+# entries are deliberately excluded from the baseline PATH bar:
+#   * ``google-re2`` — a Python module (probed by import, not on PATH), a pure
+#     performance accelerator; and
+#   * ``snyk-agent-scan`` — OPT-IN and token-gated (does nothing without a
+#     SNYK_TOKEN), so requiring its binary for "SET" would wrongly gate
+#     full-coverage on a scanner a tokenless user can never run.
+# Do NOT add either here: SET must mean "the always-on scanners are present".
 EXTERNAL_SCANNER_NAMES: tuple[str, ...] = (
     "fclones",
     "cc-audit",

@@ -230,8 +230,8 @@ class TestInstallAllScannersIncludesGoogleRe2:
         assert "google-re2" in statuses
         assert statuses["google-re2"] is True
 
-    def test_all_seven_keys_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Adding google-re2 must NOT drop any of the 6 pre-existing scanners."""
+    def test_all_scanner_keys_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Adding google-re2 (and later snyk-agent-scan) must NOT drop any pre-existing scanner."""
         monkeypatch.setattr(cis.shutil, "which", lambda name: f"/usr/bin/{name}")
         monkeypatch.setattr(cis, "_is_module_importable", lambda name: True)
         statuses = cis.install_all_scanners()
@@ -242,6 +242,7 @@ class TestInstallAllScannersIncludesGoogleRe2:
             "semgrep",
             "tirith",
             "skill-scanner",
+            "snyk-agent-scan",
             "google-re2",
         }
 
@@ -409,7 +410,9 @@ class TestGenCiYmlScanCacheBlock:
         # The matrix test job is now 'Test matrix'; the aggregate gate keeps the required 'Test'.
         assert jobs["test"].get("name") == "Test matrix", "matrix test job display name is now 'Test matrix'"
         assert "test-gate" in jobs, "aggregate Test gate job must be present"
-        assert jobs["test-gate"].get("name") == "Test", "aggregate gate display name must stay 'Test' (the required branch context)"
+        assert jobs["test-gate"].get("name") == "Test", (
+            "aggregate gate display name must stay 'Test' (the required branch context)"
+        )
         assert jobs["test-gate"].get("needs") == ["test"], "aggregate gate must need the matrix test job"
         # Test job must NOT have inherited a cache step (only validate gets it).
         test_steps = jobs["test"].get("steps", [])

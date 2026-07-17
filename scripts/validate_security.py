@@ -10442,6 +10442,103 @@ def validate_security(
             details=details,
         )
 
+    # Check 28 — Snyk Agent Scan (SKILLS-ONLY) via uvx remote.
+    #
+    # OPT-IN BY DESIGN. Unlike every other scanner here, this one hard-requires
+    # a SNYK_TOKEN (a free Snyk account) and is CLOUD-BACKED — it sends scanned
+    # skill content to Snyk's analysis server. CPV must stay usable offline and
+    # must not ship a user's private plugin source to a third party by default,
+    # so it runs only when the operator exported a token. Absent one it is
+    # SKIPPED with a visible WARNING naming the variable and the page to get it
+    # — never folded into the pass count, because a scan that never ran must
+    # never look like a scan that passed.
+    #
+    # It is SKILLS-ONLY and never touches an MCP config: scanning one makes the
+    # tool execute the server commands inside it, which on an untrusted
+    # pre-install plugin would turn CPV's own scan into the exploit. The three
+    # safety invariants (skills-dir target / never a config file; no --ci and
+    # no --dangerously-run-mcp-servers; "cannot check" != "clean") are stated
+    # and reasoned in scripts/cpv_snyk_agent_scanner.py — read them before
+    # touching this block.
+    from cpv_snyk_agent_scanner import (  # noqa: PLC0415
+        SNYK_TOKEN_ENV,
+        is_snyk_token_present,
+        run_snyk_agent_scan,
+    )
+    from cpv_snyk_agent_scanner import (  # noqa: PLC0415
+        report_findings as snyk_report_findings,
+    )
+
+    snyk_gi = get_gitignore_filter(plugin_path)
+
+    def _snyk_should_skip(file_path: str, line: int | None) -> bool:
+        """Apply CPV's self-scan filter chain to each Snyk finding.
+
+        Mirrors ``_cisco_should_skip``. Snyk findings anchor to a scanned skill
+        directory rather than a file:line, so the line-level predicates the
+        Cisco filter applies have nothing to key on and are omitted here; the
+        path-level filters (self-scan, vendored, dev-scratch, test, gitignored)
+        all still apply.
+        """
+        if not file_path:
+            return False
+        if _is_always_skip_basename(file_path):
+            return True
+        if cpv_self_scan_skip(file_path):
+            return True
+        if _is_vendored_dep_path(file_path):
+            return True
+        if _is_dev_scratch_path(file_path):
+            return True
+        if _is_test_file_path(file_path):
+            return True
+        if _external_finding_is_gitignored(file_path, snyk_gi):
+            return True
+        return False
+
+    snyk_len_before = len(report.results)
+    snyk_result = run_snyk_agent_scan(plugin_path)
+    snyk_report_findings(snyk_result, plugin_path, report, should_skip=_snyk_should_skip)
+    snyk_new_results = report.results[snyk_len_before:]
+    snyk_findings = sum(1 for r in snyk_new_results if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT"))
+
+    # Status comes off the result object's own fields rather than sniffing the
+    # emitted WARNING text: SnykScanResult states invoked/exit_code explicitly,
+    # so there is no reason to re-derive them from prose that a later reword
+    # would silently break.
+    if snyk_result.invoked:
+        snyk_status = "RAN"
+        snyk_details = ""
+    elif not is_snyk_token_present():
+        snyk_status = "SKIPPED"
+        snyk_details = f"{SNYK_TOKEN_ENV} not set — opt-in cloud scanner; see WARNING above"
+    elif snyk_result.exit_code == -1:
+        # -1 is the "never attempted" family: no launcher on PATH, or nothing
+        # scannable (no skills/agents/commands/rules/hooks). Coverage was not
+        # owed, so SKIPPED is honest.
+        snyk_status = "SKIPPED"
+        snyk_details = "Snyk Agent Scan did not run — see WARNING above"
+    elif snyk_result.exit_code == -2:
+        snyk_status = "FAILED"
+        snyk_details = "Snyk Agent Scan timed out (override CPV_SNYK_SCAN_TIMEOUT_S)"
+    else:
+        # Token present and coverage WAS attempted but did not complete: a
+        # staging failure (-4), a launcher crash (-3), or empty/unparseable
+        # output. That is "cannot check", not "nothing to check", so it is
+        # FAILED — the step table must never read a broken scan as a benign
+        # skip (the same "cannot check != clean" discipline the scanner keeps).
+        snyk_status = "FAILED"
+        snyk_details = "Snyk Agent Scan attempted but did not complete — see WARNING above"
+
+    _record_step(
+        28,
+        "External: Snyk Agent Scan (skills-only, opt-in)",
+        snyk_status,
+        findings=snyk_findings,
+        files="uvx snyk-agent-scan (skills/)" if snyk_status == "RAN" else "",
+        details=snyk_details,
+    )
+
     # Check 27 — SkillAudit native rules (MANDATORY, in-process).
     # Originally `npx skillaudit` was considered; rejected because the npm
     # package pulls in `ethers` + `@x402/*` + `express` as dependencies
@@ -11219,6 +11316,9 @@ Security Checks Performed:
   19. semgrep    (always runs — same skip rule as trufflehog)
   20. Cisco AI Defense skill-scanner via uvx remote (always runs unless
       uvx is missing or the package is unreachable at its PyPI source)
+  21. Snyk Agent Scan via uvx remote (OPT-IN: runs only when SNYK_TOKEN is
+      exported; skills-only + staged agents/commands/rules/hooks, never runs
+      an MCP server; absent token -> visible WARNING, never counted as clean)
 
 Exit Codes:
   0 - All checks passed

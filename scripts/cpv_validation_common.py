@@ -296,8 +296,9 @@ def level_to_severity(level: Level) -> int:
 # =============================================================================
 
 # All valid hook event types in Claude Code (aligned with v2.1.121).
-# Spec lists 28 events: 27 official + `Setup` retained internally for the
-# command/mcp_tool-only gating, kept here as legacy WARNING-only.
+# `Setup` is a CURRENT event (hooks.md ### Setup — fires on
+# --init-only/--init/--maintenance); it is subject to the command/mcp_tool-only
+# gating because it fires before MCP servers connect.
 VALID_HOOK_EVENTS = {
     "PreToolUse",
     "PostToolUse",
@@ -314,7 +315,7 @@ VALID_HOOK_EVENTS = {
     "SessionEnd",
     "PreCompact",
     "PostCompact",  # v2.1.76 — fires after compaction completes
-    "Setup",  # [legacy — emits WARNING] retained internally for gating only
+    "Setup",  # current event (hooks.md ### Setup); command/mcp_tool-only gating
     "TeammateIdle",
     "TaskCompleted",
     "ConfigChange",
@@ -651,7 +652,11 @@ VALID_EFFORT_VALUES = {"low", "medium", "high", "xhigh", "max"}
 _FULL_MODEL_ID_RE = re.compile(r"^claude-(?:opus|sonnet|haiku)-\d[\w.-]*(?:\[1m\])?$")
 
 # Short aliases with optional [1m] suffix: opus, sonnet[1m], haiku, fable, etc.
-_SHORT_MODEL_RE = re.compile(r"^(?:haiku|sonnet|opus|fable|inherit|default|opusplan)(?:\[1m\])?$", re.IGNORECASE)
+# `best` (model-config.md L34/L342, v2.1.205) is a first-class alias — "Fable 5
+# where available, else latest Opus" — usable as a `model` setting, just like
+# `default`/`opusplan`. It is an ALIAS, not a base model, so it lives only here
+# in the regex and is deliberately NOT added to VALID_MODELS (the base-model set).
+_SHORT_MODEL_RE = re.compile(r"^(?:haiku|sonnet|opus|fable|inherit|default|opusplan|best)(?:\[1m\])?$", re.IGNORECASE)
 
 
 def is_valid_model(value: str) -> bool:

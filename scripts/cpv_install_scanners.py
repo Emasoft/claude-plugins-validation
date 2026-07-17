@@ -46,6 +46,7 @@ __all__ = [
     "ensure_semgrep",
     "ensure_tirith",
     "ensure_cisco_skill_scanner",
+    "ensure_snyk_agent_scan",
     "ensure_google_re2",
     "install_all_scanners",
 ]
@@ -491,6 +492,31 @@ def ensure_cisco_skill_scanner() -> bool:
     return shutil.which("skill-scanner") is not None
 
 
+# ── snyk-agent-scan (uvx-resolved skills scanner; token-gated) ────────
+
+
+def ensure_snyk_agent_scan() -> bool:
+    """Install ``snyk-agent-scan`` persistently via ``uv tool install``.
+
+    The persistent install creates a ``snyk-agent-scan`` shim on PATH so we
+    stop paying the ``uvx snyk-agent-scan@latest`` resolution cost on every
+    scan (mirrors ``ensure_cisco_skill_scanner``).
+
+    Installing the binary does NOT enable the scan. The scan is opt-in on an
+    exported ``SNYK_TOKEN``, because the tool hard-requires a Snyk account and
+    is cloud-backed — see ``scripts/cpv_snyk_agent_scanner.py``. A True here
+    therefore means "the launcher is warm", not "the scanner will run".
+    """
+    if shutil.which("snyk-agent-scan"):
+        return True
+    if _opt_out("CPV_NO_SNYK_INSTALL"):
+        return False
+    if shutil.which("uv"):
+        _silent_run(["uv", "tool", "install", "snyk-agent-scan"])
+    _ensure_local_bin_on_path()
+    return shutil.which("snyk-agent-scan") is not None
+
+
 # ── google-re2 (optional Python module — RE2 regex engine) ────────────
 
 
@@ -562,6 +588,11 @@ def install_all_scanners() -> dict[str, bool]:
     ``google-re2`` is included as an OPTIONAL accelerator — skillaudit
     falls back to the Python ``re`` module if it's unavailable, so a
     False here is purely a performance signal, never a correctness one.
+
+    ``snyk-agent-scan`` installs the launcher, but the scan itself is
+    opt-in on an exported ``SNYK_TOKEN`` (a free Snyk account); a warm
+    launcher without a token still will not run. See
+    ``scripts/cpv_snyk_agent_scanner.py``.
     """
     return {
         "fclones": ensure_fclones(),
@@ -570,15 +601,22 @@ def install_all_scanners() -> dict[str, bool]:
         "semgrep": ensure_semgrep(),
         "tirith": ensure_tirith(),
         "skill-scanner": ensure_cisco_skill_scanner(),
+        "snyk-agent-scan": ensure_snyk_agent_scan(),
         "google-re2": ensure_google_re2(),
     }
 
 
-# Scanners whose absence is a PERFORMANCE signal, never a correctness one.
-# `google-re2` only accelerates skillaudit's regex matcher; CPV falls back
-# to the stdlib ``re`` module when it's missing, so its install failing must
-# NOT make the batch-installer CLI report a non-zero (failed) exit. (audit MED #68)
-_OPTIONAL_SCANNERS = frozenset({"google-re2"})
+# Scanners whose absence must NOT make the batch-installer CLI report a non-zero
+# (failed) exit, because their absence is never a correctness gap:
+#   * `google-re2` — a pure performance accelerator for skillaudit's regex
+#     matcher; CPV falls back to the stdlib ``re`` module when it is missing
+#     (audit MED #68); and
+#   * `snyk-agent-scan` — OPT-IN and token-gated. A tokenless user cannot run it
+#     regardless, so a failed launcher install (e.g. no network) is not a setup
+#     failure for them; the security scan degrades to a visible WARNING, never a
+#     block. Treating it as REQUIRED would fail `cpv-doctor --install-scanners`
+#     for every user who does not use Snyk.
+_OPTIONAL_SCANNERS = frozenset({"google-re2", "snyk-agent-scan"})
 
 
 if __name__ == "__main__":  # pragma: no cover — convenience entry point

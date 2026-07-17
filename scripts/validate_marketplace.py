@@ -357,6 +357,8 @@ RESERVED_MARKETPLACE_NAMES = {
     "claude-for-legal",
     "claude-for-financial-services",
     "financial-services-plugins",
+    "first-party-plugins",  # v2.1.205 — reserved (plugin-marketplaces.md:163)
+    "healthcare",  # v2.1.205 — reserved (plugin-marketplaces.md:163)
 }
 
 # Impersonation prefix patterns — names that LOOK like official Anthropic

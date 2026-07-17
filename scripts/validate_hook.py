@@ -72,7 +72,7 @@ EVENTS_WITH_MATCHERS = {
     "Notification",  # matcher: notification_type (permission_prompt, idle_prompt, auth_success, elicitation_dialog)
     "PreCompact",  # matcher: manual, auto
     "PostCompact",  # matcher: manual, auto (v2.1.76)
-    "Setup",  # matcher: (legacy — not in official docs as of v2.1.109)
+    "Setup",  # matcher: init, maintenance — current event (hooks.md ### Setup)
     "SessionStart",  # matcher: startup, resume, clear, compact
     "SessionEnd",  # matcher: clear, resume, logout, prompt_input_exit, bypass_permissions_disabled, other (hooks.md L192)
     "SubagentStart",  # matcher: agent name (Bash, Explore, Plan, custom)
@@ -100,6 +100,7 @@ EVENTS_WITHOUT_MATCHERS = {
     "WorktreeRemove",
     "CwdChanged",  # v2.1.83
     "PostToolBatch",  # v2.1.121 era — fires after a parallel tool batch resolves; matcher ignored
+    "MessageDisplay",  # v2.1.152 — listed among the no-matcher-support events (hooks.md matcher table)
 }
 
 # Valid hook types (5 as of v2.1.118: command, http, mcp_tool, prompt, agent).
@@ -260,14 +261,18 @@ COMMON_TOOL_NAMES = {
     "ReadMcpResourceTool",
 }
 
-# Common notification types.
+# Common notification types (hooks.md Notification matcher table = 8 values).
 # ``agent_needs_input`` / ``agent_completed`` are the agent-lifecycle triggers
-# added in Claude Code v2.1.198.
+# added in Claude Code v2.1.198. ``elicitation_complete`` / ``elicitation_response``
+# are documented Notification matcher values (hooks.md); without them a legit
+# value drew a spurious INFO "unknown type".
 COMMON_NOTIFICATION_TYPES = {
     "permission_prompt",
     "idle_prompt",
     "auth_success",
     "elicitation_dialog",
+    "elicitation_complete",
+    "elicitation_response",
     "agent_needs_input",
     "agent_completed",
 }
@@ -293,13 +298,18 @@ SESSION_END_REASONS = {
     "other",
 }
 
-# StopFailure error values (hooks.md L200).
-# 7 values total; `max_output_tokens` was the last add (v2.1.78).
+# StopFailure error values (hooks.md StopFailure matcher table = 10 values).
+# `overloaded`, `oauth_org_not_allowed`, `model_not_found` are documented
+# StopFailure error values; without them a legit value drew a spurious INFO
+# "unknown error".
 STOPFAILURE_ERRORS = {
     "rate_limit",
+    "overloaded",
     "authentication_failed",
+    "oauth_org_not_allowed",
     "billing_error",
     "invalid_request",
+    "model_not_found",
     "server_error",
     "max_output_tokens",
     "unknown",
@@ -797,16 +807,13 @@ def validate_event_name(event_name: str, report: ValidationReport) -> bool:
         else:
             report.critical(f"Unknown hook event: '{event_name}'. Valid events: {sorted(VALID_HOOK_EVENTS)}")
         return False
-    # Legacy/extended events — still accepted but nudge users toward the current spec.
-    if event_name == "Setup":
-        # Single authoritative version string for the Setup-deprecation claim,
-        # kept in sync with validate_hook_output.py and cpv_validation_common.py
-        # (all say v2.1.109). Setup is retained in VALID_HOOK_EVENTS for gating
-        # only; it is not listed in the current hooks spec.
-        report.warning(
-            "Hook event 'Setup' is not in the current official spec (as of Claude Code v2.1.109). "
-            "It may be legacy or deprecated. Verify intent; remove if unused."
-        )
+    # `Setup` is a CURRENT hook event (hooks.md `### Setup`) — it fires on
+    # `--init-only`/`--init`/`--maintenance`, has its own input/output/matcher
+    # tables, and is cross-referenced from SessionStart. It used to draw a
+    # stale "not in the current official spec / legacy or deprecated" WARNING
+    # here, which was a FALSE WARNING on every legitimate Setup hook. Removed;
+    # Setup stays in VALID_HOOK_EVENTS and keeps its command/mcp_tool type
+    # restriction (it fires before MCP servers connect).
     return True
 
 
@@ -890,7 +897,7 @@ def validate_matcher(matcher: Any, event_name: str, report: ValidationReport) ->
     if event_name == "PostCompact":
         _check_matcher_values(matcher, COMPACT_TRIGGERS, "PostCompact", "trigger", report)
     if event_name == "Setup":
-        # Setup is a legacy event (matcher: init/maintenance). The check is
+        # Setup is a current event (matcher: init/maintenance). The check is
         # INFO-only via _check_matcher_values, so an undocumented future
         # trigger is hinted, never rejected. Wires in SETUP_TRIGGERS, which
         # was defined for exactly this branch but previously never referenced.

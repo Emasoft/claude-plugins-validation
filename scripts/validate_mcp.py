@@ -66,8 +66,13 @@ VALID_TRANSPORTS = {"stdio", "sse", "http"}
 # logs a warning. Plugins shipping a server under a reserved name will look
 # loaded to the user but produce no tools.
 # v2.1.128: `workspace` was added as a reserved name (changelog 2026-05-04).
+# v2.1.205: `Claude Preview` and `Claude Browser` reserved ahead of the Claude
+#           Desktop pane rename — a user-configured server can no longer register
+#           under either name. Exact-string match, matching CC's documented names.
 RESERVED_MCP_SERVER_NAMES = {
     "workspace",  # v2.1.128 — reserved by CC; existing servers with this name are skipped
+    "Claude Preview",  # v2.1.205 — reserved by CC (Claude Desktop pane)
+    "Claude Browser",  # v2.1.205 — reserved by CC (Claude Desktop pane)
 }
 
 # Known MCP server configuration fields
@@ -164,16 +169,17 @@ def validate_mcp_server(
     """
     ctx = f"{file_context}:{server_name}"
 
-    # v2.1.128 — server names in RESERVED_MCP_SERVER_NAMES are silently skipped
-    # by Claude Code at load time. The plugin still reports as installed but
-    # produces no tools. Surface this as MAJOR so authors rename before publish.
+    # Server names in RESERVED_MCP_SERVER_NAMES are silently skipped by Claude
+    # Code at load time (see the set for the per-name reserving version). The
+    # plugin still reports as installed but produces no tools. Surface this as
+    # MAJOR so authors rename before publish.
     if server_name in RESERVED_MCP_SERVER_NAMES:
         # Note: pass NO `file=` arg. `ctx` ("mcp-config:server") is a context
         # label, not a file path — every other direct report.* call in this file
         # carries the server context inside the message (which already names the
         # server) rather than mis-filling the file column (audit NIT #9).
         report.major(
-            f"MCP server name '{server_name}' is reserved by Claude Code (v2.1.128) — "
+            f"MCP server name '{server_name}' is reserved by Claude Code — "
             "this server will be silently skipped at load time. Rename it (for example "
             f"'{server_name}-tools' or '{server_name}-bridge')."
         )
