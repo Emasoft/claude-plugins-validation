@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Appends an existing plugin to an existing marketplace's `marketplace.json`, preserving entries for *other* plugins. If a plugin with the same `name` is already listed, its entry is replaced in place with fresh metadata (so re-runs stay idempotent — one entry per name, never duplicated). Uses the correct `source.source` schema key (not the legacy `source.type`). Loaded by `cpv-main-menu-agent` via the GitHub setup → Link plugin menu branch.
+Appends an existing plugin to an existing marketplace's `marketplace.json`, preserving entries for *other* plugins. If a plugin with the same `name` is already listed, its entry is replaced in place with fresh metadata (so re-runs stay idempotent — one entry per name, never duplicated). Uses the correct `source.source` schema key (not the legacy `source.type`). Loaded dynamically via the-skills-menu, reached via the GitHub setup → Link plugin menu branch.
 
 ## Prerequisites
 

@@ -1,6 +1,6 @@
 ---
 name: cpv-main-menu-skill
-description: Routes the /cpv-main-menu Stop-hook menu via scripts/print_menu.py + claude-menu-system. Used dynamically via the-skills-menu (TRDD-478d9687) — primarily by cpv-main-menu-agent. Use when navigating CPV's many commands via a single entry point.
+description: Routes the /cpv-main-menu Stop-hook menu via scripts/print_menu.py + claude-menu-system. Used dynamically via the-skills-menu (TRDD-478d9687) — used by the /cpv-main-menu flow. Use when navigating CPV's many commands via a single entry point.
 when_to_use: When the cpv-main-menu command needs the per-category sub-menu definitions, per-leaf execution recipes, and per-menu fixed letter→action maps. Never invoke directly.
 user-invocable: false
 ---

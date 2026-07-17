@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Auto-refreshes the `<!-- BEGIN AUTO-COMPONENTS -->` block in a plugin's `README.md` so it never drifts out of sync with what the plugin actually ships (agents, skills, commands, hooks, MCP servers). Detects components from the filesystem and renders a markdown table inside the `<!-- BEGIN/END AUTO-COMPONENTS -->` markers. Custom prose around the block stays user-owned. Loaded by `cpv-main-menu-agent` via the Manage → Refresh README menu branch.
+Auto-refreshes the `<!-- BEGIN AUTO-COMPONENTS -->` block in a plugin's `README.md` so it never drifts out of sync with what the plugin actually ships (agents, skills, commands, hooks, MCP servers). Detects components from the filesystem and renders a markdown table inside the `<!-- BEGIN/END AUTO-COMPONENTS -->` markers. Custom prose around the block stays user-owned. Loaded dynamically via the-skills-menu, reached via the Manage → Refresh README menu branch.
 
 ## Prerequisites
 

@@ -9,7 +9,7 @@ user-invocable: false
 
 ## Overview
 
-Adds a new slash command to an existing plugin. The scaffold lands at `<plugin-path>/commands/<command-name>.md` with valid frontmatter so the plugin still passes `validate_plugin` immediately. Loaded by `cpv-main-menu-agent` via the Create → Add slash command menu branch.
+Adds a new slash command to an existing plugin. The scaffold lands at `<plugin-path>/commands/<command-name>.md` with valid frontmatter so the plugin still passes `validate_plugin` immediately. Loaded dynamically via the-skills-menu, reached via the Create → Add slash command menu branch.
 
 ## Prerequisites
 
