@@ -23,6 +23,7 @@ if str(scripts_dir) not in sys.path:
 
 from cpv_validation_common import ValidationReport
 from validate_mcp import (
+    RESERVED_MCP_SERVER_NAMES,
     extract_env_vars,
     validate_env_var_syntax,
     validate_mcp_config,
@@ -1120,3 +1121,45 @@ class TestV21SpecFieldAllowlist:
         assert unknown_warnings == [], (
             f"headersHelper must be a known field per v2.1.85+, got warnings: {[w.message for w in unknown_warnings]}"
         )
+
+
+class TestReservedMcpServerNamesV2_1_205:
+    """v2.1.205 — `Claude Preview` and `Claude Browser` reserved by Claude Code.
+
+    Ahead of the Claude Desktop pane rename, CC reserved these two MCP server
+    display names; a user-configured server registered under either is silently
+    skipped at load time. CPV surfaces that as a MAJOR so authors rename before
+    publish. Exact-string match (matching CC's documented names), so a
+    hyphenated/lowercase variant is deliberately NOT flagged — no false positive
+    on a name CC does not actually reserve.
+    """
+
+    def _reserved_majors(self, report: ValidationReport) -> list:
+        return [r for r in report.results if r.level == "MAJOR" and "is reserved by Claude Code" in r.message]
+
+    def test_new_names_in_reserved_set(self):
+        assert "Claude Preview" in RESERVED_MCP_SERVER_NAMES
+        assert "Claude Browser" in RESERVED_MCP_SERVER_NAMES
+
+    def test_claude_preview_server_emits_major(self):
+        report = ValidationReport()
+        validate_mcp_server("Claude Preview", {"command": "/bin/echo", "args": []}, report)
+        assert self._reserved_majors(report), "a server named 'Claude Preview' must emit the reserved-name MAJOR"
+
+    def test_claude_browser_server_emits_major(self):
+        report = ValidationReport()
+        validate_mcp_server("Claude Browser", {"command": "/bin/echo", "args": []}, report)
+        assert self._reserved_majors(report), "a server named 'Claude Browser' must emit the reserved-name MAJOR"
+
+    def test_workspace_still_reserved(self):
+        """The pre-existing v2.1.128 reservation must not regress."""
+        report = ValidationReport()
+        validate_mcp_server("workspace", {"command": "/bin/echo", "args": []}, report)
+        assert self._reserved_majors(report), "'workspace' must still emit the reserved-name MAJOR (v2.1.128)"
+
+    def test_similar_name_is_not_flagged(self):
+        """Exact-match only: a hyphenated/lowercase variant CC does not reserve
+        must NOT emit the reserved-name finding (no false positive)."""
+        report = ValidationReport()
+        validate_mcp_server("claude-preview", {"command": "/bin/echo", "args": []}, report)
+        assert self._reserved_majors(report) == [], "a name CC does not reserve must not fire the reserved-name MAJOR"

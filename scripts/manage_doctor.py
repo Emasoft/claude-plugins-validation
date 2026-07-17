@@ -688,7 +688,9 @@ def do_install_scanners() -> int:
 
     print()
     if not_available == 0:
-        ok("All 6 scanners ready. CPV will run at full speed.")
+        # Count comes off the live status dict, not a magic number, so adding a
+        # scanner to install_all_scanners() never leaves this line stale.
+        ok(f"All {len(statuses)} scanners ready. CPV will run at full speed.")
     else:
         warn(
             f"{not_available} scanner(s) unavailable. CPV will still run but with degraded "

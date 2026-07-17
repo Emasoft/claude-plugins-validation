@@ -211,7 +211,7 @@ HOOK_OUTPUT_EVENT_FIELDS: dict[str, frozenset[str]] = {
     "Elicitation": frozenset({"action", "content"}),
     # hooks.md L2067-2070
     "ElicitationResult": frozenset({"action", "content"}),
-    # Legacy (kept for input compatibility; emits WARNING on use).
+    # Setup is a current event (hooks.md ### Setup); no specific output payload.
     "Setup": frozenset(),
     # hooks.md InstructionsLoaded — no specific output per L1789 area
     "InstructionsLoaded": frozenset(),
@@ -246,11 +246,9 @@ def validate_output_payload(event_name: str, payload: Any) -> ValidationReport:
         report.major(f"Unknown hook event: {event_name!r}. Expected one of: {sorted(VALID_HOOK_EVENTS)}")
         return report
 
-    # Legacy Setup → WARNING (matches validate_hook.py handling).
-    if event_name == "Setup":
-        report.warning(
-            "Setup is a legacy event not listed in hooks.md as of v2.1.109; output payload validation is best-effort."
-        )
+    # Setup is a CURRENT event (hooks.md ### Setup) with its own output table;
+    # the stale "legacy … best-effort" WARNING was a false positive on every
+    # legitimate Setup hook and has been removed (matches validate_hook.py).
 
     # Top-level type check.
     if not isinstance(payload, dict):

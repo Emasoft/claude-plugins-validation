@@ -291,7 +291,7 @@ class TestEnsureCiscoSkillScanner:
 
 
 class TestInstallAllScanners:
-    def test_returns_dict_with_all_seven_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_returns_dict_with_all_scanner_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Mark every scanner as already installed; no cascades to run.
         # google-re2 is probed via importlib (not shutil.which) — mock both.
         monkeypatch.setattr(cis.shutil, "which", lambda name: f"/usr/bin/{name}")
@@ -304,6 +304,7 @@ class TestInstallAllScanners:
             "semgrep",
             "tirith",
             "skill-scanner",
+            "snyk-agent-scan",
             "google-re2",
         }
         assert all(statuses.values()), f"all should be available; got {statuses}"

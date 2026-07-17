@@ -157,7 +157,9 @@ All in-process checks run as pure Python — no API calls, no tokens consumed, n
 
 ### External Security Scanners (always-run, programmatic-only)
 
-`validate_security.py` orchestrates **five external scanners** alongside its in-process rule packs. Each is invoked unconditionally on every scan and self-skips with an INFO advisory when its source binary cannot be resolved on PATH or installed from its source URL. There is **no opt-out flag** — preventing a caller from accidentally silencing coverage. The `enable_*` keyword arguments on `validate_security()` survive only as test-isolation knobs.
+`validate_security.py` orchestrates **five always-run external scanners** alongside its in-process rule packs. Each is invoked unconditionally on every scan and self-skips with an INFO advisory when its source binary cannot be resolved on PATH or installed from its source URL. There is **no opt-out flag** — preventing a caller from accidentally silencing coverage. The `enable_*` keyword arguments on `validate_security()` survive only as test-isolation knobs.
+
+A **sixth scanner — Snyk Agent Scan — is opt-in** and behaves differently from the five (it is cloud-backed and token-gated); it runs only when `SNYK_TOKEN` is exported. See [Opt-in scanner: Snyk Agent Scan](#opt-in-scanner--snyk-agent-scan-snyk_token) below.
 
 | Scanner | Source | What it adds | Resolution path |
 |---------|--------|--------------|-----------------|
@@ -166,6 +168,33 @@ All in-process checks run as pure Python — no API calls, no tokens consumed, n
 | **trufflehog** | [trufflesecurity/trufflehog](https://github.com/trufflesecurity/trufflehog) | ~700 verified-secret detectors (Stripe, Slack, AWS, GitHub, …) — runs with `--concurrency=cpu_count` for parallel scans | `brew install trufflehog` or `go install github.com/trufflesecurity/trufflehog/v3@latest` |
 | **semgrep** | [semgrep/semgrep](https://github.com/semgrep/semgrep) | Thousands of static-analysis rules via the `p/security-audit` and `p/secrets` rule packs | `brew install semgrep` or `pipx install semgrep` |
 | **Cisco AI Defense skill-scanner** | [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Static (YAML+YARA), Bytecode, Pipeline (command taint), Behavioral (AST dataflow), Trigger (vague-description) — programmatic-only mode (no LLM/Meta/VirusTotal/AI Defense cloud, all of which need API keys) | persistent `skill-scanner` (preferred — `uv tool install cisco-ai-skill-scanner`) → `uvx --from cisco-ai-skill-scanner skill-scanner` fallback (set `CPV_CISCO_SCAN_TIMEOUT_S=<sec>` to override the 600s default) |
+
+### Opt-in scanner — Snyk Agent Scan (`SNYK_TOKEN`)
+
+Alongside the five always-run scanners, `validate_security.py` runs one **opt-in**, cloud-backed scanner — [snyk/agent-scan](https://github.com/snyk/agent-scan) (PyPI `snyk-agent-scan`, Apache-2.0). It adds an LLM-based second opinion CPV's regex engines cannot give: prompt injection, tool-poisoning, malware payloads, and untrusted-content / credential-handling risks in a plugin's instruction surfaces.
+
+It is **not always-run** and **must be explicitly enabled**, for two reasons: it hard-requires a Snyk API token (a free account), and it is **cloud-backed** — scanned content is sent to Snyk for analysis. CPV must stay usable offline and must never ship a plugin's private source to a third party by default, so the scan runs **only when you export `SNYK_TOKEN`**. Absent the token it is **skipped with a visible WARNING** (naming the variable and the sign-up page) — never folded into the pass count, because a scan that never ran must never look like a scan that passed.
+
+**Enable it:**
+
+1. Register a free account at [snyk.io](https://snyk.io).
+2. Copy your API token from [app.snyk.io/account](https://app.snyk.io/account) (**Auth Token → KEY → click to show**).
+3. Export it in your shell — add it to `~/.zshrc` / `~/.bashrc` (or your secret manager) to persist across sessions:
+   ```bash
+   export SNYK_TOKEN="<your-token>"
+   ```
+4. Re-run any security scan (`cpv security <path>`, `/cpv-batch-security-audit`, `cpv-doctor`). The step now shows **RAN** instead of **SKIPPED**.
+
+`cpv-doctor --install-scanners` warms the `snyk-agent-scan` launcher (`uv tool install snyk-agent-scan`, opt out with `CPV_NO_SNYK_INSTALL=1`), but a warm launcher **without a token still does not run** — the token, not the binary, is the gate.
+
+| Property | Value |
+|----------|-------|
+| Source | [snyk/agent-scan](https://github.com/snyk/agent-scan) — PyPI `snyk-agent-scan`, Apache-2.0 |
+| Gate | **opt-in** on `SNYK_TOKEN`; cloud-backed (content sent to Snyk) |
+| Coverage | skills natively; **agents / commands / rules / hook scripts are staged** as synthetic skills and every finding is remapped to its real component path |
+| Safety | **never** runs an MCP server (scanning an MCP config would execute its server commands) — directory targets only, never a config file; `--dangerously-run-mcp-servers` and `--ci` are hard-banned |
+| Absent-token | **SKIPPED** with a visible WARNING + sign-up link; never counted as clean ("cannot check ≠ clean") |
+| Env | `CPV_SNYK_SCAN_TIMEOUT_S=<sec>` (default 600) · `CPV_NO_SNYK_INSTALL=1` (skip launcher install) |
 
 **v2.48 — gitleaks removed.** trufflehog (~700 detectors with `--concurrency` parallel-scan support) provides superset coverage. gitleaks shipped ~150 detectors and crashed under reliable parallel scanning, so it has been retired from the external-scanner roster.
 
@@ -316,7 +345,7 @@ Any of these can be passed as the first argument to `cpv-remote-validate`. Short
 | `encoding` | **Encoding.** UTF-8, BOM, line endings, binary detection. |
 | `rules` | **Rules.** Structure and content of rules/*.md files. |
 | `xref` | **Cross-references.** Agent refs, versions, scripts. |
-| `doctor` | **Health check.** Plugins, settings, marketplaces. `--install-scanners` (v2.48) installs all 5 external scanners + fclones with one command. |
+| `doctor` | **Health check.** Plugins, settings, marketplaces. `--install-scanners` (v2.48) installs all 5 always-run external scanners + fclones — and warms the opt-in Snyk launcher — with one command. |
 | `lint` | **Lint only.** All 15 languages (Python, JS, Shell, Go, Rust, etc.). |
 | `standardize` | **Audit + fix.** Standardize a plugin against CPV pipeline conventions (CI/CD, hooks, publish.py). Under a plain `--fix` it also migrates an **existing** `publish.py` so it pushes the `{name}--v{version}` dependency-resolver tag (see below). |
 
@@ -347,7 +376,7 @@ These flags work with all validators:
 
 > **Default output is path-only.** Without `--json` or `--report`, `validate_security.py` auto-saves the aggregated report to `$CLAUDE_PROJECT_DIR/reports/security/<timestamp>-<plugin>.md` (or `$TMPDIR/reports/security/...` when `CLAUDE_PROJECT_DIR` is unset, e.g. on a remote `uvx` invocation) and prints **only** the compact summary (counts table + verdict + plugin path + report path) to stdout. This guarantees that an agent invoking the validator gets a tiny, predictable stdout payload that never floods its context window.
 >
-> **External scanners always run.** There are no `--no-tirith` / `--no-trufflehog` / `--no-semgrep` opt-out flags. Each external scanner self-skips with an INFO advisory if its source binary cannot be resolved on PATH or installed from its source URL. Set `CPV_NO_TIRITH_INSTALL=1` to disable tirith's auto-install fallback in CI sandboxes that block container pulls; set `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>` to override the 600s default for very large trees. See [External Security Scanners](#external-security-scanners-always-run-programmatic-only) above for the full inventory.
+> **External scanners always run.** There are no `--no-tirith` / `--no-trufflehog` / `--no-semgrep` opt-out flags. Each external scanner self-skips with an INFO advisory if its source binary cannot be resolved on PATH or installed from its source URL. Set `CPV_NO_TIRITH_INSTALL=1` to disable tirith's auto-install fallback in CI sandboxes that block container pulls; set `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>` to override the 600s default for very large trees. The one exception to "always run" is the **opt-in** Snyk Agent Scan, which runs only when `SNYK_TOKEN` is exported. See [External Security Scanners](#external-security-scanners-always-run-programmatic-only) above for the full inventory.
 
 ### Reading the Results
 

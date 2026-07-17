@@ -2889,19 +2889,21 @@ class TestPass2HookFixes:
             "userSettings",
         }
 
-    # --- CPV-P2-n6: Setup-matcher comment version ---
+    # --- CPV-P2-n6: Setup is a current event, not legacy/deprecated ---
 
-    def test_setup_matcher_comment_references_current_version(self) -> None:
-        """CPV-P2-n6 / validate_hook.py L54: the inline comment next to the
-        ``Setup`` matcher entry must cite the CURRENT Claude Code release. After
-        the fix it is v2.1.109 (was v2.1.86).
+    def test_setup_is_treated_as_current_event_not_legacy(self) -> None:
+        """CPV-P2-n6 (revised, CC v2.1.205-212 spec sync): ``Setup`` is a CURRENT
+        hook event (hooks.md ### Setup), so validate_hook.py must NOT still call
+        it "legacy or deprecated" / "not in the current official spec". The stale
+        deprecation WARNING was removed; this regression-locks that removal.
         """
         hook_src = Path(__file__).parent.parent / "scripts" / "validate_hook.py"
         src_text = hook_src.read_text(encoding="utf-8")
-        # The comment must cite v2.1.109 now and MUST NOT still cite v2.1.86.
-        assert "v2.1.109" in src_text, "Setup matcher comment must reference v2.1.109 (CPV-P2-n6)."
-        assert "as of v2.1.86" not in src_text, (
-            "stale v2.1.86 citation left in validate_hook.py — CPV-P2-n6 not applied"
+        assert "It may be legacy or deprecated" not in src_text, (
+            "stale Setup deprecation WARNING left in validate_hook.py (CPV-P2-n6)."
+        )
+        assert "Setup' is not in the current official spec" not in src_text, (
+            "stale 'Setup not in current spec' WARNING left in validate_hook.py (CPV-P2-n6)."
         )
 
 
