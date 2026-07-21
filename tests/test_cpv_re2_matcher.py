@@ -36,6 +36,7 @@ import cpv_re2_matcher as matcher_mod  # noqa: E402
 from cpv_re2_matcher import (  # noqa: E402
     HybridMatcher,
     InvalidPattern,
+    _pattern_is_re2_unsafe,
     _Re2MatchProxy,
     _reset_log_once_for_tests,
 )
@@ -450,6 +451,77 @@ def _any_match_with_span(start: int, end: int):
                 return False
 
     return _AnyMatch()
+
+
+re2_only = pytest.mark.skipif(
+    matcher_mod._re2_module is None,
+    reason="google-re2 not installed",
+)
+
+
+class TestRe2UnsafePreFilter:
+    """Pre-filter routes re2-incompatible patterns to fallback WITHOUT an Add().
+
+    The pre-filter (`_pattern_is_re2_unsafe`) exists so google-re2's C++ layer
+    never parses — and never emits an absl `E0000 ... Error parsing` stderr
+    line for — a pattern it will reject anyway. It must be PRECISE: it may not
+    over-flag a re2-SAFE pattern (that would needlessly route it to the
+    backtracking Python-re fallback, weakening re2's linear-time guarantee).
+    """
+
+    # A single backslash, used to build \u / \\u test patterns WITHOUT a
+    # literal escape in the source (which the file tooling would fold into a
+    # zero-width char that CPV's own INVISIBLE_TEXT rule then flags).
+    _BS = chr(92)
+
+    def test_flags_lookarounds_r_escape_and_backref(self) -> None:
+        """Lookarounds, the \\R escape, and \\1-\\9 backrefs are re2-rejects → True."""
+        bs = self._BS
+        for pat in (
+            r"foo(?!bar)",
+            r"x(?=y)",
+            r"(?<=a)b",
+            r"(?<!a)b",
+            r"(?>ab)",
+            "HKEY.*" + bs + "Run",  # \R line-break escape
+            "(a)" + bs + "1",  # backreference
+        ):
+            assert _pattern_is_re2_unsafe(pat) is True, pat
+
+    def test_real_unicode_escape_flags_but_escaped_backslash_does_not(self) -> None:
+        """A real \\u / \\U escape flags True; an escaped-backslash literal flags False."""
+        bs = self._BS
+        assert _pattern_is_re2_unsafe(bs + "u200b") is True  # real \u escape → re2 rejects
+        assert _pattern_is_re2_unsafe(bs + "U0001F600") is True  # real \U escape → re2 rejects
+        assert _pattern_is_re2_unsafe(bs + bs + "u200b") is False  # \\u = literal text → re2 safe
+        assert _pattern_is_re2_unsafe(bs + bs + "Run") is False  # \\R = literal text → re2 safe
+
+    def test_does_not_flag_ordinary_patterns(self) -> None:
+        """Ordinary patterns and re2-supported escapes (\\d \\s \\w) flag False."""
+        for pat in (r"abc.*def", r"\d+\s*\w+", r"(?:ldap|rmi)://host"):
+            assert _pattern_is_re2_unsafe(pat) is False, pat
+
+    @re2_only
+    def test_lookahead_routes_to_fallback_and_still_matches(self) -> None:
+        """A lookahead pattern lands in the Python-re fallback yet still fires."""
+        m = HybridMatcher({"has_la": r"yaml\.load\s*\((?!.*SafeLoader)", "plain": r"eval\("})
+        # The lookahead pattern is pre-filtered to fallback; the plain one to re2.
+        assert m.stats["re_fallback"] >= 1
+        assert m.has_re2_set is True
+        hits = {rid for rid, _ in m.scan("yaml.load(open('x'))")}
+        assert "has_la" in hits  # detection preserved via fallback
+
+    @re2_only
+    def test_escaped_backslash_literal_stays_on_re2_layer(self) -> None:
+        """A re2-safe escaped-backslash literal is NOT demoted to fallback (no over-match)."""
+        bs = self._BS
+        m = HybridMatcher({"inv": bs + bs + "u200b", "plain": r"eval\("})
+        # Both are re2-safe → zero fallback, both served by the RE2 Set.
+        assert m.stats["re_fallback"] == 0
+        assert m.stats["re2_compiled"] == 2
+        # The literal pattern matches the 6-char text: backslash + "u200b".
+        scan_text = "x = '" + bs + "u200b'"
+        assert "inv" in {rid for rid, _ in m.scan(scan_text)}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

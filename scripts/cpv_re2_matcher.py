@@ -128,6 +128,47 @@ def _blob_scan_flags(pattern: str) -> str:
     return "(?im)" + pattern
 
 
+# Perl-only regex constructs google-re2 cannot compile. We detect these
+# BEFORE handing a pattern to ``RE2::Set::Add`` so re2's C++ layer never
+# parses — and never emits an absl ``E0000 ... Error parsing`` stderr line
+# for — a pattern we already know it will reject. Such a pattern goes
+# straight to the Python ``re`` fallback, exactly where the caught-exception
+# path (``_build_layers``) routed it before, so detection is BYTE-IDENTICAL;
+# only the stderr noise and one failed Add() attempt are avoided. Mirrors
+# ``_PERL_ONLY`` in ``scripts_dev/regen_re2_compat.py`` (that dev tool is
+# gitignored, so it cannot be the shared import site); both encode the SAME
+# fixed re2 limitation — keep the two lists in sync when re2's grammar changes.
+_RE2_UNSAFE_CONSTRUCTS: Final[tuple[re.Pattern[str], ...]] = (
+    re.compile(r"\(\?="),  # lookahead (?=...)
+    re.compile(r"\(\?!"),  # negative lookahead (?!...)
+    re.compile(r"\(\?<="),  # lookbehind (?<=...)
+    re.compile(r"\(\?<!"),  # negative lookbehind (?<!...)
+    re.compile(r"\(\?>"),  # atomic group (?>...)
+    # A \u / \U / \R escape or a \1-\9 backreference — but ONLY when the
+    # backslash is itself UNESCAPED (an odd-length run of backslashes ends
+    # at it). This distinguishes a real `​` unicode escape (re2 REJECTS)
+    # from the literal `\\u200b` = escaped-backslash + literal "u200b" (re2
+    # ACCEPTS — several INVISIBLE_TEXT / LOG_INJECTION rules match that literal
+    # text). A blunt `\\u` would over-flag the literal form and needlessly
+    # route a re2-safe pattern to the backtracking Python-re fallback.
+    re.compile(r"(?:^|[^\\])(?:\\\\)*\\[uUR1-9]"),
+)
+
+
+def _pattern_is_re2_unsafe(pattern: str) -> bool:
+    """Return True iff ``pattern`` uses a Perl construct google-re2 rejects.
+
+    Conservative and fail-safe in BOTH directions: a false "unsafe" only
+    sends a re2-compatible pattern to the (correct, slower) Python ``re``
+    fallback, and a missed unsafe construct still degrades via the
+    caught-``Add``-exception path in ``_build_layers`` — so a misjudgement
+    can never change WHAT is detected, only which engine serves the pattern
+    (and whether re2 logs a stderr line). The construct list is the same
+    fixed set the re2-compatibility audit uses.
+    """
+    return any(rx.search(pattern) for rx in _RE2_UNSAFE_CONSTRUCTS)
+
+
 def _log_once(level: int, msg: str) -> None:
     """Emit ``msg`` at ``level`` exactly once across the process lifetime."""
     with _LOG_ONCE_LOCK:
@@ -310,6 +351,16 @@ class HybridMatcher:
         accepted_rule_ids: list[str] = []
 
         for rule_id, pattern in self._patterns.items():
+            if _pattern_is_re2_unsafe(pattern):
+                # Known re2-incompatible construct (lookaround / backref /
+                # \u / \U / \R). Route straight to the Python `re` fallback
+                # WITHOUT calling re2_set.Add(), so google-re2's C++ layer
+                # never parses it and never emits an absl `E0000 ... Error
+                # parsing` stderr line. Behaviourally identical to the
+                # caught-Add fallback below; this only avoids the noise and
+                # a doomed Add() attempt.
+                self._add_to_fallback(rule_id, pattern, re2_error="re2-incompatible construct (pre-filtered)")
+                continue
             try:
                 # Force case-insensitive to match the live IGNORECASE
                 # per-line scan path (audit WARNING #15).
