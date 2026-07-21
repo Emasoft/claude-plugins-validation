@@ -76,9 +76,9 @@ def refresh(plugin_root: Path, *, check_only: bool = False) -> int:
         create_if_missing=True,
     )
     if changed:
-        print(f"  [refresh-readme] {readme}: {status}")
+        print(f"  [cpv-refresh-readme] {readme}: {status}")
     else:
-        print(f"  [refresh-readme] {readme}: {status} (no changes)")
+        print(f"  [cpv-refresh-readme] {readme}: {status} (no changes)")
     return 0
 
 

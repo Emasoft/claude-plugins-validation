@@ -74,7 +74,7 @@ class TestIntraPluginRefsStillMatch:
     check is what catches typos — we must not silently drop real refs)."""
 
     def test_bare_relative_matches(self) -> None:
-        assert _matches("see skills/fix-validation for the recipe") == ["fix-validation"]
+        assert _matches("see skills/cpv-fix-validation for the recipe") == ["cpv-fix-validation"]
 
     def test_dot_slash_relative_matches(self) -> None:
         assert _matches("(./skills/foo)") == ["foo"]
@@ -84,10 +84,10 @@ class TestIntraPluginRefsStillMatch:
         assert _matches("[bar](../skills/bar/SKILL.md)") == ["bar"]
 
     def test_bracketed_matches(self) -> None:
-        assert _matches("(skills/canonical-pipeline)") == ["canonical-pipeline"]
+        assert _matches("(skills/cpv-canonical-pipeline)") == ["cpv-canonical-pipeline"]
 
     def test_backtick_quoted_matches(self) -> None:
-        assert _matches("`skills/the-skills-menu`") == ["the-skills-menu"]
+        assert _matches("`skills/cpv-the-skills-menu`") == ["cpv-the-skills-menu"]
 
     def test_variable_expansion_matches(self) -> None:
         """``${CLAUDE_PLUGIN_ROOT}/skills/foo`` — the closing ``}`` isn't
@@ -99,7 +99,7 @@ class TestIntraPluginRefsStillMatch:
         """``skills/foo`` at the very start has no preceding context, so the
         2-char lookbehind can't fire — the ref still matches and the
         existence check still catches typos."""
-        assert _matches("skills/plugin-validation-skill") == ["plugin-validation-skill"]
+        assert _matches("skills/cpv-plugin-validation-skill") == ["cpv-plugin-validation-skill"]
 
 
 class TestFixIsPreciseNotBlanket:

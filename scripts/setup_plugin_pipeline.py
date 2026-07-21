@@ -4,7 +4,7 @@
 This script sets up a complete, validated, rebase-safe development pipeline
 for Claude Code plugins and marketplaces. It can be used:
 
-1. By the plugin-validator agent to fix pipeline issues
+1. By the cpv-plugin-validator-agent agent to fix pipeline issues
 2. By developers to bootstrap new plugin projects
 3. By CI/CD to validate pipeline integrity
 

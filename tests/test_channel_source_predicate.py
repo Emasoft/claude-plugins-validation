@@ -1,6 +1,6 @@
 """TRDD-26446eed — Channel MCP server source-code prefilter tests.
 
-The prefilter is a deterministic helper used by the semantic-validator
+The prefilter is a deterministic helper used by the cpv-semantic-validator-agent
 agent. It does NOT replace the LLM (Opus reads the source and renders
 the actual security verdict). What it DOES do:
 
@@ -20,7 +20,7 @@ the actual security verdict). What it DOES do:
 Every test in this module operates on a fixture under
 ``tests/fixtures/channel_source/`` — no LLM calls, no network, fully
 deterministic. The fixtures double as the gold-standard inputs the
-semantic-validator agent will be asked to grade in a real run.
+cpv-semantic-validator-agent agent will be asked to grade in a real run.
 """
 
 from __future__ import annotations
@@ -331,7 +331,7 @@ class TestPredicateDefensiveness:
 
 
 class TestReferenceFilePresence:
-    """The semantic-validator's reference doc MUST be on disk and wired in."""
+    """The cpv-semantic-validator-agent's reference doc MUST be on disk and wired in."""
 
     @pytest.fixture
     def repo_root(self) -> Path:
@@ -339,17 +339,17 @@ class TestReferenceFilePresence:
 
     def test_channel_source_reference_file_exists(self, repo_root):
         """Reference file must exist — the agent loads it conditionally."""
-        ref = repo_root / "skills/semantic-validation-skill/references/channel-source-security.md"
+        ref = repo_root / "skills/cpv-semantic-validation-skill/references/channel-source-security.md"
         assert ref.exists(), f"Missing reference doc: {ref}"
 
     def test_skill_md_loads_reference_file(self, repo_root):
         """SKILL.md must Load the reference under a ``Conditional Pillar`` heading."""
-        skill_md = (repo_root / "skills/semantic-validation-skill/SKILL.md").read_text()
+        skill_md = (repo_root / "skills/cpv-semantic-validation-skill/SKILL.md").read_text()
         assert "channel-source-security" in skill_md
         assert "Conditional Pillar" in skill_md
 
     def test_agent_md_documents_pillar(self, repo_root):
         """The agent's instructions must mention the conditional pillar."""
-        agent_md = (repo_root / "agents/semantic-validator.md").read_text()
+        agent_md = (repo_root / "agents/cpv-semantic-validator-agent.md").read_text()
         assert "Channel MCP Server Source-Code Security" in agent_md
         assert "channels" in agent_md

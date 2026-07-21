@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-validate
-description: Fan out plugin-validator agents across every plugin in a marketplace, a list of plugins, or a single plugin. Accepts local paths and GitHub URLs. One validator agent per plugin, dispatched in parallel from a single main-session message (default 8 at a time, cap 16). Returns one consolidated severity table covering every scanned plugin.
+description: Fan out cpv-plugin-validator-agent agents across every plugin in a marketplace, a list of plugins, or a single plugin. Accepts local paths and GitHub URLs. One validator agent per plugin, dispatched in parallel from a single main-session message (default 8 at a time, cap 16). Returns one consolidated severity table covering every scanned plugin.
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---
@@ -11,7 +11,7 @@ For users who manage a fleet of plugins (a marketplace, a list of
 project folders, or a Git org), `/cpv-validate-plugin` on each one
 in turn is slow AND quietly burns context every time the user
 re-loads the same handful of validators. `/cpv-batch-validate`
-delegates each plugin to its own `plugin-validator` subagent in
+delegates each plugin to its own `cpv-plugin-validator-agent` subagent in
 **parallel** — one fresh haiku context per plugin, all dispatched
 from a single main-session message. Total main-session cost is
 ~3-4K tokens for any batch size; per-plugin work happens out-of-band
@@ -38,7 +38,7 @@ automatically when the batch finishes.
 
 You — the model running THIS turn — orchestrate the batch from the
 main session. You do NOT validate anything yourself. You delegate to
-N parallel `plugin-validator` subagents via the Agent tool, each in
+N parallel `cpv-plugin-validator-agent` subagents via the Agent tool, each in
 `batch_validate` mode.
 
 **Critical rules**:
@@ -107,7 +107,7 @@ fi
 
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   "${BATCH_SPECS[@]}" \
-  --agent plugin-validator \
+  --agent cpv-plugin-validator-agent \
   --mode batch_validate \
   --max-parallel "$MAX_PARALLEL"
 ```
@@ -154,7 +154,7 @@ in the group:
 for plugin_index in group:
     plugin = plan.plugins[plugin_index]
     Agent(
-      subagent_type: "plugin-validator",
+      subagent_type: "cpv-plugin-validator-agent",
       description: "Batch-validate plugin {plugin.display_name}",
       prompt: |
         <context>
@@ -233,7 +233,7 @@ After ALL dispatch groups have finished:
 3. If any plugin is INVALID, append the fix-prompt inline:
 
    ```text
-   Run `/cpv-batch-fix {original-target}` to fan out plugin-fixer
+   Run `/cpv-batch-fix {original-target}` to fan out cpv-plugin-fixer-agent
    agents across the invalid plugins.
    ```
 
@@ -268,5 +268,5 @@ No per-plugin report body ever crosses the main-session context.
 - TRDD-3dcbb37c §1-5 — full design
 - `scripts/cpv_marketplace_input.py` — input resolver
 - `scripts/cpv_batch_orchestrator.py` — plan / status helper
-- `agents/plugin-validator.md` — `batch_validate` mode contract
+- `agents/cpv-plugin-validator-agent.md` — `batch_validate` mode contract
 - `commands/cpv-batch-security-audit.md`, `commands/cpv-batch-caching-audit.md`, `commands/cpv-batch-caching-optimize.md` — sibling batch skills

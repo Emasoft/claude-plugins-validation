@@ -63,7 +63,7 @@ AGENT_SPAWN_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Issue #110: a real agent name is kebab/snake-cased (browser-agent, cpv-spark,
+# Issue #110: a real agent name is kebab/snake-cased (browser-agent, cpv-spark-agent,
 # caa-fix-agent) or carries a digit. A bare single English word adjacent to
 # "agent(s)" — "explicit", "specific", "single", "new" — is prose, not a
 # dispatch target. This gates ONLY the advisory prose WARNING below (which by

@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-full-scan-and-fix
-description: "Maximum-coverage same-turn sweep across a marketplace / list / single plugin. Each plugin-fixer reads every source file ONCE and runs validate + security + caching audit + caching optimize + verify-FPs + fix inline. ~5× cheaper than running the four separate batch skills sequentially. Use when applying every-checker fixes across many plugins at once. Trigger with /cpv-batch-full-scan-and-fix."
+description: "Maximum-coverage same-turn sweep across a marketplace / list / single plugin. Each cpv-plugin-fixer-agent reads every source file ONCE and runs validate + security + caching audit + caching optimize + verify-FPs + fix inline. ~5× cheaper than running the four separate batch skills sequentially. Use when applying every-checker fixes across many plugins at once. Trigger with /cpv-batch-full-scan-and-fix."
 user-invocable: true
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
@@ -9,7 +9,7 @@ argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 
 ## Overview
 
-Same-turn maximum-coverage sweep. Each plugin-fixer subagent reads
+Same-turn maximum-coverage sweep. Each cpv-plugin-fixer-agent subagent reads
 every source file ONCE and triggers EVERY applicable in-process
 checker (validate, security, caching, lint, xref, encoding, …),
 classifies findings via the v2.100.x context classifier, verifies
@@ -95,7 +95,7 @@ Assistant: /cpv-batch-full-scan-and-fix /path/a /path/b /path/c
 
 - TRDD-3dcbb37c §3 — full design
 - `commands/cpv-batch-full-scan-and-fix.md` — orchestrator body (in this plugin)
-- `agents/plugin-fixer.md` — `batch_same_turn_full` mode contract
+- `agents/cpv-plugin-fixer-agent.md` — `batch_same_turn_full` mode contract
 - Sibling batch skills (this plugin): `cpv-batch-validate`,
   `cpv-batch-security-audit`, `cpv-batch-caching-audit`,
   `cpv-batch-caching-optimize`, `cpv-batch-validate-and-fix`,

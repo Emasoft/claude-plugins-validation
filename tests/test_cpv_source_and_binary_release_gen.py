@@ -1,4 +1,4 @@
-"""Two-sided tests for the canonical-pipeline generator extensions:
+"""Two-sided tests for the cpv-canonical-pipeline generator extensions:
 
   * CHANGE 1 (C2b / #115) — ``gen_release_binaries_yml``: a binary-release
     scaffold whose emitted workflow is CANONICAL per

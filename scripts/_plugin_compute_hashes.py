@@ -2,7 +2,7 @@
 """Compute SHA256 hashes of every CPV file eligible for self-scan exclusion.
 
 The CPV security validator skips its own pattern-defining source files
-(validator scripts, fix-validation references, security tests) when
+(validator scripts, cpv-fix-validation references, security tests) when
 scanning the CPV plugin itself. Without integrity protection, any file
 named like a CPV file would be skipped — name-based detection is
 spoofable.
@@ -96,7 +96,7 @@ def is_self_scan_eligible(rel_path: str) -> bool:
     # v2.99.1 — CPV's own .github/workflows.
     if file_normalized.startswith(".github/workflows/") and (basename.endswith(".yml") or basename.endswith(".yaml")):
         return True
-    if "/semantic-validation-skill/references/" in file_normalized:
+    if "/cpv-semantic-validation-skill/references/" in file_normalized:
         return True
     if (
         ("/skills/" in file_normalized or file_normalized.startswith("skills/"))

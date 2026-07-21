@@ -165,14 +165,17 @@ def test_mixed_canonical_and_normalized_references():
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:
+        # "Cpv Plugin Validator Agent" normalizes (v2.1.140 rules) to the real
+        # agent cpv-plugin-validator-agent → a NIT, not a ghost (v3.0.0 rename:
+        # the old display form "Plugin Validator" no longer maps to any agent).
         plugin = _make_plugin_with_references(
             Path(td),
-            ["code-reviewer", "plugin-validator"],
-            ["code-reviewer", "Plugin Validator"],
+            ["code-reviewer", "cpv-plugin-validator-agent"],
+            ["code-reviewer", "Cpv Plugin Validator Agent"],
         )
         report = CrossReferenceValidationReport()
-        validate_subagent_type_matching(plugin, report, {"code-reviewer", "plugin-validator"})
-        nit_hits = [r for r in report.results if r.level == "NIT" and "Plugin Validator" in r.message]
+        validate_subagent_type_matching(plugin, report, {"code-reviewer", "cpv-plugin-validator-agent"})
+        nit_hits = [r for r in report.results if r.level == "NIT" and "Cpv Plugin Validator Agent" in r.message]
         critical_hits = [r for r in report.results if r.level == "CRITICAL" and "subagent_type" in r.message]
         major_hits = [r for r in report.results if r.level == "MAJOR" and "subagent_type" in r.message]
         assert len(nit_hits) == 1

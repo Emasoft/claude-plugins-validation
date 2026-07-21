@@ -6,7 +6,7 @@
   "header": "Manage — installed plugins and registry",
   "rows": [
     {"key": "1",  "action_id": "mgr_list",          "label": "List installed plugins — Show every plugin Claude Code knows about"},
-    {"key": "2",  "action_id": "mgr_install",       "label": "Install / update / enable / off — Hand off to the plugin-manager agent"},
+    {"key": "2",  "action_id": "mgr_install",       "label": "Install / update / enable / off — Hand off to the cpv-plugin-manager-agent agent"},
     {"key": "3",  "action_id": "mgr_doctor",        "label": "Health check — Look for problems in registry, settings, and cache"},
     {"key": "4",  "action_id": "mgr_scanners",      "label": "Install external scanners — Install all the security scanners CPV uses"},
     {"key": "5",  "action_id": "mgr_prune",         "label": "Prune old cached plugin versions — Free disk space"},

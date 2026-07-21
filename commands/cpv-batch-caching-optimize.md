@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-caching-optimize
-description: Fan out cache-optimizer-agent across every plugin in a marketplace, a list of plugins, or a single plugin and APPLY the cache-invalidation fixes (CA-01..CA-07). Accepts local paths and GitHub URLs. One cache-optimizer-agent per plugin in batch_fix mode (Phase 1 audit + Phase 2 fix + Phase 3 re-validate; Phase 4 broader refactor SKIPPED in batch mode to avoid per-plugin user prompts). Parallel main-session dispatch (default 8, cap 16).
+description: Fan out cpv-cache-optimizer-agent across every plugin in a marketplace, a list of plugins, or a single plugin and APPLY the cache-invalidation fixes (CA-01..CA-07). Accepts local paths and GitHub URLs. One cpv-cache-optimizer-agent per plugin in batch_fix mode (Phase 1 audit + Phase 2 fix + Phase 3 re-validate; Phase 4 broader refactor SKIPPED in batch mode to avoid per-plugin user prompts). Parallel main-session dispatch (default 8, cap 16).
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---
@@ -9,7 +9,7 @@ user-invocable: true
 
 For users who maintain a marketplace and want to apply the
 cache-invalidation pattern fixes (CA-01..CA-07) across every
-plugin in one pass, this command fans out one `cache-optimizer-agent`
+plugin in one pass, this command fans out one `cpv-cache-optimizer-agent`
 per plugin in **`batch_fix`** mode. Each agent runs Phase 1 (Audit)
 → Phase 2 (Fix) → Phase 3 (Re-validate) on its assigned plugin and
 writes its result back as the per-plugin status JSON.
@@ -44,7 +44,7 @@ MAX_PARALLEL=8
 
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   "$BATCH_SPEC" \
-  --agent cache-optimizer-agent \
+  --agent cpv-cache-optimizer-agent \
   --mode batch_fix \
   --max-parallel "$MAX_PARALLEL"
 ```
@@ -68,7 +68,7 @@ turn end.
 for plugin_index in group:
     plugin = plan.plugins[plugin_index]
     Agent(
-      subagent_type: "cache-optimizer-agent",
+      subagent_type: "cpv-cache-optimizer-agent",
       description: "Batch-cache-optimize {plugin.display_name}",
       prompt: |
         <context>
@@ -176,6 +176,6 @@ opt-in via the interactive single-plugin cache flow under
 ## See also
 
 - TRDD-3dcbb37c §1-5 — full design
-- `agents/cache-optimizer-agent.md` — `batch_fix` mode contract
-- `skills/cache-validation-skill/SKILL.md` — CA-01..CA-07 pattern catalog
+- `agents/cpv-cache-optimizer-agent.md` — `batch_fix` mode contract
+- `skills/cpv-cache-validation-skill/SKILL.md` — CA-01..CA-07 pattern catalog
 - `commands/cpv-batch-caching-audit.md` — sibling read-only audit command

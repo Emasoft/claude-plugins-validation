@@ -1,4 +1,4 @@
-"""Tests for the canonical-pipeline PROFILE model (TRDD-e9f13df1).
+"""Tests for the cpv-canonical-pipeline PROFILE model (TRDD-e9f13df1).
 
 Covers ``scripts/cpv_pipeline_profile.py`` (profile resolution + detection
 helpers) and the profile-aware + direction-aware rewiring of

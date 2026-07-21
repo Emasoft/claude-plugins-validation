@@ -3,13 +3,13 @@
 
 Pins:
 
-* `plugin-fixer.md` declares Phase 0.5 — situation triage + routing table
+* `cpv-plugin-fixer-agent.md` declares Phase 0.5 — situation triage + routing table
   that names the safe-ceiling derivation, the four core situations, and
   the `[BATCH_REQUIRED]` exit path.
 * `cpv-doctor-agent.md` declares Phase 0 — runtime skill routing and
   emits the `recommend-batch-fix` token when findings exceed safe-ceiling.
 * `cpv-main-menu-skill`'s Fix-leaf (§3.2.1) auto-triages and routes to
-  either `plugin-fixer` (small plugin) or `/cpv-batch-fix` (big plugin).
+  either `cpv-plugin-fixer-agent` (small plugin) or `/cpv-batch-fix` (big plugin).
 * The orphan-detection test recognises agent BODIES (not just frontmatter
   ``skills:`` lists) as a valid loader path.
 """
@@ -25,11 +25,11 @@ REPO = Path(__file__).parent.parent
 class TestPluginFixerPhase0Triage:
     """Plugin-fixer must triage before entering any fix loop."""
 
-    body = (REPO / "agents" / "plugin-fixer.md").read_text(encoding="utf-8")
+    body = (REPO / "agents" / "cpv-plugin-fixer-agent.md").read_text(encoding="utf-8")
 
     def test_phase_0_triage_section_present(self) -> None:
         assert re.search(r"## Phase 0\.5 — MANDATORY situation triage", self.body), (
-            "plugin-fixer must declare Phase 0.5 triage section (TRDD-14cc93a6)"
+            "cpv-plugin-fixer-agent must declare Phase 0.5 triage section (TRDD-14cc93a6)"
         )
 
     def test_documents_safe_ceiling_derivation(self) -> None:
@@ -61,21 +61,21 @@ class TestPluginFixerPhase0Triage:
         # Find any code-block / quoted line that contains [BATCH_REQUIRED]
         # AND mentions safe-ceiling AND plugin-root + Triage report
         # (the new auto-dispatch format).
-        assert "[BATCH_REQUIRED]" in self.body, "plugin-fixer must document the literal [BATCH_REQUIRED] exit token"
-        assert "safe-ceiling=" in self.body, "plugin-fixer must require safe-ceiling=<C> in BATCH_REQUIRED line"
-        assert "plugin-root:" in self.body, "plugin-fixer must require plugin-root: in BATCH_REQUIRED line"
+        assert "[BATCH_REQUIRED]" in self.body, "cpv-plugin-fixer-agent must document the literal [BATCH_REQUIRED] exit token"
+        assert "safe-ceiling=" in self.body, "cpv-plugin-fixer-agent must require safe-ceiling=<C> in BATCH_REQUIRED line"
+        assert "plugin-root:" in self.body, "cpv-plugin-fixer-agent must require plugin-root: in BATCH_REQUIRED line"
         assert "Triage report:" in self.body or "triage-report" in self.body, (
-            "plugin-fixer must require a triage report path so the "
+            "cpv-plugin-fixer-agent must require a triage report path so the "
             "orchestrator can show the user the diagnostics that justified "
             "the batch dispatch"
         )
 
     def test_documents_skill_tool_invocation_pattern(self) -> None:
-        """Body must demonstrate Skill tool calls for fix-validation + batch-fix-protocol."""
+        """Body must demonstrate Skill tool calls for cpv-fix-validation + cpv-batch-fix-protocol."""
         # Use the fully-qualified marker (catches a regression where someone
         # writes the call without the plugin prefix).
-        assert 'skill: "claude-plugins-validation:fix-validation"' in self.body
-        assert 'skill: "claude-plugins-validation:batch-fix-protocol"' in self.body
+        assert 'skill: "claude-plugins-validation:cpv-fix-validation"' in self.body
+        assert 'skill: "claude-plugins-validation:cpv-batch-fix-protocol"' in self.body
 
 
 class TestDoctorPhase0Routing:
@@ -95,12 +95,12 @@ class TestDoctorPhase0Routing:
     def test_emits_recommend_batch_fix_token_for_big_plugins(self) -> None:
         assert "recommend-batch-fix" in self.body, (
             "Doctor must emit the `recommend-batch-fix` token when findings "
-            "exceed plugin-fixer's safe-ceiling (TRDD-14cc93a6 + v2.91.0)"
+            "exceed cpv-plugin-fixer-agent's safe-ceiling (TRDD-14cc93a6 + v2.91.0)"
         )
 
     def test_routing_table_documented(self) -> None:
         """The doctor's routing table must mention the validator-skill invocation."""
-        assert 'skill: "claude-plugins-validation:plugin-validation-skill"' in self.body
+        assert 'skill: "claude-plugins-validation:cpv-plugin-validation-skill"' in self.body
 
 
 class TestMenuFixLeafAutoRoutes:
@@ -157,16 +157,16 @@ class TestSkillsAreGloballyInvocable:
     """The decoupled-routing principle: agents invoke skills via Skill tool, not via frontmatter ACL."""
 
     def test_plugin_fixer_body_uses_skill_tool_calls(self) -> None:
-        """plugin-fixer must demonstrate at least 2 fully-qualified Skill calls in its body."""
-        body = (REPO / "agents" / "plugin-fixer.md").read_text(encoding="utf-8")
+        """cpv-plugin-fixer-agent must demonstrate at least 2 fully-qualified Skill calls in its body."""
+        body = (REPO / "agents" / "cpv-plugin-fixer-agent.md").read_text(encoding="utf-8")
         matches = re.findall(
             r'skill:\s*"claude-plugins-validation:([a-z0-9_-]+)"',
             body,
         )
         # Body must contain at least 2 distinct skill invocations (e.g.
-        # fix-validation + batch-fix-protocol)
+        # cpv-fix-validation + cpv-batch-fix-protocol)
         assert len(set(matches)) >= 2, (
-            f"plugin-fixer body must demonstrate >=2 fully-qualified Skill calls "
+            f"cpv-plugin-fixer-agent body must demonstrate >=2 fully-qualified Skill calls "
             f"(TRDD-14cc93a6 decoupled routing). Found: {set(matches)}"
         )
 

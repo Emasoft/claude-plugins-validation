@@ -1,4 +1,4 @@
-"""Two-sided tests for GitHub issue #143 — canonical-pipeline local-gate ↔ CI
+"""Two-sided tests for GitHub issue #143 — cpv-canonical-pipeline local-gate ↔ CI
 gate-PARITY for the jscpd copy-paste dimension.
 
 The generated ``publish.py --gate`` (run by the strict pre-push hook) used to run

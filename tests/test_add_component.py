@@ -51,23 +51,23 @@ def test_add_skill_overwrites_with_force(plugin):
     assert "second" in text
 
 
-# ── add_skill + the-skills-menu catalog sync (TRDD-9dd64dbf) ─────────────────
+# ── add_skill + cpv-the-skills-menu catalog sync (TRDD-9dd64dbf) ─────────────────
 
 
 def _seed_the_skills_menu(plugin: Path) -> Path:
-    """Create a minimal the-skills-menu/SKILL.md so add_skill registers new skills."""
-    catalog_dir = plugin / "skills" / "the-skills-menu"
+    """Create a minimal cpv-the-skills-menu/SKILL.md so add_skill registers new skills."""
+    catalog_dir = plugin / "skills" / "cpv-the-skills-menu"
     catalog_dir.mkdir(parents=True)
     catalog = catalog_dir / "SKILL.md"
     catalog.write_text(
         """---
-name: the-skills-menu
+name: cpv-the-skills-menu
 description: "Dynamic skill menu for the p plugin."
 user-invocable: false
 allowed-tools: Read
 ---
 
-# the-skills-menu
+# cpv-the-skills-menu
 
 ## Plugin Skills
 
@@ -85,28 +85,28 @@ def test_add_skill_registers_in_catalog_when_method_adopted(plugin):
     rc = ac.add_skill(plugin, "freshly-added", "Does the thing", force=False)
     assert rc == 0
     body = catalog.read_text(encoding="utf-8")
-    assert "freshly-added" in body, "new skill must be appended to the-skills-menu/SKILL.md when the catalog exists"
+    assert "freshly-added" in body, "new skill must be appended to cpv-the-skills-menu/SKILL.md when the catalog exists"
     # existing entry preserved
     assert "existing-skill" in body
 
 
 def test_add_skill_no_catalog_change_when_method_not_adopted(plugin):
-    # No the-skills-menu/SKILL.md → no catalog to update, but add_skill must still succeed.
+    # No cpv-the-skills-menu/SKILL.md → no catalog to update, but add_skill must still succeed.
     rc = ac.add_skill(plugin, "freshly-added", "Does the thing", force=False)
     assert rc == 0
-    catalog = plugin / "skills" / "the-skills-menu" / "SKILL.md"
+    catalog = plugin / "skills" / "cpv-the-skills-menu" / "SKILL.md"
     assert not catalog.exists()
 
 
 def test_add_skill_never_lists_the_skills_menu_itself(plugin):
     catalog = _seed_the_skills_menu(plugin)
     before = catalog.read_text(encoding="utf-8")
-    # Adding `the-skills-menu` again would be recursive self-reference.
-    ac.add_skill(plugin, "the-skills-menu", "should be skipped", force=True)
+    # Adding `cpv-the-skills-menu` again would be recursive self-reference.
+    ac.add_skill(plugin, "cpv-the-skills-menu", "should be skipped", force=True)
     after = catalog.read_text(encoding="utf-8")
-    # The catalog's "Plugin Skills" table must not gain a `the-skills-menu` row.
-    assert after.count("the-skills-menu") == before.count("the-skills-menu"), (
-        "the-skills-menu must never list itself in its own Plugin Skills table"
+    # The catalog's "Plugin Skills" table must not gain a `cpv-the-skills-menu` row.
+    assert after.count("cpv-the-skills-menu") == before.count("cpv-the-skills-menu"), (
+        "cpv-the-skills-menu must never list itself in its own Plugin Skills table"
     )
 
 

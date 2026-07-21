@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for issue #25 — canonical-pipeline publish.py / release.yml defects.
+"""Tests for issue #25 — cpv-canonical-pipeline publish.py / release.yml defects.
 
 * Defect A — ``_plugin_in_remote_marketplace`` rejected ``url`` / ``git``
   marketplace source forms (falsely blocked Stage 5 of every downstream

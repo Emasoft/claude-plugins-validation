@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-fix
-description: Parallel fix for one OR many plugins. Single-plugin inputs run the existing per-shard protocol (one plugin-fixer per shard of findings). Marketplace / list / URL inputs run a per-plugin fan-out (one plugin-fixer per plugin; each fixer may internally shard its own findings). Accepts local paths, GitHub URLs, marketplace URLs/folders, comma-separated lists, and @listfile shapes. Default 8 parallel agents per main-session message, cap 16. Each agent starts with a fresh context window (size determined by `plugin-fixer.model`).
+description: Parallel fix for one OR many plugins. Single-plugin inputs run the existing per-shard protocol (one cpv-plugin-fixer-agent per shard of findings). Marketplace / list / URL inputs run a per-plugin fan-out (one cpv-plugin-fixer-agent per plugin; each fixer may internally shard its own findings). Accepts local paths, GitHub URLs, marketplace URLs/folders, comma-separated lists, and @listfile shapes. Default 8 parallel agents per main-session message, cap 16. Each agent starts with a fresh context window (size determined by `cpv-plugin-fixer-agent.model`).
 argument-hint: "<plugin-or-marketplace-or-list> [--shard-size N] [--max-parallel N] [--min-severity LEVEL]"
 user-invocable: true
 ---
@@ -8,14 +8,14 @@ user-invocable: true
 # /cpv-batch-fix — Parallel batch fix for large plugins
 
 For plugins where the total set of findings can't comfortably fit
-in a single `plugin-fixer` agent's working context (and stay under
+in a single `cpv-plugin-fixer-agent` agent's working context (and stay under
 the ~50% utilisation level beyond which model quality begins to
 degrade), the single-agent fix loop will silently exhaust its
 context window mid-way and exit without finishing the job. The
 "safe size" is per-model: bare `opus` / `sonnet` give 200K tokens
 (~20-30 findings safe), the `opus[1m]` / `sonnet[1m]` variants
 give 1M (~100-150 findings safe). Per the Anthropic subagent spec,
-**subagents cannot spawn other subagents**, so `plugin-fixer`
+**subagents cannot spawn other subagents**, so `cpv-plugin-fixer-agent`
 cannot parallelise itself.
 
 This command does the parallelisation **from the main session**, which
@@ -26,9 +26,9 @@ is the only place the Agent tool can fan out:
    grouping**: every finding inside `skills/<name>/` belongs to the
    `skills/<name>/` scope (with refactor rights), every other finding
    belongs to a single-file scope.
-2. Dispatches N `plugin-fixer` agents in a SINGLE main-session
+2. Dispatches N `cpv-plugin-fixer-agent` agents in a SINGLE main-session
    message, each given its own shard manifest. Each agent starts
-   with a fresh context window (size determined by `plugin-fixer`'s
+   with a fresh context window (size determined by `cpv-plugin-fixer-agent`'s
    `model:` frontmatter at dispatch time) and refactor rights
    inside `skill_dir` scopes — including the right to split an
    oversized SKILL.md into multiple smaller focused skills,
@@ -45,7 +45,7 @@ for the full design.
 
 You — the model running THIS turn — orchestrate the slash command from
 the main session. You do NOT do any fixing yourself. You delegate the
-actual fix work to N parallel `plugin-fixer` agents via the Agent tool,
+actual fix work to N parallel `cpv-plugin-fixer-agent` agents via the Agent tool,
 each in `batch_shard` mode.
 
 ## Step 0 — Resolve arguments
@@ -80,7 +80,7 @@ TARGET="<user-supplied-target>"
 MAX_PARALLEL=8  # or user override (--max-parallel, cap 16)
 RESOLVED_JSON="$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   "$TARGET" \
-  --agent plugin-fixer \
+  --agent cpv-plugin-fixer-agent \
   --mode batch_per_plugin \
   --max-parallel "$MAX_PARALLEL")"
 PLUGIN_COUNT=$(echo "$RESOLVED_JSON" | sed -n 's/^PLUGIN_COUNT: //p')
@@ -185,7 +185,7 @@ tool call per shard (up to the cap):
 # Pseudocode — emit N Agent tool calls in one assistant message
 for shard in index.shards[:max_parallel]:
     Agent(
-      subagent_type: "plugin-fixer",
+      subagent_type: "cpv-plugin-fixer-agent",
       description: "Batch-fix shard {shard.shard_id}/{index.shard_count}",
       prompt: |
         <context>
@@ -198,7 +198,7 @@ for shard in index.shards[:max_parallel]:
         plugin_path: {index.plugin_path}
         </context>
 
-        Run in batch_shard mode per agents/plugin-fixer.md.
+        Run in batch_shard mode per agents/cpv-plugin-fixer-agent.md.
         Read the shard manifest, fix only its findings, write the
         status JSON to status_path, then return ONE line exactly:
 
@@ -213,7 +213,7 @@ for shard in index.shards[:max_parallel]:
 
 Multiple Agent tool calls in a single assistant message **execute in
 parallel** per the Claude Code spec. Each agent gets its own fresh
-context window (size determined by `plugin-fixer.model` — defaults to
+context window (size determined by `cpv-plugin-fixer-agent.model` — defaults to
 opus 200K, can be `opus[1m]` or `sonnet[1m]` for 1M). If there are
 more shards than ``max_parallel``, dispatch in waves (collect the
 first wave's one-line summaries, then
@@ -265,19 +265,19 @@ No report body ever crosses the main-session context.
 
 | # | Knob | Default | Notes |
 |---|------|---------|-------|
-| 1 | `--shard-size` | 30 | Choose dynamically based on `plugin-fixer.model`'s context window AND the rule that model quality degrades above ~50% context utilisation. Safe ceiling ≈ `(model_context / 2) / 3-5K-tokens-per-finding`. opus/sonnet 200K → ~20-30 findings/shard; opus[1m]/sonnet[1m] → ~100-150 findings/shard; future models may differ. Raise for trivial mechanical findings, lower for complex ones. No hard cap — the orchestrator decides. |
+| 1 | `--shard-size` | 30 | Choose dynamically based on `cpv-plugin-fixer-agent.model`'s context window AND the rule that model quality degrades above ~50% context utilisation. Safe ceiling ≈ `(model_context / 2) / 3-5K-tokens-per-finding`. opus/sonnet 200K → ~20-30 findings/shard; opus[1m]/sonnet[1m] → ~100-150 findings/shard; future models may differ. Raise for trivial mechanical findings, lower for complex ones. No hard cap — the orchestrator decides. |
 | 2 | `--max-parallel` | 8 | Hard cap 16 — beyond that, Anthropic's API rate-limits kick in and dispatches fail. The 16 ceiling is a safety against rate-limit failure, not a behavioral limit. |
 | 3 | Findings per file | unlimited | A single-file shard with more findings than `--shard-size` gets its own oversized shard with a stderr warning |
 | 4 | Plugin size | unlimited | Tested up to 500+ findings; larger plugins simply spawn more shards |
-| 5 | Per-shard iterations | unlimited | The shard agent fixes until convergence (or oscillation, see plugin-fixer §Rules). NO hardcoded iteration ceiling — bigger shards need more iterations |
-| 6 | Per-shard wall-clock | unlimited | Bounded only by the agent's `maxTurns` (set in `agents/plugin-fixer.md` frontmatter, currently 200). Time per turn is not capped — fixes can take as long as they need |
+| 5 | Per-shard iterations | unlimited | The shard agent fixes until convergence (or oscillation, see cpv-plugin-fixer-agent §Rules). NO hardcoded iteration ceiling — bigger shards need more iterations |
+| 6 | Per-shard wall-clock | unlimited | Bounded only by the agent's `maxTurns` (set in `agents/cpv-plugin-fixer-agent.md` frontmatter, currently 200). Time per turn is not capped — fixes can take as long as they need |
 
 ## Marketplace / list input — per-plugin fan-out (TRDD-3dcbb37c)
 
 When the user's target resolved to MORE THAN ONE plugin (a
 marketplace, a list, or a multi-spec), the orchestrator switches
 from per-shard parallelism to **per-plugin parallelism**: one
-`plugin-fixer` subagent per plugin, all dispatched from one
+`cpv-plugin-fixer-agent` subagent per plugin, all dispatched from one
 main-session message in groups of `--max-parallel` (default 8,
 cap 16). Each per-plugin agent runs the standard fix loop on its
 own plugin — including the agent's own internal `batch_shard`
@@ -286,7 +286,7 @@ logic when its finding count justifies it.
 ### Step M1 — Reuse the per-plugin plan from Step 0
 
 Step 0 already ran `cpv_batch_orchestrator.py plan` (with the same
-`--agent plugin-fixer --mode batch_per_plugin --max-parallel`), which
+`--agent cpv-plugin-fixer-agent --mode batch_per_plugin --max-parallel`), which
 both classified the input AND wrote `plan.json` + `status_table.json`
 into `SESSION_DIR`. Do NOT re-plan — reuse the captured paths:
 `SESSION_DIR`, `$SESSION_DIR/plan.json`, and `STATUS_TABLE`. Queue the
@@ -301,7 +301,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$STATUS_TABLE"
 NEVER print menu inline; the CMS Stop hook emits via systemMessage at
 turn end. End the turn after this call.
 
-### Step M2 — Dispatch one plugin-fixer per plugin, in groups of max_parallel
+### Step M2 — Dispatch one cpv-plugin-fixer-agent per plugin, in groups of max_parallel
 
 For each `dispatch_groups[i]`, emit one Agent call per plugin in a
 single main-session message:
@@ -310,7 +310,7 @@ single main-session message:
 for plugin_index in group:
     plugin = plan.plugins[plugin_index]
     Agent(
-      subagent_type: "plugin-fixer",
+      subagent_type: "cpv-plugin-fixer-agent",
       description: "Batch-fix plugin {plugin.display_name}",
       prompt: |
         <context>
@@ -404,7 +404,7 @@ per-plugin status tables are informational only. No numbered or
 lettered action rows — the user's next move is the text suggestion
 above (re-run, or `/cpv-doctor` for deeper recipes). Two slugs are
 reserved by this command: ``batch-fix-shard-plan`` (per-shard mode,
-single-plugin path) and ``batch-plugin-fixer-status`` (per-plugin
+single-plugin path) and ``batch-cpv-plugin-fixer-agent-status`` (per-plugin
 mode, marketplace/list path; shared with
 `/cpv-batch-validate-and-fix`, `/cpv-batch-full-scan-and-fix` — same
 agent type). The fixed key→action map is empty by design; future
@@ -414,8 +414,8 @@ post-scan menus extend this contract with letter→action rows.
 
 - TRDD-71e68ab5 — per-shard fix protocol (single plugin)
 - TRDD-3dcbb37c — per-plugin fix protocol (marketplace / list input)
-- `agents/plugin-fixer.md` — `batch_shard` + `batch_per_plugin` mode contracts
-- `skills/batch-fix-protocol/SKILL.md` — per-shard schema reference
+- `agents/cpv-plugin-fixer-agent.md` — `batch_shard` + `batch_per_plugin` mode contracts
+- `skills/cpv-batch-fix-protocol/SKILL.md` — per-shard schema reference
 - `scripts/cpv_batch_planner.py` — per-shard planner source
 - `scripts/cpv_batch_aggregator.py` — per-shard aggregator source
 - `scripts/cpv_marketplace_input.py` — universal input resolver (TRDD-3dcbb37c)

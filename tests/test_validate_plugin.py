@@ -1334,7 +1334,7 @@ class TestValidateUserConfig:
         The janitor shipped 11 userConfig entries without `type`. CPV ≤v2.22.3 passed it,
         but Claude Code's runtime rejected all 11 at `claude plugin install`. This test
         replicates the exact manifest and asserts that the validator now emits 11 MAJORs
-        — one per entry — so the plugin-fixer can auto-repair them.
+        — one per entry — so the cpv-plugin-fixer-agent can auto-repair them.
         """
         report = self._run(
             tmp_path,

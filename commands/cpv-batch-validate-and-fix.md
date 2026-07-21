@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-validate-and-fix
-description: Same-turn validate-and-fix across a marketplace / list / single plugin. One plugin-fixer per plugin scans + verifies false positives + fixes ALL findings in the same turn — each source file is READ ONCE, not the three times the separate validate → fix → re-validate cycle requires. Cuts per-plugin token cost ~3×. Default 8 parallel agents per main-session message, cap 16.
+description: Same-turn validate-and-fix across a marketplace / list / single plugin. One cpv-plugin-fixer-agent per plugin scans + verifies false positives + fixes ALL findings in the same turn — each source file is READ ONCE, not the three times the separate validate → fix → re-validate cycle requires. Cuts per-plugin token cost ~3×. Default 8 parallel agents per main-session message, cap 16.
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---
@@ -12,7 +12,7 @@ marketplace WITHOUT paying the token cost of the standard
 `/cpv-batch-validate` → `/cpv-batch-fix` pipeline (which reads every
 plugin's source files THREE times — once for validate, once for
 fix, once for re-validate), this command runs both phases in **one
-agent turn per plugin**. Each plugin-fixer subagent reads each
+agent turn per plugin**. Each cpv-plugin-fixer-agent subagent reads each
 source file ONCE, scans + verifies false positives (via the
 v2.100.x AST/schema/markdown classifier) + applies fixes inline.
 No intermediate JSON report is written; the per-plugin status JSON
@@ -48,7 +48,7 @@ MAX_PARALLEL=8
 
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   "$BATCH_SPEC" \
-  --agent plugin-fixer \
+  --agent cpv-plugin-fixer-agent \
   --mode batch_same_turn_validate_fix \
   --max-parallel "$MAX_PARALLEL"
 ```
@@ -85,7 +85,7 @@ single main-session message:
 for plugin_index in group:
     plugin = plan.plugins[plugin_index]
     Agent(
-      subagent_type: "plugin-fixer",
+      subagent_type: "cpv-plugin-fixer-agent",
       description: "Batch-validate-and-fix {plugin.display_name}",
       prompt: |
         <context>
@@ -174,7 +174,7 @@ End the turn. The CMS Stop hook emits the final table via systemMessage.
 
 `/cpv-batch-validate-and-fix` is a one-shot same-turn fleet fix; the
 status table is informational only. No numbered or lettered action
-rows. The slug ``batch-plugin-fixer-status`` is reserved for this
+rows. The slug ``batch-cpv-plugin-fixer-agent-status`` is reserved for this
 command's status table (shared with `/cpv-batch-fix`,
 `/cpv-batch-full-scan-and-fix` — same agent type). The fixed
 key→action map is empty by design; future post-scan menus extend this
@@ -201,4 +201,4 @@ classifier chain and want a faster sweep, use this command.
 - TRDD-3dcbb37c §3 — full design
 - `/cpv-batch-validate` + `/cpv-batch-fix` — separate-pass equivalent
 - `/cpv-batch-full-scan-and-fix` — same-turn but includes security + caching audit
-- `agents/plugin-fixer.md` — `batch_same_turn_validate_fix` mode contract
+- `agents/cpv-plugin-fixer-agent.md` — `batch_same_turn_validate_fix` mode contract

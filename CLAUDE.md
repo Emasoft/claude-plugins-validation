@@ -19,23 +19,25 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `2.162.0` | `.claude-plugin/plugin.json` → `version` |
-| **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `the-skills-menu-create` |
+| **version** | `3.0.0` | `.claude-plugin/plugin.json` → `version` |
+| **commands** | **13** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `cpv-the-skills-menu-create` |
 | **agents** | **14** | `ls agents/*.md` |
 | **skills** | **47** | `ls -d skills/*/` |
 | **scripts** | **124** | `ls scripts/*.py` (25 `validate_*.py` + management/engine/CLI; `_skillaudit_*_context.py` per-language classifiers; `cpv_dependency_schema.py` SSOT dep-schema; `cpv_diagnose_architecture.py` lean-plugin diagnostic; `cpv_pipeline_profile.py` canon-profile resolver; `cpv_fix_loop_state.py` deterministic full-history fix-loop oscillation detector; `cpv_ci_preflight.py` + `cpv_ci_parity_checks.py` local CI-parity preflight — the `ci-preflight` subcommand (CIP-1..8 static defect detectors incl. CIP-6 stale/invalid CPV-ref `@main`, CIP-7 commitlint-with-no-Dependabot-exemption, CIP-8 sharded-pytest-without-`pytest-split`, + degrade-gracefully Mega-Linter sub-linter parity probes bandit[-ll]/checkov/trivy/cspell/shellcheck/shfmt) — **wired into `publish.py` as Gate 3b since v2.157.0**, so no agent can skip it; `cpv_persistence_target.py` the INTRINSIC daemon-installer source-scan discriminator — resolve-launched-program→clean→non-exploitable, shared by skillaudit PERSISTENCE + RC-39; `cpv_inplugin_write_guard.py` the RC-164 copy-only in-plugin-write guard — flags a plugin script that generates/edits a script file landing inside the plugin tree, reusing the `cpv_persistence_target.py` in-tree resolver; `cpv_fix_ledger.py` the compact by-file findings ledger — validator `--strict --json` → MECH(`fixable:true`)/INTEL split so the fix loop reads a small ledger, NOT the full report, each iteration; `cpv_codemod.py` gained an `apply --json` MECH auto-applier; `cpv_snyk_agent_scanner.py` the OPT-IN Snyk Agent Scan wrapper — instruction-surface LLM scan, token-gated on `SNYK_TOKEN`, skills-only + STAGES agents/commands/rules/hooks as synthetic skills and remaps findings to the real path, NEVER runs an MCP server) |
 | **test files** | **406** | `ls tests/test_*.py`; ~10996 tests |
 
-**The 14 agents:** cache-optimizer-agent · cpv-doctor-agent ·
-cpv-spark · cpv · marketplace-fixer · plugin-creator ·
-plugin-devitalizer · plugin-diagnoser · plugin-fixer · plugin-leaks-preventer
-· plugin-manager · plugin-validator · semantic-validator ·
-skill-validation-agent.
+**The 14 agents** (all now `cpv-…-agent`, per the v3.0.0 rename):
+cpv-agent · cpv-cache-optimizer-agent · cpv-doctor-agent ·
+cpv-marketplace-fixer-agent · cpv-plugin-creator-agent ·
+cpv-plugin-devitalizer-agent · cpv-plugin-diagnoser-agent ·
+cpv-plugin-fixer-agent · cpv-plugin-leaks-preventer-agent ·
+cpv-plugin-manager-agent · cpv-plugin-validator-agent ·
+cpv-semantic-validator-agent · cpv-skill-validation-agent · cpv-spark-agent.
 
 **Single-visible-command invariant:** only `/cpv-main-menu` is meant to be the
-user's entry point; all skills are `user-invocable: false` and load via
-`the-skills-menu`. Adding a new top-level visible command breaks this — don't,
-unless explicitly asked.
+user's entry point; the specialist skills load via `cpv-the-skills-menu`
+(itself `user-invocable: true` as the agent-facing router). Adding a new
+top-level visible command breaks this — don't, unless explicitly asked.
 
 ## Menu architecture (the thing that surprised me — now documented)
 
@@ -50,9 +52,10 @@ menu post-turn via `systemMessage` (zero context cost). The menu TREE + per-leaf
 execution recipes live in `skills/cpv-main-menu-skill/references/menu-tree.md`
 (read this to know what every menu leaf dispatches to). Main Claude queues menu
 specs + parses integer/letter choices inline; heavy work is dispatched to the
-specialised work agents (plugin-fixer/plugin-creator/plugin-diagnoser/
-marketplace-fixer/cache-optimizer-agent/plugin-devitalizer/
-plugin-leaks-preventer/etc.).
+specialised work agents (cpv-plugin-fixer-agent/cpv-plugin-creator-agent/
+cpv-plugin-diagnoser-agent/cpv-marketplace-fixer-agent/
+cpv-cache-optimizer-agent/cpv-plugin-devitalizer-agent/
+cpv-plugin-leaks-preventer-agent/etc.).
 
 **Dependency:** the menu needs `claude-menu-system` (separate plugin,
 `github.com/Emasoft/claude-menu-system`, dev checkout at
@@ -129,6 +132,9 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
 
 ## Open issues snapshot (update as they close)
+
+**v3.0.0 — BREAKING project-wide component rename: every agent is now `cpv-…-agent`, every command `cpv-…`, every skill `cpv-…` (user: "all commands, skills and agents must start with `cpv-`. and all agents must end with `-agent`" + "do as you think is best")**
+— the CPV agents lacked a `cpv-` prefix, so a user (or a routing Claude) scanning the agent registry could not find them among the fleet's dozens of agents. The fix is a namespace sweep of CPV's OWN components, MAJOR-bumped because the public dispatch names change (`Agent(subagent_type: "plugin-fixer")` → `"cpv-plugin-fixer-agent"`, `Skill(claude-plugins-validation:fix-validation)` → `:cpv-fix-validation`). **Scope:** 50 renames — 13 agents (→ `cpv-<stem>-agent`), 1 command (`the-skills-menu-create` → `cpv-the-skills-menu-create`), 36 skills (→ `cpv-<stem>`); `cpv-doctor-agent`, `cpv-main-menu`, `cpv-main-menu-skill`, `cpv-pre-install-scan` and every `cpv-batch-*` were already compliant and untouched, and SCRIPTS keep their names (they are not user-dispatched components). **Mechanism:** a reviewed, shape-scoped deterministic perl codemod, NOT `fastedit rename-all` — the component names are hyphenated STRING identifiers (`plugin-fixer`), not AST symbols (`class`/`def`), so the AST renamer finds 0 matches (verified). The codemod matched whole tokens with hyphen-aware boundaries + a `(?<!cpv-)` guard (never double-prefixes an already-fixed `name:` field) + longest-old-first (a short name never matches inside a longer one), and is idempotent. Phase 1 `git mv`'d all 50 dirs/files; Phase 2 set each frontmatter `name:` = filename/dirname (portable awk); Phase 3 ran 48 pairs over `agents commands skills scripts tests README .claude-plugin .mcp.json` (~1018 subs / 205 files) PLUS the top-level `references/` runbook dir the first pass missed (79 subs / 5 files); config files (`.github/`, `.gitignore`, `.markdownlint*`) verified clean. The bare 3-letter `cpv` agent → `cpv-agent` was done by SHAPE only (never a bare-token replace — 88 % of bare `cpv` hits are the manifest-config key / `.cache/cpv/` / plugin slug), fixing the two real dispatch sites (`cpv-the-skills-menu/SKILL.md`, `README.md`). **Verified by the validator-as-oracle loop** (`validate_plugin --strict`): 20 CRITICAL / 61 MAJOR / 49 MINOR at the start (all rename breakage — `RC-GHOST-DISPATCH-001` ghost `subagent_type:`, "Reference to non-existent skill", broken paths/links) → **VALID 0/0/0/0**. Two residual MAJORs were content-trim consequences of the longer names, not ref bugs, and were trimmed WITHOUT capability loss: `cpv-harden-and-redact` frontmatter `description` (203 → <200 tokens) and `cpv-the-skills-menu` body (~5295 → <5000 tokens — condensed the duplicated Scripts-à-la-carte section + the longest table parentheticals; the routing `via cpv-the-skills-menu` phrase the `RE_USED_VIA_THE_SKILLS_MENU` check needs is preserved). The batch-status slug is DERIVED from the agent name (`_cms_slug_for` → `f"batch-{agent_type}-status"`), so it correctly became `batch-cpv-plugin-fixer-agent-status` — reconciled in the orchestrator test + the 3 batch-command docs that document it. NOT a security / `--strict` change — pure rename; the historical version paragraphs below KEEP the old names as they were per-version. version 3.0.0, agents 14, commands 13, skills 47. [[maintain-project-claude-md]] [[claim-verification]] [[lesson-regen-hashes-last-markdown-poison]]
 
 **v2.162.0 — CC spec-drift sync v2.1.212 → v2.1.216: eight allowlist-widening / FP-reduction adds, none touching a security gate or `--strict` severity (user: "update the plugin to the latest changes of claude code")**
 — the changelog spanned v2.1.209→.216; CPV was last synced through v2.1.212 (v2.160.0, commit `32331f5`), so the genuinely-new deltas are .214/.215/.216 (.213 is absent from the public changelog — it survives only as the `min-version: 2.1.213` marker on EndConversation). A detection agent fetched the RAW docs (not a WebFetch summary — the method [[cc-spec-drift-check-method]] records as unreliable) and mechanically set-diffed each CPV constant table; every file:line was spot-verified before editing (the `CANONICAL_TOOLS: frozenset[str] =` form had defeated a naive `\s*=` grep). **The adds:** `EndConversation` (v2.1.214 — the abusive-session/jailbreak-exit tool) into BOTH `VALID_TOOLS` (strict validity) AND `CANONICAL_TOOLS` (detection breadth — the file comment keeps the two apart, but a genuinely-current tool belongs in both); SessionStart source `fork` (v2.1.212/.214) into `SESSION_START_SOURCES` (a session begun via `/fork` reports source `fork`); and ten env vars into `VALID_PLUGIN_ENV_VARS`, each a live "unknown env var" false positive on any plugin hook/skill/mcp/lsp that references it — `CLAUDE_CODE_FORWARD_SUBAGENT_TEXT` (.211), `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` / `CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION` / `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS` (.212), `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` plus the three OTel-SDK `..._ATTRIBUTE_VALUE_LENGTH_LIMIT` variants (.214), and two gaps the prior sweep missed (`CLAUDE_CODE_PROCESS_WRAPPER` .208, `CLAUDE_AX_SCREEN_READER` .181 — its settings twin `axScreenReader` had been added, the env-var form skipped). Also synced `BUILTIN_SLASH_COMMANDS` (the plugin-command name-collision WARNING) with the current-builtin slash commands the changelog names — `fork` / `subtask` / `background` / `btw` (.212), `usage-credits` (.211), `verify` / `code-review` (.215) — an FN-direction fix (a missed collision warning, never a false block), added only from named evidence so no plugin draws a false collision. **VERIFIED CURRENT (diffed, no change):** `sandbox.filesystem.disabled` (.216 — CPV tolerates the boolean subkey, no FP/FN), the Task-tool `mode` deprecation (.212 — CPV never validates it), memory-file frontmatter `modified` (.214 — a CC-auto-written field, not a plugin-authored surface), all 30 hook events, and .215 (runtime-only). +15 two-sided tests (`tests/test_cc_spec_sync_2_1_213_216.py`); 357 constant-touching regression tests still green; cache-cold strict self-validate VALID 0/0/0/0. NOT a security / `--strict` change — allowlist-widening only. version 2.162.0, scripts 124, test files 406. [[cc-spec-drift-check-method]] [[claim-verification]] [[feedback-never-suppress-never-relax-gate]] [[lesson-regen-hashes-last-markdown-poison]] [[maintain-project-claude-md]]

@@ -1,6 +1,6 @@
 # Plugin Diagnoser — full runbook
 
-Detailed step-by-step bodies for the `plugin-diagnoser` agent. The agent
+Detailed step-by-step bodies for the `cpv-plugin-diagnoser-agent` agent. The agent
 body keeps every phase HEADER plus a 1–3 line summary; the verbose detail
 (per-check tables, severity rules, the Phase 9 render recipe, and the
 Phase 10 dispatch table) lives here. Read the matching section before
@@ -37,7 +37,7 @@ to WARNING.
 ## Phase 3 — Pipeline-staleness audit
 
 The detection signals + fix recipes for every section below live in
-[pipeline-migration.md](../skills/fix-validation/references/pipeline-migration.md)
+[pipeline-migration.md](../skills/cpv-fix-validation/references/pipeline-migration.md)
 > §0 — Detect canonical pipeline drift via RC-PIPELINE-DRIFT-001 · §0b — Remove legacy pipeline scripts via RC-LEGACY-PIPELINE-001 · §1 — Fix dangling script references · §2 — Migrate to whole-repo lint via cpv_lint_engine · §3 — Cross-platform Python — bash to Python, os.path to pathlib · §4 — Make publish.py idempotent — interrupted-publish recovery · §5 — Sanitize every script-input parameter against injection
 
 Read that doc and run its per-section detection commands. Two sections are
@@ -45,7 +45,7 @@ validator-driven and surfaced from `validate_plugin.py --strict` output:
 
 | Check | How |
 |---|---|
-| §0 Canonical pipeline drift | surface every `[RC-PIPELINE-DRIFT-001]` finding. Fix path: `/cpv-upgrade-plugin` (dispatches plugin-fixer with `--force-templates`). |
+| §0 Canonical pipeline drift | surface every `[RC-PIPELINE-DRIFT-001]` finding. Fix path: `/cpv-upgrade-plugin` (dispatches cpv-plugin-fixer-agent with `--force-templates`). |
 | §0b Legacy pipeline scripts | surface every `[RC-LEGACY-PIPELINE-001]` MINOR finding (bump_version.py, release.sh, lint.sh, compute_hashes.py, …). Fix path: same `/cpv-upgrade-plugin` flow auto-moves them to `scripts_dev/` (files MOVED, never deleted). |
 | §3a/§3b/§3c Cross-platform Python | run the §3 detection commands from pipeline-migration.md (shipped `.sh` scripts, bash hook commands via `check_hook_command_cross_platform`, non-pathlib `os.path`/`shell=True`/`/tmp/`/`os.system`). |
 | §4 Non-idempotent publish.py | run the §4 presence check from pipeline-migration.md (`_read_remote_version`/`_infer_bump_type`/`_git_porcelain_clean` helpers present = current standard). |
@@ -134,7 +134,7 @@ is lost. Reference: <https://code.claude.com/docs/en/plugins-reference>.
 The canonical SessionStart install-hook recipe (the `diff`-guarded
 `npm install` into `${CLAUDE_PLUGIN_DATA}`, plus the `NODE_PATH` wiring and
 the Python/uv equivalent) lives in the "Environment variables" section of
-[plugins-reference](../skills/plugin-validation-skill/references/plugins-reference.md).
+[plugins-reference](../skills/cpv-plugin-validation-skill/references/plugins-reference.md).
 Quote that snippet into the report when a manifest declares deps but ships no
 installer hook — do not invent a different recipe.
 
@@ -156,7 +156,7 @@ Scan for:
 ## Phase 8 — Write report
 
 Write a structured Markdown report to:
-`$MAIN_ROOT/reports/plugin-diagnoser/<YYYYMMDD_HHMMSS±HHMM>-<plugin-name>.md`
+`$MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/<YYYYMMDD_HHMMSS±HHMM>-<plugin-name>.md`
 
 The report has 8 sections (one per phase) plus a top-of-document
 summary table:
@@ -206,7 +206,7 @@ cat > "$PLUGIN_DIAGNOSER_PHASE9_SPEC" <<'JSON'
 {
   "spec_version": 1,
   "mode": "menu",
-  "plugin": "plugin-diagnoser",
+  "plugin": "cpv-plugin-diagnoser-agent",
   "slug": "phase9-followup",
   "header": "Diagnosis complete — pick a follow-up action",
   "rows": [
@@ -229,10 +229,10 @@ End the turn immediately after this call. NEVER print this menu inline.
 
 ## Phase 10 — Dispatch on user choice
 
-- **F (`full_upgrade`)** → dispatch **plugin-fixer** with `min_severity=WARNING` AND a prompt that explicitly asks for pipeline-migration §1–§5 to run first.
-- **C (`critical_only`)** → dispatch **plugin-fixer** with `min_severity=CRITICAL` AND the same pipeline-migration §1–§5 prompt.
-- **J (`major_plus_critical`)** → dispatch **plugin-fixer** with `min_severity=MAJOR` AND the same pipeline-migration §1–§5 prompt.
-- **R (`register_marketplace`)** → dispatch **plugin-creator** in marketplace-mode (orphan plugin path) — interactive interrogation about marketplace target.
+- **F (`full_upgrade`)** → dispatch **cpv-plugin-fixer-agent** with `min_severity=WARNING` AND a prompt that explicitly asks for pipeline-migration §1–§5 to run first.
+- **C (`critical_only`)** → dispatch **cpv-plugin-fixer-agent** with `min_severity=CRITICAL` AND the same pipeline-migration §1–§5 prompt.
+- **J (`major_plus_critical`)** → dispatch **cpv-plugin-fixer-agent** with `min_severity=MAJOR` AND the same pipeline-migration §1–§5 prompt.
+- **R (`register_marketplace`)** → dispatch **cpv-plugin-creator-agent** in marketplace-mode (orphan plugin path) — interactive interrogation about marketplace target.
 - **S (`sync_cache`)** → ask the user "Run `claude plugin update <name>@<marketplace>` now? (yes/no)". On yes, run it. On no, print the command for the user to copy.
 - **G (`github_branch_rules`)** → fix branch rules + Claude action + secrets:
   - **(a)** confirm the user wants to (re)apply the `cpv-branch-rules` ruleset → run `cpv-setup-branch-rules-generic <owner>/<repo>` interactively;

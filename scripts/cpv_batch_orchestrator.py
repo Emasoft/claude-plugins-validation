@@ -265,8 +265,8 @@ def make_plan(
 
     Args:
         resolved: list of ``ResolvedInput`` (from ``cpv_marketplace_input.resolve``).
-        agent_type: target subagent type, e.g. ``plugin-validator``,
-            ``plugin-fixer``, ``cache-optimizer-agent``, ``cpv-doctor-agent``.
+        agent_type: target subagent type, e.g. ``cpv-plugin-validator-agent``,
+            ``cpv-plugin-fixer-agent``, ``cpv-cache-optimizer-agent``, ``cpv-doctor-agent``.
         agent_mode: per-agent mode keyword (e.g. ``batch_validate``,
             ``batch_security_audit``, ``batch_scope_diagnose``).
         max_parallel: maximum number of agents dispatched from one
@@ -423,7 +423,7 @@ def _cli(argv: list[str] | None = None) -> int:
     p_plan.add_argument(
         "--agent",
         required=True,
-        help="Target subagent type (plugin-validator/plugin-fixer/...)",
+        help="Target subagent type (cpv-plugin-validator-agent/cpv-plugin-fixer-agent/...)",
     )
     p_plan.add_argument(
         "--mode",

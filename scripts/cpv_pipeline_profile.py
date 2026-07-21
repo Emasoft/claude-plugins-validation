@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Canonical-pipeline PROFILE model (TRDD-e9f13df1, issues #130 / #118-d2).
 
-CPV's canonical-pipeline drift detector historically assumed exactly ONE
+CPV's cpv-canonical-pipeline drift detector historically assumed exactly ONE
 "standard vendored" pipeline shape: every plugin vendors the CPV validator
 scripts and ships the standard `gen_*` workflows, and any byte-difference is
 "drift" the maintainer is told to migrate away from with `--force-templates`.

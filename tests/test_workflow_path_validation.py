@@ -3,7 +3,7 @@
 Issue #21 ask #2 — escalate broken-glob / broken-literal-path references in
 workflow YAML ``run:`` bodies to MAJOR with file:line citations.
 
-Symptom this rule catches: a canonical-pipeline migration that consolidates
+Symptom this rule catches: a cpv-canonical-pipeline migration that consolidates
 several ``scripts/*.sh`` helpers into ``publish.py`` but leaves the workflow
 YAML invoking shellcheck on globs that now match zero files. The workflow
 silently passes (shellcheck reports zero issues on zero files), so the

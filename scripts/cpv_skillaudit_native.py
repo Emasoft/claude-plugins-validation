@@ -2282,7 +2282,7 @@ def _context_classifier_dispatch(
         # of the threat, not the threat itself. A `curl … | sh` snippet
         # in `references/zizmor-audit-fix-recipes.md` is teaching the
         # reader to SPOT and FIX the pattern; CPV's own
-        # `skills/canonical-pipeline/` shows the same shape. Under
+        # `skills/cpv-canonical-pipeline/` shows the same shape. Under
         # `--strict` a demoted NIT publish-blocks every security-doctor
         # plugin that documents its attack catalogue (`ai-maestro-janitor`
         # had 12+ of these). The doc-only carve-out is conservative:

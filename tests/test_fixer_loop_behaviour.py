@@ -22,10 +22,10 @@ import re
 from pathlib import Path
 
 REPO = Path(__file__).parent.parent
-PLUGIN_FIXER = REPO / "agents" / "plugin-fixer.md"
-MARKETPLACE_FIXER = REPO / "agents" / "marketplace-fixer.md"
-ITERATIVE_FIX_LOOP = REPO / "skills" / "fix-validation" / "references" / "iterative-fix-loop.md"
-SKILL_FIXES = REPO / "skills" / "fix-validation" / "references" / "skill-fixes.md"
+PLUGIN_FIXER = REPO / "agents" / "cpv-plugin-fixer-agent.md"
+MARKETPLACE_FIXER = REPO / "agents" / "cpv-marketplace-fixer-agent.md"
+ITERATIVE_FIX_LOOP = REPO / "skills" / "cpv-fix-validation" / "references" / "iterative-fix-loop.md"
+SKILL_FIXES = REPO / "skills" / "cpv-fix-validation" / "references" / "skill-fixes.md"
 LOOP_STATE = REPO / "scripts" / "cpv_fix_loop_state.py"
 
 
@@ -56,17 +56,17 @@ class TestLoopStateScript:
 
 class TestBothFixersWireTheScript:
     def test_plugin_fixer_references_loop_state(self) -> None:
-        """plugin-fixer.md wires cpv_fix_loop_state.py into its loop."""
+        """cpv-plugin-fixer-agent.md wires cpv_fix_loop_state.py into its loop."""
         assert "cpv_fix_loop_state.py" in _read(PLUGIN_FIXER)
 
     def test_marketplace_fixer_references_loop_state(self) -> None:
-        """marketplace-fixer.md wires cpv_fix_loop_state.py into its loop."""
+        """cpv-marketplace-fixer-agent.md wires cpv_fix_loop_state.py into its loop."""
         assert "cpv_fix_loop_state.py" in _read(MARKETPLACE_FIXER)
 
 
 class TestLoopBehaviourOwnedByAgents:
     def test_plugin_fixer_owns_loop_behaviour(self) -> None:
-        """plugin-fixer.md states the loop is ITS behaviour (self-contained, not a skill)."""
+        """cpv-plugin-fixer-agent.md states the loop is ITS behaviour (self-contained, not a skill)."""
         body = _read(PLUGIN_FIXER).lower()
         assert "owns the loop" in body or "this agent's behaviour" in body or "this prompt" in body
 
@@ -91,7 +91,7 @@ class TestPublishUntilCiGreen:
         """Migration §7d publishes then LOOPS until CI is green, not publish-once-then-[PARTIAL]."""
         body = _read(PLUGIN_FIXER)
         assert "gh run watch" in body and "gh run rerun" in body
-        assert re.search(r"LOOP UNTIL CI", body, re.IGNORECASE), "plugin-fixer §7d must loop until CI is green"
+        assert re.search(r"LOOP UNTIL CI", body, re.IGNORECASE), "cpv-plugin-fixer-agent §7d must loop until CI is green"
         # A red run is a fix iteration: it must fix the CAUSE, never mute the check.
         assert "NEVER" in body and "force-templates" in body
 

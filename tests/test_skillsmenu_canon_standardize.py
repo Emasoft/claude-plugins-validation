@@ -1,10 +1,10 @@
-"""Tests for the the-skills-menu canon migration in the standardize --fix path.
+"""Tests for the cpv-the-skills-menu canon migration in the standardize --fix path.
 
 Gap-closure (spec-sync Unit C): when ``standardize_plugin.py --force-templates``
-runs on an EXISTING plugin, every agent is migrated to the-skills-menu method —
-frontmatter ``skills:`` rewritten to ``[the-skills-menu]`` and the mandatory
+runs on an EXISTING plugin, every agent is migrated to cpv-the-skills-menu method —
+frontmatter ``skills:`` rewritten to ``[cpv-the-skills-menu]`` and the mandatory
 dynamic-loading body instruction inserted — and a per-plugin
-``skills/the-skills-menu/SKILL.md`` catalog is created if absent. This is the
+``skills/cpv-the-skills-menu/SKILL.md`` catalog is created if absent. This is the
 canon UPGRADE verb (``--force-templates``), NOT plain ``--fix`` (which only adds
 missing files and must leave agents untouched).
 
@@ -55,7 +55,7 @@ def _write_skill(root: Path, name: str, description: str) -> Path:
 def _make_plugin(tmp_path: Path) -> Path:
     """Lay down a minimal plugin tree with a manifest, agents/, and a REAL skill.
 
-    The skill makes the the-skills-menu catalog populatable, so the migration
+    The skill makes the cpv-the-skills-menu catalog populatable, so the migration
     proceeds (issue #150 gates migration on a non-empty catalog).
     """
     root = tmp_path / "plug"
@@ -130,8 +130,8 @@ def test_static_skills_agent_is_migrated(tmp_path: Path) -> None:
 
     assert n == 1
     text = agent.read_text(encoding="utf-8")
-    # frontmatter skills: rewritten to exactly [the-skills-menu] (block form)
-    assert "skills:\n  - the-skills-menu" in text
+    # frontmatter skills: rewritten to exactly [cpv-the-skills-menu] (block form)
+    assert "skills:\n  - cpv-the-skills-menu" in text
     # old operational skills are gone from frontmatter
     fm = text.split("---", 2)[1]
     assert "validation" not in fm
@@ -154,7 +154,7 @@ def test_flow_skills_agent_is_migrated(tmp_path: Path) -> None:
 
     assert n == 1
     text = agent.read_text(encoding="utf-8")
-    assert "skills:\n  - the-skills-menu" in text
+    assert "skills:\n  - cpv-the-skills-menu" in text
     fm = text.split("---", 2)[1]
     assert "validation" not in fm
     assert "security-scan" not in fm
@@ -181,14 +181,14 @@ def test_body_instruction_is_a_standalone_paragraph(tmp_path: Path) -> None:
 def test_catalog_is_created_when_absent(tmp_path: Path) -> None:
     root = _make_plugin(tmp_path)
     _write_agent(root, "fix-agent.md", _STATIC_AGENT)
-    catalog = root / "skills" / "the-skills-menu" / "SKILL.md"
+    catalog = root / "skills" / "cpv-the-skills-menu" / "SKILL.md"
     assert not catalog.exists()
 
     migrate_agents_to_skills_menu(root, dry_run=False)
 
     assert catalog.exists()
     body = catalog.read_text(encoding="utf-8")
-    assert "name: the-skills-menu" in body
+    assert "name: cpv-the-skills-menu" in body
     assert "## Plugin Skills" in body
     # the catalog is namespaced to THIS plugin
     assert "myplug" in body
@@ -207,7 +207,7 @@ def test_catalog_is_populated_and_drops_allowed_tools(tmp_path: Path) -> None:
 
     migrate_agents_to_skills_menu(root, dry_run=False)
 
-    catalog = (root / "skills" / "the-skills-menu" / "SKILL.md").read_text(encoding="utf-8")
+    catalog = (root / "skills" / "cpv-the-skills-menu" / "SKILL.md").read_text(encoding="utf-8")
     # the real skill is listed
     assert "`validation`" in catalog
     # the empty-stub placeholder is gone
@@ -223,9 +223,9 @@ def test_catalog_is_populated_and_drops_allowed_tools(tmp_path: Path) -> None:
 def test_existing_catalog_is_not_clobbered(tmp_path: Path) -> None:
     root = _make_plugin(tmp_path)
     _write_agent(root, "fix-agent.md", _STATIC_AGENT)
-    catalog = root / "skills" / "the-skills-menu" / "SKILL.md"
+    catalog = root / "skills" / "cpv-the-skills-menu" / "SKILL.md"
     catalog.parent.mkdir(parents=True)
-    sentinel = "---\nname: the-skills-menu\n---\n\n# hand curated\n"
+    sentinel = "---\nname: cpv-the-skills-menu\n---\n\n# hand curated\n"
     catalog.write_text(sentinel, encoding="utf-8")
 
     migrate_agents_to_skills_menu(root, dry_run=False)
@@ -283,8 +283,8 @@ def test_plain_fix_leaves_agents_untouched(tmp_path: Path) -> None:
     # plain --fix must NOT migrate the agent
     assert agent.read_text(encoding="utf-8") == original
     assert _SKILLS_MENU_BODY_INSTRUCTION not in agent.read_text(encoding="utf-8")
-    # and it must NOT create the the-skills-menu catalog
-    assert not (root / "skills" / "the-skills-menu" / "SKILL.md").exists()
+    # and it must NOT create the cpv-the-skills-menu catalog
+    assert not (root / "skills" / "cpv-the-skills-menu" / "SKILL.md").exists()
 
 
 def test_force_templates_main_migrates_agents(tmp_path: Path) -> None:
@@ -303,9 +303,9 @@ def test_force_templates_main_migrates_agents(tmp_path: Path) -> None:
         sys.argv = old_argv
 
     text = agent.read_text(encoding="utf-8")
-    assert "skills:\n  - the-skills-menu" in text
+    assert "skills:\n  - cpv-the-skills-menu" in text
     assert _SKILLS_MENU_BODY_INSTRUCTION in text
-    assert (root / "skills" / "the-skills-menu" / "SKILL.md").exists()
+    assert (root / "skills" / "cpv-the-skills-menu" / "SKILL.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +324,7 @@ def test_agent_without_frontmatter_is_skipped(tmp_path: Path, capsys) -> None:
     # only the well-formed agent migrated; the frontmatter-less file untouched
     assert n == 1
     assert bad.read_text(encoding="utf-8") == bad_before
-    assert "skills:\n  - the-skills-menu" in good.read_text(encoding="utf-8")
+    assert "skills:\n  - cpv-the-skills-menu" in good.read_text(encoding="utf-8")
     # the skip is reported for manual review (not a crash)
     out = capsys.readouterr().out
     assert "Manual review needed" in out
@@ -349,7 +349,7 @@ def test_no_agents_dir_is_no_op(tmp_path: Path) -> None:
     n = migrate_agents_to_skills_menu(root, dry_run=False)
 
     assert n == 0
-    catalog = root / "skills" / "the-skills-menu" / "SKILL.md"
+    catalog = root / "skills" / "cpv-the-skills-menu" / "SKILL.md"
     assert catalog.exists()
     assert "`do-thing`" in catalog.read_text(encoding="utf-8")
 
@@ -368,4 +368,4 @@ def test_dry_run_does_not_write(tmp_path: Path) -> None:
 
     assert n == 1  # would migrate one
     assert agent.read_text(encoding="utf-8") == original  # but wrote nothing
-    assert not (root / "skills" / "the-skills-menu" / "SKILL.md").exists()
+    assert not (root / "skills" / "cpv-the-skills-menu" / "SKILL.md").exists()

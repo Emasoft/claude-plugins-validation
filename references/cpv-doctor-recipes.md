@@ -26,7 +26,7 @@ Findings keyed by DOC-NN, appended under `## Design-correctness findings`.
 
 ### D1 — Shape detection (is the target what it claims to be?)
 
-- Has `SKILL.md` at root but no `.claude-plugin/plugin.json` → `DOC-001 [MINOR] target looks like a bare skill, not a plugin — consider /pack-components`.
+- Has `SKILL.md` at root but no `.claude-plugin/plugin.json` → `DOC-001 [MINOR] target looks like a bare skill, not a plugin — consider /cpv-pack-components`.
 - Has `.claude-plugin/marketplace.json` inside a plugin (Layout C) → `DOC-002 [WARNING] marketplace-in-plugin (Layout C) detected — verify the self-entry name/version match plugin.json`.
 - Parent dir containing N plugin children → `DOC-003 [INFO] parent directory with N plugin children — diagnosing each in turn`.
 
@@ -59,7 +59,7 @@ Layout A only: verify the marketplace entry's `source.repo` resolves. Dead repo 
 
 ### D6 — Canonical-pipeline presence
 
-For each file: present + non-empty + (where applicable) shape-match against the canonical-pipeline skill's templates.
+For each file: present + non-empty + (where applicable) shape-match against the cpv-canonical-pipeline skill's templates.
 
 | Missing file | Finding |
 |---|---|
@@ -84,16 +84,16 @@ For each file: present + non-empty + (where applicable) shape-match against the 
 - `subagent_type: <name>` in an agent's dispatch prose but no such agent ships → `DOC-082 [MAJOR]`.
 - `skills:` entry naming a skill with no `skills/<name>/SKILL.md` → `DOC-083 [MAJOR]`.
 
-### D9 — the-skills-menu method adoption (advisory)
+### D9 — cpv-the-skills-menu method adoption (advisory)
 
-The-skills-menu method (TRDD-9dd64dbf) decouples skills from agents — agents declare only `skills: [the-skills-menu]` and load operational skills at runtime. Adoption is NOT mandatory, so findings are advisory.
+The-skills-menu method (TRDD-9dd64dbf) decouples skills from agents — agents declare only `skills: [cpv-the-skills-menu]` and load operational skills at runtime. Adoption is NOT mandatory, so findings are advisory.
 
-- Plugin has ≥1 agent + ≥1 operational skill + no `skills/the-skills-menu/SKILL.md` → `DOC-090 [NIT] not adopted — consider /the-skills-menu-create`.
+- Plugin has ≥1 agent + ≥1 operational skill + no `skills/cpv-the-skills-menu/SKILL.md` → `DOC-090 [NIT] not adopted — consider /cpv-the-skills-menu-create`.
 - Agent whose `skills:` list has >1 entry → `DOC-091 [NIT] agent <name>'s skills: list has N entries (the method would reduce to 1)`.
-- Agent whose `skills:` is exactly `[the-skills-menu]` but body lacks the dynamic-loading instruction (substring "Use the Skill() tool to load them") → `DOC-092 [MINOR]`.
+- Agent whose `skills:` is exactly `[cpv-the-skills-menu]` but body lacks the dynamic-loading instruction (substring "Use the Skill() tool to load them") → `DOC-092 [MINOR]`.
 - Operational skill whose description still names a specific caller agent ("Loaded by X", …) while the plugin HAS adopted the method → `DOC-093 [NIT] rewrite the description to be agent-agnostic`.
 
-When D9 produces findings, the post-scan menu offers "Migrate to the-skills-menu method" (Surface 4 key `T`), dispatching `the-skills-menu-create` on the target.
+When D9 produces findings, the post-scan menu offers "Migrate to cpv-the-skills-menu method" (Surface 4 key `T`), dispatching `cpv-the-skills-menu-create` on the target.
 
 ## 2. Menu surfaces & fixed key→action contract (TRDD-4de479a0)
 
@@ -130,12 +130,12 @@ Emitted post-scan. Rows are OMITTED (not relettered) when "Emitted when" is unme
 
 | Key | action_id | Label | Emitted when |
 |---|---|---|---|
-| `F` | fix_all_findings | Fix ALL findings (auto-route to plugin-fixer / batch-fix) | `findings > 0` |
+| `F` | fix_all_findings | Fix ALL findings (auto-route to cpv-plugin-fixer-agent / batch-fix) | `findings > 0` |
 | `R` | revalidate_now | Re-validate now (validator + D1..D9) | always |
 | `O` | open_report | Open the full markdown report | always |
 | `D` | show_breakdown | Re-show the per-recipe breakdown matrix | always |
 | `S` | show_summary | Re-show the severity summary | always |
-| `T` | migrate_to_skills_menu | Migrate to the-skills-menu method | only when D9 produced findings |
+| `T` | migrate_to_skills_menu | Migrate to cpv-the-skills-menu method | only when D9 produced findings |
 | `P` | batch_fix_parallel | Batch-fix via parallel sharding (`/cpv-batch-fix`) | only when `— recommend-batch-fix` was emitted |
 | `A` | ask_about_findings | Ask the doctor about a finding (free-form) | always |
 | `N` | rescan_next_target | Re-scan a different target | always |
@@ -231,7 +231,7 @@ Do NOT render menus. Do NOT mutate `~/.claude/` beyond the iron-rule fix categor
 
 ## 4. Report markdown template
 
-Write ALL findings (validator + D1..D9) to ONE report at `$MAIN_ROOT/reports/plugin-diagnoser/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (`$MAIN_ROOT` = `git worktree list | head -n1 | awk '{print $1}'`):
+Write ALL findings (validator + D1..D9) to ONE report at `$MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (`$MAIN_ROOT` = `git worktree list | head -n1 | awk '{print $1}'`):
 
 ```markdown
 # CPV Doctor report — <target>
@@ -246,7 +246,7 @@ Mode: <mode>
 | Recipe | CRITICAL | MAJOR | MINOR | NIT | WARNING | Total |
 |---|---|---|---|---|---|---|
 | Schema validation | … | … | … | … | … | … |
-| D1 Shape detection … D9 the-skills-menu adoption | (one row each) | | | | | |
+| D1 Shape detection … D9 cpv-the-skills-menu adoption | (one row each) | | | | | |
 | **TOTAL** | … | … | … | … | … | … |
 
 ## Schema-correctness findings (validator)

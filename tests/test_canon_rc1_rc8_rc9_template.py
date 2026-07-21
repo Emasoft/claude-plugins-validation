@@ -1,4 +1,4 @@
-"""RC-1 / RC-8 / RC-9 — canonical-pipeline TEMPLATE fixes + their CIP detectors.
+"""RC-1 / RC-8 / RC-9 — cpv-canonical-pipeline TEMPLATE fixes + their CIP detectors.
 
 Grounded in `reports/ci-failure-forensics/20260713_123038+0200-agent-pipeline-failures.md`
 (235 workflow runs across 21 plugin repos):
@@ -7,7 +7,7 @@ Grounded in `reports/ci-failure-forensics/20260713_123038+0200-agent-pipeline-fa
   commitlint gate shipped no `.commitlintrc.json`, so it fell back to
   `@commitlint/config-conventional` (`body-max-line-length` = 100). Dependabot's
   auto-generated commit body embeds a YAML dependency block that always exceeds
-  100 chars ⇒ EVERY Dependabot PR on EVERY canonical-pipeline plugin failed CI,
+  100 chars ⇒ EVERY Dependabot PR on EVERY cpv-canonical-pipeline plugin failed CI,
   forever. Fixed by shipping a canonical `.commitlintrc.json` that disables ONLY
   that rule; CIP-7 detects the defect in already-deployed repos.
 * **RC-8** — the validate step printed "CRITICAL/MAJOR/MINOR/NIT found" for ANY

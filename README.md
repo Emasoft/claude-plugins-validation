@@ -63,29 +63,29 @@ Throughout this table, **`cpv`** is the standalone alias =
 
 > **Two menus, two audiences.** Humans run **`/cpv-main-menu`** — a real
 > interactive numbered menu (zero token cost). Agents (and any routing
-> Claude) read **the-skills-menu** instead — a plain à-la-carte catalog
+> Claude) read **cpv-the-skills-menu** instead — a plain à-la-carte catalog
 > they pick from. The universal, memorize-nothing instruction is
 > **"read the CPV skills menu and use whatever you need"**.
 
 | Feature | What it does | In Claude Code (slash command / agent / skill) | Standalone (uvx) |
 |---------|--------------|------------------------------------------------|------------------|
-| **Validate a plugin** | Structure, hooks, skills, security, compat, quality — 17 sub-validators | `plugin-validator` agent, or `Skill(claude-plugins-validation:plugin-validation-skill)` | `cpv plugin /path` |
-| **Validate a skill / component** | One skill's SKILL.md, or an agent / command / hook / MCP / LSP | `skill-validation-agent` (skill) · `plugin-validator` (any component) | `cpv skill /path --strict` · `cpv agent` · `cpv command` · `cpv hook` · `cpv mcp` · `cpv lsp` |
-| **Security scan** | 5 external scanners (trufflehog, cc-audit, tirith, semgrep, Cisco) + native skillaudit | `plugin-validator` agent, or fleet-wide `/cpv-batch-security-audit` | `cpv security /path` |
+| **Validate a plugin** | Structure, hooks, skills, security, compat, quality — 17 sub-validators | `cpv-plugin-validator-agent` agent, or `Skill(claude-plugins-validation:cpv-plugin-validation-skill)` | `cpv plugin /path` |
+| **Validate a skill / component** | One skill's SKILL.md, or an agent / command / hook / MCP / LSP | `cpv-skill-validation-agent` (skill) · `cpv-plugin-validator-agent` (any component) | `cpv skill /path --strict` · `cpv agent` · `cpv command` · `cpv hook` · `cpv mcp` · `cpv lsp` |
+| **Security scan** | 5 external scanners (trufflehog, cc-audit, tirith, semgrep, Cisco) + native skillaudit | `cpv-plugin-validator-agent` agent, or fleet-wide `/cpv-batch-security-audit` | `cpv security /path` |
 | **Pre-install gate** | Sandboxed scan of an untrusted plugin / skill / marketplace BEFORE install — never writes to the plugin cache | `/cpv-pre-install-scan <target>` | `cpv security <github-url-or-path>` |
-| **Fix findings (don't hand-edit)** | Mechanical per-rule remediation; CPV ships the fixer so you never hand-patch | `plugin-fixer` agent (validate → fix loop), or fleet-wide `/cpv-batch-fix` · `/cpv-batch-validate-and-fix` | — (fixing needs write access) |
-| **Devitalize threats (don't suppress)** | Convert flagged execution-class code into provably-inert data so a plugin passes the security gate by neutralizing the shape — never by muting a rule or relaxing `--strict`; load-bearing code is flagged, not broken | `plugin-devitalizer` agent (scan → devitalize → re-scan loop) | — (rewriting needs write access) |
-| **Prevent leaks & harden (don't suppress)** | Redact exposed secrets and runtime-read the genuinely-needed ones (env / exported / GitHub / keychain); implement missing safeguards (safe config parse, input sanitization, launch/deploy params, prompt-injection pre-scan); never mute a rule; flags what it can't safely fix | `plugin-leaks-preventer` agent (scan → redact/harden → re-scan loop) | — (rewriting needs write access) |
-| **Optimize prompt cache** | CA-01..CA-07 — dynamic placeholders, hook mutations, model-fork, `context: fork` cold re-prime, unbounded output | Audit: `/cpv-batch-caching-audit` · `Skill(…:cache-validation-skill)`. Fix: `cache-optimizer-agent` · `/cpv-batch-caching-optimize` | `cpv cache /path` (audit only) |
-| **Create** | Scaffold a plugin / marketplace / skill / agent / command / hook / MCP | `plugin-creator` agent, or `Skill(claude-plugins-validation:create-plugin)` · `…:scaffold-skill` · `…:scaffold-agent` | — |
-| **Publish to GitHub + add to marketplace** | Scaffold repo + CI/CD, publish, link into a marketplace | `plugin-creator` agent (end-to-end) | — |
-| **Migrate marketplace layout** | Fix marketplace findings + convert Layout A ⇄ B ⇄ C | `marketplace-fixer` agent, or `Skill(…:migrate-marketplace-architecture)` | — |
-| **Standardize** | Bring an old plugin up to the current CPV pipeline (CI/CD, hooks, publish.py) — including the `{name}--v{version}` dependency-resolver tag, injected into an *existing* `publish.py` without overwriting it; canon config files are **merged**, never clobbered | `plugin-creator` agent, or `Skill(…:standardize-plugin)` / `Skill(…:canonical-pipeline)` | `cpv standardize /path --fix` |
-| **Manage installed plugins** | Install / update / enable / disable / list / search / health-check | `plugin-manager` agent, or `Skill(…:plugin-management)` | `cpv doctor` (health-check only) |
-| **Deep diagnostic** | All scanners + pipeline-staleness + cross-platform + marketplace-registration + cache-sync | `plugin-diagnoser` agent; for `.claude/` scope `/cpv-batch-scope-diagnose` | `cpv doctor` |
-| **AI semantic grade** *(opt-in, expensive)* | Descriptions that won't trigger, unclear instructions, workflows with no exit — ~10–50× token cost, asks first | `semantic-validator` agent | — (needs Opus) |
+| **Fix findings (don't hand-edit)** | Mechanical per-rule remediation; CPV ships the fixer so you never hand-patch | `cpv-plugin-fixer-agent` agent (validate → fix loop), or fleet-wide `/cpv-batch-fix` · `/cpv-batch-validate-and-fix` | — (fixing needs write access) |
+| **Devitalize threats (don't suppress)** | Convert flagged execution-class code into provably-inert data so a plugin passes the security gate by neutralizing the shape — never by muting a rule or relaxing `--strict`; load-bearing code is flagged, not broken | `cpv-plugin-devitalizer-agent` agent (scan → devitalize → re-scan loop) | — (rewriting needs write access) |
+| **Prevent leaks & harden (don't suppress)** | Redact exposed secrets and runtime-read the genuinely-needed ones (env / exported / GitHub / keychain); implement missing safeguards (safe config parse, input sanitization, launch/deploy params, prompt-injection pre-scan); never mute a rule; flags what it can't safely fix | `cpv-plugin-leaks-preventer-agent` agent (scan → redact/harden → re-scan loop) | — (rewriting needs write access) |
+| **Optimize prompt cache** | CA-01..CA-07 — dynamic placeholders, hook mutations, model-fork, `context: fork` cold re-prime, unbounded output | Audit: `/cpv-batch-caching-audit` · `Skill(…:cpv-cache-validation-skill)`. Fix: `cpv-cache-optimizer-agent` · `/cpv-batch-caching-optimize` | `cpv cache /path` (audit only) |
+| **Create** | Scaffold a plugin / marketplace / skill / agent / command / hook / MCP | `cpv-plugin-creator-agent` agent, or `Skill(claude-plugins-validation:cpv-create-plugin)` · `…:cpv-scaffold-skill` · `…:cpv-scaffold-agent` | — |
+| **Publish to GitHub + add to marketplace** | Scaffold repo + CI/CD, publish, link into a marketplace | `cpv-plugin-creator-agent` agent (end-to-end) | — |
+| **Migrate marketplace layout** | Fix marketplace findings + convert Layout A ⇄ B ⇄ C | `cpv-marketplace-fixer-agent` agent, or `Skill(…:cpv-migrate-marketplace-architecture)` | — |
+| **Standardize** | Bring an old plugin up to the current CPV pipeline (CI/CD, hooks, publish.py) — including the `{name}--v{version}` dependency-resolver tag, injected into an *existing* `publish.py` without overwriting it; canon config files are **merged**, never clobbered | `cpv-plugin-creator-agent` agent, or `Skill(…:cpv-standardize-plugin)` / `Skill(…:cpv-canonical-pipeline)` | `cpv standardize /path --fix` |
+| **Manage installed plugins** | Install / update / enable / disable / list / search / health-check | `cpv-plugin-manager-agent` agent, or `Skill(…:cpv-plugin-management)` | `cpv doctor` (health-check only) |
+| **Deep diagnostic** | All scanners + pipeline-staleness + cross-platform + marketplace-registration + cache-sync | `cpv-plugin-diagnoser-agent` agent; for `.claude/` scope `/cpv-batch-scope-diagnose` | `cpv doctor` |
+| **AI semantic grade** *(opt-in, expensive)* | Descriptions that won't trigger, unclear instructions, workflows with no exit — ~10–50× token cost, asks first | `cpv-semantic-validator-agent` agent | — (needs Opus) |
 | **Fleet / batch** | Run any op across many plugins (marketplace / list / `@listfile`) in parallel | The `/cpv-batch-*` family — validate, security-audit, caching-audit/optimize, fix, validate-and-fix, full-scan-and-fix, scope-diagnose/fix | most aliases accept `--marketplace <spec>` |
-| **Hand off the whole job** | One autonomous worker reads the menu, routes, executes, returns a report | `Agent(subagent_type: "cpv", prompt: "<request>")` | — |
+| **Hand off the whole job** | One autonomous worker reads the menu, routes, executes, returns a report | `Agent(subagent_type: "cpv-agent", prompt: "<request>")` | — |
 
 ---
 
@@ -101,7 +101,7 @@ CPV ships **25 on-disk `validate_*.py` scripts** covering **190+ rules** across 
 | **Security** | Hardcoded secrets, path traversal, command injection, prompt injection |
 | **Compatibility** | Windows/macOS/Linux path issues, encoding problems, broken references |
 | **Quality** | Missing documentation, no license, inconsistent versions, dead links |
-| **v2.1.80+ Plugin Features** | `Monitor` tool, `userConfig` (5-type whitelist + required `title`/`type`), `channels` (server cross-ref), `CLAUDE_PLUGIN_OPTION_<KEY>` env vars, inline marketplace in `settings.json`, `managed-settings.d/` drop-ins, plugin skill `name` field (v2.1.98) — full reference: [`skills/create-plugin/references/v2-1-80-features.md`](skills/create-plugin/references/v2-1-80-features.md) |
+| **v2.1.80+ Plugin Features** | `Monitor` tool, `userConfig` (5-type whitelist + required `title`/`type`), `channels` (server cross-ref), `CLAUDE_PLUGIN_OPTION_<KEY>` env vars, inline marketplace in `settings.json`, `managed-settings.d/` drop-ins, plugin skill `name` field (v2.1.98) — full reference: [`skills/cpv-create-plugin/references/v2-1-80-features.md`](skills/cpv-create-plugin/references/v2-1-80-features.md) |
 | **v2.1.207 Plugin Options** *(v2.158.0+)* | `${user_config.*}` interpolated into a **shell-form** hook / monitor / MCP `headersHelper` command — Claude Code now rejects it, so the plugin is broken at runtime, not merely unsafe. Blocking CRITICAL; exec form stays legal — see below |
 | **Empirical Loading Bugs** *(v2.23.0+)* | Silent-failure modes in CC's plugin loader that `claude plugin validate` doesn't catch — see below |
 
@@ -115,7 +115,7 @@ Through extensive empirical testing of Claude Code's plugin loader (April 2026),
 4. **LSP cross-source server-name collision** — same silent-shadow risk for LSP servers. CPV emits MAJOR per duplicate.
 5. **`mcpServers: "./.mcp.json"` redundancy** — points the override at the auto-discovered default file. Harmless single load (no cascade like hooks) but redundant and confusing. CPV emits MINOR nudge.
 
-All five rules are documented with empirical evidence in [`skills/fix-validation/references/empirical-loading-bugs.md`](skills/fix-validation/references/empirical-loading-bugs.md) (13 test plugin scenarios, debug-log excerpts, runtime probes).
+All five rules are documented with empirical evidence in [`skills/cpv-fix-validation/references/empirical-loading-bugs.md`](skills/cpv-fix-validation/references/empirical-loading-bugs.md) (13 test plugin scenarios, debug-log excerpts, runtime probes).
 
 ### CC v2.1.207 — plugin options (v2.158.0+)
 
@@ -216,13 +216,13 @@ It is **not always-run** and **must be explicitly enabled**, for two reasons: it
 
 | Command | Agent | What it does |
 |---------|-------|--------------|
-| `/cpv-batch-validate` | plugin-validator (`batch_validate`) | Read-only validate, fan-out, per-plugin reports |
-| `/cpv-batch-security-audit` | plugin-validator (`batch_security_audit`) | All 5 external scanners + native skillaudit, fan-out |
-| `/cpv-batch-caching-audit` | cache-optimizer-agent (`batch_audit`) | CA-01..CA-07 audit-only across N plugins |
-| `/cpv-batch-caching-optimize` | cache-optimizer-agent (`batch_fix`) | CA-01..CA-07 audit + auto-fix in priority order |
-| `/cpv-batch-fix` | plugin-fixer (`batch_per_plugin`) | One plugin-fixer per plugin |
-| `/cpv-batch-validate-and-fix` | plugin-fixer (`batch_same_turn_validate_fix`) | Single-pass read; scan + verify FPs + fix in one turn (~3-5× cheaper) |
-| `/cpv-batch-full-scan-and-fix` | plugin-fixer (`batch_same_turn_full`) | Combined validate + security + caching + fix in one turn |
+| `/cpv-batch-validate` | cpv-plugin-validator-agent (`batch_validate`) | Read-only validate, fan-out, per-plugin reports |
+| `/cpv-batch-security-audit` | cpv-plugin-validator-agent (`batch_security_audit`) | All 5 external scanners + native skillaudit, fan-out |
+| `/cpv-batch-caching-audit` | cpv-cache-optimizer-agent (`batch_audit`) | CA-01..CA-07 audit-only across N plugins |
+| `/cpv-batch-caching-optimize` | cpv-cache-optimizer-agent (`batch_fix`) | CA-01..CA-07 audit + auto-fix in priority order |
+| `/cpv-batch-fix` | cpv-plugin-fixer-agent (`batch_per_plugin`) | One cpv-plugin-fixer-agent per plugin |
+| `/cpv-batch-validate-and-fix` | cpv-plugin-fixer-agent (`batch_same_turn_validate_fix`) | Single-pass read; scan + verify FPs + fix in one turn (~3-5× cheaper) |
+| `/cpv-batch-full-scan-and-fix` | cpv-plugin-fixer-agent (`batch_same_turn_full`) | Combined validate + security + caching + fix in one turn |
 | `/cpv-batch-scope-diagnose` | cpv-doctor-agent (`batch_scope_diagnose`) | Read-only scope audit (user / project / local / full) |
 | `/cpv-batch-scope-fix` | cpv-doctor-agent (`batch_scope_fix`) | Fix issues a prior scope-diagnose found |
 | `/cpv-batch-scope-diagnose-and-fix` | cpv-doctor-agent (`batch_scope_same_turn`) | Scope diagnose + fix in one turn |
@@ -466,19 +466,19 @@ When used as a Claude Code plugin, **agents are the primary way to interact with
 
 | Agent | What It Does | Ask it when you want to... |
 |-------|-------------|---------------------------|
-| **plugin-validator** | Runs validation scripts and returns severity reports | "Validate my plugin", "Check if this is ready to publish" |
-| **skill-validation-agent** | Specialized skill validation (basic, strict, OpenSpec, Pillars) | "Validate this skill", "Check my SKILL.md" |
-| **plugin-fixer** | Fixes **plugin** validation errors (mechanical per-error remediation) | "Fix the validation errors in my plugin", "Fix this plugin.json report" |
-| **marketplace-fixer** | Fixes **marketplace** validation errors *and* runs interactive architectural migrations between Layout A and Layout B | "Fix the marketplace errors", "Migrate my marketplace to the nested layout" |
-| **semantic-validator** | Deep AI quality analysis — catches things scripts cannot (see below) | "Check if descriptions actually match what skills do" |
-| **plugin-manager** | Full plugin lifecycle: install, update, enable, disable, search, health-check | "Install a plugin", "List my plugins", "Run doctor" |
-| **plugin-creator** | Scaffolds plugins, marketplaces, publishes to GitHub with CI/CD | "Create a new plugin", "Publish to GitHub", "Set up a marketplace" |
-| **plugin-diagnoser** | Deep diagnostic: all 5 external scanners + pipeline-staleness + cross-platform + marketplace-registration + cache-sync, then a follow-up fix menu | "Run a full diagnosis", "What's wrong with my plugin / marketplace" |
-| **plugin-devitalizer** | Converts flagged execution-class code into provably-inert data so a plugin passes the security gate by neutralizing the threat shape — never by muting a rule or relaxing `--strict`; load-bearing code is flagged, not broken | "Devitalize the execution-class findings", "Make this threat inert without losing functionality" |
-| **plugin-leaks-preventer** | Redacts leaked secrets (runtime-reads the genuinely-needed ones) and implements missing safeguards — passes the security gate by removing leaks and hardening, never by muting a rule; flags what it can't safely fix | "Redact the leaked secret in my plugin", "Harden the unsafe yaml.load my scan flagged" |
+| **cpv-plugin-validator-agent** | Runs validation scripts and returns severity reports | "Validate my plugin", "Check if this is ready to publish" |
+| **cpv-skill-validation-agent** | Specialized skill validation (basic, strict, OpenSpec, Pillars) | "Validate this skill", "Check my SKILL.md" |
+| **cpv-plugin-fixer-agent** | Fixes **plugin** validation errors (mechanical per-error remediation) | "Fix the validation errors in my plugin", "Fix this plugin.json report" |
+| **cpv-marketplace-fixer-agent** | Fixes **marketplace** validation errors *and* runs interactive architectural migrations between Layout A and Layout B | "Fix the marketplace errors", "Migrate my marketplace to the nested layout" |
+| **cpv-semantic-validator-agent** | Deep AI quality analysis — catches things scripts cannot (see below) | "Check if descriptions actually match what skills do" |
+| **cpv-plugin-manager-agent** | Full plugin lifecycle: install, update, enable, disable, search, health-check | "Install a plugin", "List my plugins", "Run doctor" |
+| **cpv-plugin-creator-agent** | Scaffolds plugins, marketplaces, publishes to GitHub with CI/CD | "Create a new plugin", "Publish to GitHub", "Set up a marketplace" |
+| **cpv-plugin-diagnoser-agent** | Deep diagnostic: all 5 external scanners + pipeline-staleness + cross-platform + marketplace-registration + cache-sync, then a follow-up fix menu | "Run a full diagnosis", "What's wrong with my plugin / marketplace" |
+| **cpv-plugin-devitalizer-agent** | Converts flagged execution-class code into provably-inert data so a plugin passes the security gate by neutralizing the threat shape — never by muting a rule or relaxing `--strict`; load-bearing code is flagged, not broken | "Devitalize the execution-class findings", "Make this threat inert without losing functionality" |
+| **cpv-plugin-leaks-preventer-agent** | Redacts leaked secrets (runtime-reads the genuinely-needed ones) and implements missing safeguards — passes the security gate by removing leaks and hardening, never by muting a rule; flags what it can't safely fix | "Redact the leaked secret in my plugin", "Harden the unsafe yaml.load my scan flagged" |
 
 This table lists the primary user-facing agents; CPV ships 14 in total (the
-rest — `cache-optimizer-agent`, `cpv-doctor-agent`, `cpv-spark`, `cpv` — are
+rest — `cpv-cache-optimizer-agent`, `cpv-doctor-agent`, `cpv-spark-agent`, `cpv-agent` — are
 dispatched for you by the menu or by other agents).
 You never need to remember command names: run **`/cpv-main-menu`** for an
 interactive menu, or just tell any Claude what you need and the right agent
@@ -490,14 +490,14 @@ CPV treats **plugins** and **marketplaces** as two distinct concerns with dedica
 
 | Concern | Validators | Fix agent | Error index |
 |---------|------------|-----------|-------------|
-| Plugin | `validate_plugin.py` (orchestrator) + 14 component sub-validators (hook, skill, agent, command, mcp, lsp, security, scoring, enterprise, docs, encoding, rules, xref, skill-basic) | `plugin-fixer` | [`skills/fix-validation/references/plugin-error-index.md`](skills/fix-validation/references/plugin-error-index.md) |
-| Marketplace | `validate_marketplace.py`, `validate_marketplace_pipeline.py`, `validate_settings_marketplace.py` | `marketplace-fixer` | [`skills/fix-validation/references/marketplace-error-index.md`](skills/fix-validation/references/marketplace-error-index.md) |
+| Plugin | `validate_plugin.py` (orchestrator) + 14 component sub-validators (hook, skill, agent, command, mcp, lsp, security, scoring, enterprise, docs, encoding, rules, xref, skill-basic) | `cpv-plugin-fixer-agent` | [`skills/cpv-fix-validation/references/plugin-error-index.md`](skills/cpv-fix-validation/references/plugin-error-index.md) |
+| Marketplace | `validate_marketplace.py`, `validate_marketplace_pipeline.py`, `validate_settings_marketplace.py` | `cpv-marketplace-fixer-agent` | [`skills/cpv-fix-validation/references/marketplace-error-index.md`](skills/cpv-fix-validation/references/marketplace-error-index.md) |
 
-**Mechanical fixes vs. architectural migrations.** The `fix-validation` and `fix-marketplace-validation` skills do **mechanical per-error remediation** — one rule, one fix, minimal user input. The separate `migrate-marketplace-architecture` skill (loaded by `marketplace-fixer`) does **interactive architectural conversion** with extensive `AskUserQuestion` prompts: it walks you through converting a Layout A hub-and-spoke marketplace into a Layout B nested single-repo marketplace or vice versa, including publish pipeline, CI, and CHANGELOG restructuring.
+**Mechanical fixes vs. architectural migrations.** The `cpv-fix-validation` and `cpv-fix-marketplace-validation` skills do **mechanical per-error remediation** — one rule, one fix, minimal user input. The separate `cpv-migrate-marketplace-architecture` skill (loaded by `cpv-marketplace-fixer-agent`) does **interactive architectural conversion** with extensive `AskUserQuestion` prompts: it walks you through converting a Layout A hub-and-spoke marketplace into a Layout B nested single-repo marketplace or vice versa, including publish pipeline, CI, and CHANGELOG restructuring.
 
 #### Supported Marketplace Layouts
 
-CPV validates and supports three marketplace layouts — all three are first-class, and `marketplace-fixer` converts between them:
+CPV validates and supports three marketplace layouts — all three are first-class, and `cpv-marketplace-fixer-agent` converts between them:
 
 | Layout | Shape | When to use |
 |--------|-------|-------------|
@@ -505,7 +505,7 @@ CPV validates and supports three marketplace layouts — all three are first-cla
 | **Layout B — Nested single-repo** | One marketplace repo that contains **all its plugins as subdirectories**, with a single author and full CPV release discipline: `publish.py`, `cliff.toml`, `CHANGELOG.md`, CI, single-version bumps. | Single author, atomic cross-plugin releases, unified CI pipeline. |
 | **Layout C — Marketplace-in-plugin** | A single plugin repo that also ships its own `.claude-plugin/marketplace.json`, serving itself. | One self-contained plugin distributed without a separate hub repo. |
 
-Full layout specifications and decision criteria: [`skills/create-plugin/references/marketplace-layouts.md`](skills/create-plugin/references/marketplace-layouts.md).
+Full layout specifications and decision criteria: [`skills/cpv-create-plugin/references/marketplace-layouts.md`](skills/cpv-create-plugin/references/marketplace-layouts.md).
 
 #### Script Validation vs. Semantic Validation
 
@@ -525,11 +525,11 @@ The semantic validator always warns about the cost and asks for confirmation bef
 
 The semantic validator (reached via `/cpv-main-menu → 4 Diagnose → semantic`) automatically activates the **Channel Source Security** pillar when the target plugin's `plugin.json` declares a non-empty `channels` array (Claude Code v2.1.80+ research-preview channels). The pillar reads the MCP server entry-point source (TypeScript / JavaScript / Python) and verifies the spec-mandated sender-ID gating per `channels-reference.md` — a check no syntactic validator can perform.
 
-A deterministic prefilter (`scripts/cpv_channel_source_predicate.py`) bounds the LLM's reading and short-circuits the pillar entirely for plugins that do not ship channels — zero opus tokens spent. See [`skills/semantic-validation-skill/references/channel-source-security.md`](skills/semantic-validation-skill/references/channel-source-security.md) for the four rules (CRITICAL: no sender gating, CRITICAL: permission-relay capability without gating, MAJOR: chat-ID-only gating, PASSED: fully gated).
+A deterministic prefilter (`scripts/cpv_channel_source_predicate.py`) bounds the LLM's reading and short-circuits the pillar entirely for plugins that do not ship channels — zero opus tokens spent. See [`skills/cpv-semantic-validation-skill/references/channel-source-security.md`](skills/cpv-semantic-validation-skill/references/channel-source-security.md) for the four rules (CRITICAL: no sender gating, CRITICAL: permission-relay capability without gating, MAJOR: chat-ID-only gating, PASSED: fully gated).
 
 ### Menu Architecture
 
-Every CPV menu — the top-level `cpv-main-menu`, the `cpv-doctor` first-contact menu, the post-scan menus emitted by the batch skills (`cpv-batch-validate`, `cpv-batch-security-audit`, `cpv-batch-fix`, etc.), the `plugin-creator` dev-stripping prompts, the `plugin-diagnoser` Phase-9 follow-up, and every sub-menu in between — is rendered by **`claude-menu-system`**'s Stop / SubagentStop / StopFailure hook. The orchestrator writes a small spec JSON, calls the queue helper, and ENDS ITS TURN; the post-turn hook prints the rendered menu through the hook JSON `systemMessage` field. Net effect: **zero token cost regardless of menu size**, menus are shown to the user but NEVER enter the transcript or the prompt cache, no subagent fork, no cache re-prime.
+Every CPV menu — the top-level `cpv-main-menu`, the `cpv-doctor` first-contact menu, the post-scan menus emitted by the batch skills (`cpv-batch-validate`, `cpv-batch-security-audit`, `cpv-batch-fix`, etc.), the `cpv-plugin-creator-agent` dev-stripping prompts, the `cpv-plugin-diagnoser-agent` Phase-9 follow-up, and every sub-menu in between — is rendered by **`claude-menu-system`**'s Stop / SubagentStop / StopFailure hook. The orchestrator writes a small spec JSON, calls the queue helper, and ENDS ITS TURN; the post-turn hook prints the rendered menu through the hook JSON `systemMessage` field. Net effect: **zero token cost regardless of menu size**, menus are shown to the user but NEVER enter the transcript or the prompt cache, no subagent fork, no cache re-prime.
 
 #### Fixed-key routing contract
 
@@ -572,8 +572,8 @@ Top-level menu (8 verbs the user actually wants to do):
 Each category drills into a sub-menu, and each leaf prompts for any required arguments in plain text before dispatching the right work agent or skill. Every menu includes `0 — Cancel` and (in sub-menus) `9 — Back`.
 
 The 37 individual slash commands from prior versions were consolidated:
-- **23 redundant commands** were deleted (their content was already in the corresponding skill — `plugin-validation-skill`, `fix-validation`, `plugin-management`, etc.)
-- **14 unique commands** were converted to `user-invocable: false` skills (`add-component-to-plugin`, `add-dependency`, `bump-version`, `deterministic-codemod`, `scaffold-agent`, `scaffold-command`, `add-hook`, `register-mcp`, `scaffold-skill`, `link-plugin-marketplace`, `pack-components`, `refresh-readme`, `strip-dev-submodules`, `show-version`) — invoked by `cpv-main-menu` behind the scenes, not visible in the slash-command palette
+- **23 redundant commands** were deleted (their content was already in the corresponding skill — `cpv-plugin-validation-skill`, `cpv-fix-validation`, `cpv-plugin-management`, etc.)
+- **14 unique commands** were converted to `user-invocable: false` skills (`cpv-add-component-to-plugin`, `cpv-add-dependency`, `cpv-bump-version`, `cpv-deterministic-codemod`, `cpv-scaffold-agent`, `cpv-scaffold-command`, `cpv-add-hook`, `cpv-register-mcp`, `cpv-scaffold-skill`, `cpv-link-plugin-marketplace`, `cpv-pack-components`, `cpv-refresh-readme`, `cpv-strip-dev-submodules`, `cpv-show-version`) — invoked by `cpv-main-menu` behind the scenes, not visible in the slash-command palette
 
 See [`design/tasks/TRDD-c50531c2-menu-unification.md`](design/tasks/TRDD-c50531c2-menu-unification.md) for the full migration rationale.
 
@@ -590,9 +590,9 @@ For CI/CD and scripting, the Python validators are still callable directly (no m
 |----------|-------|-------------|
 | Validation scripts | 25 | Python validators (20 plugin + 3 marketplace/settings + 2 scope) covering plugin packages, marketplaces, and end-user `.claude/` configuration |
 | Management scripts | 6 | Plugin lifecycle, marketplace operations, scaffolding (`manage_*.py`) |
-| Agents | 15 | AI-powered validation, fixing, devitalization, leak-prevention / hardening, management, and batch orchestration, plus the `cpv` general router |
-| Skills | 47 (13 user-invocable + 34 agent-loaded) | Validation, management, publishing, fix, migration, devitalization, leak-prevention / hardening, auto-notify, batch / fleet (v2.101.0), scope-aware doctor (v2.101.0), the-skills-menu router, and main-menu workflows |
-| Commands | 13 user-invocable | `/cpv-main-menu` (canonical entry), 10 `/cpv-batch-*` fleet skills (v2.101.0), `/cpv-pre-install-scan`, `/the-skills-menu-create` |
+| Agents | 14 | AI-powered validation, fixing, devitalization, leak-prevention / hardening, management, and batch orchestration, plus the `cpv-agent` general router |
+| Skills | 47 (13 user-invocable + 34 agent-loaded) | Validation, management, publishing, fix, migration, devitalization, leak-prevention / hardening, auto-notify, batch / fleet (v2.101.0), scope-aware doctor (v2.101.0), cpv-the-skills-menu router, and main-menu workflows |
+| Commands | 13 user-invocable | `/cpv-main-menu` (canonical entry), 10 `/cpv-batch-*` fleet skills (v2.101.0), `/cpv-pre-install-scan`, `/cpv-the-skills-menu-create` |
 | Tests | 10,800+ across 401 files | Full coverage across all modules |
 
 </details>

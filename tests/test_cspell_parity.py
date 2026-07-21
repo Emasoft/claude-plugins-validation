@@ -77,11 +77,11 @@ def _make_plugin(tmp_path: Path, name: str = "wiki-mem-plugin") -> Path:
         encoding="utf-8",
     )
     (root / "agents").mkdir()
-    (root / "agents" / "plugin-devitalizer.md").write_text("# devitalizer\n", encoding="utf-8")
+    (root / "agents" / "cpv-plugin-devitalizer-agent.md").write_text("# devitalizer\n", encoding="utf-8")
     (root / "commands").mkdir()
     (root / "commands" / "cpv-main-menu.md").write_text("# menu\n", encoding="utf-8")
-    (root / "skills" / "harden-and-redact").mkdir(parents=True)
-    (root / "skills" / "harden-and-redact" / "SKILL.md").write_text("# skill\n", encoding="utf-8")
+    (root / "skills" / "cpv-harden-and-redact").mkdir(parents=True)
+    (root / "skills" / "cpv-harden-and-redact" / "SKILL.md").write_text("# skill\n", encoding="utf-8")
     return root
 
 
@@ -515,7 +515,7 @@ def test_real_cspell_two_sided_against_the_emitted_dictionary(tmp_path: Path) ->
     _write_mega_linter(root, ["SPELL_CSPELL"])
     (root / "README.md").write_text(
         "# wiki-mem-plugin\n\n"
-        "Run `uvx` against the pyproject in a venv. The plugin-devitalizer agent\n"
+        "Run `uvx` against the pyproject in a venv. The cpv-plugin-devitalizer-agent agent\n"
         "reads the TRDD and the wikimem notes with `set -o pipefail`.\n",
         encoding="utf-8",
     )

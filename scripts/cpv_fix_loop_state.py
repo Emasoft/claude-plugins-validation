@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.12"
 # ///
-"""Deterministic oscillation / convergence detector for the plugin-fixer loop.
+"""Deterministic oscillation / convergence detector for the cpv-plugin-fixer-agent loop.
 
 The fixer's ``validate → fix → re-validate`` loop must terminate on exactly two
 conditions: **CONVERGED** (no blocking findings remain) or **CYCLE** (the
@@ -341,7 +341,7 @@ def _cmd_summary(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="cpv_fix_loop_state.py",
-        description="Deterministic oscillation/convergence detector for the plugin-fixer loop.",
+        description="Deterministic oscillation/convergence detector for the cpv-plugin-fixer-agent loop.",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 

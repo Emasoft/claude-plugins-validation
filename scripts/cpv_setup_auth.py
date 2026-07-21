@@ -37,7 +37,7 @@ Usage::
 Required surfaces in --strict mode:
     1  Git identity   (publish.py needs it for commit author)
     2  GitHub HTTPS   (publish.py Gate 12 / 13 need it for push + release)
-    6  Pre-push hook  (canonical-pipeline mandates it for quality gating)
+    6  Pre-push hook  (cpv-canonical-pipeline mandates it for quality gating)
 
 Surfaces 3, 4, 5, 7, 8 are advisory — their absence is reported but does
 not fail --strict mode.

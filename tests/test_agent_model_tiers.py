@@ -110,9 +110,9 @@ def test_every_agent_file_parses_and_keeps_name_description() -> None:
 # /cpv-main-menu by v2.90.0); the work agents still exist and do the heavy
 # lifting.
 _MAIN_SESSION_MENUS = [
-    ("plugin-fixer.md", "cpv-fix-validation.md", "plugin-fixer"),
-    ("marketplace-fixer.md", "cpv-fix-marketplace-validation.md", "marketplace-fixer"),
-    ("cache-optimizer-agent.md", "cpv-cache-optimize.md", "cache-optimizer-agent"),
+    ("cpv-plugin-fixer-agent.md", "cpv-fix-validation.md", "cpv-plugin-fixer-agent"),
+    ("cpv-marketplace-fixer-agent.md", "cpv-fix-marketplace-validation.md", "cpv-marketplace-fixer-agent"),
+    ("cpv-cache-optimizer-agent.md", "cpv-cache-optimize.md", "cpv-cache-optimizer-agent"),
     ("cpv-doctor-agent.md", "cpv-doctor.md", "cpv-doctor-agent"),
 ]
 
@@ -160,7 +160,7 @@ def test_work_agent_has_no_model_field(work: str, cmd: str, _work_name: str) -> 
     )
 
 
-@pytest.mark.parametrize("work", ["plugin-fixer.md", "marketplace-fixer.md", "cache-optimizer-agent.md"])
+@pytest.mark.parametrize("work", ["cpv-plugin-fixer-agent.md", "cpv-marketplace-fixer-agent.md", "cpv-cache-optimizer-agent.md"])
 def test_work_agent_has_no_first_contact_menu(work: str) -> None:
     """Work agents must not contain First Contact / numbered-menu blocks.
 

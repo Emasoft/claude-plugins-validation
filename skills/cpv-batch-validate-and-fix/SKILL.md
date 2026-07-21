@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-validate-and-fix
-description: "Same-turn parallel validate-and-fix across a marketplace / list / single plugin. Each plugin-fixer reads every source file ONCE — scans + verifies false positives (via v2.100.x AST/JSON/markdown classifier + llm-externalizer with file-range syntax) + fixes inline. ~3× cheaper per plugin than running cpv-batch-validate + cpv-batch-fix separately. Use when applying validation fixes across many plugins and you trust the FP classifier chain. Trigger with /cpv-batch-validate-and-fix."
+description: "Same-turn parallel validate-and-fix across a marketplace / list / single plugin. Each cpv-plugin-fixer-agent reads every source file ONCE — scans + verifies false positives (via v2.100.x AST/JSON/markdown classifier + llm-externalizer with file-range syntax) + fixes inline. ~3× cheaper per plugin than running cpv-batch-validate + cpv-batch-fix separately. Use when applying validation fixes across many plugins and you trust the FP classifier chain. Trigger with /cpv-batch-validate-and-fix."
 user-invocable: true
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
@@ -10,7 +10,7 @@ argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ## Overview
 
 Same-turn variant of the parallel validate + fix pipeline. Each
-plugin-fixer subagent reads every source file ONCE, scans +
+cpv-plugin-fixer-agent subagent reads every source file ONCE, scans +
 verifies FPs inline (via the v2.100.x context classifier +
 `llm-externalizer` with file-range syntax — minimum-token FP
 verification), applies confirmed-real fixes, and runs one
@@ -25,7 +25,7 @@ orchestrator body lives in this plugin's
 
 - `claude-plugins-validation` plugin installed (provides
   `scripts/cpv_menu.py` — the claude-menu-system bridge — and the
-  `plugin-fixer` agent).
+  `cpv-plugin-fixer-agent` agent).
 - `claude-menu-system` plugin installed — the slash command emits the
   status table via its Stop-hook (through `scripts/cpv_menu.py`).
   Declared as a hard dependency in CPV's `plugin.json`; `cpv_menu.py`
@@ -110,6 +110,6 @@ Assistant: /cpv-batch-validate-and-fix /path/a /path/b /path/c
 
 - TRDD-3dcbb37c §3 — full design
 - `commands/cpv-batch-validate-and-fix.md` — orchestrator body (in this plugin)
-- `agents/plugin-fixer.md` — `batch_same_turn_validate_fix` mode contract
+- `agents/cpv-plugin-fixer-agent.md` — `batch_same_turn_validate_fix` mode contract
 - Sibling batch skills (this plugin): `cpv-batch-validate`,
   `cpv-batch-fix`, `cpv-batch-full-scan-and-fix`

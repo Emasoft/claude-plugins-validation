@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-security-audit
-description: "Fleet-wide parallel security audit. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. One plugin-validator per plugin runs ONLY validate_security (5 external scanners + AI/security rules). Use when checking supply-chain risk across many plugins. Trigger with /cpv-batch-security-audit or 'security-audit every plugin in X'."
+description: "Fleet-wide parallel security audit. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. One cpv-plugin-validator-agent per plugin runs ONLY validate_security (5 external scanners + AI/security rules). Use when checking supply-chain risk across many plugins. Trigger with /cpv-batch-security-audit or 'security-audit every plugin in X'."
 user-invocable: true
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
@@ -28,7 +28,7 @@ orchestrator body lives in this plugin's
 - `claude-plugins-validation` plugin installed (provides
   `scripts/validate_security.py`, the universal input resolver,
   `scripts/cpv_menu.py` (the claude-menu-system bridge), and the
-  `plugin-validator` agent).
+  `cpv-plugin-validator-agent` agent).
 - `claude-menu-system` plugin installed — the slash command emits the
   status table via its Stop-hook (through `scripts/cpv_menu.py`).
   Declared as a hard dependency in CPV's `plugin.json`; `cpv_menu.py`
@@ -54,7 +54,7 @@ table — every shape is supported identically.
    ```text
    /cpv-batch-security-audit <user's spec> [--max-parallel N]
    ```
-3. The command dispatches one `plugin-validator` subagent per plugin
+3. The command dispatches one `cpv-plugin-validator-agent` subagent per plugin
    in `batch_security_audit` mode (each runs `validate_security`
    only) and aggregates the per-plugin status JSONs into a CMS-shaped
    status-table spec, queued via `scripts/cpv_menu.py`. The

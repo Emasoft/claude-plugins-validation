@@ -1,7 +1,7 @@
 # Plugin-fixer runbook — extracted detail
 
-Detailed, load-on-demand reference for the `plugin-fixer` agent. The agent
-body (`agents/plugin-fixer.md`) keeps the core triage / loop / completion-gate
+Detailed, load-on-demand reference for the `cpv-plugin-fixer-agent` agent. The agent
+body (`agents/cpv-plugin-fixer-agent.md`) keeps the core triage / loop / completion-gate
 contract inline and points here for the long step-by-step procedures.
 
 ## Table of Contents
@@ -22,7 +22,7 @@ contract inline and points here for the long step-by-step procedures.
 
 ## 1. Pre-completion verification (REQUIRED, migration runs)
 
-**Mandatory for every canonical-pipeline migration run.** Skipping any step
+**Mandatory for every cpv-canonical-pipeline migration run.** Skipping any step
 violates the Migration exit contract ([issue #21 ask #1](https://github.com/Emasoft/claude-plugins-validation/issues/21)).
 The authoritative reference is the 87-check matrix in
 [`references/canonical-pipeline-migration-checklist.md`](canonical-pipeline-migration-checklist.md)
@@ -83,7 +83,7 @@ completion report — it is the source of truth; do not summarise it in prose.
 ## 2. Pipeline migration to current standards (legacy plugin upgrade)
 
 When the user asks "fix/upgrade the pipeline" / "match the latest CPV pipeline",
-load `fix-validation`'s `pipeline-migration.md` reference (linked with its full
+load `cpv-fix-validation`'s `pipeline-migration.md` reference (linked with its full
 TOC in Guardrail 2 of the agent body) and apply its independent, revertable
 migrations: §1 stale script refs (→ cpv_lint_engine in CI), §2 whole-repo lint
 via cpv_lint_engine, §3a/§3b/§3c bash→Python scripts/hook-commands/os.path→pathlib,
@@ -114,7 +114,7 @@ an HTTP hook on a latency-sensitive event. Never substitute `uvx` for
 ## 4. CRITICAL: Never improvise `gh secret set`
 
 If a fix touches `MARKETPLACE_PAT` (rare for plugin-scope — usually routed to
-marketplace-fixer), use the helper `scripts/set_marketplace_pat.py` (it never
+cpv-marketplace-fixer-agent), use the helper `scripts/set_marketplace_pat.py` (it never
 prints the token, so it cannot leak into the transcript, shell history, or
 logs): `uv run python scripts/set_marketplace_pat.py OWNER/repo-a OWNER/repo-b`.
 Manual fallback ONLY if the helper is unavailable — value via `--body`/`-b`,
@@ -138,7 +138,7 @@ For the silent-failure loading footguns `claude plugin validate` does NOT catch
 — `Field 'agents' contains folder path`, `Field 'hooks' points to
 './hooks/hooks.json' ... DISABLES this plugin's MCP servers`, `mcpServers`
 pointing at auto-discovered `.mcp.json`, cross-source duplicate MCP/LSP servers
-— apply the recipes in the `fix-validation` references `plugin-structure-fixes.md`,
+— apply the recipes in the `cpv-fix-validation` references `plugin-structure-fixes.md`,
 `mcp-fixes.md`, and `lsp-fixes.md`. Full empirical evidence (13 scenarios,
 debug-log excerpts, runtime probes) is in `empirical-loading-bugs.md`.
 
@@ -157,7 +157,7 @@ and confirm exit 0 with no `RC-MKPL-NAME-MISMATCH`, `RC-MKPL-UNKNOWN-FIELD`, or
 ai-maestro-visual-communicator-plugin incident: mismatched name → "not found";
 unknown field → `claude plugin validate` rejects the entry). For any surviving
 RC-MKPL-* MAJOR, apply §1/§3/§4 of
-[marketplace-upstream-drift.md](../skills/fix-validation/references/marketplace-upstream-drift.md):
+[marketplace-upstream-drift.md](../skills/cpv-fix-validation/references/marketplace-upstream-drift.md):
 
 > 1. Name mismatch — RC-MKPL-NAME-MISMATCH · 2. Version drift — RC-MKPL-VERSION-DRIFT · 3. Unknown entry field — RC-MKPL-UNKNOWN-FIELD · 4. Unknown source sub-field — RC-MKPL-UNKNOWN-SOURCE-FIELD · 5. Source unreachable — RC-MKPL-UPSTREAM-UNREACHABLE · 6. Description / author / keywords drift — RC-MKPL-METADATA-DRIFT · 7. Per-batch bulk align — consolidated marketplace patch · 8. Opt-out flags — when drift IS intentional
 
@@ -167,7 +167,7 @@ the alias is documented in the README. **Agent-introduced drift WITHOUT user
 confirmation is forbidden** (TRDD-c0ee9543 §9): the gate must distinguish
 user-blessed drift (opt-out present) from agent-introduced drift (no opt-out)
 and refuse to ship the latter. Full code table:
-[marketplace-error-index.md §1.1](../skills/fix-validation/references/marketplace-error-index.md#11-rc-mkpl-upstream-cross-validation-codes-v2810).
+[marketplace-error-index.md §1.1](../skills/cpv-fix-validation/references/marketplace-error-index.md#11-rc-mkpl-upstream-cross-validation-codes-v2810).
 
 ## 7. RC-GHOST-DISPATCH-* (TRDD-25b9be90 — ghost-agent dispatch)
 
@@ -231,14 +231,14 @@ This agent fixes **plugin-level** issues only. Route each finding:
 
 - **Plugin mechanical fixes** (CRITICAL/MAJOR/MINOR/NIT on plugin files —
   missing fields, malformed JSON, typos, encoding, stale refs, hooks, metadata)
-  → `fix-validation` skill's `plugin-error-index.md` (covers
+  → `cpv-fix-validation` skill's `plugin-error-index.md` (covers
   `validate_plugin/skill*/hook/agent/command/mcp/lsp/security/rules/xref/settings_marketplace/documentation/encoding/enterprise/scoring`).
   Read only the relevant index section, then open the specific fix reference it
   points to; never load whole reference files. Apply Edit operations.
 - **Marketplace findings** (any `validate_marketplace.py`/`validate_marketplace_pipeline.py`
   report, or `category: architecture`) → STOP and redirect: "This report
   contains marketplace-level findings. I only fix plugin issues. Please invoke
-  the **marketplace-fixer** agent (via `/cpv-fix-marketplace-validation <report>`)
+  the **cpv-marketplace-fixer-agent** agent (via `/cpv-fix-marketplace-validation <report>`)
   — it handles mechanical marketplace fixes AND architectural Layout A ↔ B
   migration." Do NOT attempt marketplace fixes or migrations here.
 
@@ -266,7 +266,7 @@ deleting. The same three questions apply to .md files (a "dead" doc may be an
 intentional draft/TODO/vendor copy).
 
 **Guardrail 2 — bash → Python conversion is NOT universal.** The migration in
-[pipeline-migration §3](../skills/fix-validation/references/pipeline-migration.md)
+[pipeline-migration §3](../skills/cpv-fix-validation/references/pipeline-migration.md)
 is the DEFAULT for canonical pipeline files (publish.py, pre-push hook, CI
 workflows), NOT for every bash file. Before converting any `.sh`, check:
 (1) **Bash-specific tooling** (here-docs, `set -o pipefail`, `trap`,

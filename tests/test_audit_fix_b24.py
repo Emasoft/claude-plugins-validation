@@ -2,7 +2,7 @@
 
 Every finding in this batch was a broken/stale reference in a .md surface:
 
-  * #29  agents/plugin-creator.md — completion-gate fix loop carried a
+  * #29  agents/cpv-plugin-creator-agent.md — completion-gate fix loop carried a
           hardcoded "hard cap 5 iterations", violating the no-hardcoded-
           iteration-caps rule (only empty-set / oscillation may terminate).
   * #21  commands/cpv-batch-caching-optimize.md — referenced a ghost
@@ -11,11 +11,11 @@ Every finding in this batch was a broken/stale reference in a .md surface:
   * #166 commands/cpv-batch-fix.md — Step 0 ran the orchestrator `plan`
           (writing plan.json to /tmp) and then the marketplace path re-ran
           `plan`, abandoning the first; the fan-out now reuses Step 0's plan.
-  * #24  skills/scaffold-skill/SKILL.md — the example `--description`
+  * #24  skills/cpv-scaffold-skill/SKILL.md — the example `--description`
           lacked the "Use when ..." trigger the skill itself mandates.
-  * #110 skills/scaffold-skill/SKILL.md — the Output section overclaimed 5
+  * #110 skills/cpv-scaffold-skill/SKILL.md — the Output section overclaimed 5
           frontmatter fields; add_component._skill_template emits only 2.
-  * HIGH + #113 skills/setup-github-marketplace/references/
+  * HIGH + #113 skills/cpv-setup-github-marketplace/references/
           marketplace-setup-guide.md — referenced ghost scripts
           `update_marketplace_metadata.py` and `setup_git_hooks.py` (plus a
           bogus `--marketplace-dir` flag); the real templates are
@@ -34,20 +34,20 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-PLUGIN_CREATOR = REPO_ROOT / "agents" / "plugin-creator.md"
+PLUGIN_CREATOR = REPO_ROOT / "agents" / "cpv-plugin-creator-agent.md"
 BATCH_CACHE_OPT = REPO_ROOT / "commands" / "cpv-batch-caching-optimize.md"
 BATCH_FIX = REPO_ROOT / "commands" / "cpv-batch-fix.md"
-SCAFFOLD_SKILL = REPO_ROOT / "skills" / "scaffold-skill" / "SKILL.md"
-MKPL_GUIDE = REPO_ROOT / "skills" / "setup-github-marketplace" / "references" / "marketplace-setup-guide.md"
-SCRIPT_TEMPLATES = REPO_ROOT / "skills" / "setup-github-marketplace" / "references" / "script-templates.md"
+SCAFFOLD_SKILL = REPO_ROOT / "skills" / "cpv-scaffold-skill" / "SKILL.md"
+MKPL_GUIDE = REPO_ROOT / "skills" / "cpv-setup-github-marketplace" / "references" / "marketplace-setup-guide.md"
+SCRIPT_TEMPLATES = REPO_ROOT / "skills" / "cpv-setup-github-marketplace" / "references" / "script-templates.md"
 ADD_COMPONENT = REPO_ROOT / "scripts" / "add_component.py"
 
 
-# ---- #29: no hardcoded iteration cap in plugin-creator completion gate ----
+# ---- #29: no hardcoded iteration cap in cpv-plugin-creator-agent completion gate ----
 
 
 def test_plugin_creator_has_no_hardcoded_iteration_cap() -> None:
-    """plugin-creator.md must not carry a 'hard cap N iterations' fix-loop ceiling."""
+    """cpv-plugin-creator-agent.md must not carry a 'hard cap N iterations' fix-loop ceiling."""
     text = PLUGIN_CREATOR.read_text(encoding="utf-8")
     # The exact pre-fix wording and any equivalent magic-number ceiling.
     assert "hard cap 5 iterations" not in text
@@ -68,7 +68,10 @@ def test_plugin_creator_uses_oscillation_only_termination() -> None:
 def test_batch_cache_optimize_has_no_ghost_command() -> None:
     """The batch cache-optimize command must not reference the non-existent /cpv-cache-optimize."""
     text = BATCH_CACHE_OPT.read_text(encoding="utf-8")
-    assert "cpv-cache-optimize" not in text
+    # Match the ghost SLASH-COMMAND only, boundary-guarded: after the v3.0.0
+    # rename the legit agent `cpv-cache-optimizer-agent` contains the substring
+    # `cpv-cache-optimize`, so a bare substring check would false-fire on it.
+    assert not re.search(r"/cpv-cache-optimize(?![\w-])", text)
 
 
 def test_batch_cache_optimize_points_at_real_entry_point() -> None:
@@ -106,7 +109,7 @@ def test_batch_fix_marketplace_path_reuses_step0_plan() -> None:
     assert "STATUS_TABLE=$(echo" in text
 
 
-# ---- #24 + #110: scaffold-skill example + Output match reality ----
+# ---- #24 + #110: cpv-scaffold-skill example + Output match reality ----
 
 
 def test_scaffold_skill_example_includes_use_when_trigger() -> None:

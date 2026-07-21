@@ -28,7 +28,7 @@ needs out of the tree:
 Why a separate module instead of extending publish.py:
   - `publish.py` is already 2700+ lines; a focused classifier module is
     easier to test and re-use.
-  - Other entry points (cpv-doctor, plugin-creator, plugin-fixer) need the
+  - Other entry points (cpv-doctor, cpv-plugin-creator-agent, cpv-plugin-fixer-agent) need the
     same detection logic. Promoting it out of publish.py is the cheapest
     way to share without circular imports.
   - Per the TRDD: "ONE identical publish.py byte-for-byte across every
@@ -60,7 +60,7 @@ from typing import Callable
 
 # Allowed shape kinds — keep this list aligned with the TRDD §B detection
 # table. New kinds are additive; existing kinds must NEVER be renamed
-# without a coordinated migration of all callers (publish.py, plugin-creator,
+# without a coordinated migration of all callers (publish.py, cpv-plugin-creator-agent,
 # cpv-doctor, etc.).
 SHAPE_KINDS = (
     "single-plugin",

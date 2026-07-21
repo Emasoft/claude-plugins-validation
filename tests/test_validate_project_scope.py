@@ -479,7 +479,7 @@ class TestMarkdownElements:
         full agent spec (including 2+ example blocks for good triggering).
         An agent without examples would — correctly — fail validation at
         project scope because teammates who receive the shared agent
-        wouldn't know when it should fire. See fix-validation refs for
+        wouldn't know when it should fire. See cpv-fix-validation refs for
         remediation details.
         """
         _commit(
