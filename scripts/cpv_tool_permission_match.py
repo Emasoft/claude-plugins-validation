@@ -61,6 +61,7 @@ CANONICAL_TOOLS: frozenset[str] = frozenset(
         "CronDelete",
         "CronList",
         "Edit",
+        "EndConversation",  # v2.1.214 — end an abusive/jailbreak session (tools-reference)
         "EnterPlanMode",
         "EnterWorktree",
         "ExitPlanMode",

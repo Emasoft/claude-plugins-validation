@@ -510,6 +510,15 @@ BUILTIN_SLASH_COMMANDS: frozenset[str] = frozenset(
         "help",
         "exit",
         "quit",
+        # Background sessions / forking / side-questions (v2.1.211/.212)
+        "fork",  # v2.1.212 — copy the conversation into a new background session
+        "subtask",  # v2.1.212 — the in-session subagent /fork used to launch
+        "background",  # park the session as a background agent
+        "btw",  # v2.1.212 — reopen the side-question panel
+        "usage-credits",  # v2.1.211 — usage-credit request to org admins
+        # Review skills exposed as invocable commands (v2.1.215)
+        "verify",  # v2.1.215 — invoke the verify skill
+        "code-review",  # v2.1.215 — invoke the code-review skill
     }
 )
 
@@ -633,6 +642,7 @@ VALID_TOOLS = {
     "PushNotification",
     "SlashCommand",  # v1.0.123 — enables Claude to invoke your slash commands
     "MCPSearch",  # v2.1.7 — MCP-specific tool search (distinct from generic ToolSearch)
+    "EndConversation",  # v2.1.214 — end a session with an abusive user / jailbreak attempt (tools-reference)
     # NOTE: "Workflow" is defined once above (after "Monitor"); a second entry here
     # was a redundant duplicate with a conflicting version annotation (audit b07).
 }
@@ -734,6 +744,11 @@ VALID_PLUGIN_ENV_VARS = {
     "OTEL_METRICS_INCLUDE_ACCOUNT_UUID",
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
     "OTEL_RESOURCE_ATTRIBUTES",
+    # v2.1.214 — OTel SDK attribute-value length limits CC honors (env-vars.md);
+    # CC caps content attributes at the smallest of these and CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH.
+    "OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT",
+    "OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT",
+    "OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT",
     # v2.22.2 batch: ANTHROPIC_* core API vars referenced pervasively in plugin
     # docs, env blocks, and settings.json env maps. False-positive source if absent.
     "ANTHROPIC_API_KEY",
@@ -863,6 +878,13 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_CODE_POWERSHELL_RESPECT_EXECUTION_POLICY",  # v2.1.143 — set to "1" to opt out of PowerShell's -ExecutionPolicy Bypass default
     "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP",  # v2.1.143 — override the default cap of 8 consecutive hook blocks before turn ends with warning
     "CLAUDE_CODE_WORKFLOWS",  # v2.1.147 — set to "1" to enable the Workflow tool (off by default)
+    "CLAUDE_CODE_PROCESS_WRAPPER",  # v2.1.208 — corporate-launcher argv prefix for CC-spawned background processes (settings twin processWrapper v2.1.210)
+    "CLAUDE_AX_SCREEN_READER",  # v2.1.181 — "1"/"0" to force screen-reader-friendly output (settings twin axScreenReader)
+    "CLAUDE_CODE_FORWARD_SUBAGENT_TEXT",  # v2.1.211 — "1" to emit subagent text/thinking in stream-json (--forward-subagent-text)
+    "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION",  # v2.1.212 — cap on WebSearch calls per session (default 200)
+    "CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION",  # v2.1.212 — cap on Agent-tool subagent spawns per session (default 200)
+    "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS",  # v2.1.212 — ms before a long MCP tool call auto-backgrounds (default 120000; 0 disables)
+    "CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH",  # v2.1.214 — max length of content-bearing OTEL attributes (default 61440 = 60 KB)
     # Anthropic *_SUPPORTED_CAPABILITIES — spec-correct suffix
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",

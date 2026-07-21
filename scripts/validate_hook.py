@@ -284,7 +284,7 @@ COMPACT_TRIGGERS = {"manual", "auto"}
 SETUP_TRIGGERS = {"init", "maintenance"}
 
 # SessionStart source types
-SESSION_START_SOURCES = {"startup", "resume", "clear", "compact"}
+SESSION_START_SOURCES = {"startup", "resume", "clear", "compact", "fork"}  # v2.1.212/.214 — a session begun via /fork reports source "fork"
 
 # SessionEnd reason values (hooks.md L192).
 # `bypass_permissions_disabled` was added in a later v2.1.x point release alongside
