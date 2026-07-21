@@ -1,6 +1,6 @@
 # Canonical-pipeline migration checklist
 
-**Owner**: plugin-fixer agent (during `/cpv-upgrade-plugin` or `/cpv-fix-validation`).
+**Owner**: cpv-plugin-fixer-agent agent (during `/cpv-upgrade-plugin` or `/cpv-fix-validation`).
 
 **Contract**: After the migration agent has finished editing the plugin tree it
 MUST run every BLOCKER and MAJOR check in this file. Every BLOCKER must pass.
@@ -80,7 +80,7 @@ sys.exit(0 if ok else 1)
 PY
 ```
 **Pass when**: exit 0; every `*.yml`/`*.yaml` under `.github/workflows/` round-trips through `yaml.safe_load` without raising.
-**On fail**: open the failing file, fix the offending line, re-run. See `skills/fix-validation/references/pipeline-migration.md` §1.
+**On fail**: open the failing file, fix the offending line, re-run. See `skills/cpv-fix-validation/references/pipeline-migration.md` §1.
 
 ### CHECK-02 [BLOCKER] Every literal path in every `run:` step exists on disk
 **Why**: This is the exact bug from issue #21 — `chmod +x scripts/dispatch.sh scripts/detectors/*.sh` referenced files that the migration deleted, CI exited 1 on first push.
@@ -273,7 +273,7 @@ sys.exit(0 if not fails else 1)
 PY
 ```
 **Pass when**: exit 0.
-**On fail**: wrap in `def main(): ...` and add `if __name__ == "__main__": sys.exit(main())`. See `skills/fix-validation/references/hook-fixes.md`.
+**On fail**: wrap in `def main(): ...` and add `if __name__ == "__main__": sys.exit(main())`. See `skills/cpv-fix-validation/references/hook-fixes.md`.
 
 ### CHECK-10 [MAJOR] Every Python script with third-party imports has a PEP 723 `# /// script` block
 **Why**: PEP 723 lets `uv run` resolve dependencies declaratively — without it, `uv run scripts/X.py` falls back to the global env and breaks reproducibly across machines.
@@ -391,7 +391,7 @@ uv run mypy --no-incremental --hide-error-context --show-error-codes scripts/ 2>
   ! grep -q '^scripts/.*: error:' /tmp/cpv-mypy.log
 ```
 **Pass when**: no `error:` lines for files under `scripts/`. Exit 0.
-**On fail**: read the mypy output, fix each error. See `skills/fix-validation/references/code-quality-fixes.md`.
+**On fail**: read the mypy output, fix each error. See `skills/cpv-fix-validation/references/code-quality-fixes.md`.
 
 ### CHECK-15 [MAJOR] ruff clean on `scripts/`
 **Why**: Canonical pipeline lints via `cpv_lint_engine` (ruff under the hood). Migration regressions show up as ruff errors.
@@ -441,7 +441,7 @@ sys.exit(0 if not fails else 1)
 PY
 ```
 **Pass when**: exit 0.
-**On fail**: wrap the script body in `def main(): ...` and add the guard. See `skills/fix-validation/references/hook-fixes.md`.
+**On fail**: wrap the script body in `def main(): ...` and add the guard. See `skills/cpv-fix-validation/references/hook-fixes.md`.
 
 ### CHECK-18 [BLOCKER] No module-scope `sys.exit(0)` in `scripts/hooks/`
 **Why**: Some hooks accidentally `sys.exit(0)` at the module top to early-return. This makes import succeed-by-exit and hides logic bugs in CI.
@@ -714,7 +714,7 @@ uv run python scripts/validate_plugin.py . --strict --json 2>/dev/null | \
   [print(b.get('message','')[:200]) for b in bad]; sys.exit(0 if not bad else 1)"
 ```
 **Pass when**: exit 0.
-**On fail**: remove or rename the unknown key. See `skills/fix-validation/references/plugin-error-index.md`.
+**On fail**: remove or rename the unknown key. See `skills/cpv-fix-validation/references/plugin-error-index.md`.
 
 ---
 
@@ -801,7 +801,7 @@ uv run python scripts/validate_plugin.py . --strict --json 2>/dev/null | \
   print(f'MAJOR={m}'); sys.exit(0 if m==0 else 1)"
 ```
 **Pass when**: prints `MAJOR=0`.
-**On fail**: read the report, address each MAJOR. See `skills/fix-validation/references/plugin-error-index.md`.
+**On fail**: read the report, address each MAJOR. See `skills/cpv-fix-validation/references/plugin-error-index.md`.
 
 ### CHECK-39 [MAJOR] `validate_plugin.py --strict --json` returns zero MINOR findings
 **Why**: MINORs are advisory but accumulate post-migration; ignoring them creates technical debt that the next migration agent re-flags.
@@ -1788,7 +1788,7 @@ run_all_checks() {
 
 ## Plugin-fixer integration contract
 
-The `plugin-fixer` agent (`agents/plugin-fixer.md`) MUST run `run_all_checks` as **step 7c** of its algorithm (between the existing step 7b "validate_plugin.py final re-run" and step 8 "capture SUMMARY"). The agent's DONE condition becomes:
+The `cpv-plugin-fixer-agent` agent (`agents/cpv-plugin-fixer-agent.md`) MUST run `run_all_checks` as **step 7c** of its algorithm (between the existing step 7b "validate_plugin.py final re-run" and step 8 "capture SUMMARY"). The agent's DONE condition becomes:
 
 > "Step 7 final re-run shows zero CRITICAL/MAJOR/MINOR/NIT **AND** `run_all_checks` returns exit 0."
 
@@ -1805,11 +1805,11 @@ This closes issue #21 ask #1: "the migration agent's exit contract should be CI 
 - Issue: https://github.com/Emasoft/claude-plugins-validation/issues/21
 - TRDD: `design/tasks/TRDD-bbff5bc5-*.md` (publish-auth standard); `design/tasks/TRDD-79638eb6-*.md` (drift autodetect)
 - Drift rule: `scripts/validate_plugin.py:3640` (`validate_canonical_pipeline_drift`)
-- Migration spec: `skills/fix-validation/references/pipeline-migration.md`
-- Iterative fix loop: `skills/fix-validation/references/iterative-fix-loop.md`
-- Canonical pipeline standard: `skills/canonical-pipeline/references/detailed-standard.md`
-- Pipeline rules: `skills/canonical-pipeline/references/pipeline-rules.md`
-- Hook fixes: `skills/fix-validation/references/hook-fixes.md`
-- Code-quality fixes: `skills/fix-validation/references/code-quality-fixes.md`
-- Plugin-fixer agent: `agents/plugin-fixer.md`
+- Migration spec: `skills/cpv-fix-validation/references/pipeline-migration.md`
+- Iterative fix loop: `skills/cpv-fix-validation/references/iterative-fix-loop.md`
+- Canonical pipeline standard: `skills/cpv-canonical-pipeline/references/detailed-standard.md`
+- Pipeline rules: `skills/cpv-canonical-pipeline/references/pipeline-rules.md`
+- Hook fixes: `skills/cpv-fix-validation/references/hook-fixes.md`
+- Code-quality fixes: `skills/cpv-fix-validation/references/code-quality-fixes.md`
+- Plugin-fixer agent: `agents/cpv-plugin-fixer-agent.md`
 - Audit reports: `reports/migration-audit/20260509_184143+0200-current-state.md`, `reports/migration-audit/20260509_184057+0200-drift-rule-state.md`

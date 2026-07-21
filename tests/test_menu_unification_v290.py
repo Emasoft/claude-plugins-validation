@@ -16,8 +16,8 @@ a permanent regression-pin:
 3. **5 agents lose their First Contact menu blocks.** Agents that
    previously rendered their own first-contact menu now accept dispatch
    args from /cpv-main-menu instead. The First Contact section is gone
-   from plugin-creator, plugin-manager, plugin-validator,
-   skill-validation-agent, semantic-validator.
+   from cpv-plugin-creator-agent, cpv-plugin-manager-agent, cpv-plugin-validator-agent,
+   cpv-skill-validation-agent, cpv-semantic-validator-agent.
 
 4. **Top-level menu is 8 canonical categories.** Both commands/cpv-main-menu.md
    and skills/cpv-main-menu-skill/references/menu-tree.md MUST contain
@@ -50,31 +50,31 @@ MAIN_MENU_TREE = SKILLS_DIR / "cpv-main-menu-skill" / "references" / "menu-tree.
 # of truth at skills/<name>/SKILL.md. The OLD cpv-XXX command file is
 # pinned absent by tests/test_consolidation_v211.py.
 V290_NEW_SKILLS = [
-    "add-component-to-plugin",  # ← cpv-add-component
-    "add-dependency",  # ← cpv-add-dependency
-    "add-hook",  # ← cpv-create-hook
-    "bump-version",  # ← cpv-bump-version
-    "deterministic-codemod",  # ← cpv-codemod
-    "link-plugin-marketplace",  # ← cpv-link-plugin
-    "pack-components",  # ← cpv-pack-components
-    "refresh-readme",  # ← cpv-refresh-readme
-    "register-mcp",  # ← cpv-create-mcp
-    "scaffold-agent",  # ← cpv-create-agent
-    "scaffold-command",  # ← cpv-create-command
-    "scaffold-skill",  # ← cpv-create-skill
-    "show-version",  # ← cpv-version
-    "strip-dev-submodules",  # ← cpv-strip-dev-parts
+    "cpv-add-component-to-plugin",  # ← cpv-add-component
+    "cpv-add-dependency",  # ← cpv-add-dependency
+    "cpv-add-hook",  # ← cpv-create-hook
+    "cpv-bump-version",  # ← cpv-bump-version
+    "cpv-deterministic-codemod",  # ← cpv-codemod
+    "cpv-link-plugin-marketplace",  # ← cpv-link-plugin
+    "cpv-pack-components",  # ← cpv-pack-components
+    "cpv-refresh-readme",  # ← cpv-refresh-readme
+    "cpv-register-mcp",  # ← cpv-create-mcp
+    "cpv-scaffold-agent",  # ← cpv-create-agent
+    "cpv-scaffold-command",  # ← cpv-create-command
+    "cpv-scaffold-skill",  # ← cpv-create-skill
+    "cpv-show-version",  # ← cpv-version
+    "cpv-strip-dev-submodules",  # ← cpv-strip-dev-parts
 ]
 
 # Agents whose ## First Contact section was stripped in v2.90.0. They now
 # accept dispatch args from /cpv-main-menu instead of rendering their own
 # first-contact menu.
 V290_AGENTS_WITHOUT_FIRST_CONTACT = [
-    "plugin-creator.md",
-    "plugin-manager.md",
-    "plugin-validator.md",
-    "skill-validation-agent.md",
-    "semantic-validator.md",
+    "cpv-plugin-creator-agent.md",
+    "cpv-plugin-manager-agent.md",
+    "cpv-plugin-validator-agent.md",
+    "cpv-skill-validation-agent.md",
+    "cpv-semantic-validator-agent.md",
 ]
 
 # The 8 canonical top-level category labels — these MUST appear in both
@@ -134,7 +134,7 @@ def test_only_one_slash_command_remains() -> None:
     name when a plugin has 100+ findings, and forcing the user to
     re-navigate the menu would defeat that recommendation.
 
-    Per TRDD-9dd64dbf (v2.95.0) ``the-skills-menu-create.md`` was added
+    Per TRDD-9dd64dbf (v2.95.0) ``cpv-the-skills-menu-create.md`` was added
     as a direct-entry universal migrator — it operates on OTHER plugins
     so menu navigation inside CPV is a UX dead end.
 
@@ -149,7 +149,7 @@ def test_only_one_slash_command_remains() -> None:
     allowed = {
         "cpv-main-menu.md",
         "cpv-batch-fix.md",
-        "the-skills-menu-create.md",
+        "cpv-the-skills-menu-create.md",
         "cpv-pre-install-scan.md",
         # TRDD-3dcbb37c (v2.101.0) — Batch skills family. Each one is a
         # bare slash command because the user fans out fleet-wide

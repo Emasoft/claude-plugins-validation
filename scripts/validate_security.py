@@ -1166,7 +1166,7 @@ def is_cpv_self_scan(plugin_path: Path) -> bool:
     """Detect whether the target plugin path IS the CPV plugin itself.
 
     The security validator's own source contains every detection pattern
-    it knows how to match (regex sources, taint engine docs, fix-validation
+    it knows how to match (regex sources, taint engine docs, cpv-fix-validation
     references, security TRDDs). When CPV scans itself, those literal
     pattern definitions self-match and produce thousands of false-positive
     CRITICALs.
@@ -1182,7 +1182,7 @@ def is_cpv_self_scan(plugin_path: Path) -> bool:
        Survives forks that rename the plugin.
 
     Either signal returning True flips the entire scan into "self-scan
-    mode" — the per-file scanners then treat fix-validation references,
+    mode" — the per-file scanners then treat cpv-fix-validation references,
     cpv_*.py modules, and security tests as documentation rather than
     source. Other plugins are unaffected because they cannot satisfy
     either signal accidentally.
@@ -1910,7 +1910,7 @@ def _is_self_scan_eligible(file_path: str) -> bool:
     }
     if basename in _ROOT_DOC_BASENAMES and "/" not in file_normalized.lstrip("./"):
         return True
-    if "/semantic-validation-skill/references/" in file_normalized:
+    if "/cpv-semantic-validation-skill/references/" in file_normalized:
         return True
     if (
         ("/skills/" in file_normalized or file_normalized.startswith("skills/"))
@@ -2059,7 +2059,7 @@ def is_security_fix_reference(file_path: str) -> bool:
         return False
 
     # Any markdown under a skill's references/ folder is documentation that
-    # may quote patterns. (Was narrow to fix-validation only; broadened
+    # may quote patterns. (Was narrow to cpv-fix-validation only; broadened
     # because every skill's references can document examples.)
     if "/skills/" in ("/" + file_normalized) and "/references/" in file_normalized:
         return True
@@ -7096,7 +7096,7 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
                 continue
 
             # CPV self-scan: skip cc-audit findings on files the running CPV
-            # has marked as canonical (validator source / fix-validation refs
+            # has marked as canonical (validator source / cpv-fix-validation refs
             # / security tests). cc-audit hands back absolute paths;
             # cpv_self_scan_skip handles the abs→rel normalization.
             if file_ref and cpv_self_scan_skip(str(file_ref)):
@@ -7551,7 +7551,7 @@ def _iter_scannable_files(plugin_path: Path):
 
     Honors the same self-scan skip set as scan_all_files — checking only
     `is_validator_script` would let dev-scratch dirs (docs_dev/,
-    design/tasks/, …) and hash-verified fix-validation references slip
+    design/tasks/, …) and hash-verified cpv-fix-validation references slip
     through and produce the same FPs the main scan loop suppresses.
 
     Also skips lockfiles — every regex pattern in the security catalog
@@ -9721,7 +9721,7 @@ def validate_security(
 
     # Detect whether the target IS the CPV plugin itself (any deployment
     # location). When True, per-file scanners skip CPV's own pattern-defining
-    # source (validator scripts, fix-validation references, security-test
+    # source (validator scripts, cpv-fix-validation references, security-test
     # fixtures) — those files necessarily contain every detection pattern
     # CPV knows about, and scanning them always self-matches.
     #
@@ -9735,7 +9735,7 @@ def validate_security(
     if self_scan:
         report.info(
             "CPV self-scan mode active — skipping CPV-internal pattern-defining "
-            "source (validator scripts, fix-validation references, security tests) "
+            "source (validator scripts, cpv-fix-validation references, security tests) "
             "after SHA256 verification against .plugin-self-hashes.json. Files that "
             "match the name pattern but fail hash check (modified or spoofed) are "
             "scanned normally."
@@ -10660,8 +10660,8 @@ def _resolve_report_root() -> Path:
     ``~/.claude/CLAUDE.md`` and
     ``~/.claude/rules/agent-reports-location.md`` and matches the
     bash prologue every other CPV agent uses
-    (``plugin-validator``, ``semantic-validator``,
-    ``marketplace-fixer``, ``skill-validation-agent``).
+    (``cpv-plugin-validator-agent``, ``cpv-semantic-validator-agent``,
+    ``cpv-marketplace-fixer-agent``, ``cpv-skill-validation-agent``).
     """
     try:
         completed = subprocess.run(

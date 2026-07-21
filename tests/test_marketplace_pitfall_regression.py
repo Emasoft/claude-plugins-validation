@@ -2,7 +2,7 @@
 """Regression tests for the 7 marketplace authoring pitfalls (TRDD-962fdc55 §8.3).
 
 Each test reproduces one PIT-NNN pattern from
-`skills/marketplace-authoring-contract/references/common-pitfalls.md` and
+`skills/cpv-marketplace-authoring-contract/references/common-pitfalls.md` and
 asserts that the validator detects it. The tests use Wave 6's RC-MKPL-*
 error codes where applicable.
 
@@ -417,7 +417,7 @@ def test_pit_007_category_validation_gap_is_documented() -> None:
         ]
         # The contract is the primary defence — verify the pitfall IS documented
         # in common-pitfalls.md so authoring-time guidance covers the case.
-        pitfalls_md = PLUGIN_ROOT / "skills" / "marketplace-authoring-contract" / "references" / "common-pitfalls.md"
+        pitfalls_md = PLUGIN_ROOT / "skills" / "cpv-marketplace-authoring-contract" / "references" / "common-pitfalls.md"
         assert pitfalls_md.is_file(), "common-pitfalls.md missing — contract reference unavailable"
         pitfalls_text = pitfalls_md.read_text(encoding="utf-8")
         assert "PIT-007" in pitfalls_text, (

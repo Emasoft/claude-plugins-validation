@@ -2,7 +2,7 @@
 
 This validator emits a WARNING per plugin that has any of its canonical
 pipeline files (publish.py, pre-push, ci.yml, …) drift from the latest CPV
-template. The plugin-fixer agent picks up the WARNING and offers
+template. The cpv-plugin-fixer-agent agent picks up the WARNING and offers
 `/cpv-upgrade-plugin` to migrate.
 
 Tests cover:

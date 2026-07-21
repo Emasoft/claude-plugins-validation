@@ -449,9 +449,9 @@ class TestAgentEmissionAudit:
         """The 5 in-scope agents per TRDD §4.4 must always be in the registry."""
         labels = [t.label for t in agent_emission_audit.AGENT_TARGETS]
         expected = {
-            "plugin-creator",
-            "plugin-fixer",
-            "marketplace-fixer",
+            "cpv-plugin-creator-agent",
+            "cpv-plugin-fixer-agent",
+            "cpv-marketplace-fixer-agent",
             "cpv-upgrade-plugin",
             "cpv-migrate-marketplace",
         }
@@ -479,14 +479,14 @@ class TestAgentEmissionAudit:
             "---\n"
             "name: foo\n"
             "skills:\n"
-            "  - create-plugin\n"
-            "  - publish-to-marketplace\n"
-            "  - plugin-management\n"
+            "  - cpv-create-plugin\n"
+            "  - cpv-publish-to-marketplace\n"
+            "  - cpv-plugin-management\n"
             "---\n\n"
             "Body content\n"
         )
         names = agent_emission_audit._agent_skill_names(body)
-        assert names == ["create-plugin", "publish-to-marketplace", "plugin-management"]
+        assert names == ["cpv-create-plugin", "cpv-publish-to-marketplace", "cpv-plugin-management"]
 
     def test_agent_skill_names_empty_when_absent(self) -> None:
         """Agents without a skills: block return empty list (not error)."""
@@ -498,16 +498,16 @@ class TestAgentEmissionAudit:
         # Build a fake repo with just one fake agent.
         fake_agent_dir = tmp_path / "agents"
         fake_agent_dir.mkdir()
-        fake_agent = fake_agent_dir / "plugin-creator.md"
+        fake_agent = fake_agent_dir / "cpv-plugin-creator-agent.md"
         fake_agent.write_text("---\nname: fake\n---\n\nBody mentioning kebab-case.\n")
         # Need to patch AGENT_TARGETS in module scope for isolation.
         original = agent_emission_audit.AGENT_TARGETS
         try:
             agent_emission_audit.AGENT_TARGETS = (
                 agent_emission_audit.AgentTarget(
-                    label="plugin-creator",
+                    label="cpv-plugin-creator-agent",
                     kind="agent",
-                    body_path="agents/plugin-creator.md",
+                    body_path="agents/cpv-plugin-creator-agent.md",
                 ),
             )
             reports = agent_emission_audit.audit_agents(tmp_path)

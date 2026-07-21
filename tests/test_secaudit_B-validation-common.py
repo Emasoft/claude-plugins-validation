@@ -29,7 +29,7 @@ ever makes the scanner catch MORE, never mutes a rule or relaxes a gate):
 * **G3-gate-banners-1** (HIGH) — Bucket A omitted ~11 execution-class RC rules
   (SSH backdoor, RCE deeplink, kernel-module, MCP cmd-injection, …) and several
   exfil rules, so real malware routed to the generic fixer instead of
-  ``plugin-devitalizer``. They are now bucketed (additive; cannot mute). A
+  ``cpv-plugin-devitalizer-agent``. They are now bucketed (additive; cannot mute). A
   drift-guard walks the phase pattern tables so a future execution rule cannot
   ship unbucketed.
 * **G3-gate-banners-2** (MEDIUM) — the ``Private info leaked:`` CRITICAL carried
@@ -291,7 +291,7 @@ class TestG3BucketCoverage:
     def test_execution_rule_routes_to_bucket_a(self, rc: str) -> None:
         """MALICIOUS: an execution-class RC finding classifies into Bucket A (devitalize)."""
         present = _classify_security_buckets(_rc_report(f"{rc}: malicious execution threat (line 10)"))
-        assert "A" in present, f"{rc} must route to Gate A so it reaches plugin-devitalizer"
+        assert "A" in present, f"{rc} must route to Gate A so it reaches cpv-plugin-devitalizer-agent"
 
     @pytest.mark.parametrize("rc", EXFIL_DUAL_AB)
     def test_secret_exfil_rule_is_dual_a_and_b(self, rc: str) -> None:
@@ -332,7 +332,7 @@ class TestG3BucketCoverage:
 
         Walks PHASE3/PHASE4 pattern tables (the in-process RC scanner) so a FUTURE
         execution/exfil rule cannot ship without a bucket — which would silently
-        route real malware to the generic fixer instead of plugin-devitalizer.
+        route real malware to the generic fixer instead of cpv-plugin-devitalizer-agent.
         Strictly additive: this can only DEMAND more banner coverage; it can never
         mute a signal. The keyword set is scoped to execution MECHANISMS and ACTIVE
         EXFIL sinks (NOT prose social-engineering / impersonation / authority
@@ -369,7 +369,7 @@ class TestG3BucketCoverage:
         ]
         assert not unbucketed, (
             "execution/exfil RC rules missing a security-gate bucket (would route real "
-            f"malware to the generic fixer instead of plugin-devitalizer): {sorted(unbucketed)}"
+            f"malware to the generic fixer instead of cpv-plugin-devitalizer-agent): {sorted(unbucketed)}"
         )
         # Sanity: the guard actually inspected the rules the audit named (non-empty).
         assert {"RC-40", "RC-48", "RC-98", "RC-22", "RC-32", "RC-58"} <= set(sample_msg)

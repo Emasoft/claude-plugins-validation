@@ -5,7 +5,7 @@ script breaks CI/hooks" class of bugs.
 Background: every time a script in `scripts/` is renamed or removed, multiple
 consumers silently break — `.github/workflows/*.yml`, the locally-installed
 `.git/hooks/pre-push`, the published `setup_plugin_pipeline.py` PRE_PUSH_HOOK
-template, and the plugin-validation-skill reference hooks all hardcode
+template, and the cpv-plugin-validation-skill reference hooks all hardcode
 `scripts/<name>.py` paths. The v2.65.0 lint consolidation triggered exactly
 this regression — `lint_files.py` was removed but the CI workflow + the
 local pre-push hook still invoked it, breaking every push until a follow-up
@@ -19,7 +19,7 @@ These tests verify:
    with the file:line and a clear message.
 2. A workflow referencing only EXISTING scripts emits no findings.
 3. The hook file `.git/hooks/pre-push` is also scanned when present.
-4. The plugin-validation-skill reference template is also scanned.
+4. The cpv-plugin-validation-skill reference template is also scanned.
 5. `setup_plugin_pipeline.py` (the template generator) is scanned.
 6. A plugin without a `scripts/` directory is gracefully skipped.
 7. Non-script `scripts/<name>.py.bak` (with extra suffix) does NOT trigger
@@ -191,11 +191,11 @@ class TestHookReferences:
         assert _has_major(report, "git-hooks/pre-commit")
 
     def test_skill_reference_template_scanned(self, tmp_path: Path) -> None:
-        """The template hook in plugin-validation-skill is the source for new
+        """The template hook in cpv-plugin-validation-skill is the source for new
         plugin scaffolds; stale refs there propagate to every newly-created
         plugin."""
         plugin_root = _make_plugin(tmp_path, scripts=["validate_plugin.py"])
-        ref_dir = plugin_root / "skills" / "plugin-validation-skill" / "references"
+        ref_dir = plugin_root / "skills" / "cpv-plugin-validation-skill" / "references"
         ref_dir.mkdir(parents=True)
         (ref_dir / "pre-push-hook.py").write_text(
             "lint_script = 'scripts/old_lint.py'\n",
@@ -205,7 +205,7 @@ class TestHookReferences:
         report = ValidationReport()
         validate_pipeline_script_refs(plugin_root, report)
         assert _has_major(report, "scripts/old_lint.py")
-        assert _has_major(report, "plugin-validation-skill/references/pre-push-hook.py")
+        assert _has_major(report, "cpv-plugin-validation-skill/references/pre-push-hook.py")
 
     def test_setup_plugin_pipeline_template_scanned(self, tmp_path: Path) -> None:
         """The PRE_PUSH_HOOK template inside setup_plugin_pipeline.py is the

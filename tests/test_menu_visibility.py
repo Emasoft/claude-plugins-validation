@@ -71,7 +71,7 @@ def test_v290_only_documented_slash_commands_remain() -> None:
     direct-entry power-user command — the doctor recommends it by exact
     name when a plugin has 100+ findings.
 
-    Per TRDD-9dd64dbf (v2.95.0) ``/the-skills-menu-create`` was added
+    Per TRDD-9dd64dbf (v2.95.0) ``/cpv-the-skills-menu-create`` was added
     as a direct-entry universal migrator — it operates on OTHER plugins
     so menu navigation inside CPV would be a UX dead end.
 
@@ -84,7 +84,7 @@ def test_v290_only_documented_slash_commands_remain() -> None:
     allowed = {
         "cpv-main-menu.md",
         "cpv-batch-fix.md",
-        "the-skills-menu-create.md",
+        "cpv-the-skills-menu-create.md",
         "cpv-pre-install-scan.md",
         # TRDD-3dcbb37c (v2.101.0) — Batch skills family. Direct-entry
         # commands because the user fans out fleet-wide operations

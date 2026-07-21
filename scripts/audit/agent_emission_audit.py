@@ -18,9 +18,9 @@ What this is NOT:
       row tagged `mentions: no` is a near-certain gap.
 
 In-scope agents (per TRDD §4.4):
-    1. plugin-creator  (agents/plugin-creator.md)
-    2. plugin-fixer    (agents/plugin-fixer.md)
-    3. marketplace-fixer (agents/marketplace-fixer.md)
+    1. cpv-plugin-creator-agent  (agents/cpv-plugin-creator-agent.md)
+    2. cpv-plugin-fixer-agent    (agents/cpv-plugin-fixer-agent.md)
+    3. cpv-marketplace-fixer-agent (agents/cpv-marketplace-fixer-agent.md)
     4. cpv-upgrade-plugin  (commands/cpv-upgrade-plugin.md — slash command)
     5. cpv-migrate-marketplace (commands/cpv-migrate-marketplace.md — slash command)
 """
@@ -42,7 +42,7 @@ from pathlib import Path
 class AgentTarget:
     """One in-scope agent or slash command."""
 
-    label: str  # "plugin-creator"
+    label: str  # "cpv-plugin-creator-agent"
     kind: str  # "agent" | "command"
     body_path: str  # repo-relative path to the .md
     notes: str = ""  # free-form description of role
@@ -50,21 +50,21 @@ class AgentTarget:
 
 AGENT_TARGETS: tuple[AgentTarget, ...] = (
     AgentTarget(
-        label="plugin-creator",
+        label="cpv-plugin-creator-agent",
         kind="agent",
-        body_path="agents/plugin-creator.md",
+        body_path="agents/cpv-plugin-creator-agent.md",
         notes="Scaffolds new plugin or marketplace repos from scratch.",
     ),
     AgentTarget(
-        label="plugin-fixer",
+        label="cpv-plugin-fixer-agent",
         kind="agent",
-        body_path="agents/plugin-fixer.md",
+        body_path="agents/cpv-plugin-fixer-agent.md",
         notes="Applies fix recipes from a validation report.",
     ),
     AgentTarget(
-        label="marketplace-fixer",
+        label="cpv-marketplace-fixer-agent",
         kind="agent",
-        body_path="agents/marketplace-fixer.md",
+        body_path="agents/cpv-marketplace-fixer-agent.md",
         notes="Applies fix recipes against a marketplace.json.",
     ),
     AgentTarget(

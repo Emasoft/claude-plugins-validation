@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the Claude Code v2.1.146 → v2.1.154 changelog catch-up (TRDD-1b8efb4c).
 
-Nine spec items reach the plugin-validator surface. Each test is two-sided
+Nine spec items reach the cpv-plugin-validator-agent surface. Each test is two-sided
 where a behaviour (not just set membership) is involved: the valid shape must
 pass AND the wrong shape must still be flagged, so a positive assertion can
 never pass vacuously against a validator that accepts everything.

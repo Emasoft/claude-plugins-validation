@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Architectural tests for the marketplace-authoring-contract skill (TRDD-962fdc55).
+"""Architectural tests for the cpv-marketplace-authoring-contract skill (TRDD-962fdc55).
 
-Wave 7-B wired the `marketplace-authoring-contract` skill into every
+Wave 7-B wired the `cpv-marketplace-authoring-contract` skill into every
 plugin-touching agent. v2.90.0 (TRDD-c50531c2) deleted 23 redundant
 user-facing slash commands including `cpv-upgrade-plugin.md` and
 `cpv-migrate-marketplace.md` — the migration flows they previously
 fronted are now reached via the cpv-main-menu top-level "Diagnose &
 Upgrade" and "Publish & Migrate" leaves, which dispatch the same
-plugin-fixer / marketplace-fixer agents. The skill loaders therefore
+cpv-plugin-fixer-agent / cpv-marketplace-fixer-agent agents. The skill loaders therefore
 only need to be checked on the surviving agents.
 
 In-scope files (post v2.90.0):
 
-* `agents/plugin-creator.md`
-* `agents/plugin-fixer.md`
-* `agents/marketplace-fixer.md`
+* `agents/cpv-plugin-creator-agent.md`
+* `agents/cpv-plugin-fixer-agent.md`
+* `agents/cpv-marketplace-fixer-agent.md`
 
 The tests in this file enforce three invariants:
 
@@ -47,7 +47,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 AGENTS_DIR = PLUGIN_ROOT / "agents"
 COMMANDS_DIR = PLUGIN_ROOT / "commands"
 SKILLS_DIR = PLUGIN_ROOT / "skills"
-CONTRACT_DIR = SKILLS_DIR / "marketplace-authoring-contract"
+CONTRACT_DIR = SKILLS_DIR / "cpv-marketplace-authoring-contract"
 
 # Ensure scripts dir is on path so we can import the validator's allowlist.
 sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
@@ -87,11 +87,11 @@ def _load_frontmatter(path: Path) -> dict:
 # v2.90.0 (TRDD-c50531c2): the two slash commands previously listed here
 # (cpv-upgrade-plugin and cpv-migrate-marketplace) were deleted; their
 # entry points moved to the cpv-main-menu top-level menu, which dispatches
-# the plugin-fixer / marketplace-fixer agents that ARE in this list.
+# the cpv-plugin-fixer-agent / cpv-marketplace-fixer-agent agents that ARE in this list.
 IN_SCOPE_FILES: list[tuple[str, Path]] = [
-    ("plugin-creator", AGENTS_DIR / "plugin-creator.md"),
-    ("plugin-fixer", AGENTS_DIR / "plugin-fixer.md"),
-    ("marketplace-fixer", AGENTS_DIR / "marketplace-fixer.md"),
+    ("cpv-plugin-creator-agent", AGENTS_DIR / "cpv-plugin-creator-agent.md"),
+    ("cpv-plugin-fixer-agent", AGENTS_DIR / "cpv-plugin-fixer-agent.md"),
+    ("cpv-marketplace-fixer-agent", AGENTS_DIR / "cpv-marketplace-fixer-agent.md"),
 ]
 
 
@@ -108,10 +108,10 @@ DELETED_COMMAND_FILES: list[tuple[str, Path]] = [
 
 
 def test_all_in_scope_agents_load_contract_skill() -> None:
-    """Every plugin-touching agent must declare marketplace-authoring-contract.
+    """Every plugin-touching agent must declare cpv-marketplace-authoring-contract.
 
-    Per TRDD §6 (as amended by v2.90.0 TRDD-c50531c2): plugin-creator,
-    plugin-fixer, and marketplace-fixer must declare the contract skill in
+    Per TRDD §6 (as amended by v2.90.0 TRDD-c50531c2): cpv-plugin-creator-agent,
+    cpv-plugin-fixer-agent, and cpv-marketplace-fixer-agent must declare the contract skill in
     their `skills:` frontmatter so the loader pulls it in BEFORE the agent
     emits any marketplace.json. Without this loader, the agent has no
     proactive guidance and falls back to ad-hoc drafting (the broken
@@ -120,21 +120,21 @@ def test_all_in_scope_agents_load_contract_skill() -> None:
     cpv-main-menu, which dispatches the agents above.
     """
     # TRDD-478d9687 (v2.93.0) — per-agent `skills:` preload lists removed;
-    # every agent now declares only `[the-skills-menu]` and invokes specific
-    # skills on demand via the Skill tool. The marketplace-authoring-contract
+    # every agent now declares only `[cpv-the-skills-menu]` and invokes specific
+    # skills on demand via the Skill tool. The cpv-marketplace-authoring-contract
     # skill is reachable from any agent via the catalog. Pin that it's
     # mentioned in the catalog rather than each agent's frontmatter.
     index_paths = [
-        SKILLS_DIR / "the-skills-menu" / "SKILL.md",
-        SKILLS_DIR / "the-skills-menu" / "references" / "skills-catalog.md",
+        SKILLS_DIR / "cpv-the-skills-menu" / "SKILL.md",
+        SKILLS_DIR / "cpv-the-skills-menu" / "references" / "skills-catalog.md",
     ]
     combined = "\n".join(p.read_text(encoding="utf-8") for p in index_paths if p.exists())
-    assert "marketplace-authoring-contract" in combined, (
-        "marketplace-authoring-contract must appear in the the-skills-menu "
-        "catalog so the three in-scope agents (plugin-creator, plugin-fixer, "
-        "marketplace-fixer) can invoke it on demand. TRDD-478d9687 (v2.93.0) "
+    assert "cpv-marketplace-authoring-contract" in combined, (
+        "cpv-marketplace-authoring-contract must appear in the cpv-the-skills-menu "
+        "catalog so the three in-scope agents (cpv-plugin-creator-agent, cpv-plugin-fixer-agent, "
+        "cpv-marketplace-fixer-agent) can invoke it on demand. TRDD-478d9687 (v2.93.0) "
         "moved skill discovery from per-agent frontmatter to the universal "
-        "the-skills-menu. The contract MUST still be accessible — just via the "
+        "cpv-the-skills-menu. The contract MUST still be accessible — just via the "
         "catalog instead of preload lists."
     )
 
@@ -153,7 +153,7 @@ def test_deleted_slash_command_files_stay_deleted() -> None:
         f"v2.90.0 (TRDD-c50531c2) deleted these slash commands; they MUST NOT "
         f"be re-created: {still_present}. Their entry points now go through "
         f"cpv-main-menu's top-level rows (Diagnose & Upgrade / Publish & "
-        f"Migrate), which dispatch the same plugin-fixer / marketplace-fixer "
+        f"Migrate), which dispatch the same cpv-plugin-fixer-agent / cpv-marketplace-fixer-agent "
         f"agents directly."
     )
 
@@ -183,7 +183,7 @@ def test_contract_skill_has_all_seven_references() -> None:
     actual = {p.name for p in refs_dir.glob("*.md")}
     missing = EXPECTED_REFERENCES - actual
     assert not missing, (
-        f"marketplace-authoring-contract references missing: {sorted(missing)}. "
+        f"cpv-marketplace-authoring-contract references missing: {sorted(missing)}. "
         f"TRDD-962fdc55 §5 requires all 7 reference files. Found: {sorted(actual)}."
     )
 

@@ -1941,7 +1941,7 @@ DANGEROUS_FILES = {
 #    .template / .sample. Source: aguara, skillscan.
 #
 # CPV mode contract: programmatic checks call these helpers DIRECTLY. The
-# semantic-validator agent (opt-in opus) does NOT consume them — it has
+# cpv-semantic-validator-agent agent (opt-in opus) does NOT consume them — it has
 # its own FP-reduction via LLM judgment.
 
 
@@ -2709,7 +2709,7 @@ register_rule(
 # -----------------------------------------------------------------------------
 # The full check is partial agent-class (see agent-rule-checks.md). The
 # PROGRAMMATIC HALF runs here and emits a finding for each MCP tool
-# description matching the prefilter regex. The semantic-validator
+# description matching the prefilter regex. The cpv-semantic-validator-agent
 # (opt-in) re-runs this and adds LLM judgment for ambiguous cases.
 MCP_DESCRIPTION_INJECTION_PREFILTER: tuple[re.Pattern[str], ...] = (
     re.compile(
@@ -6658,10 +6658,10 @@ def _print_fixer_recommendation(report: ValidationReport, report_path: Path | No
     print("   Run this in Claude Code:")
     print(f"     {bold}/cpv-fix-validation {report_arg}{reset}")
     print()
-    print(" Option 2: Use the fix-validation skill directly")
-    print(f"{dim}   The plugin-fixer agent loads the fix-validation skill,{reset}")
+    print(" Option 2: Use the cpv-fix-validation skill directly")
+    print(f"{dim}   The cpv-plugin-fixer-agent agent loads the cpv-fix-validation skill,{reset}")
     print(f"{dim}   which maps each error type to a remediation guide in{reset}")
-    print(f"{dim}   skills/fix-validation/references/.{reset}")
+    print(f"{dim}   skills/cpv-fix-validation/references/.{reset}")
     print()
     print(" Report file (JSON):")
     print(f"   {report_display}")
@@ -6676,9 +6676,9 @@ def _print_fixer_recommendation(report: ValidationReport, report_path: Path | No
 # They explain WHY the scan is INVALID and point at the right WORK agent:
 #
 #   * Gate A  — execution / malicious-threat code the plugin SHIPS  → the
-#               EXISTING plugin-devitalizer agent (make it irreversibly inert).
+#               EXISTING cpv-plugin-devitalizer-agent agent (make it irreversibly inert).
 #   * Gate B  — leaked secrets and/or missing safeguards            → the NEW
-#               plugin-leaks-preventer agent (redact / runtime-read / harden).
+#               cpv-plugin-leaks-preventer-agent agent (redact / runtime-read / harden).
 #
 # CONTRACT (the invariant the tests pin): these helpers are PURELY ADDITIVE
 # informational TEXT. They NEVER call report.add_*, NEVER mutate any count,
@@ -6775,7 +6775,7 @@ _SECURITY_GATE_BUCKETS: dict[str, frozenset[str]] = {
     # kernel-module / binary-drop. These fire CRITICAL/MAJOR at the in-process
     # scanner (PHASE3_PATTERNS) but were ABSENT from the bucket map, so a plugin
     # whose only findings were these routed to the GENERIC fixer instead of the
-    # plugin-devitalizer agent whose explicit job is to remove them entirely
+    # cpv-plugin-devitalizer-agent agent whose explicit job is to remove them entirely
     # (G3-gate-banners-1). Strictly additive — only ever ADDS Gate-A coverage on
     # an already-INVALID verdict; cannot mute any signal or change the exit code.
     "RC-40": frozenset({"A"}),  # append to ~/.ssh/authorized_keys — SSH backdoor (CRITICAL)
@@ -6956,7 +6956,7 @@ _GATE_BORDER = "=" * 60  # Fits comfortably in 80-col terminals (matches the fix
 
 
 def _print_gate_a_terminal(report_arg: str, color: str, bold: str, reset: str) -> None:
-    """Gate A boxed-ASCII block (Bucket A present) — recommend plugin-devitalizer."""
+    """Gate A boxed-ASCII block (Bucket A present) — recommend cpv-plugin-devitalizer-agent."""
     print()
     print(f"{color}{_GATE_BORDER}{reset}")
     print(f"{color}{bold} SECURITY GATE A — EXECUTABLE THREAT CODE MUST BE DEVITALIZED{reset}")
@@ -6983,11 +6983,11 @@ def _print_gate_a_terminal(report_arg: str, color: str, bold: str, reset: str) -
     print("     code-execution feature) is FLAGGED for your decision, not")
     print("     silently broken.")
     print()
-    print(" TO DO THIS, dispatch the plugin-devitalizer AGENT (it is an")
+    print(" TO DO THIS, dispatch the cpv-plugin-devitalizer-agent AGENT (it is an")
     print(" AGENT, not a slash command):")
     print()
     print("   In Claude Code, dispatch:")
-    print('     Agent(subagent_type: "plugin-devitalizer",')
+    print('     Agent(subagent_type: "cpv-plugin-devitalizer-agent",')
     print('           prompt: "Devitalize the execution-class findings in')
     print(f"                    {report_arg} — make each threat irreversibly")
     print('                    inert; flag load-bearing code, never break')
@@ -7005,7 +7005,7 @@ def _print_gate_a_terminal(report_arg: str, color: str, bold: str, reset: str) -
 def _print_gate_b_terminal(
     report_arg: str, color: str, bold: str, reset: str, *, leaks: bool, safeguards: bool
 ) -> None:
-    """Gate B boxed-ASCII block (Bucket B and/or C present) — recommend plugin-leaks-preventer.
+    """Gate B boxed-ASCII block (Bucket B and/or C present) — recommend cpv-plugin-leaks-preventer-agent.
 
     The LEAKS sub-section prints only when ``leaks`` (Bucket B); the
     MISSING-SAFEGUARDS sub-section only when ``safeguards`` (Bucket C).
@@ -7055,11 +7055,11 @@ def _print_gate_b_terminal(
         print("   Anything that cannot be safely fixed is FLAGGED for your")
         print("   decision, never broken.")
     print()
-    print(" TO DO THIS, dispatch the plugin-leaks-preventer AGENT (it is")
+    print(" TO DO THIS, dispatch the cpv-plugin-leaks-preventer-agent AGENT (it is")
     print(" an AGENT, not a slash command):")
     print()
     print("   In Claude Code, dispatch:")
-    print('     Agent(subagent_type: "plugin-leaks-preventer",')
+    print('     Agent(subagent_type: "cpv-plugin-leaks-preventer-agent",')
     print('           prompt: "Redact every secret and implement the')
     print(f"                    missing safeguards reported in {report_arg};")
     print('                    runtime-read genuinely-needed secrets; flag')
@@ -7108,10 +7108,10 @@ def _print_gate_a_markdown(report_arg: str) -> None:
         "is FLAGGED for your decision, not silently broken."
     )
     print()
-    print("TO DO THIS, dispatch the **plugin-devitalizer** agent (it is an agent, not a slash command):")
+    print("TO DO THIS, dispatch the **cpv-plugin-devitalizer-agent** agent (it is an agent, not a slash command):")
     print()
     print("```")
-    print('Agent(subagent_type: "plugin-devitalizer",')
+    print('Agent(subagent_type: "cpv-plugin-devitalizer-agent",')
     print(f'      prompt: "Devitalize the execution-class findings in {report_arg} —')
     print('               make each threat irreversibly inert; flag load-bearing')
     print('               code, never break it; re-scan to prove inert.")')
@@ -7176,10 +7176,10 @@ def _print_gate_b_markdown(report_arg: str, *, leaks: bool, safeguards: bool) ->
         )
         print("- Anything that cannot be safely fixed is FLAGGED for your decision, never broken.")
     print()
-    print("TO DO THIS, dispatch the **plugin-leaks-preventer** agent (it is an agent, not a slash command):")
+    print("TO DO THIS, dispatch the **cpv-plugin-leaks-preventer-agent** agent (it is an agent, not a slash command):")
     print()
     print("```")
-    print('Agent(subagent_type: "plugin-leaks-preventer",')
+    print('Agent(subagent_type: "cpv-plugin-leaks-preventer-agent",')
     print(f'      prompt: "Redact every secret and implement the missing safeguards reported in {report_arg};')
     print('               runtime-read genuinely-needed secrets; flag what cannot be safely')
     print('               fixed; re-scan clean.")')

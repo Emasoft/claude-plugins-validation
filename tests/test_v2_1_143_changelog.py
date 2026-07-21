@@ -27,7 +27,7 @@ Four changelog items overlap with the plugin validator's surface area:
 The other items in the v2.1.143 changelog (PowerShell default change,
 ``claude agents`` flags, ``/bg`` flag preservation, ``/goal``
 behavioural fixes, daemon-fallback fixes) are CLI behaviours with no
-plugin-validator footprint.
+cpv-plugin-validator-agent footprint.
 """
 
 from __future__ import annotations

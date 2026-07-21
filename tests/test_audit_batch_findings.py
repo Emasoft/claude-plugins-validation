@@ -280,9 +280,11 @@ class TestTimestampSingleStrftime:
 
     def test_orchestrator_session_dir_has_offset(self, tmp_path: Path) -> None:
         # #11 orchestrator: _new_session_dir name embeds a GMT offset.
-        sd = orchestrator._new_session_dir("plugin-fixer", base=tmp_path)
+        sd = orchestrator._new_session_dir("cpv-plugin-fixer-agent", base=tmp_path)
         assert _TZ_OFFSET.search(sd.name), f"no GMT offset in {sd.name!r}"
-        assert sd.name.endswith("-plugin-fixer")
+        # The session dir name embeds the full agent_type (v3.0.0 rename: the
+        # agent is now cpv-plugin-fixer-agent, so the suffix tracks it).
+        assert sd.name.endswith("-cpv-plugin-fixer-agent")
 
 
 if __name__ == "__main__":

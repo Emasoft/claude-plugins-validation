@@ -248,12 +248,12 @@ class TestBatchPlannerLoweredThreshold:
         assert DEFAULT_SHARD_SIZE == 15, f"v2.98.0 lowered DEFAULT_SHARD_SIZE to 15 — got {DEFAULT_SHARD_SIZE}"
 
     def test_plugin_fixer_md_documents_15_25_ceiling(self) -> None:
-        """The plugin-fixer routing-table must reflect the lowered ceilings."""
-        pf_md = Path(__file__).parent.parent / "agents" / "plugin-fixer.md"
+        """The cpv-plugin-fixer-agent routing-table must reflect the lowered ceilings."""
+        pf_md = Path(__file__).parent.parent / "agents" / "cpv-plugin-fixer-agent.md"
         body = pf_md.read_text()
         # Must NOT still say 30-40 / 100-150 as the active numbers
-        assert "**15-25**" in body, "plugin-fixer.md must document the new bare-opus ceiling 15-25"
-        assert "**50-75**" in body, "plugin-fixer.md must document the new opus[1m] ceiling 50-75"
+        assert "**15-25**" in body, "cpv-plugin-fixer-agent.md must document the new bare-opus ceiling 15-25"
+        assert "**50-75**" in body, "cpv-plugin-fixer-agent.md must document the new opus[1m] ceiling 50-75"
 
 
 # =============================================================================
@@ -296,16 +296,16 @@ class TestAutoBatchDispatchInMenuTree:
         )
 
     def test_plugin_fixer_batch_required_format_includes_plugin_root(self) -> None:
-        """plugin-fixer.md routing-table situation 3 must require the
+        """cpv-plugin-fixer-agent.md routing-table situation 3 must require the
         ``plugin-root:`` token in the [BATCH_REQUIRED] line so the
         orchestrator can auto-dispatch without re-running validate."""
-        pf_md = Path(__file__).parent.parent / "agents" / "plugin-fixer.md"
+        pf_md = Path(__file__).parent.parent / "agents" / "cpv-plugin-fixer-agent.md"
         body = pf_md.read_text()
         # Find the routing-table-3 row
         assert "BATCH_REQUIRED" in body
         # The new format should require plugin-root + triage report
-        assert "plugin-root:" in body, "plugin-fixer.md must require plugin-root: in BATCH_REQUIRED line"
-        assert "Triage report:" in body or "triage-report" in body, "plugin-fixer.md must require a triage report path"
+        assert "plugin-root:" in body, "cpv-plugin-fixer-agent.md must require plugin-root: in BATCH_REQUIRED line"
+        assert "Triage report:" in body or "triage-report" in body, "cpv-plugin-fixer-agent.md must require a triage report path"
 
     def test_cpv_doctor_agent_emits_batch_dispatch_tokens(self) -> None:
         """cpv-doctor-agent's big-plugin handoff must surface plugin-root

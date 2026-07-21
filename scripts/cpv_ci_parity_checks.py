@@ -58,7 +58,7 @@ The checks (all grounded in shipped incidents):
   2026-07-13). With no config, ``wagoid/commitlint-github-action`` falls back to
   ``@commitlint/config-conventional`` (``body-max-line-length`` = 100), and
   Dependabot's auto-generated commit body embeds a YAML dependency block that
-  ALWAYS exceeds it — so EVERY Dependabot PR of EVERY canonical-pipeline plugin
+  ALWAYS exceeds it — so EVERY Dependabot PR of EVERY cpv-canonical-pipeline plugin
   fails CI, forever, with no plugin change (4 of the 18 sampled failures; e.g.
   ai-maestro-maintainer-agent run 29217061586). The canonical template now ships
   ``.commitlintrc.json``; this check finds the repos that predate it.

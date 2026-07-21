@@ -8,9 +8,9 @@ The two banners are PURELY ADDITIVE informational text rendered on an
 already-failing security verdict:
 
   * **Gate A** — execution / malicious-threat code the plugin SHIPS →
-    recommends the EXISTING ``plugin-devitalizer`` agent.
+    recommends the EXISTING ``cpv-plugin-devitalizer-agent`` agent.
   * **Gate B** — leaked secrets (Bucket B) and/or missing safeguards
-    (Bucket C) → recommends the NEW ``plugin-leaks-preventer`` agent.
+    (Bucket C) → recommends the NEW ``cpv-plugin-leaks-preventer-agent`` agent.
 
 The contract these tests pin (do NOT let it regress):
 
@@ -60,8 +60,8 @@ GATE_B_TITLE = "SECURITY GATE B — LEAKS & MISSING SAFEGUARDS MUST BE FIXED"
 # probe — use the full sub-section HEADER lines below instead.
 LEAKS_SUBSECTION = "LEAKED SECRETS / SENSITIVE DATA:"
 SAFEGUARDS_SUBSECTION = "MISSING SAFEGUARDS / EXPOSED VULNERABILITIES:"
-DEVITALIZER_AGENT = "plugin-devitalizer"
-LEAKS_PREVENTER_AGENT = "plugin-leaks-preventer"
+DEVITALIZER_AGENT = "cpv-plugin-devitalizer-agent"
+LEAKS_PREVENTER_AGENT = "cpv-plugin-leaks-preventer-agent"
 
 # Markdown section headers (report-file body).
 GATE_A_MD_HEADER = "## Security Gate A"
@@ -390,7 +390,7 @@ class TestNegativeAndAdditiveInvariant:
         assert GATE_B_MD_HEADER in body
         assert LEAKS_PREVENTER_AGENT in body
         # The banner's own dispatch instruction made it into the file.
-        assert 'Agent(subagent_type: "plugin-leaks-preventer"' in body
+        assert 'Agent(subagent_type: "cpv-plugin-leaks-preventer-agent"' in body
         # NOTE: the markdown banner itself emits zero ANSI — that guarantee is
         # pinned conclusively by TestGateFiring::test_markdown_body_has_no_ansi
         # (isolated helper call). The whole report FILE legitimately carries

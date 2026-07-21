@@ -100,7 +100,7 @@ class TestMakePlan:
     def test_empty_input_produces_zero_plugin_plan(self, tmp_path: Path) -> None:
         plan = make_plan(
             [],
-            agent_type="plugin-validator",
+            agent_type="cpv-plugin-validator-agent",
             agent_mode="batch_validate",
             session_dir=tmp_path / "sd",
         )
@@ -108,7 +108,7 @@ class TestMakePlan:
         assert plan.plugin_count == 0
         assert plan.plugins == []
         assert plan.dispatch_groups == []
-        assert plan.agent_type == "plugin-validator"
+        assert plan.agent_type == "cpv-plugin-validator-agent"
         assert plan.agent_mode == "batch_validate"
 
     def test_three_plugins_one_group(self, tmp_path: Path) -> None:
@@ -119,7 +119,7 @@ class TestMakePlan:
         ]
         plan = make_plan(
             plugins,
-            agent_type="plugin-fixer",
+            agent_type="cpv-plugin-fixer-agent",
             agent_mode="batch_validate_and_fix",
             session_dir=tmp_path / "sd",
         )
@@ -132,7 +132,7 @@ class TestMakePlan:
         plugins = [_ri(f"plug-{i}", tmp_path / f"p{i}") for i in range(17)]
         plan = make_plan(
             plugins,
-            agent_type="plugin-validator",
+            agent_type="cpv-plugin-validator-agent",
             agent_mode="batch_validate",
             session_dir=tmp_path / "sd",
         )
@@ -149,7 +149,7 @@ class TestMakePlan:
         )
         plan = make_plan(
             [ri],
-            agent_type="cache-optimizer-agent",
+            agent_type="cpv-cache-optimizer-agent",
             agent_mode="batch_audit",
             session_dir=tmp_path / "sd",
         )
@@ -252,14 +252,14 @@ class TestWritePlan:
         plugins = [_ri(f"p{i}", tmp_path / f"p{i}") for i in range(3)]
         plan = make_plan(
             plugins,
-            agent_type="plugin-validator",
+            agent_type="cpv-plugin-validator-agent",
             agent_mode="batch_validate",
             session_dir=tmp_path / "sd",
         )
         plan_path = write_plan(plan)
         assert plan_path.is_file()
         loaded = json.loads(plan_path.read_text(encoding="utf-8"))
-        assert loaded["agent_type"] == "plugin-validator"
+        assert loaded["agent_type"] == "cpv-plugin-validator-agent"
         assert loaded["agent_mode"] == "batch_validate"
         assert loaded["plugin_count"] == 3
         assert loaded["dispatch_groups"] == [[0, 1, 2]]
@@ -269,7 +269,7 @@ class TestWritePlan:
         plugins = [_ri("x", tmp_path / "x")]
         plan = make_plan(
             plugins,
-            agent_type="plugin-validator",
+            agent_type="cpv-plugin-validator-agent",
             agent_mode="batch_validate",
             session_dir=tmp_path / "sd",
         )
@@ -281,7 +281,7 @@ class TestWritePlan:
         assert data["spec_version"] == 1
         assert data["mode"] == "status_table"
         # Default slug derives from agent_type so the queue file is debuggable.
-        assert data["slug"] == "batch-plugin-validator-status"
+        assert data["slug"] == "batch-cpv-plugin-validator-agent-status"
 
 
 # ----------------------- 5. aggregate_status -----------------------------
@@ -291,7 +291,7 @@ class TestAggregateStatus:
     def test_no_per_plugin_files_returns_all_queued(self, tmp_path: Path) -> None:
         plan = make_plan(
             [_ri("a", tmp_path / "a"), _ri("b", tmp_path / "b")],
-            agent_type="plugin-validator",
+            agent_type="cpv-plugin-validator-agent",
             agent_mode="batch_validate",
             session_dir=tmp_path / "sd",
         )
@@ -305,7 +305,7 @@ class TestAggregateStatus:
         sd = tmp_path / "sd"
         plan = make_plan(
             [_ri("a", tmp_path / "a"), _ri("b", tmp_path / "b")],
-            agent_type="plugin-validator",
+            agent_type="cpv-plugin-validator-agent",
             agent_mode="batch_validate",
             session_dir=sd,
         )
@@ -332,7 +332,7 @@ class TestAggregateStatus:
         sd = tmp_path / "sd"
         plan = make_plan(
             [_ri("a", tmp_path / "a")],
-            agent_type="plugin-fixer",
+            agent_type="cpv-plugin-fixer-agent",
             agent_mode="batch_per_plugin",
             session_dir=sd,
         )
@@ -341,14 +341,14 @@ class TestAggregateStatus:
         assert data["spec_version"] == 1
         assert data["mode"] == "status_table"
         assert data["plugin"] == "cpv"
-        assert data["slug"] == "batch-plugin-fixer-status"
+        assert data["slug"] == "batch-cpv-plugin-fixer-agent-status"
         assert data["row_header"] == "Plugin"
 
     def test_malformed_status_json_falls_back_to_queued(self, tmp_path: Path) -> None:
         sd = tmp_path / "sd"
         plan = make_plan(
             [_ri("a", tmp_path / "a")],
-            agent_type="plugin-validator",
+            agent_type="cpv-plugin-validator-agent",
             agent_mode="batch_validate",
             session_dir=sd,
         )
@@ -364,7 +364,7 @@ class TestAggregateStatus:
         sd = tmp_path / "sd"
         plan = make_plan(
             [_ri("a", tmp_path / "a")],
-            agent_type="plugin-validator",
+            agent_type="cpv-plugin-validator-agent",
             agent_mode="batch_validate",
             session_dir=sd,
         )
@@ -397,7 +397,7 @@ class TestCli:
                 str(p1),
                 str(p2),
                 "--agent",
-                "plugin-validator",
+                "cpv-plugin-validator-agent",
                 "--mode",
                 "batch_validate",
                 "--session-dir",
@@ -412,7 +412,7 @@ class TestCli:
         assert "PLUGIN_COUNT: 2" in result.stdout
         plan_data = json.loads((sd / "plan.json").read_text())
         assert plan_data["plugin_count"] == 2
-        assert plan_data["agent_type"] == "plugin-validator"
+        assert plan_data["agent_type"] == "cpv-plugin-validator-agent"
 
     def test_status_subcommand_reads_per_plugin_files(self, tmp_path: Path) -> None:
         p1 = _make_plugin(tmp_path, "plug-x")
@@ -424,7 +424,7 @@ class TestCli:
                 "plan",
                 str(p1),
                 "--agent",
-                "plugin-validator",
+                "cpv-plugin-validator-agent",
                 "--mode",
                 "batch_validate",
                 "--session-dir",

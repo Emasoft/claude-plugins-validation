@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-validate
-description: "Fleet-wide parallel validation. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. Dispatches one plugin-validator per plugin (default 8 parallel, cap 16). Use when validating many plugins at once — e.g. every plugin in a marketplace. Trigger with /cpv-batch-validate or 'validate every plugin in X'."
+description: "Fleet-wide parallel validation. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. Dispatches one cpv-plugin-validator-agent per plugin (default 8 parallel, cap 16). Use when validating many plugins at once — e.g. every plugin in a marketplace. Trigger with /cpv-batch-validate or 'validate every plugin in X'."
 user-invocable: true
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
@@ -13,7 +13,7 @@ Parallel-validation skill for a fleet of Claude Code plugins.
 Resolves the user's input via `scripts/cpv_marketplace_input.py`
 (every shape from §Inputs), builds a batch plan via
 `scripts/cpv_batch_orchestrator.py`, dispatches one
-`plugin-validator` subagent per plugin in `batch_validate` mode,
+`cpv-plugin-validator-agent` subagent per plugin in `batch_validate` mode,
 and aggregates per-plugin status JSONs into a CMS-shaped
 ``status_table`` spec which is queued via `scripts/cpv_menu.py`.
 The claude-menu-system Stop hook emits the table to the user
@@ -22,7 +22,7 @@ post-turn (zero token cost — never enters the agent transcript).
 The full orchestrator body lives in the plugin's
 `commands/cpv-batch-validate.md` slash-command file. This SKILL.md
 is the canonical entry point when the skill is invoked from
-`the-skills-menu` (CPV agents) or from the `/cpv-batch-validate`
+`cpv-the-skills-menu` (CPV agents) or from the `/cpv-batch-validate`
 slash command directly.
 
 ## Prerequisites
@@ -30,7 +30,7 @@ slash command directly.
 - `claude-plugins-validation` plugin installed (provides
   `scripts/cpv_marketplace_input.py`,
   `scripts/cpv_batch_orchestrator.py`, `scripts/cpv_menu.py` (the
-  claude-menu-system bridge), and the `plugin-validator` agent).
+  claude-menu-system bridge), and the `cpv-plugin-validator-agent` agent).
 - `claude-menu-system` plugin installed (the Stop-hook menu emitter
   that ``cpv_menu.py`` queues specs for). Declared as a hard
   dependency in CPV's ``plugin.json``; ``cpv_menu.py`` fails fast
@@ -72,7 +72,7 @@ its on-disk shape.
    /cpv-batch-validate <user's spec> [--max-parallel N]
    ```
 3. The command resolves the spec, plans the batch, fans out N
-   `plugin-validator` subagents in parallel (one per plugin), and
+   `cpv-plugin-validator-agent` subagents in parallel (one per plugin), and
    prints the per-plugin status table after every dispatch wave.
 4. The user gets the final status table + a one-line summary
    (`DONE: plugins=N valid=X invalid=Y warning-only=Z`).
@@ -119,7 +119,7 @@ See [error-handling](references/error-handling.md) §Examples.
 - `commands/cpv-batch-validate.md` — orchestrator body
 - `scripts/cpv_marketplace_input.py` — universal input resolver
 - `scripts/cpv_batch_orchestrator.py` — plan / status helper
-- `agents/plugin-validator.md` — `batch_validate` mode contract
+- `agents/cpv-plugin-validator-agent.md` — `batch_validate` mode contract
 - Sibling batch skills (this plugin): `cpv-batch-security-audit`,
   `cpv-batch-caching-audit`, `cpv-batch-caching-optimize`,
   `cpv-batch-fix`

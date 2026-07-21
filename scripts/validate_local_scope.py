@@ -913,7 +913,7 @@ def validate_local_scope(project_root: Path, report: ValidationReport) -> None:
 # Goal: when a .claude/agents/X.md, .claude/skills/Y/SKILL.md, .claude/commands/
 # Z.md, .claude/rules/W.md, or an inline hooks/mcpServers/lspServers block in
 # settings.local.json is detected, run the SAME validator used by the plugin
-# pipeline. Users get diagnoses with identical wording; the fix-validation
+# pipeline. Users get diagnoses with identical wording; the cpv-fix-validation
 # skill's error-index already maps every finding to its remediation.
 # =============================================================================
 

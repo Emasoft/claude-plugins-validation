@@ -217,7 +217,7 @@ class TestRegisterInSkillsMenu:
     """Catalog registration inserts a valid row and scopes the dup-check to the table."""
 
     _BASE = (
-        "---\nname: the-skills-menu\n---\n\n"
+        "---\nname: cpv-the-skills-menu\n---\n\n"
         "## Plugin Skills\n\n"
         "| # | Domain | Skills |\n"
         "|---|--------|--------|\n"
@@ -229,7 +229,7 @@ class TestRegisterInSkillsMenu:
     def _run(self, catalog_body: str, skill: str, desc: str = "a desc") -> tuple[bool, str]:
         with tempfile.TemporaryDirectory() as td:
             plugin = Path(td)
-            cat = plugin / "skills" / "the-skills-menu" / "SKILL.md"
+            cat = plugin / "skills" / "cpv-the-skills-menu" / "SKILL.md"
             cat.parent.mkdir(parents=True)
             cat.write_text(catalog_body, encoding="utf-8")
             modified = ac._register_in_the_skills_menu(plugin, skill, desc)
@@ -248,7 +248,7 @@ class TestRegisterInSkillsMenu:
     def test_prose_mention_does_not_block_registration(self) -> None:
         """#143 — a name appearing only in prose must NOT skip registration."""
         cat = (
-            "---\nname: the-skills-menu\n---\n"
+            "---\nname: cpv-the-skills-menu\n---\n"
             "See `mynew` mentioned in prose.\n\n"
             "## Plugin Skills\n\n"
             "| # | Domain | Skills |\n"
@@ -266,13 +266,13 @@ class TestRegisterInSkillsMenu:
         assert out == self._BASE
 
     def test_substring_of_existing_entry_still_registers(self) -> None:
-        """Backtick-wrapped match preserved: 'fix' registers despite 'fix-validation'."""
+        """Backtick-wrapped match preserved: 'fix' registers despite 'cpv-fix-validation'."""
         cat = (
-            "---\nname: the-skills-menu\n---\n\n"
+            "---\nname: cpv-the-skills-menu\n---\n\n"
             "## Plugin Skills\n\n"
             "| # | Domain | Skills |\n"
             "|---|--------|--------|\n"
-            "| 1 | Core | `fix-validation` — fixes |\n"
+            "| 1 | Core | `cpv-fix-validation` — fixes |\n"
         )
         modified, out = self._run(cat, "fix")
         assert modified is True
@@ -280,7 +280,7 @@ class TestRegisterInSkillsMenu:
 
     def test_fresh_table_when_section_has_none(self) -> None:
         """No table in the section → a fresh header+row table is created."""
-        cat = "---\nname: the-skills-menu\n---\n\n## Plugin Skills\n\nIntro prose, no table yet.\n\n## Other\n"
+        cat = "---\nname: cpv-the-skills-menu\n---\n\n## Plugin Skills\n\nIntro prose, no table yet.\n\n## Other\n"
         modified, out = self._run(cat, "first")
         assert modified is True
         assert "| 1 | (uncategorised) | `first`" in out

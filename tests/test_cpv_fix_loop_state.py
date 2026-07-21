@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Two-sided regression lock for the plugin-fixer oscillation detector.
+"""Two-sided regression lock for the cpv-plugin-fixer-agent oscillation detector.
 
 TRDD-933592ac / B-cycle. ``scripts/cpv_fix_loop_state.py`` replaces the old
 single-step oscillation guard (``signature(N) == signature(N-1)``) — which

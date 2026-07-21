@@ -5,7 +5,7 @@
 # ///
 """cpv-codemod — deterministic mechanical fixes for CPV findings.
 
-Addresses GitHub issue #17. The plugin-fixer agent is excellent for
+Addresses GitHub issue #17. The cpv-plugin-fixer-agent agent is excellent for
 judgment-required fixes but burns enormous tokens on line-local
 mechanical transforms (backtick → markdown link, TOC stubs, etc.).
 This CLI applies the inverse of CPV's detection regexes — read-only

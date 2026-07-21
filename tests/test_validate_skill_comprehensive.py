@@ -2148,7 +2148,7 @@ class TestComprehensiveModelGateSharedSourceOfTruth:
     # ---- POSITIVE side: every documented valid value must NOT MAJOR ----
 
     def test_opus_1m_alias_not_rejected(self):
-        """`opus[1m]` (semantic-validator's own config) must NOT be a blocking MAJOR."""
+        """`opus[1m]` (cpv-semantic-validator-agent's own config) must NOT be a blocking MAJOR."""
         from validate_skill_comprehensive import validate_model_field
 
         report = self._report()

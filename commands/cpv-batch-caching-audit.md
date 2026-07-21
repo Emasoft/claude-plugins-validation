@@ -1,13 +1,13 @@
 ---
 name: cpv-batch-caching-audit
-description: Fan out cache-optimizer-agent across every plugin in a marketplace, a list of plugins, or a single plugin. Accepts local paths and GitHub URLs. One cache-optimizer-agent per plugin running in batch_audit mode (read-only — Phase 1 of the cache pipeline). Detects the seven prompt-cache-invalidation patterns (CA-01..CA-07) per plugin without applying fixes. Parallel main-session dispatch (default 8, cap 16).
+description: Fan out cpv-cache-optimizer-agent across every plugin in a marketplace, a list of plugins, or a single plugin. Accepts local paths and GitHub URLs. One cpv-cache-optimizer-agent per plugin running in batch_audit mode (read-only — Phase 1 of the cache pipeline). Detects the seven prompt-cache-invalidation patterns (CA-01..CA-07) per plugin without applying fixes. Parallel main-session dispatch (default 8, cap 16).
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---
 
 # /cpv-batch-caching-audit — Read-only cache audit across many plugins
 
-The cache-optimizer-agent's full workflow (audit → fix → re-validate
+The cpv-cache-optimizer-agent's full workflow (audit → fix → re-validate
 → optional Phase-4 broader refactor) is expensive — each Phase-4 step
 requires interactive confirmation. For a fleet-wide "which plugins
 have cache-invalidation findings?" snapshot, this command runs only
@@ -39,7 +39,7 @@ MAX_PARALLEL=8
 
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   "$BATCH_SPEC" \
-  --agent cache-optimizer-agent \
+  --agent cpv-cache-optimizer-agent \
   --mode batch_audit \
   --max-parallel "$MAX_PARALLEL"
 ```
@@ -63,7 +63,7 @@ turn end.
 for plugin_index in group:
     plugin = plan.plugins[plugin_index]
     Agent(
-      subagent_type: "cache-optimizer-agent",
+      subagent_type: "cpv-cache-optimizer-agent",
       description: "Batch-cache-audit {plugin.display_name}",
       prompt: |
         <context>
@@ -81,7 +81,7 @@ for plugin_index in group:
         skip Phase 2 (Fix), Phase 3 (Re-validate), and Phase 4
         (Broader refactor). Write per-plugin status JSON to
         `status_path` with the canonical batch_audit schema (see
-        agents/cache-optimizer-agent.md). Audit-only, so set `after`
+        agents/cpv-cache-optimizer-agent.md). Audit-only, so set `after`
         equal to `before`:
 
           {
@@ -156,6 +156,6 @@ rows.
 ## See also
 
 - TRDD-3dcbb37c §1-5 — full design
-- `agents/cache-optimizer-agent.md` — `batch_audit` mode contract
-- `skills/cache-validation-skill/SKILL.md` — CA-01..CA-07 pattern catalog
+- `agents/cpv-cache-optimizer-agent.md` — `batch_audit` mode contract
+- `skills/cpv-cache-validation-skill/SKILL.md` — CA-01..CA-07 pattern catalog
 - `commands/cpv-batch-caching-optimize.md` — sibling fix-mode command

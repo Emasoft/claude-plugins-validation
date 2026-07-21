@@ -214,13 +214,13 @@ class TestCpvConfigLoader:
             tmp_path,
             {
                 "allow_root_dirs": ["design", "templates"],
-                "allow_orchestrator_traversal": ["skills/canonical-pipeline"],
+                "allow_orchestrator_traversal": ["skills/cpv-canonical-pipeline"],
                 "allow_pipeline_drift": ["scripts/foo.py"],
             },
         )
         cfg = cvc.load_cpv_config(plugin_root)
         assert cfg["allow_root_dirs"] == ["design", "templates"]
-        assert cfg["allow_orchestrator_traversal"] == ["skills/canonical-pipeline"]
+        assert cfg["allow_orchestrator_traversal"] == ["skills/cpv-canonical-pipeline"]
         assert cfg["allow_pipeline_drift"] == ["scripts/foo.py"]
 
     def test_invalid_json_returns_empty(self, tmp_path):

@@ -15,8 +15,8 @@ Test fixture exercising every Claude Code v2.1.80+ feature CPV validates.
 ## Why every feature is here
 
 - **Documentation cross-check.** Every feature documented in
-  the v2-1-80-features reference inside the create-plugin /
-  canonical-pipeline / setup-plugin-repo skills (in the top-level
+  the v2-1-80-features reference inside the cpv-create-plugin /
+  cpv-canonical-pipeline / cpv-setup-plugin-repo skills (in the top-level
   CPV repo) has a matching example in this fixture.
 - **CI guardrail.** A regression that breaks `Monitor` tool
   acceptance (or the `userConfig` 5-type whitelist, or any other

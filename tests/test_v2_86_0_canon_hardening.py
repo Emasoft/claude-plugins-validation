@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the v2.86.0 canonical-pipeline hardening (issue #22).
+"""Tests for the v2.86.0 cpv-canonical-pipeline hardening (issue #22).
 
 Adopts the security hardening from ai-maestro-visual-communicator-plugin's
 TRDD-5f41ad36 into CPV's canonical templates so every plugin migrating via

@@ -49,7 +49,7 @@ map here — read them there.
 ## Notes
 
 - Does NOT replace the surviving direct commands (the batch family,
-  `the-skills-menu-create`, `cpv-pre-install-scan`) — power users invoke those
+  `cpv-the-skills-menu-create`, `cpv-pre-install-scan`) — power users invoke those
   directly. This menu is for discovery and one-stop navigation.
 - Never auto-installs without confirmation (`cpv-doctor --install-scanners`,
   which runs `brew`/`pipx` on your machine, always asks first).
@@ -76,5 +76,5 @@ assistant: Done.
 ## Related
 
 - `/cpv-batch-validate <input>`, `/cpv-batch-fix <input>` — direct batch (skip the menu)
-- `/the-skills-menu-create <plugin>` — apply the skills-menu pattern to any plugin
+- `/cpv-the-skills-menu-create <plugin>` — apply the skills-menu pattern to any plugin
 - `/cpv-pre-install-scan <target>` — pre-install security gate

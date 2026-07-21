@@ -1,4 +1,4 @@
-"""Two-sided tests for GitHub issue #142 — canonical-pipeline TEMPLATE defects
+"""Two-sided tests for GitHub issue #142 — cpv-canonical-pipeline TEMPLATE defects
 that broke the GENERATED plugin under ``mypy --strict`` / CI.
 
 These templates ship to OTHER plugins, so the generated output must be

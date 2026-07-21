@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """cpv_fix_ledger.py — compact by-file findings LEDGER for the CPV fix loop.
 
-The fix loop (``plugin-fixer`` / ``marketplace-fixer``) validates with
+The fix loop (``cpv-plugin-fixer-agent`` / ``cpv-marketplace-fixer-agent``) validates with
 ``--strict --json``, producing a large findings report. Re-reading that whole
 report every iteration is the dominant token cost: cost ≈ turns ×
 per-turn-context — the full report rides forward in the transcript and is
@@ -79,7 +79,7 @@ _NO_FILE = "<no-file>"
 
 # --------------------------------------------------------------------------
 # WARNING blocking classification — encoded AS DATA, verbatim from
-# skills/fix-validation/references/iterative-fix-loop.md
+# skills/cpv-fix-validation/references/iterative-fix-loop.md
 #   §"WARNING evaluation rules"  (rules 1-6)
 #   §"Publish-blocking warning categories"  (the pattern table)
 #   §"Truly advisory warnings"  (the safe-to-leave list)

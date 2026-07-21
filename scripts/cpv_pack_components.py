@@ -80,7 +80,7 @@ class Component:
 
 # Type → standard plugin folder/file mapping. Used by both discovery (where
 # do we look?) and packing (where do we copy to?). Keep in sync with
-# `skills/plugin-validation-skill/references/shape-detection.md`.
+# `skills/cpv-plugin-validation-skill/references/shape-detection.md`.
 _TYPE_TO_PLUGIN_PATH: dict[str, str] = {
     "skill": "skills/{name}/",
     "agent": "agents/{name}.md",

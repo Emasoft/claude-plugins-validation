@@ -195,7 +195,7 @@ class TestSkillsMenuRegistration:
 
     def _catalog_plugin(self, tmp_path: Path, listed: str) -> Path:
         plugin = tmp_path / "plug"
-        menu_dir = plugin / "skills" / "the-skills-menu"
+        menu_dir = plugin / "skills" / "cpv-the-skills-menu"
         menu_dir.mkdir(parents=True)
         (menu_dir / "SKILL.md").write_text(
             "# Menu\n\n## Plugin Skills\n\n| # | Domain | Skills |\n"
@@ -208,27 +208,27 @@ class TestSkillsMenuRegistration:
     def test_substring_name_not_falsely_skipped(self, tmp_path):
         import add_component
 
-        plugin = self._catalog_plugin(tmp_path, "fix-validation")
-        # "fix" is a SUBSTRING of "fix-validation" but a DIFFERENT skill — must
+        plugin = self._catalog_plugin(tmp_path, "cpv-fix-validation")
+        # "fix" is a SUBSTRING of "cpv-fix-validation" but a DIFFERENT skill — must
         # be added, not skipped.
         changed = add_component._register_in_the_skills_menu(plugin, "fix", "the fix skill")
         assert changed is True
-        content = (plugin / "skills" / "the-skills-menu" / "SKILL.md").read_text(encoding="utf-8")
+        content = (plugin / "skills" / "cpv-the-skills-menu" / "SKILL.md").read_text(encoding="utf-8")
         assert "`fix`" in content
 
     def test_exact_name_is_idempotent(self, tmp_path):
         """Two-sided: re-registering an already-listed skill is a no-op."""
         import add_component
 
-        plugin = self._catalog_plugin(tmp_path, "fix-validation")
-        assert add_component._register_in_the_skills_menu(plugin, "fix-validation", "desc") is False
+        plugin = self._catalog_plugin(tmp_path, "cpv-fix-validation")
+        assert add_component._register_in_the_skills_menu(plugin, "cpv-fix-validation", "desc") is False
 
     def test_pipe_in_description_escaped(self, tmp_path):
         import add_component
 
         plugin = self._catalog_plugin(tmp_path, "other-skill")
         add_component._register_in_the_skills_menu(plugin, "new-skill", "does a | b | c")
-        content = (plugin / "skills" / "the-skills-menu" / "SKILL.md").read_text(encoding="utf-8")
+        content = (plugin / "skills" / "cpv-the-skills-menu" / "SKILL.md").read_text(encoding="utf-8")
         # The pipe must be escaped so it can't break the table cell.
         assert "does a \\| b \\| c" in content
 

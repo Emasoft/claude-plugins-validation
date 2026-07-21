@@ -1363,22 +1363,22 @@ This project is licensed under the {p.license} License. See [LICENSE](LICENSE) f
 
 
 def gen_the_skills_menu_skill(p: PluginParams) -> str:
-    """Generate skills/the-skills-menu/SKILL.md — the per-plugin skill catalog.
+    """Generate skills/cpv-the-skills-menu/SKILL.md — the per-plugin skill catalog.
 
-    Newly-scaffolded plugins ship with the-skills-menu method out of
+    Newly-scaffolded plugins ship with cpv-the-skills-menu method out of
     the box (TRDD-9dd64dbf). The catalog starts empty (no plugin skills
     yet) and grows as the plugin author adds skills. Agents in the new
-    plugin should declare `skills: [the-skills-menu]` and load
+    plugin should declare `skills: [cpv-the-skills-menu]` and load
     operational skills dynamically via the Skill() tool.
     """
     return f"""---
-name: the-skills-menu
-description: "Dynamic skill menu for the {p.name} plugin. Teaches agents which skills are available, when to use them, and how to load them with the Skill() tool. Use when an agent needs to pick a downstream skill at runtime. Used by every {p.name} agent via the-skills-menu method (TRDD-9dd64dbf)."
+name: cpv-the-skills-menu
+description: "Dynamic skill menu for the {p.name} plugin. Teaches agents which skills are available, when to use them, and how to load them with the Skill() tool. Use when an agent needs to pick a downstream skill at runtime. Used by every {p.name} agent via cpv-the-skills-menu method (TRDD-9dd64dbf)."
 user-invocable: false
 allowed-tools: Read
 ---
 
-# the-skills-menu — universal {p.name} skill catalog
+# cpv-the-skills-menu — universal {p.name} skill catalog
 
 ## Overview
 
@@ -1429,7 +1429,7 @@ All entries above are invoked as
 
 ## Resources
 
-- [the-skills-menu-create](../the-skills-menu-create/SKILL.md) —
+- [cpv-the-skills-menu-create](../cpv-the-skills-menu-create/SKILL.md) —
   the migrator skill in the CPV plugin that can regenerate this
   catalog from the plugin's current skill inventory at any time
   (not bundled in this plugin; install
@@ -2958,7 +2958,7 @@ def stage_marketplace_registration(root: Path) -> None:
     if layout == "none":
         cprint(f"  {YELLOW}WARNING: no marketplace registration found for this plugin.{NC}")
         cprint(f"  {YELLOW}If you intend to publish to a marketplace, run the{NC}")
-        cprint(f"  {YELLOW}setup-marketplace-auto-notification skill to wire up auto-updates.{NC}")
+        cprint(f"  {YELLOW}cpv-setup-marketplace-auto-notification skill to wire up auto-updates.{NC}")
         cprint(f"  {YELLOW}Allowing release to proceed (standalone/experimental mode).{NC}")
         return
 
@@ -2995,7 +2995,7 @@ def stage_marketplace_registration(root: Path) -> None:
         cprint(f"  {GREEN}Plugin registered in remote marketplace.json{NC}")
         if not _remote_has_receiver_workflow(mkt_owner, mkt_repo):
             cprint(f"  {RED}BLOCKED: remote marketplace {mkt_owner}/{mkt_repo} has no workflow with repository_dispatch trigger.{NC}")
-            cprint(f"  {RED}  See setup-marketplace-auto-notification skill.{NC}")
+            cprint(f"  {RED}  See cpv-setup-marketplace-auto-notification skill.{NC}")
             sys.exit(1)
         cprint(f"  {GREEN}Remote marketplace has receiver workflow{NC}")
         cprint(f"  {GREEN}Layout A marketplace registration verified.{NC}")
@@ -4116,7 +4116,7 @@ jobs:
         # `body-max-line-length` OFF. Dependabot's machine-generated commit body
         # embeds a multi-line YAML dependency block that ALWAYS exceeds the
         # 100-char default, so with the bare fallback config EVERY Dependabot PR
-        # on EVERY canonical-pipeline plugin failed this gate, forever. The gate
+        # on EVERY cpv-canonical-pipeline plugin failed this gate, forever. The gate
         # itself is NOT weakened — type-enum / subject rules still reject a
         # badly-typed human commit.
         #
@@ -4682,7 +4682,7 @@ def gen_commitlintrc_json(p: PluginParams) -> str:
     Dependabot's auto-generated commit body embeds a multi-line YAML dependency
     block (``- dependency-name: …`` / ``update-type: …``) that ALWAYS exceeds
     100 chars, so the gate failed on EVERY Dependabot PR of EVERY
-    canonical-pipeline plugin, forever, with no plugin change — the single
+    cpv-canonical-pipeline plugin, forever, with no plugin change — the single
     largest ongoing red-CI signal in the fleet (4 of the 18 sampled failures,
     e.g. ai-maestro-maintainer-agent run 29217061586).
 
@@ -4759,7 +4759,7 @@ def gen_cspell_json(p: PluginParams, files: list[tuple[str, str, bool]]) -> str:
             are read back OUT of it (``agents/*.md`` / ``commands/*.md`` stems and
             ``skills/<dir>/`` names), mirroring what
             ``standardize_plugin._cspell_plugin_terms`` reads off disk. Deriving
-            them from the emitted list — rather than hardcoding "the-skills-menu"
+            them from the emitted list — rather than hardcoding "cpv-the-skills-menu"
             — means a component added to the scaffold later is dictionary-seeded
             automatically, with no second place to remember to update.
     """
@@ -5230,11 +5230,11 @@ def generate_all_files(
             ("LICENSE", gen_license_mit(p), False),
             # Changelog config
             ("cliff.toml", gen_cliff_toml(p), False),
-            # the-skills-menu method (TRDD-9dd64dbf): every newly-scaffolded
+            # cpv-the-skills-menu method (TRDD-9dd64dbf): every newly-scaffolded
             # plugin ships with the catalog skill in place so agents can
             # adopt the dynamic-loading pattern from day 1. Empty until the
             # author adds operational skills.
-            ("skills/the-skills-menu/SKILL.md", gen_the_skills_menu_skill(p), False),
+            ("skills/cpv-the-skills-menu/SKILL.md", gen_the_skills_menu_skill(p), False),
         ]
     )
     # Python-specific scripts + CI/CD — only emitted for python language for now.
@@ -5351,7 +5351,7 @@ CPV checks:
 ## Monitor, userConfig, channels, CLAUDE_PLUGIN_OPTION_*
 
 All v2.1.80+ plugin features work regardless of language.
-See `skills/canonical-pipeline/references/v2-1-80-features.md` in the CPV
+See `skills/cpv-canonical-pipeline/references/v2-1-80-features.md` in the CPV
 plugin for schemas and examples.
 """
 
@@ -5379,7 +5379,7 @@ def generate_plugin_repo(
 ) -> list[str]:
     """Write all scaffold files to target directory. Returns list of created file paths.
 
-    ``profile`` (TRDD-e9f13df1, issues #128 / #115) selects the canonical-pipeline
+    ``profile`` (TRDD-e9f13df1, issues #128 / #115) selects the cpv-canonical-pipeline
     VARIANT used for the profile-aware generators (currently ``scripts/publish.py``
     via :func:`gen_publish_py`). When ``None`` (the default — fresh scaffolds and
     every existing caller), the profile is resolved from ``target`` via

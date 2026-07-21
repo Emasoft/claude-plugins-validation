@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-caching-optimize
-description: "Fleet-wide parallel cache fix. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. One cache-optimizer-agent per plugin runs Phase 1 audit + Phase 2 fix + Phase 3 re-validate; Phase 4 broader refactor SKIPPED (run the cache-optimizer-agent on a single plugin to opt in). Use when applying CA-01..CA-07 fixes across many plugins. Trigger with /cpv-batch-caching-optimize."
+description: "Fleet-wide parallel cache fix. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. One cpv-cache-optimizer-agent per plugin runs Phase 1 audit + Phase 2 fix + Phase 3 re-validate; Phase 4 broader refactor SKIPPED (run the cpv-cache-optimizer-agent on a single plugin to opt in). Use when applying CA-01..CA-07 fixes across many plugins. Trigger with /cpv-batch-caching-optimize."
 user-invocable: true
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ---
@@ -10,7 +10,7 @@ argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 ## Overview
 
 Parallel cache-fix skill. Runs Phase 1 (Audit) → Phase 2 (Fix) →
-Phase 3 (Re-validate) of the cache-optimizer-agent workflow across
+Phase 3 (Re-validate) of the cpv-cache-optimizer-agent workflow across
 every plugin in the user's input spec. Phase 4 (Broader refactor)
 is **deliberately skipped** in batch mode because every Phase 4
 step requires interactive per-step approval and that doesn't
@@ -24,7 +24,7 @@ orchestrator body lives in this plugin's
 ## Prerequisites
 
 - `claude-plugins-validation` plugin installed (provides the
-  `cache-optimizer-agent`, the universal input resolver, and the
+  `cpv-cache-optimizer-agent`, the universal input resolver, and the
   cache validator + fix recipes).
 - For URL inputs: `git` on PATH and network access to `github.com`.
 - Write access to every plugin's tree — this skill mutates source
@@ -52,7 +52,7 @@ table — every shape is supported identically.
 4. The user gets the final status table + a one-line summary
    (`DONE: plugins=N clean=X fixed=Y partial=Z failed=W`).
 5. For Phase 4 (broader refactor — extracting shared cache headers,
-   restructuring agent contexts), run the `cache-optimizer-agent` on
+   restructuring agent contexts), run the `cpv-cache-optimizer-agent` on
    that single plugin interactively (it performs Phase 4 with the
    required per-step approval that does not compose with a parallel
    batch).
@@ -100,7 +100,7 @@ Assistant: /cpv-batch-caching-optimize /path/a /path/b /path/c
 ## Resources
 
 - TRDD-3dcbb37c — full design
-- `skills/cache-validation-skill/SKILL.md` — CA-01..CA-07 pattern catalog
+- `skills/cpv-cache-validation-skill/SKILL.md` — CA-01..CA-07 pattern catalog
 - `commands/cpv-batch-caching-optimize.md` — orchestrator body (in this plugin)
 - `commands/cpv-batch-caching-audit.md` — sibling read-only audit command (in this plugin)
 - Sibling batch skills: `cpv-batch-validate`,

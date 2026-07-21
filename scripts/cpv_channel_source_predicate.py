@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """TRDD-26446eed — Channel MCP server source-code prefilter.
 
-Deterministic helper used by the ``semantic-validator`` agent for the
+Deterministic helper used by the ``cpv-semantic-validator-agent`` agent for the
 "Channel MCP Server Source-Code Security" pillar
-(``skills/semantic-validation-skill/references/channel-source-security.md``).
+(``skills/cpv-semantic-validation-skill/references/channel-source-security.md``).
 
 The module does NOT replace the LLM; it bounds the LLM's reading by:
 
@@ -87,7 +87,7 @@ def _load_plugin_manifest(plugin_root: Path) -> dict | None:
         # when a corrupt/malicious plugin.json contains non-UTF-8 bytes.
         # Without it the decode would propagate and crash the prefilter,
         # breaking the documented "never raises on malformed input"
-        # contract that the semantic-validator relies on.
+        # contract that the cpv-semantic-validator-agent relies on.
         text = manifest_path.read_text(encoding="utf-8")
     except (OSError, ValueError):
         return None

@@ -166,7 +166,7 @@ RE_DESCRIPTION_TRIGGER_WITH = re.compile(r"[Tt]rigger\s+with\s+", re.IGNORECASE)
 RE_LOADED_BY = re.compile(r"[Ll]oaded\s+by\s+", re.IGNORECASE)
 RE_USED_BY = re.compile(r"[Uu]sed\s+by\s+", re.IGNORECASE)
 RE_USED_VIA_THE_SKILLS_MENU = re.compile(
-    r"(?:[Uu]sed|[Ll]oaded)\s+(?:dynamically\s+)?(?:by\s+\S+\s+)?via\s+(?:the-skills-menu|skills-index)",
+    r"(?:[Uu]sed|[Ll]oaded)\s+(?:dynamically\s+)?(?:by\s+\S+\s+)?via\s+(?:cpv-the-skills-menu|skills-index)",
     re.IGNORECASE,
 )
 RE_FIRST_PERSON = re.compile(r"\b(I\s+can|I\s+will|I\s+am|I\s+help)\b", re.IGNORECASE)
@@ -852,8 +852,8 @@ def validate_description_field(
                 report.minor(
                     "Non-user-invocable skill should include 'Loaded by <agent-name>', "
                     "'Used by <agent-name>', or the v2.94.0 universal-catalog phrasing "
-                    "'Used (dynamically) via the-skills-menu' / 'Loaded via the-skills-menu' "
-                    "(TRDD-478d9687 / the-skills-menu method) so it's clear how agents "
+                    "'Used (dynamically) via cpv-the-skills-menu' / 'Loaded via cpv-the-skills-menu' "
+                    "(TRDD-478d9687 / cpv-the-skills-menu method) so it's clear how agents "
                     "discover this skill.",
                     "SKILL.md",
                     category="Description Quality",

@@ -1,0 +1,77 @@
+---
+name: cpv-fix-marketplace-validation
+description: >
+  Maps marketplace validation errors to fix reference files. Used dynamically via cpv-the-skills-menu — any CPV agent can invoke at runtime (TRDD-478d9687).
+  Use when a marketplace validation report has CRITICAL/MAJOR/MINOR/NIT findings from
+  validate_marketplace.py or validate_marketplace_pipeline.py.
+user-invocable: false
+---
+
+# Fix Marketplace Validation — Error-to-Fix Index
+
+## Overview
+
+Central lookup for the cpv-marketplace-fixer-agent agent. Given a marketplace validation error, find the reference file with fix instructions. During the current transition the canonical guides live in the shared `skills/cpv-fix-validation/references/` directory — the Resources section below links to the README that records the current mapping.
+
+This skill is scoped to **mechanical per-error fixes**. For architectural migration (converting a non-CPV marketplace to Layout A or Layout B), this skill is NOT the right tool — use `cpv-migrate-marketplace-architecture` instead.
+
+## Prerequisites
+
+- A marketplace validation report from `validate_marketplace.py` or `validate_marketplace_pipeline.py`
+- Access to the shared fix guides listed in the Resources section below
+
+## Instructions
+
+1. Read the validation report for error messages with severity, file path, and optional `category` tag.
+2. **Screen for architecture findings first.** If any finding has `category: architecture`, stop and delegate to `cpv-migrate-marketplace-architecture`. Mechanical fixes cannot repair architectural issues.
+3. For each remaining mechanical finding, consult `marketplace-error-index.md` — the primary lookup covering both `validate_marketplace.py` (structure, plugin entries, source types, submodules) and `validate_marketplace_pipeline.py` (publish.py, cliff.toml, CI workflow, tagging, secrets).
+4. Jump from the index entry to the specific section in the detailed guide:
+   - `marketplace-fixes.md` §1-4 — issues from `validate_marketplace.py` (structure, entries, sources, submodules)
+   - `marketplace-fixes.md` §5-8 — issues from `validate_marketplace_pipeline.py` (publish.py, cliff.toml, CI workflow, tags, secrets)
+5. Apply the fix using Edit following the guide's step-by-step instructions. Never improvise structural changes.
+
+Copy this checklist and track your progress:
+
+- [ ] Read validation report
+- [ ] Screen for `category: architecture` → hand off if present
+- [ ] Match mechanical errors to fix guide sections
+- [ ] Apply fixes in severity order (CRITICAL → MAJOR → MINOR → NIT)
+- [ ] Re-run validation to confirm clean
+
+## Separation From Architectural Migration
+
+- `cpv-fix-marketplace-validation` (this skill): local Edit operations, minimal user interaction, safe to batch.
+- `cpv-migrate-marketplace-architecture`: repository restructuring requiring extensive `AskUserQuestion` interrogation (target layout, owner, licenses, per-plugin metadata). Irreversible in practice.
+
+If a report mixes both kinds, fix the mechanical findings first, then hand off the architectural ones.
+
+## Output
+
+The fixer logs each fix to `$MAIN_ROOT/reports/cpv-marketplace-fixer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the **main-repo root** (first entry of `git worktree list`). Both `reports/` and `reports_dev/` gitignored.
+
+## Error Handling
+
+If no matching section is found for an error message, search by error-message keywords in `marketplace-fixes.md` (sections §1-4 cover `validate_marketplace.py`; §5-8 cover `validate_marketplace_pipeline.py`). If a guide is missing a section for the error (gap), report it in the fix log and continue with the next finding. Do NOT guess at the fix — report gaps upward so guides can be updated.
+
+## Examples
+
+**Input:** `[MAJOR] marketplace.json not found`
+**Output:** marketplace-error-index → `validate_marketplace.py` → marketplace-fixes §1 → create file with required structure.
+
+**Input:** `[MAJOR] update-submodules.yml not found`
+**Output:** marketplace-error-index → `validate_marketplace_pipeline.py` → marketplace-fixes §5 → scaffold the workflow with the canonical template.
+
+## Resources
+
+- [README (transition stub with guide locations)](references/README.md)
+  > Purpose · Transition note · Canonical fix guide locations · Marketplace Error Index · Marketplace Fixes · Pipeline Fixes
+
+During the transition, the canonical marketplace fix guides live under `skills/cpv-fix-validation/references/` (`marketplace-error-index.md` and `marketplace-fixes.md` §1-8). A follow-up task will physically move them under this skill's own `references/` directory.
+
+## Token Optimization
+
+When LLM Externalizer MCP is available, offload bounded analysis:
+
+- `mcp__plugin_llm-externalizer_llm-externalizer__chat` — summarize reports / fix guides
+- `mcp__plugin_llm-externalizer_llm-externalizer__code_task` (`answer_mode=0, max_retries=3`) — scan fix guides for relevant sections
+- Always pass file paths via `input_files_paths`; never paste content.

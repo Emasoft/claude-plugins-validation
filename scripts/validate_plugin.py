@@ -1528,7 +1528,7 @@ def validate_manifest(
     #     keeps CRITICAL for this case.
     #   - For agents: see the dedicated `agents`-folder check below — folder paths in
     #     `agents` are ALWAYS rejected by CC with `agents: Invalid input`.
-    # See `skills/fix-validation/references/empirical-loading-bugs.md` for evidence.
+    # See `skills/cpv-fix-validation/references/empirical-loading-bugs.md` for evidence.
     auto_discovered_defaults = {
         "commands": "./commands/",
         "agents": "./agents/",
@@ -2376,7 +2376,7 @@ def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
 
     The CPV self-scan-skip filter is applied so that when CPV scans
     ITSELF, its own pattern-source files (validate_security.py,
-    fix-validation references, security test fixtures, rule catalogs)
+    cpv-fix-validation references, security test fixtures, rule catalogs)
     don't surface their pattern STRINGS as findings — those are what
     we LOOK FOR, not what's actively malicious. Hash-anchored: only
     CPV files whose SHA256 matches the canonical manifest get skipped;
@@ -4376,7 +4376,7 @@ def validate_gitignore(plugin_root: Path, report: ValidationReport) -> None:
     #
     # Markdown files are EXCLUDED from this scan: they are documentation
     # that often quotes both correct and incorrect patterns side-by-side
-    # (e.g. plugin-diagnoser.md has rule descriptions that LITERALLY
+    # (e.g. cpv-plugin-diagnoser-agent.md has rule descriptions that LITERALLY
     # contain the bad pattern as the thing being detected). Quoting an
     # anti-pattern is fine; we only flag actual code that ships the
     # anti-pattern.
@@ -4862,7 +4862,7 @@ def validate_pipeline_readiness(plugin_root: Path, report: ValidationReport) -> 
     if profile != PROFILE_STANDARD:
         report.info(
             f"Detected `{profile}` pipeline profile — CPV judges this plugin's "
-            f"canonical-pipeline files against the {profile} canon (e.g. a "
+            f"cpv-canonical-pipeline files against the {profile} canon (e.g. a "
             f"remote-validation plugin's intentionally-absent vendored "
             f"validators are not a gap; its remote `cpv-remote-validate` gate "
             f"is the validation path). The shared canon (SHA-pins, "
@@ -4976,7 +4976,7 @@ def _ref_after_comment_marker(line: str, match_start: int) -> bool:
 
     The dangling-ref targets — ``.github/workflows/*.yml|*.yaml``, the
     ``.git/hooks/pre-push`` + ``git-hooks/*`` shell hooks, the
-    plugin-validation-skill reference hook, and ``setup_plugin_pipeline.py`` —
+    cpv-plugin-validation-skill reference hook, and ``setup_plugin_pipeline.py`` —
     all use ``#`` as their comment marker (YAML, shell, Python). Everything after
     an unquoted ``#`` is never executed, so a ``scripts/*.py`` token sitting in a
     comment tail can never be a live invocation: skipping it cannot hide a real
@@ -5028,7 +5028,7 @@ def validate_pipeline_script_refs(plugin_root: Path, report: ValidationReport) -
     Why this exists: every time a script in `scripts/` is renamed or removed,
     multiple consumers silently break — `.github/workflows/*.yml`, the locally
     installed `.git/hooks/pre-push`, the published `setup_plugin_pipeline.py`
-    template, and the `plugin-validation-skill` reference hooks all hardcode
+    template, and the `cpv-plugin-validation-skill` reference hooks all hardcode
     `scripts/<name>.py` paths. The v2.65.0 lint consolidation triggered exactly
     this regression — `lint_files.py` was removed but CI + the local hook still
     invoked it, breaking every push until a follow-up patch.
@@ -5083,9 +5083,9 @@ def validate_pipeline_script_refs(plugin_root: Path, report: ValidationReport) -
 
     # Plugin-validation-skill reference hooks (template that gets copied into
     # plugins by setup_plugin_pipeline).
-    pvs_hook = plugin_root / "skills" / "plugin-validation-skill" / "references" / "pre-push-hook.py"
+    pvs_hook = plugin_root / "skills" / "cpv-plugin-validation-skill" / "references" / "pre-push-hook.py"
     if pvs_hook.is_file():
-        targets.append((pvs_hook, "skills/plugin-validation-skill/references/pre-push-hook.py"))
+        targets.append((pvs_hook, "skills/cpv-plugin-validation-skill/references/pre-push-hook.py"))
 
     # The pipeline-template generator itself — its embedded PRE_PUSH_HOOK
     # string is the source-of-truth for newly-scaffolded plugins.
@@ -5617,7 +5617,7 @@ def validate_workflow_path_broken(plugin_root: Path, report: ValidationReport) -
     """Detect broken literal paths and zero-match globs in workflow ``run:``
     bodies — issue #21 ask #2 (RC-WORKFLOW-PATH-BROKEN, MAJOR).
 
-    Symptom this rule catches: a canonical-pipeline migration that
+    Symptom this rule catches: a cpv-canonical-pipeline migration that
     consolidates several scripts/*.sh helpers into publish.py but leaves
     the workflow YAML still invoking the old shellcheck-on-globs lines:
 
@@ -5705,7 +5705,7 @@ def validate_workflow_path_broken(plugin_root: Path, report: ValidationReport) -
                         report.major(
                             f"[RC-WORKFLOW-PATH-BROKEN] {rel_path}:{line_no} — "
                             f"glob '{token}' matches zero files in the plugin tree. "
-                            "If a canonical-pipeline migration consolidated the "
+                            "If a cpv-canonical-pipeline migration consolidated the "
                             "matched files into publish.py, remove the dangling "
                             "glob from the workflow body; otherwise restore the "
                             "missing files.",
@@ -6185,7 +6185,7 @@ def check_project_settings_plugin_configs(plugin_root: Path, report: ValidationR
 # idempotent publish pipeline, cross-platform Python, etc.
 #
 # When any of these drifts from the canonical content, the validator emits a
-# WARNING (not blocking a publish, but visible in CI). The plugin-fixer agent
+# WARNING (not blocking a publish, but visible in CI). The cpv-plugin-fixer-agent agent
 # picks the WARNING up and offers `/cpv-upgrade-plugin` to migrate.
 _CANONICAL_PIPELINE_FILES: tuple[tuple[str, str], ...] = (
     ("scripts/publish.py", "gen_publish_py"),
@@ -6973,7 +6973,7 @@ def _pep723_has_runtime_deps(body: str) -> bool:
 def validate_pep723_invocations(plugin_root: Path, report: ValidationReport) -> None:
     """Emit MAJOR for `python <script.py>` invocations of PEP 723 scripts.
 
-    Background (reported 2026-05-09): plugin-creator scaffolded scripts that
+    Background (reported 2026-05-09): cpv-plugin-creator-agent scaffolded scripts that
     declare runtime dependencies via a PEP 723 inline-script metadata block
     (``# /// script ... # ///``), but the generated invocations in commands /
     agents / skills / hooks / README used bare ``python <script>`` /
@@ -7419,7 +7419,7 @@ def _format_no_plugin_found_hint(plugin_root: Path) -> str:
             "Skills and plugins are different things — skills are single folders dropped into "
             "`~/.claude/skills/` (user scope) or `<project>/.claude/skills/` (project/local scope), "
             "and do NOT need a marketplace or plugin.json. If you want to validate a skill, use "
-            "`validate_skill.py` or the `skill-validation-agent`. If you meant to scaffold this as a "
+            "`validate_skill.py` or the `cpv-skill-validation-agent`. If you meant to scaffold this as a "
             "full plugin, you need to wrap it in a plugin folder with `.claude-plugin/plugin.json` first."
         )
     elif classification == "skill_inside_plugin":

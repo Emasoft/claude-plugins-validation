@@ -5,7 +5,7 @@ Zero-LLM-cost aggregator that reads a batch session's ``index.json`` plus
 every ``shard-K.status.json`` and writes:
 
   1. A consolidated markdown report under
-     ``$MAIN_ROOT/reports/plugin-fixer/<ts±tz>-<plugin>-batch.md``.
+     ``$MAIN_ROOT/reports/cpv-plugin-fixer-agent/<ts±tz>-<plugin>-batch.md``.
   2. A short one-line summary printed to stdout, e.g.
 
      ``DONE: 327 → 0 (fixed: 327, failed: 0). Report: <abs-path>``
@@ -263,7 +263,7 @@ def aggregate(session_dir: Path, report_path: Path | None = None) -> dict[str, A
 
     if report_path is None:
         main_root = resolve_main_root()
-        report_dir = main_root / "reports" / "plugin-fixer"
+        report_dir = main_root / "reports" / "cpv-plugin-fixer-agent"
         report_dir.mkdir(parents=True, exist_ok=True)
         # Single strftime read so the date/time and GMT offset come from ONE
         # clock sample — two reads can straddle a sub-second midnight.
@@ -312,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
         "--report-path",
         type=Path,
         default=None,
-        help="Explicit output path; default $MAIN_ROOT/reports/plugin-fixer/<ts>-<plugin>-batch.md",
+        help="Explicit output path; default $MAIN_ROOT/reports/cpv-plugin-fixer-agent/<ts>-<plugin>-batch.md",
     )
     args = parser.parse_args(argv)
 

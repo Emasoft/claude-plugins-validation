@@ -8,7 +8,7 @@ corrected statement is present, so a future edit that re-introduces the bug
 fails here.
 
 Findings covered:
-  * marketplace-fixer.md — a hardcoded "10 fix iterations" cap in the
+  * cpv-marketplace-fixer-agent.md — a hardcoded "10 fix iterations" cap in the
     completion gate contradicted the file's own "NO hardcoded iteration cap"
     rule (line ~102) and the project's no-hardcoded-iteration-caps feedback
     rule. The pre-existing guard in test_batch_fix_v291.py did NOT match the
@@ -18,7 +18,7 @@ Findings covered:
     `source:` line named a non-existent "/cpv-doctor" slash-command
     orchestrator; the real dispatcher is /cpv-main-menu (Diagnose category),
     which the agent body itself already states correctly.
-  * plugin-manager.md — the CRITICAL rule's blanket "never call manage_*.py
+  * cpv-plugin-manager-agent.md — the CRITICAL rule's blanket "never call manage_*.py
     directly" was factually wrong for manage_plugin.py (no launcher alias, no
     isolation guard), making the install/uninstall flow — and Example 1 —
     impossible if taken literally.
@@ -37,12 +37,12 @@ def _read(name: str) -> str:
     return (AGENTS / name).read_text(encoding="utf-8")
 
 
-# --- marketplace-fixer: no hardcoded iteration cap in the completion gate ----
+# --- cpv-marketplace-fixer-agent: no hardcoded iteration cap in the completion gate ----
 
 
 def test_marketplace_fixer_completion_gate_has_no_numeric_iteration_cap() -> None:
     """The completion gate must not re-introduce an 'after N fix iterations' cap."""
-    text = _read("marketplace-fixer.md")
+    text = _read("cpv-marketplace-fixer-agent.md")
     # Original bug shape: "If after 10 fix iterations findings remain, ..."
     # Generalised so any '<digits> fix iteration(s)' or 'after N iterations'
     # cap phrasing in the gate is caught (the blind spot of the older guard).
@@ -51,7 +51,7 @@ def test_marketplace_fixer_completion_gate_has_no_numeric_iteration_cap() -> Non
         re.IGNORECASE,
     )
     assert not bug.search(text), (
-        "marketplace-fixer.md re-introduced a hardcoded numeric iteration cap "
+        "cpv-marketplace-fixer-agent.md re-introduced a hardcoded numeric iteration cap "
         "in its completion gate — only oscillation (identical consecutive "
         "finding sets) may terminate the loop. See no-hardcoded-iteration-caps."
     )
@@ -59,9 +59,9 @@ def test_marketplace_fixer_completion_gate_has_no_numeric_iteration_cap() -> Non
 
 def test_marketplace_fixer_completion_gate_states_no_cap_and_oscillation() -> None:
     """The corrected gate must state NO hardcoded cap and oscillation-as-terminator."""
-    text = _read("marketplace-fixer.md")
+    text = _read("cpv-marketplace-fixer-agent.md")
     assert "NO hardcoded iteration cap" in text, (
-        "marketplace-fixer.md lost the explicit 'NO hardcoded iteration cap' "
+        "cpv-marketplace-fixer-agent.md lost the explicit 'NO hardcoded iteration cap' "
         "statement — the loop's only termination condition is oscillation."
     )
     # The completion-gate paragraph specifically must tie [BLOCKED] to
@@ -70,7 +70,7 @@ def test_marketplace_fixer_completion_gate_states_no_cap_and_oscillation() -> No
         r"oscillates.*\[BLOCKED\]|\[BLOCKED\].*oscillat",
         text,
         re.IGNORECASE | re.DOTALL,
-    ), "marketplace-fixer.md completion gate must escalate [BLOCKED] on oscillation."
+    ), "cpv-marketplace-fixer-agent.md completion gate must escalate [BLOCKED] on oscillation."
 
 
 # --- cpv-doctor-agent: dispatcher is /cpv-main-menu, not a fake /cpv-doctor --
@@ -109,12 +109,12 @@ def test_cpv_doctor_agent_names_cpv_main_menu_dispatcher() -> None:
     )
 
 
-# --- plugin-manager: manage_plugin.py is the documented direct-call exception -
+# --- cpv-plugin-manager-agent: manage_plugin.py is the documented direct-call exception -
 
 
 def test_plugin_manager_critical_rule_carves_out_manage_plugin() -> None:
     """The CRITICAL rule must not forbid the direct manage_plugin.py call it relies on."""
-    text = _read("plugin-manager.md")
+    text = _read("cpv-plugin-manager-agent.md")
     # The CRITICAL rule must explicitly note manage_plugin.py is the direct-call
     # exception (it has no launcher alias / isolation guard).
     crit_para = next(
@@ -129,8 +129,8 @@ def test_plugin_manager_critical_rule_carves_out_manage_plugin() -> None:
 
 def test_plugin_manager_install_example_uses_manage_plugin_directly() -> None:
     """Example 1 (install) must keep its direct manage_plugin.py call (now consistent)."""
-    text = _read("plugin-manager.md")
-    assert "manage_plugin.py" in text, "plugin-manager.md lost the manage_plugin.py install example."
+    text = _read("cpv-plugin-manager-agent.md")
+    assert "manage_plugin.py" in text, "cpv-plugin-manager-agent.md lost the manage_plugin.py install example."
 
 
 def test_remote_validation_has_no_manage_plugin_alias_supports_the_carveout() -> None:
@@ -140,7 +140,7 @@ def test_remote_validation_has_no_manage_plugin_alias_supports_the_carveout() ->
     # target nor a key (other than as a substring of unrelated names).
     assert re.search(r'"manage_plugin"\s*:', launcher) is None, (
         "remote_validation.py now defines a 'manage_plugin' alias — the "
-        "plugin-manager.md carve-out should be re-evaluated."
+        "cpv-plugin-manager-agent.md carve-out should be re-evaluated."
     )
     # manage_plugin.py must still have no isolation guard (it is called directly).
     mgr = (REPO / "scripts" / "manage_plugin.py").read_text(encoding="utf-8")

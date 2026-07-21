@@ -14,7 +14,7 @@
     {"key": "7",  "action_id": "new_mcp",          "label": "New MCP server (in existing plugin) — Register server in .mcp.json"},
     {"key": "8",  "action_id": "pack_components",  "label": "Pack components into a plugin (multi-select)"},
     {"key": "9",  "action_id": "add_deps",         "label": "Add dependencies (existing plugin) — --add NAME[@MKT[@VER]] OR --from PATH-OR-URL"},
-    {"key": "10", "action_id": "impl_skills_menu", "label": "Implement the-skills-menu method (existing) — Decouple skills from agents"},
+    {"key": "10", "action_id": "impl_skills_menu", "label": "Implement cpv-the-skills-menu method (existing) — Decouple skills from agents"},
     {"key": "A",  "action_id": "ask",              "label": "Ask the agent"},
     {"key": "B",  "action_id": "back",             "label": "Back — Go back to the top-level menu"},
     {"key": "0",  "action_id": "cancel",           "label": "Cancel / Exit"}

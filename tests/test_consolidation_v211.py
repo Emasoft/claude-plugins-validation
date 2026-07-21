@@ -70,9 +70,9 @@ AGENT_COMMANDS: dict[str, str] = {}
 # --- Commands deleted in v2.90.0 (TRDD-c50531c2 menu unification) ---
 #
 # 23 user-facing slash commands were deleted because their functionality is
-# now routed through `/cpv-main-menu` → existing agents (plugin-validator,
-# plugin-fixer, plugin-creator, plugin-manager, cache-optimizer-agent,
-# cpv-doctor-agent, semantic-validator, marketplace-fixer, etc.).
+# now routed through `/cpv-main-menu` → existing agents (cpv-plugin-validator-agent,
+# cpv-plugin-fixer-agent, cpv-plugin-creator-agent, cpv-plugin-manager-agent, cpv-cache-optimizer-agent,
+# cpv-doctor-agent, cpv-semantic-validator-agent, cpv-marketplace-fixer-agent, etc.).
 V290_DELETED_USER_COMMANDS = [
     "cpv-validate-plugin",
     "cpv-validate-skill",
@@ -106,20 +106,20 @@ V290_DELETED_USER_COMMANDS = [
 # in commands/ is GONE; the skill at skills/<new-name>/SKILL.md is its
 # replacement. Mapping: command (old) → skill (new).
 V290_COMMAND_TO_SKILL = {
-    "cpv-add-component": "add-component-to-plugin",
-    "cpv-add-dependency": "add-dependency",
-    "cpv-bump-version": "bump-version",
-    "cpv-codemod": "deterministic-codemod",
-    "cpv-create-agent": "scaffold-agent",
-    "cpv-create-command": "scaffold-command",
-    "cpv-create-hook": "add-hook",
-    "cpv-create-mcp": "register-mcp",
-    "cpv-create-skill": "scaffold-skill",
-    "cpv-link-plugin": "link-plugin-marketplace",
-    "cpv-pack-components": "pack-components",
-    "cpv-refresh-readme": "refresh-readme",
-    "cpv-strip-dev-parts": "strip-dev-submodules",
-    "cpv-version": "show-version",
+    "cpv-add-component": "cpv-add-component-to-plugin",
+    "cpv-add-dependency": "cpv-add-dependency",
+    "cpv-bump-version": "cpv-bump-version",
+    "cpv-codemod": "cpv-deterministic-codemod",
+    "cpv-create-agent": "cpv-scaffold-agent",
+    "cpv-create-command": "cpv-scaffold-command",
+    "cpv-create-hook": "cpv-add-hook",
+    "cpv-create-mcp": "cpv-register-mcp",
+    "cpv-create-skill": "cpv-scaffold-skill",
+    "cpv-link-plugin": "cpv-link-plugin-marketplace",
+    "cpv-pack-components": "cpv-pack-components",
+    "cpv-refresh-readme": "cpv-refresh-readme",
+    "cpv-strip-dev-parts": "cpv-strip-dev-submodules",
+    "cpv-version": "cpv-show-version",
 }
 
 
@@ -140,10 +140,10 @@ class TestCommandCount:
         finds 100+ findings. Burying it behind 2-3 menu clicks would make
         the doctor's recommendation user-hostile.
 
-        Per TRDD-9dd64dbf (v2.95.0), ``the-skills-menu-create.md`` was
+        Per TRDD-9dd64dbf (v2.95.0), ``cpv-the-skills-menu-create.md`` was
         added as a THIRD direct-entry slash command. It is the public
         face of the universal migrator — users of OTHER plugins need a
-        bare slash command to retrofit their plugin to the-skills-menu
+        bare slash command to retrofit their plugin to cpv-the-skills-menu
         method, so menu navigation is not acceptable here.
 
         Per TRDD-84525d4a (v2.99.1), ``cpv-pre-install-scan.md`` was
@@ -159,7 +159,7 @@ class TestCommandCount:
         allowed = {
             "cpv-main-menu.md",
             "cpv-batch-fix.md",
-            "the-skills-menu-create.md",
+            "cpv-the-skills-menu-create.md",
             "cpv-pre-install-scan.md",
             # TRDD-3dcbb37c (v2.101.0) — Batch skills family. Each one is a
             # bare slash command because the user wants to fan out fleet-wide
@@ -193,7 +193,7 @@ class TestCommandCount:
         allowed = {
             "cpv-main-menu.md",
             "cpv-batch-fix.md",
-            "the-skills-menu-create.md",
+            "cpv-the-skills-menu-create.md",
             "cpv-pre-install-scan.md",
             # TRDD-3dcbb37c (v2.101.0) — Batch skills family. Each one is a
             # bare slash command because the user wants to fan out fleet-wide
@@ -306,9 +306,9 @@ class TestObsoleteCommandsRemoved:
         must NOT exist in commands/.
 
         Their functionality is now routed through `/cpv-main-menu` → the
-        existing agent for the workflow (plugin-validator, plugin-fixer,
-        plugin-creator, plugin-manager, cache-optimizer-agent,
-        cpv-doctor-agent, semantic-validator, marketplace-fixer, etc.).
+        existing agent for the workflow (cpv-plugin-validator-agent, cpv-plugin-fixer-agent,
+        cpv-plugin-creator-agent, cpv-plugin-manager-agent, cpv-cache-optimizer-agent,
+        cpv-doctor-agent, cpv-semantic-validator-agent, cpv-marketplace-fixer-agent, etc.).
         """
         for name in V290_DELETED_USER_COMMANDS:
             assert not (COMMANDS_DIR / f"{name}.md").exists(), (
@@ -357,17 +357,17 @@ class TestArchivedCommands:
 
 
 class TestCanonicalPipelineSkill:
-    """Verify the canonical-pipeline skill."""
+    """Verify the cpv-canonical-pipeline skill."""
 
     def test_skill_directory_exists(self):
-        """skills/canonical-pipeline/ directory must exist."""
-        assert (SKILLS_DIR / "canonical-pipeline").is_dir()
+        """skills/cpv-canonical-pipeline/ directory must exist."""
+        assert (SKILLS_DIR / "cpv-canonical-pipeline").is_dir()
 
     def test_skill_md_has_name_field(self):
-        """canonical-pipeline/SKILL.md frontmatter must have name: canonical-pipeline."""
-        fm = _parse_frontmatter(SKILLS_DIR / "canonical-pipeline" / "SKILL.md")
+        """cpv-canonical-pipeline/SKILL.md frontmatter must have name: cpv-canonical-pipeline."""
+        fm = _parse_frontmatter(SKILLS_DIR / "cpv-canonical-pipeline" / "SKILL.md")
         assert fm is not None
-        assert fm.get("name") == "canonical-pipeline"
+        assert fm.get("name") == "cpv-canonical-pipeline"
 
 
 AGENTS_DIR = PROJECT_ROOT / "agents"
@@ -384,10 +384,10 @@ class TestSkillAgentArchitecture:
     def test_all_skills_are_non_user_invocable(self):
         """Every SKILL.md must have user-invocable: false.
 
-        Exceptions (user-invocable: true): ``the-skills-menu`` is the
+        Exceptions (user-invocable: true): ``cpv-the-skills-menu`` is the
         universal agent-facing router (the agent counterpart to the human
-        /cpv-main-menu — see agents/cpv.md); ``the-skills-menu-create`` is the
-        universal migrator that converts arbitrary plugins to the-skills-menu
+        /cpv-main-menu — see agents/cpv.md); ``cpv-the-skills-menu-create`` is the
+        universal migrator that converts arbitrary plugins to cpv-the-skills-menu
         method. Both MUST stay user-invocable so authors/agents can trigger
         them directly (the migration target of -create is the OTHER plugin,
         not this one). The batch family below is user-invocable for the same
@@ -400,14 +400,14 @@ class TestSkillAgentArchitecture:
             # need" and have it auto-trigger and route the request. Companion:
             # agents/cpv.md. Deliberate evolution of v2.90.0 menu-unification
             # (TRDD-c50531c2), NOT drift — do NOT revert to user-invocable: false.
-            "the-skills-menu",
-            "the-skills-menu-create",
+            "cpv-the-skills-menu",
+            "cpv-the-skills-menu-create",
             # TRDD-3dcbb37c (v2.101.0) — Batch-skills family. Users invoke
             # these directly (`/cpv-batch-validate Emasoft/emasoft-plugins`),
             # so the SKILL.md MUST be user-invocable. The companion
             # `commands/cpv-batch-*.md` orchestrator body is the actual entry
             # point; the SKILL.md is the discoverability surface for
-            # the-skills-menu and natural-language invocation.
+            # cpv-the-skills-menu and natural-language invocation.
             "cpv-batch-validate",
             "cpv-batch-security-audit",
             "cpv-batch-caching-audit",
@@ -469,9 +469,9 @@ class TestSkillAgentArchitecture:
         # wiring wave lands.
         pending_wave_b_wiring = {
             # TRDD-962fdc55 Wave 7-A creates this skill; Wave 7-B (queued
-            # behind TRDD-c0ee9543) wires plugin-creator / plugin-fixer /
-            # marketplace-fixer to load it.
-            "marketplace-authoring-contract",
+            # behind TRDD-c0ee9543) wires cpv-plugin-creator-agent / cpv-plugin-fixer-agent /
+            # cpv-marketplace-fixer-agent to load it.
+            "cpv-marketplace-authoring-contract",
             # (cpv-format-menu was safe-deleted in TRDD-4de479a0 Phase 4 —
             # menu rendering moved to the externalised claude-menu-system
             # Stop hook via scripts/cpv_menu.py; no orphan to allowlist.)
@@ -480,40 +480,40 @@ class TestSkillAgentArchitecture:
             # role. The orchestrator wiring (which agent loads which skill)
             # is a follow-up wave — until then these are intentionally
             # orphaned. Each maps 1:1 to a former cpv-XXX command:
-            #   add-component-to-plugin ← cpv-add-component
-            #   add-dependency           ← cpv-add-dependency
-            #   add-hook                 ← cpv-create-hook
-            #   bump-version             ← cpv-bump-version
-            #   deterministic-codemod    ← cpv-codemod
-            #   link-plugin-marketplace  ← cpv-link-plugin
-            #   pack-components          ← cpv-pack-components
-            #   refresh-readme           ← cpv-refresh-readme
-            #   register-mcp             ← cpv-create-mcp
-            #   scaffold-agent           ← cpv-create-agent
-            #   scaffold-command         ← cpv-create-command
-            #   scaffold-skill           ← cpv-create-skill
-            #   show-version             ← cpv-version
-            #   strip-dev-submodules     ← cpv-strip-dev-parts
-            "add-component-to-plugin",
-            "add-dependency",
-            "add-hook",
-            "bump-version",
-            "deterministic-codemod",
-            "link-plugin-marketplace",
-            "pack-components",
-            "refresh-readme",
-            "register-mcp",
-            "scaffold-agent",
-            "scaffold-command",
-            "scaffold-skill",
-            "show-version",
-            "strip-dev-submodules",
+            #   cpv-add-component-to-plugin ← cpv-add-component
+            #   cpv-add-dependency           ← cpv-add-dependency
+            #   cpv-add-hook                 ← cpv-create-hook
+            #   cpv-bump-version             ← cpv-bump-version
+            #   cpv-deterministic-codemod    ← cpv-codemod
+            #   cpv-link-plugin-marketplace  ← cpv-link-plugin
+            #   cpv-pack-components          ← cpv-pack-components
+            #   cpv-refresh-readme           ← cpv-refresh-readme
+            #   cpv-register-mcp             ← cpv-create-mcp
+            #   cpv-scaffold-agent           ← cpv-create-agent
+            #   cpv-scaffold-command         ← cpv-create-command
+            #   cpv-scaffold-skill           ← cpv-create-skill
+            #   cpv-show-version             ← cpv-version
+            #   cpv-strip-dev-submodules     ← cpv-strip-dev-parts
+            "cpv-add-component-to-plugin",
+            "cpv-add-dependency",
+            "cpv-add-hook",
+            "cpv-bump-version",
+            "cpv-deterministic-codemod",
+            "cpv-link-plugin-marketplace",
+            "cpv-pack-components",
+            "cpv-refresh-readme",
+            "cpv-register-mcp",
+            "cpv-scaffold-agent",
+            "cpv-scaffold-command",
+            "cpv-scaffold-skill",
+            "cpv-show-version",
+            "cpv-strip-dev-submodules",
             # TRDD-3dcbb37c (v2.101.0) — Batch-skills family. These are
             # ``user-invocable: true`` slash-command-equivalent skills the
             # user triggers directly (no agent loader). The matching
             # ``commands/cpv-batch-*.md`` files contain the orchestrator
             # bodies; the SKILL.md is the discoverability surface for
-            # ``the-skills-menu`` and natural-language invocation.
+            # ``cpv-the-skills-menu`` and natural-language invocation.
             "cpv-batch-validate",
             "cpv-batch-security-audit",
             "cpv-batch-caching-audit",
@@ -547,7 +547,7 @@ class TestSkillAgentArchitecture:
 
         # Universal regex matching `skill: "claude-plugins-validation:<name>"`
         # OR `Skill({skill: "claude-plugins-validation:<name>"})` patterns.
-        # Bare prose mentions (e.g. "use the fix-validation skill") don't
+        # Bare prose mentions (e.g. "use the cpv-fix-validation skill") don't
         # false-match because the fully-qualified form requires the plugin
         # prefix + quotes.
         skill_invocation_re = _re.compile(
@@ -575,7 +575,7 @@ class TestSkillAgentArchitecture:
         # (cross-references between skills, e.g. a routing skill that fans
         # out to sub-skills, or a catalog skill whose references/ folder
         # holds the per-skill invocation list — TRDD-478d9687 universal
-        # the-skills-menu pattern).
+        # cpv-the-skills-menu pattern).
         for sk_dir in SKILLS_DIR.iterdir():
             if not sk_dir.is_dir():
                 continue

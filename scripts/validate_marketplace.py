@@ -446,7 +446,7 @@ def _atomic_write_text(path: Path, content: str) -> None:
     atomic rename on the same filesystem. A plain ``write_text`` leaves a
     truncated/partial report on disk if the process is interrupted mid-write
     (SIGINT, disk-full, container OOM); the report is consumed by the
-    plugin-fixer pipeline and CI, which would then parse garbage.
+    cpv-plugin-fixer-agent pipeline and CI, which would then parse garbage.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
@@ -3745,7 +3745,7 @@ def _recommend_cpv_restructure(
         )
         msg_lines.append("")
         msg_lines.append("TO CONVERT THIS MARKETPLACE AUTOMATICALLY:")
-        msg_lines.append("  Run the plugin-fixer agent: /cpv-fix-validation <report.json>")
+        msg_lines.append("  Run the cpv-plugin-fixer-agent agent: /cpv-fix-validation <report.json>")
         msg_lines.append(
             "  When it sees an 'architecture' finding of this type, it will "
             "ask which layout you want and perform the conversion: for Layout A, "
@@ -3755,7 +3755,7 @@ def _recommend_cpv_restructure(
         )
         msg_lines.append("")
         msg_lines.append(
-            "See skills/create-plugin/references/marketplace-layouts.md for the "
+            "See skills/cpv-create-plugin/references/marketplace-layouts.md for the "
             "full manual migration procedure if you prefer to do it yourself."
         )
         results.append(
@@ -3888,7 +3888,7 @@ def format_report(report: ValidationReport, verbose: bool = False) -> str:
             "surface install-resolver-blocking drift (name/version/"
             "unknown-field) BEFORE the next `claude plugin install` "
             "fails. Fix recipes: "
-            "skills/fix-validation/references/marketplace-upstream-drift.md"
+            "skills/cpv-fix-validation/references/marketplace-upstream-drift.md"
         )
     lines.append("=" * 60)
 

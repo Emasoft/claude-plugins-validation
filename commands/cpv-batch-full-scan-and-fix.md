@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-full-scan-and-fix
-description: Maximum-coverage same-turn scan + fix. One plugin-fixer per plugin reads each source file ONCE and runs validate + security + caching audit + caching optimize + verify-FPs + fix — all inline. Each per-file scan triggers every applicable checker; confirmed-real findings are fixed; confirmed-FPs are skipped. Cuts per-plugin token cost ~5× vs running the four separate batch skills sequentially. Default 8 parallel agents per main-session message, cap 16.
+description: Maximum-coverage same-turn scan + fix. One cpv-plugin-fixer-agent per plugin reads each source file ONCE and runs validate + security + caching audit + caching optimize + verify-FPs + fix — all inline. Each per-file scan triggers every applicable checker; confirmed-real findings are fixed; confirmed-FPs are skipped. Cuts per-plugin token cost ~5× vs running the four separate batch skills sequentially. Default 8 parallel agents per main-session message, cap 16.
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---
@@ -11,7 +11,7 @@ For fleet operators who want the deepest possible parallel sweep
 across every plugin in a marketplace, this command bundles
 **validate + security + caching audit + caching optimize + FP
 verification + fix** into ONE per-plugin agent turn. Each
-plugin-fixer subagent reads each source file ONCE and triggers
+cpv-plugin-fixer-agent subagent reads each source file ONCE and triggers
 every applicable in-process checker, classifies findings via the
 v2.100.x context classifier, verifies uncertain findings via
 `llm-externalizer` with file-range syntax (≤ 200 LOC per call),
@@ -83,7 +83,7 @@ fi
 
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   "${BATCH_SPECS[@]}" \
-  --agent plugin-fixer \
+  --agent cpv-plugin-fixer-agent \
   --mode batch_same_turn_full \
   --max-parallel "$MAX_PARALLEL"
 ```
@@ -117,7 +117,7 @@ turn end.
 for plugin_index in group:
     plugin = plan.plugins[plugin_index]
     Agent(
-      subagent_type: "plugin-fixer",
+      subagent_type: "cpv-plugin-fixer-agent",
       description: "Batch-full-scan-and-fix {plugin.display_name}",
       prompt: |
         <context>
@@ -214,8 +214,8 @@ End the turn. The CMS Stop hook emits the final table via systemMessage.
 
 `/cpv-batch-full-scan-and-fix` is a maximum-coverage one-shot
 same-turn fleet sweep; the status table is informational only. No
-numbered or lettered action rows. The slug ``batch-plugin-fixer-status``
-is reserved for plugin-fixer-driven batch commands (shared with
+numbered or lettered action rows. The slug ``batch-cpv-plugin-fixer-agent-status``
+is reserved for cpv-plugin-fixer-agent-driven batch commands (shared with
 `/cpv-batch-fix`, `/cpv-batch-validate-and-fix`). The fixed key→action
 map is empty by design; future post-scan menus extend this contract
 with letter→action rows.
@@ -236,4 +236,4 @@ with letter→action rows.
 
 - TRDD-3dcbb37c §3 — full design
 - `/cpv-batch-validate-and-fix` — narrower same-turn variant
-- `agents/plugin-fixer.md` — `batch_same_turn_full` mode contract
+- `agents/cpv-plugin-fixer-agent.md` — `batch_same_turn_full` mode contract

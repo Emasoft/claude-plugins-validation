@@ -410,7 +410,7 @@ def test_prefetch_mismatched_target_falls_back_to_sync(tmp_path: Path, monkeypat
 
 
 def test_no_prefetch_falls_back_to_sync_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Pre-Phase-E callers (e.g. plugin-fixer running just `gh release create`
+    """Pre-Phase-E callers (e.g. cpv-plugin-fixer-agent running just `gh release create`
     out-of-band) pass nothing for ``prefetch``. The consuming gates must
     behave identically to the pre-Phase-E pipeline — i.e. always do their
     synchronous calls.

@@ -825,14 +825,14 @@ _FORCE_TEMPLATE_FILES: set[str] = {
 # at/AHEAD of canon (i.e. the validator's "would downgrade" case).
 _PIPELINE_DRIFT_RC: str = "RC-PIPELINE-DRIFT-001"
 
-# the-skills-menu canon migration (TRDD-478d9687 / the-skills-menu-create spec).
+# cpv-the-skills-menu canon migration (TRDD-478d9687 / cpv-the-skills-menu-create spec).
 # The EXACT mandatory dynamic-loading instruction every migrated agent body must
-# carry, taken verbatim from the the-skills-menu-create spec
-# (skills/the-skills-menu-create/references/the-skills-menu-spec.md §"Agent body
+# carry, taken verbatim from the cpv-the-skills-menu-create spec
+# (skills/cpv-the-skills-menu-create/references/the-skills-menu-spec.md §"Agent body
 # instruction rule"). That spec is the SINGLE SOURCE OF TRUTH for the rewrite —
 # this constant must stay byte-identical to it. The string starts with "You must
 # load …", so it never begins with a markdown-special char (#, +, *, -); the
-# markdown-poison guard (standardize-plugin SKILL.md) below is therefore a
+# markdown-poison guard (cpv-standardize-plugin SKILL.md) below is therefore a
 # defensive assertion, not a transform.
 _SKILLS_MENU_BODY_INSTRUCTION: str = (
     "You must load the skills you need dynamically. Use the Skill() tool to load "
@@ -3102,7 +3102,7 @@ _CSPELL_MIN_WORD_LEN = 4
 def _cspell_tokens(text: str) -> list[str]:
     """Split an identifier into the lowercase alphabetic tokens cspell checks.
 
-    cspell tokenizes on non-letters, so `plugin-devitalizer` is checked as the
+    cspell tokenizes on non-letters, so `cpv-plugin-devitalizer-agent` is checked as the
     two words `plugin` and `devitalizer` — those, not the hyphenated compound,
     are what a dictionary entry must cover. Tokens shorter than
     `_CSPELL_MIN_WORD_LEN` are dropped (cspell never flags them).
@@ -3390,17 +3390,17 @@ def audit_cspell_config(plugin_path: Path) -> list[AuditItem]:
 
 
 # =============================================================================
-# the-skills-menu CANON MIGRATION (force-templates only)
+# cpv-the-skills-menu CANON MIGRATION (force-templates only)
 # =============================================================================
 #
 # Under --force-templates (the canon UPGRADE verb), every agent in the plugin is
-# migrated to the-skills-menu method: its frontmatter `skills:` list is rewritten
-# to exactly `[the-skills-menu]` (all other fields preserved) and the mandatory
+# migrated to cpv-the-skills-menu method: its frontmatter `skills:` list is rewritten
+# to exactly `[cpv-the-skills-menu]` (all other fields preserved) and the mandatory
 # dynamic-loading instruction is inserted into its body. A per-plugin
-# skills/the-skills-menu/SKILL.md catalog is created if absent (reusing
+# skills/cpv-the-skills-menu/SKILL.md catalog is created if absent (reusing
 # generate_plugin_repo.gen_the_skills_menu_skill so scaffold-new and
 # upgrade-existing emit byte-identical catalogs). Plain --fix NEVER touches an
-# agent — only adds missing files. Implements the the-skills-menu-create spec
+# agent — only adds missing files. Implements the cpv-the-skills-menu-create spec
 # (§"Agent frontmatter rewrite rule" + §"Agent body instruction rule"), which is
 # the single source of truth.
 
@@ -3430,7 +3430,7 @@ def _split_frontmatter(text: str) -> tuple[str, str] | None:
 
 
 def _rewrite_agent_skills_field(frontmatter_inner: str) -> tuple[str, bool]:
-    """Rewrite the frontmatter `skills:` list to exactly `[the-skills-menu]`.
+    """Rewrite the frontmatter `skills:` list to exactly `[cpv-the-skills-menu]`.
 
     Handles BOTH YAML shapes, preserving every other field and overall ordering:
       - block list:  ``skills:\\n  - a\\n  - b``  (consumes the indented items)
@@ -3440,7 +3440,7 @@ def _rewrite_agent_skills_field(frontmatter_inner: str) -> tuple[str, bool]:
     (so an agent that declared none is still migrated to the canonical single
     entry). Returns (new_inner, changed).
     """
-    canonical_block = "skills:\n  - the-skills-menu"
+    canonical_block = "skills:\n  - cpv-the-skills-menu"
     lines = frontmatter_inner.splitlines(keepends=True)
     out: list[str] = []
     i = 0
@@ -3499,7 +3499,7 @@ def _insert_body_instruction(body: str) -> tuple[str, bool]:
     # assert it explicitly so a future edit to the constant can't silently ship a
     # body line that markdownlint MD018/MD004 would flag and block --strict.
     if _SKILLS_MENU_BODY_INSTRUCTION.startswith(_MD_POISON_LINE_START):
-        raise ValueError("the-skills-menu body instruction must not start with a markdown-special char")
+        raise ValueError("cpv-the-skills-menu body instruction must not start with a markdown-special char")
 
     para = _SKILLS_MENU_BODY_INSTRUCTION
 
@@ -3554,21 +3554,21 @@ def scan_plugin_skills_inventory(plugin_path: Path) -> list[tuple[str, str]]:
 
     Returns a sorted list of ``(skill_name, one_line_description)`` for every
     skill directory under ``skills/`` that ships a ``SKILL.md`` — EXCLUDING
-    ``the-skills-menu`` itself (the catalog never lists itself) and any
-    ``the-skills-menu-create`` migrator copy. The skill's NAME comes from its
+    ``cpv-the-skills-menu`` itself (the catalog never lists itself) and any
+    ``cpv-the-skills-menu-create`` migrator copy. The skill's NAME comes from its
     frontmatter ``name:`` when present, otherwise from the directory name (so a
     skill with a malformed/missing name is still discovered, never silently
     dropped). The description is the frontmatter ``description:`` first sentence,
     trimmed to a single readable line; missing → a neutral placeholder.
 
-    This is the population source for the the-skills-menu catalog: WITHOUT it,
+    This is the population source for the cpv-the-skills-menu catalog: WITHOUT it,
     the standardizer wrote the empty-stub "no operational skills yet" placeholder
     even on a plugin with many real skills (issue #150).
     """
     skills_dir = plugin_path / "skills"
     if not skills_dir.is_dir():
         return []
-    excluded = {"the-skills-menu", "the-skills-menu-create"}
+    excluded = {"cpv-the-skills-menu", "cpv-the-skills-menu-create"}
     found: list[tuple[str, str]] = []
     for child in sorted(skills_dir.iterdir()):
         if not child.is_dir() or child.name in excluded:
@@ -3594,7 +3594,7 @@ def scan_plugin_skills_inventory(plugin_path: Path) -> list[tuple[str, str]]:
 
 
 def _render_skills_menu_catalog(params: object, skills: list[tuple[str, str]]) -> str:
-    """Render the the-skills-menu SKILL.md, POPULATED from the real inventory.
+    """Render the cpv-the-skills-menu SKILL.md, POPULATED from the real inventory.
 
     Starts from generate_plugin_repo.gen_the_skills_menu_skill (the single source
     of truth for the catalog shape), then applies two issue-#150 fixes:
@@ -3652,7 +3652,7 @@ def _render_skills_menu_catalog(params: object, skills: list[tuple[str, str]]) -
 
 
 def _ensure_skills_menu_catalog(plugin_path: Path, dry_run: bool) -> tuple[str | None, int]:
-    """Create a POPULATED skills/the-skills-menu/SKILL.md if absent.
+    """Create a POPULATED skills/cpv-the-skills-menu/SKILL.md if absent.
 
     Reuses generate_plugin_repo.gen_the_skills_menu_skill for the catalog shape,
     then populates its ``## Plugin Skills`` table from the plugin's REAL skill
@@ -3665,7 +3665,7 @@ def _ensure_skills_menu_catalog(plugin_path: Path, dry_run: bool) -> tuple[str |
     ``n_real_skills`` is the count of operational skills discovered under
     ``skills/`` (used by the caller to decide whether the migration is safe to
     perform). Never clobbers an existing catalog — refreshing a hand-curated
-    catalog is the the-skills-menu-create skill's job.
+    catalog is the cpv-the-skills-menu-create skill's job.
 
     CRITICAL (issue #150): an EMPTY-stub catalog is NEVER written. The old code
     wrote the "no operational skills yet" placeholder whenever the catalog was
@@ -3674,7 +3674,7 @@ def _ensure_skills_menu_catalog(plugin_path: Path, dry_run: bool) -> tuple[str |
     skills and no existing catalog, this writes NOTHING and returns (None, 0) so
     the caller skips the migration entirely.
     """
-    rel = "skills/the-skills-menu/SKILL.md"
+    rel = "skills/cpv-the-skills-menu/SKILL.md"
     target = plugin_path / rel
     skills = scan_plugin_skills_inventory(plugin_path)
     if target.exists():
@@ -3692,20 +3692,20 @@ def _ensure_skills_menu_catalog(plugin_path: Path, dry_run: bool) -> tuple[str |
 
 
 def migrate_agents_to_skills_menu(plugin_path: Path, dry_run: bool = False) -> int:
-    """Migrate every agent in the plugin to the-skills-menu method.
+    """Migrate every agent in the plugin to cpv-the-skills-menu method.
 
     For each ``agents/*.md`` file WITH YAML frontmatter:
-      - rewrite frontmatter ``skills:`` → ``[the-skills-menu]`` (preserve all
+      - rewrite frontmatter ``skills:`` → ``[cpv-the-skills-menu]`` (preserve all
         other fields), and
       - insert the mandatory dynamic-loading instruction into the body.
     An already-migrated agent (canonical skills list + instruction present) is a
     clean no-op — no duplicate instruction. An agent file lacking frontmatter is
     SKIPPED and reported for manual review (spec Error #4/#7), never crashed on.
-    A per-plugin skills/the-skills-menu/SKILL.md catalog is created if absent.
+    A per-plugin skills/cpv-the-skills-menu/SKILL.md catalog is created if absent.
 
     Profile-agnostic: every profile keeps its agents, so all are migrated.
 
-    SAFETY GATE (issue #150): an agent is migrated to the-skills-menu ONLY when
+    SAFETY GATE (issue #150): an agent is migrated to cpv-the-skills-menu ONLY when
     the catalog can actually list skills — i.e. the plugin has real skills under
     ``skills/`` (or already ships a hand-curated catalog). If population yields
     ZERO skills AND no catalog exists, NO agent is touched and a WARNING is
@@ -3718,7 +3718,7 @@ def migrate_agents_to_skills_menu(plugin_path: Path, dry_run: bool = False) -> i
     """
     agents_dir = plugin_path / "agents"
     catalog_rel, n_skills = _ensure_skills_menu_catalog(plugin_path, dry_run)
-    catalog_path = plugin_path / "skills" / "the-skills-menu" / "SKILL.md"
+    catalog_path = plugin_path / "skills" / "cpv-the-skills-menu" / "SKILL.md"
     # The catalog is "usable" when it lists real skills, OR a catalog already
     # exists on disk (hand-curated — its contents are the author's business and
     # may already list skills we cannot parse). catalog_rel is non-None only when
@@ -3730,17 +3730,17 @@ def migrate_agents_to_skills_menu(plugin_path: Path, dry_run: bool = False) -> i
         # Genuinely no skills to discover and no catalog to fall back on. Do NOT
         # migrate (would strip agents into an empty menu). Do NOT report success.
         print(
-            f"  {YELLOW}the-skills-menu migration SKIPPED:{NC} no operational skills found "
+            f"  {YELLOW}cpv-the-skills-menu migration SKIPPED:{NC} no operational skills found "
             f"under skills/ and no existing catalog. Migrating now would strip each agent's "
             f"skills into an EMPTY menu (a broken agent). Add real skills, then re-run "
-            f"--force-templates, or run the the-skills-menu-create command to build the catalog first."
+            f"--force-templates, or run the cpv-the-skills-menu-create command to build the catalog first."
         )
         return 0
 
     if catalog_rel is not None:
         verb = "would create" if dry_run else "created"
         detail = f"{n_skills} skill(s) listed" if n_skills else "from existing catalog"
-        print(f"  {GREEN}{verb}{NC} {catalog_rel} (the-skills-menu catalog — {detail})")
+        print(f"  {GREEN}{verb}{NC} {catalog_rel} (cpv-the-skills-menu catalog — {detail})")
 
     if not agents_dir.is_dir():
         print(f"  {DIM}No agents/ directory — nothing to migrate.{NC}")
@@ -3764,7 +3764,7 @@ def migrate_agents_to_skills_menu(plugin_path: Path, dry_run: bool = False) -> i
         if not dry_run:
             agent_file.write_text(new_text, encoding="utf-8")
         verb = "would migrate" if dry_run else "migrated"
-        print(f"  {GREEN}{verb}{NC} agents/{agent_file.name} → the-skills-menu")
+        print(f"  {GREEN}{verb}{NC} agents/{agent_file.name} → cpv-the-skills-menu")
         migrated += 1
 
     if skipped:
@@ -4264,21 +4264,21 @@ Examples (always invoke via the launcher):
             moved = move_legacy_pipeline_scripts(plugin_path, dry_run=args.dry_run)
             if not moved:
                 print(f"  {GREEN}No legacy pipeline scripts found.{NC}")
-        # the-skills-menu canon migration — ONLY under --force-templates (the
+        # cpv-the-skills-menu canon migration — ONLY under --force-templates (the
         # canon UPGRADE verb). Plain --fix never touches an agent. Migrates every
-        # agent's frontmatter skills: → [the-skills-menu] + body instruction, and
-        # creates skills/the-skills-menu/SKILL.md if absent.
+        # agent's frontmatter skills: → [cpv-the-skills-menu] + body instruction, and
+        # creates skills/cpv-the-skills-menu/SKILL.md if absent.
         if args.force_templates:
-            print(f"\n{BOLD}the-skills-menu migration{NC}{mode_label}")
+            print(f"\n{BOLD}cpv-the-skills-menu migration{NC}{mode_label}")
             n_migrated = migrate_agents_to_skills_menu(plugin_path, dry_run=args.dry_run)
             # The "all already migrated" success line is only truthful when the
             # migration was NOT skipped for an empty catalog (issue #150). When
             # skipped, migrate_agents_to_skills_menu already printed the WARNING
             # explaining why — never report success on top of it.
-            _menu_catalog = plugin_path / "skills" / "the-skills-menu" / "SKILL.md"
+            _menu_catalog = plugin_path / "skills" / "cpv-the-skills-menu" / "SKILL.md"
             _catalog_usable = scan_plugin_skills_inventory(plugin_path) or _menu_catalog.exists()
             if n_migrated == 0 and _catalog_usable:
-                print(f"  {GREEN}All agents already on the-skills-menu (or none to migrate).{NC}")
+                print(f"  {GREEN}All agents already on cpv-the-skills-menu (or none to migrate).{NC}")
         if created and not args.dry_run:
             # Re-run audit after fixes to show updated status
             print(f"\n{BOLD}Post-fix audit:{NC}")

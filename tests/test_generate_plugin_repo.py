@@ -342,13 +342,13 @@ class TestFullGeneration:
         assert manifest["version"] == "1.2.3"
 
     def test_the_skills_menu_catalog_scaffolded(self, tmp_path):
-        """TRDD-9dd64dbf: every new plugin ships with skills/the-skills-menu/SKILL.md."""
+        """TRDD-9dd64dbf: every new plugin ships with skills/cpv-the-skills-menu/SKILL.md."""
         target = tmp_path / "my-plugin"
         target.mkdir()
         p = _default_params(name="my-fresh-plugin")
         generate_plugin_repo(target, p)
-        catalog = target / "skills" / "the-skills-menu" / "SKILL.md"
-        assert catalog.exists(), "Newly-scaffolded plugin must include the-skills-menu/SKILL.md (TRDD-9dd64dbf)"
+        catalog = target / "skills" / "cpv-the-skills-menu" / "SKILL.md"
+        assert catalog.exists(), "Newly-scaffolded plugin must include cpv-the-skills-menu/SKILL.md (TRDD-9dd64dbf)"
         body = catalog.read_text(encoding="utf-8")
         # Plugin's namespace appears in the catalog description + instructions
         assert "my-fresh-plugin" in body, (

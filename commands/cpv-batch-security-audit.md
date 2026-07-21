@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-security-audit
-description: Fan out security-only validation across every plugin in a marketplace, a list of plugins, or a single plugin. Accepts local paths and GitHub URLs. One plugin-validator agent per plugin (mode batch_security_audit) running only the security checker — five external scanners (cc-audit, tirith, trufflehog, semgrep, Cisco AI Defense skill-scanner) plus the in-process AI/security rule pack. Parallel main-session dispatch (default 8 at a time, cap 16).
+description: Fan out security-only validation across every plugin in a marketplace, a list of plugins, or a single plugin. Accepts local paths and GitHub URLs. One cpv-plugin-validator-agent agent per plugin (mode batch_security_audit) running only the security checker — five external scanners (cc-audit, tirith, trufflehog, semgrep, Cisco AI Defense skill-scanner) plus the in-process AI/security rule pack. Parallel main-session dispatch (default 8 at a time, cap 16).
 argument-hint: "<plugin-or-marketplace-or-list> [--max-parallel N]"
 user-invocable: true
 ---
@@ -8,7 +8,7 @@ user-invocable: true
 # /cpv-batch-security-audit — Security audit every plugin in a marketplace
 
 For users who maintain a marketplace and need a fleet-wide security
-snapshot, this command dispatches one `plugin-validator` per plugin
+snapshot, this command dispatches one `cpv-plugin-validator-agent` per plugin
 in `batch_security_audit` mode. The agent runs **only** the
 `validate_security` checker (faster than full plugin validation,
 and covers the most important signal: external CC-Audit / Tirith /
@@ -74,7 +74,7 @@ fi
 
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" plan \
   "${BATCH_SPECS[@]}" \
-  --agent plugin-validator \
+  --agent cpv-plugin-validator-agent \
   --mode batch_security_audit \
   --max-parallel "$MAX_PARALLEL"
 ```
@@ -112,7 +112,7 @@ single main-session message:
 for plugin_index in group:
     plugin = plan.plugins[plugin_index]
     Agent(
-      subagent_type: "plugin-validator",
+      subagent_type: "cpv-plugin-validator-agent",
       description: "Batch-security-audit {plugin.display_name}",
       prompt: |
         <context>
@@ -184,7 +184,7 @@ After every plugin has reported:
 3. If any plugin has findings, append the fix-prompt inline:
 
    ```text
-   Run `/cpv-batch-fix {target}` to dispatch plugin-fixer agents across
+   Run `/cpv-batch-fix {target}` to dispatch cpv-plugin-fixer-agent agents across
    the plugins with findings.
    ```
 
@@ -196,7 +196,7 @@ End the turn. The CMS Stop hook emits the final table via systemMessage.
 status table is informational only. No numbered or lettered action
 rows — the user's next move is to run `/cpv-batch-fix` (text summary).
 The slug ``batch-plugin-validator-status`` is shared with
-`/cpv-batch-validate` (both invoke the same plugin-validator agent
+`/cpv-batch-validate` (both invoke the same cpv-plugin-validator-agent agent
 type, so the orchestrator's auto-derived slug collides — intentional;
 they emit one row per plugin in identical shape). The fixed
 key→action map is empty by design; future post-scan menus extend this
@@ -215,5 +215,5 @@ full pipeline. For a 17-plugin marketplace it's typically 2-3× faster.
 
 - TRDD-3dcbb37c §1-5 — full design
 - `scripts/validate_security.py` — security validator (5 external scanners)
-- `agents/plugin-validator.md` — `batch_security_audit` mode contract
+- `agents/cpv-plugin-validator-agent.md` — `batch_security_audit` mode contract
 - `commands/cpv-batch-validate.md`, `commands/cpv-batch-caching-audit.md`, `commands/cpv-batch-caching-optimize.md` — sibling batch skills

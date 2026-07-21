@@ -1281,7 +1281,7 @@ def stage_ci_preflight(plugin_root: Path) -> int:
     already mirrored CI's Lint job (jscpd / actionlint / mypy / ``uv sync --extra
     dev`` / the enabled Mega-Linter sub-linters / the CIP static defect
     detectors) — but NOTHING invoked it. It was "enforced" only by prose in
-    ``agents/plugin-fixer.md`` and ``agents/plugin-creator.md``, which an agent
+    ``agents/cpv-plugin-fixer-agent.md`` and ``agents/cpv-plugin-creator-agent.md``, which an agent
     can simply skip. A publish could therefore pass every other gate, bump,
     commit, TAG, PUSH, cut a GitHub release — and only THEN go red on GitHub,
     with the broken pipeline already shipped to every consumer. Wiring the
@@ -1410,7 +1410,7 @@ def stage_marketplace_registration_check(
         print(
             f"{YELLOW}⚠ WARNING: no marketplace registration found for this plugin.{NC}\n"
             f"{YELLOW}  If you intend to publish this plugin to a marketplace, run the{NC}\n"
-            f"{YELLOW}  setup-marketplace-auto-notification skill to wire up auto-updates.{NC}\n"
+            f"{YELLOW}  cpv-setup-marketplace-auto-notification skill to wire up auto-updates.{NC}\n"
             f"{YELLOW}  Allowing release to proceed (standalone/experimental mode).{NC}"
         )
         return 0
@@ -1445,7 +1445,7 @@ def _check_layout_a(
     if notify_wf is None or not notify_wf.is_file():
         print(
             f"{RED}✗ .github/workflows/notify-marketplace.yml missing.{NC}\n"
-            f"{RED}  Fix: run the setup-marketplace-auto-notification skill to generate it.{NC}",
+            f"{RED}  Fix: run the cpv-setup-marketplace-auto-notification skill to generate it.{NC}",
             file=sys.stderr,
         )
         return 1
@@ -1455,7 +1455,7 @@ def _check_layout_a(
         print(
             f"{RED}✗ notify-marketplace.yml does not define MARKETPLACE_OWNER/MARKETPLACE_REPO.{NC}\n"
             f"{RED}  Fix: edit .github/workflows/notify-marketplace.yml or re-run{NC}\n"
-            f"{RED}  the setup-marketplace-auto-notification skill.{NC}",
+            f"{RED}  the cpv-setup-marketplace-auto-notification skill.{NC}",
             file=sys.stderr,
         )
         return 1
@@ -1475,7 +1475,7 @@ def _check_layout_a(
         print(
             f"{RED}✗ MARKETPLACE_PAT secret is not configured on this plugin repo.{NC}\n"
             f"{RED}  Fix: gh secret set MARKETPLACE_PAT  (value: a PAT with 'repo' scope){NC}\n"
-            f"{RED}  Then re-run publish. See skill: setup-marketplace-auto-notification.{NC}",
+            f"{RED}  Then re-run publish. See skill: cpv-setup-marketplace-auto-notification.{NC}",
             file=sys.stderr,
         )
         return 1
@@ -1543,7 +1543,7 @@ def _check_layout_a(
             f"{RED}  with a github source entry for {current_slug}.{NC}\n"
             f"{RED}  Fix: add an entry to the remote marketplace.json with:{NC}\n"
             f'{RED}    {{"name": "{plugin_name}", "source": {{"source": "github", "repo": "{current_slug}"}}}}{NC}\n'
-            f"{RED}  See skill: setup-marketplace-auto-notification{NC}",
+            f"{RED}  See skill: cpv-setup-marketplace-auto-notification{NC}",
             file=sys.stderr,
         )
         return 1
@@ -1557,7 +1557,7 @@ def _check_layout_a(
             f"{RED}  will arrive with nothing listening.{NC}\n"
             f"{RED}  Fix: add a workflow in the marketplace repo with:{NC}\n"
             f"{RED}    on: repository_dispatch: types: [plugin-updated]{NC}\n"
-            f"{RED}  See skill: setup-marketplace-auto-notification{NC}",
+            f"{RED}  See skill: cpv-setup-marketplace-auto-notification{NC}",
             file=sys.stderr,
         )
         return 1
@@ -1582,7 +1582,7 @@ def _check_layout_b(plugin_root: Path, details: dict) -> int:
     if marketplace_root is None:
         print(
             f"{RED}✗ Layout B detected but marketplace_root missing from details dict.{NC}\n"
-            f"{RED}  Reference: skills/create-plugin/references/marketplace-layouts.md{NC}",
+            f"{RED}  Reference: skills/cpv-create-plugin/references/marketplace-layouts.md{NC}",
             file=sys.stderr,
         )
         return 1
@@ -1594,7 +1594,7 @@ def _check_layout_b(plugin_root: Path, details: dict) -> int:
             f"{RED}  MARKETPLACE repo root, not the nested plugin subfolder.{NC}\n"
             f"{RED}  Bumping a nested plugin independently breaks the atomic marketplace tag.{NC}\n"
             f"{RED}  Fix: cd {marketplace_root} && uv run python scripts/publish.py --patch{NC}\n"
-            f"{RED}  Reference: skills/create-plugin/references/marketplace-layouts.md{NC}",
+            f"{RED}  Reference: skills/cpv-create-plugin/references/marketplace-layouts.md{NC}",
             file=sys.stderr,
         )
         return 1
@@ -1606,7 +1606,7 @@ def _check_layout_b(plugin_root: Path, details: dict) -> int:
     except (OSError, json.JSONDecodeError) as e:
         print(
             f"{RED}✗ Could not read {mp_json_path}: {e}{NC}\n"
-            f"{RED}  Reference: skills/create-plugin/references/marketplace-layouts.md{NC}",
+            f"{RED}  Reference: skills/cpv-create-plugin/references/marketplace-layouts.md{NC}",
             file=sys.stderr,
         )
         return 1
@@ -1614,7 +1614,7 @@ def _check_layout_b(plugin_root: Path, details: dict) -> int:
     if not isinstance(entries, list):
         print(
             f"{RED}✗ marketplace.json has no 'plugins' array.{NC}\n"
-            f"{RED}  Reference: skills/create-plugin/references/marketplace-layouts.md{NC}",
+            f"{RED}  Reference: skills/cpv-create-plugin/references/marketplace-layouts.md{NC}",
             file=sys.stderr,
         )
         return 1
@@ -1631,7 +1631,7 @@ def _check_layout_b(plugin_root: Path, details: dict) -> int:
             f"{RED}✗ Plugin '{plugin_name}' is not registered in {mp_json_path}.{NC}\n"
             f"{RED}  Fix: add an entry like:{NC}\n"
             f'{RED}    {{"name": "{plugin_name}", "source": "./plugins/{plugin_name}"}}{NC}\n'
-            f"{RED}  Reference: skills/create-plugin/references/marketplace-layouts.md{NC}",
+            f"{RED}  Reference: skills/cpv-create-plugin/references/marketplace-layouts.md{NC}",
             file=sys.stderr,
         )
         return 1
@@ -1910,7 +1910,7 @@ def stage_refresh_self_hashes(plugin_root: Path) -> int:
     `.plugin-self-hashes.json` AND `.cpv-self-hashes.json` (bytes-identical
     compat copy) so v2.50.x cached clients keep verifying successfully.
 
-    The gate is CPV-specific. Other plugins generated by plugin-creator
+    The gate is CPV-specific. Other plugins generated by cpv-plugin-creator-agent
     don't ship a self-hashes manifest and therefore don't need this
     gate in their own publish.py.
     """

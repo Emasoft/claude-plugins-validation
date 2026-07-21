@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Set the MARKETPLACE_PAT secret on one or more GitHub repositories.
 
-This helper exists so agents (plugin-creator, marketplace-fixer,
-migrate-marketplace-architecture, setup-marketplace-auto-notification) do NOT
+This helper exists so agents (cpv-plugin-creator-agent, cpv-marketplace-fixer-agent,
+cpv-migrate-marketplace-architecture, cpv-setup-marketplace-auto-notification) do NOT
 have to improvise ``gh`` command lines. Improvised commands have repeatedly
 used ``echo "$MARKETPLACE_PAT" | gh secret set MARKETPLACE_PAT`` which is
 *wrong* for two reasons:

@@ -4,10 +4,10 @@ This batch corrected stale documentation in four files so they match the
 actual behaviour of `validate_marketplace.py` and the actual set of CPV
 commands/agents:
 
-  * skills/marketplace-authoring-contract/references/preflight-recipe.md
-  * skills/marketplace-authoring-contract/references/source-shape.md
-  * skills/marketplace-authoring-contract/SKILL.md
-  * agents/cache-optimizer-agent.md
+  * skills/cpv-marketplace-authoring-contract/references/preflight-recipe.md
+  * skills/cpv-marketplace-authoring-contract/references/source-shape.md
+  * skills/cpv-marketplace-authoring-contract/SKILL.md
+  * agents/cpv-cache-optimizer-agent.md
 
 The fixes were:
 
@@ -21,7 +21,7 @@ The fixes were:
      (``{"source": {"source": "github", "repo": "..."}}``) that the
      validator actually accepts, and fixed the bogus ``relative-path`` DICT
      type to the real ``directory`` dict / string-shorthand local forms.
-  4. Repointed cache-optimizer-agent.md off the deleted ``cache-optimizer-menu``
+  4. Repointed cpv-cache-optimizer-agent.md off the deleted ``cache-optimizer-menu``
      agent and the deleted ``/cpv-cache-optimize`` command onto the real
      dispatchers (cpv-main-menu + the two batch commands), and replaced the
      Phase-4 example's ``AskUserQuestion`` (which contradicted the hard
@@ -46,11 +46,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-SKILL_DIR = REPO_ROOT / "skills" / "marketplace-authoring-contract"
+SKILL_DIR = REPO_ROOT / "skills" / "cpv-marketplace-authoring-contract"
 PREFLIGHT = SKILL_DIR / "references" / "preflight-recipe.md"
 SOURCE_SHAPE = SKILL_DIR / "references" / "source-shape.md"
 SKILL_MD = SKILL_DIR / "SKILL.md"
-CACHE_AGENT = REPO_ROOT / "agents" / "cache-optimizer-agent.md"
+CACHE_AGENT = REPO_ROOT / "agents" / "cpv-cache-optimizer-agent.md"
 
 # CPV_SCAN_CACHE=0 so probes never hit the version-keyed scan cache.
 _ENV = dict(os.environ, CPV_SCAN_CACHE="0", PLUGIN_SKIP_GITHUB_INTEGRITY="1")
@@ -200,7 +200,7 @@ class TestDocReferencesAreCorrect:
 
 
 class TestCacheOptimizerAgentReferences:
-    """cache-optimizer-agent.md points at the real dispatchers, not deleted ones."""
+    """cpv-cache-optimizer-agent.md points at the real dispatchers, not deleted ones."""
 
     def test_no_ghost_cpv_cache_optimize_command(self):
         """The deleted /cpv-cache-optimize command is not referenced."""

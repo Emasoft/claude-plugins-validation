@@ -104,10 +104,10 @@ user-invocable: true
 
 
 def _register_in_the_skills_menu(plugin: Path, new_skill_name: str, description: str) -> bool:
-    """Append `new_skill_name` to the plugin's the-skills-menu catalog if it exists.
+    """Append `new_skill_name` to the plugin's cpv-the-skills-menu catalog if it exists.
 
-    Per TRDD-9dd64dbf: when a plugin has adopted the-skills-menu method
-    (signalled by `skills/the-skills-menu/SKILL.md` existing), every new
+    Per TRDD-9dd64dbf: when a plugin has adopted cpv-the-skills-menu method
+    (signalled by `skills/cpv-the-skills-menu/SKILL.md` existing), every new
     operational skill MUST be listed in the catalog so agents can
     discover it at runtime. Skip silently when the catalog is absent
     (plugin hasn't adopted the method — also valid).
@@ -119,12 +119,12 @@ def _register_in_the_skills_menu(plugin: Path, new_skill_name: str, description:
     Returns True if the catalog was modified, False if no catalog exists
     or the new skill is already listed.
     """
-    catalog = plugin / "skills" / "the-skills-menu" / "SKILL.md"
+    catalog = plugin / "skills" / "cpv-the-skills-menu" / "SKILL.md"
     if not catalog.is_file():
         return False
     # Never list the catalog itself or the migrator inside the catalog —
     # recursive self-reference is meaningless.
-    if new_skill_name in ("the-skills-menu", "the-skills-menu-create"):
+    if new_skill_name in ("cpv-the-skills-menu", "cpv-the-skills-menu-create"):
         return False
     content = catalog.read_text(encoding="utf-8")
     raw_desc = description.strip().splitlines()[0][:80] if description.strip() else "(describe the skill)"
@@ -150,7 +150,7 @@ def _register_in_the_skills_menu(plugin: Path, new_skill_name: str, description:
     # heading, or another section). Match the BACKTICK-WRAPPED name as it
     # appears in a catalog row (`name`), not a bare substring — a bare
     # substring match falsely skips a new skill whose name is a substring of
-    # an existing entry (e.g. "fix" when "fix-validation" is already listed).
+    # an existing entry (e.g. "fix" when "cpv-fix-validation" is already listed).
     if f"`{new_skill_name}`".lower() in section.lower():
         return False
     # Find the last "| ... |" table row in the section. The trailing group is
@@ -207,10 +207,10 @@ def add_skill(plugin: Path, name: str, description: str, *, force: bool) -> int:
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_md.write_text(_skill_template(name, description), encoding="utf-8")
     print(f"  [add-skill] created {skill_md.relative_to(plugin)}")
-    # TRDD-9dd64dbf: if the plugin uses the-skills-menu method, also
+    # TRDD-9dd64dbf: if the plugin uses cpv-the-skills-menu method, also
     # register the new skill in the catalog so agents can discover it.
     if _register_in_the_skills_menu(plugin, name, description):
-        print(f"  [add-skill] also registered '{name}' in skills/the-skills-menu/SKILL.md catalog")
+        print(f"  [add-skill] also registered '{name}' in skills/cpv-the-skills-menu/SKILL.md catalog")
     return 0
 
 
@@ -285,12 +285,12 @@ def add_hook(plugin: Path, event: str, command: str) -> int:
     # Check for an exact-match duplicate — idempotent re-runs.
     for existing in event_list:
         if existing == new_entry:
-            print(f"  [add-hook] {event}: identical entry already present; skipping")
+            print(f"  [cpv-add-hook] {event}: identical entry already present; skipping")
             return 0
     event_list.append(new_entry)
 
     hooks_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    print(f"  [add-hook] {hooks_json.relative_to(plugin)}: appended {event} → {command!r}")
+    print(f"  [cpv-add-hook] {hooks_json.relative_to(plugin)}: appended {event} → {command!r}")
     return 0
 
 
@@ -361,7 +361,7 @@ def main() -> int:
         return add_command(plugin, args.name, args.description, args.allowed_tools, force=args.force)
     if args.type == "hook":
         if not args.event or not args.command:
-            print("  [add-hook] --event AND --command are required", file=sys.stderr)
+            print("  [cpv-add-hook] --event AND --command are required", file=sys.stderr)
             return 1
         return add_hook(plugin, args.event, args.command)
     if args.type == "mcp":

@@ -1,6 +1,6 @@
 ---
 name: cpv-batch-fix
-description: "Parallel fix for one OR many plugins. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. Single-plugin input → per-shard fan-out (v2.91.0 protocol). Marketplace/list input → per-plugin fan-out (one plugin-fixer per plugin, internal sharding when needed). Use when applying validation fixes across many plugins. Trigger with /cpv-batch-fix."
+description: "Parallel fix for one OR many plugins. Accepts local paths, GitHub URLs, marketplaces, lists, and @listfile shapes. Single-plugin input → per-shard fan-out (v2.91.0 protocol). Marketplace/list input → per-plugin fan-out (one cpv-plugin-fixer-agent per plugin, internal sharding when needed). Use when applying validation fixes across many plugins. Trigger with /cpv-batch-fix."
 user-invocable: true
 argument-hint: "<plugin-or-marketplace-or-list> [--shard-size N] [--max-parallel N] [--min-severity LEVEL]"
 ---
@@ -13,12 +13,12 @@ Parallel fix skill for one OR many plugins. Two dispatch shapes:
 
 - **Single plugin** (default — backward-compatible with v2.91.0):
   shards the plugin's findings into ~15-finding groups and
-  dispatches one `plugin-fixer` per shard, all in parallel. This
+  dispatches one `cpv-plugin-fixer-agent` per shard, all in parallel. This
   is the original `/cpv-batch-fix` behaviour and still applies.
 
 - **Marketplace / list** (NEW in v2.101.0): resolves the spec via
   `scripts/cpv_marketplace_input.py`, then dispatches one
-  `plugin-fixer` per plugin from a single main-session message.
+  `cpv-plugin-fixer-agent` per plugin from a single main-session message.
   Each per-plugin agent runs the standard fix loop on its
   assigned plugin — including its own internal sharding if its
   finding count justifies it.
@@ -31,7 +31,7 @@ The orchestrator body lives in this plugin's
 - `claude-plugins-validation` plugin installed (provides
   `scripts/cpv_batch_planner.py`, `scripts/cpv_batch_aggregator.py`,
   `scripts/cpv_marketplace_input.py`,
-  `scripts/cpv_batch_orchestrator.py`, and the `plugin-fixer`
+  `scripts/cpv_batch_orchestrator.py`, and the `cpv-plugin-fixer-agent`
   agent).
 - For URL inputs: `git` on PATH and network access to `github.com`.
 - Write access to every plugin's tree — this skill MUTATES source
@@ -104,7 +104,7 @@ See [error-handling](references/error-handling.md) §Examples.
 - TRDD-71e68ab5 — per-shard fix protocol (single plugin)
 - TRDD-3dcbb37c — per-plugin fix protocol (marketplace input)
 - `commands/cpv-batch-fix.md` — orchestrator body (in this plugin)
-- `agents/plugin-fixer.md` — fix agent (`batch_shard` and `batch_per_plugin` modes)
+- `agents/cpv-plugin-fixer-agent.md` — fix agent (`batch_shard` and `batch_per_plugin` modes)
 - Sibling batch skills: `cpv-batch-validate`,
   `cpv-batch-security-audit`, `cpv-batch-caching-audit`,
   `cpv-batch-caching-optimize`

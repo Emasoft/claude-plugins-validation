@@ -1,6 +1,6 @@
-"""Tests for the canonical-pipeline migration agent's exit contract (issue #21 ask #1).
+"""Tests for the cpv-canonical-pipeline migration agent's exit contract (issue #21 ask #1).
 
-These are regression tests for the plugin-fixer agent's body and the
+These are regression tests for the cpv-plugin-fixer-agent agent's body and the
 related skills/commands. They guard the contract:
 
 > Migration is NOT complete until (a) every BLOCKER/MAJOR check in
@@ -24,12 +24,12 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-AGENT_FILE = REPO_ROOT / "agents" / "plugin-fixer.md"
+AGENT_FILE = REPO_ROOT / "agents" / "cpv-plugin-fixer-agent.md"
 COMMAND_FILE = REPO_ROOT / "commands" / "cpv-upgrade-plugin.md"
-CANONICAL_PIPELINE_SKILL = REPO_ROOT / "skills" / "canonical-pipeline" / "SKILL.md"
-FIX_VALIDATION_SKILL = REPO_ROOT / "skills" / "fix-validation" / "SKILL.md"
-STANDARDIZE_PLUGIN_SKILL = REPO_ROOT / "skills" / "standardize-plugin" / "SKILL.md"
-ITERATIVE_FIX_LOOP = REPO_ROOT / "skills" / "fix-validation" / "references" / "iterative-fix-loop.md"
+CANONICAL_PIPELINE_SKILL = REPO_ROOT / "skills" / "cpv-canonical-pipeline" / "SKILL.md"
+FIX_VALIDATION_SKILL = REPO_ROOT / "skills" / "cpv-fix-validation" / "SKILL.md"
+STANDARDIZE_PLUGIN_SKILL = REPO_ROOT / "skills" / "cpv-standardize-plugin" / "SKILL.md"
+ITERATIVE_FIX_LOOP = REPO_ROOT / "skills" / "cpv-fix-validation" / "references" / "iterative-fix-loop.md"
 CHECKLIST_FILE = REPO_ROOT / "references" / "canonical-pipeline-migration-checklist.md"
 
 
@@ -47,7 +47,7 @@ def test_checklist_reference_file_exists() -> None:
 
 def test_plugin_fixer_agent_file_exists() -> None:
     """The migration agent file MUST exist — /cpv-upgrade-plugin dispatches it."""
-    assert AGENT_FILE.exists(), f"plugin-fixer agent not found at {AGENT_FILE}"
+    assert AGENT_FILE.exists(), f"cpv-plugin-fixer-agent agent not found at {AGENT_FILE}"
 
 
 # ── Contract: agent body references the checklist ────────────────────────────
@@ -62,7 +62,7 @@ def test_agent_references_canonical_pipeline_migration_checklist() -> None:
     """
     body = AGENT_FILE.read_text()
     assert "canonical-pipeline-migration-checklist.md" in body, (
-        "agents/plugin-fixer.md must reference the 87-check checklist "
+        "agents/cpv-plugin-fixer-agent.md must reference the 87-check checklist "
         "(references/canonical-pipeline-migration-checklist.md) — without "
         "this link the agent cannot locate the post-migration verification "
         "matrix and silently regresses to the legacy validator-only gate."
@@ -73,7 +73,7 @@ def test_agent_has_pre_completion_verification_section() -> None:
     """Agent body MUST contain the new "Pre-completion verification (REQUIRED)" section."""
     body = AGENT_FILE.read_text()
     assert re.search(r"## Pre-completion verification \(REQUIRED\)", body), (
-        "agents/plugin-fixer.md must contain a section titled "
+        "agents/cpv-plugin-fixer-agent.md must contain a section titled "
         "'Pre-completion verification (REQUIRED)' that lists, in order, "
         "the bash commands the agent runs after the regular fix loop "
         "(run_all_checks → publish.py --print-gates → --dry-run → --patch "
@@ -85,7 +85,7 @@ def test_agent_runs_all_82_checks_via_run_all_checks() -> None:
     """Agent body MUST invoke run_all_checks (the function defined in the checklist)."""
     body = AGENT_FILE.read_text()
     assert "run_all_checks" in body, (
-        "agents/plugin-fixer.md must invoke run_all_checks (the bash "
+        "agents/cpv-plugin-fixer-agent.md must invoke run_all_checks (the bash "
         "function that executes the 87-check matrix from "
         "canonical-pipeline-migration-checklist.md and emits a "
         "Unicode-bordered Markdown table)."
@@ -96,12 +96,12 @@ def test_agent_invokes_gh_run_watch() -> None:
     """Agent body MUST invoke `gh run watch --exit-status` on the resulting CI run."""
     body = AGENT_FILE.read_text()
     assert "gh run watch" in body, (
-        "agents/plugin-fixer.md must invoke `gh run watch` to verify CI "
+        "agents/cpv-plugin-fixer-agent.md must invoke `gh run watch` to verify CI "
         "is green on the resulting tag — the user's exit contract is "
         "'CI passes on next push'."
     )
     assert "--exit-status" in body, (
-        "agents/plugin-fixer.md must use `gh run watch --exit-status` "
+        "agents/cpv-plugin-fixer-agent.md must use `gh run watch --exit-status` "
         "(without the flag, the command exits 0 even if the run failed)."
     )
 
@@ -110,7 +110,7 @@ def test_agent_runs_real_publish_patch() -> None:
     """Agent body MUST invoke a real `publish.py --patch` (not just --dry-run)."""
     body = AGENT_FILE.read_text()
     assert "publish.py --patch" in body, (
-        "agents/plugin-fixer.md must invoke `publish.py --patch` "
+        "agents/cpv-plugin-fixer-agent.md must invoke `publish.py --patch` "
         "(or --minor/--major) to actually push the new tag — a "
         "--dry-run alone would not exercise the CI run."
     )
@@ -131,14 +131,14 @@ def test_agent_warns_about_force_templates_data_loss() -> None:
     body = AGENT_FILE.read_text()
     # The warning must be present, not just the flag.
     assert "--force-templates" in body, (
-        "agents/plugin-fixer.md must mention the --force-templates option in the post-failure decision matrix."
+        "agents/cpv-plugin-fixer-agent.md must mention the --force-templates option in the post-failure decision matrix."
     )
     # And it must be paired with a warning about overwriting customisations.
     has_warning = any(
         kw in body.lower() for kw in ("overwrit", "lost", "lose", "hand-tuned", "customisation", "customization")
     )
     assert has_warning, (
-        "agents/plugin-fixer.md must explicitly warn that --force-templates "
+        "agents/cpv-plugin-fixer-agent.md must explicitly warn that --force-templates "
         "will overwrite hand-tuned customisations to canonical files."
     )
 
@@ -158,7 +158,7 @@ def test_agent_does_not_silently_force_templates_on_failure() -> None:
     ]
     matched = any(re.search(p, body, re.IGNORECASE) for p in silent_phrases)
     assert matched, (
-        "agents/plugin-fixer.md must explicitly forbid silent "
+        "agents/cpv-plugin-fixer-agent.md must explicitly forbid silent "
         "--force-templates on failure (must instead surface the "
         "per-CHECK failure list and ask the user)."
     )
@@ -171,7 +171,7 @@ def test_agent_has_migration_exit_contract_section() -> None:
     """Agent body MUST contain a "Migration exit contract" section (or equivalent)."""
     body = AGENT_FILE.read_text()
     assert re.search(r"Migration exit contract|Migration is NOT complete", body), (
-        "agents/plugin-fixer.md must contain a 'Migration exit contract' "
+        "agents/cpv-plugin-fixer-agent.md must contain a 'Migration exit contract' "
         "subsection (or equivalent wording 'Migration is NOT complete') in "
         "the Completion gate section that spells out the (a)+(b)+(c) "
         "triple condition."
@@ -182,7 +182,7 @@ def test_agent_exit_contract_mentions_marketplace_layout() -> None:
     """Agent's migration exit contract MUST acknowledge marketplace/Layout-C cases."""
     body = AGENT_FILE.read_text()
     assert "Layout-C" in body or "Layout C" in body or "marketplace" in body.lower(), (
-        "agents/plugin-fixer.md must mention Layout-C marketplace or the "
+        "agents/cpv-plugin-fixer-agent.md must mention Layout-C marketplace or the "
         "registered-upstream-marketplace case in the exit contract — "
         "without it, plugins in marketplaces would silently skip the "
         "marketplace publish + watch step."
@@ -193,7 +193,7 @@ def test_agent_exit_contract_mentions_partial_state() -> None:
     """Agent body MUST return [PARTIAL] (not [DONE]) on contract failure."""
     body = AGENT_FILE.read_text()
     assert "[PARTIAL]" in body, (
-        "agents/plugin-fixer.md must return [PARTIAL] when the migration "
+        "agents/cpv-plugin-fixer-agent.md must return [PARTIAL] when the migration "
         "exit contract fails (not [DONE], not [BLOCKED] alone) — this is "
         "the user-visible signal that a migration ran but did not reach "
         "the CI-green gate."
@@ -204,7 +204,7 @@ def test_agent_exit_contract_mentions_partial_state() -> None:
 
 
 def test_agent_has_no_tools_field() -> None:
-    """plugin-fixer MUST NOT declare a ``tools:`` field — it inherits ALL tools.
+    """cpv-plugin-fixer-agent MUST NOT declare a ``tools:`` field — it inherits ALL tools.
 
     Per the user's fleet-wide policy (every CPV skill and agent may call all
     tools, no limit), the agent omits ``tools:`` entirely. An absent ``tools:``
@@ -219,11 +219,11 @@ def test_agent_has_no_tools_field() -> None:
     body = AGENT_FILE.read_text()
     # Extract the YAML frontmatter (between first two '---' markers).
     fm_match = re.match(r"^---\n(.*?)\n---", body, re.DOTALL)
-    assert fm_match, "agents/plugin-fixer.md must have YAML frontmatter"
+    assert fm_match, "agents/cpv-plugin-fixer-agent.md must have YAML frontmatter"
     frontmatter = fm_match.group(1)
     tools_section_match = re.search(r"^tools:", frontmatter, re.MULTILINE)
     assert tools_section_match is None, (
-        "agents/plugin-fixer.md frontmatter must NOT declare a `tools:` field. "
+        "agents/cpv-plugin-fixer-agent.md frontmatter must NOT declare a `tools:` field. "
         "Per the fleet-wide 'all tools allowed' policy, an absent tools: field "
         "lets the agent inherit the full surface (Bash, AskUserQuestion, etc.). "
         "A restrictive list would re-introduce the limit the policy removed."
@@ -232,7 +232,7 @@ def test_agent_has_no_tools_field() -> None:
 
 # ── Contract: agent file (formerly the command file) tells user about new contract + time ──
 # v2.90.0 (TRDD-c50531c2): the cpv-upgrade-plugin slash command was deleted.
-# The migration contract now lives entirely in agents/plugin-fixer.md, which
+# The migration contract now lives entirely in agents/cpv-plugin-fixer-agent.md, which
 # is dispatched from cpv-main-menu's "Diagnose & Upgrade" top-level row.
 # The COMMAND_FILE constant is kept above only as a regression marker —
 # every assertion that used to target it now targets AGENT_FILE.
@@ -247,17 +247,17 @@ def test_deleted_cpv_upgrade_plugin_command_stays_deleted() -> None:
     assert not COMMAND_FILE.exists(), (
         f"{COMMAND_FILE} was deleted in v2.90.0 (TRDD-c50531c2) and MUST stay "
         "deleted. The migration flow now goes through cpv-main-menu's "
-        "'Diagnose & Upgrade' top-level row, which dispatches plugin-fixer."
+        "'Diagnose & Upgrade' top-level row, which dispatches cpv-plugin-fixer-agent."
     )
 
 
 def test_agent_description_warns_about_total_time() -> None:
-    """plugin-fixer.md description MUST tell user about the 10-15 min time budget
+    """cpv-plugin-fixer-agent.md description MUST tell user about the 10-15 min time budget
     (or reference the 87-check matrix, which implies the same)."""
     body = AGENT_FILE.read_text()
     has_time_hint = bool(re.search(r"10-15\s*min|10-15\s*minute|87-check", body, re.IGNORECASE))
     assert has_time_hint, (
-        "agents/plugin-fixer.md must tell the user (via its description or "
+        "agents/cpv-plugin-fixer-agent.md must tell the user (via its description or "
         "body) that the migration contract runs the 87-check matrix AND a "
         "real publish + CI watch (total time 10-15 minutes) — without this "
         "hint the user might abort thinking the agent hung. v2.90.0 moved "
@@ -266,26 +266,26 @@ def test_agent_description_warns_about_total_time() -> None:
 
 
 def test_agent_mentions_87_check_matrix() -> None:
-    """plugin-fixer.md MUST mention the 87-check Pre-completion verification matrix."""
+    """cpv-plugin-fixer-agent.md MUST mention the 87-check Pre-completion verification matrix."""
     body = AGENT_FILE.read_text()
     assert "87" in body, (
-        "agents/plugin-fixer.md must reference '87' (the check count) so "
+        "agents/cpv-plugin-fixer-agent.md must reference '87' (the check count) so "
         "users know what they are signing up for. v2.90.0 moved this "
         "responsibility from the deleted cpv-upgrade-plugin command."
     )
 
 
 def test_agent_mentions_real_publish_and_ci_watch() -> None:
-    """plugin-fixer.md MUST mention the real-publish + gh run watch step."""
+    """cpv-plugin-fixer-agent.md MUST mention the real-publish + gh run watch step."""
     body = AGENT_FILE.read_text()
     has_publish = "publish.py --patch" in body or "real publish" in body.lower()
     has_ci = "gh run watch" in body or "green CI" in body
     assert has_publish, (
-        "agents/plugin-fixer.md must mention `publish.py --patch` or 'real "
+        "agents/cpv-plugin-fixer-agent.md must mention `publish.py --patch` or 'real "
         "publish' so users know the migration will push a new tag."
     )
     assert has_ci, (
-        "agents/plugin-fixer.md must mention `gh run watch` or 'green CI' so users know CI must pass before [DONE]."
+        "agents/cpv-plugin-fixer-agent.md must mention `gh run watch` or 'green CI' so users know CI must pass before [DONE]."
     )
 
 
@@ -293,21 +293,21 @@ def test_agent_mentions_real_publish_and_ci_watch() -> None:
 
 
 def test_canonical_pipeline_skill_links_checklist() -> None:
-    """canonical-pipeline SKILL.md MUST link to the 87-check checklist."""
+    """cpv-canonical-pipeline SKILL.md MUST link to the 87-check checklist."""
     body = CANONICAL_PIPELINE_SKILL.read_text()
     assert "canonical-pipeline-migration-checklist.md" in body, (
-        "skills/canonical-pipeline/SKILL.md must link to the 87-check "
-        "checklist — the skill is loaded by plugin-fixer for migration "
+        "skills/cpv-canonical-pipeline/SKILL.md must link to the 87-check "
+        "checklist — the skill is loaded by cpv-plugin-fixer-agent for migration "
         "runs and must surface the same exit contract."
     )
 
 
 def test_fix_validation_skill_links_checklist() -> None:
-    """fix-validation SKILL.md MUST link to the 87-check checklist."""
+    """cpv-fix-validation SKILL.md MUST link to the 87-check checklist."""
     body = FIX_VALIDATION_SKILL.read_text()
     assert "canonical-pipeline-migration-checklist.md" in body, (
-        "skills/fix-validation/SKILL.md must link to the 87-check checklist "
-        "— the skill is loaded by plugin-fixer for migration runs and must "
+        "skills/cpv-fix-validation/SKILL.md must link to the 87-check checklist "
+        "— the skill is loaded by cpv-plugin-fixer-agent for migration runs and must "
         "surface the same exit contract."
     )
 
@@ -316,7 +316,7 @@ def test_iterative_fix_loop_describes_migration_extra_steps() -> None:
     """iterative-fix-loop.md MUST describe the migration-only extra steps (7c, 7d)."""
     body = ITERATIVE_FIX_LOOP.read_text()
     assert re.search(r"run_all_checks|87-check|Pre-completion verification", body), (
-        "skills/fix-validation/references/iterative-fix-loop.md must "
+        "skills/cpv-fix-validation/references/iterative-fix-loop.md must "
         "describe the migration-only extra steps (7c run_all_checks, 7d "
         "real publish + gh run watch). Without this, a fixer agent that "
         "loaded only this reference would skip them and silently regress."
@@ -324,13 +324,13 @@ def test_iterative_fix_loop_describes_migration_extra_steps() -> None:
 
 
 def test_standardize_plugin_skill_mentions_82_check_matrix() -> None:
-    """standardize-plugin SKILL.md MUST mention the 87-check matrix in its checklist."""
+    """cpv-standardize-plugin SKILL.md MUST mention the 87-check matrix in its checklist."""
     body = STANDARDIZE_PLUGIN_SKILL.read_text()
     has_checklist_ref = (
         "canonical-pipeline-migration-checklist" in body or "87-check matrix" in body
     )
     assert has_checklist_ref, (
-        "skills/standardize-plugin/SKILL.md must mention the 87-check "
+        "skills/cpv-standardize-plugin/SKILL.md must mention the 87-check "
         "matrix in its tick-box checklist — when this skill is invoked "
         "from a /cpv-upgrade-plugin path, the post-fix verification step "
         "must be visible."
@@ -360,7 +360,7 @@ def test_agent_completion_gate_blocks_on_run_all_non_zero() -> None:
     ]
     matched = any(re.search(p, body, re.IGNORECASE | re.DOTALL) for p in success_tied_to_runall_patterns)
     assert matched, (
-        "agents/plugin-fixer.md must tie the SUCCESS / [DONE] return "
+        "agents/cpv-plugin-fixer-agent.md must tie the SUCCESS / [DONE] return "
         "condition to run_all_checks returning exit 0. Without this "
         "explicit tying, a future edit could mention run_all_checks for "
         "documentation purposes only and silently bypass it. Add wording "

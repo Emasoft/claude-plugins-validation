@@ -367,7 +367,7 @@ NO menu, NO AskUserQuestion)**:
 Picking `A` already IS the user's request to chat. Do NOT ask
 "what can I help you with?" — that wastes a turn. Instead the menu
 agent IMMEDIATELY hands control to a fresh Opus sub-agent (dispatched
-via the `Agent` tool with `subagent_type: cpv-spark` and
+via the `Agent` tool with `subagent_type: cpv-spark-agent` and
 `model: opus`). The sub-agent's FIRST output is its analysis +
 suggestion — not a question, not a greeting, not a menu.
 
@@ -979,13 +979,13 @@ Fixed key→action map (slug `validate-batch`):
 
 | Key | Action ID         | Label shown to user                                                                                |
 |-----|-------------------|-----------------------------------------------------------------------------------------------------|
-| 1   | batch_validate    | Validate (read-only, fan-out) — /cpv-batch-validate (plugin-validator batch_validate)              |
-| 2   | batch_security    | Security audit (5 ext. scanners) — /cpv-batch-security-audit (plugin-validator batch_security)     |
-| 3   | batch_cache_audit | Caching audit (CA-01..CA-07) — /cpv-batch-caching-audit (cache-optimizer-agent batch_audit)        |
-| 4   | batch_cache_opt   | Caching optimize (audit + fix) — /cpv-batch-caching-optimize (cache-optimizer-agent batch_fix)     |
-| 5   | batch_fix         | Fix (per-plugin) — /cpv-batch-fix (plugin-fixer batch_per_plugin)                                  |
-| 6   | batch_val_fix     | Validate + fix (same-turn) — /cpv-batch-validate-and-fix (plugin-fixer same_turn_validate_fix)     |
-| 7   | batch_full        | Full scan + fix (same-turn) — /cpv-batch-full-scan-and-fix (plugin-fixer same_turn_full)           |
+| 1   | batch_validate    | Validate (read-only, fan-out) — /cpv-batch-validate (cpv-plugin-validator-agent batch_validate)              |
+| 2   | batch_security    | Security audit (5 ext. scanners) — /cpv-batch-security-audit (cpv-plugin-validator-agent batch_security)     |
+| 3   | batch_cache_audit | Caching audit (CA-01..CA-07) — /cpv-batch-caching-audit (cpv-cache-optimizer-agent batch_audit)        |
+| 4   | batch_cache_opt   | Caching optimize (audit + fix) — /cpv-batch-caching-optimize (cpv-cache-optimizer-agent batch_fix)     |
+| 5   | batch_fix         | Fix (per-plugin) — /cpv-batch-fix (cpv-plugin-fixer-agent batch_per_plugin)                                  |
+| 6   | batch_val_fix     | Validate + fix (same-turn) — /cpv-batch-validate-and-fix (cpv-plugin-fixer-agent same_turn_validate_fix)     |
+| 7   | batch_full        | Full scan + fix (same-turn) — /cpv-batch-full-scan-and-fix (cpv-plugin-fixer-agent same_turn_full)           |
 | 8   | batch_scope       | Scope-aware doctor (LOCAL only) — /cpv-batch-scope-diagnose (cpv-doctor-agent batch_scope_diagnose)|
 | A   | ask               | Ask the agent                                                                                       |
 | B   | back              | Back — Go back to the Validate menu                                                                |
@@ -1008,7 +1008,7 @@ prompt for the input string.
 ##### 3.1.7.1 Batch validate
 
 - **arg-prompt**: `Input? (single plugin path/URL, marketplace path/URL, comma-list, @listfile, skill folder, or skill pack)`
-- **execution**: invoke the skill via the Skill tool — `Skill({skill: "claude-plugins-validation:cpv-batch-validate", args: "<input>"})`. The skill resolves the input, plans shards (≤8 parallel by default, cap 16), and the main session fans out the plugin-validator dispatches in one message.
+- **execution**: invoke the skill via the Skill tool — `Skill({skill: "claude-plugins-validation:cpv-batch-validate", args: "<input>"})`. The skill resolves the input, plans shards (≤8 parallel by default, cap 16), and the main session fans out the cpv-plugin-validator-agent dispatches in one message.
 
 ##### 3.1.7.2 Batch security audit
 
@@ -1028,7 +1028,7 @@ prompt for the input string.
 ##### 3.1.7.5 Batch fix (per-plugin)
 
 - **arg-prompt**: `Input? (same shapes as 3.1.7.1)`
-- **execution**: `Skill({skill: "claude-plugins-validation:cpv-batch-fix", args: "<input>"})`. One plugin-fixer subagent per plugin in `batch_per_plugin` mode.
+- **execution**: `Skill({skill: "claude-plugins-validation:cpv-batch-fix", args: "<input>"})`. One cpv-plugin-fixer-agent subagent per plugin in `batch_per_plugin` mode.
 
 ##### 3.1.7.6 Batch validate + fix (same-turn)
 
@@ -1088,11 +1088,11 @@ Fixed key→action map (slug `fix`):
 
 | Key | Action ID      | Label shown to user                                                                          |
 |-----|----------------|----------------------------------------------------------------------------------------------|
-| 1   | fix_plugin     | Fix plugin issues — From a report file OR a plugin folder (plugin-fixer)                      |
+| 1   | fix_plugin     | Fix plugin issues — From a report file OR a plugin folder (cpv-plugin-fixer-agent)                      |
 | 2   | fix_mkt        | Fix marketplace issues — From a report file OR a marketplace folder                           |
 | 3   | fix_cache      | Optimize prompt cache — Audit + auto-fix the cache patterns                                   |
-| 4   | fix_devitalize | Devitalize security threats — Convert flagged execution-class code into provably-inert data (plugin-devitalizer); never suppresses a rule, flags load-bearing code |
-| 5   | fix_leaks      | Prevent leaks & harden — Redact exposed secrets (runtime-read the needed ones) + implement missing safeguards (plugin-leaks-preventer); never suppresses a rule, flags what it can't safely fix |
+| 4   | fix_devitalize | Devitalize security threats — Convert flagged execution-class code into provably-inert data (cpv-plugin-devitalizer-agent); never suppresses a rule, flags load-bearing code |
+| 5   | fix_leaks      | Prevent leaks & harden — Redact exposed secrets (runtime-read the needed ones) + implement missing safeguards (cpv-plugin-leaks-preventer-agent); never suppresses a rule, flags what it can't safely fix |
 | 6   | fix_batch      | Batch fix (fleet) — Drill into §3.1.7 Batch / fleet                                           |
 | A   | ask            | Ask the agent                                                                                 |
 | B   | back           | Back — Go back to the top-level menu                                                          |
@@ -1114,37 +1114,37 @@ END THE TURN.
 - **execution (TRDD-14cc93a6 — runtime routing; v2.98.0 — lowered thresholds + auto-batch)**:
   1. Quick-triage: run `validate_plugin.py --json --no-color <path>` and parse `counts.critical + counts.major + counts.minor` from stdout. Time-budget: ≤60 s. (Skip if the user passed an already-existing `.json` report — read its `counts` directly.)
   2. **If `total_findings == 0`** → reply `Plugin is already clean. ✓` and return to the post-action menu.
-  3. **If `total_findings ≤ 20`** → dispatch the **plugin-fixer agent** with the path. (The single-agent fix loop is sized for opus 200K context with v2.98.0 safe-ceiling ~15-25; raise this threshold proportionally if `plugin-fixer.model` is upgraded to a 1M variant — then the ceiling is ~50-75.)
-  4. **If `total_findings > 20`** → DON'T dispatch plugin-fixer (it would die mid-loop on a context exhaust). AUTO-DISPATCH the batch protocol from the main session:
+  3. **If `total_findings ≤ 20`** → dispatch the **cpv-plugin-fixer-agent agent** with the path. (The single-agent fix loop is sized for opus 200K context with v2.98.0 safe-ceiling ~15-25; raise this threshold proportionally if `cpv-plugin-fixer-agent.model` is upgraded to a 1M variant — then the ceiling is ~50-75.)
+  4. **If `total_findings > 20`** → DON'T dispatch cpv-plugin-fixer-agent (it would die mid-loop on a context exhaust). AUTO-DISPATCH the batch protocol from the main session:
      - Reply with: `This plugin has <N> findings — exceeds single-agent safe-ceiling. Auto-dispatching batch protocol (<shard_count> shards × <shard_size> findings).`
      - Run `python3 scripts/cpv_batch_planner.py <path> --shard-size 15` via Bash (zero LLM cost; emits index.json + per-shard manifests).
-     - In the SAME main-session message, fan out N parallel `plugin-fixer` Agent calls in `batch_shard` mode — one per shard, each given its own shard manifest path. This is the ONLY place the Agent tool can parallelise (per Anthropic spec: subagents cannot spawn subagents).
+     - In the SAME main-session message, fan out N parallel `cpv-plugin-fixer-agent` Agent calls in `batch_shard` mode — one per shard, each given its own shard manifest path. This is the ONLY place the Agent tool can parallelise (per Anthropic spec: subagents cannot spawn subagents).
      - After all shards return, run `python3 scripts/cpv_batch_aggregator.py <session-dir>` via Bash and surface the consolidated outcome.
      - The user no longer has to type `/cpv-batch-fix` manually — the menu does the dispatch end-to-end.
-  5. **If a dispatched plugin-fixer returns a line starting with `[BATCH_REQUIRED]`** (the fixer detected the threshold itself), parse the `plugin-root=<P>` token and route to step 4 with that path.
+  5. **If a dispatched cpv-plugin-fixer-agent returns a line starting with `[BATCH_REQUIRED]`** (the fixer detected the threshold itself), parse the `plugin-root=<P>` token and route to step 4 with that path.
   6. After the chosen workflow returns, surface the one-line summary verbatim and route to the post-action menu.
 
 #### 3.2.2 Fix marketplace findings
 
 - **arg-prompt**: `Path to a marketplace validation report OR a marketplace directory?`
-- **execution**: dispatch the **marketplace-fixer agent**. Handles mechanical fixes AND architectural migrations (Layout A↔B↔C).
+- **execution**: dispatch the **cpv-marketplace-fixer-agent agent**. Handles mechanical fixes AND architectural migrations (Layout A↔B↔C).
 
 #### 3.2.3 Cache optimize
 
 - **arg-prompts** (in order):
   1. `Path to plugin or project root?`
   2. `Also do broader cache-aware refactoring? (yes/no — --broader invokes Phase 4)`
-- **execution**: dispatch the **cache-optimizer-agent** with the path and `--broader` flag if requested.
+- **execution**: dispatch the **cpv-cache-optimizer-agent** with the path and `--broader` flag if requested.
 
 #### 3.2.4 Devitalize security threats
 
 - **arg-prompt**: `Path to a security report .md file OR a plugin directory?`
-- **execution**: dispatch the **plugin-devitalizer agent** (`model: opus` for the security reasoning) with the path. It scans with `validate_security` + native skillaudit, then converts each flagged execution-class finding into provably-inert data — passing the security gate by neutralizing the code's shape, NEVER by suppressing a rule or relaxing `--strict`. Load-bearing code (live shell-exec, real installers, genuine code-execution features, verified leaked secrets) is FLAGGED to the user, not silently broken. The agent runs a scan → classify → minimal-transform → re-scan-to-prove-inert loop until the scan is clean or only load-bearing findings remain flagged, then returns a before/after report path.
+- **execution**: dispatch the **cpv-plugin-devitalizer-agent agent** (`model: opus` for the security reasoning) with the path. It scans with `validate_security` + native skillaudit, then converts each flagged execution-class finding into provably-inert data — passing the security gate by neutralizing the code's shape, NEVER by suppressing a rule or relaxing `--strict`. Load-bearing code (live shell-exec, real installers, genuine code-execution features, verified leaked secrets) is FLAGGED to the user, not silently broken. The agent runs a scan → classify → minimal-transform → re-scan-to-prove-inert loop until the scan is clean or only load-bearing findings remain flagged, then returns a before/after report path.
 
 #### 3.2.5 Prevent leaks & harden
 
 - **arg-prompt**: `Path to a security report .md file OR a plugin directory?`
-- **execution**: dispatch the **plugin-leaks-preventer agent** (`model: opus` for the security reasoning) with the path. It scans with `validate_security` + native skillaudit, then redacts every exposed secret (runtime-reading the genuinely-needed ones from env / exported vars / GitHub vars / OS keychain) and implements the missing safeguards (safe config parse, input sanitization, launch/deploy params, prompt-injection pre-scan) — passing the gate by removing leaks and adding safeguards, NEVER by suppressing a rule or relaxing `--strict`. A verified live committed secret is FLAGGED to rotate + purge history, not silently edited; anything that cannot be safely fixed is FLAGGED, never broken. The agent runs a scan → classify → minimal redact/harden → re-scan-to-prove-clean loop until the scan is clean or only flagged findings remain, then returns a before/after report path.
+- **execution**: dispatch the **cpv-plugin-leaks-preventer-agent agent** (`model: opus` for the security reasoning) with the path. It scans with `validate_security` + native skillaudit, then redacts every exposed secret (runtime-reading the genuinely-needed ones from env / exported vars / GitHub vars / OS keychain) and implements the missing safeguards (safe config parse, input sanitization, launch/deploy params, prompt-injection pre-scan) — passing the gate by removing leaks and adding safeguards, NEVER by suppressing a rule or relaxing `--strict`. A verified live committed secret is FLAGGED to rotate + purge history, not silently edited; anything that cannot be safely fixed is FLAGGED, never broken. The agent runs a scan → classify → minimal redact/harden → re-scan-to-prove-clean loop until the scan is clean or only flagged findings remain, then returns a before/after report path.
 
 #### 3.2.6 Batch fix (fleet)
 
@@ -1172,7 +1172,7 @@ actions):
 | 7   | new_mcp           | New MCP server (in existing plugin) — Register server in .mcp.json                  |
 | 8   | pack_components   | Pack components into a plugin (multi-select)                                        |
 | 9   | add_deps          | Add dependencies (existing plugin) — --add NAME[@MKT[@VER]] OR --from PATH-OR-URL  |
-| 10  | impl_skills_menu  | Implement the-skills-menu method (existing) — Decouple skills from agents          |
+| 10  | impl_skills_menu  | Implement cpv-the-skills-menu method (existing) — Decouple skills from agents          |
 | A   | ask               | Ask the agent                                                                       |
 | B   | back              | Back — Go back to the top-level menu                                                |
 | 0   | cancel            | Cancel / Exit                                                                       |
@@ -1193,8 +1193,8 @@ END THE TURN.
   1. `Plugin name?`
   2. `Target directory?`
   3. `Layout (A=hub-and-spoke / B=nested monorepo / C=marketplace-in-plugin self-referential)?`
-- **execution**: dispatch the **plugin-creator agent** with the answers. Newly-scaffolded plugins ship with current pipeline standards baked in (idempotent publish.py, cpv_lint_engine, pathlib-only Python, sanitized inputs, validate_pipeline_script_refs rule, no `.sh` scripts).
-- **post-execution**: ALWAYS auto-dispatch the **plugin-diagnoser agent** on the just-scaffolded plugin path. If the diagnosis returns 0 CRITICAL/MAJOR/MINOR, print `✓ Scaffold passes diagnose-plugin clean.` and queue the §3.99 spec via `print_menu.py`. Otherwise let the diagnoser queue its follow-up menu spec so the user can pick a fix path.
+- **execution**: dispatch the **cpv-plugin-creator-agent agent** with the answers. Newly-scaffolded plugins ship with current pipeline standards baked in (idempotent publish.py, cpv_lint_engine, pathlib-only Python, sanitized inputs, validate_pipeline_script_refs rule, no `.sh` scripts).
+- **post-execution**: ALWAYS auto-dispatch the **cpv-plugin-diagnoser-agent agent** on the just-scaffolded plugin path. If the diagnosis returns 0 CRITICAL/MAJOR/MINOR, print `✓ Scaffold passes diagnose-plugin clean.` and queue the §3.99 spec via `print_menu.py`. Otherwise let the diagnoser queue its follow-up menu spec so the user can pick a fix path.
 
 #### 3.6.2 Scaffold a new marketplace
 
@@ -1202,7 +1202,7 @@ END THE TURN.
   1. `Marketplace name?`
   2. `Target directory?`
   3. `Owner GitHub username?`
-- **execution**: dispatch the **plugin-creator agent** in marketplace mode.
+- **execution**: dispatch the **cpv-plugin-creator-agent agent** in marketplace mode.
 
 #### 3.6.3 Add a skill to an existing plugin
 
@@ -1331,11 +1331,11 @@ The recovery path for "Phase 0 plugin-shape detection refused" — converts a fo
       "${INCLUDE_FLAGS[@]}"
   ```
 
-- **post-execution**: ALWAYS auto-dispatch the **plugin-diagnoser agent** on `$TARGET`. If the diagnose returns 0 CRITICAL/MAJOR, print `✓ Pack passes diagnose-plugin clean.` and queue the §3.99 spec via `print_menu.py`. Otherwise let the diagnoser queue its follow-up menu spec so the user can pick a fix path.
+- **post-execution**: ALWAYS auto-dispatch the **cpv-plugin-diagnoser-agent agent** on `$TARGET`. If the diagnose returns 0 CRITICAL/MAJOR, print `✓ Pack passes diagnose-plugin clean.` and queue the §3.99 spec via `print_menu.py`. Otherwise let the diagnoser queue its follow-up menu spec so the user can pick a fix path.
 
 - **JSON / remote-API mode**: append `--json` to make `cpv_pack_components.py` emit a single JSON object on stdout instead of human prose — used when the menu is driven by an external orchestrator.
 
-- **shape-detection escape hatch**: when Phase 0 detection has refused (per `skills/plugin-validation-skill/references/shape-detection.md`), this menu entry is the recommended remedy for option 1 ("Wrap into a NEW plugin") of the hard-refusal protocol.
+- **shape-detection escape hatch**: when Phase 0 detection has refused (per `skills/cpv-plugin-validation-skill/references/shape-detection.md`), this menu entry is the recommended remedy for option 1 ("Wrap into a NEW plugin") of the hard-refusal protocol.
 
 #### 3.6.9 Add dependencies (existing plugin)
 
@@ -1379,10 +1379,10 @@ Adds plugin dependencies to a target plugin's `plugin.json::dependencies` array 
 
 - **post-execution**: auto-run `validate_plugin --strict` on the target. If unversioned bare-string deps emit `WARNING [RC-DEP-VERSION-001]`, surface them and offer to convert to pinned via a follow-up `--add` invocation.
 
-#### 3.6.10 Implement the-skills-menu method (existing plugin)
+#### 3.6.10 Implement cpv-the-skills-menu method (existing plugin)
 
 Decouple skills from agents in any Claude Code plugin. After this leaf
-runs, every agent in the target plugin declares only `skills: [the-skills-menu]`
+runs, every agent in the target plugin declares only `skills: [cpv-the-skills-menu]`
 and picks operational skills dynamically via the `Skill()` tool at runtime.
 Works on ANY plugin (CPV, other people's plugins, your own).
 
@@ -1397,15 +1397,15 @@ Works on ANY plugin (CPV, other people's plugins, your own).
 - **execution**:
 
   ```text
-  Skill({skill: "claude-plugins-validation:the-skills-menu-create", args: "<target> [--full-cleanup]"})
+  Skill({skill: "claude-plugins-validation:cpv-the-skills-menu-create", args: "<target> [--full-cleanup]"})
   ```
 
 - **post-execution**: forward the migration report verbatim. Then
   offer §3.99 ("do something else / done").
-- **see also**: `commands/the-skills-menu-create.md` exposes the same
-  flow as the `/the-skills-menu-create` slash command for users who
+- **see also**: `commands/cpv-the-skills-menu-create.md` exposes the same
+  flow as the `/cpv-the-skills-menu-create` slash command for users who
   prefer typing the command directly. The bundled
-  `the-skills-menu-create` skill is the migration source of truth.
+  `cpv-the-skills-menu-create` skill is the migration source of truth.
 
 ---
 
@@ -1420,7 +1420,7 @@ the legacy §3.8.9 leaf was removed; the IDs were NOT re-sequenced
 | Key | Action ID         | Label shown to user                                                              |
 |-----|-------------------|-----------------------------------------------------------------------------------|
 | 1   | mgr_list          | List installed plugins — Show every plugin Claude Code knows about               |
-| 2   | mgr_install       | Install / update / enable / off — Hand off to the plugin-manager agent           |
+| 2   | mgr_install       | Install / update / enable / off — Hand off to the cpv-plugin-manager-agent agent           |
 | 3   | mgr_doctor        | Health check — Look for problems in registry, settings, and cache                 |
 | 4   | mgr_scanners      | Install external scanners — Install all the security scanners CPV uses           |
 | 5   | mgr_prune         | Prune old cached plugin versions — Free disk space                                |
@@ -1454,7 +1454,7 @@ END THE TURN.
 
 #### 3.8.2 Install / update / enable / disable
 
-- **execution**: dispatch the **plugin-manager agent**. The agent queues its own First Contact menu spec via `print_menu.py` (Stop hook emits it) asking what operation to do.
+- **execution**: dispatch the **cpv-plugin-manager-agent agent**. The agent queues its own First Contact menu spec via `print_menu.py` (Stop hook emits it) asking what operation to do.
 
 #### 3.8.3 Doctor (health check)
 
@@ -1637,18 +1637,18 @@ END THE TURN.
 #### 3.4.1 Diagnose plugin
 
 - **path-source**: per §3.0a (its row 1 = "current project folder $PWD")
-- **execution**: dispatch the **plugin-diagnoser agent** with the path. The agent runs phases 1–7 (validate, security with all scanners, pipeline staleness, cross-platform, marketplace registration, branch+actions, sync), writes the structured report, then queues its own follow-up menu spec via `print_menu.py` (keys `1`-`7` + `0`).
-- **Phase 0 escape hatch**: when the diagnoser's Phase 0 plugin-shape detection refuses (per `skills/plugin-validation-skill/references/shape-detection.md`), the diagnoser MUST redirect to §3.6.8 (Pack components into a new plugin) so the user can multi-select components and convert them into a real installable plugin. NEVER auto-scaffold around the wrong shape.
+- **execution**: dispatch the **cpv-plugin-diagnoser-agent agent** with the path. The agent runs phases 1–7 (validate, security with all scanners, pipeline staleness, cross-platform, marketplace registration, branch+actions, sync), writes the structured report, then queues its own follow-up menu spec via `print_menu.py` (keys `1`-`7` + `0`).
+- **Phase 0 escape hatch**: when the diagnoser's Phase 0 plugin-shape detection refuses (per `skills/cpv-plugin-validation-skill/references/shape-detection.md`), the diagnoser MUST redirect to §3.6.8 (Pack components into a new plugin) so the user can multi-select components and convert them into a real installable plugin. NEVER auto-scaffold around the wrong shape.
 
 #### 3.4.2 Apply CRITICAL fixes only
 
 - **path-source**: per §3.0a
-- **execution**: dispatch the **plugin-fixer agent** with `min_severity=CRITICAL`.
+- **execution**: dispatch the **cpv-plugin-fixer-agent agent** with `min_severity=CRITICAL`.
 
 #### 3.4.3 Apply MAJOR + CRITICAL fixes
 
 - **path-source**: per §3.0a
-- **execution**: dispatch the **plugin-fixer agent** with `min_severity=MAJOR`.
+- **execution**: dispatch the **cpv-plugin-fixer-agent agent** with `min_severity=MAJOR`.
 
 #### 3.4.4 Sync cached install with GitHub
 
@@ -1665,13 +1665,13 @@ END THE TURN.
 #### 3.4.5 Check + fix marketplace registration
 
 - **path-source**: per §3.0a
-- **execution**: dispatch the **plugin-diagnoser agent** in marketplace-only mode → if not registered, dispatch the **plugin-creator agent** in orphan-plugin marketplace-onboarding mode (4-path menu: A=existing marketplace, B=new local marketplace, C=new GitHub marketplace, D=existing GitHub marketplace).
+- **execution**: dispatch the **cpv-plugin-diagnoser-agent agent** in marketplace-only mode → if not registered, dispatch the **cpv-plugin-creator-agent agent** in orphan-plugin marketplace-onboarding mode (4-path menu: A=existing marketplace, B=new local marketplace, C=new GitHub marketplace, D=existing GitHub marketplace).
 
 #### 3.4.6 Audit branch rules + Claude action setup
 
 - **arg-prompt**: `Owner/repo slug to audit (or "auto" to detect from origin)?`
-- **execution**: dispatch the **plugin-diagnoser agent** in branch-rules-only mode (Phase 6.5). Findings include: ruleset state, bypass actors, Claude action version pin, missing secrets. After the audit prints, offer:
-  - 1: re-apply cpv-branch-rules ruleset → invoke the `setup-plugin-repo` skill (`setup-branch-rules-generic` recipe) with `<owner>/<repo>`
+- **execution**: dispatch the **cpv-plugin-diagnoser-agent agent** in branch-rules-only mode (Phase 6.5). Findings include: ruleset state, bypass actors, Claude action version pin, missing secrets. After the audit prints, offer:
+  - 1: re-apply cpv-branch-rules ruleset → invoke the `cpv-setup-plugin-repo` skill (`setup-branch-rules-generic` recipe) with `<owner>/<repo>`
   - 2: pin Claude action to latest SHA via pinact
   - 3: surface secret-setup instructions for `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN`
   - 0: end
@@ -1698,7 +1698,7 @@ END THE TURN.
 - **arg-prompts** (in order):
   1. `Semantic validation uses Opus with 1M context at max effort. Cost: ~10-50× normal. Proceed? (yes/no)`
   2. (only if yes) `Path to skill or agent or whole plugin?`
-- **execution**: dispatch the **semantic-validator agent** with the path. The agent itself runs the syntactic baseline first then the semantic pass.
+- **execution**: dispatch the **cpv-semantic-validator-agent agent** with the path. The agent itself runs the syntactic baseline first then the semantic pass.
 
 ---
 
@@ -1706,7 +1706,7 @@ END THE TURN.
 
 Standalone top-level for the "upgrade this plugin to the current canonical
 pipeline standard" workflow — applies ALL pipeline-migration steps (§1–§5
-from `skills/fix-validation/references/pipeline-migration.md`): bash → Python,
+from `skills/cpv-fix-validation/references/pipeline-migration.md`): bash → Python,
 os.path → pathlib, idempotent publish.py, sanitized inputs, no `.sh` scripts,
 canonical CI workflows, etc.
 
@@ -1732,8 +1732,8 @@ END THE TURN.
 #### 3.5.1 Upgrade to current pipeline standard
 
 - **path-source**: per §3.0a
-- **execution**: dispatch the **plugin-fixer agent** with the path AND the prompt: `Apply pipeline-migration §1–§5 from skills/fix-validation/references/pipeline-migration.md. min_severity=WARNING (fix everything).`
-- **v2.98.0 auto-batch**: when the dispatched plugin-fixer returns a line starting with `[BATCH_REQUIRED]` (the migration uncovered more findings than fit in single-agent context), the menu orchestrator parses the `plugin-root=<P>` token and AUTO-DISPATCHES the batch protocol — same flow as §3.2.1 step 4 (planner → N parallel shard-fixers in one main-session message → aggregator). The user does NOT see a manual `/cpv-batch-fix` prompt; the upgrade flow handles it end-to-end. The ceiling is the per-model safe-ceiling (15-25 for bare opus/sonnet, 50-75 for [1m] variants).
+- **execution**: dispatch the **cpv-plugin-fixer-agent agent** with the path AND the prompt: `Apply pipeline-migration §1–§5 from skills/cpv-fix-validation/references/pipeline-migration.md. min_severity=WARNING (fix everything).`
+- **v2.98.0 auto-batch**: when the dispatched cpv-plugin-fixer-agent returns a line starting with `[BATCH_REQUIRED]` (the migration uncovered more findings than fit in single-agent context), the menu orchestrator parses the `plugin-root=<P>` token and AUTO-DISPATCHES the batch protocol — same flow as §3.2.1 step 4 (planner → N parallel shard-fixers in one main-session message → aggregator). The user does NOT see a manual `/cpv-batch-fix` prompt; the upgrade flow handles it end-to-end. The ceiling is the per-model safe-ceiling (15-25 for bare opus/sonnet, 50-75 for [1m] variants).
 - **Phase 0 escape hatch**: same rule as §3.4.1 — if shape detection refuses, redirect to §3.6.8 instead of upgrading the wrong shape.
 
 ---
@@ -1742,7 +1742,7 @@ END THE TURN.
 
 Covers branch protection, marketplace linking, publishing, and
 marketplace-layout migrations (Layout A ↔ B ↔ C). Replaces the former
-"GitHub setup" menu, with the migrate-marketplace-architecture leaf
+"GitHub setup" menu, with the cpv-migrate-marketplace-architecture leaf
 folded in for one-stop access to the publish workflow.
 
 > **Migration note (v2.90.0 — TRDD-c50531c2):** the previous §3.7
@@ -1792,24 +1792,24 @@ END THE TURN.
 
 #### 3.7.1 Branch protection (current repo)
 
-- **execution**: invokes the `setup-plugin-repo` skill (`setup-branch-rules` recipe) inline (no extra prompts — uses the current `git remote get-url origin`).
+- **execution**: invokes the `cpv-setup-plugin-repo` skill (`setup-branch-rules` recipe) inline (no extra prompts — uses the current `git remote get-url origin`).
 
 #### 3.7.2 Branch protection (generic owner/repo)
 
 - **arg-prompt**: `Owner/repo slug?`
-- **execution**: invokes the `setup-plugin-repo` skill (`setup-branch-rules-generic` recipe) inline with the slug.
+- **execution**: invokes the `cpv-setup-plugin-repo` skill (`setup-branch-rules-generic` recipe) inline with the slug.
 
 #### 3.7.3 Link plugin to a marketplace
 
 - **arg-prompts** (in order):
   1. `Plugin repo (owner/repo)?`
   2. `Marketplace repo (owner/repo)?`
-- **execution**: invokes the `link-plugin-marketplace` skill inline with the answers.
+- **execution**: invokes the `cpv-link-plugin-marketplace` skill inline with the answers.
 
 #### 3.7.4 Publish plugin to its marketplace
 
 - **arg-prompt**: `Bump type? (patch / minor / major)`
-- **execution**: invokes the `publish-to-marketplace` skill inline. Runs the
+- **execution**: invokes the `cpv-publish-to-marketplace` skill inline. Runs the
   full publish pipeline — bump, manifest refresh, CHANGELOG, commit, push,
   GitHub release, marketplace notify.
   ```bash
@@ -1826,7 +1826,7 @@ END THE TURN.
   1. `Source layout? (A=hub-and-spoke / B=nested monorepo / C=marketplace-in-plugin)`
   2. `Target layout? (A / B / C)`
   3. `Run in --check mode first? (yes/no — recommended yes)`
-- **execution**: invokes the `migrate-marketplace-architecture` skill with
+- **execution**: invokes the `cpv-migrate-marketplace-architecture` skill with
   the source + target layout codes. The skill handles all three layout
   conversion paths idempotently.
 - **note**: For source.url → source.repo normalization on a single
@@ -2037,14 +2037,14 @@ for users who arrive via the Validate menu.
 For FLEET / MARKETPLACE-scale caching audits + optimizations
 (TRDD-3dcbb37c, v2.101.0), use §3.1.7 rows 3 (`/cpv-batch-caching-audit`)
 and 4 (`/cpv-batch-caching-optimize`) instead — they fan out N
-parallel cache-optimizer-agent dispatches in one main-session message.
+parallel cpv-cache-optimizer-agent dispatches in one main-session message.
 
 Fixed key→action map (slug `cache`):
 
 | Key | Action ID    | Label shown to user                                                                          |
 |-----|--------------|-----------------------------------------------------------------------------------------------|
 | 1   | cache_audit  | Audit only (CA-01..CA-07) — Pure read-only audit, produces report with per-rule findings     |
-| 2   | cache_fix    | Audit + auto-fix (loop) — Dispatch cache-optimizer-agent to fix CA-01..CA-07 in priority     |
+| 2   | cache_fix    | Audit + auto-fix (loop) — Dispatch cpv-cache-optimizer-agent to fix CA-01..CA-07 in priority     |
 | 3   | cache_broader| Audit + broader cache-aware refactoring — Audit + fix + Phase 4 (CLAUDE.md split, etc.)      |
 | 4   | cache_project| Audit project root (not a plugin) — Scans .claude/ + CLAUDE.md (no .claude-plugin/ required) |
 | A   | ask          | Ask the agent                                                                                 |
@@ -2073,14 +2073,14 @@ END THE TURN.
 #### 3.3.2 Audit + auto-fix
 
 - **arg-prompt**: `Path to plugin or project root?`
-- **execution**: dispatch the **cache-optimizer-agent** with the path. The
+- **execution**: dispatch the **cpv-cache-optimizer-agent** with the path. The
   agent runs Phase 1 (audit) → Phase 2 (fix) → Phase 3 (re-validate)
   internally.
 
 #### 3.3.3 Audit + broader refactoring
 
 - **arg-prompt**: `Path to plugin or project root?`
-- **execution**: dispatch the **cache-optimizer-agent** with the path AND
+- **execution**: dispatch the **cpv-cache-optimizer-agent** with the path AND
   the explicit `broader` keyword in the prompt. The agent runs Phase 1-3
   and THEN Phase 4 (CLAUDE.md split, dynamic-content migration, etc.).
 
@@ -2131,9 +2131,9 @@ END THE TURN.
 
 #### 3.10.1 Dispatching the fixer with a minimum severity
 
-When the user picks rows 1-5, dispatch the **plugin-fixer agent** (or, for
-marketplace reports, the **marketplace-fixer agent**; for cache reports,
-the **cache-optimizer-agent**) with the report path and a `min_severity`
+When the user picks rows 1-5, dispatch the **cpv-plugin-fixer-agent agent** (or, for
+marketplace reports, the **cpv-marketplace-fixer-agent agent**; for cache reports,
+the **cpv-cache-optimizer-agent**) with the report path and a `min_severity`
 parameter. The agent honours the filter by skipping fixes for any finding
 whose severity is BELOW the threshold.
 

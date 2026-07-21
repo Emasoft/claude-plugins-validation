@@ -22,26 +22,26 @@ REPO = Path(__file__).parent.parent
 
 
 class TestPluginFixerNoSubagentClaim:
-    """``plugin-fixer.md`` must NOT claim subagents can spawn subagents.
+    """``cpv-plugin-fixer-agent.md`` must NOT claim subagents can spawn subagents.
 
     Per the Anthropic subagent spec (https://code.claude.com/docs/en/sub-agents),
     a subagent cannot spawn other subagents — the Agent tool has no effect
-    inside a subagent definition. The pre-v2.91.0 plugin-fixer body claimed
+    inside a subagent definition. The pre-v2.91.0 cpv-plugin-fixer-agent body claimed
     the opposite, leading to silent runtime no-ops the user reported.
     """
 
-    body = (REPO / "agents" / "plugin-fixer.md").read_text()
+    body = (REPO / "agents" / "cpv-plugin-fixer-agent.md").read_text()
 
     def test_no_parallel_subagents_allowed_claim(self) -> None:
         assert "parallel subagents are allowed" not in self.body, (
-            "plugin-fixer.md must NOT claim parallel subagents are allowed — "
+            "cpv-plugin-fixer-agent.md must NOT claim parallel subagents are allowed — "
             "subagents cannot spawn subagents per the Anthropic spec. "
             "This stale guidance was removed in TRDD-71e68ab5."
         )
 
     def test_recommends_batch_fix_for_large_batches(self) -> None:
         assert "/cpv-batch-fix" in self.body, (
-            "plugin-fixer.md must point users at /cpv-batch-fix for very large batches — TRDD-71e68ab5."
+            "cpv-plugin-fixer-agent.md must point users at /cpv-batch-fix for very large batches — TRDD-71e68ab5."
         )
 
     def test_documents_cannot_spawn_subagents(self) -> None:
@@ -51,7 +51,7 @@ class TestPluginFixerNoSubagentClaim:
             r"CANNOT spawn (other )?agents|cannot spawn (other )?(sub)?agents|subagents cannot spawn",
             self.body,
             re.IGNORECASE,
-        ), "plugin-fixer.md must explicitly document that subagents cannot spawn subagents (TRDD-71e68ab5)."
+        ), "cpv-plugin-fixer-agent.md must explicitly document that subagents cannot spawn subagents (TRDD-71e68ab5)."
 
 
 # ---------------------------------------------------------------------------
@@ -90,17 +90,17 @@ class TestCpvDoctorMaxTurns:
 
 
 # ---------------------------------------------------------------------------
-# batch-fix-protocol skill exists + Loaded-by reference
+# cpv-batch-fix-protocol skill exists + Loaded-by reference
 # ---------------------------------------------------------------------------
 
 
 class TestBatchFixProtocolSkill:
     """The skill must exist, be ``user-invocable: false``, and be Loaded-by-plugin-fixer."""
 
-    skill = REPO / "skills" / "batch-fix-protocol" / "SKILL.md"
+    skill = REPO / "skills" / "cpv-batch-fix-protocol" / "SKILL.md"
 
     def test_skill_file_exists(self) -> None:
-        assert self.skill.is_file(), f"batch-fix-protocol skill missing at {self.skill}"
+        assert self.skill.is_file(), f"cpv-batch-fix-protocol skill missing at {self.skill}"
 
     def test_skill_is_not_user_invocable(self) -> None:
         text = self.skill.read_text()
@@ -108,23 +108,23 @@ class TestBatchFixProtocolSkill:
         assert front_match is not None
         meta = yaml.safe_load(front_match.group(1))
         assert meta.get("user-invocable") is False, (
-            "batch-fix-protocol must be user-invocable: false (it's a reference "
-            "loaded by plugin-fixer + the slash command, not directly invoked)."
+            "cpv-batch-fix-protocol must be user-invocable: false (it's a reference "
+            "loaded by cpv-plugin-fixer-agent + the slash command, not directly invoked)."
         )
 
     def test_skill_reachable_from_plugin_fixer(self) -> None:
         """v2.93.0 (TRDD-478d9687) removed per-agent preload lists in favour of
-        the universal the-skills-menu. plugin-fixer no longer declares
-        batch-fix-protocol directly; instead it loads it on demand via the
-        Skill tool. The skill MUST appear in the the-skills-menu catalog so the
+        the universal cpv-the-skills-menu. cpv-plugin-fixer-agent no longer declares
+        cpv-batch-fix-protocol directly; instead it loads it on demand via the
+        Skill tool. The skill MUST appear in the cpv-the-skills-menu catalog so the
         agent knows it exists.
         """
-        index_body = (REPO / "skills" / "the-skills-menu" / "SKILL.md").read_text()
-        catalog_body = (REPO / "skills" / "the-skills-menu" / "references" / "skills-catalog.md").read_text()
+        index_body = (REPO / "skills" / "cpv-the-skills-menu" / "SKILL.md").read_text()
+        catalog_body = (REPO / "skills" / "cpv-the-skills-menu" / "references" / "skills-catalog.md").read_text()
         combined = index_body + "\n" + catalog_body
-        assert "batch-fix-protocol" in combined, (
-            "batch-fix-protocol must appear in the the-skills-menu catalog so "
-            "plugin-fixer can pick it at runtime for batch_shard mode."
+        assert "cpv-batch-fix-protocol" in combined, (
+            "cpv-batch-fix-protocol must appear in the cpv-the-skills-menu catalog so "
+            "cpv-plugin-fixer-agent can pick it at runtime for batch_shard mode."
         )
 
     def test_skill_documents_three_json_shapes(self) -> None:
@@ -189,9 +189,9 @@ class TestNoHardcodedIterationCaps:
     )
 
     files = [
-        REPO / "agents" / "plugin-fixer.md",
-        REPO / "agents" / "marketplace-fixer.md",
-        REPO / "skills" / "fix-validation" / "references" / "iterative-fix-loop.md",
+        REPO / "agents" / "cpv-plugin-fixer-agent.md",
+        REPO / "agents" / "cpv-marketplace-fixer-agent.md",
+        REPO / "skills" / "cpv-fix-validation" / "references" / "iterative-fix-loop.md",
     ]
 
     def test_no_hardcoded_iteration_caps(self) -> None:

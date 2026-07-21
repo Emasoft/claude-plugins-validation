@@ -1,9 +1,9 @@
-"""Issue #150 — `standardize --force-templates` the-skills-menu migration.
+"""Issue #150 — `standardize --force-templates` cpv-the-skills-menu migration.
 
 The v2.143.0 migration reported SUCCESS but produced a BROKEN agent:
-  1. it wrote an EMPTY-stub `skills/the-skills-menu/SKILL.md` ("no operational
+  1. it wrote an EMPTY-stub `skills/cpv-the-skills-menu/SKILL.md` ("no operational
      skills yet") even on a plugin with many real skills under `skills/`, and
-  2. it stripped the agent's `skills:` frontmatter down to `[the-skills-menu]`
+  2. it stripped the agent's `skills:` frontmatter down to `[cpv-the-skills-menu]`
      anyway — so the agent lost its core skills AND could not discover them via
      the (empty) menu.
 
@@ -105,13 +105,13 @@ def _plugin_without_skills(tmp_path: Path) -> Path:
 
 def test_inventory_lists_every_real_skill_excluding_the_menu(tmp_path: Path) -> None:
     root = _plugin_with_skills(tmp_path, ["alpha-skill", "beta-skill", "gamma-skill"])
-    # a the-skills-menu dir present alongside must NOT be listed by the inventory
-    _write_skill(root, "the-skills-menu", "the catalog itself")
+    # a cpv-the-skills-menu dir present alongside must NOT be listed by the inventory
+    _write_skill(root, "cpv-the-skills-menu", "the catalog itself")
 
     names = [n for n, _desc in scan_plugin_skills_inventory(root)]
 
     assert names == ["alpha-skill", "beta-skill", "gamma-skill"]
-    assert "the-skills-menu" not in names
+    assert "cpv-the-skills-menu" not in names
 
 
 def test_inventory_empty_when_no_skills(tmp_path: Path) -> None:
@@ -142,7 +142,7 @@ def test_catalog_lists_all_real_skills(tmp_path: Path) -> None:
     n = migrate_agents_to_skills_menu(root, dry_run=False)
 
     assert n == 1  # the one agent migrated
-    catalog = (root / "skills" / "the-skills-menu" / "SKILL.md").read_text(encoding="utf-8")
+    catalog = (root / "skills" / "cpv-the-skills-menu" / "SKILL.md").read_text(encoding="utf-8")
     # EVERY real skill is listed (not the empty placeholder)
     for s in skills:
         assert f"`{s}`" in catalog
@@ -155,7 +155,7 @@ def test_catalog_lists_all_real_skills(tmp_path: Path) -> None:
 def test_agent_migrated_to_populated_menu_not_stripped_to_empty(tmp_path: Path) -> None:
     """With a populated catalog the agent IS switched to rely on the menu.
 
-    The frontmatter `skills:` becomes exactly `[the-skills-menu]` (the canonical
+    The frontmatter `skills:` becomes exactly `[cpv-the-skills-menu]` (the canonical
     relies-on-the-populated-menu form) and the body gains the dynamic-load
     instruction — the agent is NOT left stripped-to-empty-with-no-menu (the #150
     broken state); the menu it now relies on actually lists its skills.
@@ -168,13 +168,13 @@ def test_agent_migrated_to_populated_menu_not_stripped_to_empty(tmp_path: Path) 
     text = agent.read_text(encoding="utf-8")
     fm = text.split("---", 2)[1]
     # switched to the menu...
-    assert "skills:\n  - the-skills-menu" in text
+    assert "skills:\n  - cpv-the-skills-menu" in text
     # ...and the body teaches dynamic loading
     assert _SKILLS_MENU_BODY_INSTRUCTION in text
     # the old skills are no longer PRE-loaded in frontmatter (they live in the menu now)
     assert "alpha-skill" not in fm
     # but the catalog it now points to DOES list them — so they are still reachable
-    catalog = (root / "skills" / "the-skills-menu" / "SKILL.md").read_text(encoding="utf-8")
+    catalog = (root / "skills" / "cpv-the-skills-menu" / "SKILL.md").read_text(encoding="utf-8")
     assert "`alpha-skill`" in catalog
     assert "`beta-skill`" in catalog
     assert "`gamma-skill`" in catalog
@@ -202,7 +202,7 @@ def test_zero_skills_does_not_strip_agent(tmp_path: Path) -> None:
     # no body instruction was injected
     assert _SKILLS_MENU_BODY_INSTRUCTION not in after
     # and no empty stub catalog was written
-    assert not (root / "skills" / "the-skills-menu" / "SKILL.md").exists()
+    assert not (root / "skills" / "cpv-the-skills-menu" / "SKILL.md").exists()
 
 
 def test_zero_skills_warns_and_does_not_report_success(tmp_path: Path, capsys) -> None:
@@ -213,10 +213,10 @@ def test_zero_skills_warns_and_does_not_report_success(tmp_path: Path, capsys) -
     out = capsys.readouterr().out
     # a clear WARNING is emitted...
     assert "SKIPPED" in out
-    assert "the-skills-menu-create" in out  # tells the user how to fix it
+    assert "cpv-the-skills-menu-create" in out  # tells the user how to fix it
     # ...and NO success line ("created … catalog" / "migrated … →") is printed
-    assert "the-skills-menu catalog" not in out
-    assert "→ the-skills-menu" not in out
+    assert "cpv-the-skills-menu catalog" not in out
+    assert "→ cpv-the-skills-menu" not in out
 
 
 def test_zero_skills_main_does_not_report_all_already_migrated(tmp_path: Path, capsys) -> None:
@@ -236,8 +236,8 @@ def test_zero_skills_main_does_not_report_all_already_migrated(tmp_path: Path, c
         sys.argv = old_argv
 
     out = capsys.readouterr().out
-    # the misleading "All agents already on the-skills-menu" success is NOT printed
-    assert "All agents already on the-skills-menu" not in out
+    # the misleading "All agents already on cpv-the-skills-menu" success is NOT printed
+    assert "All agents already on cpv-the-skills-menu" not in out
     # the skip warning IS printed
     assert "SKIPPED" in out
     # and the agent is still untouched
@@ -260,8 +260,8 @@ def test_with_skills_main_does_report_progress(tmp_path: Path, capsys) -> None:
 
     out = capsys.readouterr().out
     assert "SKIPPED" not in out
-    assert "the-skills-menu catalog" in out
-    assert (root / "skills" / "the-skills-menu" / "SKILL.md").exists()
+    assert "cpv-the-skills-menu catalog" in out
+    assert (root / "skills" / "cpv-the-skills-menu" / "SKILL.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -274,11 +274,11 @@ def test_generated_menu_has_no_allowed_tools_frontmatter(tmp_path: Path) -> None
 
     migrate_agents_to_skills_menu(root, dry_run=False)
 
-    catalog = (root / "skills" / "the-skills-menu" / "SKILL.md").read_text(encoding="utf-8")
+    catalog = (root / "skills" / "cpv-the-skills-menu" / "SKILL.md").read_text(encoding="utf-8")
     fm = catalog.split("---", 2)[1]
     assert "allowed-tools" not in fm
     # sanity: the rest of the standard frontmatter survives
-    assert "name: the-skills-menu" in fm
+    assert "name: cpv-the-skills-menu" in fm
     assert "user-invocable: false" in fm
 
 
@@ -291,16 +291,16 @@ def test_generated_menu_has_no_allowed_tools_frontmatter(tmp_path: Path) -> None
 def test_existing_catalog_lets_migration_proceed_even_with_no_skills(tmp_path: Path) -> None:
     """A hand-curated catalog is a valid menu — migrate even if skills/ is bare."""
     root = _plugin_without_skills(tmp_path)
-    catalog = root / "skills" / "the-skills-menu" / "SKILL.md"
+    catalog = root / "skills" / "cpv-the-skills-menu" / "SKILL.md"
     catalog.parent.mkdir(parents=True)
-    sentinel = "---\nname: the-skills-menu\nuser-invocable: false\n---\n\n# hand curated\n"
+    sentinel = "---\nname: cpv-the-skills-menu\nuser-invocable: false\n---\n\n# hand curated\n"
     catalog.write_text(sentinel, encoding="utf-8")
     agent = root / "agents" / "main-agent.md"
 
     n = migrate_agents_to_skills_menu(root, dry_run=False)
 
     assert n == 1  # migration proceeded — a usable catalog exists
-    assert "skills:\n  - the-skills-menu" in agent.read_text(encoding="utf-8")
+    assert "skills:\n  - cpv-the-skills-menu" in agent.read_text(encoding="utf-8")
     # the hand-curated catalog is left untouched
     assert catalog.read_text(encoding="utf-8") == sentinel
 
@@ -319,4 +319,4 @@ def test_dry_run_with_skills_would_migrate_writes_nothing(tmp_path: Path) -> Non
 
     assert n == 1  # would migrate one
     assert agent.read_text(encoding="utf-8") == before  # but wrote nothing
-    assert not (root / "skills" / "the-skills-menu" / "SKILL.md").exists()
+    assert not (root / "skills" / "cpv-the-skills-menu" / "SKILL.md").exists()

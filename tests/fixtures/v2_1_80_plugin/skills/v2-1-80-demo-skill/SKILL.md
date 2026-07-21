@@ -6,7 +6,7 @@ description: Demonstrates v2.1.80-plus features end to end - userConfig substitu
 # v2.1.80+ Demo Skill
 
 This skill exists purely as a fixture for CPV. It exercises every feature
-documented in the create-plugin skill's v2.1.80 reference file.
+documented in the cpv-create-plugin skill's v2.1.80 reference file.
 
 ## Overview
 
@@ -86,6 +86,6 @@ CONFIG_FILE is not provided - skill skips step 2 and proceeds.
 - `agents/log-watcher.md` - the agent that uses the `Monitor` tool.
 - `.claude-plugin/plugin.json` - the manifest declaring `userConfig`,
   `mcpServers`, and `channels`.
-- The CPV repo's create-plugin skill ships a v2-1-80-features.md
+- The CPV repo's cpv-create-plugin skill ships a v2-1-80-features.md
   reference that documents every feature exercised here, with
   validator pointers.
