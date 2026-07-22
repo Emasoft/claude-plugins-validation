@@ -2087,6 +2087,28 @@ def _context_classifier_dispatch(
             return ""
         if _uc_benign(file_path, content, line_idx):
             return "suppress"
+    # issue #171 — cSpell config JSON word-list → non-instruction DATA carve-out.
+    # `standardize --fix` writes a `.cspell.json` whose `words` array holds real
+    # tokens (e.g. `monkeypatch`); TOOL_SHADOW — and the rest of the
+    # `_BINARY_INAPPLICABLE` family — then fired a blocking MAJOR on a spellcheck
+    # dictionary word, a self-inflicted FP (the fixer breaks the gate). A cSpell
+    # word cannot shadow a tool / exec / exfil / inject, exactly like the
+    # `.txt`/`.dict` word-list carve-out above — but the structured JSON form is
+    # scoped to the word-list ARRAYS ONLY (words/ignoreWords/flagWords/userWords,
+    # incl. overrides[].<>), so any other cSpell field (an ignorePaths glob, a
+    # dictionaryDefinitions[].path, an import) keeps firing. FN-safe:
+    # `is_cspell_json_words_entry` is confined to a cSpell config basename + those
+    # arrays; `_BINARY_INAPPLICABLE_RULES` excludes every execution / secret /
+    # exfil / decode rule, so a real key hidden as a "word" still fires.
+    if rule_id in _BINARY_INAPPLICABLE_RULES and fp_lower.endswith((".json", ".jsonc")):
+        try:
+            from _skillaudit_json_context import (  # type: ignore[import-not-found]
+                is_cspell_json_words_entry as _cspell_json_words,
+            )
+        except ImportError:
+            return ""
+        if _cspell_json_words(file_path, content, line_idx):
+            return "suppress"
     # Point 1 (v2.114.0): an extension-less script (git hook, configure,
     # runme) reaches here with no classifier-recognised extension. The
     # per-language classifiers dispatch AND internally gate on the file

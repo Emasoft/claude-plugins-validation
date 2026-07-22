@@ -17,6 +17,7 @@ script crash. Every non-zero exit code blocks the push.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -216,6 +217,131 @@ def extract_name(filepath: Path) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Branch-aware gate helpers (issue #169)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_default_branch(repo_root: Path) -> str | None:
+    """Return the default branch name from origin/HEAD (e.g. 'master'), or None.
+
+    Used to decide which pushes are RELEASE pushes. Failure to resolve simply
+    means we fall back to the hard-coded main/master pair — it never widens what
+    is treated as a feature branch.
+    """
+    try:
+        r = subprocess.run(
+            ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode == 0 and r.stdout.strip():
+        # "origin/master" -> "master"
+        return r.stdout.strip().split("/")[-1]
+    return None
+
+
+def _ref_is_release(
+    push: tuple[str, str, str, str], default_branch: str | None
+) -> bool:
+    """A push is RELEASE-gated when it targets a tag or the default branch.
+
+    'main' and 'master' are ALWAYS release branches (a repo uses one as its
+    default and no feature branch is ever named that), plus whatever origin/HEAD
+    resolves to. Every other branch is a shareable feature branch.
+    """
+    kind, _local_sha, _remote_sha, name = push
+    if kind == "tag":
+        return True
+    if name in ("main", "master"):
+        return True
+    return default_branch is not None and name == default_branch
+
+
+def _secret_scan_base(
+    repo_root: Path, remote_sha: str, default_branch: str | None
+) -> str | None:
+    """The commit to start the secret scan from — scan ONLY the new commits.
+
+    For an existing remote branch that is the remote's current tip (remote_sha).
+    For a brand-new branch (remote side all-zeros) fall back to the default
+    branch tip so already-pushed history is not re-scanned. If neither resolves,
+    return None (scan the whole branch — a fresh repo has no inherited history to
+    false-positive on).
+    """
+    if remote_sha and remote_sha != ZERO_SHA:
+        return remote_sha
+    if default_branch:
+        for ref in (f"origin/{default_branch}", default_branch):
+            try:
+                r = subprocess.run(
+                    ["git", "rev-parse", "--verify", "--quiet", ref],
+                    capture_output=True,
+                    text=True,
+                    cwd=str(repo_root),
+                    timeout=10,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+    return None
+
+
+def _run_feature_secret_gate(
+    repo_root: Path,
+    feature_refs: list[tuple[str, str, str, str]],
+    default_branch: str | None,
+) -> int:
+    """Secret-scan the commits being pushed to feature branches.
+
+    A feature-branch push does NOT require publish.py ancestry (that release
+    gate is for the default branch and tags) — but it MUST NOT leak a secret, so
+    every pushed commit range is scanned with trufflehog. Fail-closed: if
+    trufflehog is not installed the push is BLOCKED (an unscanned push is never
+    silently allowed). Returns 0 to allow, non-zero to block.
+    """
+    cprint(f"{BLUE}========================================{NC}")
+    cprint(f"{BLUE}  Feature-branch push — secret scan{NC}")
+    cprint(f"{BLUE}========================================{NC}")
+    if shutil.which("trufflehog") is None:
+        cprint(f"{RED}========================================{NC}")
+        cprint(f"{RED}  BLOCKED: trufflehog is not installed.{NC}")
+        cprint(f"{RED}  A feature-branch push must be secret-scanned first.{NC}")
+        cprint(f"{RED}  Install: https://github.com/trufflesecurity/trufflehog{NC}")
+        cprint(f"{RED}  (or push through scripts/publish.py){NC}")
+        cprint(f"{RED}========================================{NC}")
+        return 1
+    for _kind, _local_sha, remote_sha, name in feature_refs:
+        base = _secret_scan_base(repo_root, remote_sha, default_branch)
+        cmd = ["trufflehog", "git", f"file://{repo_root}", "--branch", name]
+        if base:
+            cmd += ["--since-commit", base]
+        cmd += ["--no-update", "--fail"]
+        cprint(f"{BLUE}Scanning '{name}'...{NC}")
+        try:
+            result = subprocess.run(cmd, cwd=str(repo_root), timeout=300)
+        except (OSError, subprocess.SubprocessError) as exc:
+            # FAIL-CLOSED: a scan that could not run has NOT proven the branch
+            # clean, so it must never let the push through.
+            cprint(f"{RED}  BLOCKED: secret scan could not run for '{name}' ({exc}).{NC}")
+            return 1
+        if result.returncode != 0:
+            cprint(f"{RED}========================================{NC}")
+            cprint(f"{RED}  BLOCKED: secret scan flagged '{name}'.{NC}")
+            cprint(f"{RED}  Remove the secret(s) before pushing.{NC}")
+            cprint(f"{RED}========================================{NC}")
+            return 1
+    cprint(f"{GREEN}========================================{NC}")
+    cprint(f"{GREEN}  Secret scan clean — feature push allowed.{NC}")
+    cprint(f"{GREEN}========================================{NC}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Main logic
 # ---------------------------------------------------------------------------
 
@@ -223,8 +349,43 @@ def extract_name(filepath: Path) -> str | None:
 def main() -> int:
     repo_root = get_repo_root()
 
-    # ── Pipeline enforcement: only publish.py may push ──
-    # Uses PROCESS ANCESTRY, not env vars. Env vars are trivially spoofable
+    # The git pre-push hook receives REMOTE and URL as positional args
+    remote = sys.argv[1] if len(sys.argv) > 1 else "<unknown>"
+    url = sys.argv[2] if len(sys.argv) > 2 else "<unknown>"
+
+    # Read stdin ONCE: each line is LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA.
+    stdin_lines = sys.stdin.read().strip().splitlines()
+
+    # Classify the refs being pushed into typed tuples, skipping deletions
+    # (local side is the all-zeros SHA — nothing to gate or scan).
+    pushes: list[tuple[str, str, str, str]] = []  # (kind, local_sha, remote_sha, name)
+    for line in stdin_lines:
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        local_ref, local_sha, _remote_ref, remote_sha = parts[:4]
+        if local_sha == ZERO_SHA:
+            continue
+        if local_ref.startswith("refs/tags/"):
+            pushes.append(("tag", local_sha, remote_sha, local_ref[len("refs/tags/") :]))
+        elif local_ref.startswith("refs/heads/"):
+            pushes.append(("branch", local_sha, remote_sha, local_ref[len("refs/heads/") :]))
+
+    default_branch = _resolve_default_branch(repo_root)
+    release_refs = [pp for pp in pushes if _ref_is_release(pp, default_branch)]
+    feature_refs = [pp for pp in pushes if not _ref_is_release(pp, default_branch)]
+
+    # ── Feature-branch-only push (issue #169): NO publish.py ancestry required.
+    #    Fleets / reviewers / CI must be able to share a feature branch. Allowed
+    #    only after a passing secret scan of the pushed commits. A release ref
+    #    (default branch or tag) — or an empty/unparseable push — falls through
+    #    to the full release gate below.
+    if feature_refs and not release_refs:
+        return _run_feature_secret_gate(repo_root, feature_refs, default_branch)
+
+    # ── Release path: default branch and/or tags (or nothing parsed). ──
+    # Pipeline enforcement: only publish.py may push. Uses PROCESS ANCESTRY,
+    # not env vars. Env vars are trivially spoofable
     # (`CPV_PUBLISH_PIPELINE=1 git push` bypasses the check); process ancestry
     # is not. The hook walks its parent chain up to PID 1 via `ps` and requires
     # that scripts/publish.py from THIS repo is an ancestor of the push.
@@ -234,6 +395,7 @@ def main() -> int:
         cprint(f"{RED}  This hook only accepts pushes initiated by{NC}")
         cprint(f"{RED}  scripts/publish.py (verified via process ancestry).{NC}")
         cprint(f"{RED}  Use: uv run python scripts/publish.py --patch{NC}")
+        cprint(f"{RED}  (Feature-branch pushes are allowed after a secret scan.){NC}")
         cprint(f"{RED}========================================{NC}")
         return 1
 
@@ -242,48 +404,18 @@ def main() -> int:
     cprint(f"{BLUE}========================================{NC}")
     cprint("")
 
-    # The git pre-push hook receives REMOTE and URL as positional args
-    remote = sys.argv[1] if len(sys.argv) > 1 else "<unknown>"
-    url = sys.argv[2] if len(sys.argv) > 2 else "<unknown>"
-
     cprint(f"{BLUE}Pushing to:{NC} {remote} ({url})")
     cprint("")
 
-    # Read stdin lines: each line is LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA
-    stdin_lines = sys.stdin.read().strip().splitlines()
-
-    # Classify refs being pushed: branches and/or tags
-    branch_refs: list[str] = []
-    tag_refs: list[str] = []
-    for line in stdin_lines:
-        parts = line.split()
-        if len(parts) < 4:
-            continue
-        local_ref = parts[0]
-        if local_ref.startswith("refs/tags/"):
-            tag_refs.append(local_ref[len("refs/tags/") :])
-        elif local_ref.startswith("refs/heads/"):
-            branch_refs.append(local_ref[len("refs/heads/") :])
+    # Names of the refs on the release path, for the version-bump section below.
+    branch_refs: list[str] = [name for kind, _l, _r, name in pushes if kind == "branch"]
+    tag_refs: list[str] = [name for kind, _l, _r, name in pushes if kind == "tag"]
 
     tag_only_push = bool(tag_refs) and not branch_refs
     if tag_only_push:
         cprint(f"{BLUE}Tag push detected: {', '.join(tag_refs)}{NC}")
     elif branch_refs:
         cprint(f"{BLUE}Branch push detected: {', '.join(branch_refs)}{NC}")
-
-    for line in stdin_lines:
-        parts = line.split()
-        if len(parts) < 4:
-            continue
-        _local_ref, local_sha, _remote_ref, remote_sha = parts[:4]
-
-        if local_sha == ZERO_SHA:
-            # Branch/tag deletion (local side is the all-zeros SHA). We only
-            # NOTE it here; per the "validation ALWAYS runs" policy below, the
-            # version-bump + validate steps still execute on the current tree.
-            # (Saying "no validation needed" here would contradict that policy.)
-            cprint(f"{GREEN}Ref deletion detected for a pushed ref.{NC}")
-            continue
 
     # Full validation ALWAYS runs. No bypass based on file patterns or ref type.
     # The lint/test/validate steps are mandatory for every push (branch OR tag).

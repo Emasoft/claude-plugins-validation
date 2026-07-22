@@ -495,6 +495,91 @@ def is_benign_plugin_userconfig_location(file_path: str, source: str, line_idx: 
     return True
 
 
+# cSpell config file basenames (VS Code Code Spell Checker conventions). A match
+# on any OTHER .json (settings.json / plugin.json / package.json / …) is not a
+# cSpell config and is never cleared by the word-list carve-out below.
+_CSPELL_CONFIG_BASENAMES: Final[frozenset[str]] = frozenset(
+    {
+        "cspell.json",
+        ".cspell.json",
+        "cspell.jsonc",
+        ".cspell.jsonc",
+        "cspell.config.json",
+        ".cspell.config.json",
+        "cspell.config.jsonc",
+        ".cspell.config.jsonc",
+    }
+)
+
+# cSpell word-list array keys: their string elements are spellchecker vocabulary,
+# never a tool/agent definition. Lower-cased for case-insensitive matching.
+_CSPELL_WORD_ARRAY_KEYS: Final[frozenset[str]] = frozenset({"words", "ignorewords", "flagwords", "userwords"})
+
+
+def _is_cspell_config_basename(file_path: str) -> bool:
+    """True iff ``file_path``'s basename is a recognised cSpell config file."""
+    base = file_path.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return base in _CSPELL_CONFIG_BASENAMES
+
+
+def is_cspell_json_words_entry(file_path: str, source: str, line_idx: int) -> bool:
+    """True iff ``line_idx`` sits on a string ELEMENT of a cSpell word-list array
+    (``words`` / ``ignoreWords`` / ``flagWords`` / ``userWords``, incl.
+    ``overrides[].<>``) of a cSpell config JSON(C) file — a spellchecker
+    DICTIONARY entry, never a tool/agent definition.
+
+    Rationale (issue #171): ``standardize --fix`` writes a ``.cspell.json`` whose
+    ``words`` array holds real tokens (e.g. ``monkeypatch``); the
+    ``agent_manipulation TOOL_SHADOW`` detector — and the rest of the
+    ``_BINARY_INAPPLICABLE`` family — then fired a blocking MAJOR on a spellcheck
+    word, a self-inflicted FP (the fixer breaks the gate). A cSpell word cannot
+    shadow a tool, exec, exfil, or inject. This is the structured-JSON sibling of
+    ``_is_cspell_dictionary`` (which covers ``.txt``/``.dict``/… word files), but
+    SCOPED to the word-list arrays only — so any other cSpell field (an
+    ``ignorePaths`` glob, a ``dictionaryDefinitions[].path``, an ``import`` path)
+    keeps firing.
+
+    The caller gates on the rule family; this predicate only answers "is this a
+    cSpell word-list element". FN-safe by construction:
+
+    * Confined to a recognised cSpell config BASENAME — a match in any other
+      ``.json`` (settings.json / plugin.json / package.json / …) returns ``False``.
+    * Confined to the four word-array keys — a match on any other cSpell field
+      (a path / glob / import string) is NOT a word entry and returns ``False``.
+      A non-string smuggled into a ``words`` array (``{"command": …}``) has a
+      NAMED last segment, not an ``[N]`` index, so it is NOT cleared either.
+    * The caller's rule set (``_BINARY_INAPPLICABLE_RULES``) excludes every
+      execution / secret / exfil / decode rule, so a real key or webhook host
+      hidden as a "word" still fires.
+    * Any parse failure returns ``False`` (never clears on doubt).
+    """
+    if not _is_cspell_config_basename(file_path):
+        return False
+    cleaned = _strip_jsonc_comments(source)
+    try:
+        parsed = json.loads(cleaned)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+
+    line = line_idx + 1  # 1-based, matching _walk_with_lines' line numbering
+    for path, start_line, end_line in _walk_with_lines(parsed, cleaned):
+        if not (start_line <= line <= end_line):
+            continue
+        # The covering string value must be an ELEMENT of a word-list array: its
+        # last path segment is an index token (``[N]``) and the nearest named
+        # segment above it is one of the word-array keys. This confines the clear
+        # to ``words: ["<here>"]`` (or ``overrides[].words: [...]``) and never to
+        # a bare word-array KEY line or any other cSpell field.
+        if not (path and path[-1].startswith("[")):
+            continue
+        named = [seg for seg in path if not seg.startswith("[")]
+        if named and named[-1].lower() in _CSPELL_WORD_ARRAY_KEYS:
+            return True
+    return False
+
+
 def _object_value_brace_index(source: str, key_end: int) -> int | None:
     """Given ``key_end`` just past a closing key quote, return the index of the
     ``{`` opening that key's OBJECT value (skipping whitespace and the ``:``
