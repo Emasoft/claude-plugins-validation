@@ -1798,11 +1798,21 @@ ABSOLUTE_PATH_PATTERNS = [
 # Allowed absolute path prefixes in documentation examples
 # These are skipped in doc files (.md, .txt, .html) to reduce false positives
 ALLOWED_DOC_PATH_PREFIXES = {
-    "/tmp/",
-    "/var/tmp/",
+    "/tmp/",  # nosec B108 — allowlist data constant; never creates/opens a temp file
+    "/var/tmp/",  # nosec B108 — allowlist data constant; never creates/opens a temp file
     "/var/lib/",  # Docker volumes, app data (e.g. /var/lib/postgresql/data)
     "/var/log/",  # Log path examples (e.g. /var/log/myapp/)
     "/var/run/",  # PID/socket files
+    # macOS per-user temp dir: $TMPDIR resolves to /var/folders/<xx>/<hash>/T/…,
+    # which matches the /var system-path pattern and so FP'd as a portability
+    # finding in docs — while Linux /tmp (never matched by ABSOLUTE_PATH_PATTERNS)
+    # and /var/tmp (allowlisted above) do not. #172: allowlist it too so a
+    # cross-platform plugin can name any platform's temp dir in docs even-handedly.
+    # (Windows C:\Windows\Temp, %TEMP%, and the /private/var/folders symlink form
+    # are not matched by ABSOLUTE_PATH_PATTERNS at all, so they need no entry.)
+    # FN-safe: the prefix cannot match a /Users or /home leak, and a non-temp /var
+    # path (e.g. /var/spool) still fires.
+    "/var/folders/",  # macOS $TMPDIR base (see note above)
     "/dev/",
     "/proc/",
     "/sys/",
@@ -1851,7 +1861,7 @@ _SYSTEM_PATH_ROOTS = (
     "/bin",
     "/sbin",
     "/etc",
-    "/tmp",
+    "/tmp",  # nosec B108 — FHS root data constant; never creates/opens a temp file
     "/var",
     "/opt",
     "/lib",
