@@ -32,7 +32,6 @@ import hashlib
 import json
 import os
 import re
-import unicodedata
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1262,11 +1261,6 @@ _INTENT_SOFT_SIGNAL_RULES: frozenset[str] = frozenset(
         "CRYPTO_THEFT",
     }
 )
-
-# Backwards-compat alias — the union of both halves. Older heuristics
-# (and the dispatcher's default fall-through) treat any intent rule as
-# safe-doc-keeping. The split above adds finer-grained control.
-_INTENT_CLASS_RULES: frozenset[str] = _INTENT_HARD_SIGNAL_RULES | _INTENT_SOFT_SIGNAL_RULES
 
 # **Hidden-content hard signals**: the subset of INTENT_HARD rules whose
 # threat does NOT depend on the host file being loaded as an agent
@@ -2535,23 +2529,6 @@ def _confidence(
     # second code path.
 
     return "keep"
-
-
-def _should_suppress(
-    lines: list[str],
-    line_idx: int,
-    match: str,
-    rule_id: str,
-    cb_map: list[bool],
-    cb_ranges: list[_CodeBlockRange],
-) -> bool:
-    """Back-compat wrapper around _confidence — returns True for hard suppress only.
-
-    External callers (and the rule-match loop) prefer the three-way
-    classifier, but the old binary API is retained so existing tests
-    that import _should_suppress continue to work.
-    """
-    return _confidence(lines, line_idx, match, rule_id, cb_map, cb_ranges) == "suppress"
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -4864,8 +4841,3 @@ def _suppress_binary_placeholder(finding: dict[str, Any]) -> None:
     if raw_match and _has_placeholder(raw_match):
         finding["severity"] = "info"
         finding["suppressed"] = True
-
-
-def _normalize_unicode_for_test(text: str) -> str:
-    """Normalize to NFC so the invisible-char scanner can be tested deterministically."""
-    return unicodedata.normalize("NFC", text)
