@@ -101,6 +101,10 @@ def test_v290_only_documented_slash_commands_remain() -> None:
         "cpv-batch-scope-diagnose.md",
         "cpv-batch-scope-fix.md",
         "cpv-batch-scope-diagnose-and-fix.md",
+        # Direct free-form entry to the general-purpose cpv-agent worker
+        # (user directive 2026-07-23) — `/cpv-agent <request>` reaches the
+        # worker directly, same target as the menu's `A — Ask the agent`.
+        "cpv-agent.md",
     }
     md_files = {p.name for p in COMMANDS_DIR.glob("*.md")}
     unexpected = md_files - allowed

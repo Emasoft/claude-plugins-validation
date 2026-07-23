@@ -166,6 +166,12 @@ def test_only_one_slash_command_remains() -> None:
         "cpv-batch-scope-diagnose.md",
         "cpv-batch-scope-fix.md",
         "cpv-batch-scope-diagnose-and-fix.md",
+        # Direct free-form entry to the general-purpose cpv-agent worker
+        # (user directive 2026-07-23). A bare slash command because the
+        # user wants `/cpv-agent <request>` to reach the worker without
+        # opening the menu — the same worker the menu reaches via
+        # `A — Ask the agent`.
+        "cpv-agent.md",
     }
     md_files = list(COMMANDS_DIR.glob("*.md"))
     actual = {f.name for f in md_files}
