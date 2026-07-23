@@ -22,6 +22,17 @@ dmypy.json
 
 # Claude Code
 .claude/
+# ...EXCEPT the PROJECT-scope wikimem, which MUST be tracked + pushed (shared
+# design knowledge for every contributor). Carve it back out of the blanket
+# .claude/ ignore above — git needs each parent level re-included before the
+# leaf (it cannot re-include a path whose parent dir stays excluded). The
+# anchored (leading-slash) forms keep every OTHER .claude/ path — root and
+# nested — ignored.
+!/.claude/
+/.claude/*
+!/.claude/project/
+/.claude/project/*
+!/.claude/project/memory/
 .tldr/
 .tldrignore
 llm_externalizer_output/

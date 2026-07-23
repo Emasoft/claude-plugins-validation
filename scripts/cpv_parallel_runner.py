@@ -291,7 +291,7 @@ def _run_one_per_file(
                 for f in future_to_index:
                     if not f.done():
                         f.cancel()
-                raise TimeoutError(f"{path}: scan exceeded {timeout_per_file}s")
+                raise TimeoutError(f"{path}: scan exceeded {timeout_per_file}s") from None
             results[idx] = ScanResult(file_path=path, findings=[], error=msg)
         except Exception as exc:
             # Any other worker-raised exception. We capture
@@ -362,7 +362,7 @@ def _run_in_batches(
                 for f in future_to_batch_meta:
                     if not f.done():
                         f.cancel()
-                raise TimeoutError(f"batch starting at {file_list[start]}: scan exceeded {batch_timeout}s")
+                raise TimeoutError(f"batch starting at {file_list[start]}: scan exceeded {batch_timeout}s") from None
             # Mark every file in the timed-out batch with the error.
             for local_idx, path in enumerate(paths):
                 global_idx = start + local_idx

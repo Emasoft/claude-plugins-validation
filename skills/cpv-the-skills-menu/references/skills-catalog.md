@@ -62,6 +62,8 @@ universal-loader pattern makes every skill available to every agent.
 | `cpv-scaffold-agent` | name + plugin path | agents/<name>.md created | New agent |
 | `cpv-scaffold-command` | name + plugin path | commands/<name>.md created | New slash command |
 | `cpv-scaffold-skill` | name + plugin path | skills/<name>/SKILL.md created | New skill |
+| `cpv-create-mono-agent` | plugin path | agents/<slug>-mono-agent.md (all non-meta skills inlined) | EXPERIMENTAL prefill-everything mega-agent |
+| `cpv-create-micro-agents-workflow` | plugin path | launcher agent + workflows/<base>-micro-agents.ts | EXPERIMENTAL RLM skill-per-agent workflow |
 
 ## Publish / release skills
 
@@ -145,6 +147,8 @@ Skill({skill: "claude-plugins-validation:cpv-register-mcp"})
 Skill({skill: "claude-plugins-validation:cpv-scaffold-agent"})
 Skill({skill: "claude-plugins-validation:cpv-scaffold-command"})
 Skill({skill: "claude-plugins-validation:cpv-scaffold-skill"})
+Skill({skill: "claude-plugins-validation:cpv-create-mono-agent"})
+Skill({skill: "claude-plugins-validation:cpv-create-micro-agents-workflow"})
 Skill({skill: "claude-plugins-validation:cpv-strip-dev-submodules"})
 Skill({skill: "claude-plugins-validation:cpv-refresh-readme"})
 Skill({skill: "claude-plugins-validation:cpv-bump-version"})

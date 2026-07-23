@@ -3546,7 +3546,7 @@ def _validate_hooks_in_matcher_block(
 
     if work_units:
         scan_results = parallel_scan(work_units, scan_one_hook)
-        for slot, sr in zip(work_unit_indices, scan_results):
+        for slot, sr in zip(work_unit_indices, scan_results, strict=True):
             if sr.error is not None:
                 # A worker raised — spec mandates "surface as a per-file
                 # WARNING in the report (don't crash the whole validator)".

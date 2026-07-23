@@ -62,6 +62,7 @@ from cpv_validation_common import (  # noqa: E402  (import below conditional yam
     VALID_CONTEXT_VALUES,
     ValidationReport,
     check_token_limit,
+    is_accepted_frontmatter_bool,
     is_known_skill_frontmatter_key,
     is_valid_model,
     save_report_and_print_summary,
@@ -329,9 +330,9 @@ def validate_boolean_field(
 
     value = frontmatter[field_name]
 
-    if not isinstance(value, bool):
+    if not is_accepted_frontmatter_bool(value):
         report.critical(
-            f"'{field_name}' must be a boolean (true/false), got {type(value).__name__}",
+            f"'{field_name}' must be a boolean (true/false/yes/no/on/off/1/0), got {type(value).__name__}",
             "SKILL.md",
         )
         return

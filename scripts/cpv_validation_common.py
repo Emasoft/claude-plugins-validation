@@ -485,7 +485,6 @@ BUILTIN_SLASH_COMMANDS: frozenset[str] = frozenset(
         # Tool / MCP
         "mcp",
         "plugin",
-        "context",
         "review",
         "security-review",
         # Loops + automation (v2.1.105 alias)
@@ -885,6 +884,8 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION",  # v2.1.212 — cap on Agent-tool subagent spawns per session (default 200)
     "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS",  # v2.1.212 — ms before a long MCP tool call auto-backgrounds (default 120000; 0 disables)
     "CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH",  # v2.1.214 — max length of content-bearing OTEL attributes (default 61440 = 60 KB)
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS",  # v2.1.217 — cap on concurrently-running subagents (default 20)
+    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH",  # v2.1.217 — allow subagents to spawn nested subagents (default: no nesting)
     # Anthropic *_SUPPORTED_CAPABILITIES — spec-correct suffix
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
@@ -1276,6 +1277,7 @@ SKILL_FRONTMATTER_FIELDS = {
     "effort",  # v2.1.80 — effort level for skill execution (low, medium, high, max)
     "paths",  # v2.1.84 — YAML list of globs to restrict skill activation to matching files
     "shell",  # v2.1.84 — shell for !`command` blocks: "bash" (default) or "powershell"
+    "background",  # v2.1.218 — a context: fork skill runs in the background by default; set background: false to opt out
     # v2.1.186 — these four accept kebab/snake/camel; canonical (kebab) form
     # listed here, the other casings cleared by is_known_skill_frontmatter_key().
     "display-name",  # v2.1.186 — human-readable label (skill-frontmatter alias of plugin.json `displayName`)
@@ -1295,6 +1297,26 @@ _CASING_TOLERANT_SKILL_KEYS = frozenset(
         "metadata",
     }
 )
+
+# CC v2.1.218 — frontmatter booleans accept yes/no/on/off/1/0 (case-insensitive)
+# alongside true/false. YAML 1.1 (yaml.safe_load) already coerces
+# yes/no/on/off/true/false to a Python bool, so the only documented literals that
+# reach a validator as a NON-bool are the integers 1/0 and quoted-string forms.
+# Accept all documented forms so CPV never rejects a value Claude Code accepts,
+# while still rejecting genuine non-booleans (2, "maybe", a list, ...).
+_FRONTMATTER_BOOL_STRINGS = frozenset({"true", "false", "yes", "no", "on", "off", "1", "0"})
+
+
+def is_accepted_frontmatter_bool(value: object) -> bool:
+    """True if ``value`` is a boolean Claude Code accepts in YAML frontmatter (v2.1.218)."""
+    if isinstance(value, bool):
+        return True
+    # bool is an int subclass but is handled above, so this is a plain int here.
+    if isinstance(value, int):
+        return value in (0, 1)
+    if isinstance(value, str):
+        return value.strip().lower() in _FRONTMATTER_BOOL_STRINGS
+    return False
 
 
 def _to_kebab(key: str) -> str:
@@ -2790,7 +2812,6 @@ SHADOWED_TOOL_NAMES: frozenset[str] = frozenset(
         "skill",
         "read",
         "write",
-        "edit",
         "ask_user",
         "ask_user_question",
     }
@@ -2831,7 +2852,7 @@ def _levenshtein_at_most_one(a: str, b: str) -> bool:
         return False
     if la == lb:
         # Substitution — count mismatches
-        return sum(1 for x, y in zip(a, b) if x != y) == 1
+        return sum(1 for x, y in zip(a, b, strict=True) if x != y) == 1
     # Insert / delete — walk the shorter string against the longer
     short, lng = (a, b) if la < lb else (b, a)
     i = j = mismatches = 0
@@ -5389,7 +5410,10 @@ MAX_NAME_LENGTH = 64  # Official Claude Code spec: max 64 characters for skill/c
 # (MAX_DESCRIPTION_LENGTH removed — dead since the char→token migration replaced
 # it with DESCRIPTION_TOKEN_LIMIT below. audit MINOR agent #6)
 MIN_BODY_CHARS = 100
-MAX_BODY_WORDS = 2000
+# NOTE: there is intentionally NO agent body-length cap. Anthropic imposes none,
+# an agent's full body is always loaded, and only SKILLS lose their tail to
+# auto-compaction — so the skill-only limit lives in SKILL_BODY_TOKEN_LIMIT below.
+# (Removed the old agent MAX_BODY_WORDS=2000 warning per user directive 2026-07-22.)
 
 # --- Token-based size limits (TRDD-021250b5) ---
 # The real Claude Code size limits are TOKEN-based, not character-based:
@@ -8398,9 +8422,12 @@ def validate_toc_embedding(
         nearby_lower_bt = nearby_text.lower()
         nearby_no_bt = nearby_lower_bt.replace("`", "")
 
-        def _bt_heading_matches(heading: str) -> bool:
+        # Bind the per-iteration haystacks as default args so the closure does
+        # not capture the loop variables by reference (it is called immediately
+        # below, so there is no live bug — this makes the non-capture explicit).
+        def _bt_heading_matches(heading: str, _lower: str = nearby_lower_bt, _no_bt: str = nearby_no_bt) -> bool:
             h = heading.lower()
-            return h in nearby_lower_bt or h.replace("`", "") in nearby_no_bt
+            return h in _lower or h.replace("`", "") in _no_bt
 
         embedded_count = sum(1 for heading in toc_headings if _bt_heading_matches(heading))
 

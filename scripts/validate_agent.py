@@ -34,7 +34,6 @@ from cpv_validation_common import (
     AGENT_DESCRIPTION_TOKEN_LIMIT,
     BUILTIN_AGENT_TYPES,
     COLORS,
-    MAX_BODY_WORDS,
     MIN_BODY_CHARS,
     SECRET_PATTERNS,
     USER_PATH_PATTERNS,
@@ -46,6 +45,7 @@ from cpv_validation_common import (
     ValidationReport,
     check_token_limit,
     check_utf8_encoding,
+    is_accepted_frontmatter_bool,
     is_plugin_shipped_agent,
     is_valid_model,
     save_report_and_print_summary,
@@ -660,16 +660,11 @@ def validate_user_invocable_field(frontmatter: dict[str, Any], filename: str, re
 
     value = frontmatter["user-invocable"]
 
-    if isinstance(value, bool):
+    if is_accepted_frontmatter_bool(value):
         report.passed(f"'user-invocable' field valid: {value}", filename)
-    elif isinstance(value, str) and value.lower() in ("true", "false"):
-        report.minor(
-            f"'user-invocable' should be boolean, not string: {value!r} -> use {value.lower() == 'true'}",
-            filename,
-        )
     else:
         report.major(
-            f"'user-invocable' must be boolean (true/false), got: {type(value).__name__} = {value!r}",
+            f"'user-invocable' must be boolean (true/false/yes/no/on/off/1/0), got: {type(value).__name__} = {value!r}",
             filename,
         )
 
@@ -853,8 +848,10 @@ def validate_background_field(frontmatter: dict[str, Any], filename: str, report
 
     rel_path = filename
     bg_val = frontmatter["background"]
-    if not isinstance(bg_val, bool):
-        report.major(f"'background' must be a boolean, got {type(bg_val).__name__}", rel_path)
+    if not is_accepted_frontmatter_bool(bg_val):
+        report.major(
+            f"'background' must be a boolean (true/false/yes/no/on/off/1/0), got {type(bg_val).__name__}", rel_path
+        )
     else:
         report.passed(f"Valid background: {bg_val}", rel_path)
 
@@ -1300,13 +1297,12 @@ def validate_body_content(content: str, filename: str, report: AgentValidationRe
             filename,
         )
 
-    # Word count check — advisory only; Anthropic imposes no body-length limit
-    word_count = len(body_text.split())
-    if word_count > MAX_BODY_WORDS:
-        report.warning(
-            f"Agent body is very long ({word_count} words, recommended: <{MAX_BODY_WORDS})",
-            filename,
-        )
+    # Agents intentionally have NO body-length limit (user directive 2026-07-22):
+    # Anthropic imposes no agent body-length cap, and an agent's full instructions
+    # are always loaded, so trimming an agent body loses capability for no runtime
+    # benefit. Only SKILLS carry a body-size limit (SKILL_BODY_TOKEN_LIMIT = 5000
+    # tokens), because a skill body beyond ~5000 tokens loses its tail to
+    # auto-compaction. Do NOT re-add a word/token cap for agents.
 
     # Role definition check — advisory only; Anthropic does not require a role line.
     # Recognize BOTH second-person ("You are …") and third-person identity statements

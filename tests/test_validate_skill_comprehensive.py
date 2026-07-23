@@ -1304,13 +1304,23 @@ class TestBooleanFieldValidation:
     """Tests for validate_boolean_field (lines 1114-1124)."""
 
     def test_non_boolean_value_is_critical(self):
-        """Non-boolean value for boolean field should be critical."""
+        """A genuine non-boolean value (int 2, not 0/1) for a boolean field should be critical."""
         from validate_skill_comprehensive import validate_boolean_field
 
         report = ValidationReport(skill_path="test")
-        frontmatter = {"user-invocable": "yes"}
+        frontmatter = {"user-invocable": 2}
         validate_boolean_field(frontmatter, "user-invocable", report)
         assert any("must be a boolean" in r.message for r in report.results)
+
+    def test_accepted_yaml_bool_strings_pass(self):
+        """Every YAML boolean CC accepts (yes/no/on/off/1/0) passes the comprehensive check — v2.1.218."""
+        from validate_skill_comprehensive import validate_boolean_field
+
+        for value in ("yes", "no", "on", "off", 1, 0, "TRUE"):
+            report = ValidationReport(skill_path="test")
+            frontmatter = {"user-invocable": value}
+            validate_boolean_field(frontmatter, "user-invocable", report)
+            assert not any("must be a boolean" in r.message for r in report.results), f"{value!r} should pass"
 
     def test_valid_boolean_passes(self):
         """Valid boolean value should pass."""

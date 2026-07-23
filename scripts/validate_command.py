@@ -45,6 +45,7 @@ from cpv_validation_common import (
     ValidationReport,
     check_token_limit,
     check_utf8_encoding,
+    is_accepted_frontmatter_bool,
     is_known_skill_frontmatter_key,
     is_placeholder_secret,
     is_valid_model,
@@ -476,9 +477,9 @@ def validate_skill_shared_fields(frontmatter: dict[str, Any], filename: str, rep
     for bool_field in ("user-invocable", "disable-model-invocation"):
         if bool_field in frontmatter:
             val = frontmatter[bool_field]
-            if not isinstance(val, bool):
+            if not is_accepted_frontmatter_bool(val):
                 report.major(
-                    f"'{bool_field}' must be a boolean (true/false), got {type(val).__name__}: {val!r}",
+                    f"'{bool_field}' must be a boolean (true/false/yes/no/on/off/1/0), got {type(val).__name__}: {val!r}",
                     filename,
                 )
             else:

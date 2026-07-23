@@ -65,6 +65,7 @@ from cpv_validation_common import (
     Level,
     check_token_limit,
     has_numbered_prose_steps,
+    is_accepted_frontmatter_bool,
     is_known_skill_frontmatter_key,
     is_valid_model,
     is_valid_plugin_env_var,
@@ -1423,9 +1424,9 @@ def validate_boolean_field(
 
     value = frontmatter[field_name]
 
-    if not isinstance(value, bool):
+    if not is_accepted_frontmatter_bool(value):
         report.critical(
-            f"'{field_name}' must be a boolean (true/false), got {type(value).__name__}",
+            f"'{field_name}' must be a boolean (true/false/yes/no/on/off/1/0), got {type(value).__name__}",
             "SKILL.md",
             category="Frontmatter",
         )
