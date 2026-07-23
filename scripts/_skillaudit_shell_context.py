@@ -670,15 +670,25 @@ def _cmdsub_is_safe_data_command(line: str, match: str) -> bool:
     # certification (the pure-data commands below never egress, so they are
     # unaffected by this guard).
     leaks_secret = _line_leaks_secret_var_to_url(line)
+    # SCOPE to the catalog MATCH span (2026-07-23, ensemble scan + probe-confirmed
+    # FN): suppress only when the match lies INSIDE a safe data/query cmdsub, so a
+    # benign ``$(uname -m)`` no longer suppresses a DANGEROUS sibling cmdsub
+    # (``$(uname -m) && $($CMD arg)`` — the variable-program cmdsub stays visible).
+    # Iterating ALL cmdsubs (rather than returning True on the first safe one)
+    # also fixes a latent ordering bug: a safe cmdsub appearing BEFORE a
+    # secret-leaking net-capture cmdsub used to suppress the line early. FN-safe.
+    matched_safe = False
     for m in _CMDSUB_HEAD_RE.finditer(line):
         cmd = m.group("cmd")
-        if cmd in _SAFE_CMDSUB_DATA_COMMANDS:
-            return True
-        if cmd in _NET_CAPTURE_CMDSUB_COMMANDS:
-            if leaks_secret:
-                return False  # credential leaves the machine → keep visible
-            return True
-    return False
+        if cmd in _NET_CAPTURE_CMDSUB_COMMANDS and leaks_secret:
+            return False  # credential leaves the machine → keep visible (whole line)
+        if cmd not in _SAFE_CMDSUB_DATA_COMMANDS and cmd not in _NET_CAPTURE_CMDSUB_COMMANDS:
+            continue
+        span_text = _balanced_call_span(line, m.start() + 1)
+        s, e = m.start(), m.start() + 1 + len(span_text)
+        if not match or match in line[s:e]:
+            matched_safe = True
+    return matched_safe
 
 
 def _pipe_to_text_processor(line: str, match: str) -> bool:
@@ -810,11 +820,28 @@ def _is_shell_literal_arg_cmdsub(line: str, match: str) -> bool:
         or _SHELL_INTERPRETER_PIPE_RE.search(line)
     ):
         return False
-    for m in _SHELL_LITERAL_ARG_CMDSUB_RE.finditer(line):
-        # Verify the match span overlaps with the catalog match.
-        # We accept any cmdsub on the line as a positive signal.
-        return True
-    return False
+    spans = [(m.start(), m.end()) for m in _SHELL_LITERAL_ARG_CMDSUB_RE.finditer(line)]
+    if not spans:
+        return False
+    # SCOPE the suppression to the catalog MATCH span (2026-07-23, ensemble scan
+    # + probe-confirmed FN): suppress ONLY when the matched token actually lies
+    # inside a literal-arg cmdsub. Previously this returned True on ANY literal
+    # cmdsub anywhere on the line, so a benign ``$(uname -m)`` co-located with a
+    # DANGEROUS construct (``$(uname -m) && $($CMD arg)`` / ``… ; $INJECT``)
+    # suppressed the whole line — a security false-negative. FN-safe: if any
+    # occurrence of the match falls OUTSIDE every literal cmdsub span, keep the
+    # finding visible (it may be the dangerous one).
+    if not match:
+        return True  # no match text to scope; the whole-line guards above already cleared the dangerous shapes
+    found = False
+    pos = 0
+    while (idx := line.find(match, pos)) != -1:
+        found = True
+        end = idx + len(match)
+        if not any(s <= idx and end <= e for s, e in spans):
+            return False
+        pos = idx + 1
+    return found
 
 
 # r08 sangrokjung FP iter1 (2026-05-28) — write-intent tokens for
