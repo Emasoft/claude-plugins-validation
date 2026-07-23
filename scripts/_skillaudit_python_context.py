@@ -424,56 +424,6 @@ def _arg_is_known_safe(arg: ast.expr) -> bool:
     return False
 
 
-def _container_is_all_safe(node: ast.expr) -> bool:
-    """True iff ``node`` is a List/Tuple/Set whose every element is
-    a safe argv element shape.
-
-    The argv elements of ``subprocess.run([...])`` / ``Popen([...])``
-    do NOT get shell-expanded — each element is passed verbatim as one
-    argv to the child process. So even f-strings inside the list are
-    safe (the f-string evaluates to a typed Python string; the
-    subprocess receives that string as one argv with no shell
-    interpretation). The exploit shape is ``shell=True`` PLUS an
-    f-string / BinOp concat as the WHOLE first arg — that case is
-    handled separately in the caller via ``_shell_kwarg_is_true``
-    + ``_arg_is_exploit_shape`` at the top level.
-
-    Allowed element shapes:
-
-    * ``Constant`` — pure literal.
-    * ``Starred`` — ``*args`` from caller's argv.
-    * ``Name`` — bare variable reference.
-    * ``Subscript`` / ``Attribute`` — ``d["k"]`` / ``self.cmd``.
-    * ``Call`` — assumed to return a typed string value.
-    * ``JoinedStr`` — f-string. Safe inside a list arg because list
-      elements are not shell-expanded.
-    * ``BinOp`` — string concat. Same reasoning as JoinedStr.
-
-    ``["a", "b", "c"]`` → True
-    ``["git", *args]`` → True
-    ``[str(path), "log"]`` → True
-    ``["git-cliff", "--tag", f"v{ver}", "--unreleased"]`` → True
-       (f-string element is safe because list args don't shell-expand)
-    """
-    if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-        return False
-    # Inside a list arg, ANY element is safe at the call site (no
-    # shell expansion of list args). The only injection-shape risk for
-    # list-form subprocess calls is shell=True (handled upstream).
-    return True
-
-
-def _container_is_all_literals(node: ast.expr) -> bool:
-    """Legacy strict check — kept for tests that pin literal-only behavior.
-
-    Use ``_container_is_all_safe`` for the FP-aware classifier; this
-    helper remains for unit-test introspection.
-    """
-    if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-        return False
-    return all(_arg_is_pure_literal(elt) for elt in node.elts)
-
-
 def _shell_kwarg_is_true(call: ast.Call) -> bool:
     """True iff the call has ``shell=True`` (literal True constant)."""
     for kw in call.keywords:
@@ -585,27 +535,6 @@ def _first_arg_is_argv_safe_shape_py(arg: ast.expr) -> bool:
             if not _arg_is_known_safe(elt):
                 return False
         return True
-    return False
-
-
-def _is_inside_string_literal(tree: ast.AST, line: int) -> bool:
-    """True iff the 1-based line falls inside any string-Constant node
-    (docstring, multiline string, raw string used as data, etc.).
-
-    Kept for back-compat with older callers; do NOT use as the primary
-    "this match is documentation" check — every shell-call site has
-    single-line string Constants on its argument line, so this function
-    would shadow real call classification. Use
-    ``_is_inside_multiline_string_literal`` instead, which only returns
-    True when the Constant SPANS the matched line (i.e. is actually a
-    docstring / multi-line data string).
-    """
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            start = getattr(node, "lineno", None)
-            end = getattr(node, "end_lineno", None)
-            if start is not None and end is not None and start <= line <= end:
-                return True
     return False
 
 
