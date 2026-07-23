@@ -826,6 +826,15 @@ def _process_augassign(target: ast.expr, value: ast.expr, state: _TaintState) ->
         s = _is_source_subscript(value)
         if s:
             contributed = (s, 1)
+    elif isinstance(value, ast.Attribute):
+        # Mirror the plain-assignment path (``x = sys.argv``): a bare attribute
+        # source like ``cmd += sys.argv`` must contribute its taint too, else the
+        # augmented-assign path silently DROPS a source the plain path catches
+        # (a taint false-negative — ``x = sys.argv`` flags but ``x += sys.argv``
+        # did not, letting a later ``exec(x)`` go unreported).
+        chain = _attribute_chain(value)
+        if chain and chain in TAINT_SOURCES:
+            contributed = (".".join(chain), 1)
 
     if contributed is None:
         return  # value adds no taint — preserve the target's existing taint

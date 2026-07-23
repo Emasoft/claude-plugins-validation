@@ -94,6 +94,35 @@ class TestRC73Direct:
 
 
 # -----------------------------------------------------------------------------
+# Augmented-assign attribute source (regression: `x += sys.argv` FN)
+# -----------------------------------------------------------------------------
+
+
+class TestAugAssignAttributeSource:
+    """`_process_augassign` must recognize a bare ast.Attribute taint source
+    (e.g. `cmd += sys.argv`) exactly as the plain-assign path does — else the
+    augmented-assign path silently drops a source `x = sys.argv` would catch."""
+
+    def test_augassign_attribute_source_propagates(self) -> None:
+        # `cmd += sys.argv` gains sys.argv taint → os.system(cmd) is a sink.
+        src = "import sys, os\ncmd = 'p'\ncmd += sys.argv\nos.system(cmd)\n"
+        findings = _analyze(src)
+        assert any(f.rule_id == "RC-73" and "os.system" in f.sink for f in findings)
+
+    def test_augassign_matches_plain_assign_for_attribute_source(self) -> None:
+        # Consistency: the plain-assign and augassign forms must agree.
+        plain = _analyze("import sys, os\ncmd = sys.argv\nos.system(cmd)\n")
+        aug = _analyze("import sys, os\ncmd = 'p'\ncmd += sys.argv\nos.system(cmd)\n")
+        assert plain and aug  # both forms must flag the same sys.argv → os.system flow
+
+    def test_augassign_benign_attribute_no_false_positive(self) -> None:
+        # A non-source attribute (`config.value` ∉ TAINT_SOURCES) adds no taint.
+        src = "import os\ncmd = 'p'\ncmd += config.value\nos.system(cmd)\n"
+        findings = _analyze(src)
+        assert not findings
+
+
+# -----------------------------------------------------------------------------
 # RC-74 — transitive (2+ hops) propagation
 # -----------------------------------------------------------------------------
 
