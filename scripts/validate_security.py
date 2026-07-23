@@ -45,6 +45,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+# Issue #174 — the dependency agent-context-writer detector (RC-165). Flags a
+# plugin DEPENDENCY (not just the plugin's own tree) that can write files an
+# agent later loads as instructions (.claude/agents/, .mcp.json, .github/agents/,
+# .github/workflows/copilot-setup-steps.yml, …). Three-state scoring: capability
+# present → WARNING, install-time trigger → CRITICAL, artifacts present → MAJOR.
+from cpv_dependency_agent_writers import scan_dependency_agent_writers
+
 # Issue #152 — the copy-only in-plugin-write guard (RC-164). Flags a plugin
 # script that GENERATES or EDITS a script INSIDE the plugin tree (ROOT or DATA);
 # a verbatim COPY of an already-scanned in-tree source is ALLOWED. Lenient
@@ -9186,6 +9193,39 @@ def _eval_exec_inert_string_lines(rel_path: str, content: str) -> frozenset[int]
     return frozenset(inert)
 
 
+def check_dependency_agent_writers(plugin_path: Path, report: ValidationReport) -> int:
+    """RC-165 — a plugin DEPENDENCY (not only the plugin's own tree) that can
+    write agent-context files an agent later loads as instructions (issue #174).
+
+    Three-state scoring, so a common opt-in capability is never reported with the
+    language of a live install-time attack (which would train readers to discount
+    the detector): capability present → WARNING, an install-time trigger → CRITICAL,
+    the writer's distinctive artifacts present in the tree → MAJOR.
+
+    Each state is emitted at its INTRINSIC tier — deliberately NOT through
+    ``effective_severity``. The detector is already conservative (keyed on a
+    curated named list, on the writer's *distinctive* consumer-footprint paths,
+    and on a *real* install trigger), so the sample/test/doc demotion buys no FP
+    reduction here — and it would wrongly demote a state-3 finding merely because
+    an agent-context artifact is a ``.md`` file (``is_doc_path`` treats every
+    ``.md`` as documentation, but ``.claude/agents/planner.md`` is an
+    agent-instruction file, not a README). The state-3 globs are anchored to the
+    plugin's canonical top-level consumer paths, so an artifact can never live in
+    a sample subdir to begin with. Keeping a bundled example's genuine
+    install-time trigger at CRITICAL is the security-first call.
+
+    Uninstalled-safe: the baseline reads only the plugin's own always-present
+    files (declared manifests, root ``package.json`` scripts, the on-disk tree);
+    it never GATES on ``node_modules`` being present.
+    """
+    issues = 0
+    for wf in scan_dependency_agent_writers(plugin_path):
+        # wf.severity is already the lowercase ValidationReport method name.
+        getattr(report, wf.severity)(f"RC-165: {wf.message}", wf.evidence, wf.line_no)
+        issues += 1
+    return issues
+
+
 def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
     """RC-65 (cloud IMDS), RC-39 (persistence), RC-70 (obfuscated exec),
     RC-164 (copy-only in-plugin script-write guard, issue #152)."""
@@ -9894,6 +9934,22 @@ def validate_security(
         "COMPLETED",
         findings=phase2e_issues,
         files="RC-39 persistence, RC-65 IMDS, RC-70 obfuscated-exec, RC-164 in-plugin-write",
+    )
+
+    # --- Phase 2f — dependency agent-context writers (RC-165, issue #174) ---
+    # A plugin DEPENDENCY (not just its own tree) that can write files an agent
+    # later loads as instructions. Three-state scoring so a common opt-in
+    # capability (e.g. playwright's init-agents CLI) is a non-blocking WARNING,
+    # while a genuine install-time trigger is CRITICAL.
+    dep_writer_issues = check_dependency_agent_writers(plugin_path, report)
+    if dep_writer_issues == 0:
+        report.passed("No dependency agent-context-writer findings (RC-165)")
+    _record_step(
+        18,
+        "Phase 2f — dependency agent-context writers",
+        "COMPLETED",
+        findings=dep_writer_issues,
+        files="RC-165 dependency agent-context writers",
     )
 
     # --- Phase 3 — ~30 MAJOR net-new rules ---

@@ -44,45 +44,58 @@ from cpv_validation_common import Level
 # re2-safe: anchored, no lookaround.
 _NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
-# Minimal syntactic semver-range check for plugin dependencies. Accepts the
-# npm-semver-range idioms documented at plugin-dependencies.md:44-52:
-#   ~2.1.0, ^2.0, ^2.0.0-0, >=1.4, =2.1.0, 1.2.3, "x.y.z - a.b.c", "a || b".
-# The atom regex targets a SINGLE range atom; logical OR is split and each side
-# checked. re2-safe: anchored, no lookbehind/lookahead.
-_SEMVER_ATOM_RE = re.compile(
-    r"""^
-    \s*                                           # leading space ok
-    (?:                                           # range-kind prefix
-        [~^]                                      #   ~ or ^
-      | =
-      | >=?|<=?                                   #   >, >=, <, <=
-    )?
-    \s*
-    \d+(?:\.\d+){0,2}                             # MAJOR[.MINOR[.PATCH]]
-    (?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?       # -prerelease
-    (?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?      # +build
-    \s*
-    $
-    """,
-    re.VERBOSE,
+# Syntactic npm-semver-RANGE check for plugin dependencies. The spec
+# (plugin-dependencies.md:44-52) says ``version`` accepts "any expression
+# supported by Node's ``semver`` package", so the grammar below mirrors
+# node-semver's range grammar closely enough to accept every valid range
+# WITHOUT accepting junk — the earlier single-atom regex false-positived
+# (emitted MAJOR) on valid ranges an author would routinely write: x-ranges
+# (``1.x`` / ``1.2.x`` / ``1.*`` / ``x``), the ``*`` wildcard, space-separated
+# comparator SETS (``>=1.2.3 <2.0.0`` — the AND form), and a ``v``-prefixed
+# version (``v1.2.3``). A range is ``||``-separated range-sets; each range-set
+# is a hyphen range OR a whitespace-separated set of comparators; each
+# comparator is an optional operator + a partial version with x-range
+# components. re2-safe: anchored, no lookbehind/lookahead.
+#
+# ``_XR`` — one version component: a number, or the ``x`` / ``X`` / ``*``
+# wildcard.
+_XR = r"(?:\d+|[xX*])"
+# ``_PARTIAL`` — MAJOR[.MINOR[.PATCH[-pre][+build]]], each component an ``_XR``,
+# with an optional leading ``v`` (node-semver tolerates ``v1.2.3``).
+_PARTIAL = (
+    r"[vV]?"
+    + _XR  # major
+    + r"(?:\." + _XR  # .minor
+    + r"(?:\." + _XR  # .patch
+    + r"(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?"  # -prerelease
+    + r"(?:\+[0-9A-Za-z][0-9A-Za-z.-]*)?"  # +build
+    + r")?)?"
 )
-
-# Hyphen range "x.y.z - a.b.c" (3 tokens separated by a bare dash and spaces).
-_SEMVER_HYPHEN_RE = re.compile(
-    r"^\s*\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?\s+-\s+\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?\s*$"
-)
+# One comparator: an optional range operator then a partial. ``>=``/``<=``
+# precede ``>``/``<`` in the alternation so the two-char forms win under
+# Python ``re``'s leftmost-first matching.
+_COMPARATOR_RE = re.compile(r"^(?:>=|<=|>|<|=|~|\^)?" + _PARTIAL + r"$")
+# A hyphen range ``x.y.z - a.b.c`` — two partials around a spaced dash.
+_SEMVER_HYPHEN_RE = re.compile(r"^" + _PARTIAL + r"\s+-\s+" + _PARTIAL + r"$")
 
 # Recognized dependency object sub-keys.
 DEPENDENCY_SUBKEYS = frozenset({"name", "version", "marketplace"})
 
 
 def is_valid_semver_range(text: object) -> bool:
-    """Return True when ``text`` parses as a syntactic semver range.
+    """Return True when ``text`` parses as a syntactic npm-semver range.
 
-    Not a full npm-semver parser — we only guard against obviously-malformed
-    strings (empty, spaces inside a single range token, non-ASCII). Valid
-    ranges like ``~2.1.0``, ``^2.0``, ``^2.0.0-0``, ``>=1.4``, ``=2.1.0``,
-    ``1.2.3``, ``x.y.z - a.b.c``, logical OR chains ``a || b`` all pass.
+    Mirrors node-semver's range grammar closely enough to accept every valid
+    range the spec permits ("any expression supported by Node's ``semver``
+    package", plugin-dependencies.md:44-52) WITHOUT accepting junk — a range is
+    ``||``-separated range-sets; each range-set is a hyphen range
+    (``x.y.z - a.b.c``) OR a whitespace-separated set of comparators combined
+    with AND (``>=1.2.3 <2.0.0``); each comparator is an optional operator plus
+    a partial version whose components may be numbers or the ``x`` / ``X`` /
+    ``*`` wildcard. So ``~2.1.0``, ``^2.0``, ``^2.0.0-0``, ``>=1.4``, ``1.x``,
+    ``1.2.x``, ``*``, ``>=1.2.3 <2.0.0``, ``v1.2.3``, and OR chains all pass,
+    while ``not-a-version``, ``1.2.3foo``, ``1 . 2 . 3``, a bare operator, and
+    non-ASCII are rejected.
     """
     if not isinstance(text, str) or not text:
         return False
@@ -90,14 +103,22 @@ def is_valid_semver_range(text: object) -> bool:
         text.encode("ascii")
     except UnicodeEncodeError:
         return False
-    # Logical OR — each side must be a valid range on its own.
-    if "||" in text:
-        return all(is_valid_semver_range(part) for part in text.split("||"))
-    # Hyphen range ("x.y.z - a.b.c") — must be checked before the atom regex
-    # since the atom regex does not allow internal whitespace.
-    if _SEMVER_HYPHEN_RE.match(text):
-        return True
-    return bool(_SEMVER_ATOM_RE.match(text))
+    text = text.strip()
+    if not text:
+        return False
+    # ``||`` separates alternative range-sets; each must be valid on its own.
+    for range_set in text.split("||"):
+        rs = range_set.strip()
+        if not rs:
+            return False  # an empty alternative (e.g. a trailing "||") is malformed
+        # A hyphen range is a single range-set that contains an internal space,
+        # so it must be recognised BEFORE splitting the set on whitespace.
+        if _SEMVER_HYPHEN_RE.match(rs):
+            continue
+        # Otherwise an AND set of space-separated comparators; each must match.
+        if not all(_COMPARATOR_RE.match(tok) for tok in rs.split()):
+            return False
+    return True
 
 
 def validate_dependency_element(index: int, entry: Any) -> list[tuple[Level, str]]:

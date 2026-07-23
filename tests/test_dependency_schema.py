@@ -134,3 +134,39 @@ class TestIsValidSemverRange:
     def test_invalid_ranges(self):
         for bad in ("", "not-a-version", "1.2.3foo", "1 . 2 . 3", "café", 2, None, [1]):
             assert not is_valid_semver_range(bad), f"{bad!r} wrongly accepted"
+
+    def test_npm_range_forms_previously_false_positived(self):
+        """Valid node-semver forms the earlier single-atom regex WRONGLY rejected
+        (emitting a spurious MAJOR) — x-ranges, the `*` wildcard, space-separated
+        comparator SETS (the AND form), and a `v`-prefixed version — now pass.
+        The spec accepts "any expression supported by Node's semver package"
+        (plugin-dependencies.md:44-52)."""
+        for rng in (
+            "1.x",
+            "1.2.x",
+            "1.*",
+            "x",
+            "*",
+            ">=1.2.3 <2.0.0",
+            ">=1.2.3 <2.0.0 || >=3.0.0",
+            "v1.2.3",
+            "~1",
+            "^0",
+            "1",
+            ">1.0.0",
+            "<=2.0.0",
+        ):
+            assert is_valid_semver_range(rng), f"valid npm range {rng!r} wrongly rejected"
+
+    def test_junk_still_rejected_after_broadening(self):
+        """Broadening acceptance must NOT let malformed strings through — the
+        two-sided guarantee. A bare operator, doubled operator, empty OR
+        alternative, and internal-double-dot stay rejected."""
+        for bad in (">= <", "~", "^^2", "1..2", "^2.0 || ", "1.2.3.4.5", "latest", ">=1.2.3 <"):
+            assert not is_valid_semver_range(bad), f"malformed range {bad!r} wrongly accepted"
+
+    def test_comparator_set_version_is_clean_through_element(self):
+        """The AND comparator-set form on a `.version` subkey yields no findings
+        (regression lock: it used to emit a spurious MAJOR)."""
+        assert validate_dependency_element(0, {"name": "lib", "version": ">=1.2.3 <2.0.0"}) == []
+        assert validate_dependency_element(0, {"name": "lib", "version": "1.x"}) == []
