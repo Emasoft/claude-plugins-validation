@@ -85,6 +85,13 @@ Once the target is resolved, you own the full validate → fix →
 re-validate loop. Do NOT route the user back to a separate validator
 step.
 
+**Formatter canon (never format, lint only):** NEVER run a FORMATTER
+(`ruff format`, `prettier`, `mdformat`, any markdown formatter) or
+`markdownlint --fix` on ANY file — they reflow the structured Markdown that
+skills / agents / TRDDs / wikimem / frontmatter depend on. Fix Markdown / JSON
+(marketplace.json) / YAML findings BY HAND with Edit. Only the LINTER autofix is
+allowed, and only on Python/JS: `ruff check --fix` / `eslint --fix`.
+
 ## The loop
 
 The validate→fix→re-validate loop is THIS agent's BEHAVIOUR — run it from this prompt; `skills/cpv-fix-validation/references/iterative-fix-loop.md` is supporting DATA (WARNING categories, output contract), NOT the loop logic. **Reset the oscillation state once** before the loop, then each iteration validate via the **launcher** (NEVER call `validate_marketplace.py` directly — environment-isolation guard refuses), capturing the `--json` findings for the deterministic verdict:

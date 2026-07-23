@@ -13,6 +13,16 @@ user-invocable: false
 
 Central error-to-fix lookup. Maps validation errors to fix guides in `references/`.
 
+## Formatter canon — lint only, NEVER format (user directive)
+
+NEVER run a FORMATTER on any file: no `ruff format`, no `prettier`, no `mdformat`, no markdown formatter. Formatters reflow content and corrupt the structured Markdown that skills, agents, TRDDs, wikimem, obsidian notes, and YAML frontmatter depend on.
+
+- **Markdown / mdz / docs / TRDD / wikimem**: lint-only. Run `markdownlint` in REPORT mode, then fix each finding BY HAND with Edit. NEVER `markdownlint --fix`.
+- **Python / JS/TS**: the LINTER's autofix is allowed — `ruff check --fix`, `eslint --fix`. NEVER the FORMATTER (`ruff format` / `prettier`).
+- **JSON / YAML / config**: lint/report only, fix by hand. No `prettier --write`.
+
+Why: a formatter (and markdown `--fix`) rewrites files opaquely and breaks the careful structure the author maintains. This is the same discipline as the fixer-agent scope guard ("never reformat a file you weren't sent to fix").
+
 ## Prerequisites
 
 - Report from `/cpv-validate-*`
