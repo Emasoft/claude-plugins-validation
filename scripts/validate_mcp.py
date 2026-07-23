@@ -526,7 +526,7 @@ def _parallel_scan_mcp_servers(
     # iteration order of `servers` — which matches the iteration order of
     # the parent dict — preserving the existing serial finding order.
     for scan_result, (server_name, _server_config, _file_context) in zip(
-        scan_results, servers
+        scan_results, servers, strict=True
     ):
         if scan_result.error:
             # The worker raised. Surface as WARNING so the validator keeps

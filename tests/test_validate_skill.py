@@ -430,13 +430,30 @@ class TestValidateBooleanField:
         assert any("user-invocable" in m for m in passed_msgs)
 
     def test_non_boolean_value_reports_critical(self):
-        """A non-boolean value for boolean field should report CRITICAL (lines 287-290)."""
-        frontmatter = {"disable-model-invocation": "yes"}
+        """A genuine non-boolean value (int 2, not 0/1) for a boolean field should report CRITICAL."""
+        frontmatter = {"disable-model-invocation": 2}
         report = _make_report()
         validate_boolean_field(frontmatter, "disable-model-invocation", report)
         assert report.has_critical
         crit_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
         assert any("must be a boolean" in m for m in crit_msgs)
+
+    def test_non_boolean_string_reports_critical(self):
+        """A genuine non-boolean string ('maybe') for a boolean field should report CRITICAL."""
+        frontmatter = {"disable-model-invocation": "maybe"}
+        report = _make_report()
+        validate_boolean_field(frontmatter, "disable-model-invocation", report)
+        assert report.has_critical
+
+    def test_accepted_yaml_bool_strings_pass(self):
+        """Every YAML boolean CC accepts (yes/no/on/off/1/0) PASSES the skill boolean check — v2.1.218."""
+        for value in ("yes", "no", "on", "off", 1, 0, "TRUE"):
+            frontmatter = {"disable-model-invocation": value}
+            report = _make_report()
+            validate_boolean_field(frontmatter, "disable-model-invocation", report)
+            assert not report.has_critical, f"{value!r} should pass"
+            passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+            assert any("disable-model-invocation" in m for m in passed_msgs), f"{value!r} should pass"
 
 
 class TestValidateAllowedToolsField:

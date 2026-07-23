@@ -483,15 +483,34 @@ class TestValidateUserInvocableField:
         passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
         assert any("'user-invocable' field valid" in m for m in passed_msgs)
 
-    def test_string_true_reports_minor(self):
-        """validate_user_invocable_field reports MINOR when value is string 'true' instead of boolean."""
+    def test_string_true_now_passes(self):
+        """validate_user_invocable_field PASSES string 'true' (CC v2.1.218 widened boolean coercion)."""
         report = AgentValidationReport()
         validate_user_invocable_field({"user-invocable": "true"}, "agent.md", report)
-        minor_msgs = [r.message for r in report.results if r.level == "MINOR"]
-        assert any("should be boolean" in m for m in minor_msgs)
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("'user-invocable' field valid" in m for m in passed_msgs)
+        assert not major_msgs
+
+    def test_accepted_yes_no_on_off_1_0_pass(self):
+        """validate_user_invocable_field PASSES every YAML boolean CC accepts (yes/no/on/off/1/0)."""
+        for value in ("yes", "no", "on", "off", 1, 0, "TRUE"):
+            report = AgentValidationReport()
+            validate_user_invocable_field({"user-invocable": value}, "agent.md", report)
+            passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+            major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+            assert any("'user-invocable' field valid" in m for m in passed_msgs), f"{value!r} should pass"
+            assert not major_msgs, f"{value!r} should not MAJOR"
+
+    def test_non_boolean_string_reports_major(self):
+        """validate_user_invocable_field reports MAJOR for a genuine non-boolean string like 'maybe'."""
+        report = AgentValidationReport()
+        validate_user_invocable_field({"user-invocable": "maybe"}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("must be boolean" in m for m in major_msgs)
 
     def test_invalid_type_reports_major(self):
-        """validate_user_invocable_field reports MAJOR for a non-boolean non-string value."""
+        """validate_user_invocable_field reports MAJOR for a non-boolean non-string value (int 42, not 0/1)."""
         report = AgentValidationReport()
         validate_user_invocable_field({"user-invocable": 42}, "agent.md", report)
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
@@ -645,9 +664,9 @@ class TestValidateBackgroundField:
     """Tests for validate_background_field (lines 628-633)."""
 
     def test_non_boolean_background_reports_major(self):
-        """validate_background_field reports MAJOR when value is not boolean."""
+        """validate_background_field reports MAJOR for a genuine non-boolean value like 'maybe'."""
         report = AgentValidationReport()
-        validate_background_field({"background": "yes"}, "agent.md", report)
+        validate_background_field({"background": "maybe"}, "agent.md", report)
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
         assert any("must be a boolean" in m for m in major_msgs)
 
@@ -657,6 +676,16 @@ class TestValidateBackgroundField:
         validate_background_field({"background": True}, "agent.md", report)
         passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
         assert any("Valid background" in m for m in passed_msgs)
+
+    def test_accepted_yaml_bool_strings_pass(self):
+        """validate_background_field PASSES the YAML booleans CC accepts (yes/no/on/off/1/0) — v2.1.218."""
+        for value in ("yes", "no", "on", "off", 1, 0):
+            report = AgentValidationReport()
+            validate_background_field({"background": value}, "agent.md", report)
+            passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+            major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+            assert any("Valid background" in m for m in passed_msgs), f"{value!r} should pass"
+            assert not major_msgs, f"{value!r} should not MAJOR"
 
 
 class TestValidateDisallowedToolsField:
@@ -1701,3 +1730,48 @@ class TestV223Gap79PluginShippedAllowedFields:
         assert not hooks_minors_doubled, (
             f"`hooks` must not double-emit MINOR from allowed-fields check; got: {hooks_minors_doubled}"
         )
+
+
+class TestAgentBodyHasNoLengthLimit:
+    """Agents intentionally carry NO body-length cap (user directive 2026-07-22).
+
+    A deliberate divergence from any "keep agents lean" guidance: an agent's full
+    body is always loaded, so trimming it loses capability for no runtime benefit.
+    Only SKILLS carry a body-size limit (SKILL_BODY_TOKEN_LIMIT = 5000 tokens),
+    because a skill body beyond ~5000 tokens loses its tail to auto-compaction.
+    These lock the removal of the old MAX_BODY_WORDS=2000 agent warning so it
+    cannot silently return.
+    """
+
+    def test_very_long_agent_body_emits_no_length_warning(self):
+        """A >2000-word agent body produces no body-length / word-count finding."""
+        long_body = "word " * 6000  # 6000 words — far past the removed 2000 cap
+        content = (
+            "---\n"
+            "name: verbose-agent\n"
+            "description: Use when a very long agent body must validate cleanly.\n"
+            "---\n\n"
+            "# Verbose Agent\n\nYou are a verbose agent.\n\n" + long_body
+        )
+        report = AgentValidationReport()
+        validate_body_content(content, "verbose-agent.md", report)
+        offending = [
+            r.message
+            for r in report.results
+            if "very long" in r.message.lower() or "recommended: <" in r.message
+        ]
+        assert offending == [], f"agent body must have no length limit; got: {offending}"
+
+    def test_short_agent_body_still_flagged(self):
+        """The MIN_BODY_CHARS floor still fires — only the MAX cap was removed."""
+        content = (
+            "---\n"
+            "name: tiny-agent\n"
+            "description: Use when checking the minimum-body floor still fires.\n"
+            "---\n\n"
+            "Tiny.\n"
+        )
+        report = AgentValidationReport()
+        validate_body_content(content, "tiny-agent.md", report)
+        msgs = [r.message for r in report.results]
+        assert any("very short" in m for m in msgs), msgs

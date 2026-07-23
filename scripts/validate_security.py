@@ -8988,7 +8988,7 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
                 if not line or line.startswith(("-r ", "--", "-")):
                     continue
                 # Take the dep name (before `==`, `>=`, `<`, `[`, `;`)
-                name = re.split(r"[<>=!~\[;\s]", line, 1)[0].strip()
+                name = re.split(r"[<>=!~\[;\s]", line, maxsplit=1)[0].strip()
                 if not name:
                     continue
                 if is_compromised_package(name):

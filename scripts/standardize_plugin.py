@@ -1220,7 +1220,7 @@ def _normalize_dist_name(name: str) -> str:
 
 def _requirement_dist_name(spec: str) -> str:
     """The normalized distribution name of a PEP-508 requirement string."""
-    return _normalize_dist_name(re.split(r"[<>=~!\[;\s]", spec, 1)[0])
+    return _normalize_dist_name(re.split(r"[<>=~!\[;\s]", spec, maxsplit=1)[0])
 
 
 def _project_declares_pytest_split(plugin_path: Path) -> bool:
@@ -1979,7 +1979,7 @@ def _is_release_tag_push(node: ast.AST) -> TypeGuard[ast.List]:
     if not isinstance(node, ast.List) or len(node.elts) < 2:
         return False
     head = node.elts[:2]
-    if not all(isinstance(e, ast.Constant) and e.value == want for e, want in zip(head, ("git", "push"))):
+    if not all(isinstance(e, ast.Constant) and e.value == want for e, want in zip(head, ("git", "push"), strict=True)):
         return False
     has_tag_ref = False
     for elt in node.elts[2:]:

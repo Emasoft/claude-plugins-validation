@@ -339,6 +339,7 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         # CC v2.1.196..v2.1.209 spec sweep
         "axScreenReader",  # v2.1.208 — opt-in plain-text rendering for screen readers
         "vimInsertModeRemaps",  # v2.1.208 — two-key insert-mode sequences (e.g. `jj` -> Esc)
+        "emojiCompletionEnabled",  # v2.1.217 — toggle `:shortcode:` emoji autocomplete in the prompt input
     }
 )
 

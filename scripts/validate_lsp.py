@@ -378,7 +378,7 @@ def _parallel_scan_lsp_servers(
     # Merge in input order. Worker errors → WARNING per server, so one bad
     # server doesn't poison the whole report.
     for scan_result, (server_name, _server_config, _file_context) in zip(
-        scan_results, servers
+        scan_results, servers, strict=True
     ):
         if scan_result.error:
             report.warning(

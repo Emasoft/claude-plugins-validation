@@ -420,6 +420,13 @@ class TestSkillAgentArchitecture:
             "cpv-batch-scope-diagnose",
             "cpv-batch-scope-fix",
             "cpv-batch-scope-diagnose-and-fix",
+            # EXPERIMENTAL agent-architecture generators (user directive 2026-07-22:
+            # "create those 2 skills", invoked as `/cpv-create-...`). Deliberately
+            # user-invocable — the user explicitly asked for direct slash-command
+            # invocation, the sanctioned override of the single-visible-command
+            # convention (they are wired into cpv-the-skills-menu, not orphans). NOT drift.
+            "cpv-create-mono-agent",
+            "cpv-create-micro-agents-workflow",
         }
         for skill_md in SKILLS_DIR.glob("*/SKILL.md"):
             fm = _parse_frontmatter(skill_md)
