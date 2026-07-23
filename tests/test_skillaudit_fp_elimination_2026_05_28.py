@@ -255,3 +255,34 @@ class TestJson:
     def test_get_tools_still_flagged(self) -> None:
         src = '{\n  "hook": "node -e \'get_tools()\'"\n}'
         assert jsonc.classify("plugin.json", src, 1, "get_tools", "CROSS_TOOL_ACCESS") != "safe_schema"
+
+
+# ── Shell cmdsub match-span scoping (2026-07-23 ensemble-scan FN) ──────────
+class TestShellCmdsubMatchSpanScoping:
+    """A benign command substitution (``$(uname -m)`` / ``$(ls)``) must NOT
+    suppress a CMD_INJECTION match that lies in a DANGEROUS sibling construct on
+    the same line. ``_is_shell_literal_arg_cmdsub`` / ``_cmdsub_is_safe_data_command``
+    previously returned True on ANY safe cmdsub anywhere on the line, hiding a
+    co-located threat (a security false-negative confirmed by a direct probe).
+    Suppression is now scoped to the catalog match's own span."""
+
+    # FN now closed — the dangerous construct stays VISIBLE next to a benign cmdsub.
+    def test_var_program_cmdsub_not_suppressed_by_benign(self) -> None:
+        assert sh.classify("s.sh", "a=$(uname -m) && $($CMD arg)", 0, "$($CMD arg)", "CMD_INJECTION") != "safe_literal"
+
+    def test_bare_var_exec_not_suppressed_by_benign(self) -> None:
+        assert sh.classify("s.sh", "x=$(uname -m); $INJECT", 0, "$INJECT", "CMD_INJECTION") != "safe_literal"
+
+    def test_var_program_not_suppressed_by_benign_ls(self) -> None:
+        assert sh.classify("s.sh", "safe=$(ls) ; $($CMD arg)", 0, "$($CMD arg)", "CMD_INJECTION") != "safe_literal"
+
+    # No FP regression — a match INSIDE the benign safe cmdsub is still suppressed.
+    def test_benign_literal_cmdsub_still_suppressed(self) -> None:
+        assert sh.classify("s.sh", 'ARCH="$(uname -m)"', 0, "$(uname -m)", "CMD_INJECTION") == "safe_literal"
+
+    def test_benign_data_read_still_suppressed(self) -> None:
+        assert sh.classify("s.sh", 'pid=$(cat "/p/f")', 0, "$(cat ", "CMD_INJECTION") == "safe_literal"
+
+    def test_benign_net_capture_still_suppressed(self) -> None:
+        line = "v=$(curl -s https://api.github.com/repos/foo/bar)"
+        assert sh.classify("s.sh", line, 0, "$(curl -", "CMD_INJECTION") == "safe_literal"
