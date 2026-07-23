@@ -43,7 +43,7 @@ The pre-push hook automatically detects languages by:
 | Go | go vet | (built-in with Go) | go.mod |
 | Rust | clippy | (built-in with Rust) | Cargo.toml |
 | Markdown | markdownlint | `npm install markdownlint-cli` | .markdownlint.json |
-| JSON | prettier | `npm install prettier` | .prettierrc |
+| JSON | jsonlint / `python -m json.tool` | `npm install jsonlint` (or built-in Python) | (none) |
 | YAML | yamllint | `pip install yamllint` | .yamllint.yaml |
 
 ---
@@ -105,8 +105,9 @@ The pre-push hook automatically detects languages by:
       □ Check for reported issues (user must fix manually)
 
 □ C.7 JSON lint verification:
-      □ Python json.load() validates syntax (always runs)
-      □ prettier --write --parser json runs (if prettier available)
+      □ Python json.load() validates syntax (always runs, read-only)
+      □ Report any syntax error; the user fixes it by hand (CANON: no formatter —
+        never `prettier --write`/`prettier`; lint/report only)
 
 □ C.8 YAML lint verification:
       □ yamllint -d relaxed --format parsable runs

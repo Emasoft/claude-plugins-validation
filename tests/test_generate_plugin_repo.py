@@ -1057,3 +1057,48 @@ class TestLayoutCGeneration:
             "marketplace.json:metadata" in src
             or "marketplace.json" in src.split("def check_version_consistency")[1].split("def do_bump")[0]
         )
+
+
+class TestFormatterCanon:
+    """Regression lock for the 'lint only, never format' canon (user directive):
+    CPV's generated templates and canon docs must recommend LINTERS, never
+    FORMATTERS — a formatter (or `markdownlint --fix`) reflows the structured
+    Markdown that skills / agents / TRDDs / wikimem depend on."""
+
+    _REPO = Path(__file__).parent.parent
+
+    def test_generated_readme_lints_never_formats(self):
+        """The generated plugin README recommends the linter autofix
+        (`uv run ruff check --fix`) and never invokes the ruff FORMATTER as a
+        command. (The canon NOTE may name `ruff format` in a 'never run' warning
+        — we assert the recommended COMMAND, not mere mention.)"""
+        readme = gen_readme(_default_params())
+        assert "uv run ruff check --fix" in readme
+        assert "uv run ruff format" not in readme, "generated README must not invoke the ruff FORMATTER"
+
+    def test_canonical_pipeline_ci_standard_has_no_formatter(self):
+        """The canonical-pipeline CI standard lists linters only — no
+        `ruff format` / `prettier` among the CI STEPS. The steps are the backtick
+        commands BEFORE any parenthetical canon note, so we check that prefix (the
+        note itself names the forbidden formatters)."""
+        doc = (self._REPO / "skills/cpv-canonical-pipeline/references/detailed-standard.md").read_text(
+            encoding="utf-8"
+        )
+        for ci_line in (line for line in doc.splitlines() if line.strip().startswith("- CI:")):
+            steps = ci_line.split("(", 1)[0]  # the listed steps, before any "(note)"
+            assert "ruff format" not in steps, f"formatter listed as a CI step: {ci_line}"
+            assert "prettier" not in steps, f"formatter listed as a CI step: {ci_line}"
+
+    def test_fix_validation_skill_carries_formatter_canon(self):
+        """The shared fix-validation skill states the never-format canon so every
+        fixer that loads it inherits the rule."""
+        skill = (self._REPO / "skills/cpv-fix-validation/SKILL.md").read_text(encoding="utf-8")
+        assert "Formatter canon" in skill
+        assert "never" in skill.lower() and "ruff format" in skill and "markdownlint --fix" in skill
+
+    def test_fixer_agents_forbid_formatting(self):
+        """Both fixer agents carry the explicit never-format guardrail (the user
+        named them as the culprits)."""
+        for agent in ("agents/cpv-plugin-fixer-agent.md", "agents/cpv-marketplace-fixer-agent.md"):
+            text = (self._REPO / agent).read_text(encoding="utf-8")
+            assert "ruff format" in text and "markdownlint --fix" in text, f"{agent} missing formatter canon"

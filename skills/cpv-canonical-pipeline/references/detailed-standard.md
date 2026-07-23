@@ -135,12 +135,12 @@ Marketplaces follow the **hub-only architecture**:
 ### Python Plugins
 - `pyproject.toml` with `[project]` metadata and `[tool.ruff]` config
 - `.python-version` (e.g., `3.12`)
-- CI: `ruff check`, `ruff format --check`, `mypy`, `pytest`
+- CI: `ruff check`, `mypy`, `pytest` (linters only — CANON: no formatter, so no `ruff format`/`ruff format --check`; `ruff check --fix` is fine locally)
 
 ### JavaScript/TypeScript Plugins
 - `package.json` with metadata and scripts
 - `.node-version` (e.g., `22`)
-- CI: `eslint`, `prettier --check`, `tsc --noEmit`, `jest`/`vitest`
+- CI: `eslint`, `tsc --noEmit`, `jest`/`vitest` (linters only — CANON: no formatter, so no `prettier`/`prettier --check`; `eslint --fix` is fine locally)
 
 ### Rust Plugins
 - `Cargo.toml` with metadata

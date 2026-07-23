@@ -278,13 +278,17 @@ uv pip install -e .
 uv run pytest tests/ -v
 ```
 
-### Linting & Formatting
+### Linting
 
 ```bash
-uv run ruff check scripts/ tests/
-uv run ruff format scripts/ tests/
+uv run ruff check --fix scripts/ tests/
 uv run mypy scripts/
 ```
+
+> Lint only — no formatters (CANON). `ruff check --fix` is fine; never
+> `ruff format` / `prettier` / a markdown formatter, and never
+> `markdownlint --fix` — formatters reflow structured Markdown. Fix Markdown
+> findings by hand.
 
 ### Release
 
