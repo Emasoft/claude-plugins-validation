@@ -178,6 +178,11 @@ class TestCommandCount:
             "cpv-batch-scope-diagnose.md",
             "cpv-batch-scope-fix.md",
             "cpv-batch-scope-diagnose-and-fix.md",
+            # Direct free-form entry to the general-purpose cpv-agent worker
+            # (user directive 2026-07-23) — `/cpv-agent <request>` reaches the
+            # worker directly, the same target as the menu's `A — Ask the agent`
+            # row, so a bare slash command is the honest UX.
+            "cpv-agent.md",
         }
         md_files = list(COMMANDS_DIR.glob("*.md"))
         actual = {f.name for f in md_files}
@@ -211,6 +216,9 @@ class TestCommandCount:
             "cpv-batch-scope-diagnose.md",
             "cpv-batch-scope-fix.md",
             "cpv-batch-scope-diagnose-and-fix.md",
+            # Direct free-form entry to the general-purpose cpv-agent worker
+            # (user directive 2026-07-23) — user-facing `/cpv-agent <request>`.
+            "cpv-agent.md",
         }
         md_files = list(COMMANDS_DIR.glob("*.md"))
         for f in md_files:
