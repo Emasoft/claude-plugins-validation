@@ -33,9 +33,16 @@ This file is the **engine** (pure functions). The CLI surface lives in
 
     cpv strip-dev-parts <plugin>          # dry-run preview (no --auto)
     cpv strip-dev-parts <plugin> --auto   # standard rules, live execution
-    cpv strip-dev-parts <plugin> --dry-run
+    cpv strip-dev-parts <plugin> --auto --visibility public  # #175 compile-source mirror
+    cpv strip-dev-parts <plugin> --dry-run [--force-extract]
     cpv strip-dev-parts <plugin> --check  # CI gate: dev parts gone?
     cpv strip-dev-parts <plugin> --restore  # re-clone dev parts back
+
+`--visibility {public,private}` (default private) sets the created source
+repo's visibility; a PUBLIC push is fail-closed secret-scanned first (the
+#175 compile-source repo is cloned tokenlessly by the plugin's release CI, so
+its full extracted history goes public). `--force-extract` bypasses the
+size/file threshold for the compile-source/canon migration.
 
 Security model is documented in:
   * `cpv_validate_gitmodules.py` — `.gitmodules` URL allowlist (still
@@ -155,7 +162,8 @@ class StripError(RuntimeError):
 
     Carries a stable error code (STRIP-Wxxx for working-tree safety,
     STRIP-Exxx for path errors, STRIP-Gxxx for gh-repo errors,
-    STRIP-Hxxx for history errors).
+    STRIP-Hxxx for history errors, STRIP-Rxxx for record-schema errors,
+    STRIP-Sxxx for the fail-closed secret-scan gate).
     """
 
     def __init__(self, code: str, message: str) -> None:
@@ -711,11 +719,13 @@ def gh_repo_exists_and_populated(submodule: str) -> tuple[bool, bool]:
 # ── Public convenience: dry-run summary ───────────────────────────────────────
 
 
-def summarise_plan(plan: StripPlan) -> str:
+def summarise_plan(plan: StripPlan, *, visibility: str = "private", force_extract: bool = False) -> str:
     """Return a multi-line human-readable summary of what `apply_plan` would do.
 
     Used by `--dry-run` mode to show the user EXACTLY what's about to
-    happen before any GH repo is created or any commit is made.
+    happen before any GH repo is created or any commit is made. ``visibility``
+    and ``force_extract`` mirror the live-execution flags so the preview shows
+    the actual `gh repo create` flag and the actual strip recommendation.
     """
     lines = [
         f"Plan for {plan.plugin_root}:",
@@ -732,12 +742,13 @@ def summarise_plan(plan: StripPlan) -> str:
         # Heuristic recommendation — surface but never auto-skip targets.
         # The user's explicit cpv.strip.extract[] config wins; this is just
         # advice when the dry-run plan looks like a waste of effort.
-        worth, reason = should_strip_target(t, plan.plugin_root)
+        worth, reason = should_strip_target(t, plan.plugin_root, force_extract=force_extract)
         marker = "✓" if worth else "⚠"
         lines.append(f"      {marker} {reason}")
+    vis_flag = "--public" if visibility == "public" else "--private"
     lines.append("Steps that would execute (in order):")
     for i, t in enumerate(plan.targets, start=1):
-        lines.append(f"  [{i}] gh repo create {t.submodule} --private  (if it doesn't already exist + is empty)")
+        lines.append(f"  [{i}] gh repo create {t.submodule} {vis_flag}  (if it doesn't already exist + is empty)")
         lines.append(f"      git clone --no-local <plugin> /tmp/cpv-strip-{uuid.uuid4().hex[:8]}/extract")
         # Preview MUST mirror _filter_and_push exactly: the real command
         # rstrips the trailing slash and filters ALL refs (no --refs main),
@@ -769,6 +780,8 @@ NEEDS_STRIP_FILES_MIN: int = 20
 def should_strip_target(
     target: ExtractTarget,
     plugin_root: Path,
+    *,
+    force_extract: bool = False,
 ) -> tuple[bool, str]:
     """Return (worth-stripping, reason).
 
@@ -779,12 +792,21 @@ def should_strip_target(
     of three big fixtures) strippable for the install-cache savings, while
     still skipping a tests/ that is a stub or a couple of smoke tests.
 
+    ``force_extract`` bypasses the size/file threshold: the #175 compile-source
+    / canon migration must extract a source dir regardless of size (a small
+    Rust crate is below the threshold but MUST be extracted). The existence
+    check still runs first — you cannot force-strip a directory that isn't
+    there (fail-safe: never "strip nothing").
+
     Reason string is always populated for surfacing to the user via
     --dry-run output / --check report.
     """
     src_dir = plugin_root / target.src
     if not src_dir.is_dir():
         return False, f"source path {target.src!r} does not exist (cannot strip nothing)"
+
+    if force_extract:
+        return True, "forced extraction — size threshold bypassed for compile-source/canon migration"
 
     total_bytes = 0
     total_files = 0
@@ -813,10 +835,14 @@ def should_strip_target(
 # ── Live execution ───────────────────────────────────────────────────────────
 
 
-def _ensure_repo_exists(target: ExtractTarget, plugin_name: str) -> None:
+def _ensure_repo_exists(target: ExtractTarget, plugin_name: str, visibility: str = "private") -> None:
     """Verify or create the target's GitHub repo. Idempotent.
 
-    On a fresh repo: `gh repo create --private` (retry-wrapped).
+    On a fresh repo: `gh repo create --public|--private` (retry-wrapped) per
+    ``visibility`` (default ``private``). ``public`` is the #175 compile-source
+    case — the source repo the plugin's release CI clones by URL tokenlessly —
+    so it gets a "Source for …" description; ``private`` (the dev-artefacts
+    case) keeps the TRDD-793ac32a wording.
     On an existing-but-empty repo: re-use. On an existing-AND-populated
     repo: if `target.submodule_commit_sha` is pinned in plugin.json,
     verify the remote HEAD matches; otherwise abort STRIP-G001 to refuse
@@ -853,16 +879,25 @@ def _ensure_repo_exists(target: ExtractTarget, plugin_name: str) -> None:
     gh_bin = shutil.which("gh")
     if gh_bin is None:
         raise StripError("STRIP-G003", "gh CLI not installed")
-    print(f"  [create] gh repo create {target.submodule} --private")
+    # Visibility drives BOTH the gh flag and the repo description. `public` is
+    # the #175 compile-source mirror (release CI clones it by URL, tokenless);
+    # `private` is the original dev-artefacts extraction.
+    if visibility == "public":
+        vis_flag = "--public"
+        description = f"Source for {plugin_name}, built into the shipped binaries (extracted by CPV cpv strip-dev-parts)"
+    else:
+        vis_flag = "--private"
+        description = f"Dev artefacts extracted from {plugin_name} (TRDD-793ac32a)"
+    print(f"  [create] gh repo create {target.submodule} {vis_flag}")
     gh_with_retry(
         [
             gh_bin,
             "repo",
             "create",
             target.submodule,
-            "--private",
+            vis_flag,
             "--description",
-            f"Dev artefacts extracted from {plugin_name} (TRDD-793ac32a)",
+            description,
         ],
         check=True,
     )
@@ -890,10 +925,112 @@ def _gh_remote_head_sha(submodule: str) -> str | None:
     return sha if sha else None
 
 
-def _filter_and_push(target: ExtractTarget, plugin_root: Path, tmp_root: Path) -> str:
+def _parse_truffle_findings(stdout: str) -> list[str]:
+    """Parse trufflehog `--json` GIT-mode output → short finding descriptors.
+
+    trufflehog emits one JSON object per line. In git mode the location lives
+    under ``SourceMetadata.Data.Git`` (not ``.Filesystem`` as in filesystem
+    mode). Mirrors the parse shape of ``validate_security.check_trufflehog``.
+    Returns one ``"<detector> in <file>@<commit8>"`` string per finding.
+    """
+    out: list[str] = []
+    for raw in (stdout or "").splitlines():
+        raw = raw.strip()
+        if not raw.startswith("{"):
+            continue
+        try:
+            finding = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(finding, dict):
+            continue
+        detector = finding.get("DetectorName") or finding.get("detector") or "?"
+        meta = finding.get("SourceMetadata", {}) or {}
+        data = meta.get("Data", {}) if isinstance(meta, dict) else {}
+        git = data.get("Git", {}) if isinstance(data, dict) else {}
+        fname = git.get("file", "?") if isinstance(git, dict) else "?"
+        commit = git.get("commit", "?") if isinstance(git, dict) else "?"
+        out.append(f"{detector} in {fname}@{str(commit)[:8]}")
+    return out
+
+
+def _scan_clone_for_secrets(clone: Path, *, visibility: str) -> None:
+    """Fail-closed secret scan of the filtered clone's FULL git HISTORY.
+
+    WHY THIS GATE EXISTS: ``git filter-repo`` PRESERVES history, so the
+    extracted subdirectory's every past commit rides along to the new repo. If
+    that repo is PUBLIC (the #175 compile-source case — the plugin's release CI
+    clones it by URL, tokenlessly), a secret buried in an old/deleted commit
+    leaks to the world the instant we push. So a PUBLIC target is FAIL-CLOSED
+    (BLOCK the push on any finding, or if the scan cannot be trusted), exactly
+    mirroring the issue-#169 pre-push secret gate. A PRIVATE target is not the
+    leak surface #175 introduces, so it WARNs and proceeds.
+
+    Scans the /tmp clone's `.git` history via ``trufflehog git file://<clone>``
+    (30-min timeout). Never runs a shell (args list) and never trusts a partial
+    scan for a public push.
+    """
+    public = visibility == "public"
+    truffle = shutil.which("trufflehog")
+    if truffle is None:
+        if public:
+            raise StripError(
+                "STRIP-S002",
+                "trufflehog unavailable — refusing to push a PUBLIC repo unscanned (fail-closed)",
+            )
+        print("  [warn] trufflehog not installed — secret scan skipped for a PRIVATE repo")
+        return
+    print(f"  [secret-scan] trufflehog git file://{clone}")
+    try:
+        res = subprocess.run(
+            [truffle, "git", f"file://{clone}", "--json", "--no-update", "--fail"],
+            capture_output=True,
+            text=True,
+            timeout=1800,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as e:
+        if public:
+            raise StripError(
+                "STRIP-S002",
+                "trufflehog scan timed out after 1800s — refusing to push a PUBLIC repo unscanned (fail-closed)",
+            ) from e
+        print("  [warn] trufflehog scan timed out — proceeding for a PRIVATE repo")
+        return
+    findings = _parse_truffle_findings(res.stdout)
+    if findings:
+        if public:
+            raise StripError(
+                "STRIP-S001",
+                (
+                    f"trufflehog found {len(findings)} secret(s) in the extracted history "
+                    f"(e.g. {findings[0]}); refusing to push — the target repo would be PUBLIC "
+                    f"(#175 compile-source). Purge the secret(s) from history and retry."
+                ),
+            )
+        print(f"  [warn] trufflehog found {len(findings)} secret(s) in a PRIVATE repo's history; proceeding")
+        return
+    # No parseable findings, but `--fail` exits 183 ONLY on findings; any OTHER
+    # non-zero exit means the scan itself errored. For a PUBLIC push that is a
+    # scan we cannot trust, so block (fail-closed). Private proceeds.
+    if public and res.returncode not in (0, 183):
+        raise StripError(
+            "STRIP-S002",
+            (
+                f"trufflehog exited {res.returncode} without parseable findings — refusing to push "
+                f"a PUBLIC repo on an untrusted scan (fail-closed). stderr: {(res.stderr or '')[:200]}"
+            ),
+        )
+
+
+def _filter_and_push(target: ExtractTarget, plugin_root: Path, tmp_root: Path, *, visibility: str = "private") -> str:
     """Clone main repo to tmpdir, filter-repo to keep only target.src,
     push to target.url. Uses --no-local so filter-repo refuses to operate
     on the original repo. Push is retry-wrapped against transient hiccups.
+
+    Before the push, ``visibility`` gates a fail-closed secret scan of the
+    filtered clone's full history (see ``_scan_clone_for_secrets``): a PUBLIC
+    push is BLOCKED on any finding; a PRIVATE push WARNs and proceeds.
 
     Returns the 40-hex commit SHA that was pushed (the filtered clone's
     HEAD) — the clone-by-URL model records this SHA so ``--restore`` pins
@@ -925,6 +1062,10 @@ def _filter_and_push(target: ExtractTarget, plugin_root: Path, tmp_root: Path) -
         capture_output=True,
         timeout=30,
     )
+    # FAIL-CLOSED secret gate — runs on the filtered clone's full history BEFORE
+    # the push. filter-repo preserves history, so an old secret would go PUBLIC
+    # the moment we push a public mirror; block it here (mirrors issue #169).
+    _scan_clone_for_secrets(clone, visibility=visibility)
     # Detect default branch name in the cloned repo (could be main or master).
     branch_res = subprocess.run(
         ["git", "-C", str(clone), "rev-parse", "--abbrev-ref", "HEAD"],
@@ -1045,7 +1186,7 @@ def _replace_with_url_reference(target: ExtractTarget, plugin_root: Path, sha: s
     )
 
 
-def apply_plan(plan: StripPlan) -> None:
+def apply_plan(plan: StripPlan, *, visibility: str = "private") -> None:
     """Execute the plan with idempotent state-machine recovery.
 
     Per TRDD-793ac32a §2.5, each transition is checkpointed to
@@ -1084,7 +1225,7 @@ def apply_plan(plan: StripPlan) -> None:
                 {"current_state": StripState.REPO_VERIFIED.value}
             ):
                 save_state(plan.plugin_root, {"current_target_index": idx, "current_state": StripState.INIT.value})
-                _ensure_repo_exists(target, plugin_name)
+                _ensure_repo_exists(target, plugin_name, visibility=visibility)
                 save_state(
                     plan.plugin_root, {"current_target_index": idx, "current_state": StripState.REPO_VERIFIED.value}
                 )
@@ -1097,7 +1238,7 @@ def apply_plan(plan: StripPlan) -> None:
             ):
                 tmp = Path(tempfile.mkdtemp(prefix=f"cpv-strip-{uuid.uuid4().hex[:8]}-"))
                 tmp_dirs.append(tmp)
-                target.pushed_sha = _filter_and_push(target, plan.plugin_root, tmp)
+                target.pushed_sha = _filter_and_push(target, plan.plugin_root, tmp, visibility=visibility)
                 save_state(
                     plan.plugin_root, {"current_target_index": idx, "current_state": StripState.CONTENT_PUSHED.value}
                 )
@@ -1247,10 +1388,15 @@ def main(argv: list[str] | None = None) -> int:
     if not args or args[0] in ("-h", "--help"):
         print(__doc__)
         print("\nUsage:")
-        print("  cpv_strip_dev.py <plugin-path> --dry-run [--extract <src>...]")
+        print("  cpv_strip_dev.py <plugin-path> --dry-run [--extract <src>...] [--visibility {public,private}] [--force-extract]")
         print("  cpv_strip_dev.py <plugin-path> --check")
-        print("  cpv_strip_dev.py <plugin-path> --auto [--extract <src>...]")
+        print("  cpv_strip_dev.py <plugin-path> --auto [--extract <src>...] [--visibility {public,private}] [--force-extract]")
         print("  cpv_strip_dev.py <plugin-path> --restore")
+        print("\nOptions:")
+        print("  --visibility {public,private}  visibility of the created source repo (default: private).")
+        print("                                 public is the #175 compile-source mirror; it fail-closed")
+        print("                                 secret-scans the extracted history before pushing.")
+        print("  --force-extract                bypass the size/file threshold (extract regardless of size).")
         return 0
 
     plugin_root = Path(args[0]).resolve()
@@ -1267,14 +1413,33 @@ def main(argv: list[str] | None = None) -> int:
     if "--restore" in flags:
         return run_restore(plugin_root)
 
+    # Manual flag parsing (this module deliberately does NOT use argparse — see
+    # the 4 test_main_* stdout assertions that pin the `--help`/dry-run output).
+    # --visibility takes a value validated fail-fast against the 2-member set;
+    # --force-extract is a boolean. Option-injection-safe: no user string ever
+    # reaches a shell (every subprocess call is an args list).
     explicit_targets: list[str] = []
+    visibility = "private"
     i = 0
     while i < len(flags):
-        if flags[i] == "--extract" and i + 1 < len(flags):
+        tok = flags[i]
+        if tok == "--extract" and i + 1 < len(flags):
             explicit_targets.append(flags[i + 1])
             i += 2
             continue
+        if tok == "--visibility":
+            if i + 1 >= len(flags):
+                print("ERROR: --visibility requires a value (public|private)", file=sys.stderr)
+                return 1
+            val = flags[i + 1]
+            if val not in ("public", "private"):
+                print(f"ERROR: --visibility must be one of public|private (got {val!r})", file=sys.stderr)
+                return 1
+            visibility = val
+            i += 2
+            continue
         i += 1
+    force_extract = "--force-extract" in flags
 
     try:
         plan = build_plan(plugin_root, explicit_targets=explicit_targets or None)
@@ -1295,7 +1460,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if dry_run:
-        print(summarise_plan(plan))
+        print(summarise_plan(plan, visibility=visibility, force_extract=force_extract))
         try:
             check_working_tree_safe(plugin_root, plan.targets)
         except StripError as e:
@@ -1304,7 +1469,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Live execution path. Requires --auto (no interactive mode in this RC).
     if "--auto" not in flags:
-        print(summarise_plan(plan))
+        print(summarise_plan(plan, visibility=visibility, force_extract=force_extract))
         print(
             "\nNOTE: pass --auto to actually run this. Without --auto the "
             "command stays in dry-run-only mode (no GitHub repos created, "
@@ -1320,7 +1485,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        apply_plan(plan)
+        apply_plan(plan, visibility=visibility)
     except StripError as e:
         print(f"FAILED to apply plan: {e}", file=sys.stderr)
         return 1
