@@ -1,33 +1,53 @@
 #!/usr/bin/env python3
-"""TRDD-793ac32a — strip-dev-parts engine.
+"""TRDD-793ac32a — strip-dev-parts engine (clone-by-URL model).
 
 Moves dev-only artefacts (tests/, design/, git-hooks/, …) from a
-plugin's MAIN repo into a per-plugin git submodule pointing at a fresh
-GitHub repo. Claude Code's shallow-clone install does NOT recurse into
-submodules, so the submodule content does not ship to end users —
-saving ~12 MB per CPV-style install.
+plugin's MAIN repo into a separate per-plugin GitHub repo, then REMOVES
+them from the plugin tree entirely and records the extracted content's
+source-repo URL + pinned commit SHA in the plugin manifest
+(`.claude-plugin/plugin.json` → `cpv.strip.extract[]`). **No `.gitmodules`
+entry is ever written.**
 
-Pattern verified empirically against PSS (`perfect-skill-suggester`):
-PSS's `rust/` submodule is 1.2 MB pointer in cache vs. gigabytes in
-dev. This module generalises the pattern to N submodules per plugin.
+WHY NOT A GIT SUBMODULE (the load-bearing correction): the feature was
+originally built on `git submodule add`, on the premise that Claude
+Code's install does NOT recurse into submodules, so a submodule pointer
+would keep the dev content off end-user machines. That premise is
+EMPIRICALLY FALSE — Claude Code recursively fetches submodule CONTENT at
+install time (verified on PSS 3.10.8: the installed `rust/` submodule
+shipped its full source tree). A submodule pointer therefore ships the
+content anyway. So the mechanism is retargeted onto a clone-by-URL model:
+
+  * The extracted directory is DELETED from the plugin tree (nothing is
+    left behind — not a submodule mount, not a `.gitmodules` gitlink).
+  * The manifest records only `{path, url, sha}` — plain data, never a
+    git-submodule pointer. There is nothing for Claude Code's installer
+    to recurse into, so the dev content genuinely does not ship.
+  * The dev content lives in a separate repo the developer re-clones on
+    demand via `--restore`, which re-materialises each recorded path
+    from its `{url, sha}` (a `git clone` pinned to the SHA, with the
+    nested `.git` removed so the restored files are plain tree content —
+    never an accidental gitlink).
 
 This file is the **engine** (pure functions). The CLI surface lives in
 `commands/cpv-strip-dev-parts.md`. The end-to-end command flow is:
 
-    cpv strip-dev-parts <plugin>          # interactive
-    cpv strip-dev-parts <plugin> --auto   # standard rules, no prompts
+    cpv strip-dev-parts <plugin>          # dry-run preview (no --auto)
+    cpv strip-dev-parts <plugin> --auto   # standard rules, live execution
     cpv strip-dev-parts <plugin> --dry-run
-    cpv strip-dev-parts <plugin> --restore
+    cpv strip-dev-parts <plugin> --check  # CI gate: dev parts gone?
+    cpv strip-dev-parts <plugin> --restore  # re-clone dev parts back
 
 Security model is documented in:
-  * `cpv_validate_gitmodules.py` — `.gitmodules` URL allowlist
+  * `cpv_validate_gitmodules.py` — `.gitmodules` URL allowlist (still
+    guards any hand-authored `.gitmodules`; strip-dev no longer creates
+    one, so a strip-dev'd plugin passes that validator trivially)
   * §2.3-§2.6 of TRDD-793ac32a (path traversal, working-tree safety,
     GH repo creation safety, history preservation)
 
 Idempotent state machine (per TRDD-793ac32a §2.5):
 
     INIT → REPO_VERIFIED → CONTENT_PUSHED →
-    SUBMODULE_ADDED → COMMITTED → DONE
+    REFERENCE_RECORDED → COMMITTED → DONE
 
 State checkpointed at `<plugin_root>/.cpv-strip-state.json` so a
 crashed run can resume from the last successful step.
@@ -58,6 +78,20 @@ from cpv_network_resilience import gh_with_retry, git_with_retry  # noqa: E402
 # Lowercase + alnum + hyphen + underscore + slash, no `..`, no leading `/`.
 _SAFE_SRC_RE = re.compile(r"^[a-z][a-z0-9_-]*(/[a-z][a-z0-9_-]*)*/?$")
 
+# A pushed/recorded commit id — 40 lowercase hex chars. The clone-by-URL
+# model PINS restore to this exact SHA, so a short or malformed value is
+# rejected fail-fast rather than silently cloning an unpinned HEAD.
+_SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+
+# Shape of a recorded `cpv.strip.extract[].url`. The recorder only ever
+# writes `https://github.com/<owner>/<repo>.git`, so restore requires that
+# exact shape: HTTPS only (no ssh/file/http), github.com host with NO
+# embedded userinfo (`user@`) or port (`:`), and a `..`-free path (the
+# `..` guard is applied separately because the char class permits `.`).
+# Restricting `git clone` to this shape closes option-injection (a URL that
+# begins `-`) and host-substitution vectors on a possibly-tampered manifest.
+_HTTPS_GITHUB_URL_RE = re.compile(r"^https://github\.com/[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*(?:\.git)?$")
+
 # Reserved paths that may NEVER be extracted (would brick the plugin).
 _RESERVED_SRCS: frozenset[str] = frozenset(
     {
@@ -84,12 +118,17 @@ STATE_FILENAME: str = ".cpv-strip-state.json"
 
 
 class StripState(str, Enum):
-    """Idempotent state-machine states (per TRDD-793ac32a §2.5)."""
+    """Idempotent state-machine states (per TRDD-793ac32a §2.5).
+
+    REFERENCE_RECORDED replaces the former SUBMODULE_ADDED: the step no
+    longer runs `git submodule add`; it removes the extracted directory
+    and records the `{path, url, sha}` reference in the manifest.
+    """
 
     INIT = "INIT"
     REPO_VERIFIED = "REPO_VERIFIED"
     CONTENT_PUSHED = "CONTENT_PUSHED"
-    SUBMODULE_ADDED = "SUBMODULE_ADDED"
+    REFERENCE_RECORDED = "REFERENCE_RECORDED"
     COMMITTED = "COMMITTED"
     DONE = "DONE"
 
@@ -102,7 +141,7 @@ _STATE_ORDER: tuple[StripState, ...] = (
     StripState.INIT,
     StripState.REPO_VERIFIED,
     StripState.CONTENT_PUSHED,
-    StripState.SUBMODULE_ADDED,
+    StripState.REFERENCE_RECORDED,
     StripState.COMMITTED,
     StripState.DONE,
 )
@@ -130,16 +169,102 @@ class StripError(RuntimeError):
 
 @dataclass
 class ExtractTarget:
-    """A single `cpv.strip.extract[]` entry, normalised."""
+    """A single strip DECLARATION, normalised (the pre-strip input shape).
+
+    Read from a `cpv.strip.extract[]` entry carrying `src` (see
+    ``build_plan``). `submodule` names the separate source repo the content
+    is pushed to; `submodule_path` is where the content lived and where
+    ``--restore`` re-materialises it (the recorded `path`).
+    """
 
     src: str  # "tests/" — relative to plugin_root
-    submodule: str  # "Emasoft/cpv-tests" — owner/repo
-    submodule_path: str  # "dev/tests/" — where it lands in plugin_root
-    submodule_commit_sha: str = ""  # empty if not yet pinned
+    submodule: str  # "Emasoft/cpv-tests" — owner/repo of the source repo
+    submodule_path: str  # "dev/tests/" — recorded restore path in plugin_root
+    submodule_commit_sha: str = ""  # optional pre-declared pin
+    pushed_sha: str = ""  # 40-hex SHA captured after the extract push
 
     @property
     def url(self) -> str:
         return f"https://github.com/{self.submodule}.git"
+
+
+@dataclass(frozen=True)
+class ExtractRecord:
+    """A single `cpv.strip.extract[]` RECORD (the post-strip output shape).
+
+    Written by ``apply_plan`` and read by ``--restore``. Plain data — NOT a
+    git-submodule pointer. `path` is where the content is re-cloned; `url`
+    is the source repo (`https://github.com/<owner>/<repo>.git`); `sha` is
+    the exact commit ``--restore`` checks out.
+    """
+
+    path: str  # "tests" — relative to plugin_root (no trailing slash)
+    url: str  # "https://github.com/<owner>/<repo>.git"
+    sha: str  # 40-hex commit id
+
+
+def validate_extract_record(entry: object, plugin_root: Path) -> ExtractRecord:
+    """Validate one raw `cpv.strip.extract[]` record dict. Fail-fast.
+
+    The record schema is `{"path": <rel>, "url": <https github url>,
+    "sha": <40-hex>}`. Every field is shape-checked because ``--restore``
+    runs `git clone` against the recorded URL and `git checkout` against the
+    recorded SHA — a malformed entry on a possibly-tampered manifest must be
+    REJECTED (raise ``StripError``) rather than fed to git.
+    """
+    if not isinstance(entry, dict):
+        raise StripError("STRIP-R001", f"cpv.strip.extract record must be an object, got {type(entry).__name__}")
+    path = entry.get("path")
+    url = entry.get("url")
+    sha = entry.get("sha")
+    if not isinstance(path, str) or not path.strip():
+        raise StripError("STRIP-R002", f"cpv.strip.extract record has a missing/invalid 'path': {entry!r}")
+    if not isinstance(url, str) or not url.strip():
+        raise StripError("STRIP-R003", f"cpv.strip.extract record has a missing/invalid 'url': {entry!r}")
+    if not isinstance(sha, str) or not _SHA40_RE.match(sha):
+        raise StripError(
+            "STRIP-R004",
+            f"cpv.strip.extract record 'sha' must be a 40-char lowercase hex commit id: {entry!r}",
+        )
+    # Path safety: same name / reserved-set / subpath / ancestor-symlink guards
+    # as an extract source, but the destination need not exist yet.
+    validate_src_path(path, plugin_root, must_exist=False)
+    # URL safety: HTTPS github shape, no traversal, no embedded userinfo/port.
+    if ".." in url:
+        raise StripError("STRIP-R005", f"cpv.strip.extract record 'url' contains path-traversal `..`: {url}")
+    if not _HTTPS_GITHUB_URL_RE.match(url):
+        raise StripError(
+            "STRIP-R005",
+            (
+                f"cpv.strip.extract record 'url' must be an https://github.com/<owner>/<repo> URL "
+                f"(no ssh, no embedded credentials, no port): {url}"
+            ),
+        )
+    return ExtractRecord(path=path.rstrip("/"), url=url, sha=sha)
+
+
+def parse_extract_records(plugin_root: Path) -> list[ExtractRecord]:
+    """Return the validated `{path, url, sha}` records from plugin.json.
+
+    A record is any `cpv.strip.extract[]` entry carrying a `url` key
+    (pre-strip DECLARATIONS carry `src` and no `url`, so they are ignored
+    here). Every record-shaped entry is validated — a malformed one raises
+    ``StripError`` (fail-fast). Used by ``--restore``.
+    """
+    pj_path = plugin_root / ".claude-plugin" / "plugin.json"
+    if not pj_path.is_file():
+        raise StripError("STRIP-E007", f"plugin.json not found at {pj_path}. cpv strip-dev-parts requires a plugin.")
+    pj = json.loads(pj_path.read_text(encoding="utf-8"))
+    cpv_block = pj.get("cpv", {}) if isinstance(pj.get("cpv"), dict) else {}
+    strip = cpv_block.get("strip", {}) if isinstance(cpv_block.get("strip"), dict) else {}
+    raw = strip.get("extract", [])
+    if not isinstance(raw, list):
+        return []
+    records: list[ExtractRecord] = []
+    for entry in raw:
+        if isinstance(entry, dict) and "url" in entry:
+            records.append(validate_extract_record(entry, plugin_root))
+    return records
 
 
 @dataclass
@@ -258,7 +383,7 @@ def check_working_tree_safe(
             (
                 f"plugin_root '{plugin_root}' is not a git working tree. "
                 f"`cpv strip-dev-parts` requires a git repo (it commits the "
-                f".gitmodules + content removal atomically)."
+                f"content removal + the cpv.strip.extract manifest record atomically)."
             ),
         )
 
@@ -435,11 +560,13 @@ def normalise_target(src: str, plugin_owner: str, plugin_name: str) -> ExtractTa
     owner/name. Used when no `submodule` is explicitly declared in
     plugin.json's cpv.strip.extract[].
 
-    PSS pattern: the submodule mounts at the SAME path the original dir
-    occupied. After strip, `tests/` keeps being `tests/` from the dev's
-    perspective (just backed by a submodule). All references to the
-    folder in CI, scripts, README continue to work unchanged. End-user
-    cache installs get just the .gitmodules pointer (no recurse).
+    The extracted dir is pushed to `<owner>/<plugin>-<dir>` and the
+    recorded restore path (`submodule_path`) is the SAME path the original
+    dir occupied. After strip, the content is REMOVED from the plugin tree
+    (nothing ships to end-user installs — no submodule mount, no
+    `.gitmodules` pointer for Claude Code's installer to recurse into); a
+    developer re-materialises `tests/` at `tests/` on demand via
+    `--restore` (a clone-by-URL pinned to the recorded SHA).
     """
     bare = src.rstrip("/").split("/")[-1]
     return ExtractTarget(
@@ -476,6 +603,7 @@ def build_plan(
     strip = cpv_block.get("strip", {}) if isinstance(cpv_block.get("strip"), dict) else {}
 
     # Targets — explicit list from CLI overrides the plugin.json list.
+    saw_records = False
     if explicit_targets:
         targets = [normalise_target(s, plugin_owner, plugin_name) for s in explicit_targets]
     else:
@@ -485,6 +613,13 @@ def build_plan(
         targets = []
         for entry in raw_targets:
             if isinstance(entry, dict):
+                # A post-strip RECORD ({path, url, sha}, no `src`) means this
+                # path was already extracted — it is NOT a declaration to
+                # re-strip. Note it so we do not fall back to DEFAULT targets
+                # on an already-stripped plugin, and skip it.
+                if "url" in entry and not entry.get("src"):
+                    saw_records = True
+                    continue
                 src = str(entry.get("src", ""))
                 submodule = str(entry.get("submodule", ""))
                 if not src:
@@ -504,8 +639,11 @@ def build_plan(
             elif isinstance(entry, str):
                 targets.append(normalise_target(entry, plugin_owner, plugin_name))
 
-    if not targets:
-        # Apply defaults if nothing configured AND no explicit list.
+    if not targets and not saw_records:
+        # Apply defaults ONLY on a fresh plugin: nothing configured, no
+        # explicit list, and no prior extract records. When the manifest
+        # already holds records (already stripped) we return an empty plan —
+        # a clean no-op rather than trying to re-strip a now-absent dir.
         targets = [normalise_target(s, plugin_owner, plugin_name) for s in DEFAULT_EXTRACT_TARGETS]
 
     # Validate every src path before returning.
@@ -605,9 +743,13 @@ def summarise_plan(plan: StripPlan) -> str:
         # rstrips the trailing slash and filters ALL refs (no --refs main),
         # then pushes the cloned repo's detected default branch with --force.
         lines.append(f"      git filter-repo --force --subdirectory-filter {t.src.rstrip('/')}")
-        lines.append(f"      git push -u origin <default-branch> --force  # to {t.url}")
-        lines.append(f"      git submodule add {t.url} {t.submodule_path}")
-    lines.append("  [N+1] git commit -m 'chore: extract dev parts to submodules (cpv strip-dev-parts)'")
+        lines.append(f"      git push -u origin <default-branch> --force  # to {t.url}  → capture pushed SHA")
+        # Clone-by-URL model: remove the dir and record a {path, url, sha}
+        # reference in the manifest. NO `git submodule add`, NO .gitmodules.
+        lines.append(f"      git rm -r {t.src}  →  record cpv.strip.extract[] {{path={t.submodule_path.rstrip('/')!r},")
+        lines.append(f"          url={t.url!r}, sha=<pushed>}} in plugin.json  (NO .gitmodules written)")
+    lines.append("  [N+1] git commit -m 'chore: extract dev parts to source repos (cpv strip-dev-parts)'")
+    lines.append("Restore later with: cpv strip-dev-parts <plugin> --restore  (re-clones each recorded url@sha)")
     return "\n".join(lines)
 
 
@@ -748,10 +890,14 @@ def _gh_remote_head_sha(submodule: str) -> str | None:
     return sha if sha else None
 
 
-def _filter_and_push(target: ExtractTarget, plugin_root: Path, tmp_root: Path) -> None:
+def _filter_and_push(target: ExtractTarget, plugin_root: Path, tmp_root: Path) -> str:
     """Clone main repo to tmpdir, filter-repo to keep only target.src,
     push to target.url. Uses --no-local so filter-repo refuses to operate
     on the original repo. Push is retry-wrapped against transient hiccups.
+
+    Returns the 40-hex commit SHA that was pushed (the filtered clone's
+    HEAD) — the clone-by-URL model records this SHA so ``--restore`` pins
+    the re-clone to the exact content that was extracted.
     """
     clone = tmp_root / "extract"
     print(f"  [clone] git clone --no-local {plugin_root} {clone}")
@@ -794,27 +940,89 @@ def _filter_and_push(target: ExtractTarget, plugin_root: Path, tmp_root: Path) -
         check=True,
         capture_output=True,
     )
+    # Capture the pushed commit SHA — this is what the manifest records and
+    # what --restore checks out. filter-repo rewrote history, so the clone's
+    # HEAD is the exact commit now living at the remote branch tip.
+    sha_res = subprocess.run(
+        ["git", "-C", str(clone), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    pushed_sha = sha_res.stdout.strip()
+    print(f"  [pushed] {branch} @ {pushed_sha[:12]}…")
+    return pushed_sha
 
 
-def _replace_with_submodule(target: ExtractTarget, plugin_root: Path) -> None:
-    """In the MAIN repo: remove target.src and add it back as a submodule
-    at target.submodule_path.
+def _record_extract_reference(plugin_root: Path, target: ExtractTarget, sha: str) -> None:
+    """Upsert a `{path, url, sha}` record into `cpv.strip.extract[]`.
 
-    If target.submodule_path equals target.src, the directory is replaced
-    in place (PSS pattern: same path, just becomes a submodule mount).
+    Read-modify-write of `.claude-plugin/plugin.json`, atomic (tmp + rename).
+    Drops this target's pre-strip DECLARATION (the entry whose `src` matches)
+    AND any stale record for the same `path`, then appends the fresh record —
+    so a crash-resume re-run is idempotent. Writes NO `.gitmodules`.
+    """
+    pj_path = plugin_root / ".claude-plugin" / "plugin.json"
+    if not pj_path.is_file():
+        raise StripError("STRIP-E007", f"plugin.json not found at {pj_path}; cannot record extract reference.")
+    pj = json.loads(pj_path.read_text(encoding="utf-8"))
+    if not isinstance(pj, dict):
+        raise StripError("STRIP-R006", f"plugin.json at {pj_path} is not a JSON object; cannot record.")
+    rec_path = target.submodule_path.rstrip("/")
+    record = {"path": rec_path, "url": target.url, "sha": sha}
+
+    cpv_block = pj.get("cpv")
+    if not isinstance(cpv_block, dict):
+        cpv_block = {}
+        pj["cpv"] = cpv_block
+    strip = cpv_block.get("strip")
+    if not isinstance(strip, dict):
+        strip = {}
+        cpv_block["strip"] = strip
+    extract = strip.get("extract")
+    if not isinstance(extract, list):
+        extract = []
+
+    src_key = target.src.rstrip("/")
+    kept: list[object] = []
+    for e in extract:
+        if isinstance(e, dict):
+            # Drop a prior record for the same restore path.
+            if e.get("path") == rec_path:
+                continue
+            # Drop this target's own declaration (matched by `src`).
+            e_src = e.get("src")
+            if isinstance(e_src, str) and e_src.rstrip("/") == src_key:
+                continue
+        kept.append(e)
+    kept.append(record)
+    strip["extract"] = kept
+
+    tmp = pj_path.with_suffix(pj_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(pj, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(pj_path)
+
+
+def _replace_with_url_reference(target: ExtractTarget, plugin_root: Path, sha: str) -> None:
+    """In the MAIN repo: remove target.src and record a clone-by-URL
+    reference in the manifest — NO git submodule, NO `.gitmodules`.
+
+    The extracted directory is deleted from the plugin tree entirely (so it
+    does not ship on install), and `{path, url, sha}` is recorded in
+    `cpv.strip.extract[]` so ``--restore`` can re-clone it on demand.
     """
     src_dir = plugin_root / target.src
-    sub_path = target.submodule_path.rstrip("/")
     print(f"  [git rm] {target.src}")
     subprocess.run(
         # --ignore-unmatch makes the rm idempotent: this step is only
-        # checkpointed (CONTENT_PUSHED -> SUBMODULE_ADDED) AFTER the whole
-        # function returns, so a crash BETWEEN this rm and the submodule-add
+        # checkpointed (CONTENT_PUSHED -> REFERENCE_RECORDED) AFTER the whole
+        # function returns, so a crash BETWEEN this rm and the manifest write
         # below leaves the run in CONTENT_PUSHED. A resume re-enters here and
         # re-runs the rm on an already-removed path — without --ignore-unmatch
         # `git rm` would exit non-zero ("pathspec did not match") and check=True
         # would abort the plan mid-surgery. Content is already safe in the
-        # submodule repo (pushed in the prior step), so a no-op rm is correct.
+        # source repo (pushed in the prior step), so a no-op rm is correct.
         ["git", "-C", str(plugin_root), "rm", "-rf", "--ignore-unmatch", target.src],
         check=True,
         capture_output=True,
@@ -826,12 +1034,14 @@ def _replace_with_submodule(target: ExtractTarget, plugin_root: Path) -> None:
     # so this is just defensive cleanup.
     if src_dir.exists():
         shutil.rmtree(src_dir)
-    print(f"  [submodule add] {target.url} {sub_path}")
+    print(f"  [record] cpv.strip.extract[] path={target.submodule_path.rstrip('/')} url={target.url} sha={sha[:12]}…")
+    _record_extract_reference(plugin_root, target, sha)
+    # Stage the manifest edit so it lands in the same commit as the removal.
     subprocess.run(
-        ["git", "-C", str(plugin_root), "submodule", "add", "--force", target.url, sub_path],
+        ["git", "-C", str(plugin_root), "add", "--", ".claude-plugin/plugin.json"],
         check=True,
         capture_output=True,
-        timeout=300,
+        timeout=30,
     )
 
 
@@ -843,7 +1053,7 @@ def apply_plan(plan: StripPlan) -> None:
     resume from the last successful state. Re-running this function with
     a saved state skips work that's already done:
 
-        INIT → REPO_VERIFIED → CONTENT_PUSHED → SUBMODULE_ADDED → COMMITTED → DONE
+        INIT → REPO_VERIFIED → CONTENT_PUSHED → REFERENCE_RECORDED → COMMITTED → DONE
 
     State is per-target. The state file tracks `current_target_index` and
     `current_state` so the loop knows where to pick up.
@@ -880,29 +1090,43 @@ def apply_plan(plan: StripPlan) -> None:
                 )
                 cur_state = StripState.REPO_VERIFIED.value
 
-            # Step B: clone + filter-repo + push.
+            # Step B: clone + filter-repo + push. Capture the pushed SHA
+            # (the exact commit --restore will pin to).
             if state_progress({"current_state": cur_state}) < state_progress(
                 {"current_state": StripState.CONTENT_PUSHED.value}
             ):
                 tmp = Path(tempfile.mkdtemp(prefix=f"cpv-strip-{uuid.uuid4().hex[:8]}-"))
                 tmp_dirs.append(tmp)
-                _filter_and_push(target, plan.plugin_root, tmp)
+                target.pushed_sha = _filter_and_push(target, plan.plugin_root, tmp)
                 save_state(
                     plan.plugin_root, {"current_target_index": idx, "current_state": StripState.CONTENT_PUSHED.value}
                 )
                 cur_state = StripState.CONTENT_PUSHED.value
 
-            # Step C: git rm + submodule add.
+            # Step C: git rm + record the clone-by-URL reference (NO submodule).
             if state_progress({"current_state": cur_state}) < state_progress(
-                {"current_state": StripState.SUBMODULE_ADDED.value}
+                {"current_state": StripState.REFERENCE_RECORDED.value}
             ):
-                _replace_with_submodule(target, plan.plugin_root)
+                # Resolve the SHA: from this run's push, else (a resume where
+                # Step B was already done) re-query the remote HEAD. Recording
+                # without a valid pin would produce an un-restorable reference.
+                sha = target.pushed_sha or (_gh_remote_head_sha(target.submodule) or "")
+                if not _SHA40_RE.match(sha):
+                    raise StripError(
+                        "STRIP-R010",
+                        (
+                            f"could not determine the pushed commit SHA for {target.submodule} "
+                            f"(got {sha!r}); refusing to record an un-restorable cpv.strip.extract entry."
+                        ),
+                    )
+                _replace_with_url_reference(target, plan.plugin_root, sha)
                 save_state(
-                    plan.plugin_root, {"current_target_index": idx, "current_state": StripState.SUBMODULE_ADDED.value}
+                    plan.plugin_root,
+                    {"current_target_index": idx, "current_state": StripState.REFERENCE_RECORDED.value},
                 )
 
-        # Step D: final commit (only if there are submodule changes staged).
-        commit_msg = "chore: extract dev parts to submodules (cpv strip-dev-parts)"
+        # Step D: final commit (only if there are staged removals + manifest edits).
+        commit_msg = "chore: extract dev parts to source repos (cpv strip-dev-parts)"
         print(f"\n[commit] git commit -m '{commit_msg}'")
         diff_check = subprocess.run(
             ["git", "-C", str(plan.plugin_root), "diff", "--cached", "--name-only"],
@@ -928,12 +1152,85 @@ def apply_plan(plan: StripPlan) -> None:
             },
         )
         print("\n✓ Strip complete. Push the parent commit to make it visible.")
+        print("  Dev content lives in the source repo(s); re-clone with `--restore`.")
         # Clear state on full success so the next run starts fresh.
         clear_state(plan.plugin_root)
     finally:
         for tmp in tmp_dirs:
             if tmp.exists():
                 shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ── Restore (clone-by-URL inverse of a strip) ─────────────────────────────────
+
+
+def _restore_record(record: ExtractRecord, plugin_root: Path) -> None:
+    """Re-materialise one recorded `{path, url, sha}` into the plugin tree.
+
+    Clones the source repo, checks out the pinned SHA, then REMOVES the
+    nested `.git` so the restored files are plain tree content — never an
+    accidental gitlink (the exact trap the clone-by-URL model exists to
+    avoid). Refuses to clobber a non-empty destination (fail-fast).
+    """
+    dest = plugin_root / record.path
+    if dest.exists() and any(dest.iterdir()):
+        raise StripError(
+            "STRIP-R020",
+            (
+                f"restore destination '{record.path}' already exists and is not empty. "
+                f"Remove it first, or it may already be restored."
+            ),
+        )
+    print(f"  [clone] {record.url} → {record.path} @ {record.sha[:12]}…")
+    # `--` guards against option-injection; the URL shape was validated in
+    # validate_extract_record (HTTPS github, no userinfo/port/traversal).
+    git_with_retry(
+        ["git", "clone", "--", record.url, str(dest)],
+        check=True,
+        capture_output=True,
+    )
+    # Pin to the exact extracted commit (detached — restore is a materialise,
+    # not a branch checkout).
+    subprocess.run(
+        ["git", "-C", str(dest), "checkout", "--detach", record.sha],
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
+    git_dir = dest / ".git"
+    if git_dir.exists():
+        shutil.rmtree(git_dir, ignore_errors=True)
+
+
+def run_restore(plugin_root: Path) -> int:
+    """`--restore`: re-clone every recorded dev part from its url@sha.
+
+    Reads the validated `{path, url, sha}` records from plugin.json (a
+    malformed record aborts fail-fast) and re-materialises each. Returns a
+    process exit code.
+    """
+    try:
+        records = parse_extract_records(plugin_root)
+    except StripError as e:
+        print(f"FAILED to read cpv.strip.extract records: {e}", file=sys.stderr)
+        return 1
+    except json.JSONDecodeError as e:
+        print(f"FAILED: plugin.json is not valid JSON: {e}", file=sys.stderr)
+        return 1
+    if not records:
+        print("No cpv.strip.extract records to restore (plugin is not stripped, or nothing recorded).")
+        return 0
+    for record in records:
+        try:
+            _restore_record(record, plugin_root)
+        except StripError as e:
+            print(f"FAILED to restore '{record.path}': {e}", file=sys.stderr)
+            return 1
+        except subprocess.CalledProcessError as e:
+            print(f"FAILED to restore '{record.path}': subprocess error: {e}", file=sys.stderr)
+            return 1
+    print(f"\n✓ Restore complete: {len(records)} dev part(s) re-cloned from their recorded source repo(s).")
+    return 0
 
 
 # ── CLI entry ─────────────────────────────────────────────────────────────────
@@ -943,7 +1240,8 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry point.
 
     Modes: `--dry-run` (preview), `--check` (CI gate), `--auto`
-    (live execution: creates GitHub repos, rewrites history).
+    (live execution: creates GitHub repos, rewrites history, records the
+    clone-by-URL references), `--restore` (re-clone recorded dev parts).
     """
     args = argv if argv is not None else sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
@@ -952,6 +1250,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  cpv_strip_dev.py <plugin-path> --dry-run [--extract <src>...]")
         print("  cpv_strip_dev.py <plugin-path> --check")
         print("  cpv_strip_dev.py <plugin-path> --auto [--extract <src>...]")
+        print("  cpv_strip_dev.py <plugin-path> --restore")
         return 0
 
     plugin_root = Path(args[0]).resolve()
@@ -962,6 +1261,12 @@ def main(argv: list[str] | None = None) -> int:
     flags = args[1:]
     dry_run = "--dry-run" in flags
     check = "--check" in flags
+
+    # `--restore` re-clones the recorded dev parts; it reads the manifest
+    # records directly and needs no strip plan.
+    if "--restore" in flags:
+        return run_restore(plugin_root)
+
     explicit_targets: list[str] = []
     i = 0
     while i < len(flags):
@@ -986,7 +1291,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        print("OK: no dev parts in MAIN repo (all extracted to submodules).")
+        print("OK: no dev parts in MAIN repo (all extracted to source repos).")
         return 0
 
     if dry_run:

@@ -7,7 +7,7 @@ report 20260525_102243+0200-publish-pipeline-lint-setup.md:
 #6  MINOR — notify-marketplace.yml: top-level permissions: {} (PAT-only),
             SHA-pinned peter-evans/repository-dispatch, per-job timeout.
 #7  MINOR — cpv_strip_dev validates submodule_path (reserved-dir rejected).
-#8  MINOR — _replace_with_submodule uses `git rm --ignore-unmatch` so a
+#8  MINOR — _replace_with_url_reference uses `git rm --ignore-unmatch` so a
             resume after a crash mid-step is idempotent.
 #9  MINOR — _read_deps_from_git_url turns a clone TimeoutExpired into a clean
             RuntimeError instead of a raw traceback.
@@ -121,12 +121,17 @@ class TestStripDevSubmodulePathValidation:
 
 
 class TestReplaceWithSubmoduleIdempotent:
-    """#8 - the git rm in _replace_with_submodule is resume-idempotent."""
+    """#8 - the git rm in _replace_with_url_reference is resume-idempotent.
+
+    (The function was renamed from `_replace_with_submodule` when strip-dev
+    was retargeted off git submodules onto the clone-by-URL model; the
+    `git rm --ignore-unmatch` resume-idempotency it guards is unchanged.)
+    """
 
     def test_git_rm_uses_ignore_unmatch(self):
         import cpv_strip_dev as csd
 
-        src = inspect.getsource(csd._replace_with_submodule)
+        src = inspect.getsource(csd._replace_with_url_reference)
         assert "--ignore-unmatch" in src
 
 
