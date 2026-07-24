@@ -848,6 +848,19 @@ class TestStageCheckWorkingTree:
 class TestEnsureGhAuth:
     """gh-auth precheck — TRDD-bbff5bc5 §4.1."""
 
+    @pytest.fixture(autouse=True)
+    def _isolate_skip_env(self, monkeypatch):
+        """Hermeticity guard: `_ensure_gh_auth` early-returns when
+        CPV_SKIP_GH_AUTH_CHECK=1 is in the environment (publish.py:266). A
+        self-publish run invoked with that escape hatch set leaks the var into
+        the Gate-2 pytest subprocess (and its xdist workers), so without this
+        these tests would hit the bypass instead of the gh-missing / unauthed
+        path they assert (DID NOT RAISE SystemExit). Clear BOTH publish
+        escape-hatch vars so every test here exercises the real decision path
+        regardless of the ambient environment. delenv auto-restores per test."""
+        monkeypatch.delenv("CPV_SKIP_GH_AUTH_CHECK", raising=False)
+        monkeypatch.delenv("CPV_SKIP_GITHUB_INTEGRITY", raising=False)
+
     @staticmethod
     def _stub_subprocess(monkeypatch, status_rc=0, status_out="", status_err="", perm_rc=0, perm_out="true"):
         """Replace subprocess.run inside publish module to feed gh outputs."""

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-07-24T09:33:48+00:00",
+  "computed_at": "2026-07-24T09:41:11+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:9fa3c6064b9eac17f445dba94cb286232eb5bcfaa7c2062a1bb0147e5225d54b",
@@ -918,7 +918,7 @@
     "tests/test_point1_all_text_file_scan.py": "sha256:d4cc66cb04c726a138b4839ffc5af86d42f944b339a1ae091f6ed42e04deaebe",
     "tests/test_print_menu.py": "sha256:026e20bb2930771ec2b21266188f1008d343624ad19a0d3809532b92a4b255de",
     "tests/test_prune_old_versions.py": "sha256:d588d3673a1bf2f7e88af8d46d3a77c0709ee36df92ba6b4406821ae86a548e2",
-    "tests/test_publish.py": "sha256:4efdbc9bc9ac83dcdeccd43ec184d16d328dc6d29ad38a10c348d37e72a940dd",
+    "tests/test_publish.py": "sha256:03ee1ff4caca503be906a2b90d9a571a9747f90fd66bbb95244b1791b2feccf7",
     "tests/test_publish_background_prefetch.py": "sha256:f50e73806fcb792e635f6f96cadbd64a118114470f82e30192a94be987ca3629",
     "tests/test_publish_idempotency.py": "sha256:4e01bdda7638cfbe9f014ed34164a9b07f39b000fc369d2b718d917cc615af4b",
     "tests/test_publish_parallel_preflight.py": "sha256:3fe201fab817beab7322c3a96f7f644c0f4d387b43fca27cae4192e67f9d7443",
