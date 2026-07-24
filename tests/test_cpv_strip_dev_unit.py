@@ -616,9 +616,10 @@ def test_record_extract_reference_is_idempotent(tmp_path):
 def test_apply_plan_writes_records_removes_dir_no_gitmodules(tmp_path, monkeypatch):
     plugin = _make_plugin(tmp_path, files={"tests/x.py": "print('x')\n"})
     plan = csd.build_plan(plugin, explicit_targets=["tests/"])
-    # Mock the two network-touching steps (repo create + filter/push).
-    monkeypatch.setattr(csd, "_ensure_repo_exists", lambda target, name: None)
-    monkeypatch.setattr(csd, "_filter_and_push", lambda target, root, tmp: _FAKE_SHA)
+    # Mock the two network-touching steps (repo create + filter/push). Both now
+    # accept the new keyword-only `visibility` kwarg apply_plan threads through.
+    monkeypatch.setattr(csd, "_ensure_repo_exists", lambda target, name, visibility="private": None)
+    monkeypatch.setattr(csd, "_filter_and_push", lambda target, root, tmp, visibility="private": _FAKE_SHA)
 
     csd.apply_plan(plan)
 
@@ -726,3 +727,173 @@ def test_stripped_plugin_passes_gitmodules_validator(tmp_path):
     assert not (plugin / ".gitmodules").exists()
     assert cvg.parse_gitmodules_urls(plugin) == []
     assert cvg.validate_gitmodules(plugin) == []
+
+
+# ── #175 hardening: --visibility on _ensure_repo_exists ───────────────────────
+
+
+def _wire_gh_create(monkeypatch) -> list[list[str]]:
+    """Wire _ensure_repo_exists onto a fresh-repo create path with a captured gh.
+
+    Returns the list that receives each gh_with_retry argv. `gh_repo_exists_and_populated`
+    is forced to (False, False) so the create branch runs; gh is 'installed'.
+    """
+    calls: list[list[str]] = []
+    monkeypatch.setattr(csd, "gh_repo_exists_and_populated", lambda sub: (False, False))
+    monkeypatch.setattr(csd.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(csd, "gh_with_retry", lambda argv, **kw: calls.append(list(argv)))
+    return calls
+
+
+def test_ensure_repo_exists_public_uses_public_flag(monkeypatch):
+    """visibility=public → gh repo create --public + a compile-source description."""
+    calls = _wire_gh_create(monkeypatch)
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    csd._ensure_repo_exists(target, "demo", visibility="public")
+    argv = calls[0]
+    assert "--public" in argv
+    assert "--private" not in argv
+    desc = argv[argv.index("--description") + 1]
+    assert "Source for demo" in desc
+
+
+def test_ensure_repo_exists_private_uses_private_flag(monkeypatch):
+    """visibility=private → gh repo create --private + the dev-artefacts description."""
+    calls = _wire_gh_create(monkeypatch)
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    csd._ensure_repo_exists(target, "demo", visibility="private")
+    argv = calls[0]
+    assert "--private" in argv
+    assert "--public" not in argv
+    desc = argv[argv.index("--description") + 1]
+    assert "Dev artefacts extracted from demo" in desc
+
+
+def test_ensure_repo_exists_defaults_to_private(monkeypatch):
+    """No visibility arg → private (the safe default)."""
+    calls = _wire_gh_create(monkeypatch)
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    csd._ensure_repo_exists(target, "demo")
+    assert "--private" in calls[0]
+    assert "--public" not in calls[0]
+
+
+# ── #175 hardening: fail-closed secret gate in _filter_and_push ───────────────
+
+
+def _mock_filter_and_push_env(monkeypatch, *, trufflehog_present: bool, secret_found: bool) -> list[list[str]]:
+    """Wire _filter_and_push's git + trufflehog subprocess surface with fakes.
+
+    No real git-filter-repo / trufflehog / network is invoked. Returns the list
+    of push argv git_with_retry receives, so a test can assert push-was/-was-not
+    reached. `secret_found` makes the mocked trufflehog report one git-mode
+    finding; `trufflehog_present` toggles whether `shutil.which` resolves it.
+    """
+    pushes: list[list[str]] = []
+
+    def fake_git_with_retry(cmd, **kw):
+        if "push" in cmd:
+            pushes.append(list(cmd))
+        return subprocess.CompletedProcess(list(cmd), 0, "", "")
+
+    secret_json = json.dumps(
+        {
+            "DetectorName": "AWS",
+            "Verified": False,
+            "SourceMetadata": {"Data": {"Git": {"file": "old/secret.txt", "commit": "abcdef1234567890", "line": 3}}},
+        }
+    )
+
+    def fake_run(cmd, **kw):
+        c = list(cmd)
+        prog = str(c[0])
+        if "trufflehog" in prog:
+            if secret_found:
+                return subprocess.CompletedProcess(c, 183, secret_json + "\n", "")
+            return subprocess.CompletedProcess(c, 0, "", "")
+        if "--abbrev-ref" in c:
+            return subprocess.CompletedProcess(c, 0, "main\n", "")
+        if "rev-parse" in c and "HEAD" in c:
+            return subprocess.CompletedProcess(c, 0, _FAKE_SHA + "\n", "")
+        return subprocess.CompletedProcess(c, 0, "", "")
+
+    def fake_which(name):
+        if name == "trufflehog" and trufflehog_present:
+            return "/usr/bin/trufflehog"
+        return None
+
+    monkeypatch.setattr(csd, "git_with_retry", fake_git_with_retry)
+    monkeypatch.setattr(csd.subprocess, "run", fake_run)
+    monkeypatch.setattr(csd.shutil, "which", fake_which)
+    return pushes
+
+
+def test_filter_and_push_public_blocks_on_secret(tmp_path, monkeypatch):
+    """PUBLIC + a secret in the extracted history → STRIP-S001, push NOT reached."""
+    pushes = _mock_filter_and_push_env(monkeypatch, trufflehog_present=True, secret_found=True)
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    with pytest.raises(csd.StripError) as exc:
+        csd._filter_and_push(target, tmp_path, tmp_path, visibility="public")
+    assert exc.value.code == "STRIP-S001"
+    assert pushes == []
+
+
+def test_filter_and_push_private_warns_on_secret(tmp_path, monkeypatch, capsys):
+    """PRIVATE + a secret → WARN and proceed (push reached, SHA returned)."""
+    pushes = _mock_filter_and_push_env(monkeypatch, trufflehog_present=True, secret_found=True)
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    sha = csd._filter_and_push(target, tmp_path, tmp_path, visibility="private")
+    assert sha == _FAKE_SHA
+    assert len(pushes) == 1
+    assert "warn" in capsys.readouterr().out.lower()
+
+
+def test_filter_and_push_public_blocks_when_trufflehog_absent(tmp_path, monkeypatch):
+    """PUBLIC + trufflehog unavailable → STRIP-S002 (fail-closed), push NOT reached."""
+    pushes = _mock_filter_and_push_env(monkeypatch, trufflehog_present=False, secret_found=False)
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    with pytest.raises(csd.StripError) as exc:
+        csd._filter_and_push(target, tmp_path, tmp_path, visibility="public")
+    assert exc.value.code == "STRIP-S002"
+    assert pushes == []
+
+
+def test_filter_and_push_private_proceeds_when_trufflehog_absent(tmp_path, monkeypatch):
+    """PRIVATE + trufflehog unavailable → WARN and proceed (private is not fail-closed)."""
+    pushes = _mock_filter_and_push_env(monkeypatch, trufflehog_present=False, secret_found=False)
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    sha = csd._filter_and_push(target, tmp_path, tmp_path, visibility="private")
+    assert sha == _FAKE_SHA
+    assert len(pushes) == 1
+
+
+def test_filter_and_push_public_proceeds_when_clean(tmp_path, monkeypatch):
+    """PUBLIC + a clean scan → push proceeds (the gate does not over-block)."""
+    pushes = _mock_filter_and_push_env(monkeypatch, trufflehog_present=True, secret_found=False)
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    sha = csd._filter_and_push(target, tmp_path, tmp_path, visibility="public")
+    assert sha == _FAKE_SHA
+    assert len(pushes) == 1
+
+
+# ── #175 hardening: force_extract bypasses the size threshold ─────────────────
+
+
+def test_should_strip_target_force_extract_overrides_threshold(tmp_path):
+    """A below-threshold dir is skipped by default but extracted under force_extract."""
+    plugin = _make_plugin(tmp_path, files={"tests/test_a.py": "a", "tests/test_b.py": "b"})
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    worth_default, _ = csd.should_strip_target(target, plugin)
+    assert worth_default is False  # below both thresholds → skip
+    worth_forced, reason = csd.should_strip_target(target, plugin, force_extract=True)
+    assert worth_forced is True
+    assert "forced" in reason.lower()
+
+
+def test_should_strip_target_force_extract_still_needs_existing_dir(tmp_path):
+    """force_extract cannot strip a nonexistent dir (fail-safe: never 'strip nothing')."""
+    plugin = _make_plugin(tmp_path)  # no tests/
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    worth, reason = csd.should_strip_target(target, plugin, force_extract=True)
+    assert worth is False
+    assert "does not exist" in reason
