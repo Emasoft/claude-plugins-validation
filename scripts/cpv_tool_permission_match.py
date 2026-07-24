@@ -331,19 +331,34 @@ def mcp_usage_allowed(usage: str, patterns: list[str]) -> bool:
     return False
 
 
-def _fence_line_flags(body: str) -> list[bool]:
-    """Return a per-line bool: True when the (0-based) line is inside a fence.
+@dataclass(frozen=True)
+class FencedBlock:
+    """One fenced code block found in a component body."""
+
+    info: str  # raw info string after the opening delimiter ("" when absent)
+    lang: str  # lowercased first word of ``info`` ("" when absent)
+    open_line: int  # 1-based line of the opening delimiter
+    close_line: int  # 1-based line of the closing delimiter (last line when unterminated)
+
+
+def iter_fenced_blocks(body: str) -> list[FencedBlock]:
+    """Find every fenced code block in ``body`` — the ONE fence parser.
 
     A fence opens on a line whose first non-space run is ``` ``` ``` or ``~~~``
-    (length ≥ 3) and closes on the next line with a matching-or-longer run of the
-    same character. The fence delimiter lines themselves are treated as inside
-    the fence (a tool call never appears on a bare delimiter line, so this is
-    harmless and keeps the tracker simple).
+    (length ≥ 3) and closes on a later line with a matching-or-longer run of the
+    same character AND no info string (CommonMark). The info-string rule stops a
+    ```` ```lang ```` line that is CONTENT inside the fence from closing it
+    prematurely. An unterminated fence runs to the end of the body.
+
+    :func:`_fence_line_flags` is derived from this so the in-fence flags and the
+    per-block info strings can never disagree.
     """
     lines = body.splitlines()
-    flags = [False] * len(lines)
+    blocks: list[FencedBlock] = []
     fence_char: str | None = None
     fence_len = 0
+    open_line = 0
+    info = ""
     for i, line in enumerate(lines):
         m = _FENCE_RE.match(line)
         if fence_char is None:
@@ -351,19 +366,129 @@ def _fence_line_flags(body: str) -> list[bool]:
                 run = m.group(1)
                 fence_char = run[0]
                 fence_len = len(run)
-                flags[i] = True
-        else:
-            flags[i] = True
-            if m:
-                run = m.group(1)
-                # A closing fence must match the opener's char, be at least as
-                # long, AND carry no info string (CommonMark). The info-string
-                # check stops a ```lang line that is CONTENT inside the fence
-                # from prematurely closing it.
-                if run[0] == fence_char and len(run) >= fence_len and line[m.end() :].strip() == "":
-                    fence_char = None
-                    fence_len = 0
+                open_line = i + 1
+                info = line[m.end() :].strip()
+        elif m:
+            run = m.group(1)
+            if run[0] == fence_char and len(run) >= fence_len and line[m.end() :].strip() == "":
+                blocks.append(_make_block(info, open_line, i + 1))
+                fence_char = None
+                fence_len = 0
+                info = ""
+    if fence_char is not None:
+        # Unterminated fence — everything to EOF is inside it.
+        blocks.append(_make_block(info, open_line, len(lines)))
+    return blocks
+
+
+def _make_block(info: str, open_line: int, close_line: int) -> FencedBlock:
+    """Build a :class:`FencedBlock`, deriving ``lang`` from the info string.
+
+    The language is the FIRST word of the info string, lowercased: CommonMark
+    allows trailing metadata (``bash title="run me"``), and highlighters key on
+    the first word only.
+    """
+    words = info.split()
+    return FencedBlock(info=info, lang=words[0].lower() if words else "", open_line=open_line, close_line=close_line)
+
+
+def _fence_line_flags(body: str) -> list[bool]:
+    """Return a per-line bool: True when the (0-based) line is inside a fence.
+
+    The fence delimiter lines themselves are treated as inside the fence (a tool
+    call never appears on a bare delimiter line, so this is harmless and keeps
+    the tracker simple). Derived from :func:`iter_fenced_blocks`.
+    """
+    lines = body.splitlines()
+    flags = [False] * len(lines)
+    for block in iter_fenced_blocks(body):
+        for idx in range(block.open_line - 1, min(block.close_line, len(flags))):
+            if idx >= 0:
+                flags[idx] = True
     return flags
+
+
+# Fence info-strings that mean "this block is a shell script". Deliberately
+# NARROW: a transcript language such as ``console`` can be any REPL, and
+# mislabelling one would produce a finding on a body that never intended to run
+# a shell. Only unambiguous shell dialects are listed.
+SHELL_FENCE_LANGS: frozenset[str] = frozenset(
+    {"bash", "sh", "shell", "shellscript", "shell-script", "zsh", "ksh"}
+)
+
+
+def shell_fences_without_bash(declared_value: object, body: str) -> list[int]:
+    """Return the opening line of every shell fence in a body that lacks ``Bash``.
+
+    ``declared_value`` is the raw frontmatter ``tools`` value. ``None`` (field
+    absent) returns ``[]`` — the component inherits every tool, so no shell fence
+    can be ungranted.
+
+    ADVISORY ONLY (the caller must emit WARNING, never higher): an illustrative
+    fence, a user-facing runbook, and "tell your Bash-capable subagent to run
+    this" are all legitimate, and there is no reliable discriminator between
+    "the agent runs this" and "the agent documents this".
+    """
+    rules = parse_declared_tools(declared_value)
+    if rules is None:
+        return []
+    if "Bash" in granted_builtin_tools(rules):
+        return []
+    return [block.open_line for block in iter_fenced_blocks(body) if block.lang in SHELL_FENCE_LANGS]
+
+
+# An MCP grant whose wildcard is joined to the server name by a SINGLE ``-``/``_``
+# separator (``mcp__chrome-devtools-*``). Real MCP tool ids are
+# ``mcp__<server>__<tool>`` — a DOUBLE underscore — so this shape cannot match
+# any tool of the server it names; the grant is inert and the agent silently
+# loses every tool the author meant to allow. The server group must start AND
+# end with an alphanumeric so the documented ``mcp__<server>__*`` form (whose
+# separator is ``__``) can never match.
+_MCP_SINGLE_SEPARATOR_GLOB_RE = re.compile(r"^mcp__(?P<server>[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?)[-_]\*$")
+
+# Arbitrary tool name used to PROVE a pattern cannot reach its own server.
+_MCP_PROBE_TOOL = "probe"
+
+
+def ineffective_mcp_grants(rules: list[str]) -> list[tuple[str, str]]:
+    """Return ``[(pattern, intended_server)]`` for provably-inert MCP grants.
+
+    A pattern is reported only when BOTH hold:
+
+    1. it has the single-separator wildcard shape (``mcp__<server>-*``), and
+    2. :func:`mcp_usage_allowed` — the same matcher the runtime-consistency
+       check uses, which already accepts the three DOCUMENTED forms (exact
+       ``mcp__s__t``, glob ``mcp__s__*``, bare server ``mcp__s``) — rejects a
+       probe tool id of the very server the pattern names.
+
+    Condition 2 is the proof, not a heuristic: if the grant cannot cover
+    ``mcp__<server>__<anything>`` it cannot cover any real tool of that server.
+    """
+    ineffective: list[tuple[str, str]] = []
+    for pattern in declared_mcp_patterns(rules):
+        match = _MCP_SINGLE_SEPARATOR_GLOB_RE.match(pattern)
+        if match is None:
+            continue
+        server = match.group("server")
+        if not mcp_usage_allowed(f"mcp__{server}__{_MCP_PROBE_TOOL}", [pattern]):
+            ineffective.append((pattern, server))
+    return ineffective
+
+
+def uncovered_mcp_usages_for_server(body: str, rules: list[str], server: str) -> list[BodyUsage]:
+    """Body usages of ``mcp__<server>__…`` that no declared pattern grants.
+
+    This is the corroboration signal for an ineffective grant: the body names
+    tools of exactly the server the malformed pattern meant to allow, and the
+    declared rules do not cover them — so the typo has a demonstrated cost.
+    """
+    patterns = declared_mcp_patterns(rules)
+    prefix = f"mcp__{server}__"
+    return [
+        usage
+        for usage in detect_body_usages(body)
+        if usage.is_mcp and usage.name.startswith(prefix) and not mcp_usage_allowed(usage.name, patterns)
+    ]
 
 
 def detect_body_usages(body: str) -> list[BodyUsage]:

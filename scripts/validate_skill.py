@@ -67,6 +67,7 @@ from cpv_validation_common import (  # noqa: E402  (import below conditional yam
     is_valid_model,
     save_report_and_print_summary,
     validate_component_name,
+    validate_no_duplicate_frontmatter_keys,
 )
 from cpv_validation_common import parse_frontmatter as _shared_parse_frontmatter  # noqa: E402
 
@@ -143,6 +144,11 @@ def validate_frontmatter(_skill_path: Path, content: str, report: ValidationRepo
         return None
 
     report.passed("Valid YAML frontmatter", "SKILL.md")
+
+    # A duplicated top-level key parses cleanly but SILENTLY discards the
+    # earlier value, so it is invisible in the parsed dict — it has to be read
+    # off the raw frontmatter text.
+    validate_no_duplicate_frontmatter_keys(content, report, "SKILL.md")
 
     # Validate known fields. The four v2.1.186 keys (display-name, default-enabled,
     # fallback, metadata) accept kebab/snake/camelCase, so use the casing-tolerant
