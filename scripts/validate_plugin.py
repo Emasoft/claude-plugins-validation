@@ -3167,6 +3167,25 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
             f"(the build CI clones it by pinned URL/tag) instead of linking a submodule."
         )
 
+    # RC-MIXED-COMPILED (issue #175 Phase 3): a script-primary plugin (pipeline
+    # profile `standard`) that ALSO ships a compiled component. CPV deliberately
+    # does NOT invent a new profile for this — the compiled component is already
+    # gated language-agnostically by RC-SHIP-BINARY-ONLY above and the generated
+    # publish.py G2e self-detecting build gate. This INFO just surfaces that CPV
+    # recognized the mixed-language shape (so the author knows the compiled part
+    # is covered). Informational + non-blocking. `standard_profile_ships_compiled`
+    # returns False for the submodule-build / binary-release profiles (those ARE
+    # compiled profiles — no note needed).
+    from cpv_pipeline_profile import standard_profile_ships_compiled  # noqa: PLC0415
+
+    if standard_profile_ships_compiled(plugin_root):
+        report.info(
+            "RC-MIXED-COMPILED: this plugin ships a compiled component alongside a script-primary "
+            "pipeline (profile: standard). Its compiled build is covered by the RC-SHIP-BINARY-ONLY "
+            "canon and the publish.py build gate regardless of profile — no separate compiled "
+            "pipeline profile is required."
+        )
+
     # --- 2. Check compiled source code has binaries or build script ---
     if compiled_source_files:
         # Search for bin/ directories recursively, skip gitignored paths
