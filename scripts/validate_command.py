@@ -51,6 +51,7 @@ from cpv_validation_common import (
     is_valid_model,
     save_report_and_print_summary,
     validate_component_name,
+    validate_no_duplicate_frontmatter_keys,
 )
 from cpv_validation_common import parse_frontmatter as _shared_parse_frontmatter
 
@@ -207,6 +208,11 @@ def validate_frontmatter_exists(content: str, report: CommandValidationReport, f
         return None
 
     report.passed("Valid YAML frontmatter", filename)
+
+    # A duplicated top-level key parses cleanly but SILENTLY discards the
+    # earlier value, so it is invisible in `frontmatter` — it has to be read
+    # off the raw frontmatter text.
+    validate_no_duplicate_frontmatter_keys(content, report, filename)
 
     # Check for unknown fields. Commands share the skill field set, so the four
     # v2.1.186 keys (display-name/default-enabled/fallback/metadata, any casing) are

@@ -1118,6 +1118,134 @@ def parse_frontmatter(
 
 
 # =============================================================================
+# Duplicate top-level frontmatter keys (raw, pre-YAML scan)
+# =============================================================================
+#
+# ``yaml.safe_load`` accepts a DUPLICATED mapping key silently and keeps the
+# LAST occurrence. An agent that declares ``tools:`` twice therefore validates
+# clean while the author's first grant is discarded at load time — the parsed
+# dict cannot reveal the loss, because the duplicate is already gone by the
+# time the validator sees it. The only place the evidence survives is the RAW
+# frontmatter text, so this check runs BEFORE the YAML load.
+#
+# FP-proofing: only a key at COLUMN 0 counts. Every nested mapping key and
+# every block-scalar continuation line is indented relative to its column-0
+# parent, and the first bare ``---`` closes the frontmatter — so a column-0
+# ``key:`` inside a frontmatter block is a top-level key by construction. A
+# multi-line FLOW collection is the one shape that can put a nested key at
+# column 0 (``metadata: {`` / newline / ``foo: 1,``), so bracket depth is
+# tracked and lines inside a flow collection are skipped.
+
+# A top-level YAML mapping key: an identifier at column 0 followed by ``:`` and
+# then whitespace or end-of-line. The trailing lookahead matters — YAML block
+# mappings REQUIRE a space after the colon, so ``http://example.com`` (and any
+# other ``word:``-prefixed value text) can never be mistaken for a key.
+_FRONTMATTER_TOP_LEVEL_KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)[ \t]*:(?=[ \t]|$)")
+
+
+def _flow_depth_delta(line: str) -> int:
+    """Net ``[``/``{`` minus ``]``/``}`` on ``line``, ignoring quoted spans.
+
+    Used only to SKIP lines inside a multi-line flow collection, so an
+    inaccurate count (e.g. a quoted span that spans lines) can only suppress a
+    finding, never invent one — the fail-safe direction for a validator whose
+    north star is "never call a valid agent invalid".
+    """
+    delta = 0
+    quote: str | None = None
+    escaped = False
+    for ch in line:
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif quote == '"' and ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = None
+            continue
+        if ch in "'\"":
+            quote = ch
+        elif ch in "[{":
+            delta += 1
+        elif ch in "]}":
+            delta -= 1
+        elif ch == "#":
+            break  # rest of the line is a comment
+    return delta
+
+
+def find_duplicate_frontmatter_keys(fm_text: str) -> list[tuple[str, list[int]]]:
+    """Find top-level keys that appear more than once in raw frontmatter text.
+
+    Args:
+        fm_text: the raw text BETWEEN the frontmatter delimiters (what
+            :func:`parse_frontmatter` feeds to the YAML loader).
+
+    Returns:
+        ``[(key, [1-based line numbers within fm_text])]`` for each duplicated
+        key, in first-appearance order. Keys appearing once are omitted.
+    """
+    occurrences: dict[str, list[int]] = {}
+    order: list[str] = []
+    depth = 0
+    for lineno, line in enumerate(fm_text.split("\n"), start=1):
+        if depth <= 0:
+            match = _FRONTMATTER_TOP_LEVEL_KEY_RE.match(line)
+            if match:
+                key = match.group(1)
+                if key not in occurrences:
+                    occurrences[key] = []
+                    order.append(key)
+                occurrences[key].append(lineno)
+        depth = max(0, depth + _flow_depth_delta(line))
+    return [(key, occurrences[key]) for key in order if len(occurrences[key]) > 1]
+
+
+def extract_frontmatter_text(content: str) -> tuple[str, int] | None:
+    """Return ``(raw frontmatter text, 1-based file line of its first line)``.
+
+    ``None`` when ``content`` has no delimited frontmatter block. Unlike
+    :func:`parse_frontmatter` this never invokes a YAML loader, so the raw text
+    is available even for frontmatter the loader would reject.
+    """
+    content = content.lstrip("﻿")
+    if not content.startswith("---"):
+        return None
+    lines = content.split("\n")
+    if lines[0].strip() != "---":
+        return None
+    for idx in range(1, len(lines)):
+        # Same column-0 closing-delimiter rule as parse_frontmatter (audit b07):
+        # an INDENTED ``---`` is block-scalar content, not a document marker.
+        if lines[idx].rstrip() == "---":
+            return "\n".join(lines[1:idx]), 2
+    return None
+
+
+def validate_no_duplicate_frontmatter_keys(content: str, report: ValidationReport, filename: str) -> None:
+    """Report a MAJOR for every duplicated top-level frontmatter key.
+
+    MAJOR because the consequence is silent capability loss: YAML keeps the
+    LAST occurrence, so the earlier value (an author's intended ``tools:``
+    grant, ``description:``, ``model:`` …) is discarded with no error anywhere.
+    """
+    extracted = extract_frontmatter_text(content)
+    if extracted is None:
+        return
+    fm_text, line_offset = extracted
+    for key, linenos in find_duplicate_frontmatter_keys(fm_text):
+        file_lines = [lineno + line_offset - 1 for lineno in linenos]
+        locations = ", ".join(str(n) for n in file_lines)
+        report.major(
+            f"Duplicate top-level frontmatter key '{key}' (lines {locations}) — YAML keeps "
+            f"the LAST occurrence, so the earlier '{key}' value is silently discarded. "
+            f"Merge them into a single '{key}' entry.",
+            filename,
+            file_lines[0],
+        )
+
+
+# =============================================================================
 # Plugin-shipped agent restrictions
 # =============================================================================
 

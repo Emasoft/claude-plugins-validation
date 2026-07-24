@@ -50,6 +50,7 @@ from cpv_validation_common import (
     is_valid_model,
     save_report_and_print_summary,
     validate_component_name,
+    validate_no_duplicate_frontmatter_keys,
     validate_plugin_shipped_restrictions,
 )
 
@@ -231,6 +232,11 @@ def validate_frontmatter_exists(content: str, report: AgentValidationReport, fil
         return None
 
     report.passed("Valid YAML frontmatter", filename)
+
+    # A duplicated top-level key parses cleanly but SILENTLY discards the
+    # earlier value, so it is invisible in `frontmatter` — it has to be read
+    # off the raw text (shared with the skill/command validators).
+    validate_no_duplicate_frontmatter_keys(content, report, filename)
 
     # Check for unknown fields
     for key in frontmatter.keys():
@@ -966,6 +972,150 @@ def validate_disallowed_tools_field(frontmatter: dict[str, Any], filename: str, 
     report.passed(f"'disallowedTools' field valid: {len(tool_list)} tool(s)", filename)
 
 
+def _normalize_tool_token(rule: str) -> str:
+    """Normalise one declared tool rule for equality comparison.
+
+    A BARE identifier is alias-resolved (``Task`` → ``Agent``) so the two names
+    for one tool compare equal. A rule carrying a ``(specifier)`` is left
+    verbatim: ``Bash(git:*)`` and ``Bash(rm:*)`` are DIFFERENT rules, and
+    treating them as the same tool would flag a legitimate allow-scope /
+    deny-scope refinement as a contradiction.
+    """
+    from cpv_tool_permission_match import resolve_alias  # noqa: PLC0415
+
+    token = rule.strip()
+    return token if "(" in token else resolve_alias(token)
+
+
+def validate_tool_grant_contradictions(
+    frontmatter: dict[str, Any], filename: str, report: AgentValidationReport
+) -> None:
+    """Detect self-contradictory / redundant entries across the two grant lists.
+
+    Per sub-agents.md: "If both are set, ``disallowedTools`` is applied first,
+    then ``tools`` is resolved against the remaining pool. **A tool listed in
+    both is removed.**" So an identical entry in both lists silently voids the
+    author's grant — MAJOR, and named so the author knows which one to drop.
+
+    A duplicate entry WITHIN one list is harmless (the resolved set is
+    identical), so it is only a WARNING.
+
+    Comparison is on the EXACT normalised token, never the base tool name:
+    ``tools: Bash(git:*)`` + ``disallowedTools: Bash(rm:*)`` is a deliberate
+    scope refinement, not a contradiction, and must never be flagged.
+    """
+    from cpv_tool_permission_match import parse_declared_tools  # noqa: PLC0415
+
+    normalised: dict[str, list[str]] = {}
+    for field in ("tools", "disallowedTools"):
+        rules = parse_declared_tools(frontmatter.get(field))
+        if not rules:
+            continue
+        tokens = [_normalize_tool_token(rule) for rule in rules]
+        normalised[field] = tokens
+
+        duplicates = sorted({token for token in tokens if tokens.count(token) > 1})
+        if duplicates:
+            report.warning(
+                f"'{field}' lists the same entry more than once: {', '.join(duplicates)}. "
+                "Duplicates are harmless (the resolved tool set is unchanged) but usually "
+                "signal an editing mistake — remove the extra entries.",
+                filename,
+            )
+
+    overlap = sorted(set(normalised.get("tools", [])) & set(normalised.get("disallowedTools", [])))
+    if overlap:
+        report.major(
+            f"{', '.join(overlap)} appears in BOTH 'tools' and 'disallowedTools'. "
+            "'disallowedTools' is applied first and a tool listed in both is REMOVED, so the "
+            "'tools' grant is silently voided. Drop the entry from whichever list is wrong.",
+            filename,
+        )
+
+
+def validate_mcp_grant_hygiene(
+    frontmatter: dict[str, Any], body: str, filename: str, report: AgentValidationReport
+) -> None:
+    """Flag an MCP grant whose wildcard cannot match any tool of its own server.
+
+    Real MCP tool ids are ``mcp__<server>__<tool>`` (DOUBLE underscore), and the
+    only documented server-level patterns are ``mcp__<server>`` and
+    ``mcp__<server>__*``. A single-separator wildcard (``mcp__chrome-devtools-*``)
+    therefore grants NOTHING — the author believes a whole server is allowed
+    while every one of its tools stays denied.
+
+    Severity is evidence-led: MAJOR only when the body actually references tools
+    of that server which the declared rules fail to cover (the grant is then the
+    proven root cause of the accompanying body-vs-tools finding); WARNING when
+    uncorroborated, since an unusual-but-unused pattern is not worth failing a
+    plugin over.
+    """
+    from cpv_tool_permission_match import (  # noqa: PLC0415
+        ineffective_mcp_grants,
+        parse_declared_tools,
+        uncovered_mcp_usages_for_server,
+    )
+
+    rules = parse_declared_tools(frontmatter.get("tools"))
+    if not rules:
+        return
+
+    for pattern, server in ineffective_mcp_grants(rules):
+        detail = (
+            f"MCP grant '{pattern}' in 'tools' matches no tool. Real MCP tool ids are "
+            f"'mcp__{server}__<tool>' (double underscore), so this single-separator wildcard "
+            f"grants nothing — every tool of the '{server}' server stays denied. Use "
+            f"'mcp__{server}__*' for the whole server, or list the exact "
+            f"'mcp__{server}__<tool>' ids the body needs."
+        )
+        uncovered = uncovered_mcp_usages_for_server(body, rules, server)
+        if uncovered:
+            names = ", ".join(sorted({usage.name for usage in uncovered}))
+            lines = ", ".join(str(line) for line in sorted({usage.line for usage in uncovered}))
+            report.major(
+                f"{detail} The body already uses {names} (body line(s) {lines}): this grant is "
+                "the root cause of the accompanying body-vs-'tools' finding, and those calls "
+                "fail silently at runtime.",
+                filename,
+                uncovered[0].line,
+            )
+        else:
+            report.warning(
+                f"{detail} (No body usage of that server was found, so this may be an unused "
+                "or deliberately broad pattern — only 'mcp__<server>' and 'mcp__<server>__*' "
+                "are documented.)",
+                filename,
+            )
+
+
+def validate_shell_fence_tool_grant(
+    frontmatter: dict[str, Any], body: str, filename: str, report: AgentValidationReport
+) -> None:
+    """Advise when a body carries a shell fence but 'tools' does not grant Bash.
+
+    WARNING, never higher: an illustrative snippet, a user-facing runbook, and
+    "hand this to your Bash-capable subagent" are all legitimate, and there is
+    no reliable way to tell "the agent runs this" from "the agent documents
+    this". Skipped entirely when 'tools' is absent (the agent inherits Bash).
+    """
+    from cpv_tool_permission_match import shell_fences_without_bash  # noqa: PLC0415
+
+    fence_lines = shell_fences_without_bash(frontmatter.get("tools"), body)
+    if not fence_lines:
+        return
+
+    locations = ", ".join(str(line) for line in fence_lines)
+    plural = "s" if len(fence_lines) > 1 else ""
+    report.warning(
+        f"Body contains {len(fence_lines)} shell code fence{plural} (body line{plural} {locations}) "
+        "but 'tools' does not grant 'Bash', so this agent cannot execute them. If the commands are "
+        "illustrative or meant for the user / another agent, ignore this; if the agent is supposed "
+        "to run them, add 'Bash' to 'tools'.",
+        filename,
+        fence_lines[0],
+    )
+
+
 def validate_initial_prompt_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
     """Validate the 'initialPrompt' frontmatter field.
 
@@ -1446,6 +1596,11 @@ def validate_agent(agent_path: Path) -> AgentValidationReport:
         validate_body_tool_consistency(
             frontmatter.get("tools"), _body_for_tools, report, filename=filename, field_name="tools"
         )
+        # A malformed MCP grant is the ROOT CAUSE of the cross-check finding
+        # above, so it runs right after it; the shell-fence advisory shares the
+        # same body + 'tools' inputs.
+        validate_mcp_grant_hygiene(frontmatter, _body_for_tools, filename, report)
+        validate_shell_fence_tool_grant(frontmatter, _body_for_tools, filename, report)
         validate_model_field(frontmatter, filename, report)
         validate_color_field(frontmatter, filename, report)
         validate_capabilities_field(frontmatter, filename, report)
@@ -1473,6 +1628,7 @@ def validate_agent(agent_path: Path) -> AgentValidationReport:
 
         # Cross-field validations
         validate_task_tool_prohibition(frontmatter, filename, report)
+        validate_tool_grant_contradictions(frontmatter, filename, report)
 
         # Plugin-shipped agent field restrictions
         # (hooks, mcpServers, permissionMode are forbidden when shipped in a plugin)
