@@ -234,7 +234,7 @@ def test_state_progress_recognises_states(tmp_path):
     assert csd.state_progress({}) == 0
     assert csd.state_progress({"state": "INIT"}) == 0
     # New _STATE_ORDER (REPO_CREATED removed): INIT=0, REPO_VERIFIED=1,
-    # CONTENT_PUSHED=2, SUBMODULE_ADDED=3, COMMITTED=4, DONE=5.
+    # CONTENT_PUSHED=2, REFERENCE_RECORDED=3, COMMITTED=4, DONE=5.
     assert csd.state_progress({"state": "REPO_VERIFIED"}) == 1
     assert csd.state_progress({"state": "CONTENT_PUSHED"}) == 2
     assert csd.state_progress({"state": "DONE"}) == 5
@@ -347,7 +347,12 @@ def test_summarise_plan_includes_all_targets(tmp_path):
     assert "tests/" in summary
     assert "design/" in summary
     assert "gh repo create" in summary
-    assert "git submodule add" in summary
+    # Clone-by-URL model: the preview records a reference + removes the dir,
+    # and NEVER runs `git submodule add` / writes `.gitmodules`.
+    assert "git rm" in summary
+    assert "cpv.strip.extract" in summary
+    assert "NO .gitmodules" in summary
+    assert "git submodule add" not in summary
 
 
 # ── CLI smoke ─────────────────────────────────────────────────────────────────
@@ -435,5 +440,289 @@ def test_state_progress_int_arithmetic():
     assert csd.state_progress({"current_state": csd.StripState.INIT.value}) == 0
     assert csd.state_progress({"current_state": csd.StripState.REPO_VERIFIED.value}) > 0
     assert csd.state_progress({"current_state": csd.StripState.DONE.value}) > csd.state_progress(
-        {"current_state": csd.StripState.SUBMODULE_ADDED.value}
+        {"current_state": csd.StripState.REFERENCE_RECORDED.value}
     )
+
+
+# ── Clone-by-URL model: record schema, recording, restore ────────────────────
+#
+# The retarget replaces `git submodule add` (which SHIPS content because
+# Claude Code recurses submodules at install) with a clone-by-URL model:
+# the extracted dir is removed and a `{path, url, sha}` reference is recorded
+# in cpv.strip.extract — NO .gitmodules is ever written.
+
+_FAKE_SHA = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"  # 40-hex, matches _SHA40_RE
+
+
+def _strip_manifest(records: list[dict]) -> dict:
+    """A plugin.json dict carrying `cpv.strip.extract` = the given entries."""
+    return {
+        "name": "demo",
+        "version": "0.1.0",
+        "description": "x",
+        "repository": "https://github.com/Emasoft/demo",
+        "cpv": {"strip": {"extract": records, "require_url_allowlist": True}},
+    }
+
+
+def _make_source_repo(tmp_path: Path, files: dict[str, str]) -> tuple[Path, str]:
+    """Create a local git repo standing in for an extracted source repo.
+
+    Returns (repo_path, head_sha). Restore clones this path (validation of
+    the https-github URL shape is exercised separately in parse tests).
+    """
+    repo = tmp_path / "src-repo"
+    repo.mkdir()
+    for rel, content in files.items():
+        p = repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "init", "-b", "main"], capture_output=True, check=False)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "s@s.s"], capture_output=True, check=False)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "S"], capture_output=True, check=False)
+    subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True, check=False)
+    subprocess.run(["git", "-C", str(repo), "commit", "-m", "content"], capture_output=True, check=False)
+    sha = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    return repo, sha
+
+
+# ── validate_extract_record / parse_extract_records — (c) reject malformed ────
+
+
+def test_validate_extract_record_accepts_valid(tmp_path):
+    plugin = _make_plugin(tmp_path)
+    rec = csd.validate_extract_record(
+        {"path": "tests", "url": "https://github.com/Emasoft/demo-tests.git", "sha": _FAKE_SHA}, plugin
+    )
+    assert rec == csd.ExtractRecord(path="tests", url="https://github.com/Emasoft/demo-tests.git", sha=_FAKE_SHA)
+
+
+def test_validate_extract_record_rejects_bad_sha(tmp_path):
+    plugin = _make_plugin(tmp_path)
+    with pytest.raises(csd.StripError) as exc:
+        csd.validate_extract_record(
+            {"path": "tests", "url": "https://github.com/Emasoft/demo-tests.git", "sha": "deadbeef"}, plugin
+        )
+    assert exc.value.code == "STRIP-R004"
+
+
+def test_validate_extract_record_rejects_non_github_url(tmp_path):
+    plugin = _make_plugin(tmp_path)
+    with pytest.raises(csd.StripError) as exc:
+        csd.validate_extract_record(
+            {"path": "tests", "url": "https://evil.example.com/x/y.git", "sha": _FAKE_SHA}, plugin
+        )
+    assert exc.value.code == "STRIP-R005"
+
+
+def test_validate_extract_record_rejects_url_traversal(tmp_path):
+    plugin = _make_plugin(tmp_path)
+    with pytest.raises(csd.StripError) as exc:
+        csd.validate_extract_record(
+            {"path": "tests", "url": "https://github.com/Emasoft/../evil.git", "sha": _FAKE_SHA}, plugin
+        )
+    assert exc.value.code == "STRIP-R005"
+
+
+def test_validate_extract_record_rejects_userinfo_url(tmp_path):
+    plugin = _make_plugin(tmp_path)
+    with pytest.raises(csd.StripError) as exc:
+        csd.validate_extract_record(
+            {"path": "tests", "url": "https://evil@github.com/Emasoft/demo-tests.git", "sha": _FAKE_SHA}, plugin
+        )
+    assert exc.value.code == "STRIP-R005"
+
+
+def test_validate_extract_record_rejects_reserved_path(tmp_path):
+    plugin = _make_plugin(tmp_path)
+    with pytest.raises(csd.StripError):
+        csd.validate_extract_record(
+            {"path": "scripts", "url": "https://github.com/Emasoft/demo-tests.git", "sha": _FAKE_SHA}, plugin
+        )
+
+
+def test_validate_extract_record_rejects_missing_path(tmp_path):
+    plugin = _make_plugin(tmp_path)
+    with pytest.raises(csd.StripError) as exc:
+        csd.validate_extract_record({"url": "https://github.com/Emasoft/demo-tests.git", "sha": _FAKE_SHA}, plugin)
+    assert exc.value.code == "STRIP-R002"
+
+
+def test_parse_extract_records_reads_records_ignores_declarations(tmp_path):
+    plugin = _make_plugin(
+        tmp_path,
+        plugin_json=_strip_manifest(
+            [
+                {"src": "design/", "submodule": "Emasoft/demo-design"},  # declaration → ignored
+                {"path": "tests", "url": "https://github.com/Emasoft/demo-tests.git", "sha": _FAKE_SHA},
+            ]
+        ),
+    )
+    records = csd.parse_extract_records(plugin)
+    assert len(records) == 1
+    assert records[0].path == "tests"
+
+
+def test_parse_extract_records_rejects_malformed(tmp_path):
+    plugin = _make_plugin(
+        tmp_path,
+        plugin_json=_strip_manifest(
+            [{"path": "tests", "url": "https://github.com/Emasoft/demo-tests.git", "sha": "not-a-sha"}]
+        ),
+    )
+    with pytest.raises(csd.StripError):
+        csd.parse_extract_records(plugin)
+
+
+# ── _record_extract_reference — upsert (drop declaration, keep other keys) ────
+
+
+def test_record_extract_reference_upserts_and_preserves_keys(tmp_path):
+    plugin = _make_plugin(
+        tmp_path,
+        plugin_json=_strip_manifest(
+            [{"src": "tests/", "submodule": "Emasoft/demo-tests", "submodule_path": "tests/"}]
+        ),
+        files={"tests/x.py": "x"},
+    )
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    csd._record_extract_reference(plugin, target, _FAKE_SHA)
+    pj = json.loads((plugin / ".claude-plugin" / "plugin.json").read_text())
+    extract = pj["cpv"]["strip"]["extract"]
+    # The declaration is replaced by exactly one record.
+    assert extract == [{"path": "tests", "url": "https://github.com/Emasoft/demo-tests.git", "sha": _FAKE_SHA}]
+    # Sibling strip keys are preserved (upsert never clobbers the block).
+    assert pj["cpv"]["strip"]["require_url_allowlist"] is True
+
+
+def test_record_extract_reference_is_idempotent(tmp_path):
+    plugin = _make_plugin(
+        tmp_path,
+        plugin_json=_strip_manifest([{"src": "tests/", "submodule": "Emasoft/demo-tests", "submodule_path": "tests/"}]),
+        files={"tests/x.py": "x"},
+    )
+    target = csd.normalise_target("tests/", "Emasoft", "demo")
+    csd._record_extract_reference(plugin, target, _FAKE_SHA)
+    csd._record_extract_reference(plugin, target, _FAKE_SHA)  # resume re-run
+    pj = json.loads((plugin / ".claude-plugin" / "plugin.json").read_text())
+    assert len(pj["cpv"]["strip"]["extract"]) == 1
+
+
+# ── apply_plan (network mocked) — (a) records written, NO .gitmodules ─────────
+
+
+def test_apply_plan_writes_records_removes_dir_no_gitmodules(tmp_path, monkeypatch):
+    plugin = _make_plugin(tmp_path, files={"tests/x.py": "print('x')\n"})
+    plan = csd.build_plan(plugin, explicit_targets=["tests/"])
+    # Mock the two network-touching steps (repo create + filter/push).
+    monkeypatch.setattr(csd, "_ensure_repo_exists", lambda target, name: None)
+    monkeypatch.setattr(csd, "_filter_and_push", lambda target, root, tmp: _FAKE_SHA)
+
+    csd.apply_plan(plan)
+
+    # (a) records written under cpv.strip.extract, no .gitmodules ever created.
+    pj = json.loads((plugin / ".claude-plugin" / "plugin.json").read_text())
+    assert pj["cpv"]["strip"]["extract"] == [
+        {"path": "tests", "url": "https://github.com/Emasoft/demo-tests.git", "sha": _FAKE_SHA}
+    ]
+    assert not (plugin / ".gitmodules").exists()
+    # The extracted dir is removed from the tree entirely.
+    assert not (plugin / "tests").exists()
+    # A commit landed and the state file was cleared on success (clean tree).
+    assert not (plugin / csd.STATE_FILENAME).exists()
+    status = subprocess.run(
+        ["git", "-C", str(plugin), "status", "--porcelain"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert status == ""
+
+
+# ── restore — (b) re-clone content from recorded url+sha ──────────────────────
+
+
+def test_restore_record_clones_and_strips_git(tmp_path):
+    src_repo, sha = _make_source_repo(tmp_path, {"test_a.py": "A\n", "sub/test_b.py": "B\n"})
+    plugin = _make_plugin(tmp_path)  # no tests/ dir
+    record = csd.ExtractRecord(path="tests", url=str(src_repo), sha=sha)
+    csd._restore_record(record, plugin)
+    # Content is re-materialised at the recorded path.
+    assert (plugin / "tests" / "test_a.py").read_text() == "A\n"
+    assert (plugin / "tests" / "sub" / "test_b.py").read_text() == "B\n"
+    # The nested .git is removed → plain tree content, never an accidental gitlink.
+    assert not (plugin / "tests" / ".git").exists()
+
+
+def test_restore_record_refuses_nonempty_dest(tmp_path):
+    src_repo, sha = _make_source_repo(tmp_path, {"a.py": "A"})
+    plugin = _make_plugin(tmp_path, files={"tests/existing.py": "keep"})
+    record = csd.ExtractRecord(path="tests", url=str(src_repo), sha=sha)
+    with pytest.raises(csd.StripError) as exc:
+        csd._restore_record(record, plugin)
+    assert exc.value.code == "STRIP-R020"
+
+
+def test_run_restore_calls_restore_for_each_record(tmp_path, monkeypatch):
+    plugin = _make_plugin(
+        tmp_path,
+        plugin_json=_strip_manifest(
+            [{"path": "tests", "url": "https://github.com/Emasoft/demo-tests.git", "sha": _FAKE_SHA}]
+        ),
+    )
+    called: list[str] = []
+    monkeypatch.setattr(csd, "_restore_record", lambda rec, root: called.append(rec.path))
+    rc = csd.run_restore(plugin)
+    assert rc == 0
+    assert called == ["tests"]
+
+
+def test_run_restore_noop_when_no_records(tmp_path):
+    plugin = _make_plugin(tmp_path)  # no cpv.strip block at all
+    assert csd.run_restore(plugin) == 0
+
+
+def test_run_restore_aborts_on_malformed_record(tmp_path):
+    plugin = _make_plugin(
+        tmp_path,
+        plugin_json=_strip_manifest([{"path": "tests", "url": "https://github.com/Emasoft/demo-tests.git", "sha": "x"}]),
+    )
+    assert csd.run_restore(plugin) == 1
+
+
+def test_restore_round_trip_via_run_restore(tmp_path, monkeypatch):
+    """End-to-end (b): a recorded reference restores its content."""
+    src_repo, sha = _make_source_repo(tmp_path, {"test_a.py": "A\n"})
+    plugin = _make_plugin(
+        tmp_path,
+        plugin_json=_strip_manifest(
+            [{"path": "tests", "url": "https://github.com/Emasoft/demo-tests.git", "sha": _FAKE_SHA}]
+        ),
+    )
+    # Redirect the (validated) record at the local source repo so the real
+    # clone path runs offline; the loop + success reporting are exercised.
+    monkeypatch.setattr(
+        csd, "parse_extract_records", lambda root: [csd.ExtractRecord(path="tests", url=str(src_repo), sha=sha)]
+    )
+    assert csd.run_restore(plugin) == 0
+    assert (plugin / "tests" / "test_a.py").read_text() == "A\n"
+    assert not (plugin / "tests" / ".git").exists()
+
+
+# ── (d) strip-dev'd plugin passes the .gitmodules URL-allowlist validator ─────
+
+
+def test_stripped_plugin_passes_gitmodules_validator(tmp_path):
+    """A strip-dev'd plugin (cpv.strip.extract records, NO .gitmodules) passes
+    the URL-allowlist validator that validate_plugin + pre-push invoke — it is
+    a no-op without a .gitmodules file, so nothing is rejected."""
+    import cpv_validate_gitmodules as cvg  # noqa: PLC0415
+
+    plugin = _make_plugin(
+        tmp_path,
+        plugin_json=_strip_manifest(
+            [{"path": "tests", "url": "https://github.com/Emasoft/demo-tests.git", "sha": _FAKE_SHA}]
+        ),
+    )
+    assert not (plugin / ".gitmodules").exists()
+    assert cvg.parse_gitmodules_urls(plugin) == []
+    assert cvg.validate_gitmodules(plugin) == []
