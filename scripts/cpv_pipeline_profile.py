@@ -153,6 +153,33 @@ def manifest_profile_override(plugin_root: Path) -> str | None:
     return None
 
 
+def opts_into_ship_only_binary_canon(plugin_root: Path) -> bool:
+    """True iff the manifest declares `cpv.canon: ship-only-binary` (issue #175 Phase 5).
+
+    OPT-IN escalation gate. A compiled-component finding (RC-SHIP-BINARY-ONLY /
+    RC-SUBMODULE-SHIPS) is a non-blocking WARNING for every plugin; a plugin that
+    OPTS IN here additionally gets that finding escalated to a publish-BLOCKING
+    MAJOR. This is what makes the ship-only-binary canon enforceable WITHOUT ever
+    retro-breaking a plugin that is green today (user rule #170): a plugin that
+    does not opt in keeps exactly its current WARN — nothing that blocks today
+    stops blocking, and nothing that passes today starts failing unbidden. The
+    generator and a successful `/cpv-agent upgrade` migration write this key
+    automatically once the plugin is compliant; an author may also hand-add it to
+    request strict enforcement.
+
+    SELECTOR-not-SUPPRESSOR + FAIL-SAFE: this ONLY ever ADDS a blocking severity;
+    it can never remove or silence a finding. Any read error / missing / malformed
+    / non-``"ship-only-binary"`` value returns False → the WARN still fires
+    (status quo), the block is simply not added. So a broken manifest degrades to
+    today's behavior, never to a silenced violation.
+    """
+    manifest = _load_manifest(plugin_root)
+    cpv_block = manifest.get("cpv")
+    if not isinstance(cpv_block, dict):
+        return False
+    return cpv_block.get("canon") == "ship-only-binary"
+
+
 def resolve_intentional_divergence(plugin_root: Path) -> frozenset[str]:
     """Return the repo-relative paths a plugin declares as INTENTIONALLY divergent.
 
