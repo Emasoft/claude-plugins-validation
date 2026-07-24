@@ -5142,6 +5142,13 @@ def gen_release_binaries_yml(p: PluginParams) -> str:
 #   3. a `SHA256SUMS` checksum step;
 #   4. a build `matrix` over targets.
 #
+# STRICT SHIP-ONLY-BINARY canon (issue #175): the compiled SOURCE is NOT a git
+# submodule (there is no .gitmodules to recurse). If this component's source
+# lives in a SEPARATE repository, clone it by PINNED URL/tag in the build jobs
+# (CPV's strip-dev model records it in .claude-plugin/plugin.json ->
+# cpv.strip.extract[] as {path, url, sha}). For an in-tree crate, the plain
+# checkout below is all you need.
+#
 # The binary name is `@@BIN@@` (the plugin name by default). For a Rust crate
 # whose `[[bin]]` name differs, change `@@BIN@@` in the staging step only.
 name: Release binaries
@@ -5176,10 +5183,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          # Recurse so a build-source submodule (the canonical "source in a separate
-          # repo" shape) is present to lint/test/build. No-op for an in-tree crate.
-          submodules: recursive
+      # STRICT-CANON build source (issue #175): NOT a submodule (no .gitmodules).
+      # If the compiled source lives in a SEPARATE repo, clone it by pinned URL/tag
+      # here before the cargo steps (adapt --manifest-path accordingly):
+      #   - name: Clone build source
+      #     run: git clone --depth 1 --branch "<pinned-tag>" -- "<https-source-repo-url>" src
+      # For an in-tree crate no clone step is needed.
       - name: Add clippy component
         run: rustup component add clippy
       - name: Clippy (deny warnings) - issue #175
@@ -5211,8 +5220,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          submodules: recursive
+      # STRICT-CANON build source (issue #175): NOT a submodule. Clone a separate
+      # source repo by pinned URL/tag here if this component builds from one.
       - name: Add Rust target
         run: rustup target add "${{ matrix.target }}"
       - name: Build

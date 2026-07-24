@@ -654,13 +654,18 @@ class TestPublishPyLanguageGatesIssue175:
         assert "RC-SHIP-BINARY-ONLY still applies" in g
 
     def test_release_binaries_workflow_lints_and_tests_before_build(self):
-        """The release-binaries build workflow must clippy+test before build (issue #175)."""
+        """The release-binaries build workflow clippy+tests before build, and under the
+        strict ship-only-binary canon (issue #175, v3.12.0) NO LONGER recurses a
+        submodule — the build source is cloned by pinned URL, not a git submodule."""
         from generate_plugin_repo import gen_release_binaries_yml  # noqa: PLC0415
 
         rb = gen_release_binaries_yml(_default_params())
         assert "cargo clippy --release --locked --all-targets -- -D warnings" in rb
         assert "cargo test --locked" in rb
-        assert "submodules: recursive" in rb, "must recurse a build-source submodule"
+        # STRICT CANON: no .gitmodules exists, so `submodules: recursive` would check
+        # out nothing and is misleading — it must be GONE (clone-by-URL replaces it).
+        assert "submodules: recursive" not in rb
+        assert "clone" in rb.lower(), "must point to the clone-by-URL build-source model"
 
 
 class TestTemplateGetOriginSlug:

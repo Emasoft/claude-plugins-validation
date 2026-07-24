@@ -427,6 +427,133 @@ def test_ahead_of_canon_file_is_not_told_to_downgrade(tmp_path: Path) -> None:
     assert "Run `/cpv-upgrade-plugin`" not in msg, "an ahead-of-canon file must NOT be told to downgrade"
 
 
+# ── plugin_ships_compiled: mixed-language compiled-component detection (#175) ──
+
+
+def _write_rust_component(plugin_root: Path, subdir: str = "rust") -> None:
+    """An in-tree Rust component: a Cargo.toml build marker + a .rs source file."""
+    d = plugin_root / subdir
+    d.mkdir(parents=True)
+    (d / "Cargo.toml").write_text("[package]\nname = 'x'\nversion = '0.1.0'\n")
+    (d / "lib.rs").write_text("pub fn f() -> u8 { 1 }\n")
+
+
+def test_plugin_ships_compiled_python_plus_rust_true(tmp_path: Path) -> None:
+    """A script-primary (python) plugin that ALSO ships an in-tree rust component
+    (compiled source + a build marker) → ships compiled."""
+    from cpv_pipeline_profile import plugin_ships_compiled
+
+    p = _mk_plugin(tmp_path, name="py-rust")
+    (p / "scripts" / "publish.py").write_text("# python publish pipeline\n")
+    _write_rust_component(p)
+    assert plugin_ships_compiled(p) is True
+
+
+def test_plugin_ships_compiled_pure_python_false(tmp_path: Path) -> None:
+    """A pure-python plugin (no compiled source, no build marker) → does NOT ship compiled.
+
+    ``pyproject.toml`` is intentionally NOT a build-system marker (it is python),
+    so a normal python plugin never trips the detector.
+    """
+    from cpv_pipeline_profile import plugin_ships_compiled
+
+    p = _mk_plugin(tmp_path, name="pure-py")
+    (p / "scripts" / "publish.py").write_text("# python only\n")
+    (p / "pyproject.toml").write_text("[project]\nname = 'pure-py'\n")
+    assert plugin_ships_compiled(p) is False
+
+
+def test_plugin_ships_compiled_build_source_submodule_true(tmp_path: Path) -> None:
+    """A build-source submodule ships its source on install (CC recurses) → ships compiled."""
+    from cpv_pipeline_profile import plugin_ships_compiled
+
+    p = _mk_plugin(tmp_path, name="sub-src")
+    _write_build_source_submodule(p)  # a `rust` build-source submodule in .gitmodules
+    assert plugin_ships_compiled(p) is True
+
+
+def test_plugin_ships_compiled_vendored_rust_under_node_modules_false(tmp_path: Path) -> None:
+    """A vendored crate under node_modules is cruft, not a shipped compiled component."""
+    from cpv_pipeline_profile import plugin_ships_compiled
+
+    p = _mk_plugin(tmp_path, name="vendored")
+    nm = p / "node_modules" / "somecrate"
+    nm.mkdir(parents=True)
+    (nm / "Cargo.toml").write_text("[package]\nname = 'somecrate'\n")
+    (nm / "lib.rs").write_text("pub fn g() {}\n")
+    assert plugin_ships_compiled(p) is False
+
+
+def test_plugin_ships_compiled_lone_stray_rs_false(tmp_path: Path) -> None:
+    """A lone stray .rs file with NO build system nearby is not a shipped component."""
+    from cpv_pipeline_profile import plugin_ships_compiled
+
+    p = _mk_plugin(tmp_path, name="stray-rs")
+    (p / "snippet.rs").write_text("fn main() {}\n")  # no Cargo.toml / build marker, no bin/
+    assert plugin_ships_compiled(p) is False
+
+
+def test_plugin_ships_compiled_bin_artifact_plus_build_marker_true(tmp_path: Path) -> None:
+    """The strict-canon shape — a prebuilt bin/ artifact ALONGSIDE a build marker
+    (source stripped) → ships compiled (branch 3)."""
+    from cpv_pipeline_profile import plugin_ships_compiled
+
+    p = _mk_plugin(tmp_path, name="bin-only")
+    _write_bin_artifact(p)  # bin/tool
+    (p / "Cargo.toml").write_text("[package]\nname = 'bin-only'\n")  # build marker; .rs stripped
+    assert plugin_ships_compiled(p) is True
+
+
+def test_plugin_ships_compiled_bare_bin_shims_false(tmp_path: Path) -> None:
+    """A bin/ of shell shims with NO compiled indicator anywhere → NOT compiled
+    (bin/ alone is a runtime component dir, not proof of a compiled component)."""
+    from cpv_pipeline_profile import plugin_ships_compiled
+
+    p = _mk_plugin(tmp_path, name="shim-bin")
+    (p / "bin").mkdir()
+    (p / "bin" / "run.sh").write_text("#!/bin/sh\necho hi\n")
+    assert plugin_ships_compiled(p) is False
+
+
+# ── detect_pipeline_profile consumes the detector; standard+compiled is NOTED ──
+
+
+def test_detect_pipeline_profile_notes_standard_plus_compiled(tmp_path: Path) -> None:
+    """A standard plugin that ALSO ships a compiled component keeps the `standard`
+    profile, and the fact is exposed via standard_profile_ships_compiled (the real
+    consumer of plugin_ships_compiled inside detect_pipeline_profile)."""
+    from cpv_pipeline_profile import detect_pipeline_profile, standard_profile_ships_compiled
+
+    p = _mk_plugin(tmp_path, name="std-compiled")
+    (p / "scripts" / "publish.py").write_text("# python publish\n")
+    _write_rust_component(p)
+    assert detect_pipeline_profile(p) == "standard"
+    assert standard_profile_ships_compiled(p) is True
+
+
+def test_detect_pipeline_profile_bare_standard_not_noted(tmp_path: Path) -> None:
+    """A bare (pure-python) standard plugin resolves standard and is NOT noted as
+    shipping compiled — the note fires only when a compiled component is present."""
+    from cpv_pipeline_profile import detect_pipeline_profile, standard_profile_ships_compiled
+
+    p = _mk_plugin(tmp_path, name="std-bare")
+    (p / "scripts" / "publish.py").write_text("# python only\n")
+    assert detect_pipeline_profile(p) == "standard"
+    assert standard_profile_ships_compiled(p) is False
+
+
+def test_standard_profile_ships_compiled_is_standard_only(tmp_path: Path) -> None:
+    """A submodule-build plugin ships compiled but is NOT `standard`, so the
+    standard-only NOTE helper returns False (the profile str contract is intact)."""
+    from cpv_pipeline_profile import detect_pipeline_profile, standard_profile_ships_compiled
+
+    p = _mk_plugin(tmp_path, name="sub-build")
+    _write_build_source_submodule(p)
+    _write_bin_artifact(p)
+    assert detect_pipeline_profile(p) == "submodule-build"
+    assert standard_profile_ships_compiled(p) is False
+
+
 def test_stale_standard_file_still_recommends_migrate(tmp_path: Path) -> None:
     """A standard plugin's plain stale publish.py (no hardening signal) keeps
     today's EXACT migrate recommendation (FN-safety: no regression)."""

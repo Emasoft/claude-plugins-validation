@@ -313,6 +313,35 @@ class TestRcShipBinaryOnlyIssue175:
         assert not any("RC-SUBMODULE-SHIPS" in m for m in self._warns(report))
         assert not any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
 
+    @staticmethod
+    def _infos(report):
+        return [r.message for r in report.results if r.level == "INFO"]
+
+    def test_rc_mixed_compiled_info_on_python_plus_rust(self, tmp_path):
+        """Phase 3: a script-primary plugin that ALSO ships a compiled component
+        (rust source + Cargo.toml, standard profile) emits the RC-MIXED-COMPILED info."""
+        p = tmp_path / "mixed"
+        (p / ".claude-plugin").mkdir(parents=True)
+        (p / ".claude-plugin" / "plugin.json").write_text('{"name":"mixed","version":"1.0.0","description":"t"}')
+        (p / "scripts").mkdir()
+        (p / "src").mkdir()
+        (p / "src" / "lib.rs").write_text("pub fn f() -> i32 { 1 }\n")
+        (p / "Cargo.toml").write_text('[package]\nname = "x"\nversion = "0.1.0"\n')
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-MIXED-COMPILED" in m for m in self._infos(report))
+
+    def test_no_rc_mixed_compiled_on_pure_python(self, tmp_path):
+        """A pure-python plugin (no compiled component) does NOT emit RC-MIXED-COMPILED."""
+        p = tmp_path / "pure"
+        (p / ".claude-plugin").mkdir(parents=True)
+        (p / ".claude-plugin" / "plugin.json").write_text('{"name":"pure","version":"1.0.0","description":"t"}')
+        (p / "scripts").mkdir()
+        (p / "scripts" / "x.py").write_text("print(1)\n")
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert not any("RC-MIXED-COMPILED" in m for m in self._infos(report))
+
 
 class TestValidateSkills:
     """Tests for validate_skills function."""

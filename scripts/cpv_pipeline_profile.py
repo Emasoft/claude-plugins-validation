@@ -44,6 +44,7 @@ profile is still held to that profile's full canon.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -283,6 +284,97 @@ def has_committed_bin_artifacts(plugin_root: Path) -> bool:
             if entry.is_file():
                 return True
     except OSError:
+        return False
+    return False
+
+
+# ── compiled-component detection (issue #175, mixed-language) ───────────────
+# Extensions that denote committed COMPILED source — a component that must be
+# built into a binary before it can run. Kept LOCAL to this module ON PURPOSE:
+# validate_plugin.py owns the richer `compiled_languages` map AND imports THIS
+# module, so importing it back would create a cycle. The two vocabularies are
+# the same set; a drift between them is a lint target, not a correctness bug.
+_COMPILED_SOURCE_EXTS: frozenset[str] = frozenset(
+    {".rs", ".go", ".c", ".cpp", ".cc", ".cxx", ".swift", ".zig", ".cs", ".fs", ".m"}
+)
+
+# Exact build-system marker filenames (lower-cased for a case-insensitive match).
+_BUILD_SYSTEM_FILES: frozenset[str] = frozenset(
+    {
+        "cargo.toml",
+        "go.mod",
+        "cmakelists.txt",
+        "makefile",
+        "gnumakefile",
+        "meson.build",
+        "build.zig",
+        "package.swift",
+        "global.json",
+        "directory.build.props",
+    }
+)
+# Build-system marker filename SUFFIXES — project files whose stem varies
+# (C#/F#/MSVC/solution files).
+_BUILD_SYSTEM_SUFFIXES: tuple[str, ...] = (".csproj", ".fsproj", ".sln", ".vcxproj")
+
+# Dirs never part of a SHIPPED compiled component: VCS metadata, package caches,
+# and build-OUTPUT dirs. Pruned so a vendored crate (node_modules/…/*.rs) or a
+# build artifact under target/ never trips the detector. Hidden dirs are pruned
+# too (covers .git/.venv/.mypy_cache/… cheaply).
+_COMPILED_SCAN_SKIP_DIRS: frozenset[str] = frozenset(
+    {"node_modules", "vendor", "target", "dist", "build", ".venv", ".git"}
+)
+
+
+def _is_build_system_marker(filename: str) -> bool:
+    """True iff `filename` is an exact or suffix build-system marker (case-insensitive)."""
+    low = filename.lower()
+    return low in _BUILD_SYSTEM_FILES or any(low.endswith(suf) for suf in _BUILD_SYSTEM_SUFFIXES)
+
+
+def plugin_ships_compiled(plugin_root: Path) -> bool:
+    """True iff the plugin ships a COMPILED component (issue #175, mixed-language).
+
+    A plugin "ships compiled" when ANY of:
+      1. it commits in-tree COMPILED source (`.rs`/`.go`/`.c`/`.cpp`/… — see
+         :data:`_COMPILED_SOURCE_EXTS`) AND a build-system marker
+         (Cargo.toml / go.mod / CMakeLists.txt / Makefile / build.zig /
+         Package.swift / *.csproj / …) is present in the non-vendored tree;
+      2. it registers a BUILD-SOURCE submodule
+         (:func:`has_build_source_submodule`) — Claude Code recurses submodule
+         CONTENT on install, so the compile source ships regardless; OR
+      3. it commits prebuilt `bin/` artifacts (:func:`has_committed_bin_artifacts`)
+         ALONGSIDE a compiled indicator (in-tree compiled source or a build-system
+         marker) — i.e. the bin/ holds a BUILT compiled component, not shell shims.
+
+    Vendor/cruft dirs (node_modules, vendor, target, dist, build, .venv, .git, and
+    any hidden dir) are pruned so a vendored crate or a build artifact never trips
+    it. Best-effort + side-effect-free: it does NO subprocess / git call and ANY
+    error → False (the conservative default — a tree we cannot scan is never
+    claimed to ship compiled).
+    """
+    try:
+        if has_build_source_submodule(plugin_root):
+            return True
+
+        has_compiled_source = False
+        has_build_system = False
+        for _dirpath, dirnames, filenames in os.walk(plugin_root):
+            # Prune vendor/cruft + hidden dirs in place so os.walk never descends them.
+            dirnames[:] = [d for d in dirnames if d not in _COMPILED_SCAN_SKIP_DIRS and not d.startswith(".")]
+            for filename in filenames:
+                if not has_compiled_source and Path(filename).suffix.lower() in _COMPILED_SOURCE_EXTS:
+                    has_compiled_source = True
+                if not has_build_system and _is_build_system_marker(filename):
+                    has_build_system = True
+                if has_compiled_source and has_build_system:
+                    return True  # in-tree compiled source + a build system → a built component
+
+        # bin/ artifacts alongside a compiled indicator = a shipped built component
+        # (the strict-canon "ship only the binary" shape, source stripped away).
+        if has_committed_bin_artifacts(plugin_root) and (has_compiled_source or has_build_system):
+            return True
+    except Exception:  # noqa: BLE001 — detection is advisory; any failure → False (conservative; never a false compiled claim)
         return False
     return False
 
@@ -606,6 +698,36 @@ def is_submodule_build_shape(plugin_root: Path) -> bool:
     return has_build_source_submodule(plugin_root) and has_committed_bin_artifacts(plugin_root)
 
 
+def _detect_profile_with_compiled(plugin_root: Path) -> tuple[str, bool]:
+    """Detect the profile AND whether the plugin ships a COMPILED component.
+
+    Returns ``(profile, ships_compiled)``. The two compiled-shipping profiles
+    (submodule-build, binary-release) set the flag True WITHOUT re-running
+    :func:`plugin_ships_compiled` (they ARE compiled shapes — re-scanning the tree
+    would be redundant). :func:`plugin_ships_compiled` is consulted ONLY in the
+    ``standard`` fallback, where it captures the otherwise-lost signal that a
+    script-primary plugin ALSO ships a compiled component (e.g. a rust helper crate
+    alongside a python publish pipeline, with no committed bin/ and no
+    binary-release workflow).
+
+    This is the ONE detection routine both :func:`detect_pipeline_profile` and
+    :func:`standard_profile_ships_compiled` delegate to — so the compiled detector
+    has a real caller and the profile str contract stays single-sourced.
+
+    Best-effort + side-effect-free: any exception → ``(standard, False)``.
+    """
+    try:
+        if is_remote_validation_shape(plugin_root):
+            return (PROFILE_REMOTE_VALIDATION, False)
+        if is_submodule_build_shape(plugin_root):
+            return (PROFILE_SUBMODULE_BUILD, True)
+        if is_binary_release_shape(plugin_root):
+            return (PROFILE_BINARY_RELEASE, True)
+        return (PROFILE_STANDARD, plugin_ships_compiled(plugin_root))
+    except Exception:  # noqa: BLE001 — detection is advisory; any failure must fall back to the conservative `standard`, never crash the run
+        return (PROFILE_STANDARD, False)
+
+
 def detect_pipeline_profile(plugin_root: Path) -> str:
     """Detect the plugin's PRIMARY pipeline profile by SHAPE (no manifest).
 
@@ -617,18 +739,34 @@ def detect_pipeline_profile(plugin_root: Path) -> str:
       3. binary-release — matrix build + release-asset upload + SHA256SUMS.
       4. standard — everything else (the conservative default).
 
+    A `standard`-profile plugin that ALSO ships a compiled component KEEPS the
+    `standard` profile — a new KNOWN_PROFILES value is deliberately NOT invented
+    (that would need the drift-canon mapping + every consumer updated coherently,
+    which is out of scope for the mixed-language SIGNAL). The compiled fact is
+    exposed separately via :func:`standard_profile_ships_compiled` for validators
+    to NOTE; the compiled component itself is already gated by RC-SHIP-BINARY-ONLY
+    (the language-agnostic cross-platform validator) and the publish.py G2e build
+    gate regardless of profile — so keeping `standard` loses no enforcement.
+
     Best-effort and side-effect-free: any exception → `standard`.
     """
-    try:
-        if is_remote_validation_shape(plugin_root):
-            return PROFILE_REMOTE_VALIDATION
-        if is_submodule_build_shape(plugin_root):
-            return PROFILE_SUBMODULE_BUILD
-        if is_binary_release_shape(plugin_root):
-            return PROFILE_BINARY_RELEASE
-    except Exception:  # noqa: BLE001 — detection is advisory; any failure must fall back to the conservative `standard`, never crash the run
-        return PROFILE_STANDARD
-    return PROFILE_STANDARD
+    return _detect_profile_with_compiled(plugin_root)[0]
+
+
+def standard_profile_ships_compiled(plugin_root: Path) -> bool:
+    """True iff the plugin resolves to the `standard` profile YET ships a COMPILED
+    component (issue #175, mixed-language).
+
+    The validator NOTE surface for a script-primary plugin (e.g. a python publish
+    pipeline) that ALSO carries a compiled component whose shape is not itself one
+    of the compiled profiles (submodule-build / binary-release). It lets a consumer
+    flag "standard + compiled" without CPV having invented a new profile value.
+    Returns False for a submodule-build / binary-release plugin (those are already
+    compiled profiles — the note is standard-only). Best-effort + side-effect-free
+    (delegates to :func:`_detect_profile_with_compiled`): any error → False.
+    """
+    profile, ships = _detect_profile_with_compiled(plugin_root)
+    return profile == PROFILE_STANDARD and ships
 
 
 def resolve_pipeline_profile(plugin_root: Path) -> str:
