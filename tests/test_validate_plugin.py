@@ -167,6 +167,67 @@ class TestValidateCrossPlatform:
         assert any("Windows Batch" in m or ".bat" in m for m in warning_msgs)
 
 
+class TestRcShipBinaryOnlyIssue175:
+    """Issue #175 — RC-SHIP-BINARY-ONLY WARN: a compiled component must ship ONLY the
+    built binary; its compile source belongs in a SEPARATE repo (a git submodule
+    pointer), not committed in the plugin tree. Two-sided: in-tree source warns,
+    submodule source does not; the warn is gated on a REAL compiled component so a
+    stray example source file never trips it."""
+
+    @staticmethod
+    def _warns(report):
+        return [r.message for r in report.results if r.level == "WARNING"]
+
+    def test_in_tree_rust_source_with_binary_warns(self, tmp_path):
+        """Rust source committed in-tree + a shipped binary => RC-SHIP-BINARY-ONLY warn."""
+        p = tmp_path / "rust-in-tree"
+        (p / "src").mkdir(parents=True)
+        (p / "src" / "lib.rs").write_text("pub fn f() -> i32 { 1 }\n")
+        (p / "Cargo.toml").write_text('[package]\nname = "x"\nversion = "0.1.0"\n')
+        (p / "bin").mkdir()
+        (p / "bin" / "x-macos-arm64").write_bytes(b"\x00bin")
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
+
+    def test_submodule_source_does_not_warn(self, tmp_path):
+        """Compile source under a git-submodule pointer (separate repo) is COMPLIANT."""
+        p = tmp_path / "rust-submodule"
+        (p / "rust" / "src").mkdir(parents=True)
+        (p / "rust" / "src" / "lib.rs").write_text("pub fn f() -> i32 { 1 }\n")
+        (p / "rust" / "Cargo.toml").write_text('[package]\nname = "x"\nversion = "0.1.0"\n')
+        (p / ".gitmodules").write_text(
+            '[submodule "rust"]\n\tpath = rust\n\turl = https://example.com/x-rust.git\n'
+        )
+        (p / "bin").mkdir()
+        (p / "bin" / "x-macos-arm64").write_bytes(b"\x00bin")
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert not any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
+
+    def test_in_tree_csharp_source_warns(self, tmp_path):
+        """C# is a compiled language too — in-tree .cs + *.csproj => RC-SHIP-BINARY-ONLY.
+
+        Also exercises the glob-aware build-marker match (the project file name varies)."""
+        p = tmp_path / "csharp-in-tree"
+        (p / "src").mkdir(parents=True)
+        (p / "src" / "Program.cs").write_text("class P { static void Main() {} }\n")
+        (p / "src" / "App.csproj").write_text('<Project Sdk="Microsoft.NET.Sdk"></Project>\n')
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-SHIP-BINARY-ONLY" in m and "C#" in m for m in self._warns(report))
+
+    def test_stray_source_without_build_marker_does_not_warn(self, tmp_path):
+        """A lone source file with no build system and no binary is not a compiled
+        component => no RC-SHIP-BINARY-ONLY (avoids flagging example snippets)."""
+        p = tmp_path / "stray"
+        p.mkdir()
+        (p / "snippet.rs").write_text("fn main() {}\n")
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert not any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
+
+
 class TestValidateSkills:
     """Tests for validate_skills function."""
 
