@@ -1215,6 +1215,15 @@ def lint_markdown(
     strict_missing_tools: bool = True,
 ) -> bool:
     """Lint Markdown files with markdownlint-cli2."""
+    # Issue #176: test fixtures (e.g. tests/fixtures/sample.md) are deliberate
+    # parser inputs — a multi-H1 or otherwise malformed-by-design fixture is DATA
+    # the tests parse, not a shipped doc. "Fixing" it (or adding a
+    # markdownlint-disable comment) would corrupt the very input the tests assert
+    # on. Exclude any path with a `fixtures` segment from MARKDOWN STYLE linting
+    # only — this is style-tier and never touches the security scanners (which
+    # scan the full tree). Mirrors the mypy fixtures-exclude precedent
+    # (_is_own_script) so foreign/test data is treated consistently.
+    files = [f for f in files if "fixtures" not in f.parts]
     if not files:
         return True
 
