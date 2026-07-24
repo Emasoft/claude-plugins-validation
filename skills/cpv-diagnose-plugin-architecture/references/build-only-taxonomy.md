@@ -23,11 +23,14 @@ Source code and build manifests that only PRODUCE the `bin/` binaries —
 they are never executed at runtime. The compiled output in `bin/` ships;
 the source does not.
 
-**Remediation:** strip the source into a per-plugin git submodule (the PSS
-model — Claude Code's shallow clone does NOT `--recurse-submodules`, so the
-submodule content never reaches the user, only an ~86-byte `.gitmodules`
-pointer). Add a `cpv.strip.extract[]` entry to `plugin.json` and run
-`cpv strip-dev-parts`. The engine emits a ready-to-paste
+**Remediation:** strip the source into a SEPARATE repository the plugin
+references by pinned URL + SHA. NOT a git submodule — Claude Code
+recursively fetches submodule content on install (verified on
+perfect-skill-suggester 3.10.8), so a submodule pointer keeps nothing out
+of a user's install. Add a `cpv.strip.extract[]` entry to `plugin.json` and
+run `cpv strip-dev-parts`; the strip removes the directory from the plugin
+tree and records `{path, url, sha}`, and the release CI clones that repo by
+URL to build the binaries. The engine emits a ready-to-paste
 `strip_extract_entry` on each `BUILD_SOURCE` finding.
 
 **Per-language signals:**

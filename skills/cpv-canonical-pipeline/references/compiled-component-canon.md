@@ -53,15 +53,30 @@ runnable with no toolchain.
 
 There are exactly two compliant ways to host the compile source:
 
-1. **Separate repo, cloned by URL/tag in CI.** The compile source lives in
-   its own repository. The build CI clones it by a PINNED URL and tag (NOT a
-   submodule), builds the per-target binaries, and commits ONLY the binaries
-   to `bin/`. CPV's `scripts/cpv_strip_dev.py` operationalizes the
-   extraction: it removes the source directory from the plugin tree and
-   records a `{path, url, sha}` reference in `plugin.json` under
-   `cpv.strip.extract[]`; `--restore` re-clones each reference pinned to its
-   SHA and strips the nested `.git` so the restored files are plain files,
-   not a gitlink.
+1. **Separate PUBLIC repo, cloned by URL/tag in CI.** The compile source lives
+   in its own repository, and that repository is PUBLIC — the release CI must
+   be able to clone it by URL tokenlessly, and the binary built from it ships
+   publicly anyway, so public source is transparency, not exposure. The build
+   CI clones it by a PINNED URL and tag (NOT a submodule), builds the
+   per-target binaries, and commits ONLY the binaries to `bin/`. CPV's
+   `scripts/cpv_strip_dev.py` operationalizes the extraction: it removes the
+   source directory from the plugin tree and records a `{path, url, sha}`
+   reference in `plugin.json` under `cpv.strip.extract[]`; `--restore`
+   re-clones each reference pinned to its SHA and strips the nested `.git` so
+   the restored files are plain files, not a gitlink. One command creates the
+   repo end-to-end:
+
+   ```bash
+   uv run python scripts/cpv_strip_dev.py <plugin> --auto \
+     --extract <source-dir>/ --force-extract --visibility public
+   ```
+
+   The push is gated by a FAIL-CLOSED secret scan of the extracted history
+   (`git filter-repo` preserves every past commit, so an old secret would go
+   public with it): a finding raises `STRIP-S001` and an untrusted scan raises
+   `STRIP-S002`, both refusing the push. Purge the secret and retry — never
+   downgrade the visibility to get past the gate. Confirm with the user before
+   creating a public repository.
 2. **Binary-carrier plugin.** The binary is packaged as a separate plugin
    that ships `bin/` + `plugin.json` only. The consuming plugin depends on it
    via the `dependencies` array and the `{name}--v{version}` dependency

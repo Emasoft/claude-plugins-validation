@@ -57,6 +57,42 @@ only when the manifest opts in.
    that resolves `$CLAUDE_PLUGIN_ROOT/bin/<name>-<os>-<arch>` and fail-safes on
    an unsupported platform.
 
+### End-to-end migration (creates the PUBLIC source repo)
+
+1. **CONFIRM WITH THE USER FIRST.** Creating and pushing a PUBLIC repository is
+   outward-facing and effectively irreversible — it is immediately cloneable,
+   forkable, and indexable. The confirmation must name three things: the target
+   repository (`<owner>/<name>`), the visibility (PUBLIC), and that the extracted
+   subdirectory's FULL GIT HISTORY becomes public. Do not proceed without it.
+2. Preview, then run:
+
+   ```bash
+   # Preview first — no --auto. The preview prints the real `gh repo create`
+   # visibility flag the live run would use.
+   uv run python scripts/cpv_strip_dev.py <plugin> --dry-run \
+     --extract <source-dir>/ --force-extract --visibility public
+
+   # Live run
+   uv run python scripts/cpv_strip_dev.py <plugin> --auto \
+     --extract <source-dir>/ --force-extract --visibility public
+   ```
+
+   It creates the repo, extracts the source subdirectory WITH its history via
+   `git filter-repo`, runs the fail-closed secret gate, pushes, removes the
+   directory from the plugin tree, and records `{path, url, sha}` in
+   `cpv.strip.extract[]`. `--force-extract` bypasses the 256 KB / 20-file skip
+   so a small crate still extracts.
+3. **If the secret gate blocks (STRIP-S001 / STRIP-S002), DO NOT bypass it.**
+   STRIP-S001 means trufflehog found secrets in the extracted history;
+   STRIP-S002 means the scan could not be trusted (tool absent, timed out, or
+   errored). Purge the secret from history — or make the tool available — and
+   retry. NEVER downgrade to `--visibility private` just to get past a finding:
+   that hides the leak instead of fixing it, and the source repo must be public
+   for the CI clone to work tokenlessly.
+4. Wire the plugin's release CI to clone that repo by the pinned URL/tag from
+   `cpv.strip.extract[]`, build the per-platform × per-arch binaries, and commit
+   ONLY the binaries into `bin/`. No source, no build libraries, no submodule.
+
 ## RC-SUBMODULE-SHIPS — a non-build-source submodule ships its content
 
 | Field | Value |

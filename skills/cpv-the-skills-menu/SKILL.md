@@ -18,17 +18,15 @@ CPV has **two menus for two audiences**:
   agent, and script à la carte**. Read it, pick what the task needs,
   invoke it.
 
-This is that agent-facing menu, and CPV's own agents' runtime catalog of
-operational skills loaded on demand via `Skill()` (TRDD-478d9687). It
-covers every CPV capability (see the table below) for one plugin or a
-whole fleet.
+It is also the runtime catalog CPV's own agents load skills from on
+demand (TRDD-478d9687), for one plugin or a whole fleet.
 
 ## Two execution surfaces
 
 | Surface | When to use it | How |
 |---|---|---|
 | **Route in this session** | The user is already talking to you and wants the work done here. | Read the [Intent → Action table](#intent--action-table), invoke the mapped agent / skill / script directly. |
-| **Dispatch the `cpv-agent` agent** | You want the whole job done autonomously in an isolated context (keeps your main context clean). | `Agent(subagent_type: "cpv-agent", prompt: "<the user's request, verbatim>")` — it reads this menu, routes, executes, and returns a report path. |
+| **Dispatch the `cpv-agent` agent** | The whole job should run autonomously in an isolated context (keeps your main context clean). | `Agent(subagent_type: "cpv-agent", prompt: "<the user's request, verbatim>")` — it routes, executes, and returns a report path. |
 
 ## Instructions
 
@@ -43,8 +41,7 @@ How to route a free-form request, autonomously:
    table says so (e.g. validate → fix).
 3. **Never hand-edit to fix findings.** CPV ships fixer agents
    (`cpv-plugin-fixer-agent`, `cpv-marketplace-fixer-agent`, `cpv-cache-optimizer-agent`) that
-   know the per-rule remediation recipes. Re-implementing a fix or a
-   validation by hand wastes effort and drifts from the rules.
+   know the per-rule remediation recipes; hand-rolling one drifts from the rules.
 4. **Fleet → batch.** For more than one plugin (a marketplace, a list, an
    `@listfile`), prefer the `/cpv-batch-*` family — it fans out parallel
    workers from one message.
@@ -67,18 +64,19 @@ Every "Claude Code" cell runs inside a session with CPV installed. Every
 | 5 | **Security-scan BEFORE installing** an untrusted plugin / skill / marketplace | `/cpv-pre-install-scan <target>` (sandboxed; never writes to the plugin cache) | `… security <github-url-or-path>` |
 | 6 | **Fix validation findings in a plugin** (mechanical per-rule remediation) — **do NOT hand-edit** | Dispatch `cpv-plugin-fixer-agent` (validate → fix loop), or fleet-wide `/cpv-batch-fix` · `/cpv-batch-validate-and-fix` | — (fixing needs write access; run in Claude Code) |
 | 7 | **Fix marketplace findings / migrate marketplace layout** (A ⇄ B ⇄ C) | Dispatch `cpv-marketplace-fixer-agent`, or `Skill(claude-plugins-validation:cpv-migrate-marketplace-architecture)` | — |
-| 8 | **Devitalize security threats** (rewrite execution-class code to provably-inert data; never suppresses a rule) | Dispatch `cpv-plugin-devitalizer-agent` (scan → devitalize → re-scan; flags load-bearing code) | — (needs write access; run in Claude Code) |
-| 9 | **Prevent leaks & harden a plugin** (redact / runtime-read secrets, add missing safeguards; never suppresses a rule) | Dispatch `cpv-plugin-leaks-preventer-agent` (scan → redact/harden → re-scan) | — (needs write access; run in Claude Code) |
+| 8 | **Devitalize security threats** (rewrite execution-class code to provably-inert data; never suppresses a rule) | Dispatch `cpv-plugin-devitalizer-agent` (scan → devitalize → re-scan; flags load-bearing code) | — (needs write access) |
+| 9 | **Prevent leaks & harden a plugin** (redact / runtime-read secrets, add missing safeguards; never suppresses a rule) | Dispatch `cpv-plugin-leaks-preventer-agent` (scan → redact/harden → re-scan) | — (needs write access) |
 | 10 | **Optimize prompt cache** (CA-01..CA-07) | Audit: `Skill(claude-plugins-validation:cpv-cache-validation-skill)` or `/cpv-batch-caching-audit`. Fix: dispatch `cpv-cache-optimizer-agent` or `/cpv-batch-caching-optimize` | `… cache /path` (audit only) |
 | 11 | **Create a new plugin / marketplace / skill / agent / command / hook / MCP** | Dispatch `cpv-plugin-creator-agent`, or `Skill(claude-plugins-validation:cpv-create-plugin)` · `Skill(…:cpv-scaffold-skill)` · `…:cpv-scaffold-agent` · `…:cpv-scaffold-command` · `…:cpv-add-hook` · `…:cpv-register-mcp` | — |
 | 12 | **Publish a plugin to GitHub + add it to a marketplace** | Dispatch `cpv-plugin-creator-agent` (scaffolds repo + CI/CD + publishes), or chain `Skill(…:cpv-setup-plugin-repo)` → `Skill(…:cpv-setup-github-marketplace)` → `Skill(…:cpv-link-plugin-marketplace)` → `Skill(…:cpv-publish-to-marketplace)` | — |
 | 13 | **Bring an old plugin up to the current CPV pipeline standard** | Dispatch `cpv-plugin-creator-agent`, or `Skill(claude-plugins-validation:cpv-standardize-plugin)` / `Skill(…:cpv-canonical-pipeline)` | `… standardize /path` |
 | 14 | **Manage installed plugins** (install / update / enable / disable / list / search / health-check) | Dispatch `cpv-plugin-manager-agent`, or `Skill(claude-plugins-validation:cpv-plugin-management)` | `… doctor` (health-check only) |
 | 15 | **Deep diagnostic** (all scanners + pipeline-staleness + cross-platform + marketplace-registration + cache-sync) | Dispatch `cpv-plugin-diagnoser-agent`; for `.claude/` scope (user / project / local) `/cpv-batch-scope-diagnose` | `… doctor` |
-| 16 | **AI-grade quality** (descriptions that won't trigger, unclear instructions, workflows with no exit) — **expensive, opt-in** | Dispatch `cpv-semantic-validator-agent` (warns about 10–50× token cost first) | — (needs Opus; run in Claude Code) |
+| 16 | **AI-grade quality** (descriptions that won't trigger, unclear instructions, workflows with no exit) — **expensive, opt-in** | Dispatch `cpv-semantic-validator-agent` (warns about 10–50× token cost first) | — (needs Opus) |
 | 17 | **Do the same op across many plugins** (a marketplace / list / `@listfile`) | The `/cpv-batch-*` family — validate, security-audit, caching-audit/optimize, fix, validate-and-fix, full-scan-and-fix, scope-diagnose/fix | most aliases accept a `--marketplace <spec>` |
 | 18 | **Just show me an interactive numbered menu** | `/cpv-main-menu` (human picks a number; zero-token Stop-hook render) | — |
 | 19 | **Hand the whole free-form request to one autonomous worker** | `Agent(subagent_type: "cpv-agent", prompt: "<request>")` | — |
+| 20 | **Migrate a compiled-component plugin to ship ONLY the binary** — create the separate PUBLIC source repo, extract the source, ship `bin/` only (the `RC-SHIP-BINARY-ONLY` remediation) | Dispatch `cpv-plugin-fixer-agent`, or `Skill(claude-plugins-validation:cpv-strip-dev-submodules)`; recipe: `cpv-fix-validation/references/ship-binary-only-fixes.md`. **Confirm with the user before creating a PUBLIC repo.** | — (needs write access + gh auth) |
 
 ## Scripts à la carte (no install, no tokens)
 
@@ -100,10 +98,9 @@ arg to `cpv-remote-validate` (standalone) or `remote_validation.py
 
 ## Plugin Skills (full catalog)
 
-All entries below are invoked as
-`Skill({skill: "claude-plugins-validation:<name>"})`. See
-[skills-catalog](references/skills-catalog.md) for full per-skill inputs
-and return contracts.
+All entries are invoked as `Skill({skill: "claude-plugins-validation:<name>"})`;
+per-skill inputs and return contracts are in
+[skills-catalog](references/skills-catalog.md).
 
 | # | Domain | Skills |
 |---|--------|--------|
@@ -128,8 +125,8 @@ specialists it can dispatch directly.
 | `cpv-skill-validation-agent` | Validate a single skill |
 | `cpv-plugin-fixer-agent` | Fix plugin findings (per-rule remediation) |
 | `cpv-marketplace-fixer-agent` | Fix marketplace findings + migrate layout |
-| `cpv-plugin-devitalizer-agent` | Rewrite execution-class findings to provably-inert data (never suppresses the gate; flags load-bearing code) |
-| `cpv-plugin-leaks-preventer-agent` | Redact / runtime-read secrets + add missing safeguards (never suppresses the gate; flags what it can't safely fix) |
+| `cpv-plugin-devitalizer-agent` | Rewrite execution-class findings to provably-inert data (never suppresses the gate) |
+| `cpv-plugin-leaks-preventer-agent` | Redact / runtime-read secrets + add missing safeguards (never suppresses the gate) |
 | `cpv-cache-optimizer-agent` | Apply CA-01..CA-07 cache fixes |
 | `cpv-plugin-creator-agent` | Scaffold plugins/marketplaces, publish to GitHub |
 | `cpv-plugin-manager-agent` | Plugin lifecycle (install/update/enable/disable/doctor) |
@@ -140,10 +137,10 @@ specialists it can dispatch directly.
 
 ## Invocation rules
 
-- **Namespace skills.** Always `Skill({skill: "claude-plugins-validation:<name>"})` — CPV skills are namespaced.
-- **One skill at a time.** Don't load another until the first returns; a double-load wastes a round-trip.
-- **Don't re-implement.** If a script or agent does the job, use it; never hand-roll a validation or a fix CPV already automates.
-- A skill description that still says "Loaded by `<agent>`" is advisory — the cpv-the-skills-menu method means any agent (and any routing Claude) can invoke any skill.
+- **Namespace skills.** Always `claude-plugins-validation:<name>`.
+- **One skill at a time.** Don't load another until the first returns.
+- **Don't re-implement.** If a script or agent does the job, use it.
+- A skill description that still says "Loaded by `<agent>`" is advisory — any agent (and any routing Claude) can invoke any skill.
 
 ## Output
 
