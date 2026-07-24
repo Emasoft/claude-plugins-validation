@@ -148,9 +148,11 @@ For each finding, recommend by its `category` (full detail in
   uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_strip_dev.py" <plugin_path> --auto
   ```
 
-  (Equivalently `cpv strip-dev-parts <plugin_path>`.) Claude Code's
-  shallow clone does not recurse submodules, so the stripped content never
-  reaches end-user installs.
+  (Equivalently `cpv strip-dev-parts <plugin_path>`.) The strip REMOVES the
+  directory from the plugin tree and records a `{path, url, sha}` reference
+  to a separate repo, so the content stops shipping. Do NOT substitute a git
+  submodule: Claude Code recursively fetches submodule content on install,
+  so a submodule pointer would still ship every file.
 
 - **`RUNTIME_DEP`** (dependency trees like `node_modules/`, `.venv/`) — do
   NOT ship them. Recommend the `${CLAUDE_PLUGIN_DATA}` install-on-first-use

@@ -12,8 +12,9 @@ ask the user via Unicode table (not AskUserQuestion). See the matching
 section in `agents/cpv-plugin-creator-agent.md`.
 
 The CLI flag is `generate_plugin_repo.py --strip-dev` (default) /
-`--no-strip-dev` (legacy). When ON, the generator writes (PSS pattern —
-ONE submodule per plugin):
+`--no-strip-dev` (legacy). When ON, the generator writes ONE pre-strip
+DECLARATION (the `submodule` / `submodule_path` key names are historical —
+they carry the target repo slug and mount path, not a git submodule):
 
 ```json
 {
@@ -29,17 +30,22 @@ ONE submodule per plugin):
 }
 ```
 
-into the generated plugin.json. No submodules are created until the user
-runs `cpv strip-dev-parts --auto` separately.
+into the generated plugin.json. Nothing is extracted until the user runs
+`cpv strip-dev-parts --auto` separately.
 
 ## Why this exists
 
-Claude Code's plugin installer does NOT pass `--recurse-submodules`, so
-the submodule content never reaches the user — only the .gitmodules
-pointer (~86 bytes) does. Verified empirically against PSS
-(`perfect-skill-suggester`): the rust source that lives in PSS's
-`rust/` submodule never ships to end users (binaries in `bin/` ship
-instead).
+Every file committed to a plugin ships to every user on install. The strip
+MOVES a dev-only folder into a SEPARATE repository and replaces it with a
+`{path, url, sha}` reference in `cpv.strip.extract[]`, so the folder is
+gone from the plugin tree and no longer ships; `--restore` re-clones it at
+the pinned SHA for development.
+
+A git submodule is NOT an alternative: Claude Code recursively fetches
+submodule content on install — verified on perfect-skill-suggester 3.10.8,
+whose installed `rust/` submodule carried 1.7 MB of Rust source into the
+plugin cache. So a submodule pointer excludes nothing, which is why the
+engine writes no `.gitmodules`.
 
 This pattern is most useful when `tests/` is large (fixtures, sample
 data, snapshots). For a typical CPV-style plugin it saves only ~3 MB,

@@ -69,7 +69,7 @@ universal-loader pattern makes every skill available to every agent.
 
 | Skill | Inputs | Returns | When to invoke |
 |-------|--------|---------|-----------------|
-| `cpv-strip-dev-submodules` | plugin path | dev-only submodules removed | Pre-publish cleanup |
+| `cpv-strip-dev-submodules` | plugin path (+ visibility) | dev folders / compile source moved to a separate repo, `{path,url,sha}` recorded | Pre-publish cleanup; the ship-only-binary PUBLIC source-repo migration |
 | `cpv-refresh-readme` | plugin path | auto-sections regenerated | Pre-publish README sync |
 | `cpv-bump-version` | plugin path + bump-level | versions bumped in plugin.json + pyproject.toml | Manual bump (publish.py handles it automatically) |
 | `cpv-show-version` | plugin path | current version string | Read-only version check |
