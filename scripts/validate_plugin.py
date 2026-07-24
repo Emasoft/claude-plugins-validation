@@ -3035,6 +3035,11 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
         ".cxx": ("C++", ["Makefile", "CMakeLists.txt", "meson.build"]),
         ".swift": ("Swift", ["Package.swift"]),
         ".zig": ("Zig", ["build.zig"]),
+        # C# / .NET — markers are GLOBS (project name varies), matched glob-aware below.
+        ".cs": ("C#", ["*.csproj", "*.sln", "global.json", "Directory.Build.props"]),
+        ".fs": ("F#", ["*.fsproj", "*.sln", "global.json"]),
+        # C: also a Zig/Meson build; kept with the existing C markers plus Autotools.
+        ".m": ("Objective-C", ["Makefile", "CMakeLists.txt", "*.xcodeproj", "Package.swift"]),
     }
 
     # Directories to always skip (build artifacts, caches, developer tooling)
@@ -3136,6 +3141,23 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
         # genuinely compile-required plugin still WARNs.
         ships_release_binaries = _has_release_asset_installer(plugin_root)
 
+        # RC-SHIP-BINARY-ONLY (issue #175): compile source belongs in a SEPARATE
+        # repo (a git submodule pointer), not committed in the plugin tree — the
+        # installed plugin ships only the built binary. Source UNDER a build-source
+        # submodule path is a separate repo => COMPLIANT; source committed directly
+        # in-tree => WARN with the fix. Compute the submodule paths once.
+        from cpv_pipeline_profile import _gitmodules_submodule_paths  # noqa: PLC0415
+
+        _submodule_paths = _gitmodules_submodule_paths(plugin_root)
+
+        def _path_under_submodule(rel: str) -> bool:
+            rel_parts = Path(rel).parts
+            for sp in _submodule_paths:
+                sp_parts = Path(sp).parts
+                if sp_parts and len(sp_parts) <= len(rel_parts) and rel_parts[: len(sp_parts)] == sp_parts:
+                    return True
+            return False
+
         for lang_name, source_paths in compiled_source_files.items():
             # Find expected build system files for this language
             expected_build_files: set[str] = set()
@@ -3167,7 +3189,13 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
                     d = d.parent
 
             # Check if build system files exist in any of those directories.
-            has_build_system = any((d / bf).exists() for d in search_dirs for bf in expected_build_files)
+            # Markers may be exact filenames (Cargo.toml, go.mod) OR globs (*.csproj
+            # for C#, *.fsproj for F#) — the project-file name varies per project.
+            has_build_system = any(
+                (next(d.glob(bf), None) is not None) if "*" in bf else (d / bf).exists()
+                for d in search_dirs
+                for bf in expected_build_files
+            )
 
             # Check for a generic build/install script in any of those directories.
             _generic_build_scripts = [
@@ -3203,6 +3231,26 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
             else:
                 report.major(
                     f"Found {len(source_paths)} {lang_name} source file(s) but no compiled binaries in bin/ and no build script (build.sh, install.sh, Makefile, etc.). Provide pre-compiled binaries or a build/install script."
+                )
+
+            # RC-SHIP-BINARY-ONLY (issue #175, WARN phase of warn -> migrate -> block):
+            # compile source that ships as COMMITTED files in the plugin tree (NOT in a
+            # build-source submodule pointing at a separate repo) violates the
+            # compiled-component canon — the installed plugin should ship ONLY the built
+            # binary. Gated on a real compiled component (a build system or a shipped
+            # binary) so a stray example source file never trips it. Source under a
+            # submodule = a separate repo = COMPLIANT (no warn). Advisory until the
+            # generator can auto-migrate the shape (then it escalates to blocking).
+            _in_tree_src = [rel for rel in source_paths if not _path_under_submodule(rel)]
+            if _in_tree_src and (has_bin or has_build_system or has_build_script):
+                report.warning(
+                    f"RC-SHIP-BINARY-ONLY: {len(_in_tree_src)} {lang_name} compile-source file(s) ship "
+                    f"as committed files in the plugin tree (e.g. {_in_tree_src[0]}). Per the "
+                    f"compiled-component canon, the installed plugin should ship ONLY the built binary "
+                    f"(bin/) — move the compile source to a SEPARATE repository referenced by a git "
+                    f"submodule pointer (source and build artifacts then never ship), or make the binary "
+                    f"a separate binary-carrier plugin. Build the binary in CI (clippy/deny-warnings + "
+                    f"tests); commit only the binary."
                 )
 
     # --- 3. Check compiled binaries platform coverage ---

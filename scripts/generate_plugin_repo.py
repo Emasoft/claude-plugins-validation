@@ -1657,6 +1657,12 @@ Gate stages (--gate mode, called by pre-push hook):
         actionlint unavailable so a push is never false-blocked)
    G2d. Type-check (mypy scripts/ --ignore-missing-imports, parity with ci.yml
         Lint job; WARNs+skips if mypy unavailable so a push is never false-blocked)
+   G2e. Compiled-component build gates (cargo clippy+test / go vet+build+test /
+        dotnet build / swift build / zig build), each self-detecting; WARNs+skips
+        if the toolchain is unavailable so a push is never false-blocked. C/C++ is
+        detected + noted (built in CI; no false-block-safe local command) (issue #175)
+   G2f. Shell lint (shellcheck, parity with ci.yml Mega-Linter BASH_SHELLCHECK;
+        WARNs+skips if shellcheck unavailable so a push is never false-blocked)
    G3. Validate (uvx cpv-remote-validate plugin . --strict)
    G4. Tests (pytest)
 
@@ -2482,48 +2488,95 @@ def run_gate(root: Path) -> int:
                 return 1
             cprint(f"  {GREEN}Type-check passed.{NC}")
 
-    # Gate 2e: Rust lint + test (cargo clippy -D warnings + cargo test) -- issue #175.
-    # Self-detecting: runs ONLY when the plugin ships a Rust crate (a Cargo.toml
-    # in the tree -- e.g. a checked-out build-source submodule or an in-tree crate).
-    # No Cargo.toml -> clean skip. Rust present but `cargo` absent -> WARN+skip (the
-    # build pipeline / release-binaries workflow backstops it); cargo ran + found
-    # issues -> BLOCK. Mirrors the G2b/G2c degrade-if-absent idiom so a missing
-    # toolchain never false-blocks a push.
-    cprint(f"\n{BLUE}[G2e] Rust check (cargo clippy + test, issue #175)...{NC}")
-    _compiled_skip = {"target", ".git", "node_modules", ".venv", "vendor", "dist", "build"}
-    _all_cargo = [
-        m for m in root.rglob("Cargo.toml")
-        if not any(part in _compiled_skip for part in m.relative_to(root).parts)
+    # Gate 2e: compiled-component build gates (Rust/Go/.NET/Swift/Zig) -- issue #175.
+    # Self-detecting + table-driven: for each language, glob its manifest in the tree
+    # (a checked-out build-source submodule, or an in-tree component). No manifest ->
+    # clean skip. Manifest present but toolchain absent -> WARN+skip (CI / the build
+    # pipeline backstops it); toolchain ran + a command failed -> BLOCK. Mirrors the
+    # G2b/G2c/G2d degrade-if-absent idiom so a missing toolchain never false-blocks a
+    # push. Only Rust + Go get a test command (cargo test / go test are no-ops on zero
+    # tests); the others are build-only (their test runners error on "no tests", which
+    # would be a false block) -- CI runs the full per-language test matrix.
+    cprint(f"\n{BLUE}[G2e] Compiled-component build gates (issue #175)...{NC}")
+    _compiled_skip = {"target", ".git", "node_modules", ".venv", "vendor",
+                      "dist", "build", "obj", "zig-out", "zig-cache", ".zig-cache"}
+
+    def _find_manifests(pattern):
+        found = [
+            m for m in root.rglob(pattern)
+            if not any(part in _compiled_skip for part in m.relative_to(root).parts)
+        ]
+        # Keep only top-level manifests: a workspace/module root covers its members, so
+        # a nested manifest inside another matched manifest dir is not run standalone.
+        return [m for m in found if not any(o is not m and o.parent in m.parents for o in found)]
+
+    # (label, manifest glob, toolchain, builder(manifest) -> [(cmd, cwd), ...])
+    _compiled_gates = [
+        ("Rust", "Cargo.toml", "cargo", lambda m: [
+            (["cargo", "clippy", "--manifest-path", str(m), "--all-targets", "--", "-D", "warnings"], str(root)),
+            (["cargo", "test", "--manifest-path", str(m)], str(root)),
+        ]),
+        ("Go", "go.mod", "go", lambda m: [
+            (["go", "vet", "./..."], str(m.parent)),
+            (["go", "build", "./..."], str(m.parent)),
+            (["go", "test", "./..."], str(m.parent)),
+        ]),
+        ("C#/.NET", "*.csproj", "dotnet", lambda m: [
+            (["dotnet", "build", str(m)], str(root)),
+        ]),
+        ("Swift", "Package.swift", "swift", lambda m: [
+            (["swift", "build"], str(m.parent)),
+        ]),
+        ("Zig", "build.zig", "zig", lambda m: [
+            (["zig", "build"], str(m.parent)),
+        ]),
     ]
-    # Keep only top-level manifests: a workspace/crate root covers its members, so a
-    # nested member Cargo.toml is not run standalone (avoids redundant/duplicate runs).
-    cargo_manifests = [
-        m for m in _all_cargo
-        if not any(o is not m and o.parent in m.parents for o in _all_cargo)
-    ]
-    if not cargo_manifests:
-        cprint(f"  {GREEN}No Rust crate (no Cargo.toml) -- skipped.{NC}")
-    elif shutil.which("cargo") is None:
-        cprint(f"  {YELLOW}WARNING: Rust crate(s) present but `cargo` not found -- Rust check SKIPPED locally.{NC}")
-        cprint(f"  {YELLOW}The build pipeline WILL run clippy+test; a green gate does NOT guarantee green CI")
-        cprint(f"  {YELLOW}for the Rust dimension. Install the Rust toolchain (rustup) for full parity.{NC}")
-    else:
-        for manifest in cargo_manifests:
-            rel = manifest.relative_to(root)
-            cl = subprocess.run(
-                ["cargo", "clippy", "--manifest-path", str(manifest),
-                 "--all-targets", "--", "-D", "warnings"],
-                cwd=str(root), timeout=900).returncode
-            if cl != 0:
-                cprint(f"  {RED}BLOCKED: cargo clippy found issues in {rel} (warnings denied).{NC}")
-                return 1
-            tt = subprocess.run(
-                ["cargo", "test", "--manifest-path", str(manifest)],
-                cwd=str(root), timeout=900).returncode
-            if tt != 0:
-                cprint(f"  {RED}BLOCKED: cargo test failed for {rel}.{NC}")
-                return 1
-        cprint(f"  {GREEN}Rust check passed ({len(cargo_manifests)} crate(s)).{NC}")
+    _saw_compiled = False
+    for _label, _pattern, _tool, _builder in _compiled_gates:
+        _manifests = _find_manifests(_pattern)
+        if not _manifests:
+            continue
+        _saw_compiled = True
+        if shutil.which(_tool) is None:
+            cprint(f"  {YELLOW}WARNING: {_label} component(s) present but `{_tool}` not found -- {_label} build SKIPPED locally.{NC}")
+            cprint(f"  {YELLOW}CI / the build pipeline WILL build it; a green gate does NOT guarantee green CI for {_label}.{NC}")
+            continue
+        for _manifest in _manifests:
+            _rel = _manifest.relative_to(root)
+            for _cmd, _cwd in _builder(_manifest):
+                _shown = " ".join(_cmd)
+                try:
+                    _rc = subprocess.run(_cmd, cwd=_cwd, timeout=1200).returncode
+                except subprocess.TimeoutExpired:
+                    cprint(f"  {YELLOW}WARNING: `{_shown}` timed out (>1200s) for {_rel} -- SKIPPED locally; CI backstops.{NC}")
+                    break
+                if _rc != 0:
+                    cprint(f"  {RED}BLOCKED: `{_shown}` failed for {_rel}.{NC}")
+                    return 1
+        cprint(f"  {GREEN}{_label} build passed ({len(_manifests)} component(s)).{NC}")
+
+    # C/C++: build systems are non-uniform (CMake/Make/Meson/Autotools/Bazel...) with no
+    # single false-block-safe local command, and a build depends on system libraries the
+    # author machine may lack. So the local gate DETECTS + NOTES (never blocks) -- the
+    # plugin build workflow (controlled toolchain) is the authoritative C/C++ builder, and
+    # RC-SHIP-BINARY-ONLY (in the remote validator, G3) still enforces the ship-only-binary
+    # canon for C/C++.
+    def _tree_has(pattern):
+        return any(
+            not any(part in _compiled_skip for part in p.relative_to(root).parts)
+            for p in root.rglob(pattern)
+        )
+
+    _cxx_src = any(_tree_has(x) for x in ("*.c", "*.cc", "*.cpp", "*.cxx"))
+    _cxx_build = any(_tree_has(x) for x in ("CMakeLists.txt", "Makefile", "meson.build", "configure.ac"))
+    if _cxx_src and _cxx_build:
+        _saw_compiled = True
+        cprint(f"  {YELLOW}NOTE: C/C++ component detected -- its build is authoritative in CI (controlled")
+        cprint(f"  {YELLOW}toolchain); the local gate skips non-uniform C/C++ build systems to avoid a")
+        cprint(f"  {YELLOW}false block on a missing system dependency. RC-SHIP-BINARY-ONLY still applies.{NC}")
+
+    if not _saw_compiled:
+        cprint(f"  {GREEN}No compiled component (Rust/Go/C/C++/.NET/Swift/Zig) -- skipped.{NC}")
 
     # Gate 2f: Shell lint (shellcheck) -- issue #175.
     # Self-detecting: runs ONLY when the plugin ships shell scripts (*.sh / *.bash).

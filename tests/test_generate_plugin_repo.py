@@ -563,13 +563,14 @@ class TestPublishPyCornerstoneRule:
 
 
 class TestPublishPyLanguageGatesIssue175:
-    """Issue #175 — the generated publish.py must carry SELF-DETECTING Rust + shell
-    gates so regeneration never silently drops a compiled/shell plugin's checks.
+    """Issue #175 — the generated publish.py must carry SELF-DETECTING build gates for
+    EVERY compiled component (Rust/Go/.NET/Swift/Zig) plus a shell gate, so regeneration
+    never silently drops a compiled/shell plugin's checks.
 
     The gates are self-detecting at the generated plugin's runtime (they glob the
     tree), so they are ALWAYS emitted: they no-op when the language is absent and
-    degrade to WARN+skip when the tool is absent (the build pipeline / CI backstops).
-    These assert on the TEMPLATE STRING — they do not execute cargo/shellcheck.
+    degrade to WARN+skip when the toolchain is absent (CI / the build pipeline
+    backstops). These assert on the TEMPLATE STRING — they do not execute any build.
     """
 
     @staticmethod
@@ -579,14 +580,21 @@ class TestPublishPyLanguageGatesIssue175:
         src = gen_publish_py(_default_params())
         return src.split("def run_gate")[1].split("def stage_")[0]
 
-    def test_rust_gate_runs_clippy_deny_warnings_and_test(self):
-        """G2e must run cargo clippy -D warnings + cargo test on detected crates."""
+    def test_g2e_covers_all_compiled_toolchains(self):
+        """G2e must build every supported compiled component, not just Rust."""
         g = self._gate_fn()
-        assert "[G2e]" in g, "Rust gate G2e missing"
-        assert '"cargo", "clippy"' in g
-        assert '"-D", "warnings"' in g, "clippy must deny warnings"
-        assert '"cargo", "test"' in g
-        assert 'rglob("Cargo.toml")' in g, "Rust gate must self-detect Cargo.toml"
+        assert "[G2e]" in g, "compiled build gate G2e missing"
+        # Rust: clippy -D warnings + test
+        assert '"cargo", "clippy"' in g and '"-D", "warnings"' in g and '"cargo", "test"' in g
+        assert '"Cargo.toml"' in g
+        # Go: vet + build + test
+        assert '"go", "vet"' in g and '"go", "build"' in g and '"go", "test"' in g
+        assert '"go.mod"' in g
+        # C#/.NET: dotnet build, self-detecting *.csproj
+        assert '"dotnet", "build"' in g and '"*.csproj"' in g
+        # Swift + Zig: build-only
+        assert '"swift", "build"' in g and '"Package.swift"' in g
+        assert '"zig", "build"' in g and '"build.zig"' in g
 
     def test_shell_gate_runs_shellcheck(self):
         """G2f must run shellcheck on detected shell scripts."""
@@ -596,23 +604,30 @@ class TestPublishPyLanguageGatesIssue175:
         assert 'rglob("*.sh")' in g, "Shell gate must self-detect *.sh"
 
     def test_gates_self_detect_and_skip_cleanly(self):
-        """Pure-Python plugin => both gates skip cleanly (no Cargo.toml / no *.sh)."""
+        """Pure-Python plugin => gates skip cleanly (no compiled manifest / no *.sh)."""
         g = self._gate_fn()
-        assert "No Rust crate" in g, "Rust gate must have a clean-skip branch"
+        assert "No compiled component" in g, "compiled gate must have a clean-skip branch"
         assert "No shell scripts" in g, "Shell gate must have a clean-skip branch"
 
     def test_gates_degrade_when_tool_absent(self):
-        """Language present but tool absent => WARN+skip, never a false block (CI backstops)."""
+        """Language present but toolchain absent => WARN+skip, never a false block."""
         g = self._gate_fn()
-        assert 'shutil.which("cargo")' in g, "Rust gate must probe cargo"
+        assert "shutil.which(_tool)" in g, "compiled gate must probe each toolchain"
         assert 'shutil.which("shellcheck")' in g, "Shell gate must probe shellcheck"
+        assert "does NOT guarantee green CI" in g, "degrade path must note CI backstops"
 
     def test_gates_block_on_a_real_failure(self):
-        """Tool ran and found issues => BLOCK (the other side of the two-sided gate)."""
+        """Toolchain ran and a command failed => BLOCK (the other side of the gate)."""
         g = self._gate_fn()
-        assert "BLOCKED: cargo clippy found issues" in g
-        assert "BLOCKED: cargo test failed" in g
+        assert "BLOCKED:" in g and "failed for" in g, "compiled gate must BLOCK on a real build failure"
         assert "BLOCKED: shellcheck found issues" in g
+
+    def test_compiled_gate_test_only_for_rust_and_go(self):
+        """Only Rust + Go run a test command (their runners no-op on zero tests); the
+        others are build-only so 'no tests' never becomes a false block."""
+        g = self._gate_fn()
+        assert '"cargo", "test"' in g and '"go", "test"' in g
+        assert '"swift", "test"' not in g, "swift test errors on no-tests => build-only"
 
     def test_gates_ordered_after_mypy_before_validate(self):
         """G2e/G2f must sit between G2d (mypy) and G3 (remote validate)."""
@@ -620,10 +635,23 @@ class TestPublishPyLanguageGatesIssue175:
         i2d, i2e, i2f, i3 = g.find("[G2d]"), g.find("[G2e]"), g.find("[G2f]"), g.find("[G3]")
         assert -1 < i2d < i2e < i2f < i3, "gate order must be G2d < G2e < G2f < G3"
 
-    def test_rust_gate_uses_top_level_manifest_filter(self):
-        """The Rust gate must run only top-level manifests (a workspace root covers members)."""
+    def test_compiled_gate_uses_top_level_manifest_filter(self):
+        """The compiled gate must run only top-level manifests (a workspace root covers members)."""
         g = self._gate_fn()
-        assert "o.parent in m.parents" in g, "must filter nested member Cargo.toml"
+        assert "o.parent in m.parents" in g, "must filter nested member manifests"
+
+    def test_compiled_gate_times_out_gracefully(self):
+        """A build that hangs => WARN+skip (CI backstops), never a crash/false-block."""
+        g = self._gate_fn()
+        assert "subprocess.TimeoutExpired" in g, "compiled gate must catch build timeouts"
+        assert "timed out" in g
+
+    def test_cxx_detected_but_not_built_locally(self):
+        """C/C++ has no false-block-safe universal local build => detect + NOTE (never
+        block); CI builds it and RC-SHIP-BINARY-ONLY still enforces the canon."""
+        g = self._gate_fn()
+        assert "C/C++ component detected" in g, "C/C++ must be explicitly handled"
+        assert "RC-SHIP-BINARY-ONLY still applies" in g
 
     def test_release_binaries_workflow_lints_and_tests_before_build(self):
         """The release-binaries build workflow must clippy+test before build (issue #175)."""
