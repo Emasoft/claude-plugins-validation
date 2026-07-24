@@ -342,6 +342,69 @@ class TestRcShipBinaryOnlyIssue175:
         validate_cross_platform(p, report)
         assert not any("RC-MIXED-COMPILED" in m for m in self._infos(report))
 
+    # ── Phase 5: opt-in canon escalation (WARN → blocking MAJOR) ──
+
+    @staticmethod
+    def _majors(report):
+        return [r.message for r in report.results if r.level == "MAJOR"]
+
+    def _mk_canon(self, tmp_path, name, *, opt_in: bool):
+        p = tmp_path / name
+        (p / ".claude-plugin").mkdir(parents=True)
+        m = {"name": name, "version": "1.0.0", "description": "t"}
+        if opt_in:
+            m["cpv"] = {"canon": "ship-only-binary"}
+        (p / ".claude-plugin" / "plugin.json").write_text(json.dumps(m))
+        return p
+
+    def test_optin_submodule_escalates_to_major(self, tmp_path):
+        """Opted-in + a build-source submodule → publish-blocking RC-SHIP-BINARY-ONLY-STRICT MAJOR."""
+        p = self._mk_canon(tmp_path, "opt-sub", opt_in=True)
+        (p / ".gitmodules").write_text('[submodule "rust"]\n\tpath = rust\n\turl = https://example.com/x.git\n')
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-SHIP-BINARY-ONLY-STRICT" in m for m in self._majors(report))
+
+    def test_no_optin_submodule_stays_warn_only(self, tmp_path):
+        """#170: a plugin that does NOT opt in keeps exactly today's WARN — no MAJOR, still green."""
+        p = self._mk_canon(tmp_path, "no-opt-sub", opt_in=False)
+        (p / ".gitmodules").write_text('[submodule "rust"]\n\tpath = rust\n\turl = https://example.com/x.git\n')
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
+        assert not any("STRICT" in m for m in self._majors(report))
+
+    def test_optin_rename_downgrade_still_blocks(self, tmp_path):
+        """Content-not-names: `rust/` moved under `tests/rust/` downgrades to RC-SUBMODULE-SHIPS,
+        but the STRICT escalation blocks on ANY .gitmodules entry — the rename dodge fails."""
+        p = self._mk_canon(tmp_path, "opt-rename", opt_in=True)
+        (p / ".gitmodules").write_text('[submodule "t"]\n\tpath = tests/rust\n\turl = https://example.com/x.git\n')
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-SHIP-BINARY-ONLY-STRICT" in m for m in self._majors(report))
+
+    def test_optin_in_tree_source_escalates(self, tmp_path):
+        """Opted-in + in-tree compiled source (rust + Cargo.toml) → STRICT MAJOR."""
+        p = self._mk_canon(tmp_path, "opt-src", opt_in=True)
+        (p / "src").mkdir()
+        (p / "src" / "lib.rs").write_text("pub fn f() -> i32 { 1 }\n")
+        (p / "Cargo.toml").write_text('[package]\nname = "x"\nversion = "0.1.0"\n')
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-SHIP-BINARY-ONLY-STRICT" in m for m in self._majors(report))
+
+    def test_malformed_manifest_fails_safe_to_warn(self, tmp_path):
+        """FAIL-SAFE (#170): an unreadable plugin.json + a violating tree → the WARN still fires,
+        the block is NOT added (a broken manifest degrades to status quo, never to a silence)."""
+        p = tmp_path / "bad-manifest"
+        (p / ".claude-plugin").mkdir(parents=True)
+        (p / ".claude-plugin" / "plugin.json").write_text("{ not valid json ")
+        (p / ".gitmodules").write_text('[submodule "rust"]\n\tpath = rust\n\turl = https://example.com/x.git\n')
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
+        assert not any("STRICT" in m for m in self._majors(report))
+
 
 class TestValidateSkills:
     """Tests for validate_skills function."""

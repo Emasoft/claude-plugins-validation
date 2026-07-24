@@ -3135,7 +3135,16 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
     # plugin. Checkout-independent — reads .gitmodules — so it fires even when CPV
     # validates a source repo where the submodule is a bare pointer. Advisory (WARN)
     # until the generator auto-migrates the shape.
-    from cpv_pipeline_profile import classify_submodules  # noqa: PLC0415
+    from cpv_pipeline_profile import classify_submodules, opts_into_ship_only_binary_canon  # noqa: PLC0415
+
+    # Phase 5 (issue #175): a plugin may OPT IN to strict enforcement of the
+    # ship-only-binary canon via `cpv.canon: ship-only-binary`. When opted in, the
+    # compiled-component findings below escalate from WARN to a publish-BLOCKING
+    # MAJOR. FAIL-SAFE + never-retro-break (#170): a plugin that does NOT opt in
+    # keeps exactly its current WARN, and a malformed manifest reads False → WARN
+    # only. The escalation only ever ADDS a blocking severity on TOP of the WARN
+    # (the WARN is always emitted first), so it can never silence a finding.
+    _canon_strict = opts_into_ship_only_binary_canon(plugin_root)
 
     _build_source_subs, _other_subs = classify_submodules(plugin_root)
     if _build_source_subs:
@@ -3165,6 +3174,20 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
             f"to be distributed and is safe. If it is build/dev/test tooling (docs, tests, "
             f"examples) or non-hinted compile source, it need not ship: reference it out-of-tree "
             f"(the build CI clones it by pinned URL/tag) instead of linking a submodule."
+        )
+    # Phase 5 escalation: under the opted-in canon, block on CONTENT not names —
+    # ANY .gitmodules entry (build-source OR other) ships content on install, so
+    # both classes block. Keying on the union kills the rename-downgrade gaming
+    # vector (moving `rust/` under `tests/rust/` flips RC-SHIP-BINARY-ONLY to the
+    # softer RC-SUBMODULE-SHIPS — but here they escalate identically).
+    if _canon_strict and (_build_source_subs or _other_subs):
+        report.major(
+            "RC-SHIP-BINARY-ONLY-STRICT: the plugin declares cpv.canon: ship-only-binary but links "
+            f"{len(_build_source_subs) + len(_other_subs)} git submodule(s) in .gitmodules, whose "
+            "content Claude Code ships on install. Under the ship-only-binary canon a compiled "
+            "component must ship ONLY the built binary in bin/; keep the source in a SEPARATE repo "
+            "the build CI clones by pinned URL/tag (no .gitmodules), or remove the cpv.canon opt-in "
+            "until the plugin is migrated."
         )
 
     # RC-MIXED-COMPILED (issue #175 Phase 3): a script-primary plugin (pipeline
@@ -3311,6 +3334,19 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
                     f"content on install), or make the binary a separate binary-carrier plugin. Build "
                     f"the binary in CI (clippy/deny-warnings + tests); commit only the binary."
                 )
+                # Phase 5 escalation: opted-in → the in-tree compiled source is a
+                # blocking MAJOR (in addition to the WARN above). Gated on the SAME
+                # real component condition (has_bin/has_build_system/has_build_script),
+                # so a stray example .rs never blocks.
+                if _canon_strict:
+                    report.major(
+                        f"RC-SHIP-BINARY-ONLY-STRICT: the plugin declares cpv.canon: ship-only-binary "
+                        f"but ships {len(_in_tree_src)} {lang_name} compile-source file(s) as committed "
+                        f"files in the plugin tree (e.g. {_in_tree_src[0]}). Under the ship-only-binary "
+                        f"canon the installed plugin must ship ONLY the built binary (bin/); move the "
+                        f"source to a SEPARATE repo the build CI clones by pinned URL/tag, or remove the "
+                        f"cpv.canon opt-in until the plugin is migrated."
+                    )
 
     # --- 3. Check compiled binaries platform coverage ---
     # Search for bin/ directories recursively, skip gitignored paths
