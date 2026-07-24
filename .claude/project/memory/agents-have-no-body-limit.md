@@ -2,7 +2,7 @@
 name: agents-have-no-body-limit
 description: "a CPV validator, spec-sync pass, or fixer wants to add or restore a body-length (word/token) cap on AGENTS — often citing Anthropic 'keep agents lean' guidance — is that allowed? / why was the agent 2000-word 'body is very long' warning removed? / do agents have a body-size limit the way skills do (5000 tokens)?"
 ocd: 2026-07-22
-lmd: 2026-07-22
+lmd: 2026-07-25
 metadata:
   node_type: memory
   type: project
@@ -40,5 +40,9 @@ decision, not an oversight. The regression lock is
 no length finding; the `MIN_BODY_CHARS` floor still fires). A body cap belongs ONLY on
 skills. Supersedes the "lean agents under 2000 words" note in
 [[agent-trim-and-release-gotchas]].
+
+## Governed by
+
+- [[claude-plugins-validation-overview]] — the project hub.
 
 ## Notes and lessons learned

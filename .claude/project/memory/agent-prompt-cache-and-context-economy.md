@@ -66,6 +66,10 @@ bug, which is a different problem.)
    tool result, screenshot, or snapshot and then drop the blob; batch deterministic steps
    into one turn.
 
+## Governed by
+
+- [[claude-plugins-validation-overview]] — the project hub.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-RUNTIME-SKILL-NOT-CACHE-BREAK, status:valid, keywords:"runtime skill load breaks cache progressive_disclosure reference_files skills_frontmatter_preload cache_miss_per_turn router_agent", ocd:2026-07-25, lmd:2026-07-25] DO NOT "optimize" an agent by moving its runtime `Skill()` calls into `skills:` frontmatter, BECAUSE a runtime load lands in the MESSAGE TAIL and cannot invalidate the cached prefix, while `skills:` injects the skill's FULL content into EVERY invocation — so the "optimization" adds a permanent per-run tax and is strictly worse for a sometimes-needed skill (and worst of all for a router that needs 1 of N). DO preload only always-needed skills, and measure the skill's real token size before deciding.
