@@ -3873,8 +3873,11 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
 
 
 # Files inside a plugin tree that are worth feeding to the scanner.
-# Directories the walker MUST skip — vendored deps / VCS / build cruft.
-_SKIP_DIRS: frozenset[str] = frozenset(
+# VCS internals, virtualenvs, package-manager trees, and tool caches — NEVER a
+# legitimate shipped content surface, and scanning them is catastrophic noise
+# (node_modules alone is thousands of third-party files). Skipped UNCONDITIONALLY,
+# tracked or not.
+_ALWAYS_SKIP_DIRS: frozenset[str] = frozenset(
     {
         ".git",
         ".hg",
@@ -3885,14 +3888,34 @@ _SKIP_DIRS: frozenset[str] = frozenset(
         "env",
         "node_modules",
         "vendor",
-        "dist",
-        "build",
         "__pycache__",
         ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
         ".tox",
         ".cache",
+    }
+)
+
+# Conventionally-gitignored dev / build-output / private / scratch dirs. By the
+# owner's convention these are gitignored, so on a normal source repo they are
+# genuinely unshipped and get skipped by the shipped-surface check in
+# _iter_scannable_files. But a name-skip ALONE is a security FALSE NEGATIVE
+# (issue #176 follow-up, advisor-surfaced): a TRACKED, non-gitignored
+# `docs_dev/payload.md` still ships in the `git archive` that Claude Code
+# installs, yet a bare name-skip would drop it from the scan — an
+# attacker-forgeable directory name. So the walker skips these ONLY when the file
+# is genuinely unshipped (gitignored AND untracked), or when git is unavailable
+# to prove shipped-ness (the conservative default, which also preserves the
+# issue #42 `reports/` self-match-noise fix on non-git trees).
+#
+# The private-storage dirs (r04 obra FP iter1, 2026-05-27) — per-user journal /
+# scratch / local work logs — belong here too: gitignored in practice (skipped),
+# but if a plugin accidentally TRACKS one it ships and must be scanned.
+_SKIP_IF_UNSHIPPED_DIRS: frozenset[str] = frozenset(
+    {
+        "dist",
+        "build",
         "docs_dev",
         "scripts_dev",
         "samples_dev",
@@ -3903,12 +3926,6 @@ _SKIP_DIRS: frozenset[str] = frozenset(
         "builds_dev",
         "reports_dev",
         "reports",
-        # r04 obra FP iter1 (2026-05-27): per-user private storage that
-        # plugins sometimes leak into the repo by accident. These dirs
-        # are user-private content (journal entries, scratch notes, local
-        # work logs) — never agent-loaded instructions, never published.
-        # They are NOT in the standard `_dev` family but the same skip
-        # semantics apply.
         ".private-journal",
         ".scratch",
         ".local",
@@ -4129,7 +4146,18 @@ def _iter_scannable_files(plugin_root: Path) -> Iterable[Path]:
     for p in plugin_root.rglob("*"):
         if not p.is_file():
             continue
-        if any(part in _SKIP_DIRS for part in p.parts):
+        parts = p.parts
+        # Tier 1 — VCS/cache/package cruft: skip unconditionally.
+        if any(part in _ALWAYS_SKIP_DIRS for part in parts):
+            continue
+        # Tier 2 — conventionally-gitignored dev/output/private dirs: skip by
+        # NAME only when git cannot prove shipped-ness (no git → conservative,
+        # preserves the issue #42 reports/ self-match-noise fix on non-git trees).
+        # When git IS available, DON'T skip here — fall through to the
+        # shipped-surface check below, which skips iff the file is genuinely
+        # unshipped (gitignored AND untracked) and SCANS a tracked payload,
+        # closing the name-skip false negative (issue #176 follow-up).
+        if unshipped is None and any(part in _SKIP_IF_UNSHIPPED_DIRS for part in parts):
             continue
         # Point 1 (v2.114.0) — scan EVERY text file, not a 14-suffix
         # allowlist. Text → always scanned; binary → scanned by the binary
