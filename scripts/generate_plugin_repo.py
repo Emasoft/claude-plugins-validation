@@ -2482,6 +2482,72 @@ def run_gate(root: Path) -> int:
                 return 1
             cprint(f"  {GREEN}Type-check passed.{NC}")
 
+    # Gate 2e: Rust lint + test (cargo clippy -D warnings + cargo test) -- issue #175.
+    # Self-detecting: runs ONLY when the plugin ships a Rust crate (a Cargo.toml
+    # in the tree -- e.g. a checked-out build-source submodule or an in-tree crate).
+    # No Cargo.toml -> clean skip. Rust present but `cargo` absent -> WARN+skip (the
+    # build pipeline / release-binaries workflow backstops it); cargo ran + found
+    # issues -> BLOCK. Mirrors the G2b/G2c degrade-if-absent idiom so a missing
+    # toolchain never false-blocks a push.
+    cprint(f"\n{BLUE}[G2e] Rust check (cargo clippy + test, issue #175)...{NC}")
+    _compiled_skip = {"target", ".git", "node_modules", ".venv", "vendor", "dist", "build"}
+    _all_cargo = [
+        m for m in root.rglob("Cargo.toml")
+        if not any(part in _compiled_skip for part in m.relative_to(root).parts)
+    ]
+    # Keep only top-level manifests: a workspace/crate root covers its members, so a
+    # nested member Cargo.toml is not run standalone (avoids redundant/duplicate runs).
+    cargo_manifests = [
+        m for m in _all_cargo
+        if not any(o is not m and o.parent in m.parents for o in _all_cargo)
+    ]
+    if not cargo_manifests:
+        cprint(f"  {GREEN}No Rust crate (no Cargo.toml) -- skipped.{NC}")
+    elif shutil.which("cargo") is None:
+        cprint(f"  {YELLOW}WARNING: Rust crate(s) present but `cargo` not found -- Rust check SKIPPED locally.{NC}")
+        cprint(f"  {YELLOW}The build pipeline WILL run clippy+test; a green gate does NOT guarantee green CI")
+        cprint(f"  {YELLOW}for the Rust dimension. Install the Rust toolchain (rustup) for full parity.{NC}")
+    else:
+        for manifest in cargo_manifests:
+            rel = manifest.relative_to(root)
+            cl = subprocess.run(
+                ["cargo", "clippy", "--manifest-path", str(manifest),
+                 "--all-targets", "--", "-D", "warnings"],
+                cwd=str(root), timeout=900).returncode
+            if cl != 0:
+                cprint(f"  {RED}BLOCKED: cargo clippy found issues in {rel} (warnings denied).{NC}")
+                return 1
+            tt = subprocess.run(
+                ["cargo", "test", "--manifest-path", str(manifest)],
+                cwd=str(root), timeout=900).returncode
+            if tt != 0:
+                cprint(f"  {RED}BLOCKED: cargo test failed for {rel}.{NC}")
+                return 1
+        cprint(f"  {GREEN}Rust check passed ({len(cargo_manifests)} crate(s)).{NC}")
+
+    # Gate 2f: Shell lint (shellcheck) -- issue #175.
+    # Self-detecting: runs ONLY when the plugin ships shell scripts (*.sh / *.bash).
+    # No shell -> skip. Shell present but `shellcheck` absent -> WARN+skip (CI's
+    # Mega-Linter BASH_SHELLCHECK backstops); shellcheck ran + found issues -> BLOCK.
+    cprint(f"\n{BLUE}[G2f] Shell lint (shellcheck, issue #175)...{NC}")
+    _shell_scripts = [
+        s for s in list(root.rglob("*.sh")) + list(root.rglob("*.bash"))
+        if not any(part in _compiled_skip for part in s.relative_to(root).parts)
+    ]
+    if not _shell_scripts:
+        cprint(f"  {GREEN}No shell scripts -- skipped.{NC}")
+    elif shutil.which("shellcheck") is None:
+        cprint(f"  {YELLOW}WARNING: shell scripts present but `shellcheck` not found -- shell lint SKIPPED locally.{NC}")
+        cprint(f"  {YELLOW}CI's Mega-Linter (BASH_SHELLCHECK) WILL enforce it; green gate != green CI for shell.{NC}")
+    else:
+        sc = subprocess.run(
+            ["shellcheck", *[str(s) for s in sorted(_shell_scripts)]],
+            cwd=str(root), timeout=180).returncode
+        if sc != 0:
+            cprint(f"  {RED}BLOCKED: shellcheck found issues (parity with CI Mega-Linter BASH_SHELLCHECK).{NC}")
+            return 1
+        cprint(f"  {GREEN}Shell lint passed ({len(_shell_scripts)} script(s)).{NC}")
+
     # Gate 3: Validate via REMOTE CPV validator. MANDATORY — no skip, no exceptions.
     # CORNERSTONE: a plugin cannot be pushed unless validation passes with 0
     # blocking issues (WARNING allowed). The validator is ALWAYS fetched from
@@ -5057,6 +5123,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Recurse so a build-source submodule (the canonical "source in a separate
+          # repo" shape) is present to lint/test/build. No-op for an in-tree crate.
+          submodules: recursive
+      - name: Add clippy component
+        run: rustup component add clippy
+      - name: Clippy (deny warnings) - issue #175
+        run: cargo clippy --release --locked --all-targets -- -D warnings
+      - name: Test - issue #175
+        run: cargo test --locked
       - name: Build (host target)
         run: cargo build --release --locked
 
@@ -5082,6 +5158,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
       - name: Add Rust target
         run: rustup target add "${{ matrix.target }}"
       - name: Build
