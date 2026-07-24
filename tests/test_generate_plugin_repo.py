@@ -562,6 +562,79 @@ class TestPublishPyCornerstoneRule:
         assert "no exceptions" in src.lower()
 
 
+class TestPublishPyLanguageGatesIssue175:
+    """Issue #175 — the generated publish.py must carry SELF-DETECTING Rust + shell
+    gates so regeneration never silently drops a compiled/shell plugin's checks.
+
+    The gates are self-detecting at the generated plugin's runtime (they glob the
+    tree), so they are ALWAYS emitted: they no-op when the language is absent and
+    degrade to WARN+skip when the tool is absent (the build pipeline / CI backstops).
+    These assert on the TEMPLATE STRING — they do not execute cargo/shellcheck.
+    """
+
+    @staticmethod
+    def _gate_fn() -> str:
+        from generate_plugin_repo import gen_publish_py  # noqa: PLC0415
+
+        src = gen_publish_py(_default_params())
+        return src.split("def run_gate")[1].split("def stage_")[0]
+
+    def test_rust_gate_runs_clippy_deny_warnings_and_test(self):
+        """G2e must run cargo clippy -D warnings + cargo test on detected crates."""
+        g = self._gate_fn()
+        assert "[G2e]" in g, "Rust gate G2e missing"
+        assert '"cargo", "clippy"' in g
+        assert '"-D", "warnings"' in g, "clippy must deny warnings"
+        assert '"cargo", "test"' in g
+        assert 'rglob("Cargo.toml")' in g, "Rust gate must self-detect Cargo.toml"
+
+    def test_shell_gate_runs_shellcheck(self):
+        """G2f must run shellcheck on detected shell scripts."""
+        g = self._gate_fn()
+        assert "[G2f]" in g, "Shell gate G2f missing"
+        assert '"shellcheck"' in g
+        assert 'rglob("*.sh")' in g, "Shell gate must self-detect *.sh"
+
+    def test_gates_self_detect_and_skip_cleanly(self):
+        """Pure-Python plugin => both gates skip cleanly (no Cargo.toml / no *.sh)."""
+        g = self._gate_fn()
+        assert "No Rust crate" in g, "Rust gate must have a clean-skip branch"
+        assert "No shell scripts" in g, "Shell gate must have a clean-skip branch"
+
+    def test_gates_degrade_when_tool_absent(self):
+        """Language present but tool absent => WARN+skip, never a false block (CI backstops)."""
+        g = self._gate_fn()
+        assert 'shutil.which("cargo")' in g, "Rust gate must probe cargo"
+        assert 'shutil.which("shellcheck")' in g, "Shell gate must probe shellcheck"
+
+    def test_gates_block_on_a_real_failure(self):
+        """Tool ran and found issues => BLOCK (the other side of the two-sided gate)."""
+        g = self._gate_fn()
+        assert "BLOCKED: cargo clippy found issues" in g
+        assert "BLOCKED: cargo test failed" in g
+        assert "BLOCKED: shellcheck found issues" in g
+
+    def test_gates_ordered_after_mypy_before_validate(self):
+        """G2e/G2f must sit between G2d (mypy) and G3 (remote validate)."""
+        g = self._gate_fn()
+        i2d, i2e, i2f, i3 = g.find("[G2d]"), g.find("[G2e]"), g.find("[G2f]"), g.find("[G3]")
+        assert -1 < i2d < i2e < i2f < i3, "gate order must be G2d < G2e < G2f < G3"
+
+    def test_rust_gate_uses_top_level_manifest_filter(self):
+        """The Rust gate must run only top-level manifests (a workspace root covers members)."""
+        g = self._gate_fn()
+        assert "o.parent in m.parents" in g, "must filter nested member Cargo.toml"
+
+    def test_release_binaries_workflow_lints_and_tests_before_build(self):
+        """The release-binaries build workflow must clippy+test before build (issue #175)."""
+        from generate_plugin_repo import gen_release_binaries_yml  # noqa: PLC0415
+
+        rb = gen_release_binaries_yml(_default_params())
+        assert "cargo clippy --release --locked --all-targets -- -D warnings" in rb
+        assert "cargo test --locked" in rb
+        assert "submodules: recursive" in rb, "must recurse a build-source submodule"
+
+
 class TestTemplateGetOriginSlug:
     """Verify the template's _get_origin_slug URL parser handles common formats.
 
