@@ -171,9 +171,11 @@ class TestRcShipBinaryOnlyIssue175:
     """Issue #175 — RC-SHIP-BINARY-ONLY WARN (STRICT canon): a compiled component must
     ship ONLY the built binary in bin/; NO source or build libs may ship. Claude Code
     recursively fetches submodule CONTENT on install, so even a submodule pointer ships
-    its source — hence a build-source submodule WARNS, checkout-independent (via
-    .gitmodules). In-tree committed source also warns; a DEV/test submodule and a stray
-    example source (no build marker) do not."""
+    its source — hence a build-source submodule WARNS RC-SHIP-BINARY-ONLY,
+    checkout-independent (via .gitmodules); in-tree committed source also warns. Every
+    OTHER submodule (non-hinted source like engine/, or dev/test tooling like tests/,
+    docs/) ships its content too, so it draws the general RC-SUBMODULE-SHIPS advisory
+    (v3.9.0 FN close). A stray example source with no build marker draws neither."""
 
     @staticmethod
     def _warns(report):
@@ -254,6 +256,61 @@ class TestRcShipBinaryOnlyIssue175:
         (p / "snippet.rs").write_text("fn main() {}\n")
         report = ValidationReport()
         validate_cross_platform(p, report)
+        assert not any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
+
+    def test_nonhinted_source_submodule_warns_submodule_ships(self, tmp_path):
+        """FN close (v3.9.0): a NON-build-source-hinted submodule path (engine/) still ships
+        its content on install (CC recurses), so it draws RC-SUBMODULE-SHIPS — NOT the
+        build-source RC-SHIP-BINARY-ONLY, since `engine` is not a build-source hint. This is
+        the class the v3.8.0 hint-whitelist detector missed entirely."""
+        p = tmp_path / "engine-sub"
+        p.mkdir()
+        (p / ".gitmodules").write_text(
+            '[submodule "engine"]\n\tpath = engine\n\turl = https://example.com/x-engine.git\n'
+        )
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-SUBMODULE-SHIPS" in m and "engine" in m for m in self._warns(report))
+        assert not any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
+
+    def test_dev_submodule_warns_submodule_ships(self, tmp_path):
+        """FN close (v3.9.0): a DEV/test submodule (tests/) ships its content on install too,
+        so it now draws RC-SUBMODULE-SHIPS (it still must NOT draw the compiled-source
+        RC-SHIP-BINARY-ONLY — asserted separately in test_dev_submodule_does_not_warn)."""
+        p = tmp_path / "dev-sub-ships"
+        p.mkdir()
+        (p / ".gitmodules").write_text(
+            '[submodule "tests"]\n\tpath = tests\n\turl = https://example.com/x-tests.git\n'
+        )
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-SUBMODULE-SHIPS" in m and "tests" in m for m in self._warns(report))
+
+    def test_build_source_submodule_no_double_ships_warn(self, tmp_path):
+        """A build-source submodule (rust/) draws RC-SHIP-BINARY-ONLY but NOT the general
+        RC-SUBMODULE-SHIPS advisory — it is classified as build_source, not `other`, so the
+        author sees exactly one (the stronger, more specific) finding."""
+        p = tmp_path / "rust-sub-single"
+        p.mkdir()
+        (p / ".gitmodules").write_text(
+            '[submodule "rust"]\n\tpath = rust\n\turl = https://example.com/x-rust.git\n'
+        )
+        (p / "bin").mkdir()
+        (p / "bin" / "x-macos-arm64").write_bytes(b"\x00bin")
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
+        assert not any("RC-SUBMODULE-SHIPS" in m for m in self._warns(report))
+
+    def test_no_gitmodules_no_submodule_ships_warn(self, tmp_path):
+        """No .gitmodules at all => neither submodule finding (no false positive)."""
+        p = tmp_path / "no-sub"
+        p.mkdir()
+        (p / "bin").mkdir()
+        (p / "bin" / "x-macos-arm64").write_bytes(b"\x00bin")
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert not any("RC-SUBMODULE-SHIPS" in m for m in self._warns(report))
         assert not any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
 
 

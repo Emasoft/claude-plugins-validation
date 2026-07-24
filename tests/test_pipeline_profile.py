@@ -205,6 +205,35 @@ def test_dev_tests_submodule_is_not_submodule_build(tmp_path: Path) -> None:
     assert resolve_pipeline_profile(p) == "standard"
 
 
+def test_classify_submodules_partitions_build_source_and_other(tmp_path: Path) -> None:
+    """classify_submodules() → (build_source, other): `rust` is build-source; a non-hinted
+    source dir (`engine`) and a dev submodule (`docs`) land in `other` — both ship on
+    install (CC recurses), so neither is silently dropped (issue #175 FN close)."""
+    from cpv_pipeline_profile import classify_submodules, has_build_source_submodule
+
+    p = _mk_plugin(tmp_path, name="multi-sub")
+    (p / ".gitmodules").write_text(
+        '[submodule "rust"]\n\tpath = rust\n\turl = https://github.com/Emasoft/x-rust\n'
+        '[submodule "engine"]\n\tpath = engine\n\turl = https://github.com/Emasoft/x-engine\n'
+        '[submodule "docs"]\n\tpath = docs\n\turl = https://github.com/Emasoft/x-docs\n'
+    )
+    build_source, other = classify_submodules(p)
+    assert build_source == ["rust"]
+    assert sorted(other) == ["docs", "engine"]
+    # has_build_source_submodule delegates to classify_submodules — one classifier, same verdict.
+    assert has_build_source_submodule(p) is True
+
+
+def test_classify_submodules_no_gitmodules_is_empty(tmp_path: Path) -> None:
+    """No .gitmodules → both partitions empty (side-effect-free, FN-safe default)."""
+    from cpv_pipeline_profile import classify_submodules
+
+    p = _mk_plugin(tmp_path, name="no-sub")
+    build_source, other = classify_submodules(p)
+    assert build_source == []
+    assert other == []
+
+
 def test_empty_bin_dir_does_not_trip_submodule_build(tmp_path: Path) -> None:
     """A bin/ holding only hidden files (.gitkeep) is not a prebuilt-artifact dir."""
     from cpv_pipeline_profile import has_committed_bin_artifacts, is_submodule_build_shape
