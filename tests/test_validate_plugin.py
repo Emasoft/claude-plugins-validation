@@ -168,11 +168,12 @@ class TestValidateCrossPlatform:
 
 
 class TestRcShipBinaryOnlyIssue175:
-    """Issue #175 — RC-SHIP-BINARY-ONLY WARN: a compiled component must ship ONLY the
-    built binary; its compile source belongs in a SEPARATE repo (a git submodule
-    pointer), not committed in the plugin tree. Two-sided: in-tree source warns,
-    submodule source does not; the warn is gated on a REAL compiled component so a
-    stray example source file never trips it."""
+    """Issue #175 — RC-SHIP-BINARY-ONLY WARN (STRICT canon): a compiled component must
+    ship ONLY the built binary in bin/; NO source or build libs may ship. Claude Code
+    recursively fetches submodule CONTENT on install, so even a submodule pointer ships
+    its source — hence a build-source submodule WARNS, checkout-independent (via
+    .gitmodules). In-tree committed source also warns; a DEV/test submodule and a stray
+    example source (no build marker) do not."""
 
     @staticmethod
     def _warns(report):
@@ -190,14 +191,42 @@ class TestRcShipBinaryOnlyIssue175:
         validate_cross_platform(p, report)
         assert any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
 
-    def test_submodule_source_does_not_warn(self, tmp_path):
-        """Compile source under a git-submodule pointer (separate repo) is COMPLIANT."""
+    def test_submodule_source_ships_and_warns(self, tmp_path):
+        """STRICT: a build-source submodule ships its source on install (CC recurses
+        submodules), so it WARNS — a submodule pointer is NOT compliant."""
         p = tmp_path / "rust-submodule"
         (p / "rust" / "src").mkdir(parents=True)
         (p / "rust" / "src" / "lib.rs").write_text("pub fn f() -> i32 { 1 }\n")
         (p / "rust" / "Cargo.toml").write_text('[package]\nname = "x"\nversion = "0.1.0"\n')
         (p / ".gitmodules").write_text(
             '[submodule "rust"]\n\tpath = rust\n\turl = https://example.com/x-rust.git\n'
+        )
+        (p / "bin").mkdir()
+        (p / "bin" / "x-macos-arm64").write_bytes(b"\x00bin")
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-SHIP-BINARY-ONLY" in m and "submodule" in m for m in self._warns(report))
+
+    def test_gitmodules_build_submodule_pointer_only_warns(self, tmp_path):
+        """Checkout-independent: a .gitmodules build-source entry with NO checked-out
+        content (the source-repo case CPV actually validates) still WARNS."""
+        p = tmp_path / "pointer-only"
+        p.mkdir()
+        (p / ".gitmodules").write_text(
+            '[submodule "rust"]\n\tpath = rust\n\turl = https://example.com/x-rust.git\n'
+        )
+        (p / "bin").mkdir()
+        (p / "bin" / "x-macos-arm64").write_bytes(b"\x00bin")
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-SHIP-BINARY-ONLY" in m and "submodule" in m for m in self._warns(report))
+
+    def test_dev_submodule_does_not_warn(self, tmp_path):
+        """A DEV/test submodule (tests/, dev/) is NOT a build-source submodule => no warn."""
+        p = tmp_path / "dev-sub"
+        p.mkdir()
+        (p / ".gitmodules").write_text(
+            '[submodule "tests"]\n\tpath = tests\n\turl = https://example.com/x-tests.git\n'
         )
         (p / "bin").mkdir()
         (p / "bin" / "x-macos-arm64").write_bytes(b"\x00bin")

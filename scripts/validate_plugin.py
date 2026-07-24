@@ -3126,6 +3126,27 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
         if has_scripts:
             report.passed("All scripts use cross-platform languages")
 
+    # RC-SHIP-BINARY-ONLY (issue #175, strict canon): a build-source git submodule
+    # SHIPS its source on install — Claude Code recursively fetches submodule content,
+    # so a submodule pointer does NOT keep the source out of the installed plugin
+    # (verified empirically on a real submodule-build plugin). The canon: ship ONLY the
+    # built binary in bin/; keep compile source in a SEPARATE repo the build CI clones
+    # by pinned URL/tag (NOT a submodule), or make the binary a separate binary-carrier
+    # plugin. Checkout-independent — reads .gitmodules — so it fires even when CPV
+    # validates a source repo where the submodule is a bare pointer. Advisory (WARN)
+    # until the generator auto-migrates the shape.
+    from cpv_pipeline_profile import has_build_source_submodule  # noqa: PLC0415
+
+    if has_build_source_submodule(plugin_root):
+        report.warning(
+            "RC-SHIP-BINARY-ONLY: the plugin links a build-source git submodule in "
+            ".gitmodules. Claude Code recursively fetches submodule CONTENT on install, so the "
+            "compile source ships to every user's machine — a submodule pointer does NOT exclude "
+            "it. Ship ONLY the built binary in bin/: keep the source in a SEPARATE repository the "
+            "build CI clones by pinned URL/tag (do not link it as a submodule), or make the "
+            "binary a separate binary-carrier plugin."
+        )
+
     # --- 2. Check compiled source code has binaries or build script ---
     if compiled_source_files:
         # Search for bin/ directories recursively, skip gitignored paths
@@ -3141,11 +3162,11 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
         # genuinely compile-required plugin still WARNs.
         ships_release_binaries = _has_release_asset_installer(plugin_root)
 
-        # RC-SHIP-BINARY-ONLY (issue #175): compile source belongs in a SEPARATE
-        # repo (a git submodule pointer), not committed in the plugin tree — the
-        # installed plugin ships only the built binary. Source UNDER a build-source
-        # submodule path is a separate repo => COMPLIANT; source committed directly
-        # in-tree => WARN with the fix. Compute the submodule paths once.
+        # RC-SHIP-BINARY-ONLY (issue #175, strict canon): compile source committed as
+        # regular files in the plugin tree ships directly. Source checked out UNDER a
+        # build-source submodule is already covered by the separate build-source-submodule
+        # WARN above (that submodule ships its content on install), so exclude those paths
+        # here to avoid a double warning. Compute the submodule paths once.
         from cpv_pipeline_profile import _gitmodules_submodule_paths  # noqa: PLC0415
 
         _submodule_paths = _gitmodules_submodule_paths(plugin_root)
@@ -3234,23 +3255,22 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
                 )
 
             # RC-SHIP-BINARY-ONLY (issue #175, WARN phase of warn -> migrate -> block):
-            # compile source that ships as COMMITTED files in the plugin tree (NOT in a
-            # build-source submodule pointing at a separate repo) violates the
-            # compiled-component canon — the installed plugin should ship ONLY the built
-            # binary. Gated on a real compiled component (a build system or a shipped
-            # binary) so a stray example source file never trips it. Source under a
-            # submodule = a separate repo = COMPLIANT (no warn). Advisory until the
-            # generator can auto-migrate the shape (then it escalates to blocking).
+            # compile source committed as regular files in the plugin tree ships directly
+            # to every user — the installed plugin should ship ONLY the built binary.
+            # Gated on a real compiled component (a build system or a shipped binary) so a
+            # stray example source file never trips it. Source checked out under a build-
+            # source submodule is covered by the submodule WARN above (excluded here to
+            # avoid a double warning). Advisory until the generator can auto-migrate.
             _in_tree_src = [rel for rel in source_paths if not _path_under_submodule(rel)]
             if _in_tree_src and (has_bin or has_build_system or has_build_script):
                 report.warning(
                     f"RC-SHIP-BINARY-ONLY: {len(_in_tree_src)} {lang_name} compile-source file(s) ship "
                     f"as committed files in the plugin tree (e.g. {_in_tree_src[0]}). Per the "
                     f"compiled-component canon, the installed plugin should ship ONLY the built binary "
-                    f"(bin/) — move the compile source to a SEPARATE repository referenced by a git "
-                    f"submodule pointer (source and build artifacts then never ship), or make the binary "
-                    f"a separate binary-carrier plugin. Build the binary in CI (clippy/deny-warnings + "
-                    f"tests); commit only the binary."
+                    f"(bin/) — move the compile source to a SEPARATE repository the build CI clones by "
+                    f"pinned URL/tag (do NOT link it as a submodule — Claude Code ships submodule "
+                    f"content on install), or make the binary a separate binary-carrier plugin. Build "
+                    f"the binary in CI (clippy/deny-warnings + tests); commit only the binary."
                 )
 
     # --- 3. Check compiled binaries platform coverage ---
