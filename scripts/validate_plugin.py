@@ -3135,9 +3135,10 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
     # plugin. Checkout-independent — reads .gitmodules — so it fires even when CPV
     # validates a source repo where the submodule is a bare pointer. Advisory (WARN)
     # until the generator auto-migrates the shape.
-    from cpv_pipeline_profile import has_build_source_submodule  # noqa: PLC0415
+    from cpv_pipeline_profile import classify_submodules  # noqa: PLC0415
 
-    if has_build_source_submodule(plugin_root):
+    _build_source_subs, _other_subs = classify_submodules(plugin_root)
+    if _build_source_subs:
         report.warning(
             "RC-SHIP-BINARY-ONLY: the plugin links a build-source git submodule in "
             ".gitmodules. Claude Code recursively fetches submodule CONTENT on install, so the "
@@ -3145,6 +3146,25 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
             "it. Ship ONLY the built binary in bin/: keep the source in a SEPARATE repository the "
             "build CI clones by pinned URL/tag (do not link it as a submodule), or make the "
             "binary a separate binary-carrier plugin."
+        )
+    if _other_subs:
+        # RC-SUBMODULE-SHIPS (issue #175): a submodule whose leading path segment is NOT a
+        # build-source hint STILL ships its content on install — non-hinted source dirs
+        # (engine/, compiler/, a repo-named crate) AND dev/test tooling (tests/, docs/,
+        # examples/) alike. The v3.8.0 detector only fired for the build-source-hint
+        # whitelist, so every other submodule drew ZERO finding despite CC shipping its
+        # files. This general advisory closes that false negative. WHY separate from
+        # RC-SHIP-BINARY-ONLY: the message differs — this is "confirm this content is meant
+        # to ship", not the compiled-source "ship only the binary" canon.
+        _ex = _other_subs[0]
+        report.warning(
+            f"RC-SUBMODULE-SHIPS: the plugin links {len(_other_subs)} non-build-source git "
+            f"submodule(s) in .gitmodules (e.g. {_ex}). Claude Code recursively fetches submodule "
+            f"CONTENT on install, so every file in these submodules ships to every user's machine "
+            f"— a submodule pointer does NOT keep the content out. Confirm this content is intended "
+            f"to be distributed and is safe. If it is build/dev/test tooling (docs, tests, "
+            f"examples) or non-hinted compile source, it need not ship: reference it out-of-tree "
+            f"(the build CI clones it by pinned URL/tag) instead of linking a submodule."
         )
 
     # --- 2. Check compiled source code has binaries or build script ---

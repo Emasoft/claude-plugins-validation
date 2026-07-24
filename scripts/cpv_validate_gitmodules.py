@@ -2,14 +2,24 @@
 """TRDD-793ac32a — `.gitmodules` URL allowlist validator.
 
 PSS (perfect-skill-suggester) demonstrated the submodule pattern that
-TRDD-793ac32a adopts: dev-only artefacts live in a git submodule that
-Claude Code's shallow-clone install does NOT recurse into. The pattern
-saves megabytes per install, but it has a security gap PSS doesn't
-defend against: **`.gitmodules` URL tampering**.
+TRDD-793ac32a originally adopted: dev-only artefacts in a git submodule.
+The pattern was believed to save megabytes per install AND to keep the
+submodule URL off end-user machines — but BOTH halves are now known to
+be FALSE. Claude Code recursively fetches submodule CONTENT on install
+(verified empirically on PSS 3.10.8 — the installed `rust/` submodule
+shipped its full source tree). So the submodule's URL IS resolved and
+its content IS cloned onto every user's machine at install time. This
+module's URL allowlist therefore protects the END USER too, not only
+the dev/CI supply chain — a tampered `.gitmodules` URL would otherwise
+be cloned onto every installer's machine (issue #175). The core defence
+against `.gitmodules` URL tampering is unchanged; only its rationale is
+corrected here.
 
-Attack surface (per TRDD-793ac32a §2.2):
-    1. End user — SAFE. Claude Code never recurses into submodules at
-       install time, so the URL is never resolved on the user's machine.
+Attack surface (per TRDD-793ac32a §2.2, corrected for Claude Code's
+actual install-time submodule recursion):
+    1. End user — AT RISK. Claude Code recurses submodules at install
+       time, so a tampered URL is resolved and its content cloned onto
+       the user's machine. The allowlist below is the end-user's guard.
     2. Developer — HIGH risk. `git submodule update --init` clones from
        whatever URL `.gitmodules` declares, with no built-in allowlist.
     3. CI runner — HIGH risk. `actions/checkout@v6` with

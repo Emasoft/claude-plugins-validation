@@ -218,23 +218,52 @@ def _gitmodules_submodule_paths(plugin_root: Path) -> list[str]:
     return paths
 
 
-def has_build_source_submodule(plugin_root: Path) -> bool:
-    """True iff the plugin registers a BUILD-SOURCE submodule in `.gitmodules`.
+def classify_submodules(plugin_root: Path) -> tuple[list[str], list[str]]:
+    """Partition the plugin's `.gitmodules` entries into (build_source, other).
 
-    Distinguishes a build-source submodule (e.g. `rust/`, `src/`) from a
-    strip-dev-parts DEV submodule (e.g. `dev/tests/`). The leading path segment
-    must be a build-source hint AND must not be a dev hint. A submodule whose
-    leading segment is a dev hint (tests/dev/docs) never counts.
+    Claude Code recursively fetches submodule CONTENT on install (verified
+    empirically on a real submodule-build plugin), so EVERY submodule's files
+    ship to every user's machine — a submodule pointer excludes nothing. This
+    split drives the two ship-only-binary findings (issue #175):
+
+    * ``build_source`` — leading path segment is a build-source hint
+      (rust/src/go/...) and not a dev hint. Gets the strong RC-SHIP-BINARY-ONLY
+      canon ("ship only the built binary in bin/").
+    * ``other`` — every remaining submodule: non-hinted source paths
+      (``engine/``, ``compiler/``, a repo-named ``pss-rust-engine/``) AND
+      dev/test tooling (``tests/``, ``docs/``, ``examples/``). Its content ships
+      too, so it gets the general RC-SUBMODULE-SHIPS advisory.
+
+    FN-safe: an unrecognized path lands in ``other`` (advised), never silently
+    dropped — this is exactly what closes the v3.8.0 hint-whitelist gap where a
+    non-hinted source submodule or a dev submodule drew zero finding.
     """
+    build_source: list[str] = []
+    other: list[str] = []
     for sub_path in _gitmodules_submodule_paths(plugin_root):
         if not sub_path:
             continue
         head = sub_path.split("/", 1)[0].lower()
-        if head in _DEV_SUBMODULE_HINTS:
-            continue
-        if head in _BUILD_SOURCE_SUBMODULE_HINTS:
-            return True
-    return False
+        # Dev hints and build-source hints are disjoint sets; the explicit
+        # `not in _DEV_SUBMODULE_HINTS` guard keeps the invariant defensive
+        # even if the two sets ever gain an overlapping entry.
+        if head in _BUILD_SOURCE_SUBMODULE_HINTS and head not in _DEV_SUBMODULE_HINTS:
+            build_source.append(sub_path)
+        else:
+            other.append(sub_path)
+    return build_source, other
+
+
+def has_build_source_submodule(plugin_root: Path) -> bool:
+    """True iff the plugin registers a BUILD-SOURCE submodule in `.gitmodules`.
+
+    A build-source submodule (e.g. `rust/`, `src/`) is distinct from a
+    strip-dev-parts DEV submodule (e.g. `dev/tests/`): the leading path segment
+    must be a build-source hint AND not a dev hint. Thin wrapper over
+    :func:`classify_submodules` so the head-classification lives in ONE place.
+    """
+    build_source, _ = classify_submodules(plugin_root)
+    return bool(build_source)
 
 
 def has_committed_bin_artifacts(plugin_root: Path) -> bool:
