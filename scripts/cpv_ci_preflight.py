@@ -803,12 +803,36 @@ def _argv_bandit(tool_bin: str, root: Path) -> list[str]:
 
 
 def _shell_script_paths(root: Path) -> list[str]:
-    """Return the plugin-relative `*.sh`/`*.bash` paths shellcheck/shfmt lint."""
+    """Return the plugin-relative `*.sh`/`*.bash` paths shellcheck/shfmt lint.
+
+    Skips genuinely-unshipped paths — gitignored AND untracked (issue #176). A
+    CI checkout of the published artifact never contains those files (e.g. a
+    `.gitignore`d `downloads_dev/*.sh`), so linting them locally is a parity bug:
+    CI would never see them, yet the local preflight FAILs on them. Uses
+    `gitignored_unshipped_paths` (git-accurate) so a TRACKED+gitignored file —
+    which still ships in the git archive — is NOT skipped and stays linted; and
+    when git is unavailable nothing is skipped on gitignore grounds (the present
+    tree IS the artifact).
+    """
+    try:
+        from cpv_validation_common import (  # noqa: PLC0415
+            gitignored_unshipped_paths,
+            path_is_unshipped,
+        )
+
+        unshipped: set[str] | None = gitignored_unshipped_paths(root)
+    except ImportError:
+        unshipped = None
+        path_is_unshipped = None  # type: ignore[assignment]
     paths: list[str] = []
     for pat in ("*.sh", "*.bash"):
         for p in sorted(root.rglob(pat)):
-            if p.is_file():
-                paths.append(str(p.relative_to(root)))
+            if not p.is_file():
+                continue
+            rel_posix = p.relative_to(root).as_posix()
+            if unshipped is not None and path_is_unshipped is not None and path_is_unshipped(rel_posix, unshipped):
+                continue
+            paths.append(str(p.relative_to(root)))
     return paths
 
 
