@@ -84,9 +84,12 @@ _FORBIDDEN_CHARS_RE = re.compile(r"[\\\n\r]")
 
 # The default allowlist applied when `cpv.strip.allowed_submodule_urls`
 # is absent and `cpv.strip.require_url_allowlist` is True (the default).
-# Rule: same owner as parent repo OR `Emasoft` (transitional shared-dev
-# repos). Per TRDD-793ac32a §2.2.
-_DEFAULT_TRANSITIONAL_OWNER: str = "Emasoft"
+# Rule: SAME OWNER as the parent repo ONLY. A universal validator carries no
+# personal/vendor carve-out — a hardcoded owner would let ANY third-party plugin
+# allowlist that owner's submodule URLs (a supply-chain hole). Cross-owner
+# submodules must be declared explicitly in `cpv.strip.allowed_submodule_urls`.
+# Per TRDD-793ac32a §2.2, hardened: the former `OR Emasoft` transitional carve-out
+# was removed as a universal-validator leak (issue #175 follow-up).
 
 
 # ── Data classes ───────────────────────────────────────────────────────────────
@@ -315,7 +318,7 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
         explicit_allowlist = None
     require_allowlist = strip.get("require_url_allowlist", True)
 
-    # Default rule: same owner as parent OR `Emasoft`. Computed lazily
+    # Default rule: same owner as the parent repo only. Computed lazily
     # because reading `git config remote.origin.url` is one fork.
     parent_owner: str | None = None
     parent_owner_loaded: bool = False
@@ -364,7 +367,7 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
                 )
                 continue
         elif require_allowlist:
-            # Default rule: parent owner or Emasoft.
+            # Default rule: parent repo owner only.
             if not parent_owner_loaded:
                 parent_owner = _read_remote_owner(plugin_root)
                 parent_owner_loaded = True
@@ -379,7 +382,7 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
                         path=path,
                         message=(
                             f"Submodule URL '{url}' is not GitHub-shaped; the "
-                            "default allowlist rule (same-owner OR Emasoft) "
+                            "default allowlist rule (same-owner-only) "
                             "cannot evaluate it. Add an explicit "
                             "`cpv.strip.allowed_submodule_urls` entry, OR set "
                             "`require_url_allowlist=false` to opt out."
@@ -387,7 +390,7 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
                     )
                 )
                 continue
-            if url_owner != parent_owner and url_owner != _DEFAULT_TRANSITIONAL_OWNER:
+            if url_owner != parent_owner:
                 findings.append(
                     GitmodulesFinding(
                         severity="CRITICAL",
@@ -396,10 +399,9 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
                         url=url,
                         path=path,
                         message=(
-                            f"Submodule URL '{url}' owner '{url_owner}' is not "
-                            f"the parent owner ('{parent_owner}') and not the "
-                            f"transitional default ('{_DEFAULT_TRANSITIONAL_OWNER}'). "
-                            f"Add it to `cpv.strip.allowed_submodule_urls`."
+                            f"Submodule URL '{url}' owner '{url_owner}' is not the "
+                            f"parent repo owner ('{parent_owner}'). Declare it in "
+                            f"`cpv.strip.allowed_submodule_urls` to allow a cross-owner submodule."
                         ),
                     )
                 )

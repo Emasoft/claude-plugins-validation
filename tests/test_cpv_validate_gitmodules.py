@@ -223,8 +223,9 @@ def test_validate_gitmodules_rejects_file_scheme(tmp_path):
     assert any(f.code == "STRIP-G010" for f in findings)
 
 
-def test_validate_gitmodules_default_rule_accepts_emasoft(tmp_path, monkeypatch):
-    # No explicit allowlist; default rule kicks in. Stub remote owner.
+def test_validate_gitmodules_default_rule_accepts_same_owner(tmp_path, monkeypatch):
+    # No explicit allowlist; default rule (same-owner-only) kicks in. The submodule
+    # owner equals the parent repo owner, so it is accepted — no personal carve-out.
     monkeypatch.setattr(cvg, "_read_remote_owner", lambda root: "Emasoft")
     plugin = _make_plugin(
         tmp_path,
@@ -246,6 +247,24 @@ def test_validate_gitmodules_default_rule_rejects_alien(tmp_path, monkeypatch):
 [submodule "tests"]
 \tpath = dev/tests
 \turl = https://github.com/attacker/x.git
+""",
+    )
+    findings = cvg.validate_gitmodules(plugin)
+    assert any(f.code == "STRIP-G013" for f in findings)
+
+
+def test_validate_gitmodules_default_rule_rejects_cross_owner_no_carveout(tmp_path, monkeypatch):
+    # Regression for the removed `OR Emasoft` carve-out (issue #175 follow-up): on a
+    # THIRD-PARTY plugin (parent owner != Emasoft), an Emasoft-owned submodule URL must
+    # be REJECTED by the same-owner-only default rule. Under the old carve-out this
+    # returned findings == []; a universal validator must carry no personal allowlist.
+    monkeypatch.setattr(cvg, "_read_remote_owner", lambda root: "acme")
+    plugin = _make_plugin(
+        tmp_path,
+        gitmodules_text="""\
+[submodule "tests"]
+\tpath = dev/tests
+\turl = https://github.com/Emasoft/demo-tests.git
 """,
     )
     findings = cvg.validate_gitmodules(plugin)
