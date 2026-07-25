@@ -1,6 +1,6 @@
 {
   "name": "claude-plugins-validation",
-  "version": "3.18.0",
+  "version": "3.19.0",
   "description": "Comprehensive validation, management, and standardization suite for Claude Code plugins and marketplaces. Includes 190+ validation rules, plugin lifecycle management, marketplace operations, health checks, security auditing, GitHub repo validation, plugin/marketplace repo scaffolding, and standardization tooling. Features severity hierarchy, --strict mode, language-aware token estimation, and universal plugin/marketplace templates.",
   "author": {
     "name": "Emasoft",
