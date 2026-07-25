@@ -846,10 +846,34 @@ def _is_shell_literal_arg_cmdsub(line: str, match: str) -> bool:
 
 # r08 sangrokjung FP iter1 (2026-05-28) — write-intent tokens for
 # FS_WRITE rule. Real file writes carry a redirect/copy/tee token.
+#
+# Issue #177 (2026-07-25) — the symlink / in-place-editor / truncate /
+# Python-file-object write verbs were MISSING from this set, so a GENUINE
+# dotfile write (``ln -sf /evil/rc ~/.zshrc``, ``sed -i '' … ~/.zshrc``,
+# ``truncate -s 0 ~/.zshrc``, ``python -c "open('~/.zshrc','w')"``) carried
+# no recognised write-intent token and was demoted to ``info`` in shell
+# scripts — a measured, pre-existing FALSE NEGATIVE. They are added HERE,
+# in the ONE source of truth, because the markdown classifier now reuses
+# this same predicate for bash fences: a second copy of the regex would
+# drift and silently re-open the gap on one side.
+#
+# ReDoS-safe by construction: every added alternative is either a plain
+# literal/word token or uses a BOUNDED negated class with no nested
+# quantifier.
 _WRITE_INTENT_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:>>?|tee\b|cp\b|mv\b|install\b|dd\s+of=|rsync\b|touch\b|"
     r"chmod\s+(?:[ugoa]?[+\-=][rwxst]+|\d{3,4})|"
-    r"chown\b|chgrp\b)"
+    r"chown\b|chgrp\b|"
+    # symlink creation replaces the target path; truncate empties it.
+    r"\bln\b|\btruncate\b|"
+    # in-place stream editors: ``sed -i`` / ``sed -i.bak`` / ``sed -ri`` /
+    # ``perl -pi -e``. The negated class stops at a command separator so a
+    # LATER command on the same line cannot lend its ``-i`` flag to sed.
+    r"\b(?:sed|perl)\b[^\n;&|]{0,60}\s-[A-Za-z]{0,8}i\b|--in-place\b|"
+    # Python file-object writes, reachable from a shell fence via
+    # ``python -c``. Write modes only — a bare ``'r'`` / ``'rb'`` is a read.
+    r"\bopen\s*\([^)\n]{0,200}['\"](?:[wax][btx+]*|r\+[bt]*)['\"]|"
+    r"\bwrite_(?:text|bytes)\s*\()"
 )
 
 

@@ -426,14 +426,14 @@
       "name": "MCP schema poisoning",
       "description": "Tool description or schema contains hidden instructions that manipulate the calling agent — a form of indirect prompt injection via the tool manifest itself",
       "patterns": [
-        "description.{0,80}(?:ignore|disregard|override).{0,80}(?:previous|prior|other)",
+        "description.{0,80}(?:ignore|disregard|override).{0,80}\\b(?:previous|prior|other)\\s+(?:[\\w'-]+\\s+){0,3}(?:instruction|prompt|tool|rule|guideline|guardrail|constraint|restriction|directive|direction|command|message|context|conversation|agent|server|system|persona|polic(?:y|ies)|role|turn|schema|safety|guidance|memor(?:y|ies)|history|skill|mcp|text|content)s?\\b",
         "description.{0,80}(?:you must|you should|always|never).{0,80}(?:send|post|forward|include)",
         "description.{0,80}(?:do not|never).{0,80}(?:tell|inform|show|reveal).{0,40}(?:user|human)",
         "description.{0,80}(?:secretly|silently|quietly|covertly)\\s+(?:\\w+\\s+){0,4}(?:send|post|log|record|forward)",
         "description.{0,80}(?:include|attach|append|add).{0,40}(?:all|every).{0,40}(?:conversation|message|context|history)",
         "inputSchema.{0,80}description.{0,80}(?:ignore|override|always include)"
       ],
-      "remediation": "Tool descriptions must only describe what the tool does. Remove all hidden instructions (\"ignore previous\", \"secretly send\", \"do not tell the user\"). Schema descriptions should be factual, not manipulative. NOTE: patterns now use bounded `.{0,N}` spans instead of greedy `.*` to prevent FPs on long legitimate descriptions that happen to contain a sneaky-adverb and an unrelated action verb within the same paragraph; and `without` was removed from the sneaky-adverb set because it is neutral (`without re-flashing, tail device logs` is benign)."
+      "remediation": "Tool descriptions must only describe what the tool does. Remove all hidden instructions (\"ignore previous\", \"secretly send\", \"do not tell the user\"). Schema descriptions should be factual, not manipulative. NOTE: patterns now use bounded `.{0,N}` spans instead of greedy `.*` to prevent FPs on long legitimate descriptions that happen to contain a sneaky-adverb and an unrelated action verb within the same paragraph; and `without` was removed from the sneaky-adverb set because it is neutral (`without re-flashing, tail device logs` is benign). NOTE (issue #178): the first pattern additionally requires an OBJECT NOUN after the determiner (`previous|prior|other`) and word-boundary-anchors both ends. `previous`/`prior`/`other` are ordinary English determiners, so the bare form matched benign prose such as `... ignored maintenance mode ... had no effect on the other daemon ...`; and the unanchored determiner matched INSIDE a word (`an-other` in `overrides ... to impersonate another agent`). A poison directive must name what the agent should ignore, so requiring the object noun is FN-safe for this rule's threat class: measured across the whole plugin corpus the narrowing loses only the catalog's own self-referential text and the two FP shapes above, and keeps every genuine `ignore previous instructions` / `ignore other tools instructions` match. Up to 3 intervening modifier words are allowed (`ignore all previous user-supplied instructions`)."
     },
     {
       "id": "ENV_RECON",
