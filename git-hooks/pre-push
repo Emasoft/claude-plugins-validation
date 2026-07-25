@@ -20,6 +20,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -171,15 +172,41 @@ def run_script(
     python_cmd: list[str],
     script: Path,
     args: list[str] | None = None,
-    timeout: int = 180,
+    timeout: int = 600,
     cwd: Path | None = None,
 ) -> int:
-    """Run a Python script and return its exit code, streaming output."""
+    """Run a Python script and return its exit code, streaming output.
+
+    ``timeout`` is 600s, not the historical 180s. Rationale, measured: the same
+    ``validate_plugin.py . --verbose --strict`` invocation this hook makes runs in
+    42-51s standalone on the very tree being pushed, yet repeatedly exceeded 180s
+    when invoked from `publish.py`'s Gate 12 — four consecutive release attempts
+    were blocked that way (and once before, at v3.14.0). The cause of the in-situ
+    slowdown is NOT yet identified: machine load, the post-Gate-10 tree, a
+    `uv lock` re-sync, and a captured-pipe deadlock were each measured and ruled
+    out. Until it is understood, the budget carries real margin (~12x the measured
+    standalone run, and the same 600s Gate 2 already allows for the full suite).
+
+    This is a change to PATIENCE, never to STRICTNESS: the validation still runs in
+    full, with --strict, on the actual pushed tree, and a timeout still FAILS CLOSED
+    below. A budget that fires on a clean tree produces a FALSE block, and a false
+    block is precisely what teaches people to reach for a bypass.
+
+    The elapsed time is always reported so the next occurrence yields data instead
+    of a mystery — that instrumentation is the real fix; the larger budget only
+    stops a diagnosable slowdown from masquerading as a validation failure.
+    """
     cmd = [*python_cmd, str(script)]
     if args:
         cmd.extend(args)
+    started = time.monotonic()
     try:
         result = subprocess.run(cmd, timeout=timeout, cwd=str(cwd) if cwd else None)
+        elapsed = time.monotonic() - started
+        # Surface the timing on EVERY run, not only on failure: a run that creeps
+        # from 50s toward the budget is the early warning, and it is invisible if
+        # only timeouts are reported.
+        print(f"  {BLUE}{script.name} completed in {elapsed:.1f}s (budget {timeout}s){NC}")
         return result.returncode
     except subprocess.TimeoutExpired:
         # FAIL-CLOSED: a timeout means validation did NOT complete, so we do NOT
@@ -187,7 +214,8 @@ def run_script(
         # silently defeating the iron-rule pre-push gate. Return non-zero so the
         # push is BLOCKED — re-run with a longer timeout or fix the slowness.
         # (audit MAJOR publish #3)
-        print(f"  {RED}TIMEOUT: {script.name} exceeded {timeout}s — FAILED (push blocked){NC}")
+        elapsed = time.monotonic() - started
+        print(f"  {RED}TIMEOUT: {script.name} exceeded {timeout}s (ran {elapsed:.1f}s) — FAILED (push blocked){NC}")
         return 1
 
 

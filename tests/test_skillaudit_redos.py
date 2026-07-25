@@ -137,13 +137,23 @@ class TestSkillauditReDoS:
                 """
                 line = "request " + "admin full access permission from via " * 1000 + "ZZZ"
                 content = "# doc\\n" + line + "\\nmore\\n"
-                t0 = time.perf_counter()
+                t0 = time.process_time()
                 sa.scan_content(content, "evil.md")
-                dt = time.perf_counter() - t0
+                dt = time.process_time() - t0
                 # Bounded fallback finishes in a fraction of a second locally;
                 # assert a per-scan ceiling well below the subprocess budget so
                 # an in-process slowdown is caught before the OS timeout fires.
-                assert dt < 10.0, f"A2A no-re2 scan not bounded: {dt:.3f}s"
+                #
+                # CPU time (process_time), NOT wall clock (perf_counter): catastrophic
+                # backtracking BURNS CPU, so CPU time still catches it, while wall clock
+                # also counts time this process spent descheduled. Under `pytest -n auto`
+                # every core is busy, and this assertion failed at 11.356s wall for a scan
+                # that takes ~1.3s standalone — a false ReDoS report caused purely by
+                # contention. A true hang is still caught: the harness kills the child on
+                # an OS-level WALL-clock budget (see _run_no_re2_scan), which is the right
+                # place for that check because a C-level regex hang cannot be preempted
+                # in-process. Do not "fix" this back to perf_counter.
+                assert dt < 10.0, f"A2A no-re2 scan not CPU-bounded: {dt:.3f}s CPU"
                 """
             )
         )
@@ -159,9 +169,9 @@ class TestSkillauditReDoS:
                 """
                 line = "wget " + "redirect follow manual proxy " * 1500 + "ZZZ"
                 content = line + "\\n"
-                t0 = time.perf_counter()
+                t0 = time.process_time()
                 sa.scan_content(content, "evil.js")
-                dt = time.perf_counter() - t0
+                dt = time.process_time() - t0
                 assert dt < 10.0, f"generic no-re2 scan not bounded: {dt:.3f}s"
                 """
             )
@@ -178,9 +188,9 @@ class TestSkillauditReDoS:
             textwrap.dedent(
                 """
                 content = "x" * 1_000_000 + "\\n"
-                t0 = time.perf_counter()
+                t0 = time.process_time()
                 sa.scan_content(content, "big.txt")
-                dt = time.perf_counter() - t0
+                dt = time.process_time() - t0
                 assert dt < 10.0, f"1 MB no-re2 scan not bounded (possible hang regression): {dt:.3f}s"
                 """
             )
@@ -202,9 +212,9 @@ class TestSkillauditReDoS:
             ("x" * 1_000_000 + "\n", "big.txt"),
         ]
         for content, name in cases:
-            t0 = time.perf_counter()
+            t0 = time.process_time()
             sa.scan_content(content, name)
-            elapsed = time.perf_counter() - t0
+            elapsed = time.process_time() - t0
             assert elapsed < 10.0, f"{name}: not bounded with installed engine: {elapsed:.3f}s"
 
     def test_bounded_span_preserves_true_positive(self) -> None:
@@ -246,9 +256,9 @@ class TestSkillauditReDoS:
                 # (send|post|upload|forward|transmit) verb -> maximal backtrack.
                 line = "read " + "the .env config value here " * 10000 + "ZZZ"
                 content = "# doc\\n" + line + "\\nmore\\n"
-                t0 = time.perf_counter()
+                t0 = time.process_time()
                 sa.scan_content(content, "evil.md")
-                dt = time.perf_counter() - t0
+                dt = time.process_time() - t0
                 assert dt < 10.0, f"_analyze_intent no-re2 scan not bounded: {dt:.3f}s"
                 """
             )
