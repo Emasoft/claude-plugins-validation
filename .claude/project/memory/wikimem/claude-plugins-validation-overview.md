@@ -37,6 +37,9 @@ CPV, and the plugin's own tests before anything is pushed.
 
 ## Parts map
 
+- [[prose-vs-executable-intent-canon]] — when a security rule fires on documentation
+  prose: narrow the matcher on a property of the TEXT; never by path exclusion, severity
+  re-tier, or grammatical voice. Includes the measure-co-firing-coverage discipline.
 - [[agent-prompt-cache-and-context-economy]] — how the prompt cache actually works
   (prefix cache over `tools → system → messages`), what `skills:` frontmatter really
   injects, and which "cache optimizations" are folklore.
