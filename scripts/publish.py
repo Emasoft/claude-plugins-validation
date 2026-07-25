@@ -1007,14 +1007,31 @@ def stage_bypass_guard() -> int:
 
     Documented infrastructure exemptions — these are READ-ONLY overrides
     used by CPV's own subsystems and never skip a publish gate:
-        * ``CPV_SKIP_GITHUB_INTEGRITY=1`` — bypasses the GitHub-anchored
-          integrity check inside cpv_integrity.py (set by publish.py
+        * ``PLUGIN_SKIP_GITHUB_INTEGRITY=1`` — bypasses the GitHub-anchored
+          integrity check inside the hash-verify module (set by publish.py
           itself for the test-fixture publish path).
+        * ``CPV_SKIP_GITHUB_INTEGRITY=1`` — the LEGACY spelling of the same
+          override, still honoured (deprecated, TRDD-bbff5bc5).
         * ``CPV_SKIP_GH_AUTH_CHECK=1`` — bypasses the ``gh auth status``
           round-trip in _ensure_gh_auth on flaky networks. Auth still
           has to work for the real `git push` / `gh release create`.
+
+    The ``PLUGIN_`` spelling MUST be exempt alongside the legacy one:
+    ``_plugin_verify_hashes`` renamed the var to ``PLUGIN_SKIP_GITHUB_INTEGRITY``
+    and tells users to export it, but ``PLUGIN_SKIP_`` is a forbidden PREFIX
+    here — so before this exemption, following the module's own deprecation
+    notice aborted the publish with a "Bypass attempt detected" error. This
+    grants NO new capability: the identical override is already exempt under
+    its legacy name, so this only makes the documented migration path work.
+    Note there is deliberately no ``PLUGIN_SKIP_GH_AUTH_CHECK`` exemption —
+    that var does not exist anywhere in the codebase, and exempting a
+    non-existent name would widen the bypass surface for nothing.
     """
-    exemptions = {"CPV_SKIP_GITHUB_INTEGRITY", "CPV_SKIP_GH_AUTH_CHECK"}
+    exemptions = {
+        "PLUGIN_SKIP_GITHUB_INTEGRITY",
+        "CPV_SKIP_GITHUB_INTEGRITY",
+        "CPV_SKIP_GH_AUTH_CHECK",
+    }
     forbidden_prefixes = (
         "PLUGIN_SKIP_",
         "PLUGIN_FORCE_",
