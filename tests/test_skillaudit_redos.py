@@ -44,12 +44,25 @@ if str(scripts_dir) not in sys.path:
 
 import cpv_skillaudit_native as sa  # noqa: E402
 
-# Generous wall-clock budget for the no-re2 child. The bounded fallback scans
-# the pathological inputs in well under a second locally; this ceiling is large
-# enough to absorb a slow/loaded CI runner yet tiny next to a true hang
-# (minutes / infinite), so it cleanly distinguishes "bounded but slow" from
-# "catastrophic backtracking".
-_NO_RE2_BUDGET_S = 20.0
+# Wall-clock budget for the no-re2 child. This is the OUTER guard, and it must stay
+# wall-clock: only the OS killing the process can preempt a C-level regex hang, which
+# by definition never yields to an in-process check.
+#
+# It is 120s, not the original 20s. The 20s ceiling claimed to "absorb a slow/loaded CI
+# runner" and empirically did NOT: under `pytest -n auto` (14 workers) this child was
+# killed at 20s while the same scan completes in ~1.3s standalone, failing the publish
+# on a healthy tree. Contention inflates wall time by more than an order of magnitude,
+# and the OUTER budget is the one place that cannot avoid measuring it.
+#
+# Raising it costs nothing in detection power, because the distinction this guard draws
+# is "bounded but slow" (seconds) vs "catastrophic backtracking" (minutes / infinite).
+# 120s is ~90x the standalone scan and still trivially below a true hang, so a real
+# ReDoS regression is caught exactly as before.
+#
+# The TIGHT bound lives inside the child instead, as a CPU-time assertion — CPU time is
+# what backtracking actually burns, and it is immune to the contention that makes this
+# outer wall-clock number noisy. Two layers, each measuring what it can measure honestly.
+_NO_RE2_BUDGET_S = 120.0
 
 
 def _run_no_re2_scan(body: str, *, budget: float = _NO_RE2_BUDGET_S) -> subprocess.CompletedProcess[str]:
