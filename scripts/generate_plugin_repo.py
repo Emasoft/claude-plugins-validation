@@ -2659,23 +2659,38 @@ def stage_bypass_guard() -> None:
     Closes the loophole where a fresh skip name (e.g. ``CPV_SKIP_GATE7``)
     that was not in the original explicit list would silently slip past.
 
-    Two explicit infrastructure exemptions remain — both are read-only
+    Explicit infrastructure exemptions remain — all are read-only
     overrides used by CPV's own integrity / auth subsystems and never
     skip a gate:
-        * ``CPV_SKIP_GITHUB_INTEGRITY=1`` — used to bypass GitHub-anchored
-          integrity check (see cpv_integrity.py). The integrity check is
-          a defence against tampering, NOT a publish gate.
+        * ``PLUGIN_SKIP_GITHUB_INTEGRITY=1`` — bypasses the GitHub-anchored
+          integrity check (see the hash-verify module). That check is a
+          defence against tampering, NOT a publish gate.
+        * ``CPV_SKIP_GITHUB_INTEGRITY=1`` — the LEGACY spelling of the same
+          override, still honoured (deprecated, TRDD-bbff5bc5).
         * ``CPV_SKIP_GH_AUTH_CHECK=1`` — used by `_ensure_gh_auth` to bypass
           the `gh auth status` round-trip on flaky networks. Auth still
           has to work for the actual `git push` / `gh release create`;
           this only skips the precheck.
 
-    Both are documented exemptions, listed below and excluded from the
+    The ``PLUGIN_`` spelling MUST be exempt: the hash-verify module renamed
+    the var and instructs users to export it, yet ``PLUGIN_SKIP_`` is a
+    forbidden PREFIX here — so without this entry, following that module's
+    own deprecation notice aborts the publish as a "bypass attempt". It
+    grants NO new capability (the same override is already exempt under its
+    legacy name). There is deliberately no ``PLUGIN_SKIP_GH_AUTH_CHECK``
+    entry — no such var exists, and exempting a name nothing reads would
+    widen the bypass surface for nothing.
+
+    All are documented exemptions, listed below and excluded from the
     pattern match.
     """
     cprint(f"\n{BOLD}[0/11] Checking for bypass attempts...{NC}")
     # Explicit infrastructure exemptions — see docstring above.
-    exemptions = {"CPV_SKIP_GITHUB_INTEGRITY", "CPV_SKIP_GH_AUTH_CHECK"}
+    exemptions = {
+        "PLUGIN_SKIP_GITHUB_INTEGRITY",
+        "CPV_SKIP_GITHUB_INTEGRITY",
+        "CPV_SKIP_GH_AUTH_CHECK",
+    }
     forbidden_prefixes = ("PLUGIN_SKIP_", "CPV_SKIP_", "SKIP_")
     forbidden_exact = {"NO_VERIFY"}
     attempted = [
