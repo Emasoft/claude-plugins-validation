@@ -589,12 +589,32 @@ def test_cli_exits_0_on_missing_path(capsys: pytest.CaptureFixture[str]) -> None
 # ── read-only guarantee ───────────────────────────────────────────────────────
 
 
+def _plugin_inventory(root: Path) -> list[str]:
+    """Inventory of the PLUGIN's files, excluding git's private `.git/` internals.
+
+    `.git/` is deliberately skipped. `diagnose()` shells out to git (`git ls-files`
+    et al.), and git mutates its own object store as a side effect of being QUERIED —
+    it takes and releases `*.lock` files and can kick off background maintenance. So
+    including `.git/` made this assertion measure git's internal bookkeeping rather
+    than the tool under test, and it failed intermittently on
+    `.git/objects/maintenance.lock` appearing or vanishing mid-run.
+
+    The property this test actually cares about is that diagnose() does not add,
+    remove, or rename any file OF THE PLUGIN — which is exactly what remains asserted.
+    """
+    return sorted(
+        str(p.relative_to(root))
+        for p in root.rglob("*")
+        if ".git" not in p.relative_to(root).parts
+    )
+
+
 def test_diagnose_does_not_mutate_tree(tmp_path: Path) -> None:
-    """diagnose() is read-only — the file inventory is unchanged afterwards."""
+    """diagnose() is read-only — the plugin's file inventory is unchanged afterwards."""
     root = _make_rust_plugin(tmp_path)
-    before = sorted(str(p.relative_to(root)) for p in root.rglob("*"))
+    before = _plugin_inventory(root)
     cda.diagnose(root)
-    after = sorted(str(p.relative_to(root)) for p in root.rglob("*"))
+    after = _plugin_inventory(root)
     assert before == after
 
 
