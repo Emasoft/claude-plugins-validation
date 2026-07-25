@@ -857,9 +857,16 @@ class TestEnsureGhAuth:
         these tests would hit the bypass instead of the gh-missing / unauthed
         path they assert (DID NOT RAISE SystemExit). Clear BOTH publish
         escape-hatch vars so every test here exercises the real decision path
-        regardless of the ambient environment. delenv auto-restores per test."""
+        regardless of the ambient environment. delenv auto-restores per test.
+
+        PLUGIN_SKIP_GITHUB_INTEGRITY is cleared too: TRDD-bbff5bc5 renamed
+        CPV_SKIP_GITHUB_INTEGRITY to that spelling, so clearing only the legacy
+        name would leave the SAME escape hatch live under its current name — the
+        exact ambient-leak this fixture exists to prevent, reintroduced by a
+        rename."""
         monkeypatch.delenv("CPV_SKIP_GH_AUTH_CHECK", raising=False)
         monkeypatch.delenv("CPV_SKIP_GITHUB_INTEGRITY", raising=False)
+        monkeypatch.delenv("PLUGIN_SKIP_GITHUB_INTEGRITY", raising=False)
 
     @staticmethod
     def _stub_subprocess(monkeypatch, status_rc=0, status_out="", status_err="", perm_rc=0, perm_out="true"):
