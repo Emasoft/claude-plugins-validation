@@ -113,6 +113,15 @@ line-length = 120
 # the tests rely on. Keep ruff's built-in default excludes too (extend, not replace).
 # Pattern matches what generate_plugin_repo.gen_pyproject_toml emits (dogfood parity).
 extend-exclude = ["**/fixtures", "**/testdata", "**/__fixtures__"]
+# The git hooks are Python but carry NO .py extension (git requires those exact
+# filenames), so ruff's default discovery skips them entirely — and `ruff check
+# git-hooks/` then printed "No Python files found" followed by "All checks passed",
+# i.e. a VACUOUS green. That blind spot covered the single most safety-critical
+# script in the repo: pre-push gates every push, and a NameError in it breaks
+# pushing altogether. One shipped that way (a `time` import and a `DIM` constant
+# that did not exist) and no gate caught it. Naming them here puts them under the
+# same F821/F401 checks as the rest of the tree.
+extend-include = ["git-hooks/pre-push", "git-hooks/pre-commit"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
