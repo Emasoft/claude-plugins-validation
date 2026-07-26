@@ -585,6 +585,58 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:  # type: ignore[type-arg
 # Language detection
 # ---------------------------------------------------------------------------
 
+# Interpreter basename (version digits already stripped) -> the language bucket
+# this engine lints. Deliberately SMALL: an interpreter we cannot lint must map
+# to nothing, so a `#!/usr/bin/perl` file stays unlinted rather than being fed to
+# ruff, which would answer with a wall of syntax errors.
+_SHEBANG_INTERPRETERS = {
+    "python": "python",
+    "sh": "shell",
+    "bash": "shell",
+    "zsh": "shell",
+    "dash": "shell",
+    "ksh": "shell",
+    "node": "javascript",
+}
+
+
+def _shebang_language(path: Path) -> str | None:
+    """Return the lint bucket declared by a file's shebang, or None.
+
+    Reads the first 256 bytes as BYTES and requires a literal `#!` at offset 0 —
+    the kernel honours a shebang nowhere else, and staying in bytes means an
+    arbitrary binary can never raise a decode error mid-scan.
+    """
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(256)
+    except OSError:
+        return None  # vanished, unreadable, a device node — degrade, never explode
+    if not head.startswith(b"#!"):
+        return None
+
+    line = head.split(b"\n", 1)[0].decode("utf-8", errors="replace")
+    tokens = line[2:].replace("\t", " ").split()
+    if not tokens:
+        return None
+
+    interpreter = tokens[0]
+    if Path(interpreter).name == "env":
+        # `env` is indirection, not the interpreter. Step over its own flags
+        # (`env -S python3 -u`) and any VAR=value assignments (`env FOO=bar python3`).
+        interpreter = ""
+        for token in tokens[1:]:
+            if token.startswith("-") or "=" in token:
+                continue
+            interpreter = token
+            break
+        if not interpreter:
+            return None
+
+    # `python3.12` and `python3` are both python; strip the version tail.
+    name = Path(interpreter).name.rstrip("0123456789.")
+    return _SHEBANG_INTERPRETERS.get(name)
+
 
 def detect_languages(
     plugin_root: Path,
@@ -625,6 +677,26 @@ def detect_languages(
     collect("sql", ["*.sql"])
     collect("toml", ["*.toml"])
     collect("powershell", ["*.ps1", "*.psm1", "*.psd1"])
+
+    # An extensionless script declares its language in a SHEBANG, not a suffix, so no
+    # glob above can ever match it. That is not a corner case: `git-hooks/pre-push`
+    # gates every push in this repo AND in every plugin CPV scaffolds, and one shipped
+    # with a NameError while ruff, mypy, the whole suite and a full publish all reported
+    # green — because `ruff check git-hooks/` found zero files and said "All checks
+    # passed". A checker inspecting nothing looks exactly like a clean one.
+    #
+    # Scoped to suffix-less files on purpose: a `.txt` that happens to open with `#!` is
+    # not a script, and widening this would feed prose to ruff. Files already claimed by
+    # a glob bucket are skipped so suffix-less `Dockerfile` is not double-linted.
+    already_bucketed = {p for bucket in languages.values() for p in bucket}
+    for path in gi.rglob("*"):
+        if path.suffix or path in already_bucketed:
+            continue
+        if not path.is_file():
+            continue
+        shebang_lang = _shebang_language(path)
+        if shebang_lang is not None:
+            languages.setdefault(shebang_lang, []).append(path)
 
     return languages
 
