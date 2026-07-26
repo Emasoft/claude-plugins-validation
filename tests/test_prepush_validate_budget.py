@@ -68,6 +68,48 @@ def test_successful_run_reports_elapsed_time(tmp_path: Path, capfd) -> None:
     assert "completed in" in out and "budget" in out, f"no timing instrumentation in output: {out!r}"
 
 
+def test_git_hooks_are_actually_linted_not_vacuously_green() -> None:
+    """ruff must DISCOVER the extensionless hooks — proven by file list, not by silence.
+
+    The hooks are Python but git requires exact extensionless filenames, so ruff's
+    default discovery skipped them: `ruff check git-hooks/` printed "No Python files
+    found" and then "All checks passed" — a vacuous green over the most safety-critical
+    script in the repo (pre-push gates every push; a NameError in it breaks pushing
+    entirely, and one shipped that way). `extend-include` in pyproject fixes it.
+
+    This asserts DISCOVERY rather than absence-of-errors, because those two produce
+    identical output when the file set is empty — which is the whole bug.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-m", "ruff", "check", "--show-files", "git-hooks/"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode not in (0, 1):  # ruff unavailable in this env
+        return
+    discovered = proc.stdout
+    assert "git-hooks/pre-push" in discovered, (
+        "ruff does not discover git-hooks/pre-push — the hook lint is VACUOUS "
+        f"(extend-include regressed?). --show-files said:\n{discovered!r}"
+    )
+
+
+def test_git_hooks_pass_lint() -> None:
+    """And, having been discovered, the hooks must actually be clean."""
+    proc = subprocess.run(
+        [sys.executable, "-m", "ruff", "check", "git-hooks/"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode not in (0, 1):
+        return
+    assert proc.returncode == 0, f"git hooks fail ruff:\n{proc.stdout}\n{proc.stderr}"
+
+
 def test_installed_hook_matches_the_tracked_source() -> None:
     """The installed hook must not drift from the tracked one.
 
