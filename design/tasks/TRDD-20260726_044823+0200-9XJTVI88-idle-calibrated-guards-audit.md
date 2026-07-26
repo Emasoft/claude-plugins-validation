@@ -3,13 +3,13 @@ trdd-id: 9XJTVI88
 title: Audit and harden idle-calibrated guards that false-block releases
 column: complete
 created: 2026-07-26T04:48:23+0200
-updated: 2026-07-26T04:48:23+0200
+updated: 2026-07-26T08:48:53+0200
 current-owner: cpv-session
 task-type: infra
 scope: project
 release-via: publish
 relevant-rules: []
-implementation-commits: [a95c2166, b6b6a525, eb9108d8]
+implementation-commits: [a95c2166, b6b6a525, eb9108d8, 1a44ba58]
 ---
 
 # Audit and harden idle-calibrated guards that false-block releases
@@ -19,8 +19,9 @@ implementation-commits: [a95c2166, b6b6a525, eb9108d8]
 - **Done and shipped:** v3.19.1 (hook budget + instrumentation, stale-hook reinstall,
   ReDoS inner CPU-time bound, ReDoS outer budget, `.git`-scoped tree snapshot).
 - **Done, pending release:** the ruff blind-spot fix (`extend-include` for the
-  extensionless git hooks) and the parallelism-test rewrite (peak concurrency).
-  Both committed; ship as v3.19.2.
+  extensionless git hooks) and the parallelism-test rewrite. The rewrite shipped as a
+  `threading.Barrier(4)` — NOT the peak-concurrency form, which was attempt 1 and
+  failed under real load (see "Problem" below). Ship as v3.19.2.
 - **NEXT ACTION:** `CPV_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/publish.py --patch`,
   then confirm CI + Release green.
 - **The audit is CLOSED.** A suite-wide sweep found no further defective guards — see
@@ -40,7 +41,22 @@ in the thing being measured; every one reported a failure that did not exist.
 | 3 | ReDoS inner assertion | wall clock | CPU time (`process_time`) |
 | 4 | ReDoS outer kill (20s) | wall clock, no margin | 120s (still wall clock — correct there) |
 | 5 | `test_diagnose_does_not_mutate_tree` | snapshot included `.git/` | scope to plugin files |
-| 6 | `test_scanner_block_wall_time...` | duration vs a CONSTANT | peak concurrency >= 2 |
+| 6 | `test_scanner_block_wall_time...` | duration vs a CONSTANT | `threading.Barrier(4)` — no clock at all |
+
+**Guard 6 took two attempts, and the first was worse than the original.** Interval
+overlap (peak concurrency >= 2) passed locally and then measured peak concurrency **1**
+under real Gate-2 load: the serialized per-scanner pre-work grows from ~0.8s to 3-5s while
+the fake body was 0.4s, so no two scanners were ever in flight. Overlap is a real property,
+but OBSERVING it still requires the body to outlast a load-dependent scheduling delay — a
+subtler timing race, not the absence of one. The shipped fix is a `threading.Barrier(4)`:
+a blocked party stays in flight, so arrivals ACCUMULATE regardless of stagger and release
+proves simultaneity outright. Two-sided verified (`max_workers=1` -> `BrokenBarrierError`)
+and 3/3 under the load that broke attempt 1.
+
+**Generalized lesson:** when a timing-based guard is fragile, converting it to a DIFFERENT
+measurement of the same timing is usually still fragile. Prefer a SYNCHRONISATION PRIMITIVE
+that makes the property true-or-blocked (barrier, event, queue) over any observation of
+durations.
 
 Root enabler for the worst one: **ruff never linted the git hooks.** Git requires
 extensionless filenames, so ruff's discovery skipped them and printed
@@ -96,10 +112,22 @@ So the discriminator is **not** "wall clock vs not". It is **ratio-to-a-same-run
   `validate_plugin.py completed in 100.9s (budget 600s)` — a real ~2.4x in-situ penalty
   against the old 180s budget's <2x headroom.
 
-## Open
+## Open — CLOSED by an external measurement
 
-The ~2.4x in-situ slowdown of `validate_plugin.py` is now MEASURED but not EXPLAINED. Four
-hypotheses were measured and ruled out: machine load, the post-Gate-10 tree shape, a
-`uv lock` re-sync, and a captured-pipe deadlock (`subprocess.run` drains via
-`communicate()`). The elapsed-time reporting means the next occurrence yields evidence
-rather than a mystery; do not invent a cause before then.
+The ~2.4x in-situ slowdown was attributed, at the end of the session, to **host-wide load
+from OTHER processes**: `uptime` reported a load average of **97.78** on a ~14-core machine,
+with 705 processes — one neighbour at 221% CPU, an orphaned 6-day-old node benchmark at 41%,
+and four concurrent `claude` sessions.
+
+This does not contradict the four ruled-out hypotheses, and the difference is the whole
+lesson. The hypothesis measured and rejected was **self-inflicted load from Gate 2** — CPV's
+own `-n auto` suite. The actual cause was load CPV neither creates nor can see: the machine
+was already saturated before the pipeline started. Every hypothesis was aimed inside CPV, so
+none of them could have been right.
+
+Honest strength of the claim: this is a **sufficient and consistent** explanation observed on
+the same host in the same session, NOT a controlled A/B measurement (the 2.4x datum and the
+load-97 reading were taken at different times). It is recorded as the leading cause, not as
+proof. The elapsed-time instrumentation now shipped means the next occurrence carries its own
+evidence — and, per the audit's whole thesis, the guards no longer depend on the answer:
+contention-proof instruments are correct on a host that is never idle regardless of WHY.

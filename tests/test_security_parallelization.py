@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import inspect
 import sys
+import threading
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -45,7 +46,9 @@ from validate_security import (
 # ---------------------------------------------------------------------------
 
 
-def _make_sleeping_scanner(name: str, sleep_s: float, *, count: int = 0, error: bool = False, timeline=None):
+def _make_sleeping_scanner(
+    name: str, sleep_s: float, *, count: int = 0, error: bool = False, timeline=None, barrier=None
+):
     """Build a fake check_<scanner> that sleeps then returns `count`.
 
     Scanners take (plugin_path, report) and return an int. They write
@@ -62,7 +65,12 @@ def _make_sleeping_scanner(name: str, sleep_s: float, *, count: int = 0, error: 
 
     def fn(plugin_path, report):  # noqa: ARG001
         started = time.perf_counter()
-        time.sleep(sleep_s)
+        if barrier is not None:
+            # Blocks until ALL parties arrive. Raises BrokenBarrierError on timeout,
+            # which is precisely the serial-executor signal we want to surface.
+            barrier.wait()
+        if sleep_s:
+            time.sleep(sleep_s)
         if timeline is not None:
             timeline.append((name, started, time.perf_counter()))
         if error:
@@ -119,40 +127,51 @@ def test_scanner_block_uses_threadpool_executor():
 
 
 def test_scanner_block_wall_time_is_slowest_not_sum(tmp_path: Path):
-    """The four scanners must be IN FLIGHT AT THE SAME INSTANT — asserted by
-    overlapping intervals, not by total wall time.
+    """The four scanners must run CONCURRENTLY — proved with a threading.Barrier,
+    which needs no timing at all.
 
-    History of the old formulation: it slept 4x N seconds and required the total
-    to beat the serial sum. That budget was raised twice for the same reason
-    (1.0s -> 2.0s in v2.88.0, 2.0s -> 4.0s in v2.104.0 after flaking at 9.5s
-    "under publish.py Phase C load") and flaked a THIRD time at 16.57s against a
-    16.0s ceiling. Raising it again would be the fourth attempt at a fix that has
-    already failed twice.
+    Each fake scanner waits on `Barrier(4)`. A barrier can only release when all
+    four parties have ARRIVED, and a blocked party stays in flight while it waits,
+    so arrivals ACCUMULATE no matter how staggered they are. Release therefore
+    proves four scanners were simultaneously in flight; a serial executor can never
+    assemble the fourth party, so its first scanner blocks until the barrier's own
+    timeout trips `BrokenBarrierError` and the test fails.
 
-    It fails because the premise is wrong under load. A wall-clock speedup only
-    appears when spare cores exist, and Gate 2 runs this suite with `-n auto` —
-    every core already busy. Correctly parallel code then shows NO speedup, so the
-    assertion reports "parallelism is not engaged" when parallelism is fine and the
-    machine is merely saturated. It measured contention, not concurrency.
+    This is machine-speed independent BY CONSTRUCTION — the property is
+    simultaneity, not duration, so contention cannot invert it.
 
-    Overlap is the property actually under test and contention cannot invert it: if
-    all four intervals share a common instant, the four ran concurrently — on a
-    loaded machine they simply take longer while still overlapping. Serial
-    execution can NEVER produce overlap regardless of machine speed, so the
-    detection power is strictly better than the timing bound it replaces.
+    TWO earlier formulations were tried and BOTH were wrong, which is why this one
+    avoids the clock entirely:
 
-    Bonus: the sleep drops 4.0s -> 0.4s, taking this test from ~16s to ~1s.
+    1. Wall-clock speedup vs a hard-coded serial ceiling (`elapsed < 4 * sleep_s`).
+       A speedup is only observable when spare cores exist, and Gate 2 runs this
+       suite under `-n auto` with every core busy — so correctly-parallel code shows
+       none. Its budget was raised twice for exactly this (1.0->2.0s in v2.88.0,
+       2.0->4.0s in v2.104.0 "after the 2.0s budget flaked at 9.5s under publish.py
+       Phase C load") and flaked a third time at 16.57s vs a 16.0s ceiling.
+    2. Interval OVERLAP with short bodies. Measured under real Gate-2 load, the
+       serialized per-scanner pre-work grows from ~0.8s to 3-5s while the fake body
+       was only 0.4s, so no two scanners were ever in flight and peak concurrency
+       measured 1. This was WORSE than what it replaced: overlap is a real property,
+       but observing it requires the body to outlast a pre-work delay that is itself
+       load-dependent — i.e. still a timing race, just a subtler one.
+
+    The barrier removes the race instead of tuning it. It needs no relationship
+    between body duration and scheduling delay, so no budget can rot.
     """
     plugin_path = _make_minimal_plugin(tmp_path)
 
-    # Long enough that thread start-up jitter cannot fake an overlap, short
-    # enough to stay fast. Overlap needs no long sleeps — only simultaneity.
-    sleep_s = 0.4
+    # Barrier(4): released only when all four scanners have ARRIVED. The timeout is
+    # a failure-path backstop (a serial pool would otherwise block forever), never a
+    # budget the happy path spends — a passing run releases the instant the fourth
+    # scanner arrives, however slow the machine.
+    barrier = threading.Barrier(4, timeout=120)
+    sleep_s = 0.0  # the barrier provides the rendezvous; no sleep needed
     timeline: list[tuple[str, float, float]] = []
-    fake_cc = _make_sleeping_scanner("cc-audit", sleep_s, timeline=timeline)
-    fake_tirith = _make_sleeping_scanner("tirith", sleep_s, timeline=timeline)
-    fake_truffle = _make_sleeping_scanner("trufflehog", sleep_s, timeline=timeline)
-    fake_semgrep = _make_sleeping_scanner("semgrep", sleep_s, timeline=timeline)
+    fake_cc = _make_sleeping_scanner("cc-audit", sleep_s, timeline=timeline, barrier=barrier)
+    fake_tirith = _make_sleeping_scanner("tirith", sleep_s, timeline=timeline, barrier=barrier)
+    fake_truffle = _make_sleeping_scanner("trufflehog", sleep_s, timeline=timeline, barrier=barrier)
+    fake_semgrep = _make_sleeping_scanner("semgrep", sleep_s, timeline=timeline, barrier=barrier)
 
     # Force shutil.which to claim every binary IS installed so the
     # scanner block actually invokes our fakes (not the SKIPPED branch).
@@ -218,29 +237,10 @@ def test_scanner_block_wall_time_is_slowest_not_sum(tmp_path: Path):
             iso_cache = ScannerCache(cache_dir=tmp_path / "scanner-cache")
             run_validate_security(plugin_path, cache=iso_cache)
 
+    # The barrier below already PROVED concurrency by releasing; reaching this
+    # point at all is the assertion. The timeline is kept only for diagnostics.
     assert len(timeline) == 4, f"expected all 4 scanners to run, recorded {len(timeline)}: {timeline}"
-
-    # Maximum number of scanners in flight at any instant, via a sweep line over
-    # the recorded intervals. SERIAL execution yields exactly 1 at any machine
-    # speed; anything >= 2 proves the pool really overlapped work.
-    #
-    # Deliberately NOT "all four share a common instant". Measurement shows the
-    # four starts are staggered by a roughly CONSTANT ~2.4s of serialized
-    # per-scanner pre-work before the scanner body is entered, independent of how
-    # long the body runs. The old 4.0s sleep merely exceeded that stagger, so
-    # all-four-overlap was an artifact of the sleep length, not a property of the
-    # code — asserting it would pin a premise the implementation does not provide.
-    edges = sorted([(s, 1) for _, s, _ in timeline] + [(e, -1) for _, _, e in timeline])
-    running = peak = 0
-    for _t, delta in edges:
-        running += delta
-        peak = max(peak, running)
-
-    assert peak >= 2, (
-        "validate_security scanners never overlapped — parallelism is not engaged "
-        f"(peak concurrency {peak}, expected >= 2).\n"
-        + "\n".join(f"  {n}: {s:.3f} -> {e:.3f}" for n, s, e in sorted(timeline, key=lambda r: r[1]))
-    )
+    assert not barrier.broken, "scanner barrier broke — see the BrokenBarrierError raised inside the pool"
 
 
 # ---------------------------------------------------------------------------

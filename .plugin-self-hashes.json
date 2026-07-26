@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-07-26T02:49:10+00:00",
+  "computed_at": "2026-07-26T06:49:17+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:d7475e2f6d86ac976050b9a7453c3ebe121cda6b7ccb7e8b945c3f1694cd041d",
@@ -21,7 +21,7 @@
     ".trashcan/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".trashcan/README.txt": "sha256:3106acc9af8415d37610ef0b9f138dc9622f25f81ac37a31f24a9ebd2d25f30f",
     "CHANGELOG.md": "sha256:ce386a48584140572f3a4bc5baf874a0f9ddd5fe4b1500f36dea9526e000ce6d",
-    "CLAUDE.md": "sha256:39a5afaafc3e0613f9308f2bf97786564995021a74e808a3c83f87aae9c6d391",
+    "CLAUDE.md": "sha256:09963bf13d5dd7b7722a86029822239f9dfd7311211e5d257ccd67dcd99244b2",
     "LICENSE": "sha256:f79aeb8187cb5e63d27261eba76a2d771292c27489645b3410bd5e67edc02f5d",
     "README.md": "sha256:acdaaa4df2c27a23bb23d5ef96eee4066d4b254ab0e77e28fa5438eeffaef8b0",
     "agents/cpv-agent.md": "sha256:a7ab5eb5bfbfa92e51025fcdd998285e72debeba147bcb918cbbb60f1783440e",
@@ -126,6 +126,7 @@
     "design/tasks/TRDD-20260702_190110+0200-V7K2QF8M-free-ci-matrix-shard-validate.md": "sha256:3ac00ea3d01fe7ed1b3c81a716c9028c313394a67d6d4ff4144f0263a02936c8",
     "design/tasks/TRDD-20260703_214404+0200-T7WCV3PK-coverage-audit-gate.md": "sha256:c3996a86573ffd5a2d04bdc5644204011c3837e0f7125db043fab28be605502f",
     "design/tasks/TRDD-20260703_214942+0200-S9NKP4WQ-cc-spec-sync-2192-2200.md": "sha256:9d1a5af605ec14be55cbf15f6d7588c4a4228af8cfa6bc40e41a3489e13cc5eb",
+    "design/tasks/TRDD-20260726_044823+0200-9XJTVI88-idle-calibrated-guards-audit.md": "sha256:e2d70dc61f0dc24cea6e4b314b4e9755b22ccd9b200a73a33d9fb9b2ded3fc38",
     "design/tasks/TRDD-26446eed-ea5e-43e7-886c-8512866d92be-semantic-channel-source.md": "sha256:b20480b2cf4e0a97cc06e53a32a39a4d09a4740b94c92804298a8286d88d991c",
     "design/tasks/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md": "sha256:e2f55a383481238d738aaea92cfdbcb0ce34e6f1bdeab22a3b641cfca583431d",
     "design/tasks/TRDD-2be75e88-3c23-4c91-9e4e-5ce315b497dc-scope-validators.md": "sha256:6aba8e45a304a4b8b33177decdc271a7e1677098d7b5e09903f132f73cabff68",
@@ -953,7 +954,7 @@
     "tests/test_security_benchmark.py": "sha256:fdbf40c693eee9541a1df8f7fe77a937d0335e5208a4475c6b002d9bfe3f8f1f",
     "tests/test_security_codex_review_2026_05_04.py": "sha256:145da94ff66a97a5c64c6e8cf32e5015f9948b1f8020c643ce553a5230e0948d",
     "tests/test_security_gate_banners.py": "sha256:f070b727135139b5f9f1d7c0fdb7fadeb6189b5035d47e3c0e41aa66f9c7c745",
-    "tests/test_security_parallelization.py": "sha256:2dcfc682e76707599700abc290f2011801707fb173773d45c28b8c6a23184bec",
+    "tests/test_security_parallelization.py": "sha256:69b5c85f4400a129b351bfad078522d1d2e284e3827d638246407a68d6e614dc",
     "tests/test_set_marketplace_pat.py": "sha256:535485070b52641e130e8f659f5f58846f5b9eecea966b05dc43ad12516e2725",
     "tests/test_setup_branch_rules.py": "sha256:fa4847ae56c99af5907a2d4a81e0f9ef330200e25c9accd88443ddc9e8a51208",
     "tests/test_setup_branch_rules_generic.py": "sha256:8823d2e1ca978a010a170ced88faa7834db7b7667dce2b2033909c5df3683b7e",
