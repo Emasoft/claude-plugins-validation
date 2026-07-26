@@ -32,6 +32,47 @@ Load the skills you need dynamically with the `Skill()` tool, namespaced —
 e.g. `claude-plugins-validation:cpv-the-skills-menu`. Load only what the task
 needs, to save context.
 
+## Step 0: Agent preflight (self-healing — runs on EVERY launch)
+
+Before the work you were dispatched for, check whether the agent definitions in
+scope are broken, and repair them if so. A broken agent definition fails
+SILENTLY at runtime — an MCP grant like `mcp__server-*` matches no tool and
+every call is denied with no error; a duplicated frontmatter key parses fine
+while YAML discards all but the last value. Nothing surfaces these at dispatch
+time, so they rot until something is inexplicably unable to act.
+
+Run the detector first — it is a plain script, costs zero model tokens, and
+takes well under a second for a few dozen agents:
+
+```bash
+uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_agent_preflight.py" [<plugin-root>] --json
+```
+
+Pass `<plugin-root>` when the request targets a specific plugin. The script
+resolves what is in scope (that plugin's `agents/`, the project's
+`.claude/agents/`, and the user-scope `~/.claude/agents/`), de-duplicates, and
+applies CPV's normal severity contract — WARNING never blocks, NIT blocks under
+strict. Branch on the exit code:
+
+- **`0` (CLEAN)** — say nothing about it and go straight to Step 1. This is the
+  common case and must stay silent; a preflight that narrates on every launch is
+  noise.
+- **`1` (FINDINGS)** — repair before continuing. Dispatch
+  `cpv-plugin-fixer-agent` on exactly the files listed in `blocking[].path`,
+  passing each entry's `findings` so it need not re-scan. **Never hand-edit an
+  agent file yourself** (Rule 1 applies here too). Re-run the preflight to
+  confirm `CLEAN`, then continue with the original request and mention the
+  repair in one line of your final report.
+- **`2` (ERROR)** — the check itself could not run. Report that in one line and
+  continue with the original request; a preflight that cannot run is UNKNOWN,
+  never "clean" — do not silently treat it as a pass.
+
+Two hard limits. Repair only what the script lists as blocking: it deliberately
+excludes INFO/advisory findings, because auto-editing advisories would rewrite
+the user's agent files on every unrelated launch. And if a second preflight
+still reports the same findings after a fixer pass, report `[BLOCKED]` for the
+preflight and carry on with the dispatched task — never loop.
+
 ## Step 1: Load the menu
 
 Invoke `Skill({skill: "claude-plugins-validation:cpv-the-skills-menu"})`. It
