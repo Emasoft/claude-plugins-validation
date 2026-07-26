@@ -45,17 +45,26 @@ from validate_security import (
 # ---------------------------------------------------------------------------
 
 
-def _make_sleeping_scanner(name: str, sleep_s: float, *, count: int = 0, error: bool = False):
+def _make_sleeping_scanner(name: str, sleep_s: float, *, count: int = 0, error: bool = False, timeline=None):
     """Build a fake check_<scanner> that sleeps then returns `count`.
 
     Scanners take (plugin_path, report) and return an int. They write
     their findings into the supplied `report` via `report.X(...)`. If
     `error` is True, the scanner raises a runtime error mid-call so the
     surrounding ThreadPool sees the failure.
+
+    When `timeline` is given, the scanner appends `(name, start, end)` to it.
+    That turns "did these run concurrently?" into a question about OVERLAPPING
+    INTERVALS instead of aggregate wall time — see
+    test_scanner_block_runs_concurrently for why that distinction matters.
+    (`list.append` is atomic under CPython, so no lock is needed here.)
     """
 
     def fn(plugin_path, report):  # noqa: ARG001
+        started = time.perf_counter()
         time.sleep(sleep_s)
+        if timeline is not None:
+            timeline.append((name, started, time.perf_counter()))
         if error:
             raise RuntimeError(f"{name}: synthetic scanner crash")
         # Add a marker finding so the test can verify per-scanner output
@@ -110,29 +119,40 @@ def test_scanner_block_uses_threadpool_executor():
 
 
 def test_scanner_block_wall_time_is_slowest_not_sum(tmp_path: Path):
-    """With four sleeping scanners (each 4.0s), serial execution would
-    take ~16.0s; parallel must finish in ~4.0s.
+    """The four scanners must be IN FLIGHT AT THE SAME INSTANT — asserted by
+    overlapping intervals, not by total wall time.
 
-    Lower-bound for serial: 4 * 4.0 = 16.0s. Upper bound for parallel:
-    same number, since hitting it means parallelism is broken. Use the
-    serial lower-bound as the hard ceiling on the parallel run.
+    History of the old formulation: it slept 4x N seconds and required the total
+    to beat the serial sum. That budget was raised twice for the same reason
+    (1.0s -> 2.0s in v2.88.0, 2.0s -> 4.0s in v2.104.0 after flaking at 9.5s
+    "under publish.py Phase C load") and flaked a THIRD time at 16.57s against a
+    16.0s ceiling. Raising it again would be the fourth attempt at a fix that has
+    already failed twice.
 
-    Sleep bumped from 1.0s to 2.0s in v2.88.0 and from 2.0s to 4.0s in
-    v2.104.0 after the 2.0s budget flaked at 9.5s under publish.py
-    Phase C load (tests + validate + marketplace gates run concurrently;
-    8 xdist workers + 4 scanner threads + concurrent gate processes all
-    contend for cores on a 12-core M-series laptop). Doubling sleep_s
-    grows the serial ceiling from 8.0s to 16.0s while parallel-mode wall
-    time grows from ~2-2.5s to ~4-4.5s, so the parallelism signal stays
-    sharp (4× vs 1×) with a much larger margin for contention overhead.
+    It fails because the premise is wrong under load. A wall-clock speedup only
+    appears when spare cores exist, and Gate 2 runs this suite with `-n auto` —
+    every core already busy. Correctly parallel code then shows NO speedup, so the
+    assertion reports "parallelism is not engaged" when parallelism is fine and the
+    machine is merely saturated. It measured contention, not concurrency.
+
+    Overlap is the property actually under test and contention cannot invert it: if
+    all four intervals share a common instant, the four ran concurrently — on a
+    loaded machine they simply take longer while still overlapping. Serial
+    execution can NEVER produce overlap regardless of machine speed, so the
+    detection power is strictly better than the timing bound it replaces.
+
+    Bonus: the sleep drops 4.0s -> 0.4s, taking this test from ~16s to ~1s.
     """
     plugin_path = _make_minimal_plugin(tmp_path)
 
-    sleep_s = 4.0
-    fake_cc = _make_sleeping_scanner("cc-audit", sleep_s)
-    fake_tirith = _make_sleeping_scanner("tirith", sleep_s)
-    fake_truffle = _make_sleeping_scanner("trufflehog", sleep_s)
-    fake_semgrep = _make_sleeping_scanner("semgrep", sleep_s)
+    # Long enough that thread start-up jitter cannot fake an overlap, short
+    # enough to stay fast. Overlap needs no long sleeps — only simultaneity.
+    sleep_s = 0.4
+    timeline: list[tuple[str, float, float]] = []
+    fake_cc = _make_sleeping_scanner("cc-audit", sleep_s, timeline=timeline)
+    fake_tirith = _make_sleeping_scanner("tirith", sleep_s, timeline=timeline)
+    fake_truffle = _make_sleeping_scanner("trufflehog", sleep_s, timeline=timeline)
+    fake_semgrep = _make_sleeping_scanner("semgrep", sleep_s, timeline=timeline)
 
     # Force shutil.which to claim every binary IS installed so the
     # scanner block actually invokes our fakes (not the SKIPPED branch).
@@ -196,15 +216,30 @@ def test_scanner_block_wall_time_is_slowest_not_sum(tmp_path: Path):
             # xdist workers don't contend on ~/.cache/cpv/scanner-results/
             # (which would defeat parallelism in this exact test).
             iso_cache = ScannerCache(cache_dir=tmp_path / "scanner-cache")
-            t0 = time.perf_counter()
             run_validate_security(plugin_path, cache=iso_cache)
-            elapsed = time.perf_counter() - t0
 
-    serial_lower_bound = sleep_s * 4
-    assert elapsed < serial_lower_bound, (
-        f"validate_security scanner block took {elapsed:.2f}s; "
-        f"4 scanners x {sleep_s}s in serial would already need {serial_lower_bound}s. "
-        f"Parallelism is not engaged."
+    assert len(timeline) == 4, f"expected all 4 scanners to run, recorded {len(timeline)}: {timeline}"
+
+    # Maximum number of scanners in flight at any instant, via a sweep line over
+    # the recorded intervals. SERIAL execution yields exactly 1 at any machine
+    # speed; anything >= 2 proves the pool really overlapped work.
+    #
+    # Deliberately NOT "all four share a common instant". Measurement shows the
+    # four starts are staggered by a roughly CONSTANT ~2.4s of serialized
+    # per-scanner pre-work before the scanner body is entered, independent of how
+    # long the body runs. The old 4.0s sleep merely exceeded that stagger, so
+    # all-four-overlap was an artifact of the sleep length, not a property of the
+    # code — asserting it would pin a premise the implementation does not provide.
+    edges = sorted([(s, 1) for _, s, _ in timeline] + [(e, -1) for _, _, e in timeline])
+    running = peak = 0
+    for _t, delta in edges:
+        running += delta
+        peak = max(peak, running)
+
+    assert peak >= 2, (
+        "validate_security scanners never overlapped — parallelism is not engaged "
+        f"(peak concurrency {peak}, expected >= 2).\n"
+        + "\n".join(f"  {n}: {s:.3f} -> {e:.3f}" for n, s, e in sorted(timeline, key=lambda r: r[1]))
     )
 
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-07-26T02:14:35+00:00",
+  "computed_at": "2026-07-26T02:49:10+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:d7475e2f6d86ac976050b9a7453c3ebe121cda6b7ccb7e8b945c3f1694cd041d",
@@ -21,7 +21,7 @@
     ".trashcan/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".trashcan/README.txt": "sha256:3106acc9af8415d37610ef0b9f138dc9622f25f81ac37a31f24a9ebd2d25f30f",
     "CHANGELOG.md": "sha256:ce386a48584140572f3a4bc5baf874a0f9ddd5fe4b1500f36dea9526e000ce6d",
-    "CLAUDE.md": "sha256:ab878cb5ef0ecb4a0d0089220a76c76fe8f92c8466577c899508fecaa266e001",
+    "CLAUDE.md": "sha256:39a5afaafc3e0613f9308f2bf97786564995021a74e808a3c83f87aae9c6d391",
     "LICENSE": "sha256:f79aeb8187cb5e63d27261eba76a2d771292c27489645b3410bd5e67edc02f5d",
     "README.md": "sha256:acdaaa4df2c27a23bb23d5ef96eee4066d4b254ab0e77e28fa5438eeffaef8b0",
     "agents/cpv-agent.md": "sha256:a7ab5eb5bfbfa92e51025fcdd998285e72debeba147bcb918cbbb60f1783440e",
@@ -953,7 +953,7 @@
     "tests/test_security_benchmark.py": "sha256:fdbf40c693eee9541a1df8f7fe77a937d0335e5208a4475c6b002d9bfe3f8f1f",
     "tests/test_security_codex_review_2026_05_04.py": "sha256:145da94ff66a97a5c64c6e8cf32e5015f9948b1f8020c643ce553a5230e0948d",
     "tests/test_security_gate_banners.py": "sha256:f070b727135139b5f9f1d7c0fdb7fadeb6189b5035d47e3c0e41aa66f9c7c745",
-    "tests/test_security_parallelization.py": "sha256:cd7cd291b922fc943a35eaaf3df1ef5f8d5d2f8e7b536ff432f07f8aac4ace71",
+    "tests/test_security_parallelization.py": "sha256:2dcfc682e76707599700abc290f2011801707fb173773d45c28b8c6a23184bec",
     "tests/test_set_marketplace_pat.py": "sha256:535485070b52641e130e8f659f5f58846f5b9eecea966b05dc43ad12516e2725",
     "tests/test_setup_branch_rules.py": "sha256:fa4847ae56c99af5907a2d4a81e0f9ef330200e25c9accd88443ddc9e8a51208",
     "tests/test_setup_branch_rules_generic.py": "sha256:8823d2e1ca978a010a170ced88faa7834db7b7667dce2b2033909c5df3683b7e",
