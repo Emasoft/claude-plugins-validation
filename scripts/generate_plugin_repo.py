@@ -1095,6 +1095,13 @@ line-length = 120
 # (e.g. `ruff check scripts/ tests/`) or it would "correct" the defects the
 # tests depend on. Mirrors the Mega-Linter FILTER_REGEX_EXCLUDE used in CI.
 extend-exclude = ["**/fixtures", "**/testdata", "**/__fixtures__"]
+# The git hooks are Python but git requires those exact EXTENSIONLESS filenames, so
+# ruff's default discovery skips them and `ruff check git-hooks/` prints "No Python
+# files found" followed by "All checks passed" — a VACUOUS green over the script that
+# gates every push. CPV shipped a NameError in its own pre-push exactly this way. CPV's
+# lint engine now reads shebangs, but a plugin's OWN ruff run (its CI, its hooks) does
+# not go through CPV, so it needs this line too.
+extend-include = ["git-hooks/pre-push", "git-hooks/pre-commit"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
