@@ -109,26 +109,35 @@ jobs:
         #
         # The report is captured OUTSIDE the checkout ($RUNNER_TEMP) so the
         # validator cannot scan its own half-written output.
+        #
+        # `tee`, NOT `> file` + a trailing `cat` (issue #180): with the redirect
+        # a healthy run and a hung one are byte-identical in the log for the
+        # whole window, and a job killed at its `timeout-minutes` never reaches
+        # the `cat` — so the log shows nothing about what was in flight.
+        # `${PIPESTATUS[0]}` keeps the exit code the VALIDATOR's; `$?` after a
+        # pipeline is `tee`'s status and would green every failed validation.
+        # `$exit_code` is quoted on every use because shellcheck cannot infer
+        # numeric-ness through PIPESTATUS and would otherwise raise SC2086,
+        # which the Lint job's actionlint turns into red CI.
         run: |
           set +e
           uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
               --with pyyaml \
               cpv-remote-validate plugin . --strict \
-              > "$RUNNER_TEMP/cpv-validation-report.txt" 2>&1
-          exit_code=$?
+              2>&1 | tee "$RUNNER_TEMP/cpv-validation-report.txt"
+          exit_code=${PIPESTATUS[0]}
           set -e
-          cat "$RUNNER_TEMP/cpv-validation-report.txt"
-          if [ $exit_code -eq 0 ]; then
+          if [ "$exit_code" -eq 0 ]; then
             echo "Validation passed"
             exit 0
           fi
           # CPV's verdict exit codes are 1-4. Anything else — and any 1-4 with no
           # SUMMARY line — means the validator never produced a verdict (a failed
           # uvx/git fetch exits 1 or 2 exactly like a findings verdict).
-          if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ] \
+          if [ "$exit_code" -ge 1 ] && [ "$exit_code" -le 4 ] \
              && grep -q "SUMMARY: CRITICAL=" "$RUNNER_TEMP/cpv-validation-report.txt"; then
             echo "::error::Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT found)"
-            exit $exit_code
+            exit "$exit_code"
           fi
           echo "::error::CPV validator FAILED TO RUN (exit $exit_code) — infra/network/install failure, NOT a validation verdict. No findings were produced; do not read this as CRITICAL/MAJOR/MINOR/NIT. See the log above (a cold 'uvx --from git+...' build can fail on a transient GitHub git-fetch)."
           exit 1
@@ -196,20 +205,42 @@ jobs:
 
       - name: Run full plugin validation (remote CPV, --strict)
         # Fetches CPV from GitHub — downstream plugins don't vendor the validator.
-        # --strict blocks on CRITICAL(1)/MAJOR(2)/MINOR(3)/NIT(4); WARNING(5+) advisory.
+        # --strict blocks on CRITICAL(1)/MAJOR(2)/MINOR(3)/NIT(4).
+        #
+        # The handler must be FAIL-CLOSED (RC-8). CPV's verdict codes stop at 4,
+        # so anything else — `uvx: command not found` (127), an OOM kill (137) —
+        # is the validator FAILING TO RUN, not a clean result. An earlier version
+        # of this recipe only errored on 1-4 and fell through otherwise, which
+        # silently PASSED those cases. Because uvx itself also exits 1/2, the exit
+        # code alone cannot separate a real verdict from an infra failure, so the
+        # SUMMARY line is additionally required as proof the validator ran.
+        #
+        # `tee`, not `> file` + `cat` (issue #180): with the redirect a healthy
+        # run and a hung one are byte-identical in the log, and a job killed at
+        # its `timeout-minutes` never reaches the `cat`. `${PIPESTATUS[0]}` keeps
+        # the exit code the VALIDATOR's — `$?` after a pipeline is `tee`'s and
+        # would green every failed validation. `$exit_code` is quoted throughout
+        # (shellcheck cannot infer numeric-ness through PIPESTATUS → SC2086 →
+        # red CI in the Lint job).
         run: |
           set +e
           uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
               --with pyyaml \
               cpv-remote-validate plugin . --strict \
-              > validation-report.txt 2>&1
-          exit_code=$?
+              2>&1 | tee validation-report.txt
+          exit_code=${PIPESTATUS[0]}
           set -e
-          cat validation-report.txt
-          if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ]; then
-            echo "::error::Validation failed with exit code $exit_code (CRITICAL/MAJOR/MINOR/NIT)"
-            exit $exit_code
+          if [ "$exit_code" -eq 0 ]; then
+            echo "Validation passed"
+            exit 0
           fi
+          if [ "$exit_code" -ge 1 ] && [ "$exit_code" -le 4 ] \
+             && grep -q "SUMMARY: CRITICAL=" validation-report.txt; then
+            echo "::error::Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT found)"
+            exit "$exit_code"
+          fi
+          echo "::error::CPV validator FAILED TO RUN (exit $exit_code) — infra/network/install failure, NOT a validation verdict. No findings were produced; do not read this as CRITICAL/MAJOR/MINOR/NIT."
+          exit 1
 
       - name: Run tests
         run: uv run pytest tests/ -v
