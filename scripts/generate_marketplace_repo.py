@@ -102,6 +102,14 @@ def _cpv_verdict_shell(
     Fail-CLOSED by design: an infra failure is not "no findings", so it must never
     green the gate — but it is now reported as what it actually is.
 
+    The caller MUST capture the exit code with ``${PIPESTATUS[0]}``, not
+    ``$?``: the validator is piped through ``tee``, and GitHub's default
+    ``run:`` shell is ``bash -e {0}`` WITHOUT ``-o pipefail``, so ``$?`` after
+    the pipeline is ``tee``'s status — success for every failed validation.
+    The expansions are quoted because shellcheck cannot infer numeric-ness
+    through ``PIPESTATUS`` and would flag SC2086, which actionlint turns into
+    red CI for every scaffolded marketplace.
+
     Args:
         label: human name of the gate, used in the echoed messages.
         exit_var: the shell variable holding the captured exit code (no ``$``).
@@ -116,10 +124,13 @@ def _cpv_verdict_shell(
     v = f"${exit_var}"
     infra_echo = _CPV_INFRA_FAILURE_ECHO.replace("$EXITVAR", v)
     lines = [
-        f'cat "{report_path}"',
-        f"if [ {v} -eq 0 ]; then",
+        # No `cat` here: the caller pipes through `tee`, so the report has
+        # ALREADY been streamed. It was a trailing `cat` before, which a job
+        # killed at its timeout never reaches — the log then said nothing at
+        # all about what was in flight (#180).
+        f'if [ "{v}" -eq 0 ]; then',
         f'  echo "{pass_echo}"',
-        f"elif [ {v} -ge 1 ] && [ {v} -le 4 ] \\",
+        f'elif [ "{v}" -ge 1 ] && [ "{v}" -le 4 ] \\',
         f'     && grep -q "{marker}" "{report_path}"; then',
         f'  echo "::error::{label} failed (exit {v}: CRITICAL/MAJOR/MINOR/NIT found)"',
         f"  {findings_action}",
@@ -505,13 +516,15 @@ jobs:
         # Works for BOTH Layout A and Layout B marketplaces.
         # The report is captured OUTSIDE the checkout ($RUNNER_TEMP) so the
         # validator can never scan its own half-written output.
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           set +e
           uvx --from git+https://github.com/Emasoft/claude-plugins-validation \\
               --with pyyaml \\
               cpv-remote-validate marketplace . --strict \\
-              > "$RUNNER_TEMP/cpv-marketplace-report.txt" 2>&1
-          exit_code=$?
+              2>&1 | tee "$RUNNER_TEMP/cpv-marketplace-report.txt"
+          exit_code=${PIPESTATUS[0]}
           set -e
 __CPV_MARKETPLACE_BLOCK__
 
@@ -535,6 +548,8 @@ __CPV_MARKETPLACE_BLOCK__
         # pass the full plugin validator — broken nested plugins block the
         # marketplace CI the same way they block a per-plugin CI.
         if: steps.layout.outputs.is_layout_b == 'true'
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           set -e
           failed=0
@@ -548,8 +563,8 @@ __CPV_MARKETPLACE_BLOCK__
             uvx --from git+https://github.com/Emasoft/claude-plugins-validation \\
                 --with pyyaml \\
                 cpv-remote-validate plugin "$plugin_dir" --strict \\
-                > "$RUNNER_TEMP/cpv-plugin-report.txt" 2>&1
-            rc=$?
+                2>&1 | tee "$RUNNER_TEMP/cpv-plugin-report.txt"
+            rc=${PIPESTATUS[0]}
             set -e
 __CPV_PLUGIN_BLOCK__
           done
@@ -564,13 +579,15 @@ __CPV_PLUGIN_BLOCK__
         # are the same 0-4 verdict scale (see its report.exit_code(): A→0, B/C→3,
         # D→2, F→1), so the same RC-8 classification applies: a code outside 1-4,
         # or a 1-4 with no verdict line, is an infra failure — fail, don't pass.
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           set +e
           uvx --from git+https://github.com/Emasoft/claude-plugins-validation \\
               --with pyyaml \\
               cpv-remote-validate validate_marketplace_pipeline . --strict \\
-              > "$RUNNER_TEMP/cpv-pipeline-report.txt" 2>&1
-          exit_code=$?
+              2>&1 | tee "$RUNNER_TEMP/cpv-pipeline-report.txt"
+          exit_code=${PIPESTATUS[0]}
           set -e
 __CPV_PIPELINE_BLOCK__
 """.replace(
@@ -582,7 +599,7 @@ __CPV_PIPELINE_BLOCK__
                 marker=CPV_MARKETPLACE_VERDICT_MARKER,
                 indent=" " * 10,
                 pass_echo="Marketplace validation passed",
-                findings_action="exit $exit_code",
+                findings_action='exit "$exit_code"',
                 infra_action="exit 1",
             ),
         )
@@ -612,7 +629,7 @@ __CPV_PIPELINE_BLOCK__
                 marker=CPV_PIPELINE_VERDICT_MARKER,
                 indent=" " * 10,
                 pass_echo="Marketplace pipeline validation passed",
-                findings_action="exit $exit_code",
+                findings_action='exit "$exit_code"',
                 infra_action="exit 1",
             ),
         )
