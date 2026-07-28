@@ -9134,6 +9134,68 @@ def url_check_phase_timeout() -> float:
     return override if override > 0 else _DEFAULT_URL_CHECK_PHASE_TIMEOUT
 
 
+# ---------------------------------------------------------------------------
+# Per-phase progress markers (issue #180)
+# ---------------------------------------------------------------------------
+# A validate step that is killed at its job timeout leaves a log that says
+# nothing about WHICH phase was in flight, so triage starts from zero. The
+# `tee` (v3.22.0) preserves whatever was emitted, but the validator emitted
+# almost nothing until its final report — so there was nothing to preserve.
+#
+# These markers close that: every phase announces START before it runs and
+# DONE with its elapsed time after. A killed run therefore ends with one or
+# more STARTs that never got a DONE, and those are exactly the stuck phases.
+#
+# Deliberately ON BY DEFAULT. The whole value is being there for the hang you
+# did NOT predict; an opt-in flag is useless in exactly that case. Set
+# PLUGIN_PROGRESS=0 to silence.
+#
+# STDERR ONLY, always: the --json contract is that stdout carries the JSON
+# object and nothing else, so a consumer can json.loads() the whole buffer.
+_PROGRESS_ENV = "PLUGIN_PROGRESS"
+_PROGRESS_PREFIX = "[cpv-phase]"
+# ASCII only — these land in Windows consoles and CI logs of every encoding.
+_PROGRESS_OFF = frozenset({"0", "false", "no", "off"})
+
+
+def phase_progress_enabled() -> bool:
+    """True unless ``PLUGIN_PROGRESS`` is set to a falsy value."""
+    return os.environ.get(_PROGRESS_ENV, "").strip().lower() not in _PROGRESS_OFF
+
+
+def _emit(text: str) -> None:
+    """Write one progress line, or give up silently.
+
+    A progress marker is DIAGNOSTICS, never a gate, so it must not be able to
+    fail a validation. Two ways stderr can refuse a write, both reachable in
+    ordinary use and both verified to raise:
+
+    * ``BrokenPipeError`` (an OSError) — ``cpv-remote-validate … 2>&1 | head``
+      closes the pipe once head has its lines. This became likely the moment
+      we started emitting ~90 lines instead of almost none.
+    * ``ValueError`` — stderr already closed by an embedding process.
+
+    Swallowing is the right call HERE and nowhere else: the alternative is a
+    run that fails because nobody was reading its log.
+    """
+    try:
+        print(text, file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
+
+
+def emit_phase_start(name: str) -> None:
+    """Announce that phase ``name`` is about to run."""
+    if phase_progress_enabled():
+        _emit(f"{_PROGRESS_PREFIX} START {name}")
+
+
+def emit_phase_done(name: str, elapsed: float) -> None:
+    """Announce that phase ``name`` finished, with its wall-clock cost."""
+    if phase_progress_enabled():
+        _emit(f"{_PROGRESS_PREFIX} DONE  {name} {elapsed:.1f}s")
+
+
 def validate_md_urls(
     md_file: Path,
     plugin_root: Path,

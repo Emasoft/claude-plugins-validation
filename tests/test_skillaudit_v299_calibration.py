@@ -319,13 +319,24 @@ class TestValidatePluginPipelineHookup:
         ``main()`` in the security-audit phase — the test's real
         invariant.
         """
-        sa_present = "_run_skillaudit_native(plugin_root, report)" in self.body
+        sa_flat = "_run_skillaudit_native(plugin_root, report)"  # pre-#180 flat call
+        sa_wrapped = '_serial_phase("skillaudit_native", _run_skillaudit_native'  # #180 progress-marker wrapper
+        sa_present = sa_flat in self.body or sa_wrapped in self.body
         tel_present = (
             "validate_telemetry(plugin_root, report)" in self.body  # legacy flat-call shape
             or '("validate_telemetry", validate_telemetry,' in self.body  # post-A10 dispatch tuple
         )
         assert sa_present, "main() must directly call _run_skillaudit_native (serial-before-parallel mutex contract)"
         assert tel_present, "main() must dispatch validate_telemetry (flat or via parallel_tasks)"
+
+        # The mutex contract this test exists for is about ORDER, not spelling:
+        # skillaudit writes the self-scan module state that validators in the
+        # parallel batch read, so its call must precede the batch. Asserting
+        # that directly means a future re-spelling cannot quietly break it.
+        sa_at = self.body.find(sa_flat if sa_flat in self.body else sa_wrapped)
+        batch_at = self.body.find("parallel_tasks: list[")
+        assert sa_at != -1 and batch_at != -1
+        assert sa_at < batch_at, "skillaudit must run BEFORE the parallel batch is built (mutex contract)"
 
     def test_helper_documents_iron_rule(self) -> None:
         # The helper body must mention MANDATORY and the iron-rule
