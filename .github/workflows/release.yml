@@ -32,17 +32,37 @@ jobs:
         run: uv sync
 
       - name: Run full plugin validation (strict — same gate as pre-push hook)
+        # FAIL-CLOSED (RC-8), and dogfooding what v3.22.0 shipped to everyone else.
+        # This handler used to error only on exit 1-4 and fall through otherwise —
+        # so `command not found` (127) or an OOM kill (137) SILENTLY PASSED and the
+        # release proceeded on a validation that never ran. CPV's verdict codes stop
+        # at 4, so anything else is the validator failing to run, not a clean result;
+        # the SUMMARY line is required as proof it actually produced a verdict.
+        #
+        # `tee`, not `> file` + `cat` (issue #180): with the redirect a healthy run
+        # and a hung one are byte-identical in the log, and a job killed at its cap
+        # never reaches the `cat`. ${PIPESTATUS[0]} keeps the exit code the
+        # VALIDATOR's — `$?` after a pipeline is tee's. $exit_code is quoted because
+        # shellcheck cannot infer numeric-ness through PIPESTATUS (SC2086).
+        # --no-color stays: the report is uploaded as a release asset, and ANSI
+        # escapes in it made the validator flag its own output (v2.107.1).
         run: |
           set +e
-          uv run python scripts/validate_plugin.py . --verbose --strict --no-color > validation-report.txt 2>&1
-          exit_code=$?
+          uv run python scripts/validate_plugin.py . --verbose --strict --no-color 2>&1 \
+            | tee validation-report.txt
+          exit_code=${PIPESTATUS[0]}
           set -e
-          cat validation-report.txt
-          # Strict mode: any CRITICAL/MAJOR/MINOR/NIT (exit codes 1-4) blocks release.
-          if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ]; then
-            echo "::error::Validation failed with exit code $exit_code"
-            exit $exit_code
+          if [ "$exit_code" -eq 0 ]; then
+            echo "Validation passed"
+            exit 0
           fi
+          if [ "$exit_code" -ge 1 ] && [ "$exit_code" -le 4 ] \
+             && grep -q "SUMMARY: CRITICAL=" validation-report.txt; then
+            echo "::error::Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT found)"
+            exit "$exit_code"
+          fi
+          echo "::error::Validator FAILED TO RUN (exit $exit_code) — infra/install failure, NOT a validation verdict. No findings were produced; do not read this as CRITICAL/MAJOR/MINOR/NIT."
+          exit 1
 
       - name: Run tests
         run: uv run pytest tests/ -v
