@@ -2187,6 +2187,136 @@ def migrate_publish_py_dependency_tag(plugin_path: Path, dry_run: bool = False) 
 
 
 # =============================================================================
+# Issue #179 — give an EXISTING publish.py a satisfiable test-suite bound
+# =============================================================================
+# The generator fix reaches plugins that are scaffolded AFTER it. It does not
+# reach the fleet that reported #179, because standardize never overwrites an
+# existing publish.py on a plain `--fix`, and those plugins are precisely the
+# ones that cannot safely `--force-templates` (customized or ahead-of-canon).
+# So this mirrors `migrate_publish_py_dependency_tag`: a surgical, idempotent,
+# in-place injection that runs on ANY `--fix`.
+#
+# Every replacement is lifted VERBATIM out of freshly generated canon rather
+# than re-typed here. A second copy of the canonical text is the same
+# duplicate-source defect this migration exists to repair — it would drift the
+# first time the generator's wording changed, and then the migrator would be
+# installing a stale fix while reporting success.
+
+
+def _slice_between(text: str, start: str, end: str) -> str | None:
+    """The span from ``start`` up to (not including) ``end``, or None if either
+    anchor is missing or out of order."""
+    i = text.find(start)
+    if i < 0:
+        return None
+    j = text.find(end, i)
+    if j < 0:
+        return None
+    return text[i:j]
+
+
+def _canonical_publish_py() -> str | None:
+    """Freshly generated canon, used as the source of the replacement text."""
+    try:
+        import importlib  # noqa: PLC0415
+
+        gpr = importlib.import_module("generate_plugin_repo")
+        params = gpr.PluginParams(
+            name="canon-reference-plugin",
+            description="Canon reference used to lift replacement text.",
+            author="canon",
+            author_email="canon@example.com",
+            license="MIT",
+            python_version="3.12",
+            github_owner="canon",
+            marketplace="canon",
+            version="0.0.0",
+        )
+        return str(gpr.gen_publish_py(params))
+    except Exception:  # noqa: BLE001 - a migration must never take standardize down
+        return None
+
+
+# Anchors chosen to be stable across the customizations a plugin actually makes.
+_RUN_START = "def run(\n"
+_RUN_END = "    if check and result.returncode != 0:"
+_RESOLVER_START = "# Wall-clock bound for the TEST SUITE specifically"
+_GATE_START_OLD = "    try:\n        te = subprocess.run("
+_GATE_START_NEW = "    suite_timeout = _test_suite_timeout()"
+_GATE_END = "    if te == 5:"
+_STAGE_OLD = '        r = run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root, check=False)'
+_STAGE_START_NEW = '        r = run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root,'
+_STAGE_END = "    finally:"
+
+
+def _inject_test_suite_timeout(text: str) -> tuple[str | None, str]:
+    """Return (rewritten_text, note). ``None`` text means nothing was written.
+
+    The resolver + ``run()`` rewrite is a PREREQUISITE, not one of several
+    best-effort edits: both remaining sites reference ``_test_suite_timeout``,
+    so applying either without it would leave a publish.py that raises
+    NameError at push time. When that anchor does not match, the file is left
+    byte-identical and the shape is reported instead — a half-rewritten
+    publish.py in someone else's repo is a worse outcome than an unmigrated one.
+    """
+    if "_test_suite_timeout" in text:
+        return None, ""
+
+    canon = _canonical_publish_py()
+    if canon is None:
+        return None, "publish.py: could not render canon to migrate the test-suite timeout — skipped"
+
+    canon_run = _slice_between(canon, _RESOLVER_START, _RUN_END)
+    old_run = _slice_between(text, _RUN_START, _RUN_END)
+    if canon_run is None or old_run is None or "timeout=300" not in old_run:
+        return None, (
+            "publish.py: unrecognised run() helper — the #179 test-suite timeout was NOT migrated "
+            "(left byte-identical). Re-run with --force-templates, or widen the pytest bound by hand."
+        )
+
+    new_text = text.replace(old_run, canon_run, 1)
+    applied = ["run() accepts a per-call timeout"]
+
+    canon_gate = _slice_between(canon, _GATE_START_NEW, _GATE_END)
+    old_gate = _slice_between(new_text, _GATE_START_OLD, _GATE_END)
+    if canon_gate is not None and old_gate is not None and "timeout=300" in old_gate:
+        new_text = new_text.replace(old_gate, canon_gate, 1)
+        applied.append("the G4 gate runs the suite under the wider bound")
+
+    canon_stage = _slice_between(canon, _STAGE_START_NEW, _STAGE_END)
+    if canon_stage is not None and _STAGE_OLD in new_text:
+        new_text = new_text.replace(_STAGE_OLD + "\n", canon_stage, 1)
+        applied.append("stage_tests runs the suite under the wider bound")
+
+    return new_text, "migrate publish.py for issue #179 — " + "; ".join(applied)
+
+
+def migrate_publish_py_test_suite_timeout(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """Give an EXISTING ``scripts/publish.py`` a satisfiable pytest bound (#179).
+
+    Runs on ANY ``--fix`` — deliberately NOT gated behind ``--force-templates``,
+    for the same reason as ``migrate_publish_py_dependency_tag``. Idempotent: a
+    publish.py that already resolves the bound comes back byte-identical and
+    reports nothing.
+    """
+    publish = plugin_path / "scripts" / "publish.py"
+    if not publish.is_file():
+        return []
+    try:
+        text = publish.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    new_text, note = _inject_test_suite_timeout(text)
+    if new_text is None:
+        return [note] if note else []
+    if dry_run:
+        return [f"[dry-run] would {note}"]
+    publish.write_text(new_text, encoding="utf-8")
+    return [note]
+
+
+# =============================================================================
 # Issue #165 — MERGE (never clobber) the canon config files under --force-templates
 # =============================================================================
 # `--force-templates` blind-overwrites the shared-canon config files, which DELETES
@@ -4111,6 +4241,14 @@ def fix_missing_files(
     # that needs this), idempotent, and publish.py is NOT overwritten.
     for note in migrate_publish_py_dependency_tag(plugin_path, dry_run=dry_run):
         print(f"  {YELLOW}[dep-tag]{NC} {note}")
+
+    # #179: the generated `run()` hardcoded a 300s bound that both pytest sites
+    # inherited, so G4 was unsatisfiable for any suite longer than five minutes.
+    # Same reasoning as the dep-tag migrator above — the plugins that hit this
+    # are exactly the ones that cannot safely --force-templates, so it runs on
+    # ANY --fix and never overwrites publish.py wholesale.
+    for note in migrate_publish_py_test_suite_timeout(plugin_path, dry_run=dry_run):
+        print(f"  {YELLOW}[test-timeout]{NC} {note}")
 
     # CIP-1 (#140): drop the INVERTED `CLAUDE_PRIVATE_USERNAMES: ${{ github.
     # repository_owner }}` env from every workflow. It tells CPV that the PUBLIC
