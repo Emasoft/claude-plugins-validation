@@ -198,8 +198,14 @@ def main() -> int:
     cprint(f"{BLUE}Running tests...{NC}")
     test_dir = repo_root / "<placeholder-for-test-dir>"
     if test_dir.is_dir():
+        # Size this bound for a TEST SUITE, not a lint step. 300s is the right
+        # bound for a scan; a real suite runs for minutes, and a cap the suite
+        # cannot finish inside makes the gate unsatisfiable rather than strict
+        # (issue #179). Make it overridable so a larger suite never has to edit
+        # the hook — and never trim or skip tests to fit a bound.
         te = run_script(python_cmd, Path("-m"), ["pytest", str(test_dir), "-q", "--tb=short"],
-                        cwd=repo_root, timeout=300)
+                        cwd=repo_root,
+                        timeout=float(os.environ.get("PLUGIN_TEST_SUITE_TIMEOUT") or 1800))
         if te != 0:
             cprint(f"{RED}BLOCKED: Tests failed{NC}")
             return 1
