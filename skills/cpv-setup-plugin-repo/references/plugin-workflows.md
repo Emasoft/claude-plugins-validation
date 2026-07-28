@@ -114,12 +114,13 @@ jobs:
         # a healthy run and a hung one are byte-identical in the log for the
         # whole window, and a job killed at its `timeout-minutes` never reaches
         # the `cat` — so the log shows nothing about what was in flight.
-        # `PYTHONUNBUFFERED=1` is what makes the tee actually STREAM: measured on
-        # a real release run, `tee` without it still delivered 1795 of 1803 lines
-        # in one burst at exit, because Python block-buffers stdout when it is a
-        # pipe. tee alone still beats the redirect (a killed job shows whatever
-        # HAS flushed rather than nothing), but only unbuffered output gives you
-        # live progress — which is the whole point.
+        # `PYTHONUNBUFFERED=1` makes the PHASE BANNERS land at their true time
+        # instead of whenever a 4-8 KB buffer fills, so a hung run shows which
+        # phase it died in. Measured on real release runs, that is all it buys:
+        # ~1794 of 1804 lines still arrive at exit, because those are the FINAL
+        # REPORT the validator generates at the end by program structure — not
+        # output waiting in a buffer. Expect correct progress timestamps, not a
+        # streamed report.
         # `${PIPESTATUS[0]}` keeps the exit code the VALIDATOR's; `$?` after a
         # pipeline is `tee`'s status and would green every failed validation.
         # `$exit_code` is quoted on every use because shellcheck cannot infer

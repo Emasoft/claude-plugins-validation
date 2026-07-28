@@ -55,10 +55,12 @@ def test_release_gate_streams_and_reads_the_validators_status() -> None:
 
 
 def test_release_gate_output_is_unbuffered() -> None:
-    """Without this the tee is decorative: measured on the v3.22.2 release run,
-    1795 of 1803 lines arrived in one burst at exit because Python block-buffers
-    stdout into a pipe. The step env is where it belongs — the command is a bare
-    `uv run`, not an inline assignment."""
+    """Keeps the phase banners correctly timestamped: the validator calls no
+    explicit flush, so without this they surface only when a 4-8 KB buffer fills.
+    Measured scope — it does NOT stream the report (~1794 of 1804 lines arrive at
+    exit either way; those are the final report, produced at the end by program
+    structure). The step env is where it belongs: the command is a bare `uv run`,
+    not an inline assignment."""
     text = _WF.read_text(encoding="utf-8")
     step = text.split("Run full plugin validation", 1)[1].split("- name:", 1)[0]
     assert "PYTHONUNBUFFERED" in step, "the validate step does not force unbuffered output"

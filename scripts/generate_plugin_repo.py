@@ -670,13 +670,15 @@ def gen_cpv_validate_run_block(p: PluginParams, report_path: str) -> str:
     `timeout-minutes` the `cat` never runs and the log shows NOTHING about what
     was in flight.
 
-    `PYTHONUNBUFFERED=1` is what makes the `tee` actually stream, and it is not
-    optional garnish. Measured on CPV's own v3.22.2 release run: with `tee` but
-    WITHOUT it, 1795 of 1803 output lines still arrived in one burst at exit,
-    because Python block-buffers stdout when it is a pipe rather than a tty — so
-    `tee` was faithfully forwarding a buffer nothing had flushed yet. `tee` alone
-    is still strictly better than the redirect (a killed job shows whatever HAS
-    flushed, instead of nothing), but only unbuffered output gives live progress.
+    `PYTHONUNBUFFERED=1` makes the PHASE BANNERS land at their true time instead
+    of whenever a 4-8 KB buffer fills (the validator calls no explicit flush), so
+    a hung run shows which phase it died in. Measured honestly on CPV's own
+    releases, that is ALL it buys: with it present, 1794 of 1804 lines still
+    arrive at exit — those lines are the FINAL REPORT, which the validator
+    generates at the end by program structure, not output waiting in a buffer.
+    An earlier version of this comment claimed unbuffering was what made the tee
+    stream; re-measuring disproved that. Richer per-phase progress is a real and
+    still-open improvement (issue #180's second ask), not something this delivers.
 
     `${{PIPESTATUS[0]}}` is used rather than `$?` so the exit code is the
     VALIDATOR's, not `tee`'s — reading `tee`'s status here would report success
