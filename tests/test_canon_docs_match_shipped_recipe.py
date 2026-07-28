@@ -56,13 +56,14 @@ def test_no_doc_teaches_the_blind_redirect() -> None:
 
 
 def test_no_doc_teaches_a_buffered_tee() -> None:
-    """`tee` without unbuffered output is a half-fix that LOOKS complete.
+    """The validator calls no explicit flush, so without PYTHONUNBUFFERED its
+    phase banners surface only when a 4-8 KB buffer happens to fill — and those
+    banners are what tell you WHICH phase a hung run died in.
 
-    Measured on a real release run: with `tee` but no PYTHONUNBUFFERED, 1795 of
-    1803 lines still arrived in one burst at exit, because Python block-buffers
-    stdout when it is a pipe rather than a tty — so `tee` faithfully forwarded a
-    buffer nothing had flushed. A doc that shows the tee without it teaches the
-    appearance of streaming.
+    Scoped claim, measured: this does NOT make the report stream. ~1794 of 1804
+    lines arrive at exit either way, because they are the final report the
+    validator generates at the end by program structure. The guard exists so the
+    progress markers stay correctly timestamped, not to promise live output.
     """
     for doc, body in _validator_blocks():
         assert "PYTHONUNBUFFERED" in body, f"{doc.name}: tee'd recipe does not force unbuffered output"

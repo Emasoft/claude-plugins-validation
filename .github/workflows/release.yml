@@ -47,13 +47,14 @@ jobs:
         # --no-color stays: the report is uploaded as a release asset, and ANSI
         # escapes in it made the validator flag its own output (v2.107.1).
         #
-        # PYTHONUNBUFFERED is what actually makes `tee` stream. Measured on the
-        # v3.22.2 release run: without it, 1795 of 1803 output lines landed in a
-        # single burst at exit, because Python block-buffers stdout when it is a
-        # pipe rather than a tty — so `tee` faithfully forwarded a buffer that was
-        # only flushed at the end. tee alone is still an improvement (a killed job
-        # shows whatever HAS flushed, where the old `> file` + trailing `cat`
-        # showed nothing at all), but it is not live progress without this.
+        # PYTHONUNBUFFERED makes the PHASE BANNERS appear at their true time
+        # rather than whenever a 4-8 KB buffer happens to fill (the validator
+        # calls no explicit flush), which is what lets you see WHICH phase a hung
+        # run died in. Measured honestly, that is all it buys: with it present,
+        # 1794 of 1804 lines still arrive at exit — because those lines are the
+        # FINAL REPORT, which the validator generates at the end by program
+        # structure, not output waiting in a buffer. Do not expect it to stream
+        # the report; do expect it to timestamp the progress markers correctly.
         env:
           PYTHONUNBUFFERED: "1"
         run: |
