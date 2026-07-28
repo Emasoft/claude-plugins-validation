@@ -237,7 +237,10 @@ def test_rc8_infra_failure_is_labelled_as_such(gen) -> None:
 def test_rc8_findings_label_is_gated_on_exit_1_to_4_and_the_summary_line(gen) -> None:
     """POSITIVE CONTROL: a REAL verdict (exit 1-4 + a SUMMARY line) still says "findings"."""
     text = gen(_params())
-    assert "[ $exit_code -ge 1 ] && [ $exit_code -le 4 ]" in text
+    # Quoted since #180 (PIPESTATUS defeats shellcheck's numeric inference, so an
+    # unquoted expansion trips SC2086 in the generated Lint job). The GATE is
+    # unchanged — still exit 1-4 AND a SUMMARY line.
+    assert '[ "$exit_code" -ge 1 ] && [ "$exit_code" -le 4 ]' in text
     assert 'grep -q "SUMMARY: CRITICAL="' in text
     assert "Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT found)" in text
 
@@ -246,7 +249,7 @@ def test_rc8_findings_label_is_gated_on_exit_1_to_4_and_the_summary_line(gen) ->
 def test_rc8_exit_zero_still_passes(gen) -> None:
     """POSITIVE CONTROL: a clean run is never blocked by the new handler."""
     text = gen(_params())
-    assert "if [ $exit_code -eq 0 ]; then" in text
+    assert 'if [ "$exit_code" -eq 0 ]; then' in text
     assert "Validation passed" in text
 
 
