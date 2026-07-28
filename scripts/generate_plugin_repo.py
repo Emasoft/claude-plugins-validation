@@ -1767,19 +1767,59 @@ NC     = "\033[0m" if _C else ""
 def cprint(msg: str) -> None:
     print(msg, flush=True)
 
+# Wall-clock bound for the TEST SUITE specifically (issue #179). `run()`'s 300s
+# default is sized for a lint/scan invocation; a real suite is minutes, so
+# inheriting that default made gate G4 UNSATISFIABLE for any plugin whose tests
+# run longer — a 13,618-test suite reached 47% at the cap and the gate killed its
+# own run. A cap the suite cannot finish inside does not make the gate stricter,
+# it makes it unprovable, and a timeout is indistinguishable from a hang. The
+# bound is overridable so the NEXT larger suite does not have to patch the
+# template — a fixed bound is exactly the defect being fixed here, and replacing
+# 300 with a bigger constant would only move the cliff.
+_TEST_SUITE_TIMEOUT_ENV = "PLUGIN_TEST_SUITE_TIMEOUT"
+_DEFAULT_TEST_SUITE_TIMEOUT = 1800.0
+
+
+def _test_suite_timeout() -> float:
+    """Seconds allowed for the pytest gate; the env override wins when positive.
+
+    An empty, zero, negative, or unparseable value falls back to the default.
+    That asymmetry is deliberate: a typo must never SHORTEN the bound, because a
+    near-zero ceiling would re-create the unsatisfiable gate this constant exists
+    to remove.
+    """
+    raw = os.environ.get(_TEST_SUITE_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return _DEFAULT_TEST_SUITE_TIMEOUT
+    try:
+        override = float(raw)
+    except ValueError:
+        return _DEFAULT_TEST_SUITE_TIMEOUT
+    return override if override > 0 else _DEFAULT_TEST_SUITE_TIMEOUT
+
+
 def run(
     cmd: list[str], cwd: Path | None = None, *, check: bool = True, capture: bool = False,
+    timeout: float = 300,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a command, stream output, fail-fast on error."""
+    """Run a command, stream output, fail-fast on error.
+
+    `timeout` stays at 300s by default — the right bound for the lint/scan steps
+    that make up almost every call site, and the reason a hung one fails fast.
+    Callers whose work is legitimately longer pass their own; see
+    `_test_suite_timeout` for the test gate.
+    """
     cprint(f"  {BLUE}$ {' '.join(cmd)}{NC}")
     # A subprocess exceeding `timeout` raises TimeoutExpired; without this it
     # would die with a raw traceback instead of the styled fail-fast message
     # every other failure path uses. Catch it and exit 1.
     try:
         result = subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True,
-                                capture_output=capture, timeout=300)
+                                capture_output=capture, timeout=timeout)
     except subprocess.TimeoutExpired:
-        cprint(f"  {RED}Command timed out after 300s: {' '.join(cmd)}{NC}")
+        # Report the ACTUAL bound: a hardcoded "300s" starts lying the moment any
+        # caller overrides it, and a wrong number here sends triage the wrong way.
+        cprint(f"  {RED}Command timed out after {timeout:g}s: {' '.join(cmd)}{NC}")
         sys.exit(1)
     if check and result.returncode != 0:
         cprint(f"  {RED}Command failed (exit {result.returncode}){NC}")
@@ -2636,12 +2676,15 @@ def run_gate(root: Path) -> int:
         cprint(f"  {RED}BLOCKED: tests/ directory missing or empty.{NC}")
         cprint(f"  {RED}Every CPV plugin MUST ship tests.{NC}")
         return 1
+    suite_timeout = _test_suite_timeout()
     try:
         te = subprocess.run(
             ["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"],
-            cwd=str(root), timeout=300).returncode
+            cwd=str(root), timeout=suite_timeout).returncode
     except subprocess.TimeoutExpired:
-        cprint(f"  {RED}BLOCKED: Tests timed out after 300s.{NC}")
+        cprint(f"  {RED}BLOCKED: Tests timed out after {suite_timeout:g}s.{NC}")
+        cprint(f"  {RED}If the suite is legitimately longer, raise "
+               f"{_TEST_SUITE_TIMEOUT_ENV} — do not trim or skip tests to fit.{NC}")
         return 1
     if te == 5:
         cprint(f"  {RED}BLOCKED: pytest collected 0 tests.{NC}")
@@ -2844,7 +2887,8 @@ def stage_tests(root: Path) -> None:
         sys.exit(1)
     baseline_browser_pids = _snapshot_browser_pids()
     try:
-        r = run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root, check=False)
+        r = run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root,
+                check=False, timeout=_test_suite_timeout())
     finally:
         killed = _cleanup_browser_orphans(baseline_browser_pids)
         if killed:
