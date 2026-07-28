@@ -47,6 +47,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -65,6 +66,7 @@ from cpv_validation_common import (
     removed_cpv_size_keys_present,
     save_report_and_print_summary,
     tracked_but_gitignored_paths,
+    url_check_phase_timeout,
     validate_component_name,
     validate_md_file_paths,
     validate_md_urls,
@@ -4968,6 +4970,13 @@ def validate_md_content_references(plugin_root: Path, report: ValidationReport) 
     # plugin structure, so they should not be validated as references to files in THIS
     # plugin. We pass a flag to downgrade plugin-internal backtick path errors to
     # WARNING in reference files.
+    # Issue #180: the dead-link phase is the loop, not any one call — each file
+    # gets its own per-host semaphores, so nothing paces the whole sweep. One
+    # deadline spans every file so the phase can never approach the CI job's own
+    # timeout-minutes, no matter how many files or how slow the hosts are.
+    url_deadline = time.monotonic() + url_check_phase_timeout()
+    url_skipped: list[str] = []
+
     for md_file in sorted(md_files):
         # Reference files and command files describe the USER's plugin structure,
         # not this plugin. Backtick paths there are documentation examples.
@@ -4977,7 +4986,24 @@ def validate_md_content_references(plugin_root: Path, report: ValidationReport) 
             md_file, plugin_root, report, skip_patterns=skip_patterns, is_reference_doc=is_reference_doc
         )
         # Validate URLs
-        validate_md_urls(md_file, plugin_root, report, url_cache=url_cache)
+        validate_md_urls(
+            md_file, plugin_root, report, url_cache=url_cache,
+            deadline=url_deadline, skipped=url_skipped,
+        )
+
+    if url_skipped:
+        # ONE finding for the whole phase, not one per URL — a budget overrun is
+        # a single fact about the run. WARNING so it can never block a gate: an
+        # unchecked link must not fail a plugin that may well have none broken.
+        report.warning(
+            f"Dead-link check budget ({url_check_phase_timeout():g}s) exhausted — "
+            f"{len(url_skipped)} URL(s) were NOT checked, so they are neither "
+            f"confirmed alive nor reported dead. Raise "
+            f"PLUGIN_URL_CHECK_PHASE_TIMEOUT, or set CPV_SKIP_URL_CHECK=1 if this "
+            f"environment cannot reach the network. First skipped: "
+            f"{', '.join(url_skipped[:3])}",
+            "markdown URLs",
+        )
 
 
 def validate_pipeline_readiness(plugin_root: Path, report: ValidationReport) -> None:

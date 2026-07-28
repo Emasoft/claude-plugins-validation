@@ -9087,6 +9087,53 @@ def _collect_package_repo_urls(content: str) -> set[str]:
     return repo_urls
 
 
+# Aggregate wall-clock ceiling for the WHOLE dead-link phase (issue #180).
+#
+# Every individual request is already bounded (`timeout`, 8s) and retried a
+# bounded number of times — but their SUM is not. `validate_md_urls` is called
+# ONCE PER MARKDOWN FILE, and the per-host semaphores below are scoped to a
+# single call, so the throttling that would pace a burst resets on every file
+# and the phase grows with (files x URLs). On a cold CI runner against a host
+# that is slow or rate-limiting anonymous requests, a field report measured this
+# phase running to the validate job's own 25-30 min cap while producing no
+# output at all (#180). That is the same "bounded per item, unbounded in
+# aggregate" defect issue #162 fixed for REPO LINT — it was simply still open
+# for this phase.
+#
+# A dead link is a WARNING, and WARNING never blocks (not even under --strict),
+# so a budget-forced skip cannot weaken any gate: the worst case is that a dead
+# link goes unreported for one run, which is strictly better than the validator
+# being killed before it reports anything at all.
+_URL_CHECK_PHASE_TIMEOUT_ENV = "PLUGIN_URL_CHECK_PHASE_TIMEOUT"
+# 300s: comfortably above a healthy full run, and well under the 25-30 min
+# validate-job ceiling, so it cannot false-skip a healthy slow run yet always
+# fires long before the job itself is killed.
+_DEFAULT_URL_CHECK_PHASE_TIMEOUT = 300.0
+
+# Returned in the suffix slot when the budget expired before a URL was tried.
+# Contains a NUL so no genuine warning suffix can ever collide with it.
+_URL_CHECK_SKIPPED = "\x00cpv-url-check-skipped"
+
+
+def url_check_phase_timeout() -> float:
+    """Resolve the aggregate wall-clock budget for the whole dead-link phase.
+
+    Returns ``PLUGIN_URL_CHECK_PHASE_TIMEOUT`` (seconds) when it is set to a
+    positive number, else the default. An empty, zero, negative, or unparseable
+    value falls back to the default — mirroring ``_phase_timeout`` in the lint
+    engine, so a typo can never DISABLE the guard or set a near-zero ceiling
+    that would skip every URL.
+    """
+    raw = os.environ.get(_URL_CHECK_PHASE_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return _DEFAULT_URL_CHECK_PHASE_TIMEOUT
+    try:
+        override = float(raw)
+    except ValueError:
+        return _DEFAULT_URL_CHECK_PHASE_TIMEOUT
+    return override if override > 0 else _DEFAULT_URL_CHECK_PHASE_TIMEOUT
+
+
 def validate_md_urls(
     md_file: Path,
     plugin_root: Path,
@@ -9097,6 +9144,8 @@ def validate_md_urls(
     url_cache: dict[str, bool] | None = None,
     max_retries: int = 2,
     retry_backoff: float = 0.4,
+    deadline: float | None = None,
+    skipped: list[str] | None = None,
 ) -> None:
     """Validate that URLs referenced in a markdown file are reachable.
 
@@ -9367,6 +9416,14 @@ def validate_md_urls(
         gets extra patience without slowing scans of arbitrary URLs.
         """
         raw_url, safe_url = pair
+
+        # Budget exhausted: do not start another request. Reported as SKIPPED,
+        # never as dead — we did not check it, and inventing a dead-link
+        # warning for a URL nobody contacted would be worse than the silence
+        # this budget exists to prevent.
+        if deadline is not None and time.monotonic() >= deadline:
+            return (raw_url, safe_url, True, _URL_CHECK_SKIPPED)
+
         host = (urlparse(safe_url).hostname or "").lower()
         sem = _sem_for(host)
 
@@ -9424,6 +9481,12 @@ def validate_md_urls(
     max_workers = min(16, max(1, len(to_check)))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         for raw_url, safe_url, is_alive, suffix in pool.map(_check_one, to_check):
+            if suffix == _URL_CHECK_SKIPPED:
+                # Deliberately NOT cached: it was never contacted, so recording
+                # it as alive would let a later file trust a check that never ran.
+                if skipped is not None:
+                    skipped.append(raw_url)
+                continue
             url_cache[safe_url] = is_alive
             if not is_alive:
                 label = f"Dead URL ({suffix})" if suffix else "Dead URL"

@@ -663,6 +663,16 @@ def gen_cpv_validate_run_block(p: PluginParams, report_path: str) -> str:
     Fail-closed by design: an infra failure is NOT "no findings", so it must
     never green the gate — but it is now reported as what it actually is.
 
+    RC-180 (diagnosability, 2026-07-28) — the output is `tee`d rather than
+    redirected. With `> file 2>&1` plus a trailing `cat`, a healthy run and a
+    hung one are BYTE-IDENTICAL in the log for the entire window: nothing is
+    printed until the command returns, so when the job is killed at its
+    `timeout-minutes` the `cat` never runs and the log shows NOTHING about what
+    was in flight. `tee` streams the same bytes to the log as they are produced,
+    so a killed run still shows how far it got. `${{PIPESTATUS[0]}}` is used
+    rather than `$?` so the exit code is the VALIDATOR's, not `tee`'s — reading
+    `tee`'s status here would report success for every failed validation.
+
     Args:
         p: the plugin params (selects the git/pypi CPV source).
         report_path: where to capture the validator's combined output. ci.yml
@@ -675,21 +685,25 @@ def gen_cpv_validate_run_block(p: PluginParams, report_path: str) -> str:
     return f"""set +e
           uvx --from {cpv_from} \\
               {cpv_pyyaml}cpv-remote-validate plugin . --strict \\
-              > "{report_path}" 2>&1
-          exit_code=$?
+              2>&1 | tee "{report_path}"
+          # Quoted on every use: with `exit_code=$?` shellcheck could infer the
+          # value is numeric and stayed silent, but it cannot infer that through
+          # ${{PIPESTATUS[0]}}, so an unquoted expansion trips SC2086 — and the
+          # generated Lint job runs actionlint, which would turn every scaffolded
+          # plugin's CI red.
+          exit_code=${{PIPESTATUS[0]}}
           set -e
-          cat "{report_path}"
-          if [ $exit_code -eq 0 ]; then
+          if [ "$exit_code" -eq 0 ]; then
             echo "Validation passed"
             exit 0
           fi
           # CPV's verdict exit codes are 1-4. Anything else — and any 1-4 with no
           # SUMMARY line — means the validator never produced a verdict (a failed
           # uvx/git fetch exits 1 or 2 exactly like a findings verdict).
-          if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ] \\
+          if [ "$exit_code" -ge 1 ] && [ "$exit_code" -le 4 ] \\
              && grep -q "{CPV_SUMMARY_MARKER}" "{report_path}"; then
             echo "::error::Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT found)"
-            exit $exit_code
+            exit "$exit_code"
           fi
           echo "::error::CPV validator FAILED TO RUN (exit $exit_code) — infra/network/install failure, NOT a validation verdict. No findings were produced; do not read this as CRITICAL/MAJOR/MINOR/NIT. See the log above (a cold 'uvx --from git+...' build can fail on a transient GitHub git-fetch)."
           exit 1"""
@@ -4304,12 +4318,20 @@ def gen_ci_yml(p: PluginParams) -> str:
       `fail-fast: false` so each OS reports its own failure even when
       one fails.
 
-    v2.86.0+ follow-on hardening (issues #90 / #114):
-    * Every job declares `timeout-minutes` so a hung action / stalled uvx
-      git-fetch fails fast instead of burning the 360-min default (#90).
-    * The validate job's timeout is the cold-install ceiling (30 min) —
-      `uvx --from git+…` builds CPV from source on a COLD runner (12-20 min,
-      #114); the UV cache (`enable-cache: true`) makes every later run fast.
+    v2.86.0+ follow-on hardening (issues #90 / #114 / #180):
+    * Every job declares `timeout-minutes` so a hung action fails fast instead
+      of burning the 360-min default (#90).
+    * The validate job's timeout is a VALIDATION budget, not a build budget.
+      The original #114 framing — that the cap had to cover a 12-20 min cold
+      `uvx --from git+…` source build — no longer describes where the time
+      goes. With the UV cache plus the `~/.cache/cpv` cache below, a field
+      report measured the CPV build finishing 4 SECONDS into the step while the
+      step still ran to the cap (#180). So do NOT read a timeout here as a
+      fetch/build stall and go chasing the git ref or the pin; the budget is
+      spent inside `cpv-remote-validate`. The validator now bounds its own
+      long phases (the dead-link sweep got an aggregate budget in #180, as REPO
+      LINT did in #162), and the step `tee`s its output so a killed run still
+      shows what was in flight.
     * First-party `actions/*` are SHA-pinned too (not only third-party), so
       a hostile first-party tag rewrite cannot swap action code.
     """
@@ -4439,11 +4461,12 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
-    # Cold-install ceiling (issues #90 + #114). `uvx --from git+…` clones and
-    # builds CPV from source on a COLD runner — empirically 12-20 min. The UV
-    # cache below makes every run after the first fast (seconds), but the
-    # FIRST cold build per cache key must fit under this cap. 30 min is the
-    # documented cold ceiling with headroom; do NOT lower it below 25.
+    # VALIDATION budget (issues #90 + #114 + #180) — not a build budget.
+    # A timeout here is NOT a git-fetch or cold-build stall: with the caches
+    # below, the CPV build was measured finishing ~4s into the step while the
+    # step still ran to this cap (#180). Do not chase the ref or the pin. Read
+    # the step log — it is tee'd, so a killed run still shows what was running.
+    # 30 min with headroom; do NOT lower it below 25.
     timeout-minutes: 30
     steps:
       # Plain checkout — scaffolded plugins ship NO submodules; asking the
@@ -4624,10 +4647,12 @@ def gen_release_yml(p: PluginParams) -> str:
     * Every action SHA-pinned (gh-actions.md §"Pin third-party actions to a
       full commit SHA") — first-party actions/* included, not just
       third-party, so a hostile tag rewrite cannot swap action code.
-    * timeout-minutes on the release job (issue #90) — the cold `uvx
-      --from git+…` build of CPV (12-20 min, issue #114) must fit; 30 min is
-      the documented cold ceiling. The UV cache (enable-cache: true) makes
-      every run after the first fast.
+    * timeout-minutes on the release job (issue #90) — sized as a VALIDATION
+      budget. The #114 cold-build framing (12-20 min for `uvx --from git+…`)
+      is superseded: with the UV cache a field report measured that build at
+      ~4s while the step still hit the cap (#180), so the time goes to
+      validating, not fetching. A timeout here is NOT a git-fetch stall — do
+      not chase the ref or the pin.
     * env-sanitized run blocks — every ${{{{ github.* }}}} consumed by a
       run: block is bound to an env: mapping first (gh-actions.md
       §"Avoid expression injection").
@@ -4668,11 +4693,12 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    # Cold-install ceiling (issues #90 + #114). `uvx --from git+…` clones and
-    # builds CPV from source on a COLD runner — 12-20 min. The UV cache below
-    # makes every run after the first fast; the FIRST cold build must fit
-    # under this cap. 30 min is the documented cold ceiling; do NOT lower it
-    # below 25.
+    # VALIDATION budget (issues #90 + #114 + #180) — not a build budget.
+    # A timeout here is NOT a git-fetch or cold-build stall: with the cache
+    # below, the CPV build was measured finishing ~4s into the step while the
+    # step still ran to this cap (#180). Do not chase the ref or the pin. The
+    # step is tee'd, so a killed run still shows what was in flight.
+    # 30 min with headroom; do NOT lower it below 25.
     timeout-minutes: 30
     permissions:
       contents: write       # create the release + upload assets
