@@ -147,6 +147,31 @@ def test_a_closed_stderr_cannot_fail_a_run(monkeypatch: pytest.MonkeyPatch) -> N
     emit_phase_done("x", 1.0)
 
 
+def test_no_progress_marker_is_emitted_from_a_worker_thread() -> None:
+    """THE v3.23.0 REGRESSION, pinned.
+
+    v3.23.0 emitted these from inside `_run_one_validator`, i.e. on
+    ThreadPoolExecutor worker threads. Several validators fork process pools,
+    and on Linux multiprocessing defaults to FORK — forking a multithreaded
+    process copies mutex state, so a worker holding sys.stderr's lock at fork
+    time leaves the child with a lock held by a thread that does not exist
+    there. Every Linux CI run deadlocked at the 300s subprocess timeout while
+    the full macOS suite stayed green, because macOS spawns.
+
+    A source-level assertion is the right shape here: the deadlock needs a
+    fork race to reproduce, so a behavioural test would be flaky, while the
+    invariant "workers never touch stderr" is exact and cheap to check.
+    """
+    src = (_REPO / "scripts" / "validate_plugin.py").read_text(encoding="utf-8")
+    worker = src.split("def _run_one_validator(", 1)[1].split("\ndef ", 1)[0]
+    assert "emit_phase_start" not in worker, "progress marker emitted from a worker thread (fork-deadlock risk)"
+    assert "emit_phase_done" not in worker, "progress marker emitted from a worker thread (fork-deadlock risk)"
+
+    # ...and the dispatcher still emits them, so the feature is not just gone.
+    batch = src.split("def _run_parallel_batch(", 1)[1].split("\ndef ", 1)[0]
+    assert "emit_phase_start" in batch and "emit_phase_done" in batch
+
+
 def test_markers_are_ascii_only() -> None:
     """These land in Windows consoles and CI logs of every encoding, and CPV
     itself validates cross-platform compliance."""

@@ -7737,18 +7737,14 @@ def _run_one_validator(
     """
     sub_report = _make_validator_report()
     pos_args, kw_args = args_kwargs
-    # Issue #180 — a phase that never reports DONE is the one that hung.
-    # Emitted in `finally` so a CRASHED validator still reports DONE: it
-    # finished, badly, and is not what a killed job was stuck on.
-    emit_phase_start(name)
-    started = time.monotonic()
+    # NO progress markers here — see _run_parallel_batch. This function runs on
+    # a worker THREAD, and writing to stderr from a worker thread deadlocked
+    # every Linux run.
     try:
         callable_(plugin_root, sub_report, *pos_args, **kw_args)
         return (name, sub_report, None)
     except Exception as exc:  # noqa: BLE001 — defensive boundary, must not crash orchestrator
         return (name, sub_report, exc)
-    finally:
-        emit_phase_done(name, time.monotonic() - started)
 
 
 def _run_parallel_batch(
@@ -7784,11 +7780,28 @@ def _run_parallel_batch(
     # sequence for the parity gate.
     results: list[tuple[str, ValidationReport, Exception | None] | None] = [None] * len(tasks)
 
+    # Issue #180 progress markers are emitted HERE, on the DISPATCHING thread,
+    # never inside the workers.
+    #
+    # WHY THIS MATTERS (v3.23.0 shipped it the other way and deadlocked every
+    # Linux CI run): several validators fork process pools internally, and on
+    # Linux multiprocessing defaults to FORK. Forking a multithreaded process
+    # copies mutex state — so if any worker thread happens to hold sys.stderr's
+    # internal lock at the instant another validator forks, the child inherits
+    # that lock HELD BY A THREAD THAT DOES NOT EXIST THERE and hangs on its
+    # first write. macOS defaults to spawn, which is why a fully green local
+    # suite proved nothing about this.
+    #
+    # Emitting from the dispatching thread keeps the diagnostic contract intact
+    # — a killed run still ends with STARTs that never got a DONE — while no
+    # worker thread ever touches stderr.
+    started_at: dict[int, float] = {}
     with ThreadPoolExecutor(max_workers=n_workers, thread_name_prefix="cpv-orch") as executor:
-        future_to_index = {
-            executor.submit(_run_one_validator, name, fn, plugin_root, args): idx
-            for idx, (name, fn, args) in enumerate(tasks)
-        }
+        future_to_index = {}
+        for idx, (name, fn, args) in enumerate(tasks):
+            emit_phase_start(name)
+            started_at[idx] = time.monotonic()
+            future_to_index[executor.submit(_run_one_validator, name, fn, plugin_root, args)] = idx
         for future, idx in future_to_index.items():
             try:
                 results[idx] = future.result()
@@ -7798,6 +7811,11 @@ def _run_parallel_batch(
                 # the slot with an error rather than letting the merge fail.
                 name = tasks[idx][0]
                 results[idx] = (name, _make_validator_report(), exc)
+            finally:
+                # DONE on both paths: a validator that crashed still FINISHED,
+                # and is not what a killed job was stuck on. Leaving its START
+                # unmatched would point triage at the wrong phase.
+                emit_phase_done(tasks[idx][0], time.monotonic() - started_at[idx])
 
     # Merge in input order. The serial baseline's result sequence is
     # task[0].results ++ task[1].results ++ ... ++ task[N-1].results.
