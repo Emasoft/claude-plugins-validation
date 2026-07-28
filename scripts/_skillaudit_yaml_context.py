@@ -29,8 +29,11 @@ from typing import Final, Literal
 
 from _skillaudit_json_context import _classify_key  # type: ignore[import-not-found]
 from _skillaudit_shell_context import (  # type: ignore[import-not-found]
+    _SHELL_EXECUTION_CLASS_RULES,
     _cmdsub_is_safe_data_command,
+    _is_shell_comment_line,
     _pipe_to_text_processor,
+    _shell_quote_state_at_line_start,
 )
 
 ContextVerdict = Literal["safe_literal", "safe_doc", "safe_schema", "code_fence_neutral", "suspect", "unknown"]
@@ -62,8 +65,15 @@ def _is_inside_workflow_run(file_path: str) -> bool:
     return "/.github/workflows/" in norm or norm.startswith(".github/workflows/")
 
 
-def _line_is_in_run_block(lines: list[str], line_idx: int) -> bool:
-    """Heuristic: is this line part of a ``run:`` block value?
+_RUN_OPEN_RE: Final[re.Pattern[str]] = re.compile(r"^(?P<indent>\s*)(?:-\s+)?run\s*:\s*(?P<inline>.*)$")
+_OTHER_KEY_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?P<indent>\s*)(?:-\s+)?(?!run\s*:|run\s*$)[A-Za-z_][\w-]*\s*:"
+)
+
+
+def _run_block_open_index(lines: list[str], line_idx: int) -> int | None:
+    """Index of the ``run:`` line whose block contains ``lines[line_idx]``, or
+    None when the line is not inside a run block.
 
     YAML doesn't carry rich line metadata in our stdlib without an
     extra dep, so we use a simple back-walk: find the nearest preceding
@@ -76,12 +86,9 @@ def _line_is_in_run_block(lines: list[str], line_idx: int) -> bool:
     target = lines[line_idx]
     target_indent = len(target) - len(target.lstrip())
 
-    run_open_re = re.compile(r"^(?P<indent>\s*)(?:-\s+)?run\s*:\s*(?P<inline>.*)$")
-    other_key_re = re.compile(r"^(?P<indent>\s*)(?:-\s+)?(?!run\s*:|run\s*$)[A-Za-z_][\w-]*\s*:")
-
     for j in range(line_idx, -1, -1):
         line = lines[j]
-        m_run = run_open_re.match(line)
+        m_run = _RUN_OPEN_RE.match(line)
         if m_run:
             indent = len(m_run.group("indent"))
             if indent < target_indent or (j == line_idx):
@@ -95,16 +102,45 @@ def _line_is_in_run_block(lines: list[str], line_idx: int) -> bool:
                     # run block. Only a GENUINE inline command
                     # (``run: echo hi``) limits the block to its own line.
                     if inline_val in ("|", ">", "|-", ">-", "|+", ">+"):
-                        return True
-                    return j == line_idx
-                return True
-        m_other = other_key_re.match(line)
+                        return j
+                    return j if j == line_idx else None
+                return j
+        m_other = _OTHER_KEY_RE.match(line)
         if m_other:
             other_indent = len(m_other.group("indent"))
             if other_indent < target_indent:
                 # Hit a shallower YAML key first — we're not in a run.
-                return False
-    return False
+                return None
+    return None
+
+
+def _line_is_in_run_block(lines: list[str], line_idx: int) -> bool:
+    """True iff this line is part of a ``run:`` block value."""
+    return _run_block_open_index(lines, line_idx) is not None
+
+
+def _run_line_is_shell_comment(lines: list[str], line_idx: int) -> bool:
+    """True iff this ``run:``-block line is a genuine shell comment.
+
+    A ``run:`` body IS shell, so a ``#`` comment in it is documentation the
+    shell never executes — the same reasoning the shell classifier already
+    applies to ``.sh`` files. Explaining a shell change in a comment
+    naturally means writing markdown-style inline code (``# `| tee` instead
+    of `> file`…``), and those backticks were scoring CMD_INJECTION (#180).
+
+    Proof of inertness requires the line to START outside any string: the
+    scan runs from the first body line of the enclosing block and only a
+    positively ``normal`` state qualifies, so a ``#`` sitting inside a
+    double-quoted string opened earlier — where a backtick still runs — is
+    never mistaken for a comment.
+    """
+    if not _is_shell_comment_line(lines[line_idx]):
+        return False
+    open_idx = _run_block_open_index(lines, line_idx)
+    if open_idx is None or open_idx >= line_idx:
+        # An inline `run: # …` has no body to lex; treat it as unproven.
+        return False
+    return _shell_quote_state_at_line_start(lines, open_idx + 1, line_idx) == "normal"
 
 
 def _has_known_safe_ci_pattern(line: str) -> bool:
@@ -289,6 +325,13 @@ def classify(
     # an ephemeral CI runner. The user's agents triage these.
     if _is_inside_workflow_run(file_path):
         if _line_is_in_run_block(lines, line_idx):
+            # Issue #180 — a shell ``#`` comment inside the run: body is
+            # documentation the shell never executes. Execution-class rules
+            # only; prose-vector rules (PROMPT_INJECT / INDIRECT_PROMPT_INJECT
+            # / A2A_*) are deliberately absent from that set and stay visible,
+            # because an agent reading the workflow still sees comment text.
+            if rule_id in _SHELL_EXECUTION_CLASS_RULES and _run_line_is_shell_comment(lines, line_idx):
+                return "safe_literal"
             # Issue #40 — airtight canonical install (sudo <pkgmgr> install
             # <bare packages>, no arbitrary-exec metacharacters) is a
             # 100%-certain non-threat → suppress.
