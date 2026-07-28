@@ -46,6 +46,16 @@ jobs:
         # shellcheck cannot infer numeric-ness through PIPESTATUS (SC2086).
         # --no-color stays: the report is uploaded as a release asset, and ANSI
         # escapes in it made the validator flag its own output (v2.107.1).
+        #
+        # PYTHONUNBUFFERED is what actually makes `tee` stream. Measured on the
+        # v3.22.2 release run: without it, 1795 of 1803 output lines landed in a
+        # single burst at exit, because Python block-buffers stdout when it is a
+        # pipe rather than a tty — so `tee` faithfully forwarded a buffer that was
+        # only flushed at the end. tee alone is still an improvement (a killed job
+        # shows whatever HAS flushed, where the old `> file` + trailing `cat`
+        # showed nothing at all), but it is not live progress without this.
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           set +e
           uv run python scripts/validate_plugin.py . --verbose --strict --no-color 2>&1 \

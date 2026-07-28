@@ -668,10 +668,21 @@ def gen_cpv_validate_run_block(p: PluginParams, report_path: str) -> str:
     hung one are BYTE-IDENTICAL in the log for the entire window: nothing is
     printed until the command returns, so when the job is killed at its
     `timeout-minutes` the `cat` never runs and the log shows NOTHING about what
-    was in flight. `tee` streams the same bytes to the log as they are produced,
-    so a killed run still shows how far it got. `${{PIPESTATUS[0]}}` is used
-    rather than `$?` so the exit code is the VALIDATOR's, not `tee`'s — reading
-    `tee`'s status here would report success for every failed validation.
+    was in flight.
+
+    `PYTHONUNBUFFERED=1` is what makes the `tee` actually stream, and it is not
+    optional garnish. Measured on CPV's own v3.22.2 release run: with `tee` but
+    WITHOUT it, 1795 of 1803 output lines still arrived in one burst at exit,
+    because Python block-buffers stdout when it is a pipe rather than a tty — so
+    `tee` was faithfully forwarding a buffer nothing had flushed yet. `tee` alone
+    is still strictly better than the redirect (a killed job shows whatever HAS
+    flushed, instead of nothing), but only unbuffered output gives live progress.
+
+    `${{PIPESTATUS[0]}}` is used rather than `$?` so the exit code is the
+    VALIDATOR's, not `tee`'s — reading `tee`'s status here would report success
+    for every failed validation. This matters more than it looks: GitHub's
+    default `run:` shell is `bash -e {{0}}` WITHOUT `-o pipefail` (confirmed in
+    the same run log), so `$?` after a pipeline really would be `tee`'s.
 
     Args:
         p: the plugin params (selects the git/pypi CPV source).
@@ -683,7 +694,7 @@ def gen_cpv_validate_run_block(p: PluginParams, report_path: str) -> str:
     cpv_from = cpv_uvx_from_arg(p)
     cpv_pyyaml = cpv_uvx_pyyaml_shell_fragment(p, indent=" " * 14, cont="\\")
     return f"""set +e
-          uvx --from {cpv_from} \\
+          PYTHONUNBUFFERED=1 uvx --from {cpv_from} \\
               {cpv_pyyaml}cpv-remote-validate plugin . --strict \\
               2>&1 | tee "{report_path}"
           # Quoted on every use: with `exit_code=$?` shellcheck could infer the

@@ -55,6 +55,19 @@ def test_no_doc_teaches_the_blind_redirect() -> None:
         )
 
 
+def test_no_doc_teaches_a_buffered_tee() -> None:
+    """`tee` without unbuffered output is a half-fix that LOOKS complete.
+
+    Measured on a real release run: with `tee` but no PYTHONUNBUFFERED, 1795 of
+    1803 lines still arrived in one burst at exit, because Python block-buffers
+    stdout when it is a pipe rather than a tty — so `tee` faithfully forwarded a
+    buffer nothing had flushed. A doc that shows the tee without it teaches the
+    appearance of streaming.
+    """
+    for doc, body in _validator_blocks():
+        assert "PYTHONUNBUFFERED" in body, f"{doc.name}: tee'd recipe does not force unbuffered output"
+
+
 def test_no_doc_reads_tees_exit_status() -> None:
     """After a pipeline, `$?` is tee's status — reading it greens every failed
     validation, a fail-OPEN gate."""

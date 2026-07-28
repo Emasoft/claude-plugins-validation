@@ -114,6 +114,12 @@ jobs:
         # a healthy run and a hung one are byte-identical in the log for the
         # whole window, and a job killed at its `timeout-minutes` never reaches
         # the `cat` — so the log shows nothing about what was in flight.
+        # `PYTHONUNBUFFERED=1` is what makes the tee actually STREAM: measured on
+        # a real release run, `tee` without it still delivered 1795 of 1803 lines
+        # in one burst at exit, because Python block-buffers stdout when it is a
+        # pipe. tee alone still beats the redirect (a killed job shows whatever
+        # HAS flushed rather than nothing), but only unbuffered output gives you
+        # live progress — which is the whole point.
         # `${PIPESTATUS[0]}` keeps the exit code the VALIDATOR's; `$?` after a
         # pipeline is `tee`'s status and would green every failed validation.
         # `$exit_code` is quoted on every use because shellcheck cannot infer
@@ -121,7 +127,7 @@ jobs:
         # which the Lint job's actionlint turns into red CI.
         run: |
           set +e
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+          PYTHONUNBUFFERED=1 uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
               --with pyyaml \
               cpv-remote-validate plugin . --strict \
               2>&1 | tee "$RUNNER_TEMP/cpv-validation-report.txt"
@@ -224,7 +230,7 @@ jobs:
         # red CI in the Lint job).
         run: |
           set +e
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+          PYTHONUNBUFFERED=1 uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
               --with pyyaml \
               cpv-remote-validate plugin . --strict \
               2>&1 | tee validation-report.txt
