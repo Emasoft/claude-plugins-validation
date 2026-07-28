@@ -721,6 +721,8 @@ No API keys, accounts, or cloud services needed for any validation.
 | CRITICAL/MAJOR issues (exit 1-2) | Must fix -- plugin may be broken or insecure |
 | MINOR issues (exit 3) | Recommendations -- fix when convenient |
 | NIT issues (exit 4) | Only in `--strict` mode -- optional |
+| A validation run hangs or is killed by a CI job timeout | Each phase prints `[cpv-phase] START <name>` before running and `DONE <name> <elapsed>` after, on **stderr**. A `START` with no matching `DONE` is the phase that was in flight. Set `PLUGIN_PROGRESS=0` to silence them. |
+| The dead-link phase is slow on a link-heavy repo | It has a 300s aggregate budget; over-budget URLs are reported as **skipped, never dead**. Raise it with `PLUGIN_URL_CHECK_PHASE_TIMEOUT=<seconds>`. |
 
 ## License
 

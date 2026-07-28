@@ -58,6 +58,8 @@ from cpv_validation_common import (
     COLORS,
     ValidationReport,
     check_remote_execution_guard,
+    emit_phase_done,
+    emit_phase_start,
     gitignored_unshipped_paths,
     is_vendored_path,
     load_cpv_config,
@@ -7703,6 +7705,22 @@ def _make_validator_report() -> ValidationReport:
     return ValidationReport()
 
 
+def _serial_phase(name: str, callable_: Any, *args: Any, **kwargs: Any) -> Any:
+    """Run a SERIAL orchestrator step wrapped in #180 progress markers.
+
+    The parallel batch gets its markers from ``_run_one_validator``; the
+    serial Phase 1 / Phase 3 steps run outside it, and a hang in one of
+    those would otherwise be just as unattributable as before. Exceptions
+    propagate unchanged — this only observes.
+    """
+    emit_phase_start(name)
+    started = time.monotonic()
+    try:
+        return callable_(*args, **kwargs)
+    finally:
+        emit_phase_done(name, time.monotonic() - started)
+
+
 def _run_one_validator(
     name: str,
     callable_: Any,
@@ -7719,11 +7737,18 @@ def _run_one_validator(
     """
     sub_report = _make_validator_report()
     pos_args, kw_args = args_kwargs
+    # Issue #180 — a phase that never reports DONE is the one that hung.
+    # Emitted in `finally` so a CRASHED validator still reports DONE: it
+    # finished, badly, and is not what a killed job was stuck on.
+    emit_phase_start(name)
+    started = time.monotonic()
     try:
         callable_(plugin_root, sub_report, *pos_args, **kw_args)
         return (name, sub_report, None)
     except Exception as exc:  # noqa: BLE001 — defensive boundary, must not crash orchestrator
         return (name, sub_report, exc)
+    finally:
+        emit_phase_done(name, time.monotonic() - started)
 
 
 def _run_parallel_batch(
@@ -8169,14 +8194,21 @@ def main() -> int:
     # need it set BEFORE the batch starts to avoid racing a partially-built
     # manifest dict. Running skillaudit here guarantees the writes are
     # complete before any concurrent reader fires.
-    validate_manifest(plugin_root, report, marketplace_only, hosting_marketplace=explicit_hosting)
-    validate_structure(plugin_root, report, marketplace_only)
+    _serial_phase(
+        "validate_manifest",
+        validate_manifest,
+        plugin_root,
+        report,
+        marketplace_only,
+        hosting_marketplace=explicit_hosting,
+    )
+    _serial_phase("validate_structure", validate_structure, plugin_root, report, marketplace_only)
     # gitignore-evasion hardening — a git-tracked file that ALSO matches
     # .gitignore ships but is marked ignored (a scan-evasion vector); flag the
     # plugin INVALID and route the user to the fix agent to untrack them.
-    check_tracked_gitignored_files(plugin_root, report)
+    _serial_phase("check_tracked_gitignored_files", check_tracked_gitignored_files, plugin_root, report)
     # v2.32.0 — Layout C cross-validation (marketplace-in-plugin)
-    validate_layout_c_consistency(plugin_root, report)
+    _serial_phase("validate_layout_c_consistency", validate_layout_c_consistency, plugin_root, report)
     # v2.99.1 — skillaudit native (50 rules / 489 patterns) — MANDATORY,
     # NOT skippable. Wires the in-process scanner into the standard plugin
     # validation pipeline so every `validate_plugin.py <path>` run gets the
@@ -8185,7 +8217,7 @@ def main() -> int:
     # supply chain, container escape, persistence, crypto theft, etc.)
     # in addition to validate_security.py Check 27. Iron rule preserved:
     # missing rule catalog → CRITICAL via cpv_skillaudit_native.report_findings.
-    _run_skillaudit_native(plugin_root, report)
+    _serial_phase("skillaudit_native", _run_skillaudit_native, plugin_root, report)
     # RT4-plugin-gate-weaker-than-security — make the user-facing plugin gate at
     # least as strong as the `security` subcommand for the EXECUTION class.
     # Without this, a plain os.system("curl … | bash") passed the plugin gate
@@ -8196,7 +8228,7 @@ def main() -> int:
     # Serial here (same rationale as skillaudit above): it arms/disarms the
     # validate_security self-scan module-flag, so it must complete BEFORE the
     # parallel batch's readers fire.
-    _run_security_execclass_gate(plugin_root, report)
+    _serial_phase("security_execclass_gate", _run_security_execclass_gate, plugin_root, report)
     # Print the repo-lint banner up front so output ordering is stable
     # whether or not the rest of the validators run in parallel. The lint
     # engine itself runs INSIDE the parallel batch below.
@@ -8315,6 +8347,8 @@ def main() -> int:
         # regression test AND by CPV_ORCHESTRATOR_PARALLEL=0 when a
         # caller suspects the parallel path of a regression.
         for name, fn, (pos_args, kw_args) in parallel_tasks:
+            emit_phase_start(name)
+            started = time.monotonic()
             try:
                 fn(plugin_root, report, *pos_args, **kw_args)
             except Exception as exc:  # noqa: BLE001 — match parallel error-capture
@@ -8322,23 +8356,25 @@ def main() -> int:
                 # (possibly CRITICAL) findings are lost — keep the verdict
                 # blocking. Mirrors the parallel path above.
                 report.major(f"Validator '{name}' crashed: {type(exc).__name__}: {exc}")
+            finally:
+                emit_phase_done(name, time.monotonic() - started)
 
     # ---------------------------------------------------------------------
     # Phase 3 (SERIAL) — settings/language detection/lockfiles + epilogue.
     # ---------------------------------------------------------------------
     # Check for stale ~/.claude/settings.local.json — should not exist at user level
-    _check_stale_user_settings_local(report)
+    _serial_phase("check_stale_user_settings_local", _check_stale_user_settings_local, report)
     # Plugin-wide unauthorized-install combo (specific marketplace-add + specific plugin-install)
-    _check_unauthorized_install_combo(plugin_root, report)
+    _serial_phase("check_unauthorized_install_combo", _check_unauthorized_install_combo, plugin_root, report)
     # Language detection feeds lockfile detection — must remain serial.
-    detected_languages = validate_project_languages(plugin_root, report)
-    validate_lockfiles(plugin_root, report, detected_languages)
+    detected_languages = _serial_phase("validate_project_languages", validate_project_languages, plugin_root, report)
+    _serial_phase("validate_lockfiles", validate_lockfiles, plugin_root, report, detected_languages)
 
     # Prompt-cache audit (CA-01..CA-07, all WARNING) — CALLED, not integrated.
     # Writes its OWN report and contributes only a one-line pointer to the main
     # report; cache findings never affect the VALID/INVALID verdict. The
     # standalone `cpv-cache-optimize` audit/fix commands act on these findings.
-    cache_pointer = _run_cache_audit_separate(plugin_root, args.report, report)
+    cache_pointer = _serial_phase("cache_audit", _run_cache_audit_separate, plugin_root, args.report, report)
 
     # Output
     if args.json:
