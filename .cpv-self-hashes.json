@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-07-28T15:33:06+00:00",
+  "computed_at": "2026-07-28T15:41:21+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:65263aa1a1812d99d5b616256e1e01cd11cde780ff868214f8deb7c971dffb9b",
@@ -21,7 +21,7 @@
     ".trashcan/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".trashcan/README.txt": "sha256:3106acc9af8415d37610ef0b9f138dc9622f25f81ac37a31f24a9ebd2d25f30f",
     "CHANGELOG.md": "sha256:126f02c6ce6f6bdb84d64c807449dc8c2204967781968cbd7f489f11bf4d5d1d",
-    "CLAUDE.md": "sha256:bede585d2fa56d4b7eebc792982f270b6b54054daa0f9768bef8e4c85c55402f",
+    "CLAUDE.md": "sha256:c3ff60504516459c99665e44bdc7454f36f0f164fad2afc70018d83219bb821c",
     "LICENSE": "sha256:f79aeb8187cb5e63d27261eba76a2d771292c27489645b3410bd5e67edc02f5d",
     "README.md": "sha256:a642c76ed2e0c056f6961d7363a04b1929e2af8172431ad5095769508347bade",
     "agents/cpv-agent.md": "sha256:5c6f53d3ee88f85e380f0b49bec2e714bf4d45ca575207eb509ec61903db31cb",
@@ -709,6 +709,7 @@
     "tests/test_canon_146_publish_robustness.py": "sha256:ad82f671ab89d6de925e3a42c51e122337f0f4cc0c2cac36d6dd1dac90c45e3c",
     "tests/test_canon_179_migrate_existing.py": "sha256:1feaab83f8c2d45724f912eb7cde6333f2c1913265f8f1c03c9609ffe9e49560",
     "tests/test_canon_179_test_suite_timeout.py": "sha256:feb8c3cb054fe6538334e5d5ea1da92b9d71aa80c14f12fdce5fcf54113fd7bc",
+    "tests/test_canon_docs_match_shipped_recipe.py": "sha256:9290d336a556f8cb1f34d22d5a46f9d0839efbf5b7a3f0c7988e5c36f3b8da58",
     "tests/test_canon_fp_138_139_140.py": "sha256:7decadb26ca6601d4ce914b4ced0f3a7b897f616e4162f54989a4044ecac4229",
     "tests/test_canon_gateparity_actionlint_mypy.py": "sha256:088c54cddcdb5bf35a8438ee83bfeb46294efaa0f7f7f544f034c7b1def2e286",
     "tests/test_canon_rc1_rc8_rc9_template.py": "sha256:bc76c90be528b8406c131136c22c835e322a43e41a4c2c152b0c4da6144ee5f5",
