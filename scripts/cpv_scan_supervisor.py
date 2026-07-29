@@ -42,7 +42,6 @@ and pays none of the manager-process overhead.
 from __future__ import annotations
 
 import json
-import multiprocessing as mp
 import os
 import queue as _queue
 import sys
@@ -50,6 +49,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from cpv_fork_safety import safe_mp_context
 from cpv_parallel_runner import ScanResult
 
 __all__ = [
@@ -460,7 +460,15 @@ def supervised_scan(
             },
         )
 
-    ctx = mp.get_context()
+    # NEVER mp.get_context() — that inherits the platform default, which is
+    # ``fork`` on Linux. This supervisor is reached from validator worker
+    # threads, so a forked child can inherit a held stderr/logging lock and
+    # hang forever (v3.23.0). See scripts/cpv_fork_safety.py.
+    # ``Any`` because typeshed's BaseContext does not declare ``.Process``, and
+    # the concrete ForkServerContext cannot be imported unconditionally (CPython
+    # defines it only on non-Windows). Matches how this function already types
+    # every other multiprocessing object below.
+    ctx: Any = safe_mp_context()
     manager = ctx.Manager()
     heartbeat = manager.dict()
     results = manager.dict()

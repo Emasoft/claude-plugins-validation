@@ -38,6 +38,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence, TypeVar
 
+from cpv_fork_safety import safe_mp_context
+
 T = TypeVar("T")
 
 
@@ -224,7 +226,12 @@ def parallel_scan(
     # without needing as_completed + a sort-by-index pass.
     results: list[ScanResult | None] = [None] * len(file_list)
 
-    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+    # mp_context is MANDATORY, never the platform default: the default is
+    # ``fork`` on Linux, and this harness is driven from validator worker
+    # THREADS, so a default-context pool forks a multithreaded process and can
+    # inherit a held stderr/logging lock into a child that then hangs forever
+    # (v3.23.0 shipped exactly that). See scripts/cpv_fork_safety.py.
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=safe_mp_context()) as executor:
         if chunk_size == 1:
             _run_one_per_file(
                 executor=executor,

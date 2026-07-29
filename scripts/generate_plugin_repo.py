@@ -1181,6 +1181,11 @@ dmypy.json
 # Linting
 .ruff_cache/
 
+# Publish gate G4b (Linux fork-parity probe) writes a temporary sitecustomize
+# here and removes it in a `finally`. Ignored so a SIGKILLed run cannot leave an
+# untracked dir that trips the NEXT publish's clean-tree gate.
+.cpv-forkparity/
+
 # IDE
 .idea/
 .vscode/
@@ -1699,6 +1704,11 @@ Gate stages (--gate mode, called by pre-push hook):
         WARNs+skips if shellcheck unavailable so a push is never false-blocked)
    G3. Validate (uvx cpv-remote-validate plugin . --strict)
    G4. Tests (pytest)
+   G4b. Linux fork-parity probe — re-runs the suite with multiprocessing forced
+        to fork, the way Linux does it, so a fork-from-multithreaded-process
+        deadlock cannot hide behind macOS's spawn default. Self-detecting (only
+        when the plugin creates process pools); skips on Linux; WARNs where fork
+        is unavailable
 
 Usage:
     uv run python scripts/publish.py                      # auto-bump from git-cliff
@@ -2720,6 +2730,63 @@ def run_gate(root: Path) -> int:
         cprint(f"  {RED}BLOCKED: Tests failed{NC}")
         return 1
     cprint(f"  {GREEN}Tests passed.{NC}")
+
+    # Gate 4b: Linux fork-parity probe (CPV v3.23.0 post-mortem).
+    # `multiprocessing` defaults to FORK on Linux and SPAWN on macOS. Forking a
+    # multithreaded process copies mutex state, so a child can inherit a lock
+    # (sys.stderr's, logging's) held by a thread that does not exist in the
+    # child, and hang forever on its first write. The defect is INVISIBLE on a
+    # macOS dev box and fatal in CI: CPV shipped exactly that, turning an 8.7s
+    # run into a >300s timeout that failed both CI and Release AFTER a fully
+    # green local suite of 11,484 tests.
+    # Self-detecting: runs ONLY when this plugin's own Python creates process
+    # pools. Linux (already forks) -> skip, so CI is never doubled. No fork
+    # available (Windows) -> WARN+skip. Blocks only when the probe RAN and the
+    # suite failed -- and a TIMEOUT counts, because a hang IS the signature.
+    cprint(f"\n{BLUE}[G4b] Linux fork-parity probe...{NC}")
+    _pool_src = [
+        p for p in root.rglob("*.py")
+        if not any(part in _compiled_skip for part in p.relative_to(root).parts)
+        and any(tok in p.read_text(encoding="utf-8", errors="replace")
+                for tok in ("ProcessPoolExecutor", "multiprocessing"))
+    ]
+    if not _pool_src:
+        cprint(f"  {GREEN}No process pools in this plugin -- skipped.{NC}")
+    else:
+        import multiprocessing as _mp
+        if "fork" not in _mp.get_all_start_methods():
+            cprint(f"  {YELLOW}WARNING: fork unavailable here -- parity probe SKIPPED.{NC}")
+            cprint(f"  {YELLOW}Linux CI is the FIRST place the fork path will run.{NC}")
+        elif _mp.get_start_method(allow_none=False) == "fork":
+            cprint(f"  {GREEN}Platform already defaults to fork -- the normal test run covers it.{NC}")
+        else:
+            _site = root / ".cpv-forkparity"
+            _site.mkdir(exist_ok=True)
+            (_site / "sitecustomize.py").write_text(
+                "import multiprocessing as _m\n"
+                "try:\n    _m.set_start_method('fork', force=True)\n"
+                "except Exception:\n    pass\n",
+                encoding="utf-8")
+            try:
+                _env = dict(os.environ)
+                _env["PYTHONPATH"] = str(_site) + (
+                    os.pathsep + _env["PYTHONPATH"] if _env.get("PYTHONPATH") else "")
+                try:
+                    _fp = subprocess.run(
+                        ["uv", "run", "pytest", "tests/", "-q", "--tb=short"],
+                        cwd=str(root), env=_env, timeout=suite_timeout).returncode
+                except subprocess.TimeoutExpired:
+                    cprint(f"  {RED}BLOCKED: suite HUNG under the Linux fork default.{NC}")
+                    cprint(f"  {RED}Something forks a multithreaded process. Pass an explicit{NC}")
+                    cprint(f"  {RED}mp_context (spawn) to every pool instead of the platform default.{NC}")
+                    return 1
+                if _fp != 0:
+                    cprint(f"  {RED}BLOCKED: tests fail under the Linux fork default.{NC}")
+                    cprint(f"  {RED}They pass under spawn -- this is what Linux CI will do to this commit.{NC}")
+                    return 1
+                cprint(f"  {GREEN}Suite passes under the Linux fork default.{NC}")
+            finally:
+                shutil.rmtree(_site, ignore_errors=True)
 
     cprint(f"\n{GREEN}{BOLD}All gates passed.{NC}")
     return 0

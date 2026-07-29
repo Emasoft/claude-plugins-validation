@@ -29,6 +29,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,7 @@ from typing import Any, Callable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cpv_ci_preflight import run_ci_preflight  # noqa: E402
+from cpv_fork_parity import fork_parity_supported, run_under_linux_fork_default  # noqa: E402
 from cpv_network_resilience import gh_with_retry, git_with_retry  # noqa: E402
 from cpv_validation_common import build_report_path  # noqa: E402
 
@@ -718,6 +720,14 @@ GATES: list[tuple[str, str]] = [
         "but validate_plugin does NOT; a MISSING TOOL degrades to WARNING and "
         "never blocks",
     ),
+    (
+        "Gate 3c",
+        "Linux fork-parity probe (cpv_fork_parity.py) — re-runs the suite with "
+        "the multiprocessing default forced to fork, the way Linux runs it. "
+        "macOS defaults to spawn, so this is the ONLY local gate that can see a "
+        "fork-from-multithreaded-process deadlock (v3.23.0 shipped one). Skips "
+        "as already-native on Linux; degrades to WARNING where fork is absent",
+    ),
     ("Gate 4", "Marketplace validation (validate_marketplace.py --strict) — Layout B only"),
     ("Gate 5", "Marketplace-registration check — verifies plugin is wired to its marketplace"),
     ("Gate 6", "Version consistency (plugin.json / pyproject.toml / __version__)"),
@@ -1357,6 +1367,126 @@ def stage_ci_preflight(plugin_root: Path) -> int:
         for f in result.warnings:
             print(f"    {YELLOW}! {f.gate}: {f.message}{NC}")
     print(f"{GREEN}✓ CI-parity preflight passed ({len(result.passes)} gate(s) clean){NC}")
+    return 0
+
+
+_FORK_PARITY_TIMEOUT_ENV = "PLUGIN_FORK_PARITY_TIMEOUT"
+# ~11x the 162s measured on CPV's own suite. Generous on purpose: this deadline
+# exists to catch a DEADLOCK (unbounded), not to police a slow machine, and a
+# budget tight enough to trip under load would be the timing-calibrated-test
+# mistake this repo has already paid for three times.
+_DEFAULT_FORK_PARITY_TIMEOUT = 1800.0
+
+
+def _fork_parity_timeout() -> float:
+    """Resolve the fork-parity deadline.
+
+    Mirrors ``url_check_phase_timeout``: an empty, zero, negative, or
+    unparseable value falls back to the default, so a typo can never DISABLE the
+    guard or set a near-zero ceiling that would fail every publish.
+    """
+    raw = os.environ.get(_FORK_PARITY_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return _DEFAULT_FORK_PARITY_TIMEOUT
+    try:
+        override = float(raw)
+    except ValueError:
+        return _DEFAULT_FORK_PARITY_TIMEOUT
+    return override if override > 0 else _DEFAULT_FORK_PARITY_TIMEOUT
+
+
+def stage_fork_parity(plugin_root: Path) -> int:
+    """Gate 3c: re-run the suite the way LINUX will run it.
+
+    WHY THIS GATE EXISTS (v3.23.0 post-mortem). ``multiprocessing`` defaults to
+    **fork on Linux** and **spawn on macOS**. v3.23.0 emitted progress markers
+    from ``ThreadPoolExecutor`` workers; forking a multithreaded process copies
+    mutex state, so a child inherited ``sys.stderr``'s lock held by a thread that
+    did not exist there and hung on its first write. A tiny
+    ``validate_plugin.py --json`` run went from 8.7s to a >300s timeout, failing
+    BOTH CI and Release — **after a fully green local suite of 11,484 tests.**
+
+    The local gate could not have caught it, because the only platform that
+    exhibits the bug is the one nobody runs locally. This gate removes that
+    asymmetry without Docker and without a Linux runner: it forces the
+    interpreter's default start method to ``fork`` and re-runs the suite.
+
+    Proven two-sided against the real defect before it was wired in:
+
+    ===========================  ==============  ============================
+    code                         start method    result
+    ===========================  ==============  ============================
+    v3.23.1 (fixed)              fork            37 passed in 15.4s
+    v3.23.0 (buggy)              spawn           16 passed — **blind**
+    v3.23.0 (buggy)              fork            **FAILED** — TimeoutExpired,
+                                                 CI's exact signature
+    ===========================  ==============  ============================
+
+    The middle row is the point: today's gate passes the broken code.
+
+    PLACEMENT IS LOAD-BEARING — same reasoning as Gate 3b. This runs strictly
+    BEFORE the bump (Gate 7), commit (Gate 10), tag (Gate 11) and push (Gate 12),
+    so a hang aborts with the tree untouched instead of stranding a tag for a
+    release that was never cut.
+
+    IT RUNS SERIALLY, not in the Gate 2-5 parallel block, because it re-runs the
+    whole suite: sharing a machine with Gate 2's ``-n auto`` pytest would make
+    both slower and could turn contention into a spurious timeout.
+
+    NEVER FALSE-BLOCKS. On Linux the ordinary run already forks, so the probe
+    reports ``already-native`` and skips rather than doubling CI. Where fork does
+    not exist (Windows) it degrades to a WARNING. It blocks ONLY when the probe
+    actually ran and the suite actually failed — but note a TIMEOUT *is* a
+    failure here, because a hang is this defect's signature, not an inconclusive
+    result.
+
+    Cost: ~162s measured on CPV's own suite. ``PLUGIN_FORK_PARITY_CMD`` narrows
+    the command; ``PLUGIN_FORK_PARITY_TIMEOUT`` adjusts the deadline.
+    """
+    print(f"\n{BLUE}═══ Gate 3c: Linux fork-parity probe (run the suite as Linux would) ═══{NC}")
+
+    runnable, reason = fork_parity_supported()
+    if not runnable:
+        # "cannot check" is reported as exactly that — never folded into a pass.
+        print(f"  {YELLOW}! Skipped: {reason}{NC}")
+        return 0
+
+    default_cmd = ["uv", "run", "pytest", "tests/", "-n", "auto", "--dist=worksteal", "-q", "--tb=short"]
+    raw_cmd = os.environ.get("PLUGIN_FORK_PARITY_CMD", "").strip()
+    cmd = shlex.split(raw_cmd) if raw_cmd else default_cmd
+
+    if not raw_cmd:
+        # Nothing to probe. Say so rather than running pytest against a tree with
+        # no suite: that yields pytest's "no tests collected" exit code, which
+        # this gate would otherwise report as a fork failure — a fabricated
+        # finding. Gate 2 already BLOCKS a publish with no tests, so by the time
+        # we run here a real publish always has them; this guard only keeps the
+        # gate honest when it is invoked outside that flow.
+        tests_dir = plugin_root / "tests"
+        if not (tests_dir.is_dir() and any(tests_dir.glob("test_*.py"))):
+            print(f"  {YELLOW}! Skipped: no tests/ suite to probe (Gate 2 owns the missing-tests block).{NC}")
+            return 0
+
+    timeout = _fork_parity_timeout()
+    print(f"  {reason}; deadline {timeout:.0f}s")
+    result = run_under_linux_fork_default(cmd, plugin_root, timeout=timeout)
+
+    if result.blocked:
+        print(
+            f"\n{RED}✗ Fork-parity probe FAILED — PUBLISH BLOCKED{NC}\n"
+            f"{RED}  {result.detail}{NC}\n"
+            f"{RED}  This is what Linux CI would do to this commit. A HANG here means something{NC}\n"
+            f"{RED}  forks a multithreaded process — see scripts/cpv_fork_safety.py.{NC}\n"
+            f"{RED}  Reproduce locally:{NC}\n"
+            f"{RED}    uv run python scripts/remote_validation.py fork-parity .{NC}",
+            file=sys.stderr,
+        )
+        tail = "\n".join(result.output.splitlines()[-25:])
+        if tail:
+            print(tail, file=sys.stderr)
+        return 1
+
+    print(f"{GREEN}✓ Suite passes under the Linux fork default{NC}")
     return 0
 
 
@@ -3028,6 +3158,15 @@ Examples:
     prefetch = _start_prefetch(root, layout, layout_details)
     try:
         rc = run_preflight_parallel(root, layout, prefetch=prefetch)
+        if rc != 0:
+            return rc
+
+        # Gate 3c runs SERIALLY here, after the parallel block: it re-runs the
+        # whole suite, so sharing the machine with Gate 2's ``-n auto`` pytest
+        # would slow both and risk turning contention into a spurious timeout.
+        # Still strictly before the bump/commit/tag/push, so a hang aborts with
+        # the tree untouched.
+        rc = stage_fork_parity(root)
         if rc != 0:
             return rc
 

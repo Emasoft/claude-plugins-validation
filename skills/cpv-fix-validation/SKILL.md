@@ -65,7 +65,7 @@ Output: plugin-structure-fixes §1
 - [Iterative Fix Loop](references/iterative-fix-loop.md)
   > Why a loop · Algorithm · Entry points — plugin path vs report path · Termination and safety · WARNING evaluation rules · Publish-blocking warning categories · Truly advisory warnings · Output contract
 - [Parallel scanning (v2.103.0+)](../cpv-canonical-pipeline/references/parallelism.md) — `validate → fix → re-validate` loops were dominated by validator wall-time pre-rewrite (each pass ≈ 198 s on the CPV repo); v2.103.0+ rewrite makes each pass ≈ 17 s, so 10-iteration fix loops cost less than ONE pre-rewrite pass. No need to bundle/batch fixes for time reasons.
-  > Table of contents · Performance summary · Environment knobs (disable selectively for debugging) · Scaffolded plugins (created via `cpv-create-plugin` / `cpv-setup-plugin-repo`) · Batch commands (`cpv-batch-*`) · Remote validation (`cpv` remote-mode + scaffolded `publish.py`) · When to disable parallelism · See also
+  > Table of contents · Performance summary · Environment knobs (disable selectively for debugging) · Scaffolded plugins (created via `cpv-create-plugin` / `cpv-setup-plugin-repo`) · Batch commands (`cpv-batch-*`) · Remote validation (`cpv` remote-mode + scaffolded `publish.py`) · When to disable parallelism · Fork safety — never fork a multithreaded process · See also
 - [Empirical Loading Bugs](references/empirical-loading-bugs.md)
   > Path-form acceptance matrix · Override-vs-default semantics · Three silent footguns CC does NOT catch · CPV validators added 2026-04-18 · Anthropic docs corrections · Round 2 confirmations · Tests added · Untestable in headless mode · v2.23.2 false-positive sweep
 - [Cache-Audit Fixes](references/cache-fixes.md)
