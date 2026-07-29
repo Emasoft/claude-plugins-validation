@@ -8,6 +8,7 @@
 - [Batch commands (`cpv-batch-*`)](#batch-commands-cpv-batch-)
 - [Remote validation (`cpv` remote-mode + scaffolded `publish.py`)](#remote-validation-cpv-remote-mode--scaffolded-publishpy)
 - [When to disable parallelism](#when-to-disable-parallelism)
+- [Fork safety — never fork a multithreaded process](#fork-safety--never-fork-a-multithreaded-process)
 - [See also](#see-also)
 
 Every CPV validator and the orchestrator that drives them runs file scans
@@ -354,8 +355,70 @@ checks `_source_sha256` against the live catalog) and the parity check
 that compiles every catalog pattern under RE2 to confirm its recorded
 compatible/incompatible classification still holds.
 
+## Fork safety — never fork a multithreaded process
+
+**Rule: every process pool passes an explicit `mp_context`. Never inherit the
+platform default.**
+
+`multiprocessing` defaults to **`fork` on Linux** and **`spawn` on macOS**.
+Forking a multithreaded process copies mutex *state* but not the threads that
+own it, so a child can inherit a lock — `sys.stderr`'s, `logging`'s, a malloc
+arena, the import lock — held by a thread that does not exist there, and block
+forever the first time it needs it.
+
+Because a plugin's validators run on a thread pool and fan out to process pools,
+this is a live hazard for any plugin that does both. And it is **invisible where
+most people develop**: CPV shipped it in v3.23.0 (progress markers emitted from
+worker threads), and a tiny `validate_plugin.py --json` run went from 8.7s to a
+>300s timeout that failed CI *and* Release — after a fully green local suite of
+11,484 tests.
+
+```python
+# WRONG — inherits fork on Linux
+with ProcessPoolExecutor(max_workers=n) as ex: ...
+ctx = mp.get_context()
+
+# RIGHT — an explicit, fork-free context
+from cpv_fork_safety import safe_mp_context
+with ProcessPoolExecutor(max_workers=n, mp_context=safe_mp_context()) as ex: ...
+ctx = safe_mp_context()
+```
+
+**Use `spawn`, not `forkserver`.** `forkserver` is the textbook answer, is safe
+against this deadlock, and measured *fastest* (94.7s vs spawn's 120.2s on a cold
+self-validate — `fork` was slowest at 178.1s). It was still rejected: its server
+process is started **once and reused**, so children inherit the environment
+captured when the server started rather than the caller's current environment.
+Anything configured by env var silently stops reaching workers. That is worse
+than the deadlock — it fails *quietly*, with wrong results, instead of hanging.
+It broke 5 CPV tests, each of which passed in isolation and failed in sequence:
+the signature of server reuse.
+
+Pinning `spawn` everywhere also removes the asymmetry that caused the incident —
+the start method a developer exercises locally becomes the one CI exercises.
+
+Two guards enforce this:
+
+- **`tests/test_fork_safety.py`** — a SOURCE-level invariant: no
+  `ProcessPoolExecutor` without `mp_context=`, no bare `mp.get_context()`, no
+  `multiprocessing.Pool`. A source check is the right shape because the deadlock
+  needs a fork race to reproduce, so a behavioural test would flake while the
+  invariant is exact.
+- **Gate G4b, the fork-parity probe** — re-runs the suite with the default
+  forced to `fork`, so a macOS developer sees what Linux will do. Self-detecting
+  (only when the plugin creates pools), skips on Linux, WARNs where fork is
+  unavailable, and treats a **timeout as a failure** because a hang is the
+  signature. Run it by hand with:
+
+  ```bash
+  cpv-remote-validate fork-parity . -- uv run pytest tests/ -q
+  ```
+
 ## See also
 
+- `scripts/cpv_fork_safety.py` — the fork-safe context SSOT, and the full
+  rationale including why `forkserver` was rejected.
+- `scripts/cpv_fork_parity.py` — the Linux fork-parity probe behind gate G4b.
 - `scripts/cpv_parallel_runner.py` — the shared `ProcessPoolExecutor`
   harness (`parallel_scan`, `parallel_scan_aggregated`, `ScanResult`).
 - `scripts/cpv_validate_benchmark.py` — A10's three-phase benchmark

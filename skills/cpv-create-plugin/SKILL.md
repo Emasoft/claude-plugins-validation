@@ -88,7 +88,7 @@ Copy this checklist and track your progress:
 - [Dev-stripping](references/dev-stripping.md)
   > Why this exists · When NOT to use · Testing approach
 - [Parallel scanning (v2.103.0+)](../cpv-canonical-pipeline/references/parallelism.md) — newly-scaffolded plugins inherit the ~11.6× CPV speedup for free via `uvx --from git+...` remote-mode in their `ci.yml` / `release.yml` / `publish.py` (no template re-scaffold needed when CPV ships a new parallelism win)
-  > Table of contents · Performance summary · Environment knobs (disable selectively for debugging) · Scaffolded plugins (created via `cpv-create-plugin` / `cpv-setup-plugin-repo`) · Batch commands (`cpv-batch-*`) · Remote validation (`cpv` remote-mode + scaffolded `publish.py`) · When to disable parallelism · See also
+  > Table of contents · Performance summary · Environment knobs (disable selectively for debugging) · Scaffolded plugins (created via `cpv-create-plugin` / `cpv-setup-plugin-repo`) · Batch commands (`cpv-batch-*`) · Remote validation (`cpv` remote-mode + scaffolded `publish.py`) · When to disable parallelism · Fork safety — never fork a multithreaded process · See also
 
 ## MCP Server Bundling
 

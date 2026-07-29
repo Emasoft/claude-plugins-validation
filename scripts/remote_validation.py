@@ -122,6 +122,11 @@ _ALIASES: dict[str, str] = {
     # plugin's GitHub-CI ci.yml Lint job runs (the #137-143 parity gap, TRDD-8eee537a).
     "ci-preflight": "cpv_ci_preflight",
     "cpv_ci_preflight": "cpv_ci_preflight",
+    # Linux fork-parity probe — re-runs a command with the multiprocessing
+    # default forced to fork, so a macOS dev (default spawn) exercises the path
+    # Linux CI takes. v3.23.0 shipped a fork deadlock no local gate could see.
+    "fork-parity": "cpv_fork_parity",
+    "cpv_fork_parity": "cpv_fork_parity",
     # Scope validators (validate a project's .claude/ config, separating
     # git-tracked "project" elements from non-git-tracked "local" elements)
     "local-scope": "validate_local_scope",
@@ -183,6 +188,7 @@ _COMMANDS: dict[str, str] = {
     "xref": "Cross-reference validation",
     "doctor": "Health-check installed plugins and settings",
     "ci-preflight": "Local CI-parity preflight (jscpd/actionlint/mypy/dev-extra + Mega-Linter probes + CIP-1..8)",
+    "fork-parity": "Linux fork-parity probe (re-run the suite with multiprocessing forced to fork, as Linux does)",
     "standardize": "Audit and fix plugin repo to match standards",
     "local-scope": "Local scope validation (non-git-tracked .claude/ elements)",
     "project-scope": "Project scope validation (git-tracked .claude/ elements)",
