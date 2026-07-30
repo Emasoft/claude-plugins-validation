@@ -296,6 +296,26 @@ def granted_builtin_tools(rules: list[str]) -> set[str]:
     return granted
 
 
+def declared_tool_names(rules: list[str]) -> set[str]:
+    """The built-in tool NAMES a rule list names, with NO grant expansion.
+
+    This is the correct primitive for a DENY list. ``granted_builtin_tools``
+    expands the documented cross-tool GRANTS (``Edit`` also grants ``Read``,
+    ``Bash`` also grants ``Monitor``), which is right for ``tools`` and WRONG for
+    ``disallowedTools``: denying ``Edit`` does not deny ``Read``. Aliases are
+    still resolved (a denied ``Task`` denies ``Agent`` — they are two spellings of
+    one tool, not two tools), and a ``(specifier)`` is dropped so
+    ``Skill(foo)`` counts as naming ``Skill``.
+    """
+    names: set[str] = set()
+    for rule in rules:
+        base = _rule_base_name(rule)
+        if not base or base.startswith("mcp__"):
+            continue
+        names.add(resolve_alias(base))
+    return names
+
+
 def declared_mcp_patterns(rules: list[str]) -> list[str]:
     """Return the declared MCP rule patterns (those whose base starts ``mcp__``)."""
     patterns: list[str] = []

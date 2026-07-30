@@ -24,6 +24,7 @@ import argparse
 import json
 import re
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -1116,6 +1117,267 @@ def validate_shell_fence_tool_grant(
     )
 
 
+def validate_agent_skill_closure(
+    agent_path: Path,
+    frontmatter: dict[str, Any],
+    body: str,
+    filename: str,
+    report: AgentValidationReport,
+    *,
+    skills_roots: Sequence[Path] | None = None,
+    closure: bool = False,
+    closure_ambient: bool = False,
+) -> None:
+    """Resolve every skill this agent names and report the broken references.
+
+    Findings (spec §3 of ``design/specs/agent-closure-and-variants.md``):
+
+    * **AC1** a ``skills:`` preload name that resolves in no root.
+    * **AC2** a body ``Skill()`` invocation naming a skill that resolves nowhere.
+    * **AC3** the body invokes ``Skill()``, ``tools:`` denies ``Skill``, and the
+      named skill RESOLVES — resolution is what proves a real invocation rather
+      than prose, so it is the only case that escalates on the tool gate.
+    * **AC4** a resolved preload the body never MENTIONS while the gate is open
+      (a preload injects the skill's FULL content into every invocation). A bare
+      name mention counts as usage — an ALL-IN-ONE agent routes to its preloaded
+      skills from a prose table, and demanding a ``Skill()`` call would turn a
+      token-economy advisory into an architecture preference.
+    * **AC5** a preload that CANNOT be preloaded: the skill sets
+      ``disable-model-invocation: true``, or it is a bundled user-only skill
+      (``verify`` / ``code-review``). MAJOR with NO guard — unlike AC1/AC2 the
+      proof is positive (we READ the skill's own frontmatter), so there is no
+      "maybe the roots are wrong" case to protect against.
+
+    THE NON-VACUITY GUARD, and why every escalation depends on it: if zero of
+    this agent's named skills resolved, the ROOTS are probably wrong (a
+    single-file scan, a moved plugin, an uninstalled source) and "this skill does
+    not exist" would be a fabricated finding. So a MAJOR requires that at least
+    one OTHER named skill of the same agent DID resolve; absent that proof the
+    finding degrades to WARNING — visible, never blocking.
+
+    WARNING is the ONLY non-blocking tier under ``--strict``, so every advisory
+    here is WARNING and never MINOR/NIT: CPV must not call a valid agent invalid.
+
+    A FOREIGN namespace (``other-plugin:their-skill``) that does not resolve
+    locally produces NO finding — it may legitimately live in another installed
+    plugin. A reference namespaced to THIS plugin is local and must resolve, so
+    the own-namespace form is not an escape hatch.
+    """
+    from cpv_agent_closure import (  # noqa: PLC0415
+        NEVER_PRELOADABLE_SKILLS,
+        body_mentions_skill_name,
+        find_plugin_root,
+        plugin_namespace,
+        resolve_agent_closure,
+        skill_blocks_preloading,
+        skill_disables_model_invocation,
+    )
+
+    result = resolve_agent_closure(agent_path, roots=skills_roots)
+    local_ns = plugin_namespace(find_plugin_root(agent_path))
+
+    def is_local(ref: Any) -> bool:
+        return ref.namespace is None or (local_ns is not None and ref.namespace == local_ns)
+
+    named = [ref for ref in result.refs if ref.origin in ("preload", "runtime")]
+    resolved_names = {ref.name for ref in named if ref.resolved_path is not None}
+
+    def emit(ref: Any, message: str) -> None:
+        """MAJOR when another named skill proved the roots are right, else WARNING."""
+        if any(name != ref.name for name in resolved_names):
+            report.major(message, filename, ref.line or None)
+        else:
+            report.warning(
+                f"{message} (Only a WARNING because NONE of this agent's other named skills "
+                "resolved either, so the skill search roots are probably wrong rather than the "
+                "agent — pass --skills-root to point at the right skills/ directory.)",
+                filename,
+                ref.line or None,
+            )
+
+    roots_hint = ", ".join(result.skill_roots) if result.skill_roots else "(none found)"
+
+    # AC5 first: a preload that CANNOT be preloaded gets exactly one finding, and
+    # it is this one. Reporting a bundled user-only skill as "does not exist in
+    # your skills/" (AC1) would send the author looking for a missing file, and
+    # AC4's "you never mention it" is moot once the remedy is "remove it".
+    unpreloadable: dict[str, str] = {}
+    for ref in result.refs:
+        if ref.origin != "preload":
+            continue
+        if not is_local(ref):
+            # A FOREIGN-namespaced preload names another plugin's skill. Even when
+            # a local skill of that bare name happens to exist, we cannot prove it
+            # is the one referenced — so neither its frontmatter flag nor the
+            # bundled-name inference is evidence about THIS reference.
+            continue
+        resolved = Path(ref.resolved_path) if ref.resolved_path else None
+        reason = skill_blocks_preloading(ref.name, resolved)
+        if reason is None:
+            continue
+        unpreloadable[ref.name] = reason
+        # Only the NAME-based inference degrades to a WARNING. When the skill's own
+        # frontmatter carries the flag we have positive proof, so it stays MAJOR
+        # even for a locally-shipped skill whose name collides with a bundled one.
+        if (
+            not skill_disables_model_invocation(resolved)
+            and ref.name in NEVER_PRELOADABLE_SKILLS
+            and ref.resolved_path is not None
+        ):
+            # A locally-shipped skill whose NAME collides with a bundled user-only
+            # one. Which of the two a preload picks is not documented, so calling
+            # the agent invalid here would risk failing a valid plugin — WARNING.
+            report.warning(
+                f"'skills' preloads {ref.name!r}, and {reason}. A local skill of the same name does "
+                f"exist ({ref.resolved_path}), so which one this preload picks is undefined — rename "
+                f"the local skill to remove the collision.",
+                filename,
+            )
+            continue
+        report.major(
+            f"'skills' preloads {ref.name!r}, which cannot be preloaded: {reason}. The preload is "
+            f"silently dropped, so the agent never gets that content — remove it from 'skills' and "
+            f"invoke the skill at runtime instead (or drop the flag on the skill if the preload is "
+            f"the intent).",
+            filename,
+        )
+
+    for ref in named:
+        if ref.resolved_path is not None or not is_local(ref):
+            continue
+        if ref.origin == "preload":
+            if ref.name in unpreloadable:
+                continue
+            # AC1
+            emit(
+                ref,
+                f"'skills' preloads {ref.name!r} but no such skill exists in any skill search "
+                f"root ({roots_hint}). Claude Code SKIPS a missing or disabled preload and only "
+                f"logs a warning to the debug log, so the agent silently runs without it — fix the "
+                f"name or ship the skill.",
+            )
+        else:
+            # AC2
+            emit(
+                ref,
+                f"Body invokes Skill() on {ref.name!r} but no such skill exists in any skill "
+                f"search root ({roots_hint}). That invocation fails silently at runtime — fix "
+                f"the name, ship the skill, or namespace it to the plugin that owns it.",
+            )
+
+    if not result.can_load_at_runtime:
+        # Name the ACTUAL cause: per sub-agents.md the gate is shut either by
+        # omitting Skill from 'tools' OR by listing it in 'disallowedTools', and
+        # the two have different remedies.
+        from cpv_tool_permission_match import declared_tool_names, parse_declared_tools  # noqa: PLC0415
+
+        denied = parse_declared_tools(frontmatter.get("disallowedTools")) or []
+        if "Skill" in declared_tool_names(denied):
+            cause = "'disallowedTools' lists 'Skill', and 'disallowedTools' is applied FIRST"
+            remedy = "Remove 'Skill' from 'disallowedTools'"
+        else:
+            cause = "'tools' is declared without it"
+            remedy = "Add 'Skill' to 'tools' (or drop the 'tools' field to inherit every tool)"
+        for ref in result.refs:
+            if ref.origin != "runtime" or ref.resolved_path is None:
+                continue
+            # AC3 — MAJOR unconditionally: the named skill RESOLVES, which proves
+            # this is a real invocation and not prose, so the non-vacuity guard
+            # has nothing left to protect against.
+            report.major(
+                f"Body invokes Skill() on {ref.name!r} (which exists at {ref.resolved_path}) but "
+                f"this agent cannot use the 'Skill' tool: {cause}, so the invocation is DEAD. "
+                f"{remedy}; a 'skills:' preload is otherwise this agent's only skill access.",
+                filename,
+                ref.line or None,
+            )
+
+    if result.can_load_at_runtime:
+        for ref in result.refs:
+            if ref.origin != "preload" or ref.resolved_path is None:
+                continue
+            if ref.name in unpreloadable:
+                # AC5 already told the author to remove it; "you never mention
+                # it" on top of that is noise pointing the wrong way.
+                continue
+            # A bare NAME MENTION anywhere outside a fence counts as usage: an
+            # ALL-IN-ONE agent preloads every skill and routes to them from a
+            # prose table, so requiring a Skill() call would flag the canonical
+            # pattern. A mention only inside a fence is an illustration, not
+            # routing, so it does NOT count.
+            if body_mentions_skill_name(body, ref.name):
+                continue
+            # AC4
+            report.warning(
+                f"Skill {ref.name!r} is preloaded but the body never mentions it. A preload injects "
+                f"the skill's FULL content into EVERY invocation of this agent, so an unused one is "
+                f"paid for every turn; this agent can use the 'Skill' tool, so it could load the "
+                f"skill on demand instead. Either route to it from the body (a prose/table mention "
+                f"is enough) or drop it from 'skills'.",
+                filename,
+            )
+
+    report.info(
+        f"Skill closure: {len(named)} named + {len(result.refs) - len(named)} transitive reference(s), "
+        f"{len(result.ambient)} skill(s) ambient in {len(result.skill_roots)} root(s) "
+        f"[{roots_hint}]; runtime Skill() gate {'OPEN' if result.can_load_at_runtime else 'SHUT'}; "
+        f"max depth reached {result.max_depth_reached}",
+        filename,
+    )
+
+    if closure or closure_ambient:
+        _roll_in_closure_skill_reports(result, report, filename, ambient=closure_ambient)
+
+
+def _roll_in_closure_skill_reports(
+    result: Any,
+    report: AgentValidationReport,
+    filename: str,
+    *,
+    ambient: bool,
+) -> None:
+    """Validate each reachable skill (and, with ``ambient``, the whole palette)
+    and merge its findings into the AGENT's report.
+
+    Opt-in only (``--closure`` / ``--closure-ambient``): validating an entire
+    skill palette on every agent scan would be pure noise, and it would make one
+    skill's defect fail every agent that can reach it.
+
+    PASSED results are collapsed into ONE line per clean skill — merging them
+    verbatim would bury the agent's own findings under hundreds of lines.
+    """
+    from validate_skill_comprehensive import validate_skill  # noqa: PLC0415
+
+    targets: dict[str, Path] = {}
+    for ref in result.refs:
+        if ref.reachable and ref.resolved_path is not None:
+            skill_dir = Path(ref.resolved_path).parent
+            targets.setdefault(skill_dir.name, skill_dir)
+
+    if ambient:
+        for root in result.skill_roots:
+            root_path = Path(root)
+            try:
+                entries = sorted(root_path.iterdir())
+            except OSError:
+                continue
+            for entry in entries:
+                try:
+                    if entry.is_dir() and (entry / "SKILL.md").is_file():
+                        targets.setdefault(entry.name, entry)
+                except OSError:
+                    continue
+
+    for name in sorted(targets):
+        skill_report = validate_skill(targets[name])
+        findings = [r for r in skill_report.results if r.level not in ("PASSED", "INFO")]
+        if not findings:
+            report.passed(f"[closure {name}] skill validation clean", filename)
+            continue
+        for r in findings:
+            getattr(report, r.level.lower())(f"[closure {name}] {r.message}", r.file or filename, r.line)
+
+
 def validate_initial_prompt_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
     """Validate the 'initialPrompt' frontmatter field.
 
@@ -1543,14 +1805,33 @@ def validate_security(content: str, filename: str, report: AgentValidationReport
             )
 
 
-def validate_agent(agent_path: Path) -> AgentValidationReport:
+def validate_agent(
+    agent_path: Path,
+    *,
+    skills_roots: Sequence[Path] | None = None,
+    closure: bool = False,
+    closure_ambient: bool = False,
+) -> AgentValidationReport:
     """Validate a complete agent file.
 
     Args:
         agent_path: Path to the agent .md file
+        skills_roots: Explicit skill search roots for the closure checks. ``None``
+            (the default) auto-resolves them from the agent's own plugin /
+            project / user scope; an explicit list — including ``[]`` — replaces
+            auto-resolution entirely, which is how a caller gets a hermetic,
+            machine-independent answer.
+        closure: Also validate every REACHABLE skill and roll its findings into
+            this report (opt-in — see ``_roll_in_closure_skill_reports``).
+        closure_ambient: Also validate the ambient skill palette present in the
+            search roots. Implies the ``closure`` merge behaviour.
 
     Returns:
         AgentValidationReport with all results
+
+    The three keyword arguments are keyword-ONLY and defaulted, so every existing
+    positional caller (``scan_one_agent``, ``validate_scoring``,
+    ``validate_plugin``, ``cpv_agent_preflight``) is unaffected.
     """
     report = AgentValidationReport(agent_path=str(agent_path))
     filename = agent_path.name
@@ -1601,6 +1882,19 @@ def validate_agent(agent_path: Path) -> AgentValidationReport:
         # same body + 'tools' inputs.
         validate_mcp_grant_hygiene(frontmatter, _body_for_tools, filename, report)
         validate_shell_fence_tool_grant(frontmatter, _body_for_tools, filename, report)
+        # TRDD-7KS7KP7U: resolve the agent → skill closure and report the broken
+        # references. Runs right after the tool-grant checks because AC3 depends
+        # on the same 'Skill' grant those checks parse.
+        validate_agent_skill_closure(
+            agent_path,
+            frontmatter,
+            _body_for_tools,
+            filename,
+            report,
+            skills_roots=skills_roots,
+            closure=closure,
+            closure_ambient=closure_ambient,
+        )
         validate_model_field(frontmatter, filename, report)
         validate_color_field(frontmatter, filename, report)
         validate_capabilities_field(frontmatter, filename, report)
@@ -1670,11 +1964,25 @@ def scan_one_agent(agent_path: Path) -> list[AgentValidationReport]:
     return [validate_agent(agent_path)]
 
 
-def validate_agents_directory(agents_dir: Path) -> list[AgentValidationReport]:
+def validate_agents_directory(
+    agents_dir: Path,
+    *,
+    skills_roots: Sequence[Path] | None = None,
+    closure: bool = False,
+    closure_ambient: bool = False,
+) -> list[AgentValidationReport]:
     """Validate all agent files in a directory.
 
     Args:
         agents_dir: Path to the agents/ directory
+        skills_roots / closure / closure_ambient: forwarded to
+            :func:`validate_agent`. When ANY of them is set the scan runs
+            SERIALLY: ``parallel_scan`` pickles a top-level one-argument worker by
+            qualified name, so per-call options can only reach a worker through a
+            module global — and under the ``spawn`` start method (which
+            ``cpv_fork_safety`` pins) a child does not inherit globals. A serial
+            loop is correct and costs nothing here, because these options are
+            opt-in and low-volume.
 
     Returns:
         List of AgentValidationReport for each agent, in alphabetical filename
@@ -1706,6 +2014,18 @@ def validate_agents_directory(agents_dir: Path) -> list[AgentValidationReport]:
     # Sort once so the harness sees deterministic input order, then trust
     # the harness's input-order preservation contract for output order.
     sorted_files = sorted(agent_files)
+
+    if skills_roots is not None or closure or closure_ambient:
+        return [
+            validate_agent(
+                path,
+                skills_roots=skills_roots,
+                closure=closure,
+                closure_ambient=closure_ambient,
+            )
+            for path in sorted_files
+        ]
+
     scan_results: list[ScanResult] = parallel_scan(sorted_files, scan_one_agent)
 
     reports: list[AgentValidationReport] = []
@@ -1829,7 +2149,41 @@ def main() -> int:
         "--report", type=str, default=None, help="Save detailed report to file, print only summary to stdout"
     )
     parser.add_argument("--strict", action="store_true", help="Strict mode — NIT issues also block validation")
+    parser.add_argument(
+        "--skills-root",
+        action="append",
+        default=None,
+        dest="skills_roots",
+        metavar="PATH",
+        help=(
+            "Skill directory to resolve the agent's skills against (repeatable). "
+            "Replaces auto-resolution from the plugin / project / user scope, which is what "
+            "makes the closure checks hermetic and machine-independent."
+        ),
+    )
+    parser.add_argument(
+        "--closure",
+        action="store_true",
+        help="Also validate every reachable skill and roll its findings into the agent's report",
+    )
+    parser.add_argument(
+        "--closure-ambient",
+        action="store_true",
+        help="Also validate the ambient skill palette present in the search roots (noisy — opt in)",
+    )
     args = parser.parse_args()
+
+    skills_roots: list[Path] | None = None
+    if args.skills_roots is not None:
+        skills_roots = []
+        for raw in args.skills_roots:
+            root = Path(raw).expanduser()
+            if not root.is_dir():
+                # Fail loudly: silently dropping a bad root would leave every
+                # name unresolved and turn the whole closure check vacuous.
+                print(f"Error: --skills-root {root} is not a directory", file=sys.stderr)
+                return 1
+            skills_roots.append(root.resolve())
 
     path = Path(args.path).resolve()
 
@@ -1850,9 +2204,21 @@ def main() -> int:
 
     # Handle directory vs file
     if path.is_dir():
-        reports = validate_agents_directory(path)
+        reports = validate_agents_directory(
+            path,
+            skills_roots=skills_roots,
+            closure=args.closure,
+            closure_ambient=args.closure_ambient,
+        )
     else:
-        reports = [validate_agent(path)]
+        reports = [
+            validate_agent(
+                path,
+                skills_roots=skills_roots,
+                closure=args.closure,
+                closure_ambient=args.closure_ambient,
+            )
+        ]
 
     # Output
     if args.json:

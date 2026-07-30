@@ -2330,6 +2330,10 @@ def _check_context_fork_self_recursion(
     bare ``/<name>`` regex would false-fire on ordinary prose paths and option
     lists. Only the explicit ``skill: "<name>"`` invocation is detected.
     (audit NIT agent #11 — docstring now matches the implementation.)
+
+    The matcher itself was PROMOTED to ``cpv_agent_closure`` (TRDD-7KS7KP7U,
+    spec §2) and is imported back here, so the ``skill:``-key grammar has
+    exactly one definition shared with the agent-closure resolver.
     """
     skill_name = frontmatter.get("name") or skill_path.name
     if not isinstance(skill_name, str) or not skill_name:
@@ -2356,8 +2360,12 @@ def _check_context_fork_self_recursion(
     candidates: list[str] = [skill_name]
     if qualified:
         candidates.append(qualified)
-    # Compile per-candidate matchers — escape any regex metachars.
-    matchers = [re.compile(r"""skill\s*:\s*["']""" + re.escape(c) + r"""["']""", re.IGNORECASE) for c in candidates]
+    # ONE grammar: the matcher (including the escaping of regex metachars in the
+    # name) lives in cpv_agent_closure. A local copy here would drift from the
+    # closure resolver's idea of what a Skill() invocation looks like.
+    from cpv_agent_closure import skill_object_invocation_matcher  # noqa: PLC0415
+
+    matchers = [skill_object_invocation_matcher(c) for c in candidates]
     # Strip markdown code fences (``` ... ```) before scanning — documented
     # "how to invoke this skill" examples inside fences are NOT runtime
     # self-recursion. Replace fences with newlines so line numbers stay
