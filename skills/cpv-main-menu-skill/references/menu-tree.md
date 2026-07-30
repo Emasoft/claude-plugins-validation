@@ -576,6 +576,7 @@ Fixed key→action map (slug `validate-component`):
 | 5   | comp_mcp     | MCP server — setup (transport, env vars, security checks)                     |
 | 6   | comp_lsp     | LSP server — Language-server setup in plugin.json                             |
 | 7   | comp_style   | Output-style or Rule file — Output-style files or .claude/rules/*.md          |
+| 8   | comp_agent_closure | Agent + its skill closure — every skill the agent can actually reach, validated too |
 | A   | ask          | Ask the agent                                                                 |
 | B   | back         | Back — Go back to the Validate menu                                           |
 | 0   | cancel       | Cancel / Exit                                                                 |
@@ -685,6 +686,27 @@ END THE TURN.
   uv run --with pyyaml python "$LAUNCHER" rules "$TARGET_PATH" \
     --report "$MAIN_ROOT/reports/validate_rules/$TS-$SLUG.md"
   ```
+
+##### 3.1.2.8 Agent + its skill closure
+
+Row 2 validates the agent file alone. This row also resolves and validates
+every skill the agent can actually REACH — which is NOT the same as the
+skills it preloads: `skills:` frontmatter controls what is PRELOADED, while
+reachability is gated by the `Skill` tool (`disallowedTools` shuts it, no
+`tools:` field leaves it open). An agent naming a skill that does not exist
+scored a clean 100/100 before this row existed.
+
+- **arg-prompt**: `Path to the agent .md file? (e.g. ./agents/my-agent.md)`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" agent "$TARGET_PATH" --closure \
+    --report "$MAIN_ROOT/reports/validate_agent/$TS-$SLUG-closure.md"
+  ```
+- **note**: pass `--skills-root PATH` (repeatable) to pin the search roots
+  instead of auto-resolving plugin / project / user scope — that is what makes
+  a closure result hermetic and machine-independent, so use it whenever the
+  answer must be reproducible. Add `--closure-ambient` to also validate the
+  ambient skill palette sitting in those roots (noisy — opt in deliberately).
 
 #### 3.1.3 Marketplace — Level-2 sub-menu
 
@@ -1173,6 +1195,8 @@ actions):
 | 8   | pack_components   | Pack components into a plugin (multi-select)                                        |
 | 9   | add_deps          | Add dependencies (existing plugin) — --add NAME[@MKT[@VER]] OR --from PATH-OR-URL  |
 | 10  | impl_skills_menu  | Implement cpv-the-skills-menu method (existing) — Decouple skills from agents          |
+| 11  | convert_agent     | Convert an agent — ALL-IN-ONE / ONE-FOR-ALL (micro-agent nodes) / PLUGIN-OMNI       |
+| 12  | eval_agent        | Compare an agent with its variants — static cost model; opt-in live A/B/C            |
 | A   | ask               | Ask the agent                                                                       |
 | B   | back              | Back — Go back to the top-level menu                                                |
 | 0   | cancel            | Cancel / Exit                                                                       |
@@ -1406,6 +1430,61 @@ Works on ANY plugin (CPV, other people's plugins, your own).
   flow as the `/cpv-the-skills-menu-create` slash command for users who
   prefer typing the command directly. The bundled
   `cpv-the-skills-menu-create` skill is the migration source of truth.
+
+#### 3.6.11 Convert an agent to another architecture
+
+Generates a NEW agent beside the original (the source is never modified) in
+one of three architectures. They differ only in the skills list and in WHERE a
+skill executes — no mode ever copies a skill's content into an agent, so one
+skill stays shared and is edited once:
+
+| Mode | `skills:` lists | Skills execute in |
+|---|---|---|
+| `all-in-one` | every skill it needs | the same agent |
+| `one-for-all` | every skill it needs | a forked subagent per skill |
+| `plugin-omni` | exactly one — the plugin's skills-menu | resolved at runtime from the menu |
+
+- **arg-prompts** (in order):
+  1. `Path to the agent .md file to convert?`
+  2. `Target architecture (1=all-in-one / 2=one-for-all / 3=plugin-omni)?`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/convert_agent.py" \
+    "$TARGET_PATH" --to "$MODE"
+  ```
+- **note**: `one-for-all` reaches the per-skill fork by adding `context: fork`
+  to the SHARED skill — which changes that skill for EVERY agent using it, so
+  the conversion requires `--force` as explicit consent. Run with `--dry-run`
+  first to see exactly what would be touched. Every generated variant also
+  carries the `verification-before-completion` skill.
+- **post-execution**: validate the generated agent with §3.1.2.8 (agent +
+  closure), then offer §3.99.
+
+#### 3.6.12 Compare an agent with its variants
+
+Two tiers, deliberately kept apart. **Tier 1** always runs, makes ZERO LLM calls,
+and is a STATIC COST model — prefix tokens, per-invocation injected tokens, tool
+surface, closure size. It says what each shape COSTS; it does not measure whether
+one works better. **Tier 2** is opt-in (`--live`) and aggregates the REAL numbers a
+driver captured per run — it never simulates one, and reports UNKNOWN instead.
+
+- **arg-prompts** (in order):
+  1. `Path to the ORIGINAL agent .md?`
+  2. `Which variant files to compare? (any subset of all-in-one / one-for-all / plugin-omni)`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" agent-eval "$ORIGINAL" \
+    --all-in-one "$AIO" --plugin-omni "$OMNI" --skills-root "$PLUGIN/skills" \
+    --report "$MAIN_ROOT/reports/cpv-agent-eval/$TS-$SLUG.md"
+  ```
+- **note**: pass `--skills-root` pointing at the real skills. Without it a variant's
+  preloads may not resolve, and an unresolvable preload is priced at 0 tokens — which
+  understates that variant and can flip the delta's SIGN (measured: one variant read
+  as 9,264 tokens cheaper, and 13,545 more expensive once its preloads resolved). The
+  report's `like-for-like` column says `no` when that happened; do not read a delta
+  as a comparison while it does.
+- **post-execution**: forward the report path and the `like-for-like` column verbatim.
+  A named variant with no file is shown NOT-EVALUATED with its reason, never dropped.
 
 ---
 
@@ -1925,6 +2004,7 @@ Fixed key→action map (slug `security`):
 | 10  | sec_semgrep  | Single scanner only (semgrep) — with p/security-audit + p/secrets rule packs                 |
 | 11  | sec_cisco    | Single scanner only (Cisco AI Defense) — programmatic engines, no API key needed             |
 | 12  | sec_telemetry| Telemetry hazards only — PLUGIN_SEED_DIR / SHELL_PREFIX / OTEL_LOG_RAW_API_BODIES            |
+| 13  | sec_agent    | Single agent + its skill closure — one agent and every skill it can reach                     |
 | A   | ask          | Ask the agent                                                                                 |
 | B   | back         | Back — Go back to the Validate sub-menu                                                       |
 | 0   | cancel       | Cancel / Exit                                                                                 |
@@ -2016,6 +2096,25 @@ this when they pick one.
 #### 3.16.12 Telemetry hazards only
 
 See §3.1.5.7.3 — same recipe.
+
+#### 3.16.13 Single agent + its skill closure
+
+Scans ONE agent plus every skill it can reach — the surface that actually
+executes when that agent runs, which a plugin-wide scan reports without ever
+telling you which agent owns the risk.
+
+- **arg-prompt**: `Path to the agent .md file? (e.g. ./agents/my-agent.md)`
+- **execution**:
+  ```bash
+  uv run --with pyyaml python "$LAUNCHER" agent-security "$TARGET_PATH" --strict \
+    --report "$MAIN_ROOT/reports/cpv_agent_security/$TS-$SLUG.md"
+  ```
+- **note**: a narrow scan must never read cleaner than the plugin-wide one on
+  the same content. Every scanner that could not run is reported SKIPPED and the
+  verdict reads INCOMPLETE — never VALID — so "cannot check" is never presented
+  as "clean". Add `--require-full-coverage` (exit 5 on any skipped scanner) for
+  CI that must not accept a partial scan, and `--skills-root PATH` (repeatable)
+  to pin the roots and make the result hermetic.
 
 ---
 

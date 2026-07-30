@@ -12,6 +12,7 @@
     {"key": "5", "action_id": "comp_mcp",     "label": "MCP server — setup (transport, env vars, security checks)"},
     {"key": "6", "action_id": "comp_lsp",     "label": "LSP server — Language-server setup in plugin.json"},
     {"key": "7", "action_id": "comp_style",   "label": "Output-style or Rule file — Output-style files or .claude/rules/*.md"},
+    {"key": "8", "action_id": "comp_agent_closure", "label": "Agent + its skill closure — every skill the agent can actually reach, validated too"},
     {"key": "A", "action_id": "ask",          "label": "Ask the agent"},
     {"key": "B", "action_id": "back",         "label": "Back — Go back to the Validate menu"},
     {"key": "0", "action_id": "cancel",       "label": "Cancel / Exit"}

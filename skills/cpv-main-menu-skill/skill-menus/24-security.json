@@ -17,6 +17,7 @@
     {"key": "10", "action_id": "sec_semgrep",    "label": "Single scanner only (semgrep) — p/security-audit + p/secrets"},
     {"key": "11", "action_id": "sec_cisco",      "label": "Single scanner only (Cisco AI Defense)"},
     {"key": "12", "action_id": "sec_telemetry",  "label": "Telemetry hazards only — PLUGIN_SEED_DIR / SHELL_PREFIX / etc."},
+    {"key": "13", "action_id": "sec_agent",      "label": "Single agent + its skill closure — scan one agent and every skill it can reach"},
     {"key": "A",  "action_id": "ask",            "label": "Ask the agent"},
     {"key": "B",  "action_id": "back",           "label": "Back — Go back to the Validate sub-menu"},
     {"key": "0",  "action_id": "cancel",         "label": "Cancel / Exit"}

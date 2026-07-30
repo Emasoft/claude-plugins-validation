@@ -9651,6 +9651,283 @@ def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
     return issues
 
 
+def make_cisco_should_skip(plugin_path: Path) -> "Callable[[str, int | None], bool]":
+    """Build the per-finding suppression predicate for the Cisco scanner.
+
+    Issue #67 — Cisco runs as an external uvx subprocess over the whole tree, so
+    the gitignore filter is built ONCE here and closed over. Without this chain,
+    Cisco scanning CPV itself would surface CPV's own rule catalogs, regex
+    sources, parametrize fixtures, and FP-corpus markdown as findings — exactly
+    the noise the in-process scanners already filter out.
+
+    MODULE-LEVEL (a factory, not an inline closure) so the single-agent scan
+    (``cpv_agent_security``) applies the IDENTICAL chain to its closure file
+    set. Two copies of a suppression chain drift, and a drifted copy makes the
+    two entry points disagree about the same file.
+    """
+    cisco_gi = get_gitignore_filter(plugin_path)
+
+    def _cisco_should_skip(file_path: str, line: int | None) -> bool:
+        if not file_path:
+            return False
+        if _is_always_skip_basename(file_path):
+            return True
+        if cpv_self_scan_skip(file_path):
+            return True
+        if _is_vendored_dep_path(file_path):
+            return True
+        if _is_dev_scratch_path(file_path):
+            return True
+        if _is_test_file_path(file_path):
+            return True
+        # Issue #67 — drop findings inside ANY gitignored path (generalises the
+        # hardcoded dev-scratch list above to the actual .gitignore).
+        if _external_finding_is_gitignored(file_path, cisco_gi):
+            return True
+        if isinstance(line, int) and line > 0:
+            try:
+                fpath = Path(file_path)
+                if fpath.is_file() and fpath.stat().st_size < 2_000_000:
+                    body = fpath.read_text(encoding="utf-8", errors="ignore")
+                    if cpv_self_scan_skip_line(file_path, body, int(line)):
+                        return True
+                    if is_fp_corpus_markdown(file_path, body):
+                        return True
+            except OSError:
+                pass
+        return False
+
+    return _cisco_should_skip
+
+
+def cisco_launcher_available() -> bool:
+    """Is ANY Cisco skill-scanner launcher on PATH?
+
+    v2.48 — the persistent ``skill-scanner`` binary (``uv tool install
+    cisco-ai-skill-scanner``) is preferred over the ephemeral ``uvx``
+    resolution; ``cpv_skill_scanner.build_scan_command`` picks between them.
+    Here we only need to know whether EITHER exists before spawning a run.
+    """
+    return bool(shutil.which("skill-scanner") or shutil.which("uvx"))
+
+
+def check_cisco_scanner(plugin_path: Path, report: ValidationReport, *, step_num: int = 26) -> int:
+    """Run the Cisco AI Defense skill-scanner over ``plugin_path`` (Check 27).
+
+    Programmatic-only mode (no API-key engines). Self-skips when no launcher is
+    on PATH or the ``cisco-ai-skill-scanner`` package cannot be resolved at its
+    PyPI source URL. See ``scripts/cpv_skill_scanner.py``.
+
+    Returns the number of BLOCKING-tier findings it contributed, and records its
+    own row in the scan-step table — so a scan that did NOT run is visible as
+    SKIPPED/FAILED rather than silently absent from the report.
+
+    EXTRACTED to module level so ``cpv_agent_security`` can run the SAME scanner
+    over one agent's closure. ``plugin_path`` may therefore be an ephemeral
+    mirror of a file set rather than a real plugin root; nothing here assumes a
+    manifest, an install slug, or a marketplace.
+    """
+    from cpv_skill_scanner import report_findings, run_cisco_scan  # noqa: PLC0415
+
+    step_name = "External: Cisco AI Defense (skill-scanner)"
+    if not cisco_launcher_available():
+        # Neither launcher available — record SKIPPED and do not even spawn the run.
+        _record_step(
+            step_num,
+            step_name,
+            "SKIPPED",
+            details="neither `skill-scanner` nor `uvx` on PATH — "
+            "run `cpv-doctor --install-scanners` or "
+            "`pip install uv && uv tool install cisco-ai-skill-scanner`",
+        )
+        return 0
+
+    report_len_before = len(report.results)
+    cisco_result = run_cisco_scan(plugin_path)
+    report_findings(cisco_result, plugin_path, report, should_skip=make_cisco_should_skip(plugin_path))
+    new_results = report.results[report_len_before:]
+    # Detect "uvx package failed to resolve / cisco binary unavailable" via
+    # the WARNING messages run_cisco_scan / report_findings emit.
+    unavail = any(
+        ("cisco" in (r.message or "").lower() or "skill-scanner" in (r.message or "").lower())
+        and (
+            "unavailable" in r.message.lower()
+            or "not found" in r.message.lower()
+            or "skipped" in r.message.lower()
+            or "failed to resolve" in r.message.lower()
+        )
+        for r in new_results
+    )
+    timed_out = any(
+        "timeout" in (r.message or "").lower() and "cisco" in (r.message or "").lower() for r in new_results
+    )
+    cisco_findings = sum(1 for r in new_results if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT"))
+    if timed_out:
+        status = "FAILED"
+        details = "Cisco scanner timed out (override CPV_CISCO_SCAN_TIMEOUT_S)"
+    elif unavail:
+        status = "SKIPPED"
+        details = "Cisco scanner unavailable — see WARNING above"
+    else:
+        status = "RAN"
+        details = ""
+    _record_step(
+        step_num,
+        step_name,
+        status,
+        findings=cisco_findings,
+        files="uvx --from cisco-ai-skill-scanner" if status == "RAN" else "",
+        details=details,
+    )
+    return cisco_findings
+
+
+def make_snyk_should_skip(plugin_path: Path) -> "Callable[[str, int | None], bool]":
+    """Build the per-finding suppression predicate for the Snyk Agent Scan.
+
+    Mirrors :func:`make_cisco_should_skip`. Snyk findings anchor to a scanned
+    skill DIRECTORY rather than a file:line, so the line-level predicates the
+    Cisco filter applies have nothing to key on and are omitted here; every
+    path-level filter (self-scan, vendored, dev-scratch, test, gitignored) still
+    applies. Module-level for the same SSOT reason.
+    """
+    snyk_gi = get_gitignore_filter(plugin_path)
+
+    def _snyk_should_skip(file_path: str, line: int | None) -> bool:
+        if not file_path:
+            return False
+        if _is_always_skip_basename(file_path):
+            return True
+        if cpv_self_scan_skip(file_path):
+            return True
+        if _is_vendored_dep_path(file_path):
+            return True
+        if _is_dev_scratch_path(file_path):
+            return True
+        if _is_test_file_path(file_path):
+            return True
+        if _external_finding_is_gitignored(file_path, snyk_gi):
+            return True
+        return False
+
+    return _snyk_should_skip
+
+
+def snyk_step_status(snyk_result: Any) -> tuple[str, str]:
+    """``(status, details)`` for one ``SnykScanResult``'s step-table row.
+
+    Status comes off the result object's own fields rather than sniffing the
+    emitted WARNING text: ``SnykScanResult`` states ``invoked``/``exit_code``
+    explicitly, so there is no reason to re-derive them from prose a later
+    reword would silently break.
+
+    The FAILED-vs-SKIPPED split is the "cannot check != clean" discipline: a
+    scan that was never OWED coverage is SKIPPED, a scan that was attempted and
+    did not complete is FAILED. The step table must never read a broken scan as
+    a benign skip.
+    """
+    from cpv_snyk_agent_scanner import SNYK_TOKEN_ENV, is_snyk_token_present  # noqa: PLC0415
+
+    if snyk_result.invoked:
+        return "RAN", ""
+    if not is_snyk_token_present():
+        return "SKIPPED", f"{SNYK_TOKEN_ENV} not set — opt-in cloud scanner; see WARNING above"
+    if snyk_result.exit_code == -1:
+        # -1 is the "never attempted" family: no launcher on PATH, or nothing
+        # scannable. Coverage was not owed, so SKIPPED is honest.
+        return "SKIPPED", "Snyk Agent Scan did not run — see WARNING above"
+    if snyk_result.exit_code == -2:
+        return "FAILED", "Snyk Agent Scan timed out (override CPV_SNYK_SCAN_TIMEOUT_S)"
+    # Token present and coverage WAS attempted but did not complete: a staging
+    # failure (-4), a launcher crash (-3), or empty/unparseable output.
+    return "FAILED", "Snyk Agent Scan attempted but did not complete — see WARNING above"
+
+
+def check_snyk_agent_scan(plugin_path: Path, report: ValidationReport, *, step_num: int = 28) -> int:
+    """Run the Snyk Agent Scan over ``plugin_path`` (Check 28).
+
+    OPT-IN BY DESIGN. Unlike every other scanner here, this one hard-requires a
+    ``SNYK_TOKEN`` (a free Snyk account) and is CLOUD-BACKED — it sends scanned
+    instruction-surface content to Snyk's analysis server. CPV must stay usable
+    offline and must not ship a user's private plugin source to a third party by
+    default, so it runs only when the operator exported a token. Absent one it
+    is SKIPPED with a visible WARNING naming the variable and the page to get it
+    — never folded into the pass count, because a scan that never ran must never
+    look like a scan that passed.
+
+    It is SKILLS-ONLY and never touches an MCP config: scanning one makes the
+    tool execute the server commands inside it, which on an untrusted
+    pre-install plugin would turn CPV's own scan into the exploit. The four
+    safety invariants (directory targets / never a config file; no ``--ci`` and
+    no ``--dangerously-run-mcp-servers``; "cannot check" != "clean"; ephemeral
+    name-only staging) are stated and reasoned in
+    ``scripts/cpv_snyk_agent_scanner.py`` — read them before touching this.
+
+    EXTRACTED to module level so ``cpv_agent_security`` can run the SAME scanner
+    over one agent's closure without a second copy of the wiring.
+    """
+    from cpv_snyk_agent_scanner import (  # noqa: PLC0415
+        report_findings as snyk_report_findings,
+    )
+    from cpv_snyk_agent_scanner import run_snyk_agent_scan  # noqa: PLC0415
+
+    snyk_len_before = len(report.results)
+    snyk_result = run_snyk_agent_scan(plugin_path)
+    snyk_report_findings(snyk_result, plugin_path, report, should_skip=make_snyk_should_skip(plugin_path))
+    snyk_new_results = report.results[snyk_len_before:]
+    snyk_findings = sum(1 for r in snyk_new_results if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT"))
+
+    snyk_status, snyk_details = snyk_step_status(snyk_result)
+    _record_step(
+        step_num,
+        "External: Snyk Agent Scan (skills-only, opt-in)",
+        snyk_status,
+        findings=snyk_findings,
+        files="uvx snyk-agent-scan (skills/)" if snyk_status == "RAN" else "",
+        details=snyk_details,
+    )
+    return snyk_findings
+
+
+def skillaudit_should_skip(file_path: str, line: int | None) -> bool:
+    """Apply CPV's full self-scan filter chain to one skillaudit finding.
+
+    Mirrors ``_cisco_should_skip`` so that when CPV scans itself the skillaudit
+    pass doesn't surface CPV's own rule catalogs, regex sources, fixture
+    markdown, or test files as findings.
+
+    MODULE-LEVEL, not a closure inside ``validate_security``, because the
+    single-agent scan (``cpv_agent_security``, spec §4) must honour the SAME
+    chain over its closure file set. Two copies would drift, and a drifted
+    suppression chain makes the two entry points disagree about whether the
+    identical file is a finding.
+    """
+    if not file_path:
+        return False
+    if _is_always_skip_basename(file_path):
+        return True
+    if cpv_self_scan_skip(file_path):
+        return True
+    if _is_vendored_dep_path(file_path):
+        return True
+    if _is_dev_scratch_path(file_path):
+        return True
+    if _is_test_file_path(file_path):
+        return True
+    if isinstance(line, int) and line > 0:
+        try:
+            fpath = Path(file_path)
+            if fpath.is_file() and fpath.stat().st_size < 2_000_000:
+                body = fpath.read_text(encoding="utf-8", errors="ignore")
+                if cpv_self_scan_skip_line(file_path, body, int(line)):
+                    return True
+                if is_fp_corpus_markdown(file_path, body):
+                    return True
+        except OSError:
+            pass
+    return False
+
+
 def validate_security(
     plugin_path: Path,
     enable_tirith: bool = True,
@@ -10396,204 +10673,10 @@ def validate_security(
             )
 
     # Check 27 — Cisco AI Defense skill-scanner via uvx remote.
-    # Programmatic-only mode (no API-key engines). Self-skips when uvx
-    # is not on PATH or the cisco-ai-skill-scanner package cannot be
-    # resolved at its PyPI source URL. See scripts/cpv_skill_scanner.py.
-    from cpv_skill_scanner import report_findings, run_cisco_scan  # noqa: PLC0415
-
-    # Issue #67 — Cisco runs as an external uvx subprocess over the whole tree;
-    # build the gitignore filter ONCE so _cisco_should_skip can drop findings
-    # whose path the plugin's own .gitignore excludes (gitignored = not shipped).
-    cisco_gi = get_gitignore_filter(plugin_path)
-
-    def _cisco_should_skip(file_path: str, line: int | None) -> bool:
-        """Apply CPV's full self-scan filter chain to each Cisco finding.
-
-        Without this, Cisco scanning CPV itself would surface CPV's own
-        rule catalogs, regex sources, parametrize fixtures, and FP-corpus
-        markdown as findings — exactly the noise the in-process scanners
-        already filter out via cpv_self_scan_skip / vendored / dev_scratch
-        / test_file / fp-corpus / pattern-source-line predicates.
-        """
-        if not file_path:
-            return False
-        if _is_always_skip_basename(file_path):
-            return True
-        if cpv_self_scan_skip(file_path):
-            return True
-        if _is_vendored_dep_path(file_path):
-            return True
-        if _is_dev_scratch_path(file_path):
-            return True
-        if _is_test_file_path(file_path):
-            return True
-        # Issue #67 — drop findings inside ANY gitignored path (generalises the
-        # hardcoded dev-scratch list above to the actual .gitignore).
-        if _external_finding_is_gitignored(file_path, cisco_gi):
-            return True
-        if isinstance(line, int) and line > 0:
-            try:
-                fpath = Path(file_path)
-                if fpath.is_file() and fpath.stat().st_size < 2_000_000:
-                    body = fpath.read_text(encoding="utf-8", errors="ignore")
-                    if cpv_self_scan_skip_line(file_path, body, int(line)):
-                        return True
-                    if is_fp_corpus_markdown(file_path, body):
-                        return True
-            except OSError:
-                pass
-        return False
-
-    # v2.48 — prefer the persistent ``skill-scanner`` binary (created by
-    # ``uv tool install cisco-ai-skill-scanner``) over the ephemeral uvx
-    # resolution. cpv_skill_scanner.build_scan_command() picks the right
-    # launcher; here we only need ANY launcher (persistent OR uvx) to be
-    # available before we can run the scan.
-    if not (shutil.which("skill-scanner") or shutil.which("uvx")):
-        # Neither launcher available — record SKIPPED and do not even spawn the run.
-        _record_step(
-            26,
-            "External: Cisco AI Defense (skill-scanner)",
-            "SKIPPED",
-            details="neither `skill-scanner` nor `uvx` on PATH — "
-            "run `cpv-doctor --install-scanners` or "
-            "`pip install uv && uv tool install cisco-ai-skill-scanner`",
-        )
-    else:
-        report_len_before = len(report.results)
-        cisco_result = run_cisco_scan(plugin_path)
-        report_findings(cisco_result, plugin_path, report, should_skip=_cisco_should_skip)
-        new_results = report.results[report_len_before:]
-        # Detect "uvx package failed to resolve / cisco binary unavailable" via
-        # the WARNING messages run_cisco_scan / report_findings emit.
-        unavail = any(
-            ("cisco" in (r.message or "").lower() or "skill-scanner" in (r.message or "").lower())
-            and (
-                "unavailable" in r.message.lower()
-                or "not found" in r.message.lower()
-                or "skipped" in r.message.lower()
-                or "failed to resolve" in r.message.lower()
-            )
-            for r in new_results
-        )
-        timed_out = any(
-            "timeout" in (r.message or "").lower() and "cisco" in (r.message or "").lower() for r in new_results
-        )
-        cisco_findings = sum(1 for r in new_results if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT"))
-        if timed_out:
-            status = "FAILED"
-            details = "Cisco scanner timed out (override CPV_CISCO_SCAN_TIMEOUT_S)"
-        elif unavail:
-            status = "SKIPPED"
-            details = "Cisco scanner unavailable — see WARNING above"
-        else:
-            status = "RAN"
-            details = ""
-        _record_step(
-            26,
-            "External: Cisco AI Defense (skill-scanner)",
-            status,
-            findings=cisco_findings,
-            files="uvx --from cisco-ai-skill-scanner" if status == "RAN" else "",
-            details=details,
-        )
+    check_cisco_scanner(plugin_path, report)
 
     # Check 28 — Snyk Agent Scan (SKILLS-ONLY) via uvx remote.
-    #
-    # OPT-IN BY DESIGN. Unlike every other scanner here, this one hard-requires
-    # a SNYK_TOKEN (a free Snyk account) and is CLOUD-BACKED — it sends scanned
-    # skill content to Snyk's analysis server. CPV must stay usable offline and
-    # must not ship a user's private plugin source to a third party by default,
-    # so it runs only when the operator exported a token. Absent one it is
-    # SKIPPED with a visible WARNING naming the variable and the page to get it
-    # — never folded into the pass count, because a scan that never ran must
-    # never look like a scan that passed.
-    #
-    # It is SKILLS-ONLY and never touches an MCP config: scanning one makes the
-    # tool execute the server commands inside it, which on an untrusted
-    # pre-install plugin would turn CPV's own scan into the exploit. The three
-    # safety invariants (skills-dir target / never a config file; no --ci and
-    # no --dangerously-run-mcp-servers; "cannot check" != "clean") are stated
-    # and reasoned in scripts/cpv_snyk_agent_scanner.py — read them before
-    # touching this block.
-    from cpv_snyk_agent_scanner import (  # noqa: PLC0415
-        SNYK_TOKEN_ENV,
-        is_snyk_token_present,
-        run_snyk_agent_scan,
-    )
-    from cpv_snyk_agent_scanner import (  # noqa: PLC0415
-        report_findings as snyk_report_findings,
-    )
-
-    snyk_gi = get_gitignore_filter(plugin_path)
-
-    def _snyk_should_skip(file_path: str, line: int | None) -> bool:
-        """Apply CPV's self-scan filter chain to each Snyk finding.
-
-        Mirrors ``_cisco_should_skip``. Snyk findings anchor to a scanned skill
-        directory rather than a file:line, so the line-level predicates the
-        Cisco filter applies have nothing to key on and are omitted here; the
-        path-level filters (self-scan, vendored, dev-scratch, test, gitignored)
-        all still apply.
-        """
-        if not file_path:
-            return False
-        if _is_always_skip_basename(file_path):
-            return True
-        if cpv_self_scan_skip(file_path):
-            return True
-        if _is_vendored_dep_path(file_path):
-            return True
-        if _is_dev_scratch_path(file_path):
-            return True
-        if _is_test_file_path(file_path):
-            return True
-        if _external_finding_is_gitignored(file_path, snyk_gi):
-            return True
-        return False
-
-    snyk_len_before = len(report.results)
-    snyk_result = run_snyk_agent_scan(plugin_path)
-    snyk_report_findings(snyk_result, plugin_path, report, should_skip=_snyk_should_skip)
-    snyk_new_results = report.results[snyk_len_before:]
-    snyk_findings = sum(1 for r in snyk_new_results if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT"))
-
-    # Status comes off the result object's own fields rather than sniffing the
-    # emitted WARNING text: SnykScanResult states invoked/exit_code explicitly,
-    # so there is no reason to re-derive them from prose that a later reword
-    # would silently break.
-    if snyk_result.invoked:
-        snyk_status = "RAN"
-        snyk_details = ""
-    elif not is_snyk_token_present():
-        snyk_status = "SKIPPED"
-        snyk_details = f"{SNYK_TOKEN_ENV} not set — opt-in cloud scanner; see WARNING above"
-    elif snyk_result.exit_code == -1:
-        # -1 is the "never attempted" family: no launcher on PATH, or nothing
-        # scannable (no skills/agents/commands/rules/hooks). Coverage was not
-        # owed, so SKIPPED is honest.
-        snyk_status = "SKIPPED"
-        snyk_details = "Snyk Agent Scan did not run — see WARNING above"
-    elif snyk_result.exit_code == -2:
-        snyk_status = "FAILED"
-        snyk_details = "Snyk Agent Scan timed out (override CPV_SNYK_SCAN_TIMEOUT_S)"
-    else:
-        # Token present and coverage WAS attempted but did not complete: a
-        # staging failure (-4), a launcher crash (-3), or empty/unparseable
-        # output. That is "cannot check", not "nothing to check", so it is
-        # FAILED — the step table must never read a broken scan as a benign
-        # skip (the same "cannot check != clean" discipline the scanner keeps).
-        snyk_status = "FAILED"
-        snyk_details = "Snyk Agent Scan attempted but did not complete — see WARNING above"
-
-    _record_step(
-        28,
-        "External: Snyk Agent Scan (skills-only, opt-in)",
-        snyk_status,
-        findings=snyk_findings,
-        files="uvx snyk-agent-scan (skills/)" if snyk_status == "RAN" else "",
-        details=snyk_details,
-    )
+    check_snyk_agent_scan(plugin_path, report)
 
     # Check 27 — SkillAudit native rules (MANDATORY, in-process).
     # Originally `npx skillaudit` was considered; rejected because the npm
@@ -10612,45 +10695,13 @@ def validate_security(
         run_skillaudit_scan,
     )
 
-    def _skillaudit_should_skip(file_path: str, line: int | None) -> bool:
-        """Apply CPV's full self-scan filter chain to each skillaudit finding.
-
-        Mirrors ``_cisco_should_skip`` so that when CPV scans itself the
-        skillaudit pass doesn't surface CPV's own rule catalogs, regex
-        sources, fixture markdown, or test files as findings.
-        """
-        if not file_path:
-            return False
-        if _is_always_skip_basename(file_path):
-            return True
-        if cpv_self_scan_skip(file_path):
-            return True
-        if _is_vendored_dep_path(file_path):
-            return True
-        if _is_dev_scratch_path(file_path):
-            return True
-        if _is_test_file_path(file_path):
-            return True
-        if isinstance(line, int) and line > 0:
-            try:
-                fpath = Path(file_path)
-                if fpath.is_file() and fpath.stat().st_size < 2_000_000:
-                    body = fpath.read_text(encoding="utf-8", errors="ignore")
-                    if cpv_self_scan_skip_line(file_path, body, int(line)):
-                        return True
-                    if is_fp_corpus_markdown(file_path, body):
-                        return True
-            except OSError:
-                pass
-        return False
-
     report_len_before = len(report.results)
     skillaudit_result = run_skillaudit_scan(plugin_path)
     skillaudit_report_findings(
         skillaudit_result,
         plugin_path,
         report,
-        should_skip=_skillaudit_should_skip,
+        should_skip=skillaudit_should_skip,
     )
     new_results = report.results[report_len_before:]
     skillaudit_findings_count = sum(1 for r in new_results if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT"))
