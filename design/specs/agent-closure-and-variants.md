@@ -48,6 +48,54 @@ gate is open they are all *potentially* loadable, so the set is REPORTED but its
 members are NOT validated by default — validating an entire palette per agent
 would be pure noise. Opt in with `--closure-ambient`.
 
+## 1.1 The three agent architectures — CANONICAL TERMINOLOGY
+
+These names are the project's vocabulary. Use them verbatim in code, findings,
+skills, menus and docs. All three pair their skill strategy with the **`Skill`
+tool**, so all three require the gate in §1 to be OPEN.
+
+| architecture | `skills:` frontmatter | body carries | node granularity |
+|---|---|---|---|
+| **ALL-IN-ONE AGENT** | EVERY skill it needs | instructions for how to use each skill, at the right time and in the right choice branch | the agent itself does the work |
+| **ONE-FOR-ALL AGENT** | the micro-agents it dispatches | ONLY the graph / choice tree / skeleton of the procedure | each node is a **micro-agent** (= **one-skill-agent**: a skill whose frontmatter carries `agent:`, with minimal context) doing one small step |
+| **PLUGIN-OMNI-AGENT** | exactly ONE skill — the plugin's `the-skills-menu` (every skill's name + description + when to use it) | routing through that menu | resolved at runtime from the menu |
+
+Three facts that constrain any implementation, each verified rather than assumed:
+
+1. **ALL-IN-ONE is a FRONTMATTER strategy, not body inlining.** `skills:`
+   frontmatter injects each named skill's FULL content into every invocation's
+   cached prefix, so listing the skills *is* the preload. Concatenating skill
+   bodies into the agent body is a DIFFERENT, older construction and is NOT what
+   ALL-IN-ONE means. The body's job is the routing instructions.
+2. **`agent:` IS a valid skill frontmatter field** (verified against
+   `cpv_validation_common.SKILL_FRONTMATTER_FIELDS`), so a one-skill-agent is a
+   spec-valid primitive — a skill that runs in its own subagent with minimal
+   context.
+3. **`skills:` is NOT a valid skill frontmatter field** — it is agent-only
+   (same source). So a micro-agent node CANNOT declare its own skill list, and
+   the choice tree therefore has to live in the ONE-FOR-ALL agent's body. Any
+   design that nests `skills:` inside a skill is invalid.
+
+### 1.2 MANDATORY companion skill on every generated variant
+
+Every generated ALL-IN-ONE, ONE-FOR-ALL, and PLUGIN-OMNI agent MUST carry
+**`verification-before-completion`** in its `skills:` list. Its Iron Law — *no
+completion claim without fresh verification evidence* — is exactly the failure
+mode a multi-skill or multi-node agent is most prone to, because a node reporting
+"success" is not evidence that the step happened.
+
+This creates a hard interaction with AC1 (§3): a preload naming a skill that does
+not resolve is a MAJOR, so a generator that adds this name without ensuring the
+skill exists would emit agents that fail CPV's own validator. Therefore the
+generator MUST ensure `skills/verification-before-completion/SKILL.md` exists in
+the target plugin — writing it from the bundled template when absent, and NEVER
+overwriting an existing one (the user may have adapted it). The template is
+`design/specs/verification-before-completion.template.md`.
+
+For a PLUGIN-OMNI agent the `skills:` list is "one skill, the menu" — the
+companion skill is the ONE permitted addition, so that list has exactly two
+entries, and the menu itself must list the companion skill too.
+
 ## 2. `scripts/cpv_agent_closure.py` — the SSOT (workstream T1)
 
 Reuse, never reimplement: `cpv_tool_permission_match` for tool-token
@@ -130,7 +178,16 @@ and "this skill does not exist" would be a fabricated finding. So:
 | **AC1** | a `skills:` preload name does not resolve in any root | MAJOR w/ guard, else WARNING |
 | **AC2** | a body `Skill()` invocation names a skill that does not resolve | MAJOR w/ guard, else WARNING |
 | **AC3** | body invokes `Skill()` AND `tools:` denies `Skill` AND the named skill RESOLVES | MAJOR (resolution proves a real invocation, not prose) |
-| **AC4** | a `skills:` preload the body never uses, while the gate is open | WARNING (a preload injects FULL content every invocation) |
+| **AC4** | a `skills:` preload the body never MENTIONS, while the gate is open | WARNING (a preload injects FULL content every invocation) |
+
+**AC4 counts a bare NAME MENTION as usage, not just a `Skill()` call.** An
+ALL-IN-ONE agent (§1.1) preloads every skill and routes to them from a prose
+table or a choice-branch list — `| cpv-fix-validation | when a finding is
+mechanical |` is genuine usage. Requiring a `Skill()` call would make CPV warn on
+its own canonical output, so the test is: does the skill's name appear anywhere in
+the body outside a fenced block? If not, the preload is dead weight and the
+WARNING is correct. This keeps AC4 an honest token-economy advisory instead of an
+architecture preference.
 
 AC3 supersedes nothing: the existing prose WARNING stays for the unresolved case.
 A skill that does not resolve is prose as far as we can prove, so it never
@@ -163,36 +220,64 @@ each reachable `SKILL.md`, its `references/**`, its `scripts/**`.
 ## 5. `scripts/convert_agent.py` (workstream T3)
 
 Converts ONE SOURCE AGENT (not a whole plugin — that is what the two existing
-generators already do) plus its closure.
+generators already do) into any of the three §1.1 architectures, using its
+closure as the skill set.
 
 ```
-convert_agent.py <agent.md> --to mono  [--out DIR] [--name NAME] [--force]
-convert_agent.py <agent.md> --to micro [--out DIR] [--name NAME] [--force]
+convert_agent.py <agent.md> --to all-in-one   [--out DIR] [--name NAME] [--force]
+convert_agent.py <agent.md> --to one-for-all  [--out DIR] [--name NAME] [--force]
+convert_agent.py <agent.md> --to plugin-omni  [--out DIR] [--name NAME] [--force]
 ```
 
-- `--to mono` → `<name>-mono.md`: the source agent's body with every REACHABLE
-  skill inlined under `## Skill: <name>` (frontmatter stripped, headings demoted
-  so the agent keeps one H1). Turn-1 ready, no runtime load. Carries the union of
-  the source's tool grants; no `model:` pin (CA-04).
-- `--to micro` → `<name>-launcher.md` + `workflows/<name>-micro.ts`: a thin
-  launcher plus a Workflow-tool graph whose nodes are the closure's skills,
-  each run as a near-empty micro-agent, edges threaded output→input, per-step
-  verify.
-- Never overwrite without `--force`. Both outputs must pass `validate_agent`
-  (and the emitted `.ts` must live under a `known_dirs` entry).
-- Both modes read the closure through §2. Neither may re-derive the skill set.
-- The two existing skills (`cpv-create-mono-agent`,
-  `cpv-create-micro-agents-workflow`) gain the agent-scoped path and delegate to
-  this script; their plugin-wide path is unchanged.
+Common to all three: `Skill` is added to `tools` (all three depend on the §1 gate
+being open); `verification-before-completion` is appended to `skills:` and ensured
+on disk per §1.2; no `model:` pin (CA-04); an existing output is never overwritten
+without `--force`; every emitted agent must pass `validate_agent` with zero
+blocking findings — including the new AC1–AC4, which is the real acceptance test,
+since a generator emitting an unresolvable preload has produced a broken agent.
+
+- **`--to all-in-one`** → `<name>-all-in-one.md`. `skills:` = every REACHABLE
+  skill of the closure (+ the companion). The BODY is the routing layer: for each
+  skill, when to reach for it and which branch of the procedure it belongs to.
+  Derive the branches from the source agent's own structure; where the source
+  gives no ordering, emit a flat "choose by intent" table rather than inventing a
+  sequence. Skill bodies are NOT concatenated into the agent body — the
+  frontmatter list IS the preload (§1.1 fact 1).
+- **`--to one-for-all`** → `<name>-one-for-all.md` plus one micro-agent skill per
+  closure node at `skills/<node>/SKILL.md` carrying `agent:` in frontmatter (a
+  one-skill-agent, minimal context). The agent BODY carries ONLY the graph /
+  choice tree / skeleton — never the step contents, which live in the nodes.
+  Because `skills:` is invalid inside a skill (§1.1 fact 3), a node must not
+  declare its own skill list; the graph belongs to the agent.
+- **`--to plugin-omni`** → `<name>-plugin-omni.md`. `skills:` = exactly the
+  plugin's `the-skills-menu` skill + the companion. The body routes through the
+  menu. If the target plugin has no `the-skills-menu`, generate it from the real
+  `skills/` inventory — never an empty catalog, which would make the agent inert
+  while looking correct.
+
+All three read the closure through §2; none may re-derive the skill set.
+
+Then extend the existing skills to cover the agent-scoped path, delegating here:
+`cpv-create-mono-agent` → ALL-IN-ONE, `cpv-create-micro-agents-workflow` →
+ONE-FOR-ALL, plus a PLUGIN-OMNI path. Their plugin-wide behaviour is UNCHANGED.
+Both must adopt the §1.1 vocabulary; "mono" and "micro" survive only as the
+historical skill NAMES (renaming a skill is a separate change), never as a
+description of what the architecture is.
 
 ## 6. `scripts/cpv_agent_eval.py` (workstream T4)
 
-Selectively compare the ORIGINAL agent against its `mono` and `micro` variants.
+Selectively compare the ORIGINAL agent against any subset of its §1.1 variants.
 
 ```
-cpv_agent_eval.py --original A.md [--mono M.md] [--micro L.md] \
-                  --variants original,mono,micro [--tasks tasks.jsonl] [--live]
+cpv_agent_eval.py --original A.md [--all-in-one X.md] [--one-for-all Y.md] \
+                  [--plugin-omni Z.md] \
+                  --variants original,all-in-one,one-for-all,plugin-omni \
+                  [--tasks tasks.jsonl] [--live]
 ```
+
+`--variants` accepts any subset, so "the original vs the 2 new versions" is
+`--variants original,all-in-one,one-for-all`. A named variant whose file is not
+supplied is reported as NOT-EVALUATED, never silently dropped from the table.
 
 **Tier 1 — static cost model. Always runs. Zero LLM calls. Real measurements
 over real files.** Per variant: cached-prefix token estimate (system prompt =
