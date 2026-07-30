@@ -45,6 +45,10 @@ CPV, and the plugin's own tests before anything is pushed.
   injects, and which "cache optimizations" are folklore.
 - [[agents-have-no-body-limit]] — what does and does not constrain an agent definition's
   size.
+- [[agent-skill-closure-and-architectures]] — which skills an agent can actually REACH
+  (tool-gated on `Skill`/`disallowedTools`, not the `skills:` list), the two preload
+  entries that silently do nothing, and the three canonical architectures
+  (ALL-IN-ONE / ONE-FOR-ALL / PLUGIN-OMNI) with the never-inline rule.
 - (add component pages here as they are written — the validator core, the security /
   taint surface, the canonical publish pipeline, the menu + agent dispatch architecture)
 

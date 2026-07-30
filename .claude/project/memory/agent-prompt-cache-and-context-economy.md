@@ -70,6 +70,14 @@ bug, which is a different problem.)
 
 - [[claude-plugins-validation-overview]] — the project hub.
 
+## See also
+
+- [[agent-skill-closure-and-architectures]] — the reachability half of the same
+  subject: `skills:` frontmatter is a preload hint, not an ACL (the gate is the
+  `Skill` tool plus `disallowedTools`), which preload entries silently do nothing,
+  and the three agent architectures. This page answers "what does it cost"; that
+  one answers "what can the agent reach, and does it exist".
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-RUNTIME-SKILL-NOT-CACHE-BREAK, status:valid, keywords:"runtime skill load breaks cache progressive_disclosure reference_files skills_frontmatter_preload cache_miss_per_turn router_agent", ocd:2026-07-25, lmd:2026-07-25] DO NOT "optimize" an agent by moving its runtime `Skill()` calls into `skills:` frontmatter, BECAUSE a runtime load lands in the MESSAGE TAIL and cannot invalidate the cached prefix, while `skills:` injects the skill's FULL content into EVERY invocation — so the "optimization" adds a permanent per-run tax and is strictly worse for a sometimes-needed skill (and worst of all for a router that needs 1 of N). DO preload only always-needed skills, and measure the skill's real token size before deciding.
