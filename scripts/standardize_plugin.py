@@ -825,6 +825,57 @@ _FORCE_TEMPLATE_FILES: set[str] = {
 # at/AHEAD of canon (i.e. the validator's "would downgrade" case).
 _PIPELINE_DRIFT_RC: str = "RC-PIPELINE-DRIFT-001"
 
+# The two force-template files that carry a plugin's RELEASE MACHINERY — the
+# steps that build its artifacts and get them into a release. Everything else in
+# _FORCE_TEMPLATE_FILES is toolchain-agnostic infrastructure (lint config,
+# changelog config, the retry helper, the pre-push hook) that canon fully models,
+# and the two config files among them already MERGE rather than clobber.
+#
+# ci.yml is deliberately NOT here: a compiled plugin's BUILD lives in its release
+# lineage, and ci.yml is the generic lint/validate/test graph canon does model.
+_PROFILE_SENSITIVE_FORCE_FILES: frozenset[str] = frozenset(
+    {
+        "scripts/publish.py",
+        ".github/workflows/release.yml",
+    }
+)
+
+def _canon_incomplete_profiles() -> frozenset[str]:
+    """Profiles whose canon output provably CANNOT carry the plugin's own release
+    machinery, so force-overwriting a ``_PROFILE_SENSITIVE_FORCE_FILES`` entry
+    DESTROYS working behavior:
+
+      * ``submodule-build`` — MEASURED on a real perfect-skill-suggester clone:
+        canon's submodule-build publish.py is 2392 lines and carries ZERO of the
+        plugin's ``_ensure_submodule_pushed`` / ``CARGO_LOCK`` / ``CARGO_TOML`` /
+        ``rustup`` / second-crate markers. ``gen_publish_py`` DOES model this
+        profile — but only the gitlink / submodule-push mechanics, never the Rust
+        toolchain steps beside them. The worst single loss is
+        ``_ensure_submodule_pushed()``, which refuses to release while the parent
+        references an UNPUSHED submodule commit; without it the plugin can tag a
+        release whose submodule ref nobody can resolve, and Claude Code recurses
+        submodules on install, so every user's install breaks.
+      * ``binary-release`` — canon emits the plain STANDARD publish.py for this
+        profile (verified: identical length to ``standard``), so a plugin that
+        builds and uploads per-platform binaries loses all of it.
+
+    ``remote-validation`` is deliberately EXCLUDED: ``gen_publish_py`` documents
+    that the remote-validation gate shape already lives in the standard template,
+    so canon genuinely models it and a refresh is safe.
+
+    Lazy sibling import (the ``_classify_drift_direction`` idiom): ``scripts/`` is
+    only put on ``sys.path`` inside the standardize entry points, so a
+    module-level import would break a bare ``import standardize_plugin``. Reading
+    the names from ``cpv_pipeline_profile`` keeps ONE source of truth — a
+    hand-copied literal would silently drift the day a profile is renamed.
+    """
+    from cpv_pipeline_profile import (  # noqa: E402 — sibling import, see docstring
+        PROFILE_BINARY_RELEASE,
+        PROFILE_SUBMODULE_BUILD,
+    )
+
+    return frozenset({PROFILE_SUBMODULE_BUILD, PROFILE_BINARY_RELEASE})
+
 # cpv-the-skills-menu canon migration (TRDD-478d9687 / cpv-the-skills-menu-create spec).
 # The EXACT mandatory dynamic-loading instruction every migrated agent body must
 # carry, taken verbatim from the cpv-the-skills-menu-create spec
@@ -879,20 +930,31 @@ def _force_template_skip_reason(
     rel_path: str,
     canon_content: str,
     divergence: set[str],
+    plugin_root: Path,
+    profile: str,
 ) -> str | None:
     """Decide whether a ``--force-templates`` overwrite of ``rel_path`` must be
-    SKIPPED (issue #145b / #144Bb).
+    SKIPPED (issue #145b / #144Bb; profile/compiled guard added for the PSS
+    migration).
 
     Returns the COMPLETE skip line to print (so each condition controls its own
     wording exactly) when the overwrite must be declined, or ``None`` when the
     file should be overwritten as before.
 
-    Two skip conditions:
+    Three skip conditions:
 
     1. ``rel_path`` is in ``divergence`` (the plugin's
        ``cpv.pipeline.intentional_divergence`` manifest list) — skip regardless
        of drift direction; the plugin deliberately diverges.
-    2. The plugin's CURRENT file is at/AHEAD of canon — i.e. force-overwriting
+    2. ``rel_path`` carries RELEASE MACHINERY (``_PROFILE_SENSITIVE_FORCE_FILES``)
+       and this plugin builds a compiled artifact — signalled EITHER by a declared
+       ``profile`` canon cannot fully model (``_canon_incomplete_profiles``) OR,
+       intrinsically, by ``plugin_ships_compiled``. Canon models the standard
+       pipeline and a submodule-gitlink section; it can never model a plugin's
+       toolchain-specific build/release steps, so the overwrite would DESTROY
+       working behavior rather than refresh it. The intrinsic half matters because
+       a plugin that never declared a profile is exactly the one nobody warned.
+    3. The plugin's CURRENT file is at/AHEAD of canon — i.e. force-overwriting
        it would DOWNGRADE a hardened/ahead file (the exact case the validator
        flags "at or AHEAD of canon … Do NOT --force-templates"). We classify
        direction by REUSING ``validate_plugin._classify_drift_direction`` on a
@@ -902,9 +964,15 @@ def _force_template_skip_reason(
 
     An ABSENT plugin file is never skipped here (a new file must be written);
     in practice force-overwrite only ever processes existing files, but this
-    keeps the helper correct for any caller. An IDENTICAL file falls through to
-    ``"plain"`` (no diff lines, no hardening markers either side) → overwrite,
-    which is a harmless no-op rewrite of byte-identical content.
+    keeps the helper correct for any caller. An IDENTICAL file returns ``None``
+    before condition 2 is consulted, so a plugin already ON canon is never told
+    its refresh was declined. Deleting the file and re-running is therefore the
+    documented escape hatch for an author who genuinely wants canon's version:
+    the create path always writes.
+
+    Condition 2 only ever DECLINES a destructive overwrite — it relaxes no gate
+    and silences nothing. The validator's drift WARNING for the file still fires,
+    so the divergence stays visible (selector, not suppressor).
     """
     if rel_path in divergence:
         return f"skipped {rel_path} — marked intentional_divergence"
@@ -917,6 +985,27 @@ def _force_template_skip_reason(
     if plugin_content == canon_content:
         # Byte-identical; nothing to skip (and nothing to downgrade).
         return None
+
+    if rel_path in _PROFILE_SENSITIVE_FORCE_FILES:
+        reason = ""
+        if profile in _canon_incomplete_profiles():
+            reason = f"pipeline profile is '{profile}'"
+        else:
+            # Lazy sibling import, and only reached for the two release-machinery
+            # files, so the tree walk costs at most two calls per standardize run.
+            from cpv_pipeline_profile import (  # noqa: E402 — sibling import
+                plugin_ships_compiled,
+            )
+
+            if plugin_ships_compiled(plugin_root):
+                reason = "the plugin ships a compiled component"
+        if reason:
+            return (
+                f"skipped force-overwrite of {rel_path} — {reason}, and canon cannot "
+                f"carry this plugin's own build/release steps (overwriting would DELETE "
+                f"them). Review the canon diff by hand, or delete the file and re-run to "
+                f"take canon's version; see {_PIPELINE_DRIFT_RC}"
+            )
 
     # Issue #165 — a canon YAML file is MERGED, never blind-overwritten (see
     # _merge_canon_yaml, which the caller invokes). A blind overwrite deletes the
@@ -4084,7 +4173,9 @@ def fix_missing_files(
         # plugin's file untouched. Only applies to the force-overwrite branch; a
         # genuinely MISSING file (op_kind == "create") is always written.
         if op_kind == "overwrite":
-            skip_line = _force_template_skip_reason(file_path, rel_path, content, divergence)
+            skip_line = _force_template_skip_reason(
+                file_path, rel_path, content, divergence, plugin_path, profile
+            )
             if skip_line is not None:
                 print(f"  {YELLOW}{skip_line}{NC}")
                 continue

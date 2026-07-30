@@ -89,6 +89,39 @@ _UV_SYNC_TIMEOUT = 300
 # Mega-Linter sub-linter probes — checkov/trivy can be slow on a large tree.
 _MEGALINTER_TIMEOUT = 300
 
+# Issue #183 — how many lines of a failing tool's OWN output the report echoes.
+# A blocking gate that reports only a COUNT ("Found 2 errors in 1 file") gives the
+# reader nothing to act on, and this gate is one whose failure they often cannot
+# reproduce locally: `uv run mypy` resolves against the project venv while the
+# preflight (like CI) does not, so the obvious command says "Success" while the
+# gate says "CI would fail". The cap keeps a 5000-error run from burying the
+# verdict; the elided count is always stated, never silently dropped.
+_FAIL_DETAIL_MAX_LINES = 40
+
+
+def _fail_detail(text: str) -> str:
+    """Normalise a failing tool's captured output for the FAIL report.
+
+    Drops blank lines (the cap is scarce, and a tool's padding carries nothing),
+    caps at :data:`_FAIL_DETAIL_MAX_LINES` and, when truncated, appends an
+    explicit "… and N more line(s)" so the reader always knows output was elided.
+    Returns "" for empty input, which the renderer treats as "nothing to echo"
+    rather than printing an empty block.
+
+    Each surviving line keeps its OWN leading indentation — several of these
+    tools (checkov, trivy, jscpd) indent findings under a header, and stripping
+    the block as a whole would flatten the first line out of that structure.
+    """
+    lines = [ln.rstrip() for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    if len(lines) <= _FAIL_DETAIL_MAX_LINES:
+        return "\n".join(lines)
+    elided = len(lines) - _FAIL_DETAIL_MAX_LINES
+    kept = lines[:_FAIL_DETAIL_MAX_LINES]
+    kept.append(f"… and {elided} more line{'s' if elided != 1 else ''}")
+    return "\n".join(kept)
+
 
 @dataclass
 class PreflightFinding:
@@ -104,12 +137,17 @@ class PreflightFinding:
             ``"PASS"`` (the gate ran clean).
         message: A human-readable description.
         file: An optional plugin-relative path the finding is about.
+        detail: The failing tool's OWN output, already capped by
+            :func:`_fail_detail` (issue #183). Set on FAIL findings whose gate
+            shells out to a tool; empty for PASS/WARNING and for the static
+            CIP-N detectors, which have no external output to echo.
     """
 
     gate: str
     severity: str
     message: str
     file: str = ""
+    detail: str = ""
 
 
 @dataclass
@@ -126,8 +164,10 @@ class PreflightResult:
     strict: bool = False
     findings: list[PreflightFinding] = field(default_factory=list)
 
-    def add(self, gate: str, severity: str, message: str, file: str = "") -> None:
-        self.findings.append(PreflightFinding(gate, severity, message, file))
+    def add(
+        self, gate: str, severity: str, message: str, file: str = "", detail: str = ""
+    ) -> None:
+        self.findings.append(PreflightFinding(gate, severity, message, file, detail))
 
     @property
     def fails(self) -> list[PreflightFinding]:
@@ -233,6 +273,7 @@ def _gate_jscpd(result: PreflightResult) -> None:
             _SEV_FAIL,
             "jscpd found copy-paste duplication over the .jscpd.json threshold (parity with "
             "CI Mega-Linter). Reduce duplication or raise the threshold in .jscpd.json.",
+            detail=_fail_detail((cp.stdout or "") + "\n" + (cp.stderr or "")),
         )
     else:
         result.add("jscpd", _SEV_PASS, "Copy-paste check passed (no over-threshold duplication).")
@@ -293,6 +334,7 @@ def _gate_actionlint(result: PreflightResult) -> None:
             "actionlint",
             _SEV_FAIL,
             f"actionlint found workflow errors (parity with CI Lint job): {first}",
+            detail=_fail_detail(detail),
         )
     else:
         result.add("actionlint", _SEV_PASS, "Workflow YAML passed actionlint.")
@@ -362,6 +404,7 @@ def _gate_mypy(result: PreflightResult) -> None:
             "mypy",
             _SEV_FAIL,
             f"mypy found type errors in scripts/ (parity with CI Lint job): {summary}",
+            detail=_fail_detail(detail),
         )
     else:
         result.add("mypy", _SEV_PASS, "Type check passed (mypy scripts/ --ignore-missing-imports).")
@@ -451,6 +494,7 @@ def _gate_uv_sync_dev(result: PreflightResult) -> None:
             "`uv sync --extra dev` fails: the `dev` extra is not defined in pyproject.toml "
             "(#142 Defect-2). Add a `[project.optional-dependencies].dev` table (or run "
             "`standardize --fix`).",
+            detail=_fail_detail((proc.stdout or "") + "\n" + (proc.stderr or "")),
         )
     else:
         # Some OTHER resolve failure (network, lockfile drift, build) — not a
@@ -654,6 +698,7 @@ def _gate_megalinter_tool(
             gate,
             _SEV_FAIL,
             f"{tool_name} found errors (parity with CI Mega-Linter {linter_id}): {first}",
+            detail=_fail_detail(detail),
         )
     else:
         result.add(gate, _SEV_PASS, f"{tool_name} passed (Mega-Linter {linter_id} parity).")
@@ -1038,6 +1083,14 @@ def _print_report(result: PreflightResult) -> None:
         for f in result.fails:
             loc = f" [{f.file}]" if f.file else ""
             print(f"  ✗ {f.gate}{loc}: {f.message}")
+            # Issue #183 — echo the failing tool's OWN output. Only the FAIL set
+            # gets it: those are the findings the reader must act on, and this is
+            # the only place the diagnostics exist (the gate captured them, and
+            # for mypy the obvious local re-run resolves a different environment
+            # and reports success). PASS/WARNING stay one-line summaries.
+            if f.detail:
+                for ln in f.detail.splitlines():
+                    print(f"      {ln}")
     if result.warnings:
         print(f"\nWARNING ({n_warn}) — tool absent / advisory (does NOT block):")
         for f in result.warnings:
