@@ -7363,10 +7363,40 @@ def print_compact_summary(
     plugin_path: Path | str | None = None,
     *,
     security_gates: bool = False,
+    verdict_override: str | None = None,
 ) -> None:
-    """Print a concise summary: counts by severity + verdict."""
+    """Print a concise summary: counts by severity + verdict.
+
+    ``verdict_override`` replaces the derived VALID/INVALID word when the caller
+    has a verdict the finding counts alone cannot express. The one real case is
+    a scan whose COVERAGE was incomplete (a scanner class could not run): the
+    findings are clean, but "clean" is not what happened — nobody looked. Such a
+    run must never print VALID, so ``cpv_agent_security`` passes ``INCOMPLETE``.
+    Defaults to None, so every existing caller is byte-identical.
+    """
     counts = report.count_by_level()
     exit_code = report.exit_code
+
+    if verdict_override:
+        # Rendered in the WARNING colour: it is neither a pass nor a finding —
+        # it is an UNKNOWN, and it must not be mistaken for either.
+        verdict = f"{COLORS['WARNING']}{verdict_override}{COLORS['RESET']}"
+        verdict_line = (
+            f"{COLORS['WARNING']}Verdict: {verdict_override} — "
+            f"a scanner class did not run, so this is NOT a clean result{COLORS['RESET']}"
+        )
+        print(f"{COLORS['BOLD']}{title}{COLORS['RESET']}: {verdict}")
+        parts = [
+            f"{COLORS.get(level, '')}{level}:{counts.get(level, 0)}{COLORS['RESET']}"
+            for level in ("PASSED", "CRITICAL", "MAJOR", "MINOR", "NIT", "WARNING")
+        ]
+        print(f"  {' | '.join(parts)}")
+        print(f"  {verdict_line}")
+        if plugin_path:
+            print(f"  Plugin: {plugin_path}")
+        if report_path:
+            print(f"  Report: {report_path}")
+        return
 
     # Determine verdict — VALID/INVALID for the whole plugin or skill
     if exit_code == EXIT_OK:
@@ -7427,6 +7457,7 @@ def save_report_and_print_summary(
     *args: Any,
     plugin_path: Path | str | None = None,
     security_gates: bool = False,
+    verdict_override: str | None = None,
     **kwargs: Any,
 ) -> None:
     """Save full detailed report to file, print only compact summary to stdout.
@@ -7470,7 +7501,14 @@ def save_report_and_print_summary(
     os.replace(tmp_path, report_path)
 
     # Print compact summary to real stdout
-    print_compact_summary(report, title, report_path, plugin_path=plugin_path, security_gates=security_gates)
+    print_compact_summary(
+        report,
+        title,
+        report_path,
+        plugin_path=plugin_path,
+        security_gates=security_gates,
+        verdict_override=verdict_override,
+    )
 
 
 # =============================================================================

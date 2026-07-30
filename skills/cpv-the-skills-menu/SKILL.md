@@ -23,10 +23,11 @@ demand (TRDD-478d9687), for one plugin or a whole fleet.
 
 ## Two execution surfaces
 
-| Surface | When to use it | How |
-|---|---|---|
-| **Route in this session** | The user is already talking to you and wants the work done here. | Read the [Intent → Action table](#intent--action-table), invoke the mapped agent / skill / script directly. |
-| **Dispatch the `cpv-agent` agent** | The whole job should run autonomously in an isolated context (keeps your main context clean). | `Agent(subagent_type: "cpv-agent", prompt: "<the user's request, verbatim>")` — it routes, executes, and returns a report path. |
+**Route in this session** (the default): pick the row below and invoke the
+mapped agent / skill / script directly. **Or dispatch the whole job** with
+`Agent(subagent_type: "cpv-agent", prompt: "<request, verbatim>")` when it should
+run autonomously in an isolated context — that keeps your main context clean and
+returns a report path.
 
 ## Instructions
 
@@ -77,6 +78,7 @@ Every "Claude Code" cell runs inside a session with CPV installed. Every
 | 18 | **Just show me an interactive numbered menu** | `/cpv-main-menu` (human picks a number; zero-token Stop-hook render) | — |
 | 19 | **Hand the whole free-form request to one autonomous worker** | `Agent(subagent_type: "cpv-agent", prompt: "<request>")` | — |
 | 20 | **Migrate a compiled-component plugin to ship ONLY the binary** — create the separate PUBLIC source repo, extract the source, ship `bin/` only (the `RC-SHIP-BINARY-ONLY` remediation) | Dispatch `cpv-plugin-fixer-agent`, or `Skill(claude-plugins-validation:cpv-strip-dev-submodules)`; recipe: `cpv-fix-validation/references/ship-binary-only-fixes.md`. **Confirm with the user before creating a PUBLIC repo.** | — (needs write access + gh auth) |
+| 21 | **ONE agent + the skills it REACHES** — validate, security-scan, convert, or cost-compare variants | `agent --closure` · `agent-security` · `convert_agent.py --to <mode>` · `agent-eval` | same |
 
 ## Scripts à la carte (no install, no tokens)
 
@@ -111,6 +113,7 @@ per-skill inputs and return contracts are in
 | 5 | Routing / UX | `cpv-plugin-management`, `cpv-main-menu-skill`, `cpv-the-skills-menu-create` |
 | 6 | Batch / fleet (TRDD-3dcbb37c) | `cpv-batch-validate`, `cpv-batch-security-audit`, `cpv-batch-caching-audit`, `cpv-batch-caching-optimize`, `cpv-batch-fix`, `cpv-batch-validate-and-fix`, `cpv-batch-full-scan-and-fix` |
 | 7 | Scope-aware diagnostics (TRDD-a175f78d) | `cpv-batch-scope-diagnose`, `cpv-batch-scope-fix`, `cpv-batch-scope-diagnose-and-fix` |
+| _ | _ | `verification-before-completion` — Iron Law — no completion claim without fresh verification evidence. |
 
 ## Agents (specialist workers)
 

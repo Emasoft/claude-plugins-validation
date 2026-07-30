@@ -42,7 +42,10 @@ __all__ = [
     "SkillAuditScanResult",
     "scan_content",
     "scan_path",
+    "scan_files",
+    "filter_scannable_files",
     "run_skillaudit_scan",
+    "run_skillaudit_scan_files",
     "report_findings",
     "SAFE_DOMAINS",
     "SUSPICIOUS_DOMAINS",
@@ -4124,70 +4127,138 @@ def _iter_scannable_files(plugin_root: Path) -> Iterable[Path]:
         if plugin_root.is_file() and _file_is_scannable(plugin_root):
             yield plugin_root
         return
-    # Build the SHIPPED-set skip once (gitignore-evasion hardening). SECURITY:
-    # skip a path ONLY if it is gitignored AND untracked (= not in the published
-    # artifact). A tracked+gitignored file STILL SHIPS (`.gitignore` does not
-    # untrack an already-tracked file) and therefore MUST be scanned — the old
-    # pure-pattern skip matched it and wrongly dropped it, letting an author
-    # `git add` a payload then `.gitignore` it to evade the scanner.
-    # `gitignored_unshipped_paths` is git-accurate (one `git ls-files` call) and
-    # returns None when git is unavailable, in which case we skip nothing on
-    # gitignore grounds (the present tree IS the artifact — scan everything).
+    unshipped, path_is_unshipped = _unshipped_lookup(plugin_root)
+    for p in plugin_root.rglob("*"):
+        if not p.is_file():
+            continue
+        if _file_passes_scan_filters(p, plugin_root, unshipped, path_is_unshipped):
+            yield p
+
+
+def _unshipped_lookup(
+    plugin_root: Path,
+) -> tuple[set[str] | None, "Callable[[str, set[str]], bool] | None"]:
+    """Build the SHIPPED-set skip once, for one root.
+
+    SECURITY: skip a path ONLY if it is gitignored AND untracked (= not in the
+    published artifact). A tracked+gitignored file STILL SHIPS (`.gitignore`
+    does not untrack an already-tracked file) and therefore MUST be scanned —
+    the old pure-pattern skip matched it and wrongly dropped it, letting an
+    author `git add` a payload then `.gitignore` it to evade the scanner.
+    `gitignored_unshipped_paths` is git-accurate (one `git ls-files` call) and
+    returns None when git is unavailable, in which case we skip nothing on
+    gitignore grounds (the present tree IS the artifact — scan everything).
+
+    Extracted so BOTH the tree walker (`_iter_scannable_files`) and the
+    caller-supplied-list filter (`filter_scannable_files`) resolve it the same
+    way. Two copies of a suppression chain drift, and a drifted copy means the
+    file-set scan reports findings the tree scan correctly skips.
+    """
     try:
         from cpv_validation_common import (  # noqa: PLC0415
             gitignored_unshipped_paths,
             path_is_unshipped,
         )
-
-        unshipped: set[str] | None = gitignored_unshipped_paths(plugin_root)
     except ImportError:
-        unshipped = None
-        path_is_unshipped = None  # type: ignore[assignment]
-    for p in plugin_root.rglob("*"):
-        if not p.is_file():
-            continue
-        parts = p.parts
-        # Tier 1 — VCS/cache/package cruft: skip unconditionally.
-        if any(part in _ALWAYS_SKIP_DIRS for part in parts):
-            continue
-        # Tier 2 — conventionally-gitignored dev/output/private dirs: skip by
-        # NAME only when git cannot prove shipped-ness (no git → conservative,
-        # preserves the issue #42 reports/ self-match-noise fix on non-git trees).
-        # When git IS available, DON'T skip here — fall through to the
-        # shipped-surface check below, which skips iff the file is genuinely
-        # unshipped (gitignored AND untracked) and SCANS a tracked payload,
-        # closing the name-skip false negative (issue #176 follow-up).
-        if unshipped is None and any(part in _SKIP_IF_UNSHIPPED_DIRS for part in parts):
-            continue
-        # Point 1 (v2.114.0) — scan EVERY text file, not a 14-suffix
-        # allowlist. Text → always scanned; binary → scanned by the binary
-        # scanner when enabled, else skipped. Closes the arbitrary-extension
-        # evasion vector (payload parked in payload.info / a .txt recipe).
-        if not _file_is_scannable(p):
-            continue
-        # Issue #42 — hash-anchored skip for plugins that bundle byte-identical
-        # copies of CPV's scanner catalog / context classifiers (an offline
-        # auditor packaging). Spoofed basenames (different bytes) fall through.
-        if _is_self_artifact_copy(p):
-            continue
-        # Issue #37 + gitignore-evasion hardening — skip ONLY genuinely-unshipped
-        # paths (gitignored AND untracked). A tracked+gitignored file ships and is
-        # scanned here (and separately flagged INVALID by validate_plugin's
-        # gitignore-enforcement rule). Applied AFTER _SKIP_DIRS / extension filters
-        # because most files won't be unshipped and a cheap negative path is preferred.
-        if unshipped is not None and path_is_unshipped is not None:
-            try:
-                rel = p.relative_to(plugin_root).as_posix()
-            except ValueError:
-                rel = ""
-            if rel and path_is_unshipped(rel, unshipped):
-                continue
+        return None, None
+    return gitignored_unshipped_paths(plugin_root), path_is_unshipped
+
+
+def _file_passes_scan_filters(
+    p: Path,
+    plugin_root: Path,
+    unshipped: set[str] | None,
+    path_is_unshipped: "Callable[[str, set[str]], bool] | None",
+) -> bool:
+    """The FULL per-file suppression chain — the ONE definition.
+
+    ``_iter_scannable_files`` applies it while walking a tree;
+    ``filter_scannable_files`` applies it to a caller-supplied list. A
+    caller-supplied list bypasses the walker entirely, so routing it through
+    this same predicate is what keeps a file-set scan's verdict identical to
+    the tree scan's for the same file.
+    """
+    parts = p.parts
+    # Tier 1 — VCS/cache/package cruft: skip unconditionally.
+    if any(part in _ALWAYS_SKIP_DIRS for part in parts):
+        return False
+    # Tier 2 — conventionally-gitignored dev/output/private dirs: skip by
+    # NAME only when git cannot prove shipped-ness (no git → conservative,
+    # preserves the issue #42 reports/ self-match-noise fix on non-git trees).
+    # When git IS available, DON'T skip here — fall through to the
+    # shipped-surface check below, which skips iff the file is genuinely
+    # unshipped (gitignored AND untracked) and SCANS a tracked payload,
+    # closing the name-skip false negative (issue #176 follow-up).
+    if unshipped is None and any(part in _SKIP_IF_UNSHIPPED_DIRS for part in parts):
+        return False
+    # Point 1 (v2.114.0) — scan EVERY text file, not a 14-suffix
+    # allowlist. Text → always scanned; binary → scanned by the binary
+    # scanner when enabled, else skipped. Closes the arbitrary-extension
+    # evasion vector (payload parked in payload.info / a .txt recipe).
+    if not _file_is_scannable(p):
+        return False
+    # Issue #42 — hash-anchored skip for plugins that bundle byte-identical
+    # copies of CPV's scanner catalog / context classifiers (an offline
+    # auditor packaging). Spoofed basenames (different bytes) fall through.
+    if _is_self_artifact_copy(p):
+        return False
+    # Issue #37 + gitignore-evasion hardening — skip ONLY genuinely-unshipped
+    # paths (gitignored AND untracked). A tracked+gitignored file ships and is
+    # scanned here (and separately flagged INVALID by validate_plugin's
+    # gitignore-enforcement rule). Applied AFTER _SKIP_DIRS / extension filters
+    # because most files won't be unshipped and a cheap negative path is preferred.
+    if unshipped is not None and path_is_unshipped is not None:
         try:
-            if p.stat().st_size > 2_000_000:
+            rel = p.relative_to(plugin_root).as_posix()
+        except ValueError:
+            rel = ""
+        if rel and path_is_unshipped(rel, unshipped):
+            return False
+    try:
+        if p.stat().st_size > 2_000_000:
+            return False
+    except OSError:
+        return False
+    return True
+
+
+def filter_scannable_files(plugin_root: Path, files: "Iterable[Path]") -> list[Path]:
+    """Reduce a caller-supplied file list to the ones the tree scan would scan.
+
+    ``_iter_scannable_files`` is what applies the suppression chain (always-skip
+    dirs, the self-artifact hash skip, the size cap, and the
+    gitignored-AND-untracked shipped-surface check). A caller that hands
+    ``scan_files`` its own list bypasses that walker, so the list is filtered
+    HERE through the same predicate — otherwise a file-set scan would report
+    findings the plugin scan correctly skips, which is a false positive
+    introduced purely by the entry point taken.
+
+    Every path is interpreted RELATIVE TO ``plugin_root``: the shipped-surface
+    check is root-relative, so a caller with files under several roots must
+    group them by root and call once per root. A path that is not under
+    ``plugin_root`` gets ``rel == ""`` and therefore skips only the
+    gitignore-based tier — grouping is the caller's job, not a silent
+    best-effort here.
+
+    De-duplicated by RESOLVED path and returned in sorted order, so the scan
+    order is stable and a symlinked duplicate is never scanned twice.
+    """
+    unshipped, path_is_unshipped = _unshipped_lookup(plugin_root)
+    kept: dict[Path, Path] = {}
+    for p in files:
+        try:
+            if not p.is_file():
                 continue
         except OSError:
             continue
-        yield p
+        if not _file_passes_scan_filters(p, plugin_root, unshipped, path_is_unshipped):
+            continue
+        try:
+            key = p.resolve()
+        except (OSError, RuntimeError, ValueError):
+            key = p
+        kept.setdefault(key, p)
+    return [kept[k] for k in sorted(kept)]
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -4523,6 +4594,34 @@ def scan_path(plugin_root: Path) -> tuple[list[dict[str, Any]], int]:
     return _scan_path_parallel(plugin_root, files)
 
 
+def scan_files(plugin_root: Path, files: "Iterable[Path]") -> tuple[list[dict[str, Any]], int]:
+    """``scan_path`` over a CALLER-SUPPLIED file list. Same (findings, count).
+
+    The single-agent security scan (``cpv_agent_security``) needs the skillaudit
+    engine over exactly one agent file plus its reachable skill closure — a set
+    that is neither a whole tree nor a single file. This is a public WRAPPER, not
+    a second engine: it routes through the SAME
+    ``_scan_path_serial`` / ``_scan_path_parallel`` split as :func:`scan_path`,
+    so a finding's shape, severity, cache key and sentinel semantics are
+    identical whichever entry point produced it. There is exactly one per-file
+    scan body (``_scan_one_file_skillaudit``) and it is unchanged.
+
+    ``files`` is filtered through :func:`filter_scannable_files` FIRST, so the
+    suppression chain the tree walker applies is applied here too. Paths must all
+    be under ``plugin_root`` for the root-relative shipped-surface tier to mean
+    anything — a caller whose set spans several roots (e.g. a plugin skill plus a
+    user-scope ``~/.claude/skills`` skill) groups by root and calls once per root.
+    """
+    scannable = filter_scannable_files(plugin_root, files)
+    if not scannable:
+        return [], 0
+
+    if not _parallel_enabled() or len(scannable) < _parallel_threshold():
+        return _scan_path_serial(plugin_root, scannable)
+
+    return _scan_path_parallel(plugin_root, scannable)
+
+
 def _scan_path_serial(plugin_root: Path, files: list[Path]) -> tuple[list[dict[str, Any]], int]:
     """Serial scan loop — routes through `_scan_one_file_skillaudit`.
 
@@ -4675,16 +4774,62 @@ def run_skillaudit_scan(plugin_path: Path) -> SkillAuditScanResult:
     on a specific file, the rest of the tree still gets scanned (we
     catch per-file OSError + UnicodeError internally).
     """
-    if not _get_rules():
-        return SkillAuditScanResult(
-            invoked=False,
-            findings=(),
-            skipped_reason=(
-                f"skillaudit rule catalog missing at {_RULES_PATH}; "
-                "this is a CPV install integrity issue, not a runtime opt-out"
-            ),
-        )
+    missing = _catalog_missing_result()
+    if missing is not None:
+        return missing
     raw_findings, files_scanned = scan_path(plugin_path)
+    return _normalise_scan_result(raw_findings, files_scanned)
+
+
+def run_skillaudit_scan_files(plugin_root: Path, files: "Iterable[Path]") -> SkillAuditScanResult:
+    """``run_skillaudit_scan`` over a CALLER-SUPPLIED file list.
+
+    The Check-27 entry point for a scan set that is neither a whole tree nor a
+    single file — one agent file plus its reachable skill closure
+    (``cpv_agent_security``). Shares the catalog-integrity guard and the
+    finding-normalisation with :func:`run_skillaudit_scan`, so a
+    ``SkillAuditScanResult`` means exactly the same thing whichever entry point
+    built it (and ``report_findings`` needs no second variant).
+
+    Like :func:`run_skillaudit_scan`, this NEVER raises and NEVER honours a skip
+    env var. ``plugin_root`` is the root the paths are reported relative to and
+    the root the shipped-surface suppression is resolved against — see
+    :func:`scan_files`.
+    """
+    missing = _catalog_missing_result()
+    if missing is not None:
+        return missing
+    raw_findings, files_scanned = scan_files(plugin_root, files)
+    return _normalise_scan_result(raw_findings, files_scanned)
+
+
+def _catalog_missing_result() -> SkillAuditScanResult | None:
+    """The ``invoked=False`` result when the rule catalog is absent, else None.
+
+    A missing catalog is a CPV PACKAGING defect, not a runtime opt-out, and
+    ``report_findings`` turns this state into a CRITICAL so the validation still
+    fails fast. Shared by both ``run_skillaudit_scan*`` entry points so neither
+    can silently lose the guard.
+    """
+    if _get_rules():
+        return None
+    return SkillAuditScanResult(
+        invoked=False,
+        findings=(),
+        skipped_reason=(
+            f"skillaudit rule catalog missing at {_RULES_PATH}; "
+            "this is a CPV install integrity issue, not a runtime opt-out"
+        ),
+    )
+
+
+def _normalise_scan_result(raw_findings: list[dict[str, Any]], files_scanned: int) -> SkillAuditScanResult:
+    """Raw scanner dicts → the normalised ``SkillAuditScanResult``.
+
+    The ONE place raw skillaudit severities are mapped to CPV severities. Kept
+    single-sourced because a second copy of a severity mapping drifts, and a
+    drifted copy under-reports — i.e. is a false negative.
+    """
     # Filter out suppressed findings (informational, not actionable).
     actionable: list[SkillAuditFinding] = []
     for f in raw_findings:

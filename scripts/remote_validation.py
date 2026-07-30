@@ -95,6 +95,17 @@ _ALIASES: dict[str, str] = {
     "agents": "validate_agent",
     "command": "validate_command",
     "security": "validate_security",
+    # Single-agent security scan — the agent .md PLUS every REACHABLE skill in
+    # its closure (SKILL.md + references/** + scripts/**). An agent's attack
+    # surface is not its own file: a reachable skill's body enters its context
+    # as instructions (spec `design/specs/agent-closure-and-variants.md` §4).
+    "agent-security": "cpv_agent_security",
+    "cpv_agent_security": "cpv_agent_security",
+    # Compare an agent against its ALL-IN-ONE / ONE-FOR-ALL / PLUGIN-OMNI variants.
+    # Tier 1 is a STATIC cost model (zero LLM calls); Tier 2 is opt-in and aggregates
+    # REAL captured runs — it never simulates a number (spec §6).
+    "agent-eval": "cpv_agent_eval",
+    "cpv_agent_eval": "cpv_agent_eval",
     "cache": "validate_cache",
     "cache-audit": "validate_cache",
     "settings-marketplace": "validate_settings_marketplace",
@@ -174,6 +185,8 @@ _COMMANDS: dict[str, str] = {
     "agent": "Agent definition validation",
     "command": "Command definition validation",
     "security": "Security vulnerability scan",
+    "agent-security": "Security-scan ONE agent plus its reachable skill closure",
+    "agent-eval": "Compare an agent against its ALL-IN-ONE / ONE-FOR-ALL / PLUGIN-OMNI variants",
     "cache": "Prompt-cache invalidation audit (CA-01..CA-07)",
     "settings-marketplace": "Validate marketplace JSON in settings.json",
     "telemetry": "OTEL telemetry supply-chain risk validation",

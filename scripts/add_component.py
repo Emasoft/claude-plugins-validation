@@ -103,7 +103,9 @@ user-invocable: true
 # ── Per-type writers ─────────────────────────────────────────────────────────
 
 
-def _register_in_the_skills_menu(plugin: Path, new_skill_name: str, description: str) -> bool:
+def _register_in_the_skills_menu(
+    plugin: Path, new_skill_name: str, description: str, *, catalog: Path | None = None
+) -> bool:
     """Append `new_skill_name` to the plugin's cpv-the-skills-menu catalog if it exists.
 
     Per TRDD-9dd64dbf: when a plugin has adopted cpv-the-skills-menu method
@@ -116,10 +118,17 @@ def _register_in_the_skills_menu(plugin: Path, new_skill_name: str, description:
     `## Plugin Skills`. The table-presence detection is forgiving — if
     no table is found, a fresh one is created.
 
+    ``catalog`` overrides the default path. A plugin's catalog is named
+    ``<prefix>the-skills-menu`` and only CPV's own copy carries the ``cpv-``
+    prefix, so a caller that already RESOLVED the target plugin's menu (e.g.
+    ``convert_agent.ensure_menu_skill``) passes it in rather than re-deriving a
+    hardcoded name — one row-insertion routine, two callers.
+
     Returns True if the catalog was modified, False if no catalog exists
     or the new skill is already listed.
     """
-    catalog = plugin / "skills" / "cpv-the-skills-menu" / "SKILL.md"
+    if catalog is None:
+        catalog = plugin / "skills" / "cpv-the-skills-menu" / "SKILL.md"
     if not catalog.is_file():
         return False
     # Never list the catalog itself or the migrator inside the catalog —

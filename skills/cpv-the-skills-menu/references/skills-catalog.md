@@ -62,8 +62,10 @@ universal-loader pattern makes every skill available to every agent.
 | `cpv-scaffold-agent` | name + plugin path | agents/<name>.md created | New agent |
 | `cpv-scaffold-command` | name + plugin path | commands/<name>.md created | New slash command |
 | `cpv-scaffold-skill` | name + plugin path | skills/<name>/SKILL.md created | New skill |
-| `cpv-create-mono-agent` | plugin path | agents/<slug>-mono-agent.md (all non-meta skills inlined) | EXPERIMENTAL prefill-everything mega-agent |
-| `cpv-create-micro-agents-workflow` | plugin path | launcher agent + workflows/<base>-micro-agents.ts | EXPERIMENTAL RLM skill-per-agent workflow |
+| `cpv-create-mono-agent` | plugin path, or ONE agent path | agents/<slug>-all-in-one.md (every non-meta skill PRELOADED BY NAME — never inlined) | ALL-IN-ONE agent: whole skill set in context from turn 1 |
+| `cpv-create-micro-agents-workflow` | plugin path, or ONE agent path | agents/<source>-one-for-all.md + `context: fork` on each node, or launcher agent + workflows/<base>-micro-agents.ts | ONE-FOR-ALL agent: one subagent per skill |
+| `cpv-evaluate-agent-variants` | original agent path + any variant paths | Two-tier comparison table + `--json` under reports/cpv-agent-eval/ (Tier 1 static always, Tier 2 live opt-in) | Deciding whether a conversion HELPED: prefix/closure cost now, real tokens + pass rate when runs were captured |
+| `verification-before-completion` | none (a discipline, not a tool) | The Iron Law: no completion claim without FRESH verification evidence | Before claiming done / fixed / passing, or committing. `convert_agent.py` attaches it to every variant it generates |
 
 ## Publish / release skills
 
@@ -149,6 +151,8 @@ Skill({skill: "claude-plugins-validation:cpv-scaffold-command"})
 Skill({skill: "claude-plugins-validation:cpv-scaffold-skill"})
 Skill({skill: "claude-plugins-validation:cpv-create-mono-agent"})
 Skill({skill: "claude-plugins-validation:cpv-create-micro-agents-workflow"})
+Skill({skill: "claude-plugins-validation:cpv-evaluate-agent-variants"})
+Skill({skill: "claude-plugins-validation:verification-before-completion"})
 Skill({skill: "claude-plugins-validation:cpv-strip-dev-submodules"})
 Skill({skill: "claude-plugins-validation:cpv-refresh-readme"})
 Skill({skill: "claude-plugins-validation:cpv-bump-version"})

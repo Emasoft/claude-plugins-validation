@@ -803,20 +803,17 @@ def _iter_subdir_files(skill_dir: Path) -> Iterable[Path]:
             continue
 
 
-def closure_files(closure: AgentClosure) -> list[Path]:
-    """Every file a REACHABLE skill of ``closure`` ships: its ``SKILL.md`` plus
-    its ``references/**`` and ``scripts/**``.
+def _files_for_refs(refs: Iterable[SkillRef]) -> set[Path]:
+    """The shipped file set of every RESOLVED skill in ``refs``.
 
-    Unreachable references are excluded — they cannot execute, so they are not
-    part of this set. Callers that must still ACCOUNT for them (the security
-    scanner reports them in a separate ``unreachable`` section, because "cannot
-    reach" is not "clean") read ``closure.refs`` directly.
-
-    Sorted and de-duplicated, so the result is a stable scan order.
+    One definition shared by :func:`closure_files` and
+    :func:`unreachable_closure_files`, which differ ONLY in which refs they
+    select. A second walker would drift and the two sets would stop partitioning
+    the closure cleanly.
     """
     files: set[Path] = set()
-    for ref in closure.refs:
-        if not ref.reachable or ref.resolved_path is None:
+    for ref in refs:
+        if ref.resolved_path is None:
             continue
         skill_md = Path(ref.resolved_path)
         try:
@@ -826,4 +823,40 @@ def closure_files(closure: AgentClosure) -> list[Path]:
             continue
         files.add(skill_md)
         files.update(_iter_subdir_files(skill_md.parent))
-    return sorted(files)
+    return files
+
+
+def closure_files(closure: AgentClosure) -> list[Path]:
+    """Every file a REACHABLE skill of ``closure`` ships: its ``SKILL.md`` plus
+    its ``references/**`` and ``scripts/**``.
+
+    Unreachable references are excluded — they cannot execute, so they are not
+    part of this set. Callers that must still ACCOUNT for them (the security
+    scanner reports them in a separate ``unreachable`` section, because "cannot
+    reach" is not "clean") use :func:`unreachable_closure_files`.
+
+    Sorted and de-duplicated, so the result is a stable scan order.
+    """
+    return sorted(_files_for_refs(ref for ref in closure.refs if ref.reachable))
+
+
+def unreachable_closure_files(closure: AgentClosure) -> list[Path]:
+    """The files of every UNREACHABLE resolved skill, MINUS the reachable set.
+
+    The complement of :func:`closure_files` over the same closure. It exists
+    because "cannot reach" is not "clean": a skill whose only reference is a
+    runtime ``Skill()`` call while the ``Skill`` gate is shut cannot execute, so
+    its findings must not gate a publish — but silently dropping it would hide
+    real content that ships in the plugin and becomes live the moment the gate
+    opens. The security scanner reports these separately and non-blocking.
+
+    The reachable subtraction is load-bearing: one skill can be BOTH preloaded
+    (always reachable) and invoked at runtime (unreachable when the gate is
+    shut). Without it, that skill's files would appear in both sets — reported
+    twice, and gating from the reachable set while pretending not to.
+
+    Sorted and de-duplicated, like :func:`closure_files`.
+    """
+    reachable = _files_for_refs(ref for ref in closure.refs if ref.reachable)
+    unreachable = _files_for_refs(ref for ref in closure.refs if not ref.reachable)
+    return sorted(unreachable - reachable)

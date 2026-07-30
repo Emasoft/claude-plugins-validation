@@ -15,6 +15,8 @@
     {"key": "8",  "action_id": "pack_components",  "label": "Pack components into a plugin (multi-select)"},
     {"key": "9",  "action_id": "add_deps",         "label": "Add dependencies (existing plugin) — --add NAME[@MKT[@VER]] OR --from PATH-OR-URL"},
     {"key": "10", "action_id": "impl_skills_menu", "label": "Implement cpv-the-skills-menu method (existing) — Decouple skills from agents"},
+    {"key": "11", "action_id": "convert_agent",    "label": "Convert an agent — ALL-IN-ONE / ONE-FOR-ALL (micro-agent nodes) / PLUGIN-OMNI (skills-menu)"},
+    {"key": "12", "action_id": "eval_agent",       "label": "Compare an agent with its variants — static cost model; opt-in live A/B/C"},
     {"key": "A",  "action_id": "ask",              "label": "Ask the agent"},
     {"key": "B",  "action_id": "back",             "label": "Back — Go back to the top-level menu"},
     {"key": "0",  "action_id": "cancel",           "label": "Cancel / Exit"}

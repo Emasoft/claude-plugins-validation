@@ -181,7 +181,24 @@ class TestAllExternalScannersWired:
             assert "_external_finding_is_gitignored" in src, f"{fn.__name__} missing gitignore skip"
 
     def test_cisco_skip_calls_gitignore_predicate(self) -> None:
-        """Cisco's _cisco_should_skip is a closure inside validate_security; assert
-        the predicate is referenced (with its dedicated cisco_gi filter)."""
-        src = inspect.getsource(vs.validate_security)
+        """Cisco's suppression predicate must wire the gitignore skip.
+
+        It lives in the ``make_cisco_should_skip`` FACTORY (module level) rather
+        than an inline closure inside ``validate_security``, so the single-agent
+        scan can reuse the identical chain over an agent's closure. The invariant
+        this guards is unchanged — only its address moved.
+        """
+        src = inspect.getsource(vs.make_cisco_should_skip)
         assert "_external_finding_is_gitignored(file_path, cisco_gi)" in src
+
+    def test_snyk_skip_calls_gitignore_predicate(self) -> None:
+        """Same guard for the Snyk predicate, which moved out for the same reason."""
+        src = inspect.getsource(vs.make_snyk_should_skip)
+        assert "_external_finding_is_gitignored(file_path, snyk_gi)" in src
+
+    def test_the_agent_scan_reuses_those_predicates(self) -> None:
+        """A single-agent scan must not carry its OWN copy of a filter chain: it
+        runs the same extracted entry points, which build these predicates."""
+        for fn in (vs.check_cisco_scanner, vs.check_snyk_agent_scan):
+            src = inspect.getsource(fn)
+            assert "should_skip=make_" in src, f"{fn.__name__} does not use the shared predicate factory"
