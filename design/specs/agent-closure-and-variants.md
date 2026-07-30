@@ -54,27 +54,54 @@ These names are the project's vocabulary. Use them verbatim in code, findings,
 skills, menus and docs. All three pair their skill strategy with the **`Skill`
 tool**, so all three require the gate in §1 to be OPEN.
 
-| architecture | `skills:` frontmatter | body carries | node granularity |
+### THE INLINING PROHIBITION — read this before anything else
+
+**A skill's content is NEVER copied into an agent.** Not concatenated into a body,
+not duplicated into a variant, not embedded anywhere. An agent REFERENCES skills by
+name in its `skills:` frontmatter and nowhere else.
+
+The reason is single-source-of-truth, and it outranks any token argument: a skill
+has to stay INDEPENDENT so it can be shared by many agents and edited, fixed, or
+updated ONCE. An inlined copy is a second source that silently rots the moment the
+original changes, and with N agents inlining it there are N stale copies and no
+signal that any of them drifted.
+
+This makes the three architectures far more alike than different:
+
+| architecture | `skills:` frontmatter lists | body carries | skills execute in |
 |---|---|---|---|
-| **ALL-IN-ONE AGENT** | EVERY skill it needs | instructions for how to use each skill, at the right time and in the right choice branch | the agent itself does the work |
-| **ONE-FOR-ALL AGENT** | the micro-agents it dispatches | ONLY the graph / choice tree / skeleton of the procedure | each node is a **micro-agent** (= **one-skill-agent**: a skill whose frontmatter carries `agent:`, with minimal context) doing one small step |
+| **ALL-IN-ONE AGENT** | EVERY skill it needs | how to use each skill, at the right time and in the right choice branch | **the same agent** |
+| **ONE-FOR-ALL AGENT** | EVERY skill it needs | the same routing / choice tree / skeleton | **a separate subagent per skill** (a **micro-agent** = **one-skill-agent**, minimal context) |
 | **PLUGIN-OMNI-AGENT** | exactly ONE skill — the plugin's `the-skills-menu` (every skill's name + description + when to use it) | routing through that menu | resolved at runtime from the menu |
 
-Three facts that constrain any implementation, each verified rather than assumed:
+**ALL-IN-ONE and ONE-FOR-ALL are otherwise essentially the same construction.**
+The ONLY difference is WHERE a skill runs: in-agent, or dispatched to a separate
+subagent. Nothing else about the agent's shape changes. Any implementation that
+makes them differ in more than that has misread this section.
 
-1. **ALL-IN-ONE is a FRONTMATTER strategy, not body inlining.** `skills:`
-   frontmatter injects each named skill's FULL content into every invocation's
-   cached prefix, so listing the skills *is* the preload. Concatenating skill
-   bodies into the agent body is a DIFFERENT, older construction and is NOT what
-   ALL-IN-ONE means. The body's job is the routing instructions.
+All three pair their list with the **`Skill` tool** — that is how the skills (or
+the micro-agents) get launched — so all three need the §1 gate OPEN.
+
+Four facts that constrain any implementation, each verified rather than assumed:
+
+1. **`skills:` frontmatter is the preload mechanism.** It injects each named
+   skill's FULL content into every invocation's cached prefix, so listing the
+   skills IS the preload. This is why inlining buys nothing: the content is
+   already there, and the copy only adds a maintenance liability.
 2. **`agent:` IS a valid skill frontmatter field** (verified against
    `cpv_validation_common.SKILL_FRONTMATTER_FIELDS`), so a one-skill-agent is a
-   spec-valid primitive — a skill that runs in its own subagent with minimal
-   context.
-3. **`skills:` is NOT a valid skill frontmatter field** — it is agent-only
-   (same source). So a micro-agent node CANNOT declare its own skill list, and
-   the choice tree therefore has to live in the ONE-FOR-ALL agent's body. Any
-   design that nests `skills:` inside a skill is invalid.
+   spec-valid primitive — a skill that runs in its own subagent, minimal context.
+   This is the ONE-FOR-ALL mechanism, and it is an IN-PLACE frontmatter addition
+   to the existing shared skill, never a copy of it.
+3. **`skills:` is NOT a valid skill frontmatter field** — it is agent-only (same
+   source). So a micro-agent node CANNOT declare its own skill list, and the
+   choice tree therefore has to live in the ONE-FOR-ALL agent's body. Any design
+   nesting `skills:` inside a skill is invalid.
+4. **Adding `agent:` to a SHARED skill changes how it executes for EVERY agent
+   that lists it.** That follows directly from fact 1 plus the no-copy rule, and
+   it is the one genuine cost of the ONE-FOR-ALL conversion. The generator must
+   report which shared skills it is about to convert and how many other agents
+   list them, rather than mutating them silently.
 
 ### 1.2 MANDATORY companion skill on every generated variant
 
@@ -236,19 +263,30 @@ without `--force`; every emitted agent must pass `validate_agent` with zero
 blocking findings — including the new AC1–AC4, which is the real acceptance test,
 since a generator emitting an unresolvable preload has produced a broken agent.
 
+**THE INLINING PROHIBITION APPLIES TO ALL THREE.** No mode may copy, concatenate,
+or embed a skill's content anywhere. Every mode emits an agent that REFERENCES
+skills by name. A generator that produces a self-contained blob has violated the
+single-source-of-truth rule §1.1 exists to protect.
+
 - **`--to all-in-one`** → `<name>-all-in-one.md`. `skills:` = every REACHABLE
-  skill of the closure (+ the companion). The BODY is the routing layer: for each
-  skill, when to reach for it and which branch of the procedure it belongs to.
-  Derive the branches from the source agent's own structure; where the source
-  gives no ordering, emit a flat "choose by intent" table rather than inventing a
-  sequence. Skill bodies are NOT concatenated into the agent body — the
-  frontmatter list IS the preload (§1.1 fact 1).
-- **`--to one-for-all`** → `<name>-one-for-all.md` plus one micro-agent skill per
-  closure node at `skills/<node>/SKILL.md` carrying `agent:` in frontmatter (a
-  one-skill-agent, minimal context). The agent BODY carries ONLY the graph /
-  choice tree / skeleton — never the step contents, which live in the nodes.
-  Because `skills:` is invalid inside a skill (§1.1 fact 3), a node must not
-  declare its own skill list; the graph belongs to the agent.
+  skill of the closure (+ the companion), BY NAME. The BODY is the routing layer:
+  for each skill, when to reach for it and which branch of the procedure it
+  belongs to. Derive the branches from the source agent's own structure; where the
+  source gives no ordering, emit a flat "choose by intent" table rather than
+  inventing a sequence. Skills execute IN THIS AGENT.
+- **`--to one-for-all`** → `<name>-one-for-all.md`. **Identical to `all-in-one`
+  in every respect except one:** each listed skill is made a one-skill-agent so it
+  executes in a SEPARATE SUBAGENT with minimal context. Mechanically that is an
+  IN-PLACE `agent:` frontmatter addition to the existing shared skill (§1.1 fact
+  2) — never a copy, never a rewritten body. Emit ONE minimal node agent for the
+  nodes to point at rather than one per skill, so the "minimal context" property
+  has a single definition. The agent BODY is the same routing / choice tree as
+  `all-in-one`; per §1.1 fact 3 a node cannot carry its own skill list, so the
+  graph belongs to the agent.
+  Because of §1.1 fact 4, this mode MUST first report every shared skill it would
+  convert and how many other agents list it, and MUST NOT mutate a shared skill
+  without `--force` — converting a skill changes its execution for every agent
+  that lists it, and that consequence has to be visible before it happens.
 - **`--to plugin-omni`** → `<name>-plugin-omni.md`. `skills:` = exactly the
   plugin's `the-skills-menu` skill + the companion. The body routes through the
   menu. If the target plugin has no `the-skills-menu`, generate it from the real
@@ -256,6 +294,13 @@ since a generator emitting an unresolvable preload has produced a broken agent.
   while looking correct.
 
 All three read the closure through §2; none may re-derive the skill set.
+
+**Supersession — `create_mono_agent.py` must change, not merely gain a flag.**
+It currently CONCATENATES every non-meta skill body into one agent, which is
+exactly the construction the inlining prohibition forbids. Convert it to the
+frontmatter model. This is a deliberate breaking change to published behaviour
+(so, a MAJOR bump), and there is to be ONE version of the mechanism — no
+inlining path kept behind a flag for compatibility.
 
 Then extend the existing skills to cover the agent-scoped path, delegating here:
 `cpv-create-mono-agent` → ALL-IN-ONE, `cpv-create-micro-agents-workflow` →
