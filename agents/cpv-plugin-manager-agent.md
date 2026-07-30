@@ -24,7 +24,9 @@ health-check / manage-marketplaces) with explicit args and proceeds
 directly to the requested action.
 
 All scripts, flags, scope rules, and workflows are documented in the
-**cpv-plugin-management** skill. Read it before taking any action.
+**cpv-plugin-management** skill. Read it before taking any action. If the
+requested action turns out to be validation or fixing rather than management,
+check cpv-the-skills-menu to hand it to the skill that actually owns it.
 
 ## Guidelines
 
