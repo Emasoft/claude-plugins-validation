@@ -575,7 +575,10 @@ def test_force_template_no_longer_skips_yaml_it_merges_instead(tmp_path: Path) -
     cfg.write_text("APPLY_FIXES: none\nGITHUB_COMMENT_REPORTER: false\n", encoding="utf-8")
     canon = "APPLY_FIXES: none\nENABLE_LINTERS:\n  - PYTHON_RUFF\n"
 
-    assert _force_template_skip_reason(cfg, ".mega-linter.yml", canon, set()) is None
+    assert (
+        _force_template_skip_reason(cfg, ".mega-linter.yml", canon, set(), root, "standard")
+        is None
+    )
 
 
 def test_force_overwrite_proceeds_for_a_yaml_with_no_custom_keys(tmp_path: Path) -> None:
@@ -585,7 +588,10 @@ def test_force_overwrite_proceeds_for_a_yaml_with_no_custom_keys(tmp_path: Path)
     cfg.write_text("APPLY_FIXES: all\n", encoding="utf-8")
     canon = "APPLY_FIXES: none\nENABLE_LINTERS:\n  - PYTHON_RUFF\n"
 
-    assert _force_template_skip_reason(cfg, ".mega-linter.yml", canon, set()) is None
+    assert (
+        _force_template_skip_reason(cfg, ".mega-linter.yml", canon, set(), root, "standard")
+        is None
+    )
 
 
 if __name__ == "__main__":

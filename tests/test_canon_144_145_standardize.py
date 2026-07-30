@@ -165,7 +165,7 @@ def test_skip_helper_ahead_returns_skip_line(tmp_path):
     f = tmp_path / RELEASE_REL
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(plugin, encoding="utf-8")
-    line = _force_template_skip_reason(f, RELEASE_REL, canon, set())
+    line = _force_template_skip_reason(f, RELEASE_REL, canon, set(), tmp_path, "standard")
     assert line is not None, "an ahead-of-canon file must be skipped"
     assert "at/AHEAD of canon (would downgrade)" in line
     assert _PIPELINE_DRIFT_RC in line
@@ -181,7 +181,7 @@ def test_skip_helper_mixed_returns_skip_line(tmp_path):
     f = tmp_path / RELEASE_REL
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(plugin, encoding="utf-8")
-    line = _force_template_skip_reason(f, RELEASE_REL, canon, set())
+    line = _force_template_skip_reason(f, RELEASE_REL, canon, set(), tmp_path, "standard")
     assert line is not None, "a mixed-hardening file must be skipped (never downgrade)"
     assert "at/AHEAD of canon (would downgrade)" in line
 
@@ -193,7 +193,7 @@ def test_skip_helper_behind_returns_none(tmp_path):
     f = tmp_path / RELEASE_REL
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(plugin, encoding="utf-8")
-    assert _force_template_skip_reason(f, RELEASE_REL, canon, set()) is None
+    assert _force_template_skip_reason(f, RELEASE_REL, canon, set(), tmp_path, "standard") is None
 
 
 def test_skip_helper_plain_returns_none(tmp_path):
@@ -203,7 +203,7 @@ def test_skip_helper_plain_returns_none(tmp_path):
     f = tmp_path / RELEASE_REL
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(plugin, encoding="utf-8")
-    assert _force_template_skip_reason(f, RELEASE_REL, canon, set()) is None
+    assert _force_template_skip_reason(f, RELEASE_REL, canon, set(), tmp_path, "standard") is None
 
 
 def test_skip_helper_identical_returns_none(tmp_path):
@@ -212,13 +212,16 @@ def test_skip_helper_identical_returns_none(tmp_path):
     f = tmp_path / RELEASE_REL
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(canon, encoding="utf-8")
-    assert _force_template_skip_reason(f, RELEASE_REL, canon, set()) is None
+    assert _force_template_skip_reason(f, RELEASE_REL, canon, set(), tmp_path, "standard") is None
 
 
 def test_skip_helper_absent_file_returns_none(tmp_path):
     """An absent plugin file is never skipped (a new file must be written)."""
     f = tmp_path / RELEASE_REL  # not created
-    assert _force_template_skip_reason(f, RELEASE_REL, "name: x\n", set()) is None
+    assert (
+        _force_template_skip_reason(f, RELEASE_REL, "name: x\n", set(), tmp_path, "standard")
+        is None
+    )
 
 
 def test_skip_helper_divergence_skips_even_when_behind(tmp_path):
@@ -228,7 +231,7 @@ def test_skip_helper_divergence_skips_even_when_behind(tmp_path):
     f = tmp_path / RELEASE_REL
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(plugin, encoding="utf-8")
-    line = _force_template_skip_reason(f, RELEASE_REL, canon, {RELEASE_REL})
+    line = _force_template_skip_reason(f, RELEASE_REL, canon, {RELEASE_REL}, tmp_path, "standard")
     assert line is not None, "a marked-divergent file must be skipped even when behind canon"
     assert "marked intentional_divergence" in line
     assert RELEASE_REL in line
