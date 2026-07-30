@@ -4,6 +4,25 @@
 here VERBATIM. Do not rename a field, reorder a positional parameter, or change a
 return type — three other workstreams import this surface concurrently.
 
+## 0.0 Provenance — where the normative facts come from
+
+Every mechanism claim in this spec is taken from the official docs, fetched as RAW
+markdown and diffed against CPV's own constants. A WebFetch *summary* of these
+pages has false-negatived twice on this project, so summaries are not acceptable
+evidence here.
+
+| doc | what it settles |
+|---|---|
+| `code.claude.com/docs/en/skills.md` | the skill frontmatter table — `context`, `agent`, `background`, `disable-model-invocation`; "Run skills in a subagent" |
+| `code.claude.com/docs/en/sub-agents.md` | "Preload skills into subagents" — the `skills:` field's exact semantics, the `Skill`/`disallowedTools` gate, the no-preload rule, the silent skip |
+| `agentskills.io/skill-creation/evaluating-skills.md` | the eval schema T4 adopts: `evals/evals.json`, `timing.json`, `benchmark.json`, the delta framing |
+| `code.claude.com/docs/en/debug-your-config.md` | the confirmation surfaces (`/skills`, `/context`, `--safe-mode`) the AC findings must name |
+| `code.claude.com/docs/en/plugins-reference.md` | plugin skills layout (`skills/<name>/SKILL.md`) |
+
+Two claims an earlier draft got WRONG, both corrected above and recorded here so
+they are not reintroduced: `agent:` alone does NOT fork a subagent (`context: fork`
+does), and the gate must consult `disallowedTools`, not only `tools`.
+
 ## 0. Why this exists (the verified gap)
 
 Probed first-hand against v3.24.0 on a purpose-built fixture:
@@ -36,12 +55,24 @@ agent" is NOT simply the `skills:` list. It is:
 | `runtime` | a `Skill(...)` / `/name` invocation in the agent body | ONLY if the agent can use the `Skill` tool |
 | `transitive` | a skill invoked from a reachable skill's body | its parent is reachable AND the `Skill` gate is open |
 
-**The `Skill`-tool gate** (`agent_can_load_skills_at_runtime`):
+**The `Skill`-tool gate** (`agent_can_load_skills_at_runtime`), doc-backed by
+`sub-agents.md` → "Preload skills into subagents": *"To prevent a subagent from
+invoking skills entirely, omit `Skill` from the `tools` list **or add it to
+`disallowedTools`**."*
 
-- no `tools:` field  → **True** (the agent inherits every session tool)
-- `tools:` contains `Skill` (normalized) → **True**
-- `tools:` present without `Skill` → **False** — every runtime invocation in that
-  body is DEAD, and a `skills:` preload is the agent's only skill access
+- `Skill` in `disallowedTools` → **False**, regardless of `tools` (deny is applied
+  first, so it wins)
+- else no `tools:` field → **True** (the agent inherits every session tool)
+- else `Skill` present in `tools` → **True** (a specifier-carrying `Skill(...)`
+  still grants the tool — test the NAME part, not an exact bare token)
+- else → **False** — every runtime invocation in that body is DEAD, and a
+  `skills:` preload is the agent's only skill access
+
+The same doc confirms the whole model: *"This field controls which skills are
+preloaded, **not which skills the subagent can access**: without it, the subagent
+can still discover and invoke project, user, and plugin skills through the Skill
+tool during execution."* So `skills:` is a preload hint and the gate is the ACL —
+which is exactly §1.
 
 `ambient` is the full set of skill names present in the search roots. When the
 gate is open they are all *potentially* loadable, so the set is REPORTED but its
@@ -88,20 +119,44 @@ Four facts that constrain any implementation, each verified rather than assumed:
    skill's FULL content into every invocation's cached prefix, so listing the
    skills IS the preload. This is why inlining buys nothing: the content is
    already there, and the copy only adds a maintenance liability.
-2. **`agent:` IS a valid skill frontmatter field** (verified against
-   `cpv_validation_common.SKILL_FRONTMATTER_FIELDS`), so a one-skill-agent is a
-   spec-valid primitive — a skill that runs in its own subagent, minimal context.
-   This is the ONE-FOR-ALL mechanism, and it is an IN-PLACE frontmatter addition
-   to the existing shared skill, never a copy of it.
-3. **`skills:` is NOT a valid skill frontmatter field** — it is agent-only (same
-   source). So a micro-agent node CANNOT declare its own skill list, and the
-   choice tree therefore has to live in the ONE-FOR-ALL agent's body. Any design
-   nesting `skills:` inside a skill is invalid.
-4. **Adding `agent:` to a SHARED skill changes how it executes for EVERY agent
-   that lists it.** That follows directly from fact 1 plus the no-copy rule, and
-   it is the one genuine cost of the ONE-FOR-ALL conversion. The generator must
+2. **`context: fork` is the subagent-execution mechanism — NOT `agent:`.** The
+   docs are explicit: `context` — *"Set to `fork` to run in a forked subagent
+   context"*; `agent` — *"Which subagent type to use **when `context: fork` is
+   set**"* (default `general-purpose`; built-ins `Explore` / `Plan` also skip
+   CLAUDE.md, which is how "minimal context" is actually achieved). **A skill
+   carrying `agent:` alone does nothing.** An earlier draft of this spec said
+   otherwise; it was wrong. ONE-FOR-ALL therefore adds `context: fork` (plus
+   optionally `agent:`) IN PLACE to the existing shared skill, never a copy.
+3. **`background` defaults to `true`, so a forked skill returns NOTHING inline** —
+   its result arrives as a notification. A pipeline that threads one node's output
+   into the next step needs **`background: false`**, which requires Claude Code
+   **v2.1.218+**. Getting this wrong yields a graph whose steps appear to run and
+   silently deliver nothing to the next step.
+4. **`skills:` is NOT a valid skill frontmatter field** — it is agent-only
+   (verified against `cpv_validation_common.SKILL_FRONTMATTER_FIELDS`). So a
+   micro-agent node CANNOT declare its own skill list, and the choice tree
+   therefore has to live in the ONE-FOR-ALL agent's body. Any design nesting
+   `skills:` inside a skill is invalid.
+5. **A skill with `disable-model-invocation: true` CANNOT BE PRELOADED AT ALL** —
+   *"You can't preload skills that set `disable-model-invocation: true`, since
+   preloading draws from the same set of skills Claude can invoke"*, and that
+   *"includes the bundled `/verify` and `/code-review` skills"*. Listing such a
+   skill in `skills:` is a preload that silently does nothing → finding **AC5**.
+6. **Adding `context: fork` to a SHARED skill changes how it executes for EVERY
+   agent that lists it.** That follows from fact 1 plus the no-copy rule, and it
+   is the one genuine cost of the ONE-FOR-ALL conversion. The generator must
    report which shared skills it is about to convert and how many other agents
    list them, rather than mutating them silently.
+7. **A missing or disabled preload fails SILENTLY** — *"If a listed skill is
+   missing or disabled, Claude Code skips it and logs a warning to the debug
+   log."* Nothing surfaces at dispatch time, which is precisely why AC1 has to
+   exist: the debug log is not somewhere anyone looks.
+
+The docs also frame the two architectures as two directions of ONE system, which
+is why they are so alike: *"With `skills` in a subagent, the subagent controls the
+system prompt and loads skill content. With `context: fork` in a skill, the skill
+content is injected into the agent you specify. Both use the same underlying
+system."*
 
 ### 1.2 MANDATORY companion skill on every generated variant
 
@@ -206,6 +261,23 @@ and "this skill does not exist" would be a fabricated finding. So:
 | **AC2** | a body `Skill()` invocation names a skill that does not resolve | MAJOR w/ guard, else WARNING |
 | **AC3** | body invokes `Skill()` AND `tools:` denies `Skill` AND the named skill RESOLVES | MAJOR (resolution proves a real invocation, not prose) |
 | **AC4** | a `skills:` preload the body never MENTIONS, while the gate is open | WARNING (a preload injects FULL content every invocation) |
+| **AC5** | a `skills:` preload names a RESOLVED skill carrying `disable-model-invocation: true`, or the bundled `verify` / `code-review` skill | **MAJOR — no guard needed** |
+
+**AC5 is the one MAJOR that needs no non-vacuity guard**, because resolution
+itself is the proof: we read that skill's own frontmatter and saw the field, so
+there is no "maybe the roots are wrong" case to fail safe against. Per §1.1 fact 5
+such a skill can never be preloaded, so the entry is inert — and per fact 7 the
+failure is silent, appearing only in the debug log.
+
+**Every AC finding must tell the author how to CONFIRM it in a live session**, so
+the finding is actionable rather than a claim they have to take on trust. The
+documented surfaces (`debug-your-config.md`) are: **`/skills`** — lists skills from
+project, user and plugin sources, and shows a **"user-only" badge** for exactly the
+`disable-model-invocation: true` case AC5 reports; and **`/context`** — shows what
+actually occupies the window, including which skills loaded. Name the relevant one
+in the finding text. `debug-your-config.md` independently corroborates AC5's
+failure mode: *"Skill appears in `/skills` but Claude never invokes it → Skill has
+`disable-model-invocation: true` in its frontmatter."*
 
 **AC4 counts a bare NAME MENTION as usage, not just a `Skill()` call.** An
 ALL-IN-ONE agent (§1.1) preloads every skill and routes to them from a prose
@@ -275,15 +347,25 @@ single-source-of-truth rule §1.1 exists to protect.
   source gives no ordering, emit a flat "choose by intent" table rather than
   inventing a sequence. Skills execute IN THIS AGENT.
 - **`--to one-for-all`** → `<name>-one-for-all.md`. **Identical to `all-in-one`
-  in every respect except one:** each listed skill is made a one-skill-agent so it
-  executes in a SEPARATE SUBAGENT with minimal context. Mechanically that is an
-  IN-PLACE `agent:` frontmatter addition to the existing shared skill (§1.1 fact
-  2) — never a copy, never a rewritten body. Emit ONE minimal node agent for the
-  nodes to point at rather than one per skill, so the "minimal context" property
-  has a single definition. The agent BODY is the same routing / choice tree as
-  `all-in-one`; per §1.1 fact 3 a node cannot carry its own skill list, so the
-  graph belongs to the agent.
-  Because of §1.1 fact 4, this mode MUST first report every shared skill it would
+  in every respect except one:** each listed skill executes in a SEPARATE
+  SUBAGENT with minimal context. Mechanically that is an IN-PLACE frontmatter
+  addition to the existing shared skill — never a copy, never a rewritten body:
+
+  ```yaml
+  context: fork          # REQUIRED — this is what forks a subagent (§1.1 fact 2)
+  agent: Explore         # optional: which type; Explore/Plan also skip CLAUDE.md
+  background: false      # REQUIRED for a pipeline — see below
+  ```
+
+  `agent:` ALONE DOES NOTHING (§1.1 fact 2) — `context: fork` is the mechanism.
+  And `background` defaults to `true`, so without `background: false` each node
+  returns NOTHING inline and its result arrives as a notification (§1.1 fact 3):
+  a graph whose steps appear to run and silently deliver nothing downstream. Emit
+  `background: false` for any node whose output the next step consumes, and record
+  that this needs Claude Code **v2.1.218+**.
+  The agent BODY is the same routing / choice tree as `all-in-one`; per §1.1 fact
+  4 a node cannot carry its own skill list, so the graph belongs to the agent.
+  Because of §1.1 fact 6, this mode MUST first report every shared skill it would
   convert and how many other agents list it, and MUST NOT mutate a shared skill
   without `--force` — converting a skill changes its execution for every agent
   that lists it, and that consequence has to be visible before it happens.
@@ -332,14 +414,40 @@ the projected cost of N turns under the prefix-cache read rate. This tier is
 what the test suite asserts, because it is deterministic.
 
 **Tier 2 — live A/B/C. OPT-IN via `--live`, and never implied.** Dispatches each
-selected variant on a real task set and records REAL tokens, turns, wall time,
-and outcome. **No mocks, no simulated numbers, no fabricated comparison** — if
-the harness cannot run, it reports UNKNOWN and exits non-zero. A missing
-`--tasks` file is an error, never an empty pass.
+selected variant on a real task set and records REAL tokens, turns, wall time and
+outcome. **No mocks, no simulated numbers, no fabricated comparison** — if the
+harness cannot run it reports UNKNOWN and exits non-zero. A missing task file is
+an error, never an empty pass.
+
+**ADOPT THE ECOSYSTEM EVAL SCHEMA — do not invent one.** `evaluating-skills.md`
+already defines this exact comparison, so Tier 2 reuses its shapes verbatim and
+only swaps the configuration names (`with_skill`/`without_skill` → `original` /
+`all-in-one` / `one-for-all` / `plugin-omni`):
+
+- **Input** — `evals/evals.json`: `{skill_name, evals: [{id, prompt,
+  expected_output, files}]}`. `--tasks` defaults to this path. Test-case design
+  guidance (vary phrasing, cover one boundary condition, use realistic context)
+  belongs in the skill, not the script.
+- **Per run** — `timing.json`: `{total_tokens, duration_ms}`. In Claude Code these
+  two values come from the task-completion notification and, per the doc, **"are
+  not persisted anywhere else"** — so capture them the moment a run finishes or
+  they are gone. A run whose timing was lost is UNKNOWN, never zero.
+- **Aggregate** — `benchmark.json`: `{run_summary: {<config>: {pass_rate,
+  time_seconds, tokens}}, delta: {...}}`, each metric `{mean, stddev}`. `stddev`
+  is only meaningful with multiple runs per eval, so with single runs report the
+  raw counts and the delta and OMIT stddev rather than emitting a fake 0.
+- **Isolation** — each run starts from a CLEAN context (a fresh subagent per run),
+  so nothing leaks between variants. A shared context would make the comparison
+  meaningless.
+- **The delta is the deliverable.** Per the doc: the delta says what a variant
+  COSTS (time, tokens) and what it BUYS (pass rate). "Higher pass rate for more
+  tokens" is a trade-off to report, not a winner to declare — so the tool ranks
+  nothing and never prints a verdict; it prints the delta and lets the human
+  decide.
 
 Output: a findings-style table plus `--json`, written under
-`reports/cpv-agent-eval/`. The report must state which tier produced each number;
-a static estimate must never be presented as a measured result.
+`reports/cpv-agent-eval/`. Every number carries the tier that produced it; a
+static estimate must never be presented as a measured result.
 
 ## 7. Universal constraints (all workstreams)
 
