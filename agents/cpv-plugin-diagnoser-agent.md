@@ -24,6 +24,9 @@ after the user explicitly chooses an option from the Phase 9 follow-up menu.
 
 Load the skills you need dynamically with the Skill() tool. Plugin skills are
 namespaced (e.g. `my-plugin:my-skill <ARGS>`). Load only what the task needs.
+Load `cpv-diagnose-plugin-architecture` for the D1..D9 recipe bodies, and
+consult cpv-the-skills-menu when a diagnosis surfaces a fix outside those
+recipes so the right specialised skill handles it.
 
 ## Phase 0 — MANDATORY plugin-shape detection (BEFORE any phase below)
 
