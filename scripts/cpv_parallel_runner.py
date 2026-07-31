@@ -404,3 +404,59 @@ def parallel_scan_aggregated(
     unchanged (``n_workers``, ``chunk_size``, ``on_error``, ``timeout_per_file``).
     """
     return aggregator(parallel_scan(files, scan_func, **kwargs))
+
+
+# A timed-out result is reported with this prefix by BOTH dispatchers
+# (``_run_one_per_file`` and ``_run_in_batches``). ``retry_failed_serially``
+# keys on it to tell a WEDGE apart from a CRASH — see its docstring for why
+# that distinction is load-bearing rather than cosmetic.
+_TIMEOUT_ERROR_PREFIX = "TimeoutError"
+
+
+def result_is_timeout(result: ScanResult) -> bool:
+    """True when ``result`` failed because its deadline expired (not a crash)."""
+    return result.error is not None and result.error.startswith(_TIMEOUT_ERROR_PREFIX)
+
+
+def retry_failed_serially(
+    results: list[ScanResult],
+    items: Sequence[Any],
+    scan_func: Callable[[Any], list],
+) -> list[ScanResult]:
+    """Re-run each CRASHED item once, in THIS process, and return the merged list.
+
+    Callers treat a per-file scan failure as a BLOCKING finding — a file the
+    scanner could not read is UNKNOWN, never clean. That is only fair if a
+    *transient* failure cannot fail an honest plugin: a CI runner that OOM-kills
+    one pool worker would otherwise block a plugin that has nothing wrong with
+    it, which is issue #179's defect (a gate the work cannot satisfy) wearing a
+    different hat. Retrying once in-process absorbs the transient case, so only
+    a REPRODUCIBLE failure is reported.
+
+    **A TIMEOUT is never retried.** Re-running a wedged scan in this process
+    would hang the main thread with nothing left to preempt it — the pool at
+    least isolates the wedge in a killable child. A timeout is already proof the
+    work does not terminate, so a second attempt buys no information and costs
+    the whole run. Crashes are the opposite: they end promptly and are usually
+    environmental.
+
+    Order is preserved; a retry that succeeds replaces the failed result, and a
+    retry that fails again keeps the ORIGINAL error (the first failure is the
+    more informative one — the retry may fail differently for a reason that has
+    nothing to do with the file).
+    """
+    if len(results) != len(items):
+        raise ValueError(f"results/items length mismatch: {len(results)} vs {len(items)}")
+
+    out = list(results)
+    for idx, result in enumerate(out):
+        if result.error is None or result_is_timeout(result):
+            continue
+        try:
+            findings = scan_func(items[idx])
+        except Exception:
+            # Reproducible failure — keep the original error verbatim so the
+            # caller reports the first, most representative diagnosis.
+            continue
+        out[idx] = ScanResult(file_path=result.file_path, findings=findings, error=None)
+    return out

@@ -6730,7 +6730,7 @@ def scan_all_files(
     os.environ[_WORKER_ENV_EXTREME] = "1" if _CLASSIFIER_ESCALATE else "0"
 
     try:
-        from cpv_parallel_runner import parallel_scan  # noqa: PLC0415
+        from cpv_parallel_runner import parallel_scan, retry_failed_serially  # noqa: PLC0415
 
         scan_results = parallel_scan(
             files,
@@ -6742,6 +6742,12 @@ def scan_all_files(
             resume=resume,
             notify=notify,
         )
+        # An unscanned file is now a BLOCKING finding (below), so a transient
+        # pool death must not fail an honest plugin. Retry crashes once, in
+        # process — NOT timeouts, which would wedge this thread. This MUST run
+        # inside the try: the worker reads _WORKER_ENV_* from the environment,
+        # and the finally below restores it.
+        scan_results = retry_failed_serially(scan_results, files, scan_one_file_for_security)
     finally:
         for key, prev in saved_env.items():
             if prev is None:
@@ -6755,16 +6761,36 @@ def scan_all_files(
     for idx, scan_result in enumerate(scan_results):
         file_path = files[idx]
         if scan_result.error is not None:
-            # Worker raised — surface as a per-file WARNING (this is what
-            # the spec recommends: "Surface as a per-file WARNING in the
-            # report (don't crash the whole validator)"). Use rel_path so
-            # the message stays consistent with the legacy serial format.
+            # The scan did NOT complete on this file, so we do not know what is
+            # in it. That is UNKNOWN, never clean — and it must BLOCK.
+            #
+            # This was a WARNING until v4.2.0, which never blocks (see
+            # cpv_validation_common.exit_code_strict: "WARNING still does not
+            # block even in strict mode"). Measured consequence: a plugin whose
+            # payload lived in a file slow enough to be killed passed, because
+            # the payload's own blocking finding was replaced by this
+            # non-blocking one. A plugin author controls how slow their files
+            # are to scan, so that is an attacker-triggerable mute, not just an
+            # availability bug (issue #182).
+            #
+            # MAJOR, not NIT: NIT blocks only under --strict, and the case with
+            # the most at stake — scanning an untrusted third-party plugin
+            # before installing it — runs in DEFAULT mode.
+            #
+            # A transient failure cannot reach here: crashes were already
+            # retried once serially above. Only a reproducible failure, or a
+            # timeout (proof the work does not terminate), survives to this
+            # point.
             try:
                 rel = str(file_path.relative_to(plugin_path))
             except ValueError:
                 rel = str(file_path)
-            report.warning(
-                f"Security scan worker raised on this file: {scan_result.error}",
+            report.major(
+                f"Security scan did not complete on this file, so its contents are "
+                f"UNVERIFIED: {scan_result.error}. A file that could not be scanned "
+                f"is not a file that was found clean. Re-run; if it persists, the "
+                f"file is likely too large or pathological to scan — split it, or "
+                f"raise the per-file budget.",
                 rel,
             )
             stats["files_skipped"] += 1
