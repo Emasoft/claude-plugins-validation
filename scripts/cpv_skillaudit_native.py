@@ -4691,12 +4691,17 @@ def _scan_path_parallel(plugin_root: Path, files: list[Path]) -> tuple[list[dict
     # test ``test_module_imports_only_stdlib`` walks top-level
     # imports; this lazy import keeps that gate green by being inside
     # a function body.
-    from cpv_parallel_runner import parallel_scan  # noqa: PLC0415
+    from cpv_parallel_runner import parallel_scan, retry_failed_serially  # noqa: PLC0415
 
     prev_env = os.environ.get(_WORKER_ENV_PLUGIN_ROOT)
     os.environ[_WORKER_ENV_PLUGIN_ROOT] = str(plugin_root)
     try:
         scan_results = parallel_scan(files, _scan_one_file_skillaudit)
+        # An unscanned file now blocks (see the merge loop below), so a
+        # transient pool death must not fail an honest plugin. Crashes only —
+        # a timeout is never retried in-process. MUST stay inside the try:
+        # the worker reads _WORKER_ENV_PLUGIN_ROOT, restored in the finally.
+        scan_results = retry_failed_serially(scan_results, files, _scan_one_file_skillaudit)
     finally:
         if prev_env is None:
             os.environ.pop(_WORKER_ENV_PLUGIN_ROOT, None)
@@ -4712,12 +4717,21 @@ def _scan_path_parallel(plugin_root: Path, files: list[Path]) -> tuple[list[dict
     for idx, scan_result in enumerate(scan_results):
         fp = files[idx]
         if scan_result.error is not None:
-            # Worker crashed — surface as a WARNING-like finding so
-            # the file's failure is visible in the aggregate, but the
-            # scan as a whole still completes. The shape mirrors a
-            # real skillaudit finding so downstream consumers
-            # (report_findings, severity grouping) don't crash on a
-            # missing key.
+            # The scan did NOT complete on this file — its contents are
+            # UNKNOWN, and unknown is not clean. The shape mirrors a real
+            # skillaudit finding so downstream consumers (report_findings,
+            # severity grouping) don't crash on a missing key.
+            #
+            # Severity was "low" until v4.2.0. Two things were wrong with it:
+            # the old comment here claimed "low" was "emitted as WARNING-class",
+            # but _SEVERITY_MAP maps "low" → "nit", which DOES block under
+            # --strict; and nit does NOT block in default mode, which is the
+            # mode used to scan an untrusted plugin before installing it. So
+            # the one case with the most at stake was the one that passed.
+            # "high" → MAJOR blocks in both modes (issue #182).
+            #
+            # Crashes were already retried once serially above, so only a
+            # reproducible failure or a timeout reaches here.
             rel = str(fp)
             try:
                 rel = str(fp.relative_to(plugin_root))
@@ -4726,13 +4740,15 @@ def _scan_path_parallel(plugin_root: Path, files: list[Path]) -> tuple[list[dict
             all_findings.append(
                 {
                     "ruleId": "SKILLAUDIT_WORKER_ERROR",
-                    "severity": "low",  # → CPV nit → emitted as WARNING-class
+                    "severity": "high",  # → CPV major → blocks in BOTH modes
                     "category": "infrastructure",
-                    "name": "Skillaudit worker failed on this file",
+                    "name": "Skillaudit scan did not complete on this file",
                     "description": (
-                        f"Per-file skillaudit scan worker raised: "
-                        f"{scan_result.error}. File not scanned; other "
-                        f"files in the tree were unaffected."
+                        f"Per-file skillaudit scan did not complete: "
+                        f"{scan_result.error}. This file's contents are "
+                        f"UNVERIFIED — a file that could not be scanned is not "
+                        f"a file that was found clean. Other files in the tree "
+                        f"were unaffected."
                     ),
                     "line": 0,
                     "lineContent": "",
