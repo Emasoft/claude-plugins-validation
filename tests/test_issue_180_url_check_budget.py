@@ -226,3 +226,54 @@ def test_budget_overrun_is_reported_once_and_never_blocks() -> None:
     tail = src.split("if url_skipped:", 1)[1].split("\ndef ", 1)[0]
     assert "report.warning(" in tail, "the overrun is not reported at WARNING severity"
     assert "report.major(" not in tail and "report.minor(" not in tail, "a budget overrun must not block"
+
+
+class TestDeadlineRecheckedPerAttempt:
+    """The entry check gates task START; everything after it could overrun.
+
+    #180's budget was verified as one deadline spanning every file, which is
+    the load-bearing property. But `_check_one` consulted it exactly once, at
+    entry — so a task admitted just under the wire could still spend ~55s on a
+    fully-timing-out strict host (5 attempts x 8s + backoff), with up to 16
+    started tasks draining 2-at-a-time behind the per-host semaphore. The 300s
+    phase budget could therefore overshoot by minutes.
+
+    A retry is a NEW request, so declining to start one is exactly the decision
+    the entry check already makes. The FIRST attempt stays exempt: a task
+    admitted under the budget must get one real request, or a URL could be
+    reported SKIPPED having never been tried at all.
+    """
+
+    @staticmethod
+    def _attempt_loop() -> str:
+        src = (
+            Path(__file__).resolve().parent.parent / "scripts" / "cpv_validation_common.py"
+        ).read_text(encoding="utf-8")
+        i = src.index("for attempt in range(host_attempts")
+        return src[i : i + 2000]
+
+    def test_deadline_is_rechecked_inside_the_attempt_loop(self) -> None:
+        assert "attempt > 0 and deadline is not None" in self._attempt_loop(), (
+            "no per-attempt budget re-check — the retry ladder can outrun the phase budget"
+        )
+
+    def test_deadline_is_rechecked_after_acquiring_the_semaphore(self) -> None:
+        loop = self._attempt_loop()
+        after_sem = loop[loop.index("with sem:") :]
+        head = after_sem[: after_sem.index("_one_request")]
+        assert "deadline is not None and time.monotonic() >= deadline" in head, (
+            "no re-check after the semaphore acquire — a queued task can wake up past the deadline"
+        )
+
+    def test_first_attempt_is_not_gated_by_the_recheck(self) -> None:
+        """Otherwise a URL admitted under budget could be SKIPPED untried."""
+        loop = self._attempt_loop()
+        recheck = loop[loop.index("if attempt > 0 and deadline") :]
+        assert recheck.startswith("if attempt > 0 and deadline is not None")
+
+    def test_recheck_reports_skipped_never_dead(self) -> None:
+        """A URL we declined to contact must never be called dead."""
+        loop = self._attempt_loop()
+        recheck = loop[loop.index("if attempt > 0 and deadline") :]
+        ret = recheck[: recheck.index("with sem:")]
+        assert "True, _URL_CHECK_SKIPPED" in ret, "must report alive+skipped, not dead"

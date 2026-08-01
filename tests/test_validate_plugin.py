@@ -365,14 +365,42 @@ class TestRcShipBinaryOnlyIssue175:
         validate_cross_platform(p, report)
         assert any("RC-SHIP-BINARY-ONLY-STRICT" in m for m in self._majors(report))
 
-    def test_no_optin_submodule_stays_warn_only(self, tmp_path):
-        """#170: a plugin that does NOT opt in keeps exactly today's WARN — no MAJOR, still green."""
+    def test_no_declaration_now_blocks(self, tmp_path):
+        """v5.0.0 REVERSES this test's original assertion, deliberately.
+
+        It used to assert #170: a plugin that does not opt in keeps its WARN and
+        stays green. That was correct while the canon was opt-in — and it is
+        exactly why the canon enforced almost nothing, since the plugins most in
+        need of migrating were the ones that never opted in. The canon is now
+        universal, so an undeclared plugin BLOCKS. The old expectation is
+        preserved one test down, keyed on the explicit `cpv.canon: none`.
+        """
         p = self._mk_canon(tmp_path, "no-opt-sub", opt_in=False)
         (p / ".gitmodules").write_text('[submodule "rust"]\n\tpath = rust\n\turl = https://example.com/x.git\n')
         report = ValidationReport()
         validate_cross_platform(p, report)
         assert any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
+        assert any("RC-SHIP-BINARY-ONLY-STRICT" in m for m in self._majors(report))
+
+    def test_declared_optout_keeps_it_advisory(self, tmp_path):
+        """The migration path for a plugin that cannot comply yet.
+
+        This is where the pre-v5 behaviour still lives: findings visible, no
+        block — but now the author has to say so in their own manifest.
+        """
+        p = self._mk_canon(tmp_path, "optout-sub", opt_in=False)
+        manifest = p / ".claude-plugin" / "plugin.json"
+        data = json.loads(manifest.read_text())
+        data["cpv"] = {"canon": "none"}
+        manifest.write_text(json.dumps(data))
+        (p / ".gitmodules").write_text('[submodule "rust"]\n\tpath = rust\n\turl = https://example.com/x.git\n')
+        report = ValidationReport()
+        validate_cross_platform(p, report)
+        assert any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
         assert not any("STRICT" in m for m in self._majors(report))
+        assert any("RC-SHIP-BINARY-ONLY-OPTOUT" in m for m in self._warns(report)), (
+            "a declared exception must be announced, or it is a silent pass"
+        )
 
     def test_optin_rename_downgrade_still_blocks(self, tmp_path):
         """Content-not-names: `rust/` moved under `tests/rust/` downgrades to RC-SUBMODULE-SHIPS,
@@ -393,9 +421,15 @@ class TestRcShipBinaryOnlyIssue175:
         validate_cross_platform(p, report)
         assert any("RC-SHIP-BINARY-ONLY-STRICT" in m for m in self._majors(report))
 
-    def test_malformed_manifest_fails_safe_to_warn(self, tmp_path):
-        """FAIL-SAFE (#170): an unreadable plugin.json + a violating tree → the WARN still fires,
-        the block is NOT added (a broken manifest degrades to status quo, never to a silence)."""
+    def test_malformed_manifest_fails_safe_to_enforced(self, tmp_path):
+        """v5.0.0 INVERTS the fail-safe direction, and that is the point.
+
+        Under the opt-in, an unreadable manifest degraded to "advisory" — safe,
+        because the block was the exceptional state. Under a mandatory canon the
+        exemption is the exceptional state, so degrading to "advisory" would let
+        a corrupt (or deliberately corrupted) manifest BUY an exemption. It must
+        degrade to ENFORCED instead.
+        """
         p = tmp_path / "bad-manifest"
         (p / ".claude-plugin").mkdir(parents=True)
         (p / ".claude-plugin" / "plugin.json").write_text("{ not valid json ")
@@ -403,7 +437,10 @@ class TestRcShipBinaryOnlyIssue175:
         report = ValidationReport()
         validate_cross_platform(p, report)
         assert any("RC-SHIP-BINARY-ONLY" in m for m in self._warns(report))
-        assert not any("STRICT" in m for m in self._majors(report))
+        assert any("RC-SHIP-BINARY-ONLY-STRICT" in m for m in self._majors(report))
+        assert not any("RC-SHIP-BINARY-ONLY-OPTOUT" in m for m in self._warns(report)), (
+            "a broken manifest must never be read as a declared opt-out"
+        )
 
 
 class TestValidateSkills:

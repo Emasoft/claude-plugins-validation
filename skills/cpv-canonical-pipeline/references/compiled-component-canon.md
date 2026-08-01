@@ -6,8 +6,8 @@
 - [The canon shape — bin/ per platform×arch + a dispatcher](#the-canon-shape--bin-per-platformarch--a-dispatcher)
 - [Two compliant source-hosting options](#two-compliant-source-hosting-options)
 - [Why a git submodule is non-compliant](#why-a-git-submodule-is-non-compliant)
-- [The four findings](#the-four-findings)
-- [The cpv.canon opt-in — WARN escalates to a blocking MAJOR](#the-cpvcanon-opt-in--warn-escalates-to-a-blocking-major)
+- [The findings](#the-findings)
+- [The canon is UNIVERSAL (v5.0.0) — and the one declared exception](#the-canon-is-universal-v500--and-the-one-declared-exception)
 - [The generated publish.py build gates (G2e / G2f)](#the-generated-publishpy-build-gates-g2e--g2f)
 
 ## Overview
@@ -20,10 +20,10 @@ submodule may ship inside the installed plugin. The compile source lives in
 a SEPARATE repository the build CI clones by pinned URL/tag, or the binary
 is packaged as a separate binary-carrier plugin.
 
-CPV enforces this canon with four findings emitted by
-`validate_plugin.py::validate_cross_platform`. Three are advisory WARNs for
-every plugin; a plugin that opts in via `cpv.canon: ship-only-binary` gets
-them escalated to a publish-blocking MAJOR.
+CPV enforces this canon with findings emitted by
+`validate_plugin.py::validate_cross_platform`. **As of v5.0.0 enforcement is
+UNIVERSAL**: a compiled plugin blocks on publish unless it declares the
+`cpv.canon: none` exception.
 
 ## The canon shape — bin/ per platform×arch + a dispatcher
 
@@ -107,16 +107,18 @@ pointer.
 content out of the install" is empirically false for Claude Code. Relying on
 it ships exactly the source the canon means to exclude.
 
-## The four findings
+## The findings
 
-All four are emitted by `validate_plugin.py::validate_cross_platform`
-(issue #175).
+Emitted by `validate_plugin.py::validate_cross_platform` (issue #175), with the
+attestation rules from `cpv_binary_attestation.py` (issue #185 §2/§3).
 
 | Identifier | Severity | Trigger |
 |---|---|---|
 | `RC-SHIP-BINARY-ONLY` | WARNING | A build-source git submodule in `.gitmodules`, OR in-tree committed compile-source files — the in-tree case gated on a real compiled component (a `bin/`, a build system, or a build script). |
 | `RC-SUBMODULE-SHIPS` | WARNING | Any non-build-source submodule in `.gitmodules` (its content ships on install anyway; closes the v3.8.0 hint-whitelist false negative). |
-| `RC-SHIP-BINARY-ONLY-STRICT` | MAJOR (publish-blocking) | Fires ONLY when the manifest opts in via `cpv.canon: ship-only-binary`. Blocks on CONTENT not names: ANY `.gitmodules` entry (build-source OR other) or in-tree compile-source. |
+| `RC-SHIP-BINARY-ONLY-STRICT` | MAJOR (publish-blocking) | **v5.0.0: fires for EVERY compiled plugin** unless it declares `cpv.canon: none`. Blocks on CONTENT not names: ANY `.gitmodules` entry (build-source OR other) or in-tree compile-source. |
+| `RC-ATTEST-MISSING` | MAJOR (publish-blocking) | **v5.0.0** (WARNING in 4.3.0): a binary in `bin/` with no `cpv.attest[]` record. Run `cpv-remote-validate attest --emit .`. |
+| `RC-SHIP-BINARY-ONLY-OPTOUT` | WARNING | The manifest declares `cpv.canon: none`. The findings above stay advisory — a declared exception, never a clean bill of health. |
 | `RC-MIXED-COMPILED` | INFO | A script-primary plugin (pipeline profile `standard`) that ALSO ships a compiled component. Its build is covered by `RC-SHIP-BINARY-ONLY` + the generated `publish.py` G2e gate regardless of profile. |
 
 **Why this matters:** `RC-SUBMODULE-SHIPS` exists because the earlier
@@ -127,33 +129,52 @@ finding. `RC-MIXED-COMPILED` is purely informational — it tells the author
 CPV recognized the mixed-language shape and that the compiled part is already
 gated; it invents no new pipeline profile.
 
-## The cpv.canon opt-in — WARN escalates to a blocking MAJOR
+## The canon is UNIVERSAL (v5.0.0) — and the one declared exception
 
-`RC-SHIP-BINARY-ONLY` and `RC-SUBMODULE-SHIPS` are non-blocking WARNs for
-every plugin. A plugin that declares `cpv.canon: ship-only-binary` in its
-manifest additionally gets those findings escalated to a publish-blocking
-`RC-SHIP-BINARY-ONLY-STRICT` MAJOR. The opt-in reader is
-`cpv_pipeline_profile.opts_into_ship_only_binary_canon(plugin_root)`, which
-returns True iff `plugin.json` has `cpv.canon == "ship-only-binary"`.
+Through v4.3.0 the blocking escalation required an opt-in
+(`cpv.canon: ship-only-binary`). In practice that enforced almost nothing: the
+plugins most in need of migrating were exactly the ones that never opted in.
+**v5.0.0 makes enforcement the default.** `RC-SHIP-BINARY-ONLY-STRICT` and
+`RC-ATTEST-MISSING` are publish-blocking MAJORs for every compiled plugin.
 
 The escalation blocks on CONTENT, not names: it fires on ANY `.gitmodules`
 entry — build-source OR other — which kills the rename-downgrade gaming vector
 (moving `rust/` under `tests/rust/` would flip `RC-SHIP-BINARY-ONLY` to the
-softer `RC-SUBMODULE-SHIPS`, but under the opt-in both escalate identically).
+softer `RC-SUBMODULE-SHIPS`, but both escalate identically).
 
-**Never-retro-break guarantee (#170):** the opt-in is a selector, not a
-suppressor, and is fail-safe. A plugin that does NOT opt in keeps exactly its
-current WARN — nothing green starts failing unbidden. A missing, malformed, or
-non-`"ship-only-binary"` value reads False, so only the WARN fires. The WARN
-is ALWAYS emitted first; the MAJOR is only ever ADDED on top, so the opt-in
-can never silence a finding — a broken manifest degrades to today's behavior,
-never to a silenced violation.
+**Why attestation had to ship first.** Enforcing "ship only the binary" before
+`cpv.attest[]` existed would have forced the fleet to ship binaries that
+nothing could tie to a source revision — CPV's five scanners cannot read native
+code, so the record IS the audit trail. An opaque blob is a worse outcome than
+shipped source, which is the opposite of what a security validator is for.
+v4.3.0 shipped the record; v5.0.0 turns on the requirement that makes it
+checkable. That ordering is the whole design decision, not a scheduling detail.
 
-**Why this matters:** a blanket WARN→MAJOR flip would retro-break every plugin
-that ships a compiled submodule and is green today (WARNING is the only
-non-blocking tier). The opt-in makes the canon enforceable without breaking a
-single green plugin — the plugin (or a successful migration) declares
-readiness before the block turns on.
+### The exception: `cpv.canon: none`
+
+```json
+{ "cpv": { "canon": "none" } }
+```
+
+This is the ONLY escape hatch, and it withholds the BLOCK, never the finding —
+every advisory still fires, plus an `RC-SHIP-BINARY-ONLY-OPTOUT` WARNING naming
+the exception. It exists because the flip **deliberately retro-breaks plugins
+that are green today** (consciously overriding #170 rather than quietly bending
+it), and some authors cannot migrate on this release's schedule — a source repo
+they do not control, a build they cannot yet reproduce in CI. Without a declared
+exception their only recourse would be to stop upgrading CPV, which would cost
+them every OTHER security fix too. A visible, greppable exception is strictly
+better than that.
+
+**Fail-safe direction is INVERTED from the old opt-in, and this is the
+security-relevant part.** `cpv_pipeline_profile.ship_canon_opted_out()` returns
+False on a missing, malformed, or unreadable manifest — i.e. **ENFORCED**. Under
+the opt-in a broken manifest degraded to "advisory"; under a mandatory canon it
+must degrade to "enforced", or a corrupt manifest would buy an exemption.
+
+A legacy `cpv.canon: ship-only-binary` declaration is now redundant rather than
+wrong: it is honoured, reported as `RC-SHIP-BINARY-ONLY-DECLARED` (INFO), and
+may be removed.
 
 ## The generated publish.py build gates (G2e / G2f)
 

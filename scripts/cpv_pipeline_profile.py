@@ -180,6 +180,38 @@ def opts_into_ship_only_binary_canon(plugin_root: Path) -> bool:
     return cpv_block.get("canon") == "ship-only-binary"
 
 
+def ship_canon_opted_out(plugin_root: Path) -> bool:
+    """True iff the manifest declares `cpv.canon: none` — the explicit opt-OUT (v5.0.0).
+
+    v5.0.0 made the ship-only-binary canon UNIVERSAL: every compiled plugin is
+    enforced, not just the ones that opted in. `opts_into_ship_only_binary_canon`
+    above is the v4-era opt-IN and is now redundant; this is its inverse, and the
+    only remaining escape hatch.
+
+    WHY an opt-out exists at all: the flip deliberately retro-breaks plugins that
+    are green today, and some cannot migrate on the release's schedule (a source
+    repo they do not control, a build they cannot yet reproduce in CI). Without a
+    declared exception those authors' only recourse would be to stop upgrading
+    CPV — which costs them every OTHER security fix too. That is a worse outcome
+    than a visible, greppable exception.
+
+    It is a DECLARATION, never a silence: the caller still emits an
+    `RC-SHIP-BINARY-ONLY-OPTOUT` WARNING naming the exception, and every
+    underlying advisory finding still fires. The only thing it withholds is the
+    blocking severity.
+
+    FAIL-SAFE, and note the asymmetry against the opt-in: an unreadable or
+    malformed manifest returns False → the plugin is ENFORCED. A broken manifest
+    can never buy an exemption, which is the direction that matters once the
+    canon is mandatory.
+    """
+    manifest = _load_manifest(plugin_root)
+    cpv_block = manifest.get("cpv")
+    if not isinstance(cpv_block, dict):
+        return False
+    return cpv_block.get("canon") == "none"
+
+
 def resolve_intentional_divergence(plugin_root: Path) -> frozenset[str]:
     """Return the repo-relative paths a plugin declares as INTENTIONALLY divergent.
 
