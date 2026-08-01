@@ -6731,6 +6731,17 @@ def scan_all_files(
     if not files:
         return stats
 
+    # Issue #182 — the hard-kill bound is now DEFAULT-ON for a scan whose SHAPE
+    # makes a wedge plausible (many files, or a single large one). An explicit
+    # kwarg or CPV_SCAN_SKIP_STUCK_AFTER (resolved just above) always wins; this
+    # only fills a budget nobody set. Placed AFTER the file list exists because
+    # the routing decision is a property of the work, and BEFORE ``_supervised``
+    # so a default-on budget also forces the killable path — a serial loop runs
+    # in THIS process, where a wedged file cannot be killed at all.
+    from cpv_parallel_runner import resolve_hard_kill_after_s  # noqa: PLC0415
+
+    hard_kill_after_s = resolve_hard_kill_after_s(files, hard_kill_after_s)
+
     threshold = _parallel_scan_threshold()
 
     # Issue #52/#56 — any supervision feature forces the parallel/killable path:

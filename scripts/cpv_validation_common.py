@@ -9540,7 +9540,27 @@ def validate_md_urls(
                 # `--strict` runtime past a sane upper bound.
                 time.sleep(min(backoff_cap, host_backoff * attempt))
 
+            # Re-check the budget per attempt, not only at task entry.
+            # The entry check gates task START; everything after it — the
+            # retry ladder and the per-host semaphore queue — could still
+            # run long past the deadline. Worst case on a fully-timing-out
+            # strict host was ~55s per URL (5 attempts x 8s + backoff) with
+            # up to 16 started tasks draining 2-at-a-time, so the 300s phase
+            # budget could overshoot by minutes. A retry is a NEW request, so
+            # declining to start one is the same decision the entry check
+            # makes. First attempt is exempt: a task admitted under the
+            # budget always gets one real request, or a URL could be reported
+            # SKIPPED having never been tried even once.
+            if attempt > 0 and deadline is not None and time.monotonic() >= deadline:
+                return (raw_url, safe_url, True, _URL_CHECK_SKIPPED)
+
             with sem:
+                # Re-check after ACQUIRING the semaphore too: on a strict host
+                # (concurrency 2) a task can sit in this queue for a long time,
+                # and the budget may have expired while it waited.
+                if deadline is not None and time.monotonic() >= deadline:
+                    return (raw_url, safe_url, True, _URL_CHECK_SKIPPED)
+
                 # First attempt: HEAD (cheap). On retry, switch to GET
                 # because some CDNs (and occasionally GitHub) drop HEAD.
                 method = "HEAD" if attempt == 0 else "GET"

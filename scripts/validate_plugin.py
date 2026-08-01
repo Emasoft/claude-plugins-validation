@@ -3139,16 +3139,51 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
     # plugin. Checkout-independent — reads .gitmodules — so it fires even when CPV
     # validates a source repo where the submodule is a bare pointer. Advisory (WARN)
     # until the generator auto-migrates the shape.
-    from cpv_pipeline_profile import classify_submodules, opts_into_ship_only_binary_canon  # noqa: PLC0415
+    from cpv_pipeline_profile import (  # noqa: PLC0415
+        classify_submodules,
+        opts_into_ship_only_binary_canon,
+        ship_canon_opted_out,
+    )
 
-    # Phase 5 (issue #175): a plugin may OPT IN to strict enforcement of the
-    # ship-only-binary canon via `cpv.canon: ship-only-binary`. When opted in, the
-    # compiled-component findings below escalate from WARN to a publish-BLOCKING
-    # MAJOR. FAIL-SAFE + never-retro-break (#170): a plugin that does NOT opt in
-    # keeps exactly its current WARN, and a malformed manifest reads False → WARN
-    # only. The escalation only ever ADDS a blocking severity on TOP of the WARN
-    # (the WARN is always emitted first), so it can never silence a finding.
-    _canon_strict = opts_into_ship_only_binary_canon(plugin_root)
+    _ship_canon_opted_out = ship_canon_opted_out
+
+    # v5.0.0 — THE CANON IS NOW UNIVERSAL. Through v4.3.0 the strict escalation
+    # required a `cpv.canon: ship-only-binary` opt-in, so in practice almost
+    # nothing was enforced: the plugins most in need of migrating were exactly
+    # the ones that never opted in. The owner's directive is that the whole fleet
+    # aligns on the canon, so `_canon_strict` is now TRUE for every plugin.
+    #
+    # ORDERING MATTERS, and it is why this did not ship in 4.3.0: enforcing
+    # "ship only the binary" before `cpv.attest[]` existed would have forced the
+    # fleet to ship binaries nothing could tie to a source revision — an opaque
+    # blob is a worse outcome than shipped source, which is the opposite of what
+    # a security validator is for. 4.3.0 shipped the attestation record; this
+    # release turns on the requirement it makes checkable.
+    #
+    # This DELIBERATELY retro-breaks green plugins (#170), which is a rule this
+    # release consciously overrides rather than quietly bends. The migration is
+    # mechanical and both halves are documented in the finding text itself.
+    # `cpv.canon: none` remains as an explicit, greppable opt-OUT for a plugin
+    # that cannot migrate yet — an author declaring the exception in their own
+    # manifest, never a silent pass.
+    _canon_optout = _ship_canon_opted_out(plugin_root)
+    _canon_strict = not _canon_optout
+    if _canon_optout:
+        report.warning(
+            "RC-SHIP-BINARY-ONLY-OPTOUT: the plugin declares `cpv.canon: none`, opting OUT of the "
+            "universal ship-only-binary canon. The compiled-component findings below stay advisory "
+            "for this plugin. This is a declared exception, not a clean bill of health — the source "
+            "still ships to every user and the shipped binary is still unattested."
+        )
+    elif opts_into_ship_only_binary_canon(plugin_root):
+        # An explicit `cpv.canon: ship-only-binary` is now redundant rather than
+        # wrong — say so, so an author who opted in early is not left wondering
+        # whether their declaration still does anything.
+        report.info(
+            "RC-SHIP-BINARY-ONLY-DECLARED: the plugin declares `cpv.canon: ship-only-binary`. As of "
+            "CPV v5.0.0 the canon is universal, so this declaration is redundant — it is honoured, "
+            "not an error, and may be removed."
+        )
 
     _build_source_subs, _other_subs = classify_submodules(plugin_root)
     if _build_source_subs:
@@ -3186,12 +3221,13 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
     # softer RC-SUBMODULE-SHIPS — but here they escalate identically).
     if _canon_strict and (_build_source_subs or _other_subs):
         report.major(
-            "RC-SHIP-BINARY-ONLY-STRICT: the plugin declares cpv.canon: ship-only-binary but links "
+            "RC-SHIP-BINARY-ONLY-STRICT: the plugin links "
             f"{len(_build_source_subs) + len(_other_subs)} git submodule(s) in .gitmodules, whose "
-            "content Claude Code ships on install. Under the ship-only-binary canon a compiled "
-            "component must ship ONLY the built binary in bin/; keep the source in a SEPARATE repo "
-            "the build CI clones by pinned URL/tag (no .gitmodules), or remove the cpv.canon opt-in "
-            "until the plugin is migrated."
+            "content Claude Code ships on install. Under the ship-only-binary canon — UNIVERSAL as "
+            "of CPV v5.0.0 — a compiled component must ship ONLY the built binary in bin/; keep the "
+            "source in a SEPARATE repo the build CI clones by pinned URL/tag (no .gitmodules). If "
+            "this plugin cannot migrate yet, declare the exception with `cpv.canon: none` in the "
+            "manifest — it stays advisory, and the exception is visible rather than silent."
         )
 
     # Issue #185 §2/§3 — the canon mandates shipping a binary that CPV's five
@@ -3200,15 +3236,72 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
     # binary" converts a verifiable artifact into an opaque one: nothing ties
     # the shipped bytes to any source revision.
     #
-    # WARNING for now, on purpose. A plugin published before this manifest
-    # format existed cannot retroactively carry it, so blocking on arrival
-    # would retro-break every compiled plugin in the fleet (#170). This is the
-    # migration window; `attest --emit` makes compliance mechanical, and the
-    # severity flips when the canon becomes universal.
+    # v5.0.0 — the severity flip this comment promised. In 4.3.0 these were
+    # WARNINGs because the format had just arrived and blocking on arrival would
+    # have retro-broken every compiled plugin (#170); that was the migration
+    # window, and it is now closed. An unattested binary is precisely the case
+    # the canon creates and cannot otherwise detect, so under a universal canon
+    # it must block. `attest --emit` makes compliance mechanical.
+    #
+    # Still WARNING under a declared `cpv.canon: none` opt-out, so an author who
+    # cannot migrate yet keeps a working publish path — with the exception
+    # visible in their own manifest and in the report.
     from cpv_binary_attestation import verify_attestations  # noqa: PLC0415
 
     for _rule_id, _message in verify_attestations(plugin_root):
-        report.warning(_message)
+        if _canon_strict:
+            report.major(_message)
+        else:
+            report.warning(_message)
+
+    # Issue #185 §1 — the canon told plugins to commit EVERY platform×arch
+    # binary, so on a real install ~79% of the shipped bytes are native code
+    # the host can never execute, against the ~1% that source-stripping saves.
+    # The canon optimised the wrong thing. WARNING (never blocking): unlike the
+    # rules above there is no defect here — the plugin did exactly what the
+    # canon asked — so this reports a cost and names the cheaper shape
+    # (fetch-on-install with a checksum-verified release asset) rather than
+    # failing a compliant plugin.
+    from cpv_platform_delivery import verify_platform_delivery  # noqa: PLC0415
+
+    for _rule_id, _message in verify_platform_delivery(plugin_root):
+        if _rule_id.endswith("-OK"):
+            report.info(_message)
+        else:
+            report.warning(_message)
+
+    # Issue #185 §5/§6/§7 — the three remaining holes the canon opened.
+    #
+    # §5 extracted-repo rot: `cpv.strip.extract[]` records {path,url,sha} for the
+    # source moved out of the tree, and nothing ever checked those still resolve.
+    # The network probe is OPT-IN (`network=False` here) because an offline or
+    # pre-install scan must never fail on connectivity — but a check that could
+    # not run must not read as clean either, so an unverified record emits an
+    # explicit INFO rather than silence.
+    #
+    # §6 licence gating: shipping only a binary drops the source tree's LICENSE,
+    # so the artifact users install can carry no licence at all.
+    #
+    # §7 build-graph role: the compiled-source rule keys on file EXTENSION, so a
+    # `dist/` bundle whose source is `.ts` was never caught. This classifies by
+    # ROLE (build input vs output) instead, closing the extension-blind case.
+    from cpv_ship_canon import (  # noqa: PLC0415
+        verify_binary_licences,
+        verify_build_roles,
+        verify_extract_records,
+    )
+
+    for _rule_id, _message in (
+        *verify_extract_records(plugin_root),
+        *verify_binary_licences(plugin_root),
+        *verify_build_roles(plugin_root),
+    ):
+        if _rule_id == "RC-EXTRACT-UNVERIFIED":
+            report.info(_message)
+        elif _canon_strict:
+            report.major(_message)
+        else:
+            report.warning(_message)
 
     # RC-MIXED-COMPILED (issue #175 Phase 3): a script-primary plugin (pipeline
     # profile `standard`) that ALSO ships a compiled component. CPV deliberately
@@ -3360,12 +3453,14 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
                 # so a stray example .rs never blocks.
                 if _canon_strict:
                     report.major(
-                        f"RC-SHIP-BINARY-ONLY-STRICT: the plugin declares cpv.canon: ship-only-binary "
-                        f"but ships {len(_in_tree_src)} {lang_name} compile-source file(s) as committed "
-                        f"files in the plugin tree (e.g. {_in_tree_src[0]}). Under the ship-only-binary "
-                        f"canon the installed plugin must ship ONLY the built binary (bin/); move the "
-                        f"source to a SEPARATE repo the build CI clones by pinned URL/tag, or remove the "
-                        f"cpv.canon opt-in until the plugin is migrated."
+                        f"RC-SHIP-BINARY-ONLY-STRICT: the plugin ships {len(_in_tree_src)} {lang_name} "
+                        f"compile-source file(s) as committed files in the plugin tree (e.g. "
+                        f"{_in_tree_src[0]}). Under the ship-only-binary canon — UNIVERSAL as of CPV "
+                        f"v5.0.0 — the installed plugin must ship ONLY the built binary (bin/); move "
+                        f"the source to a SEPARATE repo the build CI clones by pinned URL/tag. If this "
+                        f"plugin cannot migrate yet, declare the exception with `cpv.canon: none` in "
+                        f"the manifest — it stays advisory, and the exception is visible rather than "
+                        f"silent."
                     )
 
     # --- 3. Check compiled binaries platform coverage ---

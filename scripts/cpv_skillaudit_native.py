@@ -4588,10 +4588,7 @@ def scan_path(plugin_root: Path) -> tuple[list[dict[str, Any]], int]:
     if not files:
         return [], 0
 
-    if not _parallel_enabled() or len(files) < _parallel_threshold():
-        return _scan_path_serial(plugin_root, files)
-
-    return _scan_path_parallel(plugin_root, files)
+    return _scan_dispatch(plugin_root, files)
 
 
 def scan_files(plugin_root: Path, files: "Iterable[Path]") -> tuple[list[dict[str, Any]], int]:
@@ -4616,10 +4613,36 @@ def scan_files(plugin_root: Path, files: "Iterable[Path]") -> tuple[list[dict[st
     if not scannable:
         return [], 0
 
-    if not _parallel_enabled() or len(scannable) < _parallel_threshold():
-        return _scan_path_serial(plugin_root, scannable)
+    return _scan_dispatch(plugin_root, scannable)
 
-    return _scan_path_parallel(plugin_root, scannable)
+
+def _scan_dispatch(plugin_root: Path, files: list[Path]) -> tuple[list[dict[str, Any]], int]:
+    """Serial-vs-parallel routing, shared by :func:`scan_path` and :func:`scan_files`.
+
+    Two independent reasons to take the pool:
+
+    1. **Throughput** — at ``_parallel_threshold()`` files or more the per-file
+       work dominates the pool-spawn cost (the pre-issue-#182 rule, unchanged).
+    2. **Supervision (issue #182)** — a work set whose shape makes a wedge
+       plausible must run somewhere a wedged scan can be KILLED. The serial loop
+       runs in THIS process: a file that never finishes there hangs the whole
+       validator with nothing left to preempt it, so a below-threshold set that
+       contains a large file is routed to the pool purely to be bounded.
+
+    ``CPV_SKILLAUDIT_PARALLEL=0`` still forces serial. That is the pre-existing
+    parallelism escape hatch, not one of the routing knobs, and it does not
+    create a mute: an unsupervised wedge HANGS (and the job's own timeout kills
+    it, fail-closed) rather than reporting a file as clean.
+    """
+    if not _parallel_enabled():
+        return _scan_path_serial(plugin_root, files)
+
+    from cpv_parallel_runner import supervision_is_warranted  # noqa: PLC0415
+
+    if len(files) >= _parallel_threshold() or supervision_is_warranted(files):
+        return _scan_path_parallel(plugin_root, files)
+
+    return _scan_path_serial(plugin_root, files)
 
 
 def _scan_path_serial(plugin_root: Path, files: list[Path]) -> tuple[list[dict[str, Any]], int]:
@@ -4691,12 +4714,25 @@ def _scan_path_parallel(plugin_root: Path, files: list[Path]) -> tuple[list[dict
     # test ``test_module_imports_only_stdlib`` walks top-level
     # imports; this lazy import keeps that gate green by being inside
     # a function body.
-    from cpv_parallel_runner import parallel_scan, retry_failed_serially  # noqa: PLC0415
+    from cpv_parallel_runner import (  # noqa: PLC0415
+        parallel_scan,
+        resolve_hard_kill_after_s,
+        retry_failed_serially,
+    )
 
     prev_env = os.environ.get(_WORKER_ENV_PLUGIN_ROOT)
     os.environ[_WORKER_ENV_PLUGIN_ROOT] = str(plugin_root)
     try:
-        scan_results = parallel_scan(files, _scan_one_file_skillaudit)
+        # Issue #182 — default-on hard-kill bound. ``parallel_scan`` routes to the
+        # killable supervisor whenever a budget is set, so a file whose scan never
+        # returns is killed and reported (SKILLAUDIT_WORKER_ERROR, severity high →
+        # MAJOR, blocking in BOTH modes) instead of hanging the run. A budget of
+        # ``None`` keeps the lean executor for work too small to warrant it.
+        scan_results = parallel_scan(
+            files,
+            _scan_one_file_skillaudit,
+            hard_kill_after_s=resolve_hard_kill_after_s(files),
+        )
         # An unscanned file now blocks (see the merge loop below), so a
         # transient pool death must not fail an honest plugin. Crashes only —
         # a timeout is never retried in-process. MUST stay inside the try:

@@ -460,3 +460,165 @@ def retry_failed_serially(
             continue
         out[idx] = ScanResult(file_path=result.file_path, findings=findings, error=None)
     return out
+
+
+# ── Default-on hard-kill bound: WHEN to pay for supervision (issue #182) ─────
+#
+# v4.2.0 made a file whose security scan did NOT complete BLOCK instead of pass.
+# But the only thing that can actually BOUND a wedged scan stayed opt-in, so the
+# default pool path was still unbounded. ``future.result(timeout=)`` does not
+# bound a ``ProcessPoolExecutor``: it records a timeout but cannot cancel a
+# STARTED task, so the pool's ``shutdown(wait=True)`` blocks on the wedged worker
+# anyway — the hang is relocated, not removed. Only KILLING the worker bounds it,
+# which is what ``cpv_scan_supervisor.supervised_scan(hard_kill_after_s=…)`` does.
+#
+# Supervision is not free. It spawns a Manager process, a task Queue, N workers
+# and a watchdog loop — a FIXED cost of roughly a fifth of a second, independent
+# of how many files are being scanned. Paying that on every three-file scan taxes
+# every small run to guard against a wedge that cannot plausibly happen there.
+#
+# So the bound is ROUTED, not blanket. Supervise when EITHER
+#
+#   * ``len(items) >= CPV_SCAN_SUPERVISE_MIN_FILES`` (default 32), or
+#   * any single item is a LARGE file — its size falls in
+#     [CPV_SCAN_SUPERVISE_LARGE_FILE_MIN_BYTES, CPV_SCAN_SUPERVISE_LARGE_FILE_MAX_BYTES]
+#     (default 1 MiB - 8 MiB).
+#
+# The window's LOWER edge is where a single file's scan time becomes measurable;
+# the UPPER edge is where the scanners stop reading the file at all
+# (``validate_security.MAX_SCAN_BYTES`` is 8 MiB and the skillaudit walker drops
+# anything over 2 MB), so a file ABOVE the window returns immediately and cannot
+# wedge a worker — there is nothing there to supervise.
+#
+# **Not supervising is never a MUTE.** An unsupervised wedge hangs the run until
+# the CI job's own ``timeout-minutes`` kills it, and since v3.22.2 a killed job is
+# a hard, fail-closed failure. The bound does not create the blocking outcome — it
+# converts an opaque whole-job hang into a clean, attributable BLOCKING finding on
+# the one file responsible, while the rest of the tree still gets scanned.
+
+_SUPERVISE_MIN_FILES_ENV = "CPV_SCAN_SUPERVISE_MIN_FILES"
+# 32 mirrors validate_security's own CPV_PARALLEL_SCAN_THRESHOLD default: at that
+# size a pool is already being spawned, so the supervisor's extra fixed cost is
+# a fraction of work the run was going to do regardless.
+_DEFAULT_SUPERVISE_MIN_FILES = 32
+
+_SUPERVISE_LARGE_FILE_MIN_BYTES_ENV = "CPV_SCAN_SUPERVISE_LARGE_FILE_MIN_BYTES"
+_DEFAULT_SUPERVISE_LARGE_FILE_MIN_BYTES = 1024 * 1024  # 1 MiB
+
+_SUPERVISE_LARGE_FILE_MAX_BYTES_ENV = "CPV_SCAN_SUPERVISE_LARGE_FILE_MAX_BYTES"
+_DEFAULT_SUPERVISE_LARGE_FILE_MAX_BYTES = 8 * 1024 * 1024  # 8 MiB
+
+# The budget itself keeps its existing operator knob so there is ONE spelling of
+# "how long may a single file's scan take", not two.
+_HARD_KILL_AFTER_ENV = "CPV_SCAN_SKIP_STUCK_AFTER"
+# 300s. Measured on CPV's own 1083-file tree with the cache off (v4.2.0), the
+# WORST single file took 27.13s with google-re2 and 28.25s without — so the
+# default is ~11x the slowest scan this codebase has ever produced, while staying
+# far under the 25-30 min ceiling a validate job runs with. A bound the work
+# cannot finish inside is issue #179's own defect; this one has an order of
+# magnitude of headroom.
+DEFAULT_HARD_KILL_AFTER_S = 300.0
+
+
+def _env_positive_number(name: str, default: Any, cast: Callable[[str], Any]) -> Any:
+    """Typo-safe env override, matching ``cpv_lint_engine._phase_timeout``.
+
+    Blank, unparseable, zero and negative values ALL fall back to ``default``.
+    A misconfiguration therefore degrades to the shipped behaviour rather than to
+    a near-zero (or absent) guard.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = cast(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def supervise_min_files() -> int:
+    """File-count threshold at or above which a scan is supervised.
+
+    WIDEN-ONLY: an override may LOWER the bar (supervise more often) but never
+    raise it. Raising it is how you would switch the bound off for an entire tree
+    without ever writing the word "off" — precisely the disable this must not
+    permit. Lowering only ever costs throughput, never safety.
+    """
+    value = int(_env_positive_number(_SUPERVISE_MIN_FILES_ENV, _DEFAULT_SUPERVISE_MIN_FILES, int))
+    return min(value, _DEFAULT_SUPERVISE_MIN_FILES)
+
+
+def supervise_size_window() -> tuple[int, int]:
+    """``(min_bytes, max_bytes)`` size window that makes a single file "large".
+
+    WIDEN-ONLY, for the same reason as :func:`supervise_min_files`: the floor may
+    only be lowered and the ceiling may only be raised, so an override can only
+    ever cause MORE files to be considered large. The returned window therefore
+    always contains the shipped default window, and ``min_bytes <= max_bytes``
+    holds by construction.
+    """
+    lo = int(
+        _env_positive_number(
+            _SUPERVISE_LARGE_FILE_MIN_BYTES_ENV,
+            _DEFAULT_SUPERVISE_LARGE_FILE_MIN_BYTES,
+            int,
+        )
+    )
+    hi = int(
+        _env_positive_number(
+            _SUPERVISE_LARGE_FILE_MAX_BYTES_ENV,
+            _DEFAULT_SUPERVISE_LARGE_FILE_MAX_BYTES,
+            int,
+        )
+    )
+    return min(lo, _DEFAULT_SUPERVISE_LARGE_FILE_MIN_BYTES), max(hi, _DEFAULT_SUPERVISE_LARGE_FILE_MAX_BYTES)
+
+
+def hard_kill_after_s() -> float:
+    """Per-file wall-clock budget after which the scanning worker is KILLED.
+
+    ``CPV_SCAN_SKIP_STUCK_AFTER`` overrides it; a blank/unparseable/non-positive
+    value falls back to :data:`DEFAULT_HARD_KILL_AFTER_S`. There is deliberately
+    no value that means "no bound" — a SMALLER budget is stricter (it kills
+    sooner, producing MORE blocking findings), so no setting of this variable can
+    turn the guard off.
+    """
+    return float(_env_positive_number(_HARD_KILL_AFTER_ENV, DEFAULT_HARD_KILL_AFTER_S, float))
+
+
+def supervision_is_warranted(items: Sequence[Any]) -> bool:
+    """True when this work set is big enough that the fixed supervisor cost pays.
+
+    ``items`` are the paths about to be scanned. A non-path item (a validator
+    work-unit dataclass) is simply not measurable as a file and is skipped — the
+    count arm still applies to it.
+    """
+    if len(items) >= supervise_min_files():
+        return True
+    lo, hi = supervise_size_window()
+    for item in items:
+        try:
+            size = os.stat(item).st_size
+        except (OSError, TypeError, ValueError):
+            # Unreadable or not path-like. The scan itself reports an unreadable
+            # file; routing must not raise on it.
+            continue
+        if lo <= size <= hi:
+            return True
+    return False
+
+
+def resolve_hard_kill_after_s(items: Sequence[Any], explicit: float | None = None) -> float | None:
+    """The per-file hard-kill budget to use for a security scan of ``items``.
+
+    An ``explicit`` budget (a caller kwarg, or one an entry point already read
+    from the environment) ALWAYS wins. Otherwise the routing above decides:
+    a warranted shape gets :func:`hard_kill_after_s`, anything smaller gets
+    ``None`` (the lean executor, exactly as before).
+    """
+    if explicit is not None:
+        return explicit
+    if not supervision_is_warranted(items):
+        return None
+    return hard_kill_after_s()
