@@ -1533,6 +1533,31 @@ def _sha256_file(path: Path) -> str | None:
         return None
 
 
+# The FOUR zones of ONE non-shippable design corpus, as defined by the TRDD
+# folder lifecycle that ai-maestro-janitor installs to ~/.claude/rules/ on
+# every machine. A card moves between them by a pure `git mv` with ZERO content
+# change: proposals → tasks → archived (or → refused).
+#
+# Issue #184: only `tasks/` was listed here, so archiving a finished card —
+# the ROUTINE terminal transition of every card, and the one the governance
+# rules mandate — turned a green plugin red on identical bytes. Obeying the
+# rules must never fail the gate. The reporter also could not fix it at the
+# source, because `trdd-design-tasks` §12 freezes terminal TRDD bodies, so
+# rewording an archived card to please a scanner would corrupt a frozen
+# project record (the #176 case-2 shape: there is no source fix — the scope
+# is what is wrong).
+#
+# GENERAL FORM, worth keeping: when a scope exclusion names ONE member of a
+# set the ecosystem defines as a set, the excluded member is a coincidence of
+# which zone existed first and the others are a latent gate failure — armed
+# the first time anyone follows the lifecycle to its end.
+_TRDD_LIFECYCLE_DIR_PARTS = (
+    "/design/proposals/",
+    "/design/tasks/",
+    "/design/archived/",
+    "/design/refused/",
+)
+
 _DEV_SCRATCH_DIR_PARTS = (
     "/docs_dev/",
     "/scripts_dev/",
@@ -1544,7 +1569,7 @@ _DEV_SCRATCH_DIR_PARTS = (
     "/builds_dev/",
     "/reports_dev/",
     "/reports/",
-    "/design/tasks/",
+    *_TRDD_LIFECYCLE_DIR_PARTS,
     # v2.45 FP3 — Claude Code chat history exports (raw transcripts,
     # gitignored, never executed) and anthropic_dev/ (vendored Anthropic
     # docs / env-var references downloaded for development reference,
@@ -1565,14 +1590,20 @@ _DEV_SCRATCH_DIR_PARTS = (
 def _is_dev_scratch_path(rel_or_abs: str) -> bool:
     """True for files inside a gitignored dev-scratch / design-spec dir.
 
-    These dirs (docs_dev/, scripts_dev/, design/tasks/, …) are NEVER
-    shipped — they're listed in _plugin_compute_hashes.py's `skip_dirs`
-    so they have no manifest entry. They're also documentation by
+    These dirs (docs_dev/, scripts_dev/, the design/ TRDD lifecycle zones, …)
+    are NEVER shipped — they're listed in _plugin_compute_hashes.py's
+    `skip_dirs` so they have no manifest entry. They're also documentation by
     example: audit reports in docs_dev/ legitimately quote secret-pattern
-    fixtures, TRDDs in design/tasks/ describe wire formats that include
-    pattern strings. Letting the scanner flag them produces noise with
-    zero security signal — they can't reach a runtime code path because
-    they're not imported and not loaded by Claude Code.
+    fixtures, and TRDDs describe wire formats that include pattern strings.
+    Letting the scanner flag them produces noise with zero security signal —
+    they can't reach a runtime code path because they're not imported and not
+    loaded by Claude Code.
+
+    All FOUR lifecycle zones qualify, not just tasks/ — see
+    `_TRDD_LIFECYCLE_DIR_PARTS`. This function is what governs IN-PROCESS
+    skillaudit findings (via `validate_plugin._run_skillaudit_native`), not
+    only external-scanner output, which is why keying on one zone was
+    observable as a plugin flipping red purely by archiving a card (#184).
 
     Marker prefix `/` on each entry forces a directory-boundary match so
     a file literally named `docs_dev_helper.py` doesn't accidentally
@@ -1958,7 +1989,12 @@ def _is_self_scan_eligible(file_path: str) -> bool:
     # protection") that match prompt-injection heuristics by accident.
     if "/templates/" in file_normalized or file_normalized.startswith("templates/"):
         return True
-    if "/design/tasks/" in file_normalized and basename.startswith("trdd-"):
+    # All FOUR TRDD lifecycle zones, not just tasks/ — a card is `git mv`d
+    # between them with zero content change, so keying on one zone made the
+    # verdict depend on lifecycle position (#184). The `trdd-` filename gate
+    # is retained, so this recognises the SAME documents in their other
+    # folders and grants nothing new.
+    if any(part in file_normalized for part in _TRDD_LIFECYCLE_DIR_PARTS) and basename.startswith("trdd-"):
         return True
     if "/docs_dev/" in file_normalized:
         # docs_dev/ is a private dev-only directory (gitignored). Audit
@@ -2053,7 +2089,8 @@ def is_security_fix_reference(file_path: str) -> bool:
 
     Returns True for:
     - Any `.md` under `skills/<any>/references/` (CPV-shipped reference docs)
-    - `*/design/tasks/TRDD-*.md` (CPV TRDDs documenting security work)
+    - `*/design/{proposals,tasks,archived,refused}/TRDD-*.md` (CPV TRDDs
+      documenting security work, in any lifecycle zone)
     - Specific `*-fixes.md` filenames anywhere (legacy direct match)
     """
     file_normalized = file_path.lower().replace("\\", "/")
@@ -2071,8 +2108,9 @@ def is_security_fix_reference(file_path: str) -> bool:
     if "/skills/" in ("/" + file_normalized) and "/references/" in file_normalized:
         return True
 
-    # Design TRDDs that explain security work / patterns.
-    if "/design/tasks/" in ("/" + file_normalized) and "trdd-" in file_normalized:
+    # Design TRDDs that explain security work / patterns — in ANY of the four
+    # lifecycle zones (#184; archiving a card must not change its treatment).
+    if any(part in ("/" + file_normalized) for part in _TRDD_LIFECYCLE_DIR_PARTS) and "trdd-" in file_normalized:
         return True
 
     basename = file_normalized.rsplit("/", 1)[-1] if "/" in file_normalized else file_normalized

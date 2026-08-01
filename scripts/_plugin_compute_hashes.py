@@ -112,7 +112,19 @@ def is_self_scan_eligible(rel_path: str) -> bool:
         return True
     if "/templates/" in file_normalized or file_normalized.startswith("templates/"):
         return True
-    if "/design/tasks/" in file_normalized and basename.startswith("trdd-"):
+    # All four TRDD lifecycle zones (proposals/tasks/archived/refused) — a card
+    # is `git mv`d between them with zero content change, so keying on one zone
+    # made a card's treatment depend on its lifecycle position (#184). Mirrors
+    # validate_security._TRDD_LIFECYCLE_DIR_PARTS (duplicated deliberately: this
+    # module must stay import-free of the validator so the manifest can be built
+    # standalone; the parity is pinned by a test).
+    if (
+        any(
+            part in file_normalized
+            for part in ("/design/proposals/", "/design/tasks/", "/design/archived/", "/design/refused/")
+        )
+        and basename.startswith("trdd-")
+    ):
         return True
     if "/docs_dev/" in file_normalized:
         return True
