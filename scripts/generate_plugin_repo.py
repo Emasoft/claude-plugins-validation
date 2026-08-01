@@ -3653,7 +3653,27 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
         cprint(f"  {YELLOW}HEAD is already '{expected_subject}' and tree is clean — "
                f"skipping commit (interrupted-publish recovery).{NC}")
     else:
-        run(["git", "add", "-A"], cwd=root)
+        # Issue #186 — stage TRACKED modifications only; never `git add -A`.
+        # Untracked files at this point are not part of the release: gate 1
+        # already required a clean tree, so anything still untracked is
+        # reports/ (which "routinely contain private data — absolute paths,
+        # usernames, internal hostnames, tokens caught in logs"), local
+        # scratch, or leftovers from a failed run. A release commit is pushed
+        # to a public repo AND is the artifact users install, so an accidental
+        # inclusion there is unrecoverable in practice.
+        run(["git", "add", "-u"], cwd=root)
+        for _gen in (".claude-plugin/plugin.json", ".plugin-self-hashes.json",
+                     "CHANGELOG.md", "README.md", "pyproject.toml", "uv.lock"):
+            if (root / _gen).exists():
+                run(["git", "add", "--", _gen], cwd=root)
+        _st = subprocess.run(["git", "status", "--porcelain"], cwd=root,
+                             capture_output=True, text=True, check=False)
+        _stray = [ln[3:].strip() for ln in _st.stdout.splitlines() if ln.startswith("??")]
+        if _stray:
+            cprint(f"  {YELLOW}NOT staged — untracked files are never swept into a release (#186):{NC}")
+            for _p in _stray[:20]:
+                cprint(f"  {YELLOW}    ?? {_p}{NC}")
+            cprint(f"  {YELLOW}  If one belongs in the release, `git add` it BY NAME and re-run.{NC}")
         run(["git", "commit", "-m", expected_subject], cwd=root)
 
     if tag_exists:
@@ -6089,7 +6109,7 @@ Examples:
     if not args.dry_run:
         print(f"\n{BOLD}Next steps:{NC}")
         print(f"  cd {target}")
-        print("  git init && git add -A && git commit -m 'Initial scaffold'")
+        print("  git init && git add . && git commit -m 'Initial scaffold'  # add BY NAME once the tree has scratch")
         print(f"  uv venv --python {params.python_version} && source .venv/bin/activate")
         print("  uv pip install -e .")
         print("  uv run python scripts/setup-hooks.py")

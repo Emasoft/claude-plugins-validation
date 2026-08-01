@@ -42,7 +42,8 @@ CPV supports three layouts: **A** (hub-and-spoke), **B** (nested), **C** (market
    - Validate via launcher (alias `plugin`) — see [references/launcher-invocation.md](references/launcher-invocation.md). Direct invocation refused.
      > The one-liner · Why the launcher is mandatory · Direct invocation (development only)
    - Fix ALL issues (CRITICAL, MAJOR, MINOR, NIT) — only WARNINGs may remain
-   - Init git: `cd <target-dir> && git init && git add -A && git commit -m "Initial scaffold"`
+   - Init git: `cd <target-dir> && git init && git add <the scaffolded paths> && git commit -m "Initial scaffold"`
+     (stage by name — a scaffold dir often already holds local scratch, and `-A` sweeps it into the first commit)
    - Create repo: `gh repo create <owner>/<name> --public --source . --push`
    - Configure hooks: `git config core.hooksPath git-hooks`
 

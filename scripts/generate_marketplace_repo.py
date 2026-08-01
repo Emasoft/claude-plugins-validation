@@ -1218,7 +1218,7 @@ def generate_marketplace_repo(
     print(f"  1. cd {target_dir}")
     print("  2. git init && git config core.hooksPath .githooks")
     print("  3. Update plugin descriptions in .claude-plugin/marketplace.json")
-    print("  4. git add -A && git commit -m 'feat: initial marketplace scaffold'")
+    print("  4. git add .claude-plugin README.md && git commit -m 'feat: initial marketplace scaffold'")
     print(f"  5. gh repo create {github_owner}/{name} --public --source=. --push")
     print()
     print("After first push to GitHub (once the CI workflow has reported):")

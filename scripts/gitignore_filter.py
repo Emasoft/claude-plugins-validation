@@ -342,6 +342,18 @@ class GitignoreFilter:
 
         Pattern matching uses ``Path.match(pattern)`` — same semantics as
         ``Path.rglob(pattern)`` minus the unconditional descent.
+
+        Yields DIRECTORIES as well as files, because ``Path.rglob`` does and
+        every caller reads this method as its drop-in replacement. It did not
+        until issue #187: a directory was pushed onto the descent stack but
+        never tested against the pattern, so ``rglob("bin")`` returned ``[]``
+        for a real, tracked, populated ``bin/``. That silently made
+        ``has_bin`` False for every plugin and told authors shipping 11
+        committed binaries that "users will need to compile before use", while
+        the platform-coverage check downstream never ran at all. A miss like
+        that is invisible from the call site — the caller sees an empty
+        iterator, which is indistinguishable from "the tree really has none".
+        Callers that require files filter with ``is_file()``.
         """
         import fnmatch
 
@@ -385,6 +397,12 @@ class GitignoreFilter:
                     if self.is_dir_ignored(entry):
                         continue
                     stack.append(entry)
+                    # Test the directory itself against the pattern too (#187).
+                    # Descent and matching are independent: a dir we descend
+                    # into can also BE a match, and pruning it from the results
+                    # is what made `rglob("bin")` unconditionally empty.
+                    if matches(entry):
+                        yield entry
                 elif entry.is_file():
                     if self.is_ignored(entry):
                         continue

@@ -157,6 +157,30 @@ readiness before the block turns on.
 
 ## The generated publish.py build gates (G2e / G2f)
 
+> **Where the canon actually lives — read this before diffing anything.**
+> A plugin's canonical `publish.py` is the output of **`gen_publish_py()` in
+> `scripts/generate_plugin_repo.py`**. That function is the canon; the gates
+> below exist only there.
+>
+> **`<cpv>/scripts/publish.py` is CPV's OWN release pipeline, not a template.**
+> Diffing your plugin's `publish.py` against it is the natural move and it is
+> wrong: you will find zero build gates and a large apparent gap (one report
+> measured 1805 vs 3236 lines with 40+ functions seemingly "missing"), which
+> reads as catastrophic drift and invites a destructive wholesale port. To see
+> the real canon for your plugin, generate it:
+>
+> ```bash
+> uv run python -c "import sys; sys.path.insert(0,'scripts'); \
+>   import generate_plugin_repo as g; \
+>   print(g.gen_publish_py(g.PluginParams(name='<your-plugin>', description='x', \
+>     author='x', author_email='x@example.com'), profile='<your-profile>'))" > /tmp/canon-publish.py
+> diff /tmp/canon-publish.py scripts/publish.py
+> ```
+>
+> And determine your PROFILE first — `gen_publish_py` is profile-aware, so a
+> diff taken against the wrong profile is meaningless. See
+> "Profile-aware" in `cpv-canonical-pipeline/SKILL.md`.
+
 The canonical pipeline's generated `publish.py` carries per-plugin,
 self-detecting build gates that run before the release is cut:
 

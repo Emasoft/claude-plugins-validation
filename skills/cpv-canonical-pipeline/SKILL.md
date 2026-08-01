@@ -8,6 +8,18 @@ user-invocable: false
 
 # Canonical Plugin Pipeline Standard
 
+> **Before you diff anything: determine the plugin's PROFILE.** The pipeline
+> comes in four profiles and the canon differs per profile, so a diff taken
+> against the wrong one is meaningless — a legitimate 1400-line difference
+> reads as catastrophic drift and invites a destructive "resync" that deletes
+> working release machinery.
+>
+> **The canon for a plugin's `publish.py` is `gen_publish_py()` in
+> `scripts/generate_plugin_repo.py`** — generate it and diff against that.
+> `<cpv>/scripts/publish.py` is CPV's own release pipeline and is NOT a
+> template: it carries none of the per-plugin build gates, so diffing against
+> it reports gates as "missing" that were never supposed to be there.
+
 ## Overview
 
 Defines the standard files, workflows, hooks, and release pipeline that every Emasoft Claude Code plugin repository MUST have. Covers Python, JavaScript/TypeScript, Rust, Go, and Shell plugins. Pipeline supports all three CPV layouts (A: separate plugin and marketplace repos; B: nested monorepo; C: marketplace-in-plugin self-referential single repo).
