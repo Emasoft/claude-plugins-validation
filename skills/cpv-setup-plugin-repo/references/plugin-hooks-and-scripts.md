@@ -261,7 +261,7 @@ Step 6:  Bump version            update plugin.json, pyproject.toml, __version__
 Step 7:  Update README badge     replace version-X.Y.Z-blue with new version in README.md
 Step 8:  Generate changelog      git-cliff --tag vX.Y.Z -o CHANGELOG.md (if git-cliff installed)
 Step 9:  Build binaries          compile for current platform (if compiled sources exist)
-Step 10: Commit                  git add -A && git commit -m "bump: version X.Y.Z → X.Y.Z"
+Step 10: Commit                  git add -u + the generated files BY NAME (never -A, #186)
 Step 11: Tag                     git tag vX.Y.Z
 Step 12: Push                    git push && git push --tags
 ```

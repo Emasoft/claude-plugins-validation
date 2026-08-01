@@ -3194,6 +3194,22 @@ def validate_cross_platform(plugin_root: Path, report: ValidationReport) -> None
             "until the plugin is migrated."
         )
 
+    # Issue #185 §2/§3 — the canon mandates shipping a binary that CPV's five
+    # security scanners cannot read, so the ATTESTATION is the audit trail that
+    # replaces the source they can no longer see. Without it "ship only the
+    # binary" converts a verifiable artifact into an opaque one: nothing ties
+    # the shipped bytes to any source revision.
+    #
+    # WARNING for now, on purpose. A plugin published before this manifest
+    # format existed cannot retroactively carry it, so blocking on arrival
+    # would retro-break every compiled plugin in the fleet (#170). This is the
+    # migration window; `attest --emit` makes compliance mechanical, and the
+    # severity flips when the canon becomes universal.
+    from cpv_binary_attestation import verify_attestations  # noqa: PLC0415
+
+    for _rule_id, _message in verify_attestations(plugin_root):
+        report.warning(_message)
+
     # RC-MIXED-COMPILED (issue #175 Phase 3): a script-primary plugin (pipeline
     # profile `standard`) that ALSO ships a compiled component. CPV deliberately
     # does NOT invent a new profile for this — the compiled component is already

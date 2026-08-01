@@ -502,6 +502,9 @@ def validate_broken_links(plugin_path: Path, report: DocumentationValidationRepo
     plugin_root_resolved = plugin_path.resolve()
 
     for md_file in gi.rglob("*.md"):
+        # `rglob` yields directories too (pathlib parity, #187).
+        if not md_file.is_file():
+            continue
         rel_md = md_file.relative_to(plugin_root_resolved)
         # Belt-and-suspenders: skip conventional dev/template dirs even if the
         # plugin's .gitignore does not list them.
@@ -881,6 +884,9 @@ def validate_image_references(plugin_path: Path, report: DocumentationValidation
     plugin_root_resolved = plugin_path.resolve()
 
     for md_file in gi.rglob("*.md"):
+        # `rglob` yields directories too (pathlib parity, #187).
+        if not md_file.is_file():
+            continue
         rel_md = md_file.relative_to(plugin_root_resolved)
         if _is_under_skip_dir(rel_md, _LINK_CHECK_SKIP_DIRS):
             continue

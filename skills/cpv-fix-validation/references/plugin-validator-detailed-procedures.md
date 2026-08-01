@@ -249,7 +249,7 @@ jobs:
 ### Phase 8: End-to-End Test
 ```
 □ 8.1 Make a test change to a file
-□ 8.2 Stage and commit: git add -A && git commit -m "test: Pipeline test"
+□ 8.2 Stage and commit: git add <the files you changed> && git commit -m "test: Pipeline test"
 □ 8.3 Attempt push: git push
 □ 8.4 Verify pre-push hook runs
 □ 8.5 Verify push succeeds or blocks appropriately
@@ -273,7 +273,7 @@ uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py"
 ```bash
 ruff check . --select=E,F,W
 # Fix manually, then retry
-git add -A && git commit -m "fix: Manual lint fixes" && git push
+git add <the files you changed> && git commit -m "fix: Manual lint fixes" && git push
 ```
 
 **Issue: "Type errors found"**
@@ -286,7 +286,7 @@ mypy --ignore-missing-imports .
 ```bash
 git push --no-verify  # Bypass (use with caution!)
 ruff check . && mypy . # read-only, no --fix
-git add -A && git commit -m "fix: Manual fixes" && git push
+git add <the files you changed> && git commit -m "fix: Manual fixes" && git push
 ```
 
 ### Git Hook Installation Issues

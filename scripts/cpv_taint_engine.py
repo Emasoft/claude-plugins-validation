@@ -1096,6 +1096,11 @@ def iter_python_files(root: Path) -> Iterable[Path]:
         "target",
     }
     for p in gi.rglob("*.py"):
+        # `rglob` yields directories as well as files (pathlib parity, #187);
+        # this walker reads source, so a dir named e.g. `pkg.py` is not a file
+        # to parse.
+        if not p.is_file():
+            continue
         # ``gi.root`` is ``root.resolve()`` (absolute); re-base onto the caller's
         # original ``root`` token so the yielded path keeps the exact form the
         # downstream consumer expects (``plugin_path / sub``), so

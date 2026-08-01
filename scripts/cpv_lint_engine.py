@@ -658,7 +658,10 @@ def detect_languages(
     def collect(name: str, patterns: list[str]) -> None:
         out: list[Path] = []
         for pattern in patterns:
-            out.extend(gi.rglob(pattern))
+            # `rglob` yields directories too (pathlib parity, #187). These paths
+            # are handed to real linters, and a directory named `Dockerfile` or
+            # `vendor.py` would be invoked as if it were source.
+            out.extend(p for p in gi.rglob(pattern) if p.is_file())
         if out:
             languages[name] = out
 

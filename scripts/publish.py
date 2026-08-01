@@ -564,6 +564,9 @@ def update_python_versions(plugin_root: Path, new_version: str) -> list[tuple[bo
     gi = _get_gi(plugin_root)
     results: list[tuple[bool, str]] = []
     for py_file in gi.rglob("*.py"):
+        # `rglob` yields directories too (pathlib parity, #187).
+        if not py_file.is_file():
+            continue
         try:
             content = py_file.read_text(encoding="utf-8")
             # Allow optional trailing whitespace/comment so lines like
@@ -625,6 +628,9 @@ def check_version_consistency(plugin_root: Path) -> tuple[bool, str]:
     # Python __version__ variables
     gi = _get_gi(plugin_root)
     for py_file in gi.rglob("*.py"):
+        # `rglob` yields directories too (pathlib parity, #187).
+        if not py_file.is_file():
+            continue
         try:
             content = py_file.read_text(encoding="utf-8")
             m = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE)
@@ -2416,6 +2422,64 @@ def _ensure_submodules_pushed(plugin_root: Path) -> None:
         sys.exit(1)
 
 
+def stage_release_changes(plugin_root: Path) -> None:
+    """Stage the release commit WITHOUT absorbing untracked files (issue #186).
+
+    `git add -A` stages untracked files too. At release time a plugin tree
+    routinely holds `reports/` (CPV's own convention says these "routinely
+    contain private data — absolute paths, usernames, internal hostnames,
+    proprietary source, tokens caught in logs"), local scratch, editor
+    artifacts, and whatever a failed earlier run left behind. A release commit
+    is the WORST place for an accidental inclusion: it is pushed to a public
+    repo and it is also the artifact users install, so once it lands, forks,
+    clones and GitHub's caches make it unrecoverable in practice.
+
+    Staging tracked modifications only is safe HERE specifically because Gate 1
+    already required a clean tree: everything legitimate is committed by the
+    time this runs, so the only files this pipeline itself creates are the
+    generated ones enumerated below. Anything else untracked at this point is,
+    by construction, not part of the release.
+
+    The failure mode is deliberately "the release did not include your new
+    file, here it is by name" rather than "the release published your scratch
+    directory" — the first is a loud, cheap fix; the second is permanent.
+    """
+    run(["git", "add", "-u"], cwd=plugin_root)
+
+    # Files this pipeline generates. They are normally already tracked, but a
+    # first-ever CHANGELOG.md (or a plugin adopting the canon) can be new — so
+    # name them explicitly rather than reaching for `-A`. Only existing paths
+    # are staged; a missing one is not an error.
+    for rel in (
+        ".claude-plugin/plugin.json",
+        ".plugin-self-hashes.json",
+        ".cpv-self-hashes.json",
+        "CHANGELOG.md",
+        "README.md",
+        "pyproject.toml",
+        "uv.lock",
+    ):
+        if (plugin_root / rel).exists():
+            run(["git", "add", "--", rel], cwd=plugin_root)
+
+    # Surface whatever is left untracked instead of silently absorbing it.
+    res = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["git", "status", "--porcelain"],
+        cwd=plugin_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    stray = [ln[3:].strip() for ln in res.stdout.splitlines() if ln.startswith("??")]
+    if stray:
+        print(f"{YELLOW}  NOT staged — untracked files are never swept into a release commit (#186):{NC}")
+        for path in stray[:20]:
+            print(f"{YELLOW}    ?? {path}{NC}")
+        if len(stray) > 20:
+            print(f"{YELLOW}    … and {len(stray) - 20} more{NC}")
+        print(f"{YELLOW}  If one of these belongs in the release, `git add` it BY NAME and re-run.{NC}")
+
+
 def stage_commit_tag_push(
     plugin_root: Path,
     tag_name: str,
@@ -2496,11 +2560,11 @@ def stage_commit_tag_push(
         if _local_tag_exists(plugin_root, tag_name):
             run(["git", "tag", "-d", tag_name], cwd=plugin_root)
             print(f"{YELLOW}  Removed local-only tag {tag_name} (will re-create on the consolidated commit).{NC}")
-        run(["git", "add", "-A"], cwd=plugin_root)
+        stage_release_changes(plugin_root)
         run(["git", "commit", "-m", expected_subject], cwd=plugin_root)
         print(f"{GREEN}✓ Re-committed {tag_name} with manifest refresh folded in{NC}")
     else:
-        run(["git", "add", "-A"], cwd=plugin_root)
+        stage_release_changes(plugin_root)
         run(["git", "commit", "-m", expected_subject], cwd=plugin_root)
         print(f"{GREEN}✓ Committed {tag_name}{NC}")
     print(f"\n{BLUE}═══ Gate 11: Create git tag {tag_name} ═══{NC}")
