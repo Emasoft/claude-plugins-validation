@@ -34,9 +34,22 @@ Design (kill-safe by construction):
   * `mp.Process.kill()` is cross-platform (SIGKILL on POSIX, TerminateProcess
     on Windows) — so unlike the old SIGALRM path this also works on Windows.
 
-The supervisor is OPT-IN: `parallel_scan` only routes here when
-`hard_kill_after_s` is set, so the default per-plugin scan path is unchanged
-and pays none of the manager-process overhead.
+ROUTING — this is NO LONGER opt-in, and the correction matters. `parallel_scan`
+routes here whenever `hard_kill_after_s` is set, which was once only on explicit
+request. Since v5.0.0 (#182) `resolve_hard_kill_after_s` fills that budget BY
+DEFAULT for any scan whose shape makes a wedge plausible — `files >= 32`, or any
+single file 1 MiB-8 MiB — so in practice **almost every real plugin now takes
+this path**, and it is the default per-plugin scan path rather than an exception
+to it.
+
+This docstring previously claimed the opposite ("OPT-IN ... the default
+per-plugin scan path is unchanged and pays none of the manager-process
+overhead"). That sentence survived the v5.0.0 flip and made the routing change
+invisible to anyone reading this module to understand what runs where — it cost
+an hour of misdirected investigation on issue #189 before the flip was noticed.
+Measured while chasing that: the supervised path is NOT the slower one (400
+files / 0.62 MB: lean 19.84s vs supervised 14.35s, i.e. 0.72x), so the manager
+overhead this text warned about does not dominate at realistic sizes either.
 """
 
 from __future__ import annotations
