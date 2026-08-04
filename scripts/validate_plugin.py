@@ -6119,6 +6119,15 @@ _COVERAGE_SKIP_SEGMENTS: frozenset[str] = frozenset(
 # matching stays unbounded (cheap).
 _COVERAGE_CONTENT_SCAN_CAP = 5_000_000
 
+# Top-level-module imports written in either canonical form, ANYWHERE in a file —
+# the leading `[ \t]*` is load-bearing, not cosmetic: a dispatcher routinely imports
+# its per-language backend LAZILY inside a function body (indented), and that is
+# precisely the edge this scan exists to follow. Anchored at a line start so a name
+# inside a comment, a docstring, or a string literal is not mistaken for an import.
+_COVERAGE_IMPORT_RE = re.compile(
+    r"(?m)^[ \t]*(?:from[ \t]+([A-Za-z_]\w*)[ \t]+import\b|import[ \t]+([A-Za-z_]\w*))"
+)
+
 
 def _coverage_path_is_vendored(path: Path, root: Path) -> bool:
     """True if any segment of ``path`` (relative to ``root``) is a vendored /
@@ -6206,6 +6215,61 @@ def _coverage_test_blobs(test_files: list[Path]) -> tuple[str, str]:
         content_parts.append(text)
         total += len(text)
     return name_blob, "\n".join(content_parts)
+
+
+def _coverage_indirect_python_tokens(
+    plugin_root: Path, name_blob: str, content_blob: str
+) -> set[str]:
+    """Tokens for ``scripts/*.py`` modules reached ONE HOP from a directly-named one.
+
+    A suite that drives a dispatcher (``from cpv_skillaudit_native import
+    scan_content``) genuinely exercises the per-language backend the dispatcher
+    imports — but the backend's own name never appears in the test, so the
+    filename/content match alone reports a well-tested module as untested. This
+    credits a module that a DIRECTLY-named module imports.
+
+    ONE hop, deliberately. That is the depth at which "the suite drives a facade
+    over this module" is still a fair claim. Full transitive closure would credit
+    nearly every module in a cohesive package and make the advisory vacuous — and
+    an advisory that can never fire is worth exactly as much as no advisory.
+
+    Errs toward CREDITING (under-warning), matching this check's stated bias: a
+    missed warning is a quiet gap, whereas telling an author their tested module is
+    untested spends the credibility the advisory needs to be worth reading.
+    """
+    scripts_dir = plugin_root / "scripts"
+    if not scripts_dir.is_dir():
+        return set()
+
+    # stem -> path, for the sibling set an import can resolve against.
+    modules = {py.stem.lower(): py for py in scripts_dir.glob("*.py")}
+    if not modules:
+        return set()
+
+    indirect: set[str] = set()
+    scanned = 0
+    for stem, path in sorted(modules.items()):
+        # Only a module the suite NAMES can lend its coverage onward.
+        if stem not in name_blob and stem not in content_blob:
+            continue
+        # Bounded like the test-content blob above: this is an ADVISORY check, so
+        # it must never become the expensive part of a scan on a huge plugin.
+        # Sorted iteration keeps which modules get scanned deterministic when the
+        # cap bites, so the advisory cannot flap between runs.
+        if scanned >= _COVERAGE_CONTENT_SCAN_CAP:
+            break
+        try:
+            source = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue  # best-effort, exactly like the content blob above
+        scanned += len(source)
+        for from_mod, plain_mod in _COVERAGE_IMPORT_RE.findall(source):
+            imported = (from_mod or plain_mod).lower()
+            # Only a SIBLING plugin module counts; a stdlib/third-party import
+            # lends nothing, and a self-import cannot credit anything new.
+            if imported != stem and imported in modules:
+                indirect.add(imported)
+    return indirect
 
 
 def _git_tags(plugin_root: Path) -> list[str] | None:
@@ -6382,10 +6446,16 @@ def check_test_coverage(plugin_root: Path, report: ValidationReport) -> None:
         return
 
     name_blob, content_blob = _coverage_test_blobs(test_files)
+    # A module the suite reaches only THROUGH a dispatcher it does name is tested;
+    # crediting it is what keeps this advisory from calling covered code untested.
+    indirect = _coverage_indirect_python_tokens(plugin_root, name_blob, content_blob)
     untested = [
         rel_path
         for rel_path, token in components
-        if token and token not in name_blob and token not in content_blob
+        if token
+        and token not in name_blob
+        and token not in content_blob
+        and token not in indirect
     ]
     if not untested:
         return

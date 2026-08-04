@@ -186,12 +186,19 @@ Both must complete without crashes. This catches import errors, missing deps, an
 
 ## Post-Push CI Verification
 
-After every first push to a new GitHub repo, ALWAYS verify CI passes:
+Since v5.1.1 `publish.py` does this automatically as its `[post-release]` stage
+(Reliability Contract item 7), so on a canon pipeline the check below is a
+BACKSTOP. Run it when the publish reported `UNVERIFIED`, or after any push that
+did not go through `publish.py`:
+
 ```bash
-sleep 30 && gh run list --repo <owner>/<plugin-name> --limit 5
+gh run list --repo <owner>/<plugin-name> --limit 5
 ```
+
 If any workflow failed, investigate with `gh run view <id> --log-failed | head -30`.
-Fix and push again. Do NOT leave failing CI as the final state.
+Fix the cause and publish a follow-up patch. Do NOT leave failing CI as the final
+state, and NEVER mute a check to make it green. A green publish says nothing
+about CI: the release push bypasses the ruleset's required checks by design.
 
 ## Generated-Pipeline Reliability Contract (v2.134.0)
 
@@ -203,6 +210,7 @@ The generator applies six reliability fixes so a scaffolded/upgraded plugin's fi
 4. **`notify-marketplace` no-ops when `MARKETPLACE_PAT` is absent** — the job is guarded so a repo without the secret does not surface a red associated workflow on the release.
 5. **"Done" = green CI, not "files generated"** — the creator/fixer agents PUBLISH then watch every required run with `gh run watch <run-id> --exit-status`, treating a red run as the next fix iteration (read failing job → fix the cause on the plugin side → re-publish → re-watch; `gh run rerun --failed` for transient infra; NEVER mute a check). See `agents/cpv-plugin-creator-agent.md` "CI-green guarantee phase" and `agents/cpv-plugin-fixer-agent.md` §7d.
 6. **`publish.py` pushes the dependency-resolver tag `{name}--v{version}`** (DOUBLE hyphen, CC 2.1.110) alongside `v{version}`, in one atomic push (`git push origin HEAD v{version} {name}--v{version}`). A version-constrained dependency resolves ONLY against `{plugin-name}--v{version}`; without it a dependent install fails `no-matching-tag` and is DISABLED, while the release still looks fine. **This is the upgrade path's job on an EXISTING plugin:** `standardize` is profile-aware and refuses to overwrite an existing `publish.py`, so a plugin that already had one never gained the stage — since v2.158.0 a plain `--fix` injects only that stage into the existing file (idempotent; a `publish.py` too customized to migrate safely is left byte-identical and reported, never half-migrated). Do NOT hand-roll `claude plugin tag --push`: wrong layer, and `claude plugin tag <name>` takes a **path**, not a tag name — it silently creates nothing.
+7. **`publish.py` VERIFIES CI is green on the released commit** (v5.1.1, `stage_verify_ci_green`, printed as `[post-release]`). The release push targets the default branch directly and the maintainer role holds `bypass_mode: always` on the branch ruleset, so GitHub prints `Bypassed rule violations … required status checks are expected` and lets it through — meaning **the required checks never actually gate a release**: tag, GitHub release and marketplace notification are all public before CI has said a word. Item 5 above was the only cover for that, and it lives in agent PROSE, which is skippable (the defect v2.157.0 fixed one gate earlier for `ci-preflight`). It **never aborts the publish** — by then the release is public, so exiting non-zero could not un-ship it and would only discard the report; a RED result is a loud notice naming the failing runs plus the exact `gh run view --log-failed` command, feeding item 5's fix→re-publish loop. "Cannot check" is never green (no `gh` / no runs / timeout → `UNVERIFIED` with the reason); `skipped`/`neutral` are not failures. **This is the upgrade path's job on an EXISTING plugin:** a plain `--fix` injects the stage, its call site and the top-level `import time` as ONE all-or-nothing unit (the call without the function is a `NameError` at publish time; the function without the call is dead code that looks migrated) — idempotent, and a `publish.py` too customized to migrate safely is left byte-identical and reported, never half-migrated.
 
 ## Mega-Linter Configuration
 

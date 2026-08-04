@@ -137,12 +137,25 @@ Both must complete without crashes. This catches import errors, missing deps, an
 
 ## Post-Push CI Verification
 
-After every first push to a new GitHub repo, ALWAYS verify CI passes:
+Since v5.1.1 `publish.py` does this automatically as its `[post-release]` stage
+(see Reliability Contract item 7) — so on a canon pipeline the check below is a
+BACKSTOP, not the primary mechanism. Run it whenever the publish reported
+`UNVERIFIED` (no `gh`, no runs found, or the wait expired), or after any push
+that did not go through `publish.py`:
+
 ```bash
-sleep 30 && gh run list --repo <owner>/<plugin-name> --limit 5
+gh run list --repo <owner>/<plugin-name> --limit 5
 ```
+
 If any workflow failed, investigate with `gh run view <id> --log-failed | head -30`.
-Fix and push again. Do NOT leave failing CI as the final state.
+Fix the cause on the plugin side and publish a follow-up patch. Do NOT leave
+failing CI as the final state, and NEVER mute a check to make it green.
+
+**Why this is not optional even though the publish "succeeded":** the release
+push bypasses the branch ruleset's required status checks (that bypass is what
+lets a scripted release run at all), so a green publish says nothing about CI.
+The release is already public by the time CI reports — which is exactly why a
+red result means "ship a follow-up patch", not "the publish failed".
 
 ## Generated-Pipeline Reliability Contract (v2.134.0)
 
@@ -154,6 +167,8 @@ The generator applies six reliability fixes so a scaffolded/upgraded plugin's fi
 4. **`notify-marketplace` no-ops when `MARKETPLACE_PAT` is absent** — the job is guarded so a repo without the secret does not surface a red associated workflow on the release.
 5. **"Done" = green CI, not "files generated"** — the creator/fixer agents PUBLISH then watch every required run with `gh run watch <run-id> --exit-status`, treating a red run as the next fix iteration (read failing job → fix the cause on the plugin side → re-publish → re-watch; `gh run rerun --failed` for transient infra; NEVER mute a check). See `agents/cpv-plugin-creator-agent.md` "CI-green guarantee phase" and `agents/cpv-plugin-fixer-agent.md` §7d.
 6. **`publish.py` pushes the dependency-resolver tag `{name}--v{version}`** (DOUBLE hyphen, CC 2.1.110) alongside the release tag `v{version}`, in the SAME atomic push (one `git push origin HEAD v{version} {name}--v{version}` argv) so a release can never ship with one ref and not the other. A version-constrained plugin dependency resolves **only** against `{plugin-name}--v{version}`: without that tag, `claude plugin install` on a dependent fails with `no-matching-tag` and the dependent is DISABLED — a release that looks fine and is silently un-dependable. The generator has emitted this stage since v2.156.0; since v2.158.0 `standardize --fix` also MIGRATES an **existing** `publish.py` that lacks it, injecting only that stage (idempotent; a `publish.py` too customized to migrate safely is left byte-identical and reported, never half-migrated). Do NOT hand-roll `claude plugin tag --push` into a pipeline: it is the wrong layer, and `claude plugin tag <name>` takes a **path**, not a tag name — it silently creates nothing.
+
+7. **`publish.py` VERIFIES CI is green on the released commit** (v5.1.1, `stage_verify_ci_green`, printed as `[post-release]`). This closes a real hole rather than adding ceremony: the release push targets the default branch directly and the maintainer role holds `bypass_mode: always` on the branch ruleset, so GitHub prints `Bypassed rule violations … required status checks are expected` and lets it through. That bypass is deliberate — it is what makes a scripted release possible at all — but it means **the required status checks never actually gate a release**: the tag, the GitHub release and the marketplace notification are all public before CI has said a word. Point 5 above was the only thing covering that gap, and it lives in agent PROSE, which is skippable — the identical defect v2.157.0 fixed one gate earlier when `ci-preflight` was wired in as Gate 3b. The stage **never aborts the publish**, and that asymmetry is deliberate rather than a weak gate: by the time it runs the release is already published, so a non-zero exit could not un-ship anything — it would only discard the report that is the whole point. A RED result is surfaced as a loud notice naming the failing runs plus the exact `gh run view --log-failed` command, which is what feeds point 5's fix→re-publish loop. **"Cannot check" is never reported as green** (no `gh`, no runs found, a timeout → `UNVERIFIED` with the reason), and `skipped`/`neutral` conclusions are not failures — a dormant optional workflow reports `skipped` on every release and treating that as RED would cry wolf every time. The generator emits it for new plugins; **`standardize --fix` MIGRATES an existing `publish.py`** that lacks it (idempotent, on ANY `--fix` — NOT gated behind `--force-templates`, because the plugins that need it most are the ones with a customized `publish.py` they cannot safely force-overwrite). The migration is **all-or-nothing**: the stage, its call site and the top-level `import time` are one unit, since landing the call without the function is a `NameError` at publish time in someone else's repo, and landing the function without the call is dead code that silently keeps the gap open while *looking* migrated. A `publish.py` too customized to migrate safely is left **byte-identical** and reported, never half-migrated.
 
 ## Mega-Linter Configuration
 

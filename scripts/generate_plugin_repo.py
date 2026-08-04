@@ -1734,6 +1734,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # Load gh / git retry wrappers from the sibling module so every push +
@@ -3765,6 +3766,105 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     sys.exit(1)
 
 
+# How long to wait for the released commit's CI runs to conclude. Generous on
+# purpose: a cold runner installing a toolchain can take many minutes, and a gate
+# that gives up early reports UNVERIFIED on a healthy run — noise that teaches the
+# reader to ignore it. Expiry is never a failure verdict.
+CI_VERIFY_TIMEOUT_S = 900
+
+
+def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
+    """Confirm CI went GREEN on the commit that was just released.
+
+    WHY THIS EXISTS. `--install-branch-rules` makes CI a required status check,
+    but the release push goes straight to the default branch and the maintainer
+    role can bypass the ruleset — GitHub then reports `Bypassed rule violations
+    … required status checks are expected` and lets the push through. The bypass
+    is what makes a scripted release possible at all, but it means **the required
+    checks never actually gate the release**: tag, GitHub release and marketplace
+    notification are all public before CI has said a word. Without this stage,
+    "CI must be green" lives only in agent prose, and prose is skippable.
+
+    NEVER ABORTS, and that asymmetry is deliberate rather than a weak gate: by
+    the time this runs the release is already published, so exiting non-zero
+    could not un-ship it — it would only discard the report that is the whole
+    point. A RED result is surfaced as a loud notice naming the failing runs and
+    the exact follow-up command, which is what lets the caller enter the
+    fix→re-publish loop.
+
+    "Cannot check" is never reported as green: no gh, no network, no runs found,
+    or a timeout are each reported UNVERIFIED with the reason, never as a pass.
+    """
+    # Deliberately NOT numbered into the [N/11] sequence: those steps run BEFORE
+    # anything is public and any of them can abort the publish. This one runs
+    # after the release exists and never aborts, so numbering it as a 12th step
+    # would misrepresent it as another gate the publish is conditional on.
+    cprint(f"\\n{BOLD}[post-release] Verifying CI on the released commit...{NC}")
+    if dry_run:
+        cprint(f"  {YELLOW}(dry-run) skipped.{NC}")
+        return
+
+    if shutil.which("gh") is None:
+        cprint(f"  {YELLOW}UNVERIFIED - gh CLI not installed, cannot check CI.{NC}")
+        cprint(f"  {YELLOW}  The release IS published; verify manually.{NC}")
+        return
+
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root),
+                          capture_output=True, text=True)
+    if head.returncode != 0:
+        cprint(f"  {YELLOW}UNVERIFIED - could not resolve HEAD.{NC}")
+        return
+    sha = head.stdout.strip()
+
+    deadline = time.monotonic() + CI_VERIFY_TIMEOUT_S
+    while True:
+        listed = subprocess.run(
+            ["gh", "run", "list", "--commit", sha, "--limit", "20",
+             "--json", "name,status,conclusion"],
+            cwd=str(root), capture_output=True, text=True,
+        )
+        if listed.returncode != 0:
+            cprint(f"  {YELLOW}UNVERIFIED - `gh run list` exited {listed.returncode}.{NC}")
+            return
+        try:
+            runs = json.loads(listed.stdout or "[]")
+        except json.JSONDecodeError:
+            cprint(f"  {YELLOW}UNVERIFIED - unparseable `gh run list` output.{NC}")
+            return
+
+        if not runs:
+            # A workflow takes a few seconds to register after the push.
+            if time.monotonic() >= deadline:
+                cprint(f"  {YELLOW}UNVERIFIED - no CI runs found for {sha[:8]}.{NC}")
+                return
+            time.sleep(15)
+            continue
+
+        if not [r for r in runs if r.get("status") != "completed"]:
+            break
+        if time.monotonic() >= deadline:
+            cprint(f"  {YELLOW}UNVERIFIED - still running after {CI_VERIFY_TIMEOUT_S}s.{NC}")
+            cprint(f"  {YELLOW}  Check with: gh run list --commit {sha[:8]}{NC}")
+            return
+        time.sleep(15)
+
+    # `skipped`/`neutral` are not failures — a dormant optional workflow
+    # (e.g. a PyPI publish that only fires on a tag) always reports skipped.
+    failed = [r for r in runs
+              if r.get("conclusion") not in ("success", "skipped", "neutral")]
+    if failed:
+        detail = ", ".join(f"{r.get('name', '?')}={r.get('conclusion')}" for r in failed)
+        cprint(f"  {RED}CI IS RED on the released commit {sha[:8]}: {detail}{NC}")
+        cprint(f"  {RED}  The tag and GitHub release are ALREADY PUBLISHED - the ruleset{NC}")
+        cprint(f"  {RED}  bypass meant no required check gated them. Fix the cause and{NC}")
+        cprint(f"  {RED}  publish a follow-up patch; do NOT mute the check.{NC}")
+        cprint(f"  {RED}  Logs: gh run view --log-failed --commit {sha[:8]}{NC}")
+        return
+
+    names = ", ".join(sorted({str(r.get("name", "?")) for r in runs}))
+    cprint(f"  {GREEN}CI green on {sha[:8]} ({names}){NC}")
+
+
 # -- Main ----------------------------------------------------------------------
 
 def main() -> int:
@@ -3870,6 +3970,9 @@ def main() -> int:
     stage_changelog(root, new_ver, args.dry_run)
     stage_commit_and_push(root, new_ver, args.dry_run)
     stage_gh_release(root, new_ver, args.dry_run)
+    # Runs AFTER the release on purpose — it verifies the commit that actually
+    # shipped. Never aborts (the release is already public; see its docstring).
+    stage_verify_ci_green(root, args.dry_run)
 
     cprint(f"\n{GREEN}{BOLD}Published {new_ver} successfully!{NC}")
     return 0

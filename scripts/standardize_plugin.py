@@ -2380,6 +2380,117 @@ def _inject_test_suite_timeout(text: str) -> tuple[str | None, str]:
     return new_text, "migrate publish.py for issue #179 — " + "; ".join(applied)
 
 
+# --- v5.1.1: post-release CI verification -----------------------------------
+# Anchors for lifting the CI-verify stage VERBATIM out of freshly-rendered canon.
+# A second copy of the canonical text here would drift the first time the canon's
+# wording changed — the same duplicate-source defect these migrators exist to
+# repair (v3.22.0).
+_CI_VERIFY_CANON_START = "# How long to wait for the released commit's CI runs"
+_CI_VERIFY_CANON_END = "# -- Main ---"
+_CI_VERIFY_CALL_ANCHOR = "    stage_gh_release(root, new_ver, args.dry_run)\n"
+_CI_VERIFY_IMPORT_ANCHOR = "from pathlib import Path\n"
+# The call block is LIFTED from canon, never spelled out here. A hand-written copy
+# drifted from the generator's wording on its very first run (em-dash vs hyphen),
+# which the byte-identity test caught — exactly the duplicate-source defect these
+# migrators exist to repair.
+_CI_VERIFY_CALL_END = "\n    cprint("
+
+
+def _inject_ci_verify(text: str) -> tuple[str | None, str]:
+    """Return (rewritten_text, note). ``None`` text means nothing was written.
+
+    ALL-OR-NOTHING, for the same reason as ``_inject_test_suite_timeout``: the
+    stage function, its ``import time``, and its call site are one unit. Landing
+    the call without the function is a ``NameError`` at publish time — in someone
+    else's repo, at the least recoverable moment — and landing the function
+    without the call is dead code that silently keeps the gap open while
+    *looking* migrated, which is worse than not migrating. So when any anchor
+    fails to match, the file is left BYTE-IDENTICAL and the shape is reported.
+    """
+    if "stage_verify_ci_green" in text:
+        return None, ""  # already migrated — idempotent
+
+    canon = _canonical_publish_py()
+    if canon is None:
+        return None, "publish.py: could not render canon to migrate CI verification — skipped"
+
+    canon_stage = _slice_between(canon, _CI_VERIFY_CANON_START, _CI_VERIFY_CANON_END)
+    if canon_stage is None:
+        return None, "publish.py: canon has no CI-verify stage to lift — skipped"
+
+    canon_call = _slice_between(canon, _CI_VERIFY_CALL_ANCHOR, _CI_VERIFY_CALL_END)
+    if _CI_VERIFY_CALL_ANCHOR not in text or canon_call is None:
+        return None, (
+            "publish.py: unrecognised release stage — the post-release CI verification was NOT "
+            "migrated (left byte-identical). Add stage_verify_ci_green() by hand, or re-run with "
+            "--force-templates."
+        )
+
+    # The stage function must be DEFINED before main() calls it. Canon places it
+    # directly above the `-- Main --` banner; mirror that placement so a migrated
+    # file and a freshly-scaffolded one have the same shape.
+    if _CI_VERIFY_CANON_END in text:
+        new_text = text.replace(_CI_VERIFY_CANON_END, canon_stage + _CI_VERIFY_CANON_END, 1)
+    else:
+        # No banner to anchor on — insert immediately before the call site's
+        # enclosing `def main(`, which every canon-derived publish.py has.
+        main_anchor = "def main() -> int:"
+        if main_anchor not in text:
+            return None, (
+                "publish.py: no `def main() -> int:` to anchor the CI-verify stage against — NOT "
+                "migrated (left byte-identical)."
+            )
+        new_text = text.replace(main_anchor, canon_stage + "\n" + main_anchor, 1)
+
+    new_text = new_text.replace(_CI_VERIFY_CALL_ANCHOR, canon_call, 1)
+
+    # `time` is used by the stage's poll loop. Add it only when absent, and place
+    # it with the other stdlib imports rather than at the top of the file.
+    if not re.search(r"^import time$", new_text, re.MULTILINE):
+        if _CI_VERIFY_IMPORT_ANCHOR in new_text:
+            new_text = new_text.replace(
+                _CI_VERIFY_IMPORT_ANCHOR, "import time\n" + _CI_VERIFY_IMPORT_ANCHOR, 1
+            )
+        else:
+            # Cannot guarantee the import lands → refuse rather than ship a file
+            # that NameErrors on `time.monotonic()` at publish time.
+            return None, (
+                "publish.py: could not place `import time` — CI verification NOT migrated "
+                "(left byte-identical)."
+            )
+
+    return new_text, (
+        "migrate publish.py for v5.1.1 — verify CI is green on the released commit "
+        "(the branch-ruleset bypass means required checks never gate the release push)"
+    )
+
+
+def migrate_publish_py_ci_verify(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """Give an EXISTING ``scripts/publish.py`` post-release CI verification.
+
+    Runs on ANY ``--fix`` — deliberately NOT gated behind ``--force-templates``,
+    for the same reason as its two siblings: the plugins that most need this are
+    the ones with a hand-customized publish.py they cannot safely force-overwrite.
+    Idempotent: a publish.py that already has the stage comes back byte-identical
+    and reports nothing.
+    """
+    publish = plugin_path / "scripts" / "publish.py"
+    if not publish.is_file():
+        return []
+    try:
+        text = publish.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    new_text, note = _inject_ci_verify(text)
+    if new_text is None:
+        return [note] if note else []
+    if dry_run:
+        return [f"[dry-run] would {note}"]
+    publish.write_text(new_text, encoding="utf-8")
+    return [note]
+
+
 def migrate_publish_py_test_suite_timeout(plugin_path: Path, dry_run: bool = False) -> list[str]:
     """Give an EXISTING ``scripts/publish.py`` a satisfiable pytest bound (#179).
 
@@ -4340,6 +4451,17 @@ def fix_missing_files(
     # ANY --fix and never overwrites publish.py wholesale.
     for note in migrate_publish_py_test_suite_timeout(plugin_path, dry_run=dry_run):
         print(f"  {YELLOW}[test-timeout]{NC} {note}")
+
+    # v5.1.1: verify CI is GREEN on the commit that was just released. The release
+    # push goes straight to the default branch and the maintainer role bypasses the
+    # ruleset, so the "required status checks" never actually gate a release — the
+    # tag, the GitHub release and the marketplace notification are all public before
+    # CI has said a word. Until now that verification lived only in agent PROSE,
+    # which is skippable; this makes it part of the pipeline. Same delivery
+    # reasoning as the two migrators above: ANY --fix, idempotent, never a
+    # wholesale overwrite.
+    for note in migrate_publish_py_ci_verify(plugin_path, dry_run=dry_run):
+        print(f"  {YELLOW}[ci-verify]{NC} {note}")
 
     # CIP-1 (#140): drop the INVERTED `CLAUDE_PRIVATE_USERNAMES: ${{ github.
     # repository_owner }}` env from every workflow. It tells CPV that the PUBLIC

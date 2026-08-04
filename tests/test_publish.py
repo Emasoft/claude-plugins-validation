@@ -491,9 +491,15 @@ def _gate(label: str) -> tuple[str, str]:
 
 
 def test_gate_numbers_are_unique_and_ordered():
-    """A lettered sub-gate must never renumber a numbered gate."""
+    """A lettered sub-gate must never renumber a numbered gate.
+
+    Gate 14 (v5.1.1) verifies CI is green on the released commit. It is the one
+    gate that runs AFTER something irreversible, so it never returns non-zero —
+    but it is still a declared gate, because a step that can report a RED release
+    must be visible in `--gates` rather than a silent side effect.
+    """
     numbered = [name for name, _ in publish.GATES if not name[-1].isalpha()]
-    assert numbered == [f"Gate {i}" for i in range(14)]
+    assert numbered == [f"Gate {i}" for i in range(15)]
 
 
 def test_gate_8_is_integrity_manifest_refresh():
