@@ -436,7 +436,7 @@ def validate_model_field(frontmatter: dict[str, Any], filename: str, report: Com
     # Accept all valid model aliases and full IDs (same as skills/agents)
     if not is_valid_model(model):
         report.major(
-            f"Invalid 'model' value: {model}. Valid: sonnet, opus, haiku, inherit, default, opusplan, or full ID like claude-opus-4-6",
+            f"Invalid 'model' value: {model}. Valid: sonnet, opus, haiku, fable, inherit, default, opusplan, or full ID like claude-opus-5",
             filename,
         )
         return

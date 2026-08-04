@@ -262,6 +262,19 @@ job is to neutralize dead/example sinks, not delete features.
 removed sink call does NOT satisfy the bar; the sink call must be absent
 from the shipped bytes.
 
+**FIRST, though — check it is a shell exec at all.** SHELL_EXEC's catalog
+pattern for spawns is a bare `\bspawn\s*\(` with no receiver or language
+guard, so it can match a construct that starts no process. The known case is
+Rust IN-PROCESS concurrency — `std::thread::spawn`, `tokio::spawn`,
+`rayon::spawn`, and `s.spawn(…)` inside `thread::scope` all start a thread or
+async task in the SAME process: no shell, no `exec`, no child. The scanner
+clears these since v5.1.0 (issue #188), so you should not normally be handed
+one; if you are, **do NOT devitalize it** — there is nothing to neutralize,
+and the flagged line is often a concurrency TEST whose second thread is the
+whole proof, so removing it deletes the evidence rather than a threat. Report
+it as a scanner false positive instead. `Command::new(...).spawn()` and
+`Command::new("sh").arg("-c")` are the real thing and still fire.
+
 ---
 
 ## T5 — `eval` / `exec` of a string

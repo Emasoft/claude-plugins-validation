@@ -330,6 +330,7 @@ VALID_HOOK_EVENTS = {
     "TaskCreated",  # v2.1.84 — fires when a task is created via TaskCreate tool
     "PermissionDenied",  # v2.1.89 — fires when auto mode classifier denies a tool call
     "MessageDisplay",  # v2.1.152 — transform/hide assistant message text as displayed (hookSpecificOutput.displayContent)
+    "DirectoryAdded",  # v2.1.219 — fires after /add-dir or the SDK register_repo_root registers a working dir mid-session
 }
 
 # =============================================================================
@@ -656,9 +657,13 @@ VALID_MODELS = {"haiku", "sonnet", "opus", "fable", "inherit"}
 # - "max": Opus 4.6 legacy — still accepted, upgraded to Opus on request.
 VALID_EFFORT_VALUES = {"low", "medium", "high", "xhigh", "max"}
 
-# Regex for full model IDs like claude-opus-4-5, claude-sonnet-4-6, claude-haiku-4-5-20251001
-# Full model IDs like claude-opus-4-6, claude-sonnet-4-6[1m], etc.
-_FULL_MODEL_ID_RE = re.compile(r"^claude-(?:opus|sonnet|haiku)-\d[\w.-]*(?:\[1m\])?$")
+# Regex for full model IDs like claude-opus-5, claude-sonnet-4-6, claude-haiku-4-5-20251001.
+# The family list is ENUMERATED on purpose: a generic `\w+` would accept a hallucinated
+# `claude-gpt-4`, and rejecting that is the whole point of this check — so widen it by
+# adding a real family, never by loosening the alternation. `fable` was added for Claude
+# Fable 5 (`claude-fable-5`, CC v2.1.170); VALID_MODELS already carried the short alias,
+# so only the FULL-ID spelling was being rejected.
+_FULL_MODEL_ID_RE = re.compile(r"^claude-(?:opus|sonnet|haiku|fable)-\d[\w.-]*(?:\[1m\])?$")
 
 # Short aliases with optional [1m] suffix: opus, sonnet[1m], haiku, fable, etc.
 # `best` (model-config.md L34/L342, v2.1.205) is a first-class alias — "Fable 5

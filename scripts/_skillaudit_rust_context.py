@@ -77,6 +77,42 @@ _RUST_SHELL_PROGRAM_RE: Final[re.Pattern[str]] = re.compile(
 # An inline-shell flag `-c` / `/c` (quoted) anywhere on the line — turns a
 # `Command` into a shell invocation regardless of which program; keep firing.
 _RUST_SHELL_FLAG_RE: Final[re.Pattern[str]] = re.compile(r"""[\"'](?:-c|/c)[\"']""")
+
+# ── issue #188 — an in-process spawn is not a process spawn ──────────────
+# `std::thread::spawn` / `tokio::spawn` / `rayon::spawn` / … start a THREAD or
+# an async TASK inside the SAME process: no shell, no `exec`, no child. The
+# catalog's `\bspawn\s*\(` is aimed at `subprocess.Popen` / `child_process.spawn`
+# / `Command::spawn`, so it matches the bare token with no receiver guard and
+# every one of these is a pure FP. It is not cosmetic: the finding lands at
+# `medium` -> MINOR, and a MINOR blocks `--strict` (exit 3), so one FP gates a
+# release whose CRITICAL and MAJOR counts are both 0 — and the reporting code
+# could not be changed to satisfy it without deleting the concurrency proof the
+# test exists to make.
+#
+# PATH-QUALIFIED forms are unambiguous: the crate/module path itself names an
+# in-process executor, so the line clears on its own.
+_RUST_INPROCESS_SPAWN_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:std\s*::\s*)?thread\s*::\s*spawn\s*\("
+    r"|\btokio\s*::\s*(?:task\s*::\s*)?spawn(?:_blocking|_local)?\s*\("
+    r"|\brayon\s*::\s*spawn(?:_fifo)?\s*\("
+    r"|\b(?:async_std|smol|glommio)\s*::\s*(?:task\s*::\s*)?spawn(?:_blocking|_local)?\s*\("
+)
+
+# A SCOPED spawn (`s.spawn(...)` inside `thread::scope(|s| …)`). The receiver
+# alone proves NOTHING — `cmd.spawn()` on a `Command` is a real process spawn —
+# so this shape is cleared only with positive evidence of an enclosing scope.
+_RUST_SCOPED_SPAWN_RE: Final[re.Pattern[str]] = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*spawn\s*\(")
+
+# The scope openers that legitimise a scoped `s.spawn(` above.
+_RUST_SCOPE_OPENER_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:std\s*::\s*)?thread\s*::\s*scope\s*\("
+    r"|\bcrossbeam\s*::\s*(?:thread\s*::\s*)?scope\s*\("
+    r"|\brayon\s*::\s*(?:scope|scope_fifo|in_place_scope)\s*\("
+)
+
+# A real PROCESS indicator other than `Command::new` — a line carrying one is
+# never cleared as in-process, whatever else it looks like.
+_RUST_PROCESS_PATH_RE: Final[re.Pattern[str]] = re.compile(r"\bstd\s*::\s*process\b|\bprocess\s*::\s*Command\b")
 # A genuine Rust env-write to a reserved CLAUDE_* var (class 4 — the real
 # poisoning shape, distinct from PRINTING the var name in a help string).
 _RUST_ENV_WRITE_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:std::)?env::set_var\s*\(")
@@ -227,6 +263,46 @@ def _rust_command_chain_is_direct_exec(lines: list[str], line_idx: int) -> bool:
     return True
 
 
+def _rust_spawn_is_in_process(lines: list[str], line_idx: int) -> bool:
+    """issue #188: True iff the flagged ``spawn(`` starts a THREAD or an async
+    TASK in THIS process rather than a child process.
+
+    Two shapes, deliberately held to different standards of proof:
+
+    1. PATH-QUALIFIED (``std::thread::spawn(``, ``tokio::spawn(``,
+       ``rayon::spawn(``, ``async_std::task::spawn(``, …) — the path names an
+       in-process executor, so the line clears on its own.
+    2. SCOPED HANDLE (``s.spawn(...)`` inside ``thread::scope(|s| …)``) — the
+       receiver proves NOTHING on its own, because ``cmd.spawn()`` on a
+       ``Command`` is a genuine process spawn. Cleared ONLY when a bounded
+       look-back finds a scope opener, and never if it finds a ``Command``
+       builder first.
+
+    FN-safe in both shapes: a line carrying a real process indicator
+    (``Command::new``, ``std::process``, ``process::Command``) is never
+    cleared, so ``Command::new("sh").arg("-c").spawn()`` keeps firing.
+    """
+    line = lines[line_idx]
+    # A real process builder on the flagged line itself always wins.
+    if _RUST_COMMAND_NEW_RE.search(line) or _RUST_PROCESS_PATH_RE.search(line):
+        return False
+    # Shape 1 — unambiguous path-qualified in-process executor.
+    if _RUST_INPROCESS_SPAWN_RE.search(line):
+        return True
+    # Shape 2 — a scoped handle needs positive evidence of its scope.
+    if not _RUST_SCOPED_SPAWN_RE.search(line):
+        return False
+    for j in range(line_idx, max(-1, line_idx - _RUST_LOOKBACK_MAX - 1), -1):
+        text = lines[j]
+        # A Command builder in the window means this `.spawn()` may terminate a
+        # process chain — decline and let the #124 chain logic decide.
+        if _RUST_COMMAND_NEW_RE.search(text) or _RUST_PROCESS_PATH_RE.search(text):
+            return False
+        if _RUST_SCOPE_OPENER_RE.search(text):
+            return True
+    return False
+
+
 def _classify_shell_exec(lines: list[str], line_idx: int, match: str) -> ContextVerdict:
     """SHELL_EXEC: the issue-#71 `eval` FP plus the issue-#124 direct-exec
     `Command::new(<non-shell>)…spawn()` FP (single- AND multi-line)."""
@@ -239,6 +315,11 @@ def _classify_shell_exec(lines: list[str], line_idx: int, match: str) -> Context
         if _RUST_EVAL_IDENT_RE.search(line):
             return "safe_literal"
         return "unknown"
+    # issue #188 — an in-process thread/async-task spawn is not a process spawn.
+    # Checked BEFORE the #124 Command logic: these shapes have no `Command::new`
+    # head at all, so the chain walker below would never reach them.
+    if "spawn" in m and _rust_spawn_is_in_process(lines, line_idx):
+        return "safe_literal"
     # issue #124 class 6 — a `spawn`/`output`/`status` match. Clear ONLY a direct
     # exec of a non-shell program with NO inline-shell flag in the builder chain.
     # FN-safe: `Command::new("sh").arg("-c")…` has a shell-program literal AND a

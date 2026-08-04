@@ -490,10 +490,12 @@ def validate_model_field(frontmatter: dict[str, Any], filename: str, report: Age
         report.major(f"'model' must be a string, got {type(model).__name__}", filename)
         return
 
-    # v2.1.74+: accept short names (haiku/sonnet/opus/inherit) AND full model IDs (claude-opus-4-5)
+    # v2.1.74+: accept short names (haiku/sonnet/opus/fable/inherit) AND full model IDs (claude-opus-5).
+    # VALID_MODELS is interpolated, so this message tracks the family set automatically;
+    # only the full-ID example is spelled out and has to be kept current by hand.
     if not is_valid_model(model):
         report.major(
-            f"Invalid 'model' value: {model}. Valid: {VALID_MODELS} or full ID like claude-opus-4-6",
+            f"Invalid 'model' value: {model}. Valid: {VALID_MODELS} or full ID like claude-opus-5",
             filename,
         )
         return

@@ -197,6 +197,13 @@ HOOK_OUTPUT_EVENT_FIELDS: dict[str, frozenset[str]] = {
     "CwdChanged": frozenset({"watchPaths"}),
     # hooks.md L1765
     "FileChanged": frozenset({"watchPaths"}),
+    # v2.1.219 — DirectoryAdded. EMPTY on purpose: the docs state "DirectoryAdded
+    # hooks have no decision control" (it cannot block an add that already
+    # completed), and its event section documents INPUT fields (`directory`,
+    # `source`) only. Its two siblings above carry `watchPaths`, so the tempting
+    # move is to give this one fields too — don't; output reaches the user via
+    # the COMMON `systemMessage` field, not an event-specific key.
+    "DirectoryAdded": frozenset(),
     # hooks.md L1819
     "WorktreeCreate": frozenset({"worktreePath"}),
     # hooks.md L1860 — no specific output

@@ -1372,14 +1372,14 @@ model: "sonnet"
 
 ### MAJOR: Invalid model value
 
-**Error message**: `Invalid 'model' value: '{model}'. Valid: sonnet, opus, haiku, inherit, default, opusplan (optionally with [1m]), or full ID like claude-opus-4-6`
+**Error message**: `Invalid 'model' value: '{model}'. Valid: sonnet, opus, haiku, fable, inherit, default, opusplan (optionally with [1m]), or full ID like claude-opus-5`
 **Severity**: MAJOR
 **Source**: `validate_skill_comprehensive.py` — `validate_model_field()` (gated by the shared `is_valid_model`)
-**Root cause**: The model value is not accepted by the shared `is_valid_model` gate. Accepted forms: the short aliases `sonnet`, `opus`, `haiku`, `inherit`, `default`, `opusplan`; any of those (or a full ID) with a `[1m]` 1M-context suffix; or a full model ID like `claude-opus-4-6` / `claude-sonnet-4-5-20251001`.
+**Root cause**: The model value is not accepted by the shared `is_valid_model` gate. Accepted forms: the short aliases `sonnet`, `opus`, `haiku`, `fable`, `inherit`, `default`, `opusplan`, `best`; any of those (or a full ID) with a `[1m]` 1M-context suffix; or a full model ID like `claude-opus-5` / `claude-sonnet-4-5-20251001`.
 **Fix**: Use any accepted form, e.g.:
 ```yaml
 model: sonnet
-# also valid: opus[1m], opusplan, claude-opus-4-6
+# also valid: opus[1m], opusplan, fable, claude-opus-5
 ```
 
 ### MINOR: model: haiku less reliable
