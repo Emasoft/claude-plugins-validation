@@ -1278,8 +1278,8 @@ def validate_model_field(
     # (audit CRITICAL C1 / MAJOR M1)
     if not is_valid_model(model):
         report.major(
-            f"Invalid 'model' value: '{model}'. Valid: sonnet, opus, haiku, inherit, "
-            "default, opusplan (optionally with [1m]), or full ID like claude-opus-4-6",
+            f"Invalid 'model' value: '{model}'. Valid: sonnet, opus, haiku, fable, "
+            "inherit, default, opusplan (optionally with [1m]), or full ID like claude-opus-5",
             "SKILL.md",
             category="Frontmatter",
         )

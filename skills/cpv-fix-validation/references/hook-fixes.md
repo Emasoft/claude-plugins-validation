@@ -236,7 +236,7 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
 **Root cause**: An event name in the `"hooks"` object is not recognized by Claude Code.
 **Fix**:
 1. Check the event name for typos (names are case-sensitive)
-2. Valid event names are (all 30 — 29 official + Setup legacy WARNING-only; this list is the documentation mirror of `VALID_HOOK_EVENTS` in `scripts/cpv_validation_common.py`, the single source of truth):
+2. Valid event names are (all 31 — 30 official + Setup legacy WARNING-only; this list is the documentation mirror of `VALID_HOOK_EVENTS` in `scripts/cpv_validation_common.py`, the single source of truth):
    - `PreToolUse`
    - `PostToolUse`
    - `PostToolUseFailure`
@@ -267,6 +267,7 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
    - `CwdChanged` (v2.1.83)
    - `FileChanged` (v2.1.83)
    - `MessageDisplay` (v2.1.152 — transform/hide assistant message text as displayed via `hookSpecificOutput.displayContent`)
+   - `DirectoryAdded` (v2.1.219 — fires after `/add-dir` or the SDK `register_repo_root` control request registers a working directory mid-session. TAKES matchers (`slash_command`, `register_repo_root`), and has NO decision control — it cannot block an add that has already completed)
 3. **Wrong**: `"preToolUse"`, `"pre_tool_use"`, `"PreTooluse"`
 4. **Correct**: `"PreToolUse"`
 5. **New: Fuzzy matching** — the validator now suggests corrections for misspelled events. If you see `did you mean 'PreToolUse'?` in the error message, it detected a close match. Common typos:
@@ -459,7 +460,8 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
 **Severity**: INFO
 **Root cause**: A matcher is specified for an event that does not support matchers. The matcher will be silently ignored.
 **Fix**:
-1. Events that do NOT support matchers (mirrors `EVENTS_WITHOUT_MATCHERS` in `validate_hook.py`): `UserPromptSubmit`, `Stop`, `TeammateIdle`, `TaskCompleted`, `TaskCreated`, `WorktreeCreate`, `WorktreeRemove`, `CwdChanged`, `PostToolBatch`
+1. Events that do NOT support matchers (all 10 — mirrors `EVENTS_WITHOUT_MATCHERS` in `validate_hook.py`): `UserPromptSubmit`, `Stop`, `TeammateIdle`, `TaskCompleted`, `TaskCreated`, `WorktreeCreate`, `WorktreeRemove`, `CwdChanged`, `PostToolBatch`, `MessageDisplay`
+   - **`DirectoryAdded` is NOT in this list** — it TAKES matchers (`slash_command`, `register_repo_root`). Most recently-added events are matcher-less, so the pattern invites adding it here; doing so would flag a correct hook that scopes on how the directory was added.
 2. Remove the `"matcher"` field or set it to `""` for clarity:
    ```json
    {

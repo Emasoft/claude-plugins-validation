@@ -340,6 +340,12 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         "axScreenReader",  # v2.1.208 — opt-in plain-text rendering for screen readers
         "vimInsertModeRemaps",  # v2.1.208 — two-key insert-mode sequences (e.g. `jj` -> Esc)
         "emojiCompletionEnabled",  # v2.1.217 — toggle `:shortcode:` emoji autocomplete in the prompt input
+        # v2.1.219 — advisory Dynamic workflow size guideline, settable from any settings file.
+        # Its release-mate `sandbox.network.strictAllowlist` is deliberately NOT listed: this
+        # set is TOP-LEVEL keys only (`sandbox` is already here, and nested keys are modelled
+        # solely by the *_NESTED_KEYS tuple sets), so a bare `strictAllowlist` entry would
+        # excuse a genuine typo at the top level.
+        "workflowSizeGuideline",
     }
 )
 

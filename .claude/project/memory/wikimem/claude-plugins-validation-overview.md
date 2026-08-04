@@ -49,6 +49,10 @@ CPV, and the plugin's own tests before anything is pushed.
   (tool-gated on `Skill`/`disallowedTools`, not the `skills:` list), the two preload
   entries that silently do nothing, and the three canonical architectures
   (ALL-IN-ONE / ONE-FOR-ALL / PLUGIN-OMNI) with the never-inline rule.
+- [[hook-event-registration-is-a-two-half-contract]] — a Claude Code spec sync that adds a
+  hook event must edit BOTH `VALID_HOOK_EVENTS` and `HOOK_OUTPUT_EVENT_FIELDS`; one
+  invariant test is all that couples them, and an empty output schema must be a decision
+  with a doc citation, never the `.get(..., frozenset())` default by accident.
 - (add component pages here as they are written — the validator core, the security /
   taint surface, the canonical publish pipeline, the menu + agent dispatch architecture)
 
