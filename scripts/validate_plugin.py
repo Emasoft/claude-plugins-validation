@@ -8145,6 +8145,15 @@ def main() -> int:
 
     check_remote_execution_guard()
 
+    # Bound the whole run (#190). Armed here rather than around a specific phase
+    # because the phases that bound themselves are not the problem — the hazard
+    # is a wait nobody has thought to bound yet, and only a budget over the run
+    # as a whole covers those. Idempotent, so the remote_validation wrapper
+    # arming it first simply wins.
+    from cpv_watchdog import arm as _arm_watchdog  # noqa: PLC0415
+
+    _arm_watchdog()
+
     from cpv_validation_common import launcher_epilog
 
     parser = argparse.ArgumentParser(
