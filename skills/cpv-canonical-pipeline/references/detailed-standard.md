@@ -85,8 +85,17 @@ git config core.hooksPath git-hooks
 ## Release Pipeline (`scripts/publish.py`)
 
 ### Gate mode (`--gate`)
-Called by the pre-push hook. Runs quality checks only, no version bump or push:
-- **G1**: Version bump check (local vs remote)
+Runs quality checks only, no version bump or push. Works **standalone** (a local
+pre-release check) AND as the pre-push hook's delegate — the two contexts differ
+only in what G0/G1 enforce (issue cpv#192):
+- **G0**: Orchestrator check — applies **only while a push is in flight**
+  (git-push ancestry). A standalone run pushes nothing, so there is nothing for
+  G0 to protect and it is skipped with a note; a direct `git push` still
+  carries push ancestry and is still BLOCKED. Undeterminable ancestry fails
+  CLOSED (treated as a push).
+- **G1**: Version bump check (local vs remote) — same principle: blocks in push
+  context, informational note when standalone (pre-bump is the normal state
+  before a release; the pipeline bumps later).
 - **G2**: Lint (`ruff check scripts/`)
 - **G3**: Validate (`--strict`, blocks on CRITICAL/MAJOR/MINOR/NIT)
 - **G4**: Tests (`pytest tests/ -x -q`)

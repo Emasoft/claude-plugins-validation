@@ -1650,9 +1650,13 @@ def gen_publish_py(p: PluginParams, profile: str = PROFILE_STANDARD) -> str:
 """Unified publish pipeline: bypass-guard -> lint -> validate (remote CPV) -> test -> bump -> badge -> changelog -> commit -> push -> release.
 
 Modes:
-  --gate                  Pre-push gate: orchestrator check + lint (ruff/jscpd/
-                          actionlint/mypy) + validate + tests only (no bump/push).
-                          Called by git-hooks/pre-push automatically.
+  --gate                  Quality gate: lint (ruff/jscpd/actionlint/mypy) +
+                          validate + tests only (no bump/push). Runs STANDALONE
+                          for a local pre-release check. When invoked by the
+                          pre-push hook it ALSO enforces that the push was
+                          started by this script (G0) and that the version was
+                          bumped (G1) — those two protect a push, so they only
+                          apply while one is in flight (issue cpv#192).
   --install-hook          Install git-hooks/pre-push into .git/hooks/ and set core.hooksPath.
   --install-branch-rules  Apply the cpv-branch-rules GitHub ruleset to the origin
                           (server-side CI enforcement — run once after first push).
@@ -2404,28 +2408,73 @@ def _called_by_publish_orchestrator(root: Path) -> bool:
     return False
 
 
+def _push_in_flight() -> bool | None:
+    """Is a `git push` actually being attempted right now? (issue cpv#192)
+
+    Three-valued on purpose:
+
+    * ``True``  — a ``git … push`` (or the pre-push hook itself) is an
+      ancestor: we are running INSIDE a push. G0/G1 must be enforced.
+    * ``False`` — ancestry is visible and carries no push: a developer ran
+      ``publish.py --gate`` standalone. No push exists for G0/G1 to protect,
+      so the quality gates run and nothing is blocked.
+    * ``None``  — ancestry could not be determined (``ps`` failed). Callers
+      MUST fail closed and treat this like ``True``: an undetectable ancestry
+      must never become the bypass G0 exists to prevent.
+
+    The regex deliberately also matches the hook script's own path
+    (``.git/hooks/pre-push``) — that process IS push context. A false
+    positive (e.g. a wrapper shell whose cmdline mentions ``git push``)
+    degrades to enforcing G0, i.e. fails closed.
+    """
+    ancestry = _get_process_ancestry()
+    if not ancestry:
+        return None
+    return any(re.search(r"\bgit\b.*\bpush\b", cmdline) for _pid, cmdline in ancestry)
+
+
 def run_gate(root: Path) -> int:
-    """Pre-push gate: blocks on any quality issue. Returns 0 if clean."""
+    """Quality gate. Blocks on any quality issue; returns 0 if clean.
+
+    G0 (orchestrator) and G1's version-bump block protect a PUSH, so they are
+    enforced only while one is in flight; a standalone ``--gate`` run gets the
+    quality checks the flag advertises (issue cpv#192).
+    """
     cprint(f"\n{BOLD}Pre-push gate checks{NC}\n")
 
     # Gate 0: Orchestrator check — only publish.py may trigger a push.
     # Prevents a user from running `git push` directly and bypassing the
     # version-bump / changelog / tag / release pipeline. Uses process
     # ancestry (non-spoofable), NOT env vars.
+    #
+    # Enforced ONLY when a push is actually in flight: G0's invariant is "no
+    # PUSH bypasses the pipeline", not "no checks may run". A standalone
+    # `--gate` pushes nothing, so blocking it defended nothing and told the
+    # user they attempted an action they never took (issue cpv#192). A direct
+    # `git push` still carries git-push ancestry and is still blocked.
     cprint(f"{BLUE}[G0] Checking push orchestrator...{NC}")
-    if not _called_by_publish_orchestrator(root):
+    push_ctx = _push_in_flight()
+    if push_ctx is False:
+        cprint(f"  {YELLOW}No push in flight — standalone gate run; orchestrator check not applicable.{NC}")
+    elif not _called_by_publish_orchestrator(root):
+        # push_ctx is True (inside a pre-push hook) or None (ancestry
+        # unknown — fail CLOSED: treat as a push we cannot vouch for).
         cprint("")
         cprint(f"  {RED}========================================{NC}")
         cprint(f"  {RED}  BLOCKED: Direct push not allowed{NC}")
-        cprint(f"  {RED}  This pre-push hook only accepts pushes{NC}")
-        cprint(f"  {RED}  initiated by scripts/publish.py.{NC}")
-        cprint(f"  {RED}  Run one of:{NC}")
+        cprint(f"  {RED}  This push was not started by{NC}")
+        cprint(f"  {RED}  scripts/publish.py, which must drive{NC}")
+        cprint(f"  {RED}  every push (bump/changelog/tag/release).{NC}")
+        if push_ctx is None:
+            cprint(f"  {RED}  (process ancestry unavailable — failing closed){NC}")
+        cprint(f"  {RED}  To release, run one of:{NC}")
         cprint(f"  {RED}    uv run python scripts/publish.py --patch{NC}")
         cprint(f"  {RED}    uv run python scripts/publish.py --minor{NC}")
         cprint(f"  {RED}    uv run python scripts/publish.py --major{NC}")
         cprint(f"  {RED}========================================{NC}")
         return 1
-    cprint(f"  {GREEN}Orchestrated by publish.py.{NC}")
+    else:
+        cprint(f"  {GREEN}Orchestrated by publish.py.{NC}")
 
     # Gate 1: Version bump check — local vs remote
     # Resolves origin/HEAD dynamically so the gate works on both `main` and
@@ -2473,8 +2522,17 @@ def run_gate(root: Path) -> int:
         if remote_ver is None:
             cprint(f"  {YELLOW}No remote plugin.json found (first push?) — skipping version-bump check.{NC}")
         elif local_ver == remote_ver:
-            cprint(f"  {RED}BLOCKED: Version not bumped — local {local_ver} == {matched_ref} {remote_ver}{NC}")
-            return 1
+            # Same principle as G0 (issue cpv#192): "version must be bumped"
+            # is an invariant about a PUSH. During a real publish the bump has
+            # already happened when the hook fires, so hitting this in push
+            # context means a bypass — block. Standalone, pre-bump is the
+            # NORMAL state (the pipeline bumps later); blocking would just
+            # recreate the G0 complaint one gate down.
+            if push_ctx is False:
+                cprint(f"  {YELLOW}Version not bumped yet ({local_ver} == {matched_ref}) — fine for a standalone check; the publish pipeline bumps before pushing.{NC}")
+            else:
+                cprint(f"  {RED}BLOCKED: Version not bumped — local {local_ver} == {matched_ref} {remote_ver}{NC}")
+                return 1
         else:
             cprint(f"  {GREEN}Version bump OK: {remote_ver} → {local_ver} (via {matched_ref}){NC}")
 
