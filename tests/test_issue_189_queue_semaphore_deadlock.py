@@ -49,13 +49,33 @@ SEM_MAX = _multiprocessing.SemLock.SEM_VALUE_MAX
 
 
 def test_the_ceiling_that_causes_this_is_real():
-    """Pin the premise. If this ever stops being true, the rest is theatre."""
+    """Pin the premise. If this ever stops being true, the rest is theatre.
+
+    PLATFORM-HONEST, learned the expensive way: the first draft asserted
+    `SEM_MAX < 86222` unconditionally, which is a fact about MACOS (SEM_VALUE_MAX
+    is 32767 there). On Linux SEM_VALUE_MAX is INT_MAX, the cap is unreachable,
+    and the assert broke CI on the very release that shipped the fix. The
+    universal premise is only that the queue's bound IS the semaphore cap; the
+    "a real plugin tree exceeds it" premise belongs to the platform the reporter
+    hit it on.
+    """
     assert SEM_MAX == mp.get_context("spawn").Queue()._maxsize
-    assert SEM_MAX < 86222, "the reporter's tree exceeded the cap; that IS the bug"
+    if sys.platform == "darwin":
+        assert SEM_MAX < 86222, "the reporter's tree exceeded the cap; that IS the bug"
+    else:
+        # Linux: the cap exists but is astronomically high — the #189 overflow
+        # is not reachable there, which is WHY it was only ever reported on mac.
+        assert SEM_MAX >= 2**31 - 1
 
 
+@pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="SEM_VALUE_MAX is INT_MAX on Linux — overflowing it would need 2^31 puts; "
+    "the first draft tried exactly that in CI and the job died at its 20-minute "
+    "timeout after building two billion work items",
+)
 def test_unbounded_put_past_the_cap_blocks_forever():
-    """CONTROL — reproduce the original defect directly.
+    """CONTROL — reproduce the original defect directly (macOS, cap=32767).
 
     This is what `supervised_scan` used to do: fill the queue with every item
     before any consumer exists. It must hang, or the fix is a fix for nothing.
@@ -131,8 +151,16 @@ def test_scan_over_the_cap_terminates_and_scans_every_file(tmp_path):
 
     The whole point. Every file must come back — terminating by dropping the
     overflow would pass a termination test while silently reducing coverage.
+
+    The item count is CAPPED at the macOS semaphore ceiling, not derived from
+    the local platform's: on Linux SEM_VALUE_MAX is INT_MAX and the first draft
+    computed `SEM_MAX + 25` there — 2,147,483,672 paths — which silently ate 18
+    minutes of a CI shard until the job's 20-minute timeout killed the runner.
+    On macOS 32792 items IS over the cap (the regression proof); on Linux the
+    same count cannot cross the cap but still drives the feeder/worker path at
+    full load, which is the strongest platform-safe assertion available there.
     """
-    files = [str(tmp_path / f"f{i}.txt") for i in range(SEM_MAX + 25)]
+    files = [str(tmp_path / f"f{i}.txt") for i in range(min(SEM_MAX, 32767) + 25)]
     for p in files[:5]:
         Path(p).write_text("x", encoding="utf-8")
 
