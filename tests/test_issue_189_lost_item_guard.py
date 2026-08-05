@@ -123,3 +123,75 @@ class TestScanTerminatesAndReportsLostFiles:
         )
         assert len(results) == 3
         assert all(not r.error for r in results), "a healthy scan must stay error-free"
+
+
+# ---------------------------------------------------------------------------
+# The REAL reproduction — failure injected INSIDE the get()-to-heartbeat window
+# ---------------------------------------------------------------------------
+# The tests above do NOT exercise the race: `heartbeat[wid] = idx` is written
+# BEFORE `scan_func` runs, so a scanner that dies takes the already-handled
+# WorkerDied path (verified — they pass with the guard disabled).
+#
+# The window is only reachable from INSIDE `task_q.get()`. The queue unpickles
+# the item there, so an item whose `__setstate__` kills the process dies with the
+# item already consumed and no heartbeat published — precisely the state that
+# strands a file. `supervised_scan` documents `file_list` as "paths or
+# work-units; forwarded verbatim", so this needs no production-code hook.
+
+
+class _DiesOnUnpickle:
+    """A work-item that kills its worker while being unpickled inside `get()`.
+
+    `os._exit` (not `sys.exit`) so the child cannot unwind, flush, or record
+    anything — the same abruptness as the SIGKILL this models.
+    """
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def __reduce__(self):  # type: ignore[no-untyped-def]
+        return (_revive_and_die, (self.name,))
+
+
+def _revive_and_die(name: str):  # type: ignore[no-untyped-def]
+    import os as _os
+
+    _os._exit(1)
+
+
+def _scan_by_name(item) -> list:  # type: ignore[no-untyped-def]
+    return []
+
+
+class TestTheActualRace:
+    def test_scan_terminates_when_an_item_is_lost_before_its_heartbeat(self) -> None:
+        """The load-bearing test: WITHOUT the guard this never returns.
+
+        Passing means `supervised_scan` returned at all. The suite's wall-clock
+        kill is what fails it if the guard regresses.
+        """
+        items = [_DiesOnUnpickle("a"), _DiesOnUnpickle("lost"), _DiesOnUnpickle("b")]
+        results = sup.supervised_scan(
+            items,
+            _scan_by_name,
+            n_workers=2,
+            poll_interval_s=0.05,
+            hard_kill_after_s=20.0,
+        )
+        assert len(results) == len(items), "every item must be accounted for"
+
+    def test_every_lost_item_is_reported_as_an_error(self) -> None:
+        """FN-safety: a lost item must never come back as scanned-and-clean."""
+        items = [_DiesOnUnpickle("a"), _DiesOnUnpickle("b")]
+        results = sup.supervised_scan(
+            items,
+            _scan_by_name,
+            n_workers=2,
+            poll_interval_s=0.05,
+            hard_kill_after_s=20.0,
+        )
+        assert results, "the scan must return results, not hang"
+        assert all(r.error for r in results), (
+            "an item no worker could report on must carry an error — silence would "
+            "read as 'scanned, clean'"
+        )
