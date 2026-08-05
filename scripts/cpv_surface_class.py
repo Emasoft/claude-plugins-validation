@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Single source of truth for "what KIND of surface is this path?" — issue #191.
 
 Ten separately-closed false-positive issues shared one root cause: in every case
