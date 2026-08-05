@@ -115,6 +115,17 @@ class TestSkillAuditNativeModule:
             # regex walk doesn't see it; if a future refactor moves
             # it to module scope, allowlist it here.
             "cpv_parallel_runner",
+            # ``cpv_surface_class`` (#191) — CPV's own path classifier, the
+            # single definition of "what KIND of surface is this file?" that
+            # this module and ``_skillaudit_markdown_context`` previously
+            # duplicated (and diverged on, into a real bypass). First-party and
+            # stdlib-only: it imports ``typing`` and nothing else, so the
+            # supply-chain surface this rule protects stays empty. Enforced,
+            # not asserted — ``test_surface_class_module_imports_only_stdlib``
+            # in tests/test_issue_191_surface_class_ssot.py fails if anything
+            # non-stdlib is ever added to it, so this entry cannot become a
+            # laundering route for a third-party dep.
+            "cpv_surface_class",
         }
         import re as _re
 

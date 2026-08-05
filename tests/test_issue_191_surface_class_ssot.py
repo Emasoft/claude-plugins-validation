@@ -31,6 +31,7 @@ today.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -154,6 +155,24 @@ def test_instruction_loadable_basenames_are_never_documentation(name, where):
 def test_unknown_and_executable_surfaces_are_not_documentation(path):
     """Fail-closed: anything not positively identified as docs stays live."""
     assert surface.is_documentation_only_path(path) is False
+
+
+def test_surface_class_module_imports_only_stdlib():
+    """The SSOT must stay stdlib-only, or it becomes a supply-chain hole.
+
+    `cpv_skillaudit_native` carries an iron rule: zero third-party imports, so
+    its supply-chain surface is empty. Centralising the classifier meant adding
+    `cpv_surface_class` to that module's import allowlist — which is only safe
+    while this module is itself clean. Without this test the allowlist entry
+    would be a laundering route: add `requests` here and the native scanner
+    silently inherits it through an entry that was justified on the grounds that
+    it could not.
+    """
+    body = (SCRIPTS / "cpv_surface_class.py").read_text(encoding="utf-8")
+    allowed = {"__future__", "typing"}
+    for match in re.finditer(r"^(?:from|import)\s+([A-Za-z_][\w.]*)", body, re.MULTILINE):
+        head = match.group(1).split(".")[0]
+        assert head in allowed, f"cpv_surface_class must stay stdlib-only, found '{head}'"
 
 
 def test_empty_path_is_neither():
