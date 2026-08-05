@@ -333,8 +333,13 @@ class TestFinding5CheckTokenLimit:
         assert str(est - 1) in msg
         assert "Description" in msg
         assert "shorten it" in msg
-        # The method tier ("bpe" by default) is surfaced for debuggability.
-        assert "bpe" in msg
+        # The method is surfaced for debuggability — since issue #193 as the
+        # estimator's full detail line (raw o200k count + the x1.3 factor),
+        # because the bare tier name "bpe estimate" read as a raw BPE count
+        # and sent a reporter reverse-engineering a chars/3 divisor that
+        # never existed.
+        assert "o200k_base BPE (" in msg
+        assert "x1.3 Claude-correction" in msg
 
     def test_empty_text_returns_false_no_finding(self) -> None:
         """Empty text short-circuits to no finding regardless of the limit."""

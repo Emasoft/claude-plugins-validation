@@ -48,7 +48,7 @@ name: pdf-processing
 | **Type** | string |
 | **Required** | Yes |
 | **Min Length** | 20 characters (recommended) |
-| **Max Length** | 200 tokens (MAJOR; bpe estimate) — TRDD-021250b5; was 1024 chars hard / <200 chars recommended |
+| **Max Length** | 200 estimated Claude tokens (MAJOR; o200k BPE x1.3 Claude-correction, disclosed in the finding — issue #193) — TRDD-021250b5; was 1024 chars hard / <200 chars recommended |
 | **Quality** | Must describe WHAT and WHEN to use |
 
 **Example**:

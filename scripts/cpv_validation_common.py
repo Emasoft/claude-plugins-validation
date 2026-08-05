@@ -6098,8 +6098,20 @@ def check_token_limit(
 
     est = estimate_tokens(text)
     if est.tokens > max_tokens:
+        # The finding must SHOW ITS WORK (issue #193). The old wording — "bpe
+        # estimate" — asserted a precision the number does not have: the count
+        # is o200k BPE x1.3 Claude-correction (Claude's tokenizer is not
+        # public; it runs ~20-25% over o200k, and the margin keeps the gate
+        # conservative). A reporter measured their file against cl100k, got a
+        # number 35% lower, and reasonably concluded the gate was chars/3 —
+        # the label, not the method, caused an hour of misdirected reverse
+        # engineering. est.detail carries the raw count and the factor, and
+        # the char count is the measured input; printing both turns that
+        # investigation into a glance. The estimator and the limits are
+        # unchanged — this discloses the method, it does not weaken the gate.
         report.major(
-            f"{field_label} is ~{est.tokens} tokens (limit {max_tokens}; {est.method} estimate). {advice}",
+            f"{field_label} is ~{est.tokens} estimated Claude tokens "
+            f"(limit {max_tokens}; {len(text)} chars; {est.detail}). {advice}",
             file,
         )
         return True
