@@ -4842,6 +4842,90 @@ def _normalise_scan_result(raw_findings: list[dict[str, Any]], files_scanned: in
 # ────────────────────────────────────────────────────────────────────────
 
 
+# ────────────────────────────────────────────────────────────────────────
+# Audit-consent REGISTRY (issue #194)
+# ────────────────────────────────────────────────────────────────────────
+#
+# The recordable-review-verdict half of the issue-#101 informed-consent policy.
+# The #101 sentinel is fence-anchored, so content that cannot host a sentinel —
+# a rule TABLE ROW in a verbatim-mirrored governance doc, threat-model prose in
+# an instruction-loadable references/ file — had NO honest path through
+# ``--strict``: its findings demote to NIT ("needs review") and the review's
+# conclusion was unrepresentable, making "needs review" a terminal blocking
+# state (issue #194).
+#
+# A plugin may therefore record the review verdict in
+# ``<plugin-root>/.cpv-audit-consent.json``:
+#
+#   {"version": 1, "consents": [
+#     {"file": "skills/x/references/RULES.md",       # plugin-relative, posix
+#      "ruleId": "A2A_CROSS_AGENT_INJECT",
+#      "lineSha256": "<sha256 hex of line.strip()[:200]>",
+#      "reason": "R42.1 rule text DESCRIBES the forbidden attack"}]}
+#
+# Safety properties, each deliberate and each pinned by tests:
+#   * ONLY an already-DEMOTED finding can be consented (NIT → non-blocking
+#     WARNING, still visible, marked "consented"). A live/keep finding —
+#     execution-class or otherwise — is UNAFFECTED by any registry entry, so
+#     the registry can never hide a real threat, only un-block a reviewed
+#     false positive.
+#   * The hash pins the EXACT flagged line (the finding's own ``lineContent``
+#     recipe: ``line.strip()[:200]``). Any edit to the line invalidates the
+#     consent and the finding blocks again.
+#   * Fail-closed: a missing, unreadable, or malformed registry consents to
+#     NOTHING (findings keep blocking). A malformed single entry is skipped.
+#   * Self-incriminating, like the #101 sentinel: the registry names the rule
+#     and the reason in a committed file — a malicious author gains nothing.
+_AUDIT_CONSENT_REGISTRY_BASENAME: str = ".cpv-audit-consent.json"
+
+
+def _load_audit_consent_registry(plugin_root: Path) -> dict[tuple[str, str, str], str]:
+    """Load ``.cpv-audit-consent.json`` → {(rel_file, ruleId, lineSha256): reason}.
+
+    Fail-closed by construction: every failure mode (absent file, unreadable,
+    non-JSON, wrong shape, malformed entry) yields an EMPTY registry or skips
+    the entry — never an exception, never a permissive default.
+    """
+    reg_path = plugin_root / _AUDIT_CONSENT_REGISTRY_BASENAME
+    try:
+        raw = json.loads(reg_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    consents: dict[tuple[str, str, str], str] = {}
+    entries = raw.get("consents")
+    if not isinstance(entries, list):
+        return {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        file_rel = entry.get("file")
+        rule_id = entry.get("ruleId")
+        digest = entry.get("lineSha256")
+        if not (isinstance(file_rel, str) and isinstance(rule_id, str) and isinstance(digest, str)):
+            continue
+        key = (Path(file_rel).as_posix(), rule_id, digest.strip().lower())
+        consents[key] = str(entry.get("reason", ""))
+    return consents
+
+
+def _consent_for_finding(
+    consents: dict[tuple[str, str, str], str],
+    rel: str,
+    rule_id: str,
+    line_content: str,
+) -> str | None:
+    """Return the recorded reason iff this finding's (file, rule, content hash)
+    has a consent entry; None otherwise. The hash input is the finding's own
+    ``lineContent`` verbatim — the same ``line.strip()[:200]`` the scanner
+    recorded — so consent author and scanner share one recipe."""
+    if not consents or not line_content:
+        return None
+    digest = hashlib.sha256(line_content.encode("utf-8")).hexdigest()
+    return consents.get((Path(rel).as_posix(), rule_id, digest))
+
+
 def report_findings(
     result: SkillAuditScanResult,
     plugin_path: Path,
@@ -4864,6 +4948,7 @@ def report_findings(
         return 1
 
     appended = 0
+    consents = _load_audit_consent_registry(plugin_path)
     for finding in result.findings:
         line = finding.line_number
         rel = _relativise(finding.file_path, plugin_path)
@@ -4875,6 +4960,22 @@ def report_findings(
         # data_exfiltration, prompt_injection, supply_chain, etc.).
         category = finding.category or "unknown"
         is_demoted = bool(finding.raw.get("demoted"))
+        # Issue #194 — a DEMOTED finding with a matching consent-registry entry
+        # emits as a visible, NON-blocking WARNING marked "consented". Gated on
+        # ``is_demoted`` FIRST so a live/keep finding can never be consented
+        # away, and on the report actually exposing ``warning`` (else fall
+        # through to the blocking path — fail-closed, never fail-permissive).
+        if is_demoted:
+            reason = _consent_for_finding(
+                consents, rel, finding.rule_id, str(finding.raw.get("lineContent", ""))
+            )
+            warn_method = getattr(report, "warning", None)
+            if reason is not None and callable(warn_method):
+                consent_prefix = f"⚠ [skillaudit:{category} {finding.rule_id}] (demoted, consented)"
+                consent_note = f" [consent: {reason}]" if reason else ""
+                warn_method(f"{consent_prefix} {finding.message}{consent_note}".strip(), rel, line)
+                appended += 1
+                continue
         # Demoted matches get a ⚠ marker so reviewers (and downstream
         # security agents) see they need disambiguation.
         prefix = f"[skillaudit:{category} {finding.rule_id}]"
