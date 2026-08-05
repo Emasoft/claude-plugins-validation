@@ -36,7 +36,6 @@ sys.path.insert(0, str(SCRIPTS))
 
 import cpv_watchdog  # noqa: E402
 
-
 # A child that blocks the MAIN thread on a lock nobody will ever release — the
 # shape the reporter sampled (`__psynch_cvwait`, 3317/3317 samples).
 _BLOCK_FOREVER = """

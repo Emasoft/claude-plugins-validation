@@ -40,14 +40,6 @@ from __future__ import annotations
 import re
 from typing import Final, Literal
 
-from cpv_surface_class import (  # type: ignore[import-not-found]
-    DOC_ONLY_BASENAMES,
-    DOC_ONLY_DIR_PREFIXES,
-    INSTRUCTION_LOADABLE_BASENAMES,
-    is_documentation_only_path,
-    is_instruction_loadable_path,
-)
-
 from _skillaudit_shell_context import (  # type: ignore[import-not-found]
     _cmdsub_is_safe_data_command,
     _is_launchagent_removal,
@@ -55,6 +47,13 @@ from _skillaudit_shell_context import (  # type: ignore[import-not-found]
     _pipe_to_text_processor,
     _reads_sensitive_path,
     _shell_match_lacks_write_intent,
+)
+from cpv_surface_class import (  # type: ignore[import-not-found]
+    DOC_ONLY_BASENAMES,
+    DOC_ONLY_DIR_PREFIXES,
+    INSTRUCTION_LOADABLE_BASENAMES,
+    is_documentation_only_path,
+    is_instruction_loadable_path,
 )
 
 ContextVerdict = Literal["safe_literal", "safe_doc", "code_fence_neutral", "unknown"]
