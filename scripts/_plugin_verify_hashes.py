@@ -53,6 +53,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -112,6 +113,39 @@ def _read_local_plugin_version(plugin_root: Path) -> str | None:
         return str(v) if isinstance(v, str) else None
     except (OSError, json.JSONDecodeError):
         return None
+
+
+# A plugin-cache install lives at <cache>/<marketplace>/<plugin>/<version>/, so a
+# sibling of plugin_root is another cached version ONLY in that layout. In a dev
+# checkout plugin_root.parent is an arbitrary WORKSPACE, and without the two
+# gates below its unrelated sibling dirs (reports/, docs_dev/, thoughts/, ...)
+# were printed as runnable `python3 .../remote_validation.py` recovery commands
+# for launcher files that do not exist — in directories agents routinely write
+# to, so the hint was both wrong and a place a planted script could be endorsed.
+_VERSION_DIR_RE = re.compile(r"\d+(?:\.\d+)+")
+
+
+def _discover_sibling_cached_versions(plugin_root: Path) -> list[Path]:
+    """Sibling dirs that are REAL cached versions of this plugin, newest first.
+
+    A sibling qualifies only when its NAME is a dotted numeric version AND it
+    actually ships scripts/remote_validation.py — the hint must never suggest
+    running a launcher whose existence was not verified.
+    """
+    out: list[Path] = []
+    try:
+        for p in plugin_root.parent.iterdir():
+            if (
+                p.is_dir()
+                and p.name != plugin_root.name
+                and _VERSION_DIR_RE.fullmatch(p.name)
+                and (p / "scripts" / "remote_validation.py").is_file()
+            ):
+                out.append(p)
+    except OSError:
+        return []
+    out.sort(key=lambda p: tuple(int(x) for x in p.name.split(".")), reverse=True)
+    return out
 
 
 def _cache_path_for_version(version: str | None) -> Path:
@@ -433,31 +467,25 @@ def verify_self_integrity(
             file=sys.stderr,
         )
         # Auto-discover sibling cached versions and print exact commands.
-        try:
-            cache_root = plugin_root.parent
-            siblings = sorted(
-                (p for p in cache_root.iterdir() if p.is_dir() and p.name != plugin_root.name),
-                reverse=True,
+        # Only verified real installs qualify (see _discover_sibling_cached_versions).
+        siblings = _discover_sibling_cached_versions(plugin_root)
+        current_version = _read_local_plugin_version(plugin_root) or "?"
+        if siblings:
+            print(
+                f"     You have these other cached versions next to v{current_version}:",
+                file=sys.stderr,
             )
-            current_version = _read_local_plugin_version(plugin_root) or "?"
-            if siblings:
+            for sib in siblings[:5]:
+                sib_launcher = sib / "scripts" / "remote_validation.py"
                 print(
-                    f"     You have these other cached versions next to v{current_version}:",
+                    f'       python3 "{sib_launcher}" <subcommand> <args>',
                     file=sys.stderr,
                 )
-                for sib in siblings[:5]:
-                    sib_launcher = sib / "scripts" / "remote_validation.py"
-                    print(
-                        f'       python3 "{sib_launcher}" <subcommand> <args>',
-                        file=sys.stderr,
-                    )
-            else:
-                print(
-                    "     (no sibling cached versions found — you only have this one)",
-                    file=sys.stderr,
-                )
-        except OSError:
-            pass
+        else:
+            print(
+                "     (no sibling cached versions found — you only have this one)",
+                file=sys.stderr,
+            )
 
         print(
             "\n  2. LEGITIMATE LOCAL MODIFICATIONS (CPV development / fork).\n"
