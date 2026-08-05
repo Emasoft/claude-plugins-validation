@@ -394,7 +394,8 @@ description: "Analyzes CSV files and generates summary reports."
 
 ### MAJOR: Description exceeds maximum length
 
-**Error message**: `'description' is ~N tokens (limit 200; bpe estimate). Tighten to a focused sentence...`
+**Error message**: `'description' is ~N estimated Claude tokens (limit 200; N chars; o200k_base BPE (N tokens) x1.3 Claude-correction, rounded up). Tighten to a focused sentence...`
+(The count is o200k BPE with a deliberate x1.3 Claude-correction — Claude's tokenizer is not public and runs ~20-25% over o200k, so the gate errs strict. Comparing the number against `tiktoken`/cl100k will read ~30% "high"; that is the disclosed margin, not a bug — issue #193.)
 **Severity**: MAJOR
 **Source**: `validate_skill_comprehensive.py` — `validate_description_field()`
 **Root cause**: Description exceeds the 200-token limit (TRDD-021250b5; was a 1024-character hard limit). The limit is now token-based and non-negotiable — there is no per-plugin override.
