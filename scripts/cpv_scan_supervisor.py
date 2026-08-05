@@ -58,6 +58,7 @@ import json
 import os
 import queue as _queue
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -494,8 +495,37 @@ def supervised_scan(
     heartbeat = manager.dict()
     results = manager.dict()
     task_q: Any = ctx.Queue()
-    for item in pending:
-        task_q.put(item)
+
+    # The feed CANNOT be done inline here, and this is the #189 deadlock.
+    #
+    # A default ``mp.Queue`` is NOT unbounded: its slot semaphore is capped at
+    # ``SemLock.SEM_VALUE_MAX`` (32767 on macOS and Linux), so ``put()`` BLOCKS
+    # once that many items are outstanding. Feeding inline — before any worker
+    # exists — meant nothing could ever drain it, so a plugin with more than
+    # 32767 scannable files wedged the parent HERE, permanently, with its feeder
+    # thread stuck in ``connection._send`` on a full pipe. Deterministic, which
+    # is why the reporter got a clean bisect while every probe under 32767 files
+    # completed happily and "disproved" it.
+    #
+    # 86222 files is not hypothetical: that is one real plugin's working tree
+    # (a Rust build dir, a .venv, caches). The fix is ordering plus concurrency —
+    # workers are spawned FIRST so there is a consumer, and the feed runs on a
+    # thread so a full queue can never stop the supervision loop from draining
+    # results, respawning dead workers, or enforcing the timeout. Feeding on the
+    # main thread would deadlock even WITH consumers: a blocked put() means the
+    # loop that drains the queue never runs.
+    feeder_stop = threading.Event()
+
+    def _feed() -> None:
+        for item in pending:
+            while not feeder_stop.is_set():
+                try:
+                    task_q.put(item, timeout=0.5)
+                    break
+                except _queue.Full:
+                    continue  # workers are behind; retry until they catch up
+            if feeder_stop.is_set():
+                return
 
     workers: dict[int, Any] = {}
     next_wid = 0
@@ -516,6 +546,10 @@ def supervised_scan(
 
     for _ in range(n_workers):
         _spawn()
+
+    # Only now, with consumers running, is it safe to start filling the queue.
+    feeder = threading.Thread(target=_feed, name="cpv-task-feeder", daemon=True)
+    feeder.start()
 
     started_seen: set[int] = set()
     # wid -> (file_index, parent_monotonic_when_first_observed). Timed entirely
@@ -702,7 +736,15 @@ def supervised_scan(
                     if requeued:
                         for i in requeued:
                             lost_retries[i] = 1
-                            task_q.put((i, files[i]))
+                            try:
+                                # Bounded for the same reason as the feeder: an
+                                # unbounded put here would block the very loop
+                                # that drains the queue. On Full the retry stays
+                                # unrecorded, so the next quiescent tick re-runs
+                                # this guard rather than losing the file.
+                                task_q.put((i, files[i]), timeout=0.5)
+                            except _queue.Full:
+                                lost_retries[i] = 0
                         if not workers:
                             _spawn()
                         continue
@@ -732,6 +774,12 @@ def supervised_scan(
                         )
                         _persist_finished(i, res, None)
     finally:
+        # Stop the feeder BEFORE the sentinels. A sentinel that overtakes a real
+        # work item would retire a worker with files still queued, turning a
+        # deadlock into silently unscanned files — the worse failure, because it
+        # reads as a completed scan.
+        feeder_stop.set()
+        feeder.join(timeout=5.0)
         # Graceful shutdown: sentinels first, then force-reap any straggler so a
         # process-table snapshot before/after the call is identical (no leak).
         for _ in workers:

@@ -35,6 +35,7 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from cpv_surface_class import (  # type: ignore[import-not-found]
     DOC_ONLY_BASENAMES as _SURFACE_DOC_ONLY_BASENAMES,
@@ -48,7 +49,6 @@ from cpv_surface_class import (  # type: ignore[import-not-found]
 from cpv_surface_class import (  # type: ignore[import-not-found]
     is_documentation_only_path as _surface_is_documentation_only,
 )
-from typing import Any
 
 __all__ = [
     "SkillAuditFinding",
