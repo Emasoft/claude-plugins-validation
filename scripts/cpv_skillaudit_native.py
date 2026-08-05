@@ -35,6 +35,19 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from cpv_surface_class import (  # type: ignore[import-not-found]
+    DOC_ONLY_BASENAMES as _SURFACE_DOC_ONLY_BASENAMES,
+)
+from cpv_surface_class import (  # type: ignore[import-not-found]
+    DOC_ONLY_DIR_PREFIXES as _SURFACE_DOC_ONLY_DIR_PREFIXES,
+)
+from cpv_surface_class import (  # type: ignore[import-not-found]
+    INSTRUCTION_LOADABLE_BASENAMES as _SURFACE_INSTRUCTION_LOADABLE_BASENAMES,
+)
+from cpv_surface_class import (  # type: ignore[import-not-found]
+    is_documentation_only_path as _surface_is_documentation_only,
+)
 from typing import Any
 
 __all__ = [
@@ -1340,7 +1353,7 @@ _USERCONFIG_INERT_MANIPULATION_RULES: frozenset[str] = frozenset(
 # data-exfil / etc. prose IS a real delivery vector and must NOT be
 # suppressed by the documentation-only-path heuristic. Listed as
 # basenames (case-insensitive).
-_INSTRUCTION_LOADABLE_BASENAMES: frozenset[str] = frozenset({"skill.md", "claude.md", "agents.md"})
+_INSTRUCTION_LOADABLE_BASENAMES: frozenset[str] = _SURFACE_INSTRUCTION_LOADABLE_BASENAMES
 
 # Basenames / dir prefixes that are NEVER loaded as instructions —
 # pure documentation surfaces. Issue #38: a prompt-injection phrase
@@ -1348,73 +1361,8 @@ _INSTRUCTION_LOADABLE_BASENAMES: frozenset[str] = frozenset({"skill.md", "claude
 # production pipeline reads those files as instructions. Suppress
 # matches there so plugin authors who describe the threat model in
 # their own docs don't see CPV flag their warnings as the threat.
-_DOC_ONLY_BASENAMES: frozenset[str] = frozenset(
-    {
-        "readme.md",
-        "changelog.md",
-        "contributing.md",
-        "license.md",
-        "license",
-        "code_of_conduct.md",
-        "security.md",
-        "support.md",
-        "authors.md",
-        "maintainers.md",
-        "history.md",
-        # r04 obra FP iter1 (2026-05-27): common doc-content basenames
-        # present in many real-world plugin trees. NONE of these are
-        # loaded by Claude Code as agent instructions — they exist for
-        # human readers (release notes / examples / changelog summaries
-        # / TODO lists / roadmaps).
-        "release-notes.md",
-        "releasenotes.md",
-        "release_notes.md",
-        "examples.md",
-        "example.md",
-        "usage.md",
-        "commandline-usage.md",
-        "commandline_usage.md",
-        "cli-usage.md",
-        "todo.md",
-        "todos.md",
-        "roadmap.md",
-        "notes.md",
-        "faq.md",
-        "design.md",
-        "architecture.md",
-        "internals.md",
-        "advanced.md",
-        "migration.md",
-        "upgrade.md",
-        "troubleshooting.md",
-    }
-)
-_DOC_ONLY_DIR_PREFIXES: tuple[str, ...] = (
-    "docs/",
-    "doc/",
-    # SECURITY (bypass fix): `references/` and `reference/` are NOT doc-only.
-    # Anthropic Agent Skills load `skills/<name>/references/*.md` ON DEMAND —
-    # a SKILL.md that says "follow the recipe in references/x.md" makes that
-    # file part of the agent's instruction/execution surface. Treating it as
-    # inert documentation let an attacker hide an executable payload there and
-    # leave only a pointer in SKILL.md. They stay fully scanned.
-    "examples/",
-    "example/",
-    "changelog/",
-    # r05 ananddtyagi FP iter1 (2026-05-27): kept in sync with
-    # _skillaudit_markdown_context._DOC_ONLY_DIR_PREFIXES_MD.
-    # Standards/guides/tutorials/wiki/specs documentation directories.
-    "standards/",
-    "standard/",
-    "guides/",
-    "guide/",
-    "tutorials/",
-    "tutorial/",
-    "wiki/",
-    "specs/",
-    "spec/",
-    "specifications/",
-)
+_DOC_ONLY_BASENAMES: frozenset[str] = _SURFACE_DOC_ONLY_BASENAMES
+_DOC_ONLY_DIR_PREFIXES: tuple[str, ...] = _SURFACE_DOC_ONLY_DIR_PREFIXES
 
 
 def _rule_is_secret_detection(rule_id: str) -> bool:
@@ -1464,32 +1412,14 @@ def _is_documentation_only_path(file_path: str) -> bool:
     root, agents/, commands/, .claude/rules/), the function returns
     False and the existing dispatcher behaviour stands.
     """
-    # audit MED #8: strip only the LITERAL ``./`` prefix, never every leading
-    # ``.``/``/`` char. ``str.lstrip('./')`` is a CHARACTER SET strip, so it
-    # turned ``.docs/x.md`` → ``docs/x.md`` (and ``.specs/…`` → ``specs/…``),
-    # making non-standard dotfile directories falsely match the doc-only
-    # prefixes and silently suppress PROMPT_INJECT there. The ``[2:]``-on-prefix
-    # idiom (already used at line ~697 / ``_is_documentation_only_path``'s
-    # sibling) preserves the leading dot.
-    norm = file_path.replace("\\", "/").lower()
-    if norm.startswith("./"):
-        norm = norm[2:]
-    if not norm:
-        return False
-    parts = norm.split("/")
-    basename = parts[-1]
-    # Never doc-only if the basename is a known instruction-loadable
-    # file. SKILL.md inside references/ stays instruction-loadable.
-    if basename in _INSTRUCTION_LOADABLE_BASENAMES:
-        return False
-    # Doc-only if basename is on the allowlist (READMEs etc.) OR the
-    # path is anchored under a doc-only directory subtree.
-    if basename in _DOC_ONLY_BASENAMES:
-        return True
-    for prefix in _DOC_ONLY_DIR_PREFIXES:
-        if norm.startswith(prefix) or ("/" + prefix) in ("/" + norm):
-            return True
-    return False
+    # The implementation lives in ``cpv_surface_class`` (issue #191). It used to
+    # live here AND in a mirrored copy inside ``_skillaudit_markdown_context``,
+    # and the copies silently diverged — the audit MED #8 normalisation fix
+    # (strip a LITERAL ``./``, never the character set ``./``, which turns
+    # ``.specs/x.md`` into ``specs/x.md``) landed here and never reached the
+    # mirror. One definition means a fix cannot again reach one caller and miss
+    # another.
+    return _surface_is_documentation_only(file_path)
 
 
 _CLASSIFIER_EXTENSIONS: tuple[str, ...] = (

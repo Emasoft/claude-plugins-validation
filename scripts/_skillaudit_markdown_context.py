@@ -40,6 +40,14 @@ from __future__ import annotations
 import re
 from typing import Final, Literal
 
+from cpv_surface_class import (  # type: ignore[import-not-found]
+    DOC_ONLY_BASENAMES,
+    DOC_ONLY_DIR_PREFIXES,
+    INSTRUCTION_LOADABLE_BASENAMES,
+    is_documentation_only_path,
+    is_instruction_loadable_path,
+)
+
 from _skillaudit_shell_context import (  # type: ignore[import-not-found]
     _cmdsub_is_safe_data_command,
     _is_launchagent_removal,
@@ -553,113 +561,26 @@ def _is_inert_token_in_string(line: str, match: str) -> bool:
     return True
 
 
-# Mirrored from ``cpv_skillaudit_native._is_documentation_only_path`` to
-# avoid a circular import (this module is imported by the dispatcher in
-# the parent module). The two definitions stay in sync via a parity
-# test in ``tests/test_skillaudit_doc_only_parity.py``.
-_DOC_ONLY_BASENAMES_MD: Final[frozenset[str]] = frozenset(
-    {
-        "readme.md",
-        "changelog.md",
-        "contributing.md",
-        "license.md",
-        "license",
-        "code_of_conduct.md",
-        "security.md",
-        "support.md",
-        "authors.md",
-        "maintainers.md",
-        "history.md",
-        # r04 obra FP iter1 (kept in sync with cpv_skillaudit_native._DOC_ONLY_BASENAMES)
-        "release-notes.md",
-        "releasenotes.md",
-        "release_notes.md",
-        "examples.md",
-        "example.md",
-        "usage.md",
-        "commandline-usage.md",
-        "commandline_usage.md",
-        "cli-usage.md",
-        "todo.md",
-        "todos.md",
-        "roadmap.md",
-        "notes.md",
-        "faq.md",
-        "design.md",
-        "architecture.md",
-        "internals.md",
-        "advanced.md",
-        "migration.md",
-        "upgrade.md",
-        "troubleshooting.md",
-    }
-)
-_DOC_ONLY_DIR_PREFIXES_MD: Final[tuple[str, ...]] = (
-    "docs/",
-    "doc/",
-    # SECURITY (bypass fix) — kept in sync with the native list: `references/`
-    # is an Agent-Skills progressive-disclosure surface (a SKILL.md points the
-    # agent at `references/x.md` to load + follow), so it is NOT inert docs.
-    # Removing it stops an attacker hiding an executable recipe there.
-    "examples/",
-    "example/",
-    "changelog/",
-    # r05 ananddtyagi FP iter1 (2026-05-27): development standards docs
-    # (MAINTENANCE_STANDARDS.md, FEATURE_DEVELOPMENT_STANDARDS.md, etc.)
-    # in a `standards/` directory are informational guidelines for
-    # contributors, NOT instructions loaded by Claude Code at runtime.
-    "standards/",
-    "standard/",
-    "guides/",
-    "guide/",
-    "tutorials/",
-    "tutorial/",
-    "wiki/",
-    "specs/",
-    "spec/",
-    "specifications/",
-)
-_INSTRUCTION_LOADABLE_BASENAMES_MD: Final[frozenset[str]] = frozenset({"skill.md", "claude.md", "agents.md"})
+# These were MIRRORED from ``cpv_skillaudit_native`` to dodge a circular import,
+# and were documented as staying in sync "via a parity test in
+# tests/test_skillaudit_doc_only_parity.py". That test never existed, and the
+# copies duly diverged: this side kept ``str.lstrip("./")`` — a CHARACTER-SET
+# strip — after the native side was fixed to strip a literal ``./``. The result
+# was that ``.specs/evil.md``, ``.docs/…``, ``.doc/…``, ``.guides/…`` and
+# ``.wiki/…`` were classified here as inert documentation, demoting
+# execution-class matches inside directories an attacker names freely.
+#
+# The definitions now live in ``cpv_surface_class``, which imports nothing from
+# CPV and so is importable from both sides — the circular import that motivated
+# the mirror does not apply to it (issue #191).
+_DOC_ONLY_BASENAMES_MD: Final[frozenset[str]] = DOC_ONLY_BASENAMES
+_DOC_ONLY_DIR_PREFIXES_MD: Final[tuple[str, ...]] = DOC_ONLY_DIR_PREFIXES
+_INSTRUCTION_LOADABLE_BASENAMES_MD: Final[frozenset[str]] = INSTRUCTION_LOADABLE_BASENAMES
 
-
-def _is_documentation_only_path_md(file_path: str) -> bool:
-    """Mirror of ``cpv_skillaudit_native._is_documentation_only_path``.
-
-    Returns True iff ``file_path`` is a pure-documentation surface that
-    Claude Code never loads as agent instructions. Mirrored locally to
-    avoid a circular import — kept in sync via parity test.
-    """
-    if not file_path:
-        return False
-    norm = file_path.replace("\\", "/").lstrip("./").lower()
-    if not norm:
-        return False
-    parts = norm.split("/")
-    basename = parts[-1]
-    if basename in _INSTRUCTION_LOADABLE_BASENAMES_MD:
-        return False
-    if basename in _DOC_ONLY_BASENAMES_MD:
-        return True
-    for prefix in _DOC_ONLY_DIR_PREFIXES_MD:
-        if norm.startswith(prefix) or ("/" + prefix) in ("/" + norm):
-            return True
-    return False
-
-
-def _is_instruction_loadable_path_md(file_path: str) -> bool:
-    """True iff ``file_path`` is a markdown surface Claude Code MAY load as
-    agent instructions — the exact complement of ``_is_documentation_only_path_md``
-    (and of the dispatcher's ``_is_documentation_only_path``). Covers the
-    instruction-loadable basenames (SKILL.md / CLAUDE.md / AGENTS.md), files
-    under ``agents/`` / ``commands/`` / ``.claude/rules/`` / ``output-styles/``,
-    and any unknown ``.md`` at plugin root not on the doc-only allowlist.
-
-    Used by ``_match_in_security_review_doc`` to DEMOTE (visible NIT) rather
-    than hard-suppress an execution-class match on these surfaces, where the
-    surrounding ``Remediation:`` / ✓ doc-vocab is attacker-controllable."""
-    if not file_path:
-        return False
-    return not _is_documentation_only_path_md(file_path)
+# Thin aliases, kept so the (many) existing call sites and tests in this module
+# do not have to change: the names stay, the second implementation is gone.
+_is_documentation_only_path_md = is_documentation_only_path
+_is_instruction_loadable_path_md = is_instruction_loadable_path
 
 
 def _is_gfm_table_row(line: str) -> bool:
