@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Hard wall-clock budget for a validate run — issue #190.
 
 A validate that stops returning currently never exits. Its parent dies (the
@@ -41,10 +42,15 @@ import sys
 import threading
 import time
 
-# Distinct from 0 (clean) and 1 (findings) so a caller — a human, publish.py, or
-# a CI step — can tell "the gate could not finish" apart from "the gate failed
-# the plugin". Conflating them is how a budget turns into a false verdict.
-EXIT_BUDGET_EXCEEDED = 3
+# 124 — the GNU timeout(1) convention, and the one exit the finding vocabulary
+# can never emit: EXIT_OK/CRITICAL/MAJOR/MINOR/NIT are 0..4 in
+# cpv_validation_common, so a caller can always tell "the gate could not
+# finish" apart from "the gate found something". The first draft used 3, which
+# COLLIDES with EXIT_MINOR — and was misread within the hour: a clean-but-for-
+# one-MINOR self-validate exited 3 and was taken for a budget abort. Reusing a
+# verdict code recreates in the exit status the exact conflation this module
+# exists to prevent.
+EXIT_BUDGET_EXCEEDED = 124
 
 _BUDGET_ENV = "CPV_VALIDATE_BUDGET_S"
 # 30 minutes. The reporter's healthy full run is ~3.5 min and their pathological
