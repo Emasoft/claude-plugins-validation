@@ -209,6 +209,14 @@ _COMMANDS: dict[str, str] = {
 
 
 def main() -> int:
+    # Bound the run before anything else (#190). This is the process the
+    # reporter found orphaned at ppid=1, 3h and 11h old — `cpv-remote-validate`
+    # is the launcher, so the budget has to start here and not only in the
+    # validator it dispatches to.
+    from cpv_watchdog import arm as _arm_watchdog  # noqa: PLC0415
+
+    _arm_watchdog()
+
     # Build help text with command table
     commands_help = "\n".join(f"  {name:<16s} {desc}" for name, desc in _COMMANDS.items())
 

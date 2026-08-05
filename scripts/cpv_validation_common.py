@@ -9229,12 +9229,22 @@ def _emit(text: str) -> None:
 
 def emit_phase_start(name: str) -> None:
     """Announce that phase ``name`` is about to run."""
+    # Register BEFORE the progress-enabled check, and outside it: the watchdog
+    # names the stuck phase in its abort diagnostic (#190), and that has to work
+    # for the operator who ran with PLUGIN_PROGRESS=0 — which is precisely the
+    # run whose hang is otherwise unattributable.
+    from cpv_watchdog import note_phase_start  # noqa: PLC0415
+
+    note_phase_start(name)
     if phase_progress_enabled():
         _emit(f"{_PROGRESS_PREFIX} START {name}")
 
 
 def emit_phase_done(name: str, elapsed: float) -> None:
     """Announce that phase ``name`` finished, with its wall-clock cost."""
+    from cpv_watchdog import note_phase_done  # noqa: PLC0415
+
+    note_phase_done(name)
     if phase_progress_enabled():
         _emit(f"{_PROGRESS_PREFIX} DONE  {name} {elapsed:.1f}s")
 
