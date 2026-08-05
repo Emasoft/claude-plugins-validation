@@ -152,6 +152,32 @@ def _diagnostic(budget_s: float, started_at: float) -> str:
     return "\n".join(lines)
 
 
+def _dump_thread_stacks() -> None:
+    """Dump every thread's Python stack to stderr before we die.
+
+    Without this an abort says only THAT the run wedged; the operator then has
+    to catch the next occurrence live and attach a sampler — and on macOS
+    ``py-spy`` needs root, so in practice nobody ever does. ``faulthandler``
+    reads the frames from inside the process, needs no privileges, and works on
+    a thread blocked in a syscall, which is precisely the state that matters:
+    the reported hangs sit at 0.0% CPU with one thread in ``sem_wait`` and
+    another in ``write``, and the Python frames behind those C frames are the
+    entire diagnosis.
+
+    Best-effort, like everything else on this path: a failure to dump must not
+    stop the abort.
+    """
+    try:
+        import faulthandler  # noqa: PLC0415
+
+        sys.stderr.write("\n--- Python stacks of all threads at abort ---\n")
+        faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+        sys.stderr.write("--- end stacks ---\n\n")
+        sys.stderr.flush()
+    except Exception:  # noqa: BLE001, S110 — failure path, must not raise
+        pass
+
+
 def _fire(budget_s: float, started_at: float) -> None:
     try:
         sys.stderr.write(_diagnostic(budget_s, started_at))
@@ -160,6 +186,7 @@ def _fire(budget_s: float, started_at: float) -> None:
         # Nobody is reading the log. Terminating is still the right outcome, and
         # is the half of this that the operator actually needs.
         pass
+    _dump_thread_stacks()
     _reap_children()
     # NOT sys.exit: that raises SystemExit in THIS thread, which the stuck main
     # thread would never observe, and the process would hang on regardless.

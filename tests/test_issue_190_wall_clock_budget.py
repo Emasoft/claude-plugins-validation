@@ -98,6 +98,28 @@ def test_abort_diagnostic_is_loud_and_names_the_phase():
     assert "do not read this as clean" in proc.stderr.lower()
 
 
+def test_abort_dumps_python_stacks_of_all_threads():
+    """The abort must say WHERE it was stuck, not merely that it was.
+
+    A hang at 0.0% CPU cannot be diagnosed after the fact, and on macOS py-spy
+    needs root — so an abort that does not dump its own frames leaves the
+    operator with nothing but "it hung", which is what made #189 take three
+    rounds of guessing.
+    """
+    proc = _run_child("import cpv_watchdog; cpv_watchdog.arm(budget_s=1.0)", timeout=30)
+    assert "Python stacks of all threads at abort" in proc.stderr
+    # Frames must actually be present — a header with no stack is worse than no
+    # header, because it looks like the diagnosis happened. faulthandler prints
+    # file/line/function, never source text, so assert on its real output shape.
+    assert "most recent call first" in proc.stderr
+    # BOTH threads: the stuck main thread is the one that matters, and dumping
+    # only the watchdog's own thread would be a diagnosis of nothing.
+    # Case-insensitive because faulthandler labels the firing thread
+    # "Current thread 0x…" and every other one "Thread 0x…".
+    assert proc.stderr.lower().count("thread 0x") >= 2
+    assert "--- end stacks ---" in proc.stderr
+
+
 def test_unarmed_child_really_hangs():
     """CONTROL — without the watchdog the same child never returns.
 
