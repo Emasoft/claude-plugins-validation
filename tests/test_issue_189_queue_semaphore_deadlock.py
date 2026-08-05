@@ -3,8 +3,9 @@
 
 WHAT ACTUALLY HAPPENED. `supervised_scan` filled `task_q` with every work item
 BEFORE spawning a single worker. A default `multiprocessing.Queue` is not
-unbounded — its slot semaphore is capped at `SemLock.SEM_VALUE_MAX`, 32767 on
-macOS and Linux — so `put()` blocks once that many items are outstanding. With
+unbounded — its slot semaphore is capped at `SemLock.SEM_VALUE_MAX`: 32767 on
+macOS, INT_MAX on Linux (which is why the overflow was only ever reachable, and
+reported, on macOS) — so `put()` blocks once that many items are outstanding. With
 no consumer yet in existence, nothing could ever drain it, and the parent wedged
 in `put()` permanently with its feeder thread stuck in `connection._send` on a
 full pipe.
@@ -25,7 +26,9 @@ a corpus under 32767 files, where the bug cannot occur.
 WHY THE TEST IS SHAPED LIKE THIS. The threshold IS the bug. A test with a
 handful of items passes against the original code, so it would prove nothing —
 the same vacuity that made the first #189 fix's tests worthless. These tests
-therefore push a real >SEM_VALUE_MAX item count through a real queue.
+therefore push an item count past the macOS ceiling (the platform where the cap
+is reachable) through a real queue; on Linux the same count is a full-load
+feeder exercise, per the per-test docstrings.
 """
 
 from __future__ import annotations

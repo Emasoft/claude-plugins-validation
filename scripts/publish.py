@@ -3428,9 +3428,12 @@ def stage_verify_ci_green(
             break
         if time.monotonic() >= deadline:
             names = ", ".join(sorted({str(r.get("name", "?")) for r in pending}))
+            # The hint carries the FULL sha: `gh run list --commit` with an
+            # abbreviated sha silently matches nothing and exits 0, so a pasted
+            # short-sha command reads as "no runs" (verified project lesson).
             print(
                 f"{YELLOW}⚠ UNVERIFIED — still running after {timeout_s}s: {names}.{NC}\n"
-                f"{YELLOW}  Check with: gh run list --commit {sha[:8]}{NC}",
+                f"{YELLOW}  Check with: gh run list --commit {sha}{NC}",
                 file=sys.stderr,
             )
             return 0
@@ -3446,12 +3449,17 @@ def stage_verify_ci_green(
         detail = ", ".join(
             f"{r.get('name', '?')}={r.get('conclusion')}" for r in failed
         )
+        # Follow-up commands must be pasteable as written: `gh run view` has NO
+        # --commit flag (that flag belongs to `gh run list`), and `gh run list
+        # --commit` with an abbreviated sha silently matches nothing — so the
+        # hint is a two-step with the FULL sha, then the run id.
         print(
             f"{RED}✗ CI IS RED on the released commit {sha[:8]}: {detail}{NC}\n"
             f"{RED}  The release v-tag and GitHub release are ALREADY PUBLISHED — the{NC}\n"
             f"{RED}  ruleset bypass meant no required check gated them. Fix the cause and{NC}\n"
             f"{RED}  publish a follow-up patch; do NOT mute the check.{NC}\n"
-            f"{RED}  Logs: gh run view --log-failed --commit {sha[:8]}{NC}",
+            f"{RED}  Logs: gh run list --commit {sha}{NC}\n"
+            f"{RED}        then: gh run view --log-failed <run-id>{NC}",
             file=sys.stderr,
         )
         return 0

@@ -3902,7 +3902,9 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
             break
         if time.monotonic() >= deadline:
             cprint(f"  {YELLOW}UNVERIFIED - still running after {CI_VERIFY_TIMEOUT_S}s.{NC}")
-            cprint(f"  {YELLOW}  Check with: gh run list --commit {sha[:8]}{NC}")
+            # Full sha on purpose: `gh run list --commit` with a short sha
+            # silently matches nothing and exits 0.
+            cprint(f"  {YELLOW}  Check with: gh run list --commit {sha}{NC}")
             return
         time.sleep(15)
 
@@ -3916,7 +3918,10 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
         cprint(f"  {RED}  The tag and GitHub release are ALREADY PUBLISHED - the ruleset{NC}")
         cprint(f"  {RED}  bypass meant no required check gated them. Fix the cause and{NC}")
         cprint(f"  {RED}  publish a follow-up patch; do NOT mute the check.{NC}")
-        cprint(f"  {RED}  Logs: gh run view --log-failed --commit {sha[:8]}{NC}")
+        # Two steps, pasteable as written: `gh run view` has no --commit flag,
+        # and `gh run list --commit` needs the FULL sha (short sha = silent []).
+        cprint(f"  {RED}  Logs: gh run list --commit {sha}{NC}")
+        cprint(f"  {RED}        then: gh run view --log-failed <run-id>{NC}")
         return
 
     names = ", ".join(sorted({str(r.get("name", "?")) for r in runs}))
