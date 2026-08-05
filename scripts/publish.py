@@ -3345,7 +3345,13 @@ def stage_verify_ci_green(
     rule): no gh, no network, no runs found, or a timeout are each reported as
     UNVERIFIED with the reason, never folded into a pass.
     """
-    print(f"\n{BLUE}═══ Gate 14: Verify CI is green on the released commit ═══{NC}")
+    # flush=True on this stage's stdout prints: with output redirected to a
+    # file, stdout is BLOCK-buffered while the stage's verdicts go to stderr
+    # (write-through) — so in a captured log the UNVERIFIED/RED line landed ~70
+    # lines BEFORE this banner and the gate read as having silently printed
+    # nothing. Verified on the v5.1.3 publish log; causal order in the capture
+    # is what makes the gate auditable, so it is worth the explicit flushes.
+    print(f"\n{BLUE}═══ Gate 14: Verify CI is green on the released commit ═══{NC}", flush=True)
 
     gh_bin = shutil.which("gh")
     if gh_bin is None:
@@ -3451,7 +3457,7 @@ def stage_verify_ci_green(
         return 0
 
     names = ", ".join(sorted({str(r.get("name", "?")) for r in runs}))
-    print(f"{GREEN}✓ CI green on {sha[:8]} ({names}){NC}")
+    print(f"{GREEN}✓ CI green on {sha[:8]} ({names}){NC}", flush=True)
     return 0
 
 
