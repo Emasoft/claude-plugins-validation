@@ -92,6 +92,14 @@ EVENT_RESUMED = "resumed"
 # kill never lands while the worker is inside `task_q.get()`.
 _IDLE = "idle"
 
+# Consecutive quiescent polls (nobody in flight, queue drained, files still
+# missing) before the lost-item guard acts. >1 on purpose: a worker that has
+# pulled an item but not yet published its heartbeat looks momentarily identical
+# to a lost one, and re-dispatching a file that is actually being scanned would
+# double-scan it. Three polls is long enough to clear that window and short
+# enough that a real loss is resolved in seconds rather than hanging forever.
+_LOST_ITEM_STALL_TICKS = 3
+
 
 def _worker_main(
     wid: int,
@@ -517,6 +525,9 @@ def supervised_scan(
     # the worker actually began it) — which can only DELAY a kill, never bring
     # one forward onto a healthy worker.
     inflight: dict[int, tuple[int, float]] = {}
+    # Lost-item guard state (see the guard at the end of the loop body).
+    stalled_ticks = 0
+    lost_retries: dict[int, int] = {}
     try:
         while len(seen) < n:
             time.sleep(poll_interval_s)
@@ -645,6 +656,81 @@ def supervised_scan(
                     workers.pop(wid, None)
                     inflight.pop(wid, None)
                     _spawn()  # keep draining the remaining files
+
+            # 3. LOST-ITEM GUARD — the loop must terminate by construction.
+            #
+            # `while len(seen) < n` waits for a result per file, and there is a
+            # window in which a file can become unaccountable: a worker that dies
+            # between `task_q.get()` returning an item and `heartbeat[wid] = idx`
+            # has CONSUMED the item (it is gone from the queue) but published no
+            # heartbeat, so `inflight` holds nothing for it and the dead-worker
+            # branch above records nothing. Its replacement then blocks in
+            # `task_q.get()` on an empty queue forever — and because a worker
+            # never exits on an empty queue (only on the None sentinel, which is
+            # sent AFTER this loop), `proc.is_alive()` stays True and no further
+            # recovery fires. The parent then waits on a result that cannot
+            # arrive: CPV issue #189, seen in the wild as a scan that never
+            # returns and leaks semaphores when finally killed.
+            #
+            # A quiescent state — nobody in flight, nothing queued, files still
+            # missing — is therefore proof of loss, not of progress. Requiring it
+            # to persist for several consecutive polls keeps a merely-slow
+            # dispatch (a worker that has pulled an item but not yet published
+            # its heartbeat) from being mistaken for it.
+            missing = [i for i, _ in pending if i not in seen]
+            if missing:
+                anyone_working = any(
+                    isinstance(heartbeat.get(w, _IDLE), int) for w in workers
+                )
+                try:
+                    queue_drained = task_q.empty()
+                except (OSError, NotImplementedError):
+                    # `.empty()` is advisory and unavailable on some platforms;
+                    # without it we cannot prove loss, so never claim it.
+                    queue_drained = False
+                if not anyone_working and queue_drained:
+                    stalled_ticks += 1
+                else:
+                    stalled_ticks = 0
+
+                if stalled_ticks >= _LOST_ITEM_STALL_TICKS:
+                    stalled_ticks = 0
+                    # Re-dispatch once per file: a genuinely transient loss (a
+                    # worker killed by an external OOM) then still gets scanned,
+                    # so the guard costs nothing on a healthy run.
+                    requeued = [i for i in missing if lost_retries.get(i, 0) == 0]
+                    if requeued:
+                        for i in requeued:
+                            lost_retries[i] = 1
+                            task_q.put((i, files[i]))
+                        if not workers:
+                            _spawn()
+                        continue
+                    # Already retried and lost again → REPORT it. An unscannable
+                    # file must never read as clean: it becomes an errored
+                    # ScanResult, which the caller's verdict logic treats as a
+                    # finding, exactly like a timeout.
+                    for i in missing:
+                        res = ScanResult(
+                            files[i],
+                            [],
+                            "WorkerLost: item was dispatched but no worker reported a result "
+                            "(re-dispatched once, lost again)",
+                        )
+                        out[i] = res
+                        seen.add(i)
+                        _emit(
+                            on_event,
+                            {
+                                "type": EVENT_KILLED,
+                                "index": i,
+                                "total": n,
+                                "path": str(files[i]),
+                                "worker": None,
+                                "reason": "lost",
+                            },
+                        )
+                        _persist_finished(i, res, None)
     finally:
         # Graceful shutdown: sentinels first, then force-reap any straggler so a
         # process-table snapshot before/after the call is identical (no leak).
