@@ -4860,7 +4860,7 @@ def _normalise_scan_result(raw_findings: list[dict[str, Any]], files_scanned: in
 #   {"version": 1, "consents": [
 #     {"file": "skills/x/references/RULES.md",       # plugin-relative, posix
 #      "ruleId": "A2A_CROSS_AGENT_INJECT",
-#      "lineSha256": "<sha256 hex of line.strip()[:200]>",
+#      "lineSha256": "<sha256 hex of the FULL line.strip()>",
 #      "reason": "R42.1 rule text DESCRIBES the forbidden attack"}]}
 #
 # Safety properties, each deliberate and each pinned by tests:
@@ -4869,11 +4869,22 @@ def _normalise_scan_result(raw_findings: list[dict[str, Any]], files_scanned: in
 #     execution-class or otherwise — is UNAFFECTED by any registry entry, so
 #     the registry can never hide a real threat, only un-block a reviewed
 #     false positive.
-#   * The hash pins the EXACT flagged line (the finding's own ``lineContent``
-#     recipe: ``line.strip()[:200]``). Any edit to the line invalidates the
-#     consent and the finding blocks again.
+#   * The hash pins the EXACT flagged line — sha256 of the FULL ``line.strip()``
+#     as read from the file on disk at report time. Deliberately NOT the
+#     finding's ``lineContent`` field: that is truncated to 200 chars, and
+#     hashing it would let an edit BEYOND char 200 of a long line silently
+#     inherit a consent recorded for the original text. Any edit anywhere in
+#     the line invalidates the consent and the finding blocks again.
+#   * The ``_INTENT_HARD_SIGNAL_RULES`` family (PROMPT_INJECT,
+#     INDIRECT_PROMPT_INJECT, the exfil/secret/decode-threat rules — "the
+#     prose IS the attack") can NEVER be consented, demoted or not: the #101
+#     sentinel refuses them, and a registry weaker than the sentinel on
+#     exactly the rules the sentinel refuses would be a second gate an
+#     author shops to.
 #   * Fail-closed: a missing, unreadable, or malformed registry consents to
-#     NOTHING (findings keep blocking). A malformed single entry is skipped.
+#     NOTHING (findings keep blocking). A malformed single entry is skipped,
+#     and a ``reason`` is whitespace-collapsed + capped at 200 chars so it
+#     can never spoof extra report lines.
 #   * Self-incriminating, like the #101 sentinel: the registry names the rule
 #     and the reason in a committed file — a malicious author gains nothing.
 _AUDIT_CONSENT_REGISTRY_BASENAME: str = ".cpv-audit-consent.json"
@@ -4906,23 +4917,53 @@ def _load_audit_consent_registry(plugin_root: Path) -> dict[tuple[str, str, str]
         if not (isinstance(file_rel, str) and isinstance(rule_id, str) and isinstance(digest, str)):
             continue
         key = (Path(file_rel).as_posix(), rule_id, digest.strip().lower())
-        consents[key] = str(entry.get("reason", ""))
+        # Collapse whitespace + cap: the reason is interpolated into the
+        # report, where an embedded newline could spoof additional report
+        # lines and an unbounded string could balloon it.
+        consents[key] = " ".join(str(entry.get("reason", "")).split())[:200]
     return consents
+
+
+# Rules the registry may NEVER consent, demoted or not. The #101 sentinel is
+# allowlist-gated on _EXECUTION_CLASS_RULES; this registry is deliberately
+# broader (issue #194 exists for A2A/agent-manipulation PROSE), but the hard
+# prompt-injection / exfil / secret / decode-threat family stays out of BOTH
+# mechanisms: for those rules the text itself is the payload and ships
+# verbatim regardless of any committed consent, so a consent cannot defang it.
+_CONSENT_PROTECTED_RULES: frozenset[str] = _INTENT_HARD_SIGNAL_RULES
+
+
+def _consent_line_text(file_path: str, line_number: int | None) -> str:
+    """The FULL stripped text of the flagged line, read from disk — the consent
+    hash input. Deliberately NOT the finding's ``lineContent``: that field is
+    truncated to 200 chars, so hashing it would let an edit BEYOND char 200 of
+    a long line silently inherit a consent recorded for the original text.
+    Any read failure returns "" (the caller declines consent — fail-closed)."""
+    if line_number is None or line_number < 1:
+        return ""
+    try:
+        lines = Path(file_path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    if line_number > len(lines):
+        return ""
+    return lines[line_number - 1].strip()
 
 
 def _consent_for_finding(
     consents: dict[tuple[str, str, str], str],
     rel: str,
     rule_id: str,
-    line_content: str,
+    line_text: str,
 ) -> str | None:
-    """Return the recorded reason iff this finding's (file, rule, content hash)
-    has a consent entry; None otherwise. The hash input is the finding's own
-    ``lineContent`` verbatim — the same ``line.strip()[:200]`` the scanner
-    recorded — so consent author and scanner share one recipe."""
-    if not consents or not line_content:
+    """Return the recorded reason iff this finding's (file, rule, full-line
+    hash) has a consent entry AND the rule is not consent-protected; None
+    otherwise. ``line_text`` is the FULL stripped flagged line as read from
+    disk (``_consent_line_text``), so consent author and checker share one
+    recipe that no truncation can weaken."""
+    if not consents or not line_text or rule_id in _CONSENT_PROTECTED_RULES:
         return None
-    digest = hashlib.sha256(line_content.encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(line_text.encode("utf-8")).hexdigest()
     return consents.get((Path(rel).as_posix(), rule_id, digest))
 
 
@@ -4963,11 +5004,17 @@ def report_findings(
         # Issue #194 — a DEMOTED finding with a matching consent-registry entry
         # emits as a visible, NON-blocking WARNING marked "consented". Gated on
         # ``is_demoted`` FIRST so a live/keep finding can never be consented
-        # away, and on the report actually exposing ``warning`` (else fall
-        # through to the blocking path — fail-closed, never fail-permissive).
-        if is_demoted:
+        # away; on the rule being outside _CONSENT_PROTECTED_RULES (inside
+        # _consent_for_finding); on the FULL flagged line re-read from disk
+        # (never the truncated lineContent); and on the report actually
+        # exposing ``warning`` (else fall through to the blocking path —
+        # fail-closed, never fail-permissive).
+        if is_demoted and consents:
             reason = _consent_for_finding(
-                consents, rel, finding.rule_id, str(finding.raw.get("lineContent", ""))
+                consents,
+                rel,
+                finding.rule_id,
+                _consent_line_text(finding.file_path, line),
             )
             warn_method = getattr(report, "warning", None)
             if reason is not None and callable(warn_method):
