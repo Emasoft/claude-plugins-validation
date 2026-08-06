@@ -2491,6 +2491,142 @@ def migrate_publish_py_ci_verify(plugin_path: Path, dry_run: bool = False) -> li
     return [note]
 
 
+# --- v5.3.0: the CHANGELOG-destroying git-cliff call, and --canon-version ----
+# Both migrations exist for the same reason as their siblings: `standardize`
+# will not overwrite an existing publish.py on a plain `--fix`, and the plugins
+# that most need these are exactly the ones carrying a customized pipeline they
+# cannot safely `--force-templates`.
+#
+# The changelog one is a DATA-LOSS fix (ai-maestro#62): `-o` overwrites, so
+# `--unreleased ... -o CHANGELOG.md` leaves a changelog containing only the
+# release just generated. Measured across this host when the defect was
+# confirmed: 6 of 7 plugin repos were down to a single section, the canon's own
+# repo having lost 380. The history is recoverable — it is rendered from the
+# commit log — so the migration restores it on the next publish.
+_CLIFF_OLD_CALL = '["git-cliff", "--bump", "--unreleased", "--tag", tag, "-o", "CHANGELOG.md"],'
+_CLIFF_NEW_CALL = '["git-cliff", "--bump", "--tag", tag, "-o", "CHANGELOG.md"],'
+_CLIFF_OLD_DRYRUN = 'cprint(f"  Would run: git-cliff --bump --unreleased --tag {tag} -o CHANGELOG.md")'
+_CLIFF_NEW_DRYRUN = 'cprint(f"  Would run: git-cliff --bump --tag {tag} -o CHANGELOG.md")'
+# Anchors for lifting the canon-version block VERBATIM out of freshly-rendered
+# canon — never a second copy of the text here (the duplicate-source defect
+# these migrators exist to repair).
+_CANON_VER_START = "# ── Canon version reporting (--canon-version)"
+_CANON_VER_END = "def main() -> int:"
+_CANON_VER_ARG_ANCHOR = '    parser.add_argument("--dry-run", action="store_true", help="Preview only, no changes")\n'
+_CANON_VER_CALL_ANCHOR = "    root = get_repo_root()\n"
+
+
+def _lift_statement(source: str, needle: str) -> str | None:
+    """The COMPLETE statement (all continuation lines) whose first line contains ``needle``.
+
+    Lifted verbatim from freshly-rendered canon, so the migrator never carries a
+    second copy of canonical text. Consumes lines until parentheses balance —
+    a single-line lift of a multi-line call would emit an unclosed ``(``.
+    """
+    lines = source.splitlines(keepends=True)
+    for idx, line in enumerate(lines):
+        if needle not in line:
+            continue
+        out = [line]
+        depth = line.count("(") - line.count(")")
+        cursor = idx
+        while depth > 0 and cursor + 1 < len(lines):
+            cursor += 1
+            out.append(lines[cursor])
+            depth += lines[cursor].count("(") - lines[cursor].count(")")
+        return "".join(out) if depth == 0 else None
+    return None
+
+
+def migrate_publish_py_changelog_history(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """Stop an EXISTING ``scripts/publish.py`` from destroying CHANGELOG history.
+
+    Runs on ANY ``--fix``. Idempotent: a publish.py whose changelog call already
+    omits ``--unreleased`` comes back byte-identical and reports nothing. An
+    unrecognised changelog step is left byte-identical and REPORTED — a
+    half-rewritten publish.py in someone else's repo is worse than an unmigrated
+    one.
+    """
+    publish = plugin_path / "scripts" / "publish.py"
+    if not publish.is_file():
+        return []
+    try:
+        text = publish.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    if _CLIFF_OLD_CALL not in text:
+        if _CLIFF_NEW_CALL in text:
+            return []  # already migrated — idempotent
+        return [
+            "publish.py: unrecognised git-cliff changelog step — the CHANGELOG-history fix was NOT "
+            "migrated (left byte-identical). Re-run with --force-templates, or drop `--unreleased` "
+            "from the call that writes CHANGELOG.md by hand."
+        ]
+    new_text = text.replace(_CLIFF_OLD_CALL, _CLIFF_NEW_CALL, 1)
+    if _CLIFF_OLD_DRYRUN in new_text:
+        new_text = new_text.replace(_CLIFF_OLD_DRYRUN, _CLIFF_NEW_DRYRUN, 1)
+    note = (
+        "migrate publish.py — CHANGELOG.md is regenerated with full history "
+        "(dropped `--unreleased` from the `-o CHANGELOG.md` call; ai-maestro#62)"
+    )
+    if dry_run:
+        return [f"[dry-run] would {note}"]
+    publish.write_text(new_text, encoding="utf-8")
+    return [note]
+
+
+def migrate_publish_py_canon_version(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """Give an EXISTING ``scripts/publish.py`` the ``--canon-version`` command.
+
+    ALL-OR-NOTHING, like its siblings: the helper block, the CLI flag and the
+    early return are one unit — the flag without the helpers is a NameError at
+    the moment someone is trying to diagnose their canon version, and the
+    helpers without the flag are dead code that looks migrated.
+
+    The baked ``CANON_VERSION`` is the CPV version doing the migration, because
+    that is the canon the file now carries.
+    """
+    publish = plugin_path / "scripts" / "publish.py"
+    if not publish.is_file():
+        return []
+    try:
+        text = publish.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    if "CANON_VERSION" in text:
+        return []  # already migrated — idempotent
+    canon = _canonical_publish_py()
+    if canon is None:
+        return ["publish.py: could not render canon to migrate --canon-version — skipped"]
+    canon_block = _slice_between(canon, _CANON_VER_START, _CANON_VER_END)
+    # The argparse call spans MULTIPLE lines in canon, so lift the whole
+    # statement by balancing parens — taking only the first line leaves an
+    # unclosed `(` and a publish.py that will not parse, which is precisely the
+    # half-rewritten outcome these migrators refuse to produce. (Caught by the
+    # migrated-file-must-compile assertion in test_canon_62_requirements.)
+    canon_arg = _lift_statement(canon, 'parser.add_argument("--canon-version"')
+    canon_call = _lift_statement(canon, "return print_canon_version()")
+    if canon_block is None or canon_arg is None or canon_call is None:
+        return ["publish.py: could not locate the canon-version block in canon — skipped"]
+    if _CANON_VER_ARG_ANCHOR not in text or _CANON_VER_CALL_ANCHOR not in text:
+        return [
+            "publish.py: unrecognised main() shape — --canon-version was NOT migrated "
+            "(left byte-identical). Re-run with --force-templates."
+        ]
+    new_text = text.replace(_CANON_VER_END, canon_block + _CANON_VER_END, 1)
+    new_text = new_text.replace(_CANON_VER_ARG_ANCHOR, _CANON_VER_ARG_ANCHOR + canon_arg, 1)
+    new_text = new_text.replace(
+        _CANON_VER_CALL_ANCHOR,
+        "    if args.canon_version:\n" + canon_call + "\n" + _CANON_VER_CALL_ANCHOR,
+        1,
+    )
+    note = "migrate publish.py — added `--canon-version` (installed vs latest canon report)"
+    if dry_run:
+        return [f"[dry-run] would {note}"]
+    publish.write_text(new_text, encoding="utf-8")
+    return [note]
+
+
 def migrate_publish_py_test_suite_timeout(plugin_path: Path, dry_run: bool = False) -> list[str]:
     """Give an EXISTING ``scripts/publish.py`` a satisfiable pytest bound (#179).
 
@@ -4451,6 +4587,20 @@ def fix_missing_files(
     # ANY --fix and never overwrites publish.py wholesale.
     for note in migrate_publish_py_test_suite_timeout(plugin_path, dry_run=dry_run):
         print(f"  {YELLOW}[test-timeout]{NC} {note}")
+
+    # ai-maestro#62: `-o` OVERWRITES, so a changelog step restricted to the
+    # unreleased window replaced CHANGELOG.md with only the release it just
+    # generated. Measured when the report was confirmed: 6 of 7 plugin repos on
+    # this host were down to ONE section (the canon's own repo had lost 380).
+    # Same delivery reasoning as its siblings — the affected plugins are the
+    # ones that cannot safely --force-templates — so it runs on ANY --fix.
+    for note in migrate_publish_py_changelog_history(plugin_path, dry_run=dry_run):
+        print(f"  {YELLOW}[changelog]{NC} {note}")
+
+    # v5.3.0: `--canon-version` reports installed-vs-latest canon from inside a
+    # plugin, so "which canon am I on?" is answerable without reading the diff.
+    for note in migrate_publish_py_canon_version(plugin_path, dry_run=dry_run):
+        print(f"  {YELLOW}[canon-version]{NC} {note}")
 
     # v5.1.1: verify CI is GREEN on the commit that was just released. The release
     # push goes straight to the default branch and the maintainer role bypasses the

@@ -478,6 +478,59 @@ def bump_semver(current: str, bump_type: str) -> str | None:
 # ── Version read/write (absorbed from bump_version.py) ───────────────────────
 
 
+# ── Canon version reporting (--canon-version) ────────────────────────────────
+#
+# Downstream plugins carry a COPY of this pipeline, so "which canon am I on?"
+# is not answerable from the copy alone. `--canon-version` answers it: the
+# INSTALLED canon version is baked in at generation/migration time (in a
+# generated publish.py it is the `CANON_VERSION` constant; in CPV's own repo it
+# is CPV's version, since this file IS the canon), and the LATEST is read from
+# the canon repo's manifest on GitHub.
+CANON_LATEST_URL = "https://raw.githubusercontent.com/Emasoft/claude-plugins-validation/master/.claude-plugin/plugin.json"
+CANON_FETCH_TIMEOUT_S = 6
+
+
+def fetch_latest_canon_version() -> str | None:
+    """The newest canon version per the canon repo's manifest, or None.
+
+    EVERY failure mode (offline, DNS, timeout, HTTP error, malformed JSON)
+    returns None rather than raising: `--canon-version` is an INFORMATION
+    command, and an info command that fails on a train with no wifi is a bug.
+    The caller renders None as an explicit "unknown", never as "up to date".
+    """
+    import urllib.request  # noqa: PLC0415 - stdlib, imported only on this path
+
+    req = urllib.request.Request(  # noqa: S310 - fixed https URL, not user input
+        CANON_LATEST_URL,
+        headers={"User-Agent": "cpv-publish-canon-version"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=CANON_FETCH_TIMEOUT_S) as resp:  # noqa: S310
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001 - any failure means "unknown", by design
+        return None
+    version = data.get("version") if isinstance(data, dict) else None
+    return version if isinstance(version, str) and version else None
+
+
+def print_canon_version(installed: str | None) -> int:
+    """Print the canon version report. Always returns 0 — info never fails."""
+    latest = fetch_latest_canon_version()
+    installed_display = installed or "unknown (could not read plugin.json)"
+    latest_display = latest or "unknown (could not reach GitHub)"
+    print("Emasoft CPV Plugin Publishing Pipeline Canon")
+    print()
+    print(f"* Installed Canon Version:  {installed_display}")
+    print(f"* Latest Version Available: {latest_display}")
+    print()
+    if installed and latest and installed == latest:
+        print("The canon is up to date.")
+    else:
+        print('Run "/cpv-agent update the canon" to update')
+        print("the plugin to the latest canon.")
+    return 0
+
+
 def get_current_version(plugin_root: Path) -> str | None:
     """Read current version from .claude-plugin/plugin.json."""
     plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
@@ -745,7 +798,7 @@ GATES: list[tuple[str, str]] = [
         ".cpv-self-hashes.json compat copy also written) — issue #18: stale manifest "
         "causes integrity-mismatch abort on fresh marketplace installs",
     ),
-    ("Gate 9", "Generate CHANGELOG.md + release notes (git-cliff --bump --unreleased --tag)"),
+    ("Gate 9", "Generate CHANGELOG.md (full history, idempotent) + release notes (git-cliff)"),
     ("Gate 10", "Commit bump + manifest refresh + changelog"),
     ("Gate 11", "Create annotated git tag vX.Y.Z"),
     ("Gate 12", "Push branch + tag to origin"),
@@ -756,6 +809,14 @@ GATES: list[tuple[str, str]] = [
         "ruleset's required checks are bypassed by the release push, so this is "
         "the ONLY thing that confirms the shipped commit actually passes CI; "
         "reports RED loudly, degrades to WARNING when gh/network is unavailable",
+    ),
+    (
+        "Gate 15",
+        "Prove the release INSTALLS — `claude plugin install <plugin>@<marketplace>` "
+        "into a clean temp dir. Static validation cannot catch an uninstallable "
+        "release (ai-maestro#62 R2); only an install can. SKIPPED (never a pass) "
+        "when the claude CLI or the marketplace name is unavailable; set "
+        "CPV_PUBLISH_REQUIRE_INSTALL_SMOKE=1 to make a real failure exit non-zero",
     ),
 ]
 
@@ -2115,15 +2176,29 @@ def stage_changelog(plugin_root: Path, tag_name: str, new_version: str) -> tuple
     if not cliff_toml.is_file():
         print(f"{RED}✗ cliff.toml not found. Required for changelog generation.{NC}", file=sys.stderr)
         return 1, None
-    # Use the pattern recommended by the git-cliff docs for release pipelines:
-    #   git cliff --bump --unreleased --tag <NEXT> -o CHANGELOG.md
-    # --bump          tells git-cliff to treat this as a release bump (so the
-    #                 unreleased section is promoted to a dated tag entry)
-    # --unreleased    process only commits since the last tag
+    # CHANGELOG.md gets the FULL history, regenerated from the commit log:
+    #   git cliff --bump --tag <NEXT> -o CHANGELOG.md
+    # --bump          treat this as a release bump (the unreleased section is
+    #                 promoted to a dated tag entry)
     # --tag <NEXT>    label the new entry with our computed version
-    # -o CHANGELOG.md write the full regenerated changelog back to disk
+    # -o CHANGELOG.md write the regenerated changelog back to disk
+    #
+    # `--unreleased` MUST NOT appear here (ai-maestro#62, reported by the
+    # ai-maestro server Claude and reproduced in THIS repo: our own
+    # CHANGELOG.md had been reduced to a single section). `-o` OVERWRITES the
+    # file, so restricting content to the unreleased window and then writing
+    # leaves a changelog containing only the release just generated — every
+    # prior entry is destroyed, and the history is unrecoverable from the
+    # artifact. Dropping the flag makes git-cliff render every tag from the
+    # commit log, which is also IDEMPOTENT: re-running the step for the same
+    # version reproduces the same file. `--prepend` is the WRONG fix — it
+    # accumulates, so a publish retried after a failed downstream gate
+    # silently duplicates a section.
+    #
+    # The release-notes extraction below is the ONLY place `--unreleased`
+    # belongs: it writes to a separate notes file, never to CHANGELOG.md.
     run(
-        [cliff_bin, "--bump", "--unreleased", "--tag", tag_name, "-o", "CHANGELOG.md"],
+        [cliff_bin, "--bump", "--tag", tag_name, "-o", "CHANGELOG.md"],
         cwd=plugin_root,
     )
     print(f"{GREEN}✓ CHANGELOG.md updated with {tag_name}{NC}")
@@ -2693,6 +2768,22 @@ def stage_commit_tag_push(
         capture_output=False,
     )
     print(f"{GREEN}✓ Pushed branch and tag {tag_name} atomically{NC}")
+    # Prove the TAG, not the stage (ai-maestro#62 R3, filed by the ai-maestro
+    # server Claude): a push stage that ran and silently failed its ref-update
+    # is indistinguishable from one that succeeded, and the plugin then reports
+    # a green publish while being undependable. `git ls-remote` asks the remote
+    # itself. A network failure returns False, so this reports UNVERIFIED —
+    # never a false green, and never a false block either: the refs are already
+    # pushed by this point, so failing the run could not un-push them.
+    for verify_tag in (tag_name, *([dep_tag_name] if dep_tag_name else [])):
+        if _remote_tag_exists(plugin_root, verify_tag):
+            print(f"{GREEN}✓ Verified on remote: {verify_tag}{NC}")
+        else:
+            print(
+                f"{YELLOW}⚠ Could NOT verify {verify_tag} on remote "
+                f"(ls-remote found nothing, or the network was unreachable).{NC}\n"
+                f"{YELLOW}  Check with: git ls-remote --tags origin '*{verify_tag}'{NC}"
+            )
     return 0
 
 
@@ -3144,6 +3235,7 @@ Examples:
   %(prog)s --major              # force major bump
   %(prog)s --dry-run            # preview only, stops before bump commit
   %(prog)s --print-gates        # print gate list and exit
+  %(prog)s --canon-version      # report installed vs latest canon, then exit
         """,
     )
     bump_group = parser.add_mutually_exclusive_group()
@@ -3152,11 +3244,27 @@ Examples:
     bump_group.add_argument("--patch", action="store_true", help="Force a patch bump (override auto-detection)")
     parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
     parser.add_argument("--print-gates", action="store_true", help="Print gate list and exit")
+    parser.add_argument(
+        "--canon-version",
+        action="store_true",
+        help="Report the installed vs latest CPV publish-canon version and exit",
+    )
     args = parser.parse_args()
 
     if args.print_gates:
         print_gates()
         return 0
+
+    # Answered BEFORE Gate 0 and before any tree check: it reads nothing but a
+    # manifest and reports. A plugin author debugging a stale canon usually has
+    # a dirty tree, and refusing to tell them their canon version because of it
+    # would make the command useless exactly when it is needed.
+    if args.canon_version:
+        # In THIS repo the canon and the plugin are the same artifact, so CPV's
+        # own version IS the installed canon version. A generated publish.py
+        # instead reports its baked CANON_VERSION constant, which records the
+        # canon it was generated from (and may lag this repo's version).
+        return print_canon_version(get_current_version(get_plugin_root()))
 
     # ── Gate 0: bypass guard ──
     rc = stage_bypass_guard()
@@ -3299,6 +3407,12 @@ Examples:
         # would only discard the report), so the publish verdict is unchanged.
         stage_verify_ci_green(root)
 
+        # Gate 15 — same post-release position, same reason. Only an actual
+        # install can prove the artifact is installable (ai-maestro#62 R2).
+        rc_smoke = stage_install_smoke(root, new_version)
+        if rc_smoke != 0:
+            return rc_smoke
+
         print(f"\n{GREEN}✓ Published v{new_version}{NC}")
         return 0
     finally:
@@ -3315,6 +3429,131 @@ Examples:
 # gate that gives up early would report UNVERIFIED on a perfectly healthy run —
 # noise that teaches the reader to ignore it. Expiry is never a failure verdict.
 _CI_VERIFY_DEFAULT_TIMEOUT_S = 900
+
+
+def _resolve_marketplace_name(plugin_root: Path) -> str | None:
+    """The marketplace NAME Claude Code installs by (``<plugin>@<name>``).
+
+    Layout B reads the parent marketplace.json directly. Layout A resolves the
+    remote marketplace repo from notify-marketplace.yml and reads its manifest
+    from GitHub. Anything unresolvable returns None, which makes the smoke test
+    SKIP with a reason — never guess a marketplace name, because installing
+    from the wrong one would prove nothing.
+    """
+    layout, details = detect_layout(plugin_root)
+    if layout == "B":
+        mp_root = details.get("marketplace_root")
+        if isinstance(mp_root, Path):
+            try:
+                data = json.loads((mp_root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return None
+            name = data.get("name") if isinstance(data, dict) else None
+            return name if isinstance(name, str) and name else None
+        return None
+    if layout == "A":
+        owner, repo = details.get("mkt_owner"), details.get("mkt_repo")
+        if not (isinstance(owner, str) and isinstance(repo, str)):
+            return None
+        import urllib.request  # noqa: PLC0415 - stdlib, only on this path
+
+        for branch in ("main", "master"):
+            url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/.claude-plugin/marketplace.json"
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "cpv-publish-install-smoke"})  # noqa: S310
+                with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+                    data = json.loads(resp.read().decode("utf-8"))
+            except Exception:  # noqa: BLE001 - unreachable manifest → SKIP, not a guess
+                continue
+            name = data.get("name") if isinstance(data, dict) else None
+            if isinstance(name, str) and name:
+                return name
+        return None
+    return None
+
+
+def stage_install_smoke(plugin_root: Path, new_version: str) -> int:
+    """Gate 15: prove the just-published release actually INSTALLS.
+
+    ai-maestro#62 R2, filed by the MANAGER Claude after eleven plugins each
+    published green and were all uninstallable: static validation cannot catch
+    it (the manifest was valid, the tags existed, the marketplace entry was
+    correct) — only an install can. So this installs the plugin from its
+    marketplace into a clean temp directory.
+
+    Position and verdict mirror Gate 14, for the same reason: it must run after
+    the release (nothing to install before it), by which point a non-zero exit
+    could not un-ship anything. So the DEFAULT is a loud report, not a failed
+    run. Setting ``CPV_PUBLISH_REQUIRE_INSTALL_SMOKE=1`` makes a genuine
+    install FAILURE exit non-zero, for fleets that want the pipeline to go red.
+
+    Cannot-check is never reported as clean: a missing ``claude`` CLI (the
+    normal case on a CI runner), an unresolvable marketplace, or a timeout all
+    report SKIPPED with the reason, and never count as a pass.
+    """
+    print(f"\n{BLUE}═══ Gate 15: Prove the release installs (clean-dir install smoke) ═══{NC}")
+    if os.environ.get("CPV_PUBLISH_SKIP_INSTALL_SMOKE") == "1":
+        print(f"{YELLOW}  SKIPPED — CPV_PUBLISH_SKIP_INSTALL_SMOKE=1{NC}")
+        return 0
+    strict = os.environ.get("CPV_PUBLISH_REQUIRE_INSTALL_SMOKE") == "1"
+    claude_bin = shutil.which("claude")
+    if claude_bin is None:
+        print(f"{YELLOW}  SKIPPED — the `claude` CLI is not on PATH (normal on a CI runner).{NC}")
+        print(f"{YELLOW}  This is NOT a pass: the release was not proven installable here.{NC}")
+        return 0
+    plugin_name = None
+    try:
+        plugin_name = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")).get(
+            "name"
+        )
+    except (OSError, ValueError):
+        pass
+    marketplace = _resolve_marketplace_name(plugin_root)
+    if not (isinstance(plugin_name, str) and plugin_name and marketplace):
+        print(f"{YELLOW}  SKIPPED — could not resolve <plugin>@<marketplace> (name={plugin_name!r}, {NC}")
+        print(f"{YELLOW}  marketplace={marketplace!r}). Not a pass — nothing was installed.{NC}")
+        return 0
+    target = f"{plugin_name}@{marketplace}"
+    import tempfile  # noqa: PLC0415 - stdlib, only on this path
+
+    with tempfile.TemporaryDirectory(prefix="cpv-install-smoke-") as tmp:
+        print(f"  $ (cd {tmp} && claude plugin install {target} --scope local)")
+        try:
+            result = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                [claude_bin, "plugin", "install", target, "--scope", "local"],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"{YELLOW}  SKIPPED — the install could not be run ({exc}). Not a pass.{NC}")
+            return 0
+    if result.returncode == 0:
+        print(f"{GREEN}✓ {target} installs cleanly (dependencies resolved){NC}")
+        # The marketplace entry is updated ASYNCHRONOUSLY (notify-marketplace
+        # dispatch), so right after a release the resolved version may still be
+        # the previous one. That is a lag, NOT an install failure — report it
+        # without failing, or every Layout-A release would flap.
+        if new_version not in (result.stdout or ""):
+            print(
+                f"{YELLOW}  Note: the marketplace has not published v{new_version} yet "
+                f"(async notify) — installability is proven, the version listing lags.{NC}"
+            )
+        return 0
+    tail = (result.stderr or result.stdout or "").strip().splitlines()[-8:]
+    print(f"{RED}========================================{NC}")
+    print(f"{RED}  RELEASE IS NOT INSTALLABLE: {target}{NC}")
+    print(f"{RED}  The release is already public — fix forward with a new release.{NC}")
+    for ln in tail:
+        print(f"{RED}    {ln}{NC}")
+    print(f"{RED}  Reproduce: cd $(mktemp -d) && claude plugin install {target} --scope local{NC}")
+    print(f"{RED}========================================{NC}")
+    if strict:
+        print(f"{RED}✗ CPV_PUBLISH_REQUIRE_INSTALL_SMOKE=1 — failing the publish run.{NC}")
+        return 1
+    return 0
 
 
 def stage_verify_ci_green(
