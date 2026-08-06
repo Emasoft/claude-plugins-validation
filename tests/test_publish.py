@@ -493,13 +493,14 @@ def _gate(label: str) -> tuple[str, str]:
 def test_gate_numbers_are_unique_and_ordered():
     """A lettered sub-gate must never renumber a numbered gate.
 
-    Gate 14 (v5.1.1) verifies CI is green on the released commit. It is the one
-    gate that runs AFTER something irreversible, so it never returns non-zero —
-    but it is still a declared gate, because a step that can report a RED release
-    must be visible in `--gates` rather than a silent side effect.
+    Gates 14 (v5.1.1, CI green on the released commit) and 15 (v5.3.0, the
+    release actually installs) both run AFTER something irreversible, so neither
+    aborts the publish by default — but both are declared gates, because a step
+    that can report a broken release must be visible in `--gates` rather than be
+    a silent side effect.
     """
     numbered = [name for name, _ in publish.GATES if not name[-1].isalpha()]
-    assert numbered == [f"Gate {i}" for i in range(15)]
+    assert numbered == [f"Gate {i}" for i in range(16)]
 
 
 def test_gate_8_is_integrity_manifest_refresh():
@@ -617,18 +618,28 @@ class TestCpvPublishPipelineOrder:
         assert label == "Gate 7"
         assert "bump" in desc.lower()
 
-    def test_gate_9_is_changelog_with_git_cliff_bump_unreleased(self):
-        """Gate 9 must be the changelog stage, explicitly using git-cliff --bump --unreleased.
+    def test_gate_9_is_changelog_and_never_scopes_the_file_write_to_unreleased(self):
+        """Gate 9 is the changelog stage, and its CHANGELOG.md write must render FULL history.
 
-        v2.64.0 retired the lint gate; the changelog gate moved from slot 10
-        to slot 9.
+        This test previously asserted the description advertised ``--unreleased``,
+        i.e. it PINNED the defect (ai-maestro#62): ``-o`` overwrites, so scoping
+        the content to the unreleased window destroyed every prior entry — CPV's
+        own changelog was down to 1 section against 381 releases. It now asserts
+        the CODE, not a description string, because the description was exactly
+        what made the defect look correct to a reviewer.
+
+        v2.64.0 retired the lint gate; the changelog gate moved from slot 10 to 9.
         """
         label, desc = _gate("Gate 9")
         assert label == "Gate 9"
         assert "git-cliff" in desc.lower()
-        assert "--bump" in desc
-        assert "--unreleased" in desc
-        assert "--tag" in desc
+        assert "changelog" in desc.lower()
+        src = (Path(publish.__file__).parent / "publish.py").read_text(encoding="utf-8")
+        assert '[cliff_bin, "--bump", "--tag", tag_name, "-o", "CHANGELOG.md"]' in src
+        assert '"--unreleased", "--tag", tag_name, "-o", "CHANGELOG.md"' not in src, (
+            "--unreleased on the -o CHANGELOG.md call destroys the release history"
+        )
+        assert '"--unreleased"' in src, "the release-NOTES extraction must still scope to unreleased"
 
     def test_gates_10_to_13_run_commit_tag_push_release(self):
         """Gates 10-13 must run commit → tag → push → github release in that order.

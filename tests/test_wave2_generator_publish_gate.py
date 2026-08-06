@@ -218,10 +218,11 @@ def test_publish_declares_gate_3b() -> None:
     # Lettered — so Gates 4..14 keep their numbers (the pre-push hook's "Gate 2b"
     # set this convention).
     assert labels.count("Gate 4") == 1
-    # Gate 14 (v5.1.1) is last: post-release CI verification. It runs after the
-    # GitHub release exists, so it is deliberately the only gate that cannot
-    # abort the publish.
-    assert labels[-1] == "Gate 14"
+    # Gate 15 (v5.3.0) is last: the post-release install proof. Like Gate 14
+    # before it, it runs after the GitHub release exists, so by default it
+    # reports rather than aborts — nothing it could return would un-ship the
+    # release it just checked.
+    assert labels[-1] == "Gate 15"
 
 
 def test_gate_3b_runs_in_the_preflight_block_before_the_bump() -> None:
