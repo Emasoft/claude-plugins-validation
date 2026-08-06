@@ -3630,13 +3630,24 @@ def detect_bump_type(root: Path) -> str:
 def stage_changelog(root: Path, new_ver: str, dry_run: bool) -> None:
     """Step 9: Generate CHANGELOG.md with git-cliff using the bumped tag.
 
-    Uses the git-cliff pattern recommended for release pipelines:
-        git cliff --bump --unreleased --tag v<NEXT> -o CHANGELOG.md
+        git cliff --bump --tag v<NEXT> -o CHANGELOG.md
 
     --bump          promote the unreleased section into a dated tag entry
-    --unreleased    process only commits since the last tag
     --tag v<NEXT>   label the new entry with the computed version (prefixed v)
     -o CHANGELOG.md write the regenerated changelog back to disk
+
+    `--unreleased` MUST NOT appear here. `-o` OVERWRITES the file, so
+    restricting the content to the unreleased window and then writing leaves a
+    CHANGELOG containing only the release just generated — every prior entry is
+    destroyed and the history is unrecoverable from the artifact. Rendering the
+    full history from the commit log is also IDEMPOTENT: running this step
+    twice for the same version produces the same file. `--prepend` is the WRONG
+    fix — it accumulates, so a publish retried after a failed downstream gate
+    silently duplicates a section.
+
+    Consequence worth stating on purpose: CHANGELOG.md is fully DERIVED from
+    conventional commits, so hand-written prose in it does not survive a
+    publish. Put release prose in the commit messages.
     """
     cprint(f"\n{BOLD}[9/11] Generating changelog (git-cliff)...{NC}")
     if not shutil.which("git-cliff"):
@@ -3648,13 +3659,13 @@ def stage_changelog(root: Path, new_ver: str, dry_run: bool) -> None:
         return
     tag = f"v{new_ver}"
     if dry_run:
-        cprint(f"  Would run: git-cliff --bump --unreleased --tag {tag} -o CHANGELOG.md")
+        cprint(f"  Would run: git-cliff --bump --tag {tag} -o CHANGELOG.md")
         return
     run(
-        ["git-cliff", "--bump", "--unreleased", "--tag", tag, "-o", "CHANGELOG.md"],
+        ["git-cliff", "--bump", "--tag", tag, "-o", "CHANGELOG.md"],
         cwd=root,
     )
-    cprint(f"  {GREEN}CHANGELOG.md updated with {tag}.{NC}")
+    cprint(f"  {GREEN}CHANGELOG.md updated with {tag} (full history).{NC}")
 
 def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     """Step 10: Commit, tag, push. Idempotent on commit + tag.
@@ -3930,6 +3941,57 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
 
 # -- Main ----------------------------------------------------------------------
 
+# ── Canon version reporting (--canon-version) ────────────────────────────────
+#
+# This pipeline is a COPY of the CPV publish canon, so "which canon am I on?"
+# cannot be answered from the copy alone. CANON_VERSION records the canon this
+# file was generated (or migrated) from; the latest is read from the canon
+# repo's manifest. The generator rewrites the placeholder below at scaffold
+# time — an un-rewritten value means this file was hand-copied rather than
+# generated, and is reported as-is rather than guessed.
+CANON_VERSION = "0.0.0-unpinned"
+CANON_LATEST_URL = "https://raw.githubusercontent.com/Emasoft/claude-plugins-validation/master/.claude-plugin/plugin.json"
+CANON_FETCH_TIMEOUT_S = 6
+
+
+def fetch_latest_canon_version():
+    """Newest canon version per the canon repo's manifest, or None.
+
+    EVERY failure (offline, DNS, timeout, HTTP error, malformed JSON) returns
+    None rather than raising: --canon-version is an INFORMATION command, and an
+    info command that fails without network is a bug. None renders as an
+    explicit "unknown", never as "up to date".
+    """
+    import urllib.request
+
+    req = urllib.request.Request(
+        CANON_LATEST_URL, headers={"User-Agent": "cpv-publish-canon-version"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=CANON_FETCH_TIMEOUT_S) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+    version = data.get("version") if isinstance(data, dict) else None
+    return version if isinstance(version, str) and version else None
+
+
+def print_canon_version() -> int:
+    """Print the canon version report. Always returns 0 — info never fails."""
+    latest = fetch_latest_canon_version()
+    print("Emasoft CPV Plugin Publishing Pipeline Canon")
+    print()
+    print(f"* Installed Canon Version:  {CANON_VERSION}")
+    print(f"* Latest Version Available: {latest or 'unknown (could not reach GitHub)'}")
+    print()
+    if latest and CANON_VERSION == latest:
+        print("The canon is up to date.")
+    else:
+        print('Run "/cpv-agent update the canon" to update')
+        print("the plugin to the latest canon.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Unified publish pipeline for Claude Code plugins.",
@@ -3955,10 +4017,19 @@ def main() -> int:
     mode_group.add_argument("--major", action="store_const", dest="bump", const="major",
                             help="Force a major bump (override auto-detection)")
     parser.add_argument("--dry-run", action="store_true", help="Preview only, no changes")
+    parser.add_argument("--canon-version", action="store_true",
+                        help="Report the installed vs latest CPV publish-canon version and exit")
     # NOTE: --skip-tests was intentionally removed. The cornerstone rule is that
     # every CPV plugin MUST pass validation with 0 issues (WARNING allowed) before
     # any push. Skipping tests would bypass that guarantee — there are no exceptions.
     args = parser.parse_args()
+
+    # Answered BEFORE the repo lookup and every gate: it reads a manifest and
+    # reports. Someone debugging a stale canon usually has a dirty tree, and
+    # refusing to answer because of it would make the command useless exactly
+    # when it is needed.
+    if args.canon_version:
+        return print_canon_version()
 
     root = get_repo_root()
 
@@ -4058,6 +4129,16 @@ if __name__ == "__main__":
     result = template.replace(
         "git+https://github.com/Emasoft/claude-plugins-validation",
         cpv_uvx_from_arg(p),
+    )
+    # Bake the canon version this file is generated FROM, so `publish.py
+    # --canon-version` can report installed-vs-latest from inside the plugin.
+    # Derived from the same source as the CPV ref pin (`_default_cpv_ref`),
+    # minus the leading "v", so the two can never disagree about which canon
+    # this file came from. The placeholder survives only in a hand-copied
+    # publish.py, which is exactly the case worth reporting honestly.
+    result = result.replace(
+        'CANON_VERSION = "0.0.0-unpinned"',
+        f'CANON_VERSION = "{_default_cpv_ref().lstrip("v")}"',
     )
     # Issue #137: the published `pypi` wheel declares pyyaml as a runtime
     # dependency, so drop the `--with pyyaml` shim from every inline argv list in
