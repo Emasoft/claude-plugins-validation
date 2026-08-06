@@ -3964,11 +3964,14 @@ def fetch_latest_canon_version():
     """
     import urllib.request
 
-    req = urllib.request.Request(
+    req = urllib.request.Request(  # nosec B310 - fixed https constant, never user input
         CANON_LATEST_URL, headers={"User-Agent": "cpv-publish-canon-version"}
     )
     try:
-        with urllib.request.urlopen(req, timeout=CANON_FETCH_TIMEOUT_S) as resp:
+        # nosec B310: CANON_LATEST_URL is a module-level https literal. B310 exists
+        # to catch a scheme an attacker can choose (file:/, custom); there is no
+        # input path to this URL at all, so the finding cannot apply here.
+        with urllib.request.urlopen(req, timeout=CANON_FETCH_TIMEOUT_S) as resp:  # nosec B310
             data = json.loads(resp.read().decode("utf-8"))
     except Exception:
         return None
