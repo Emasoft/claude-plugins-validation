@@ -1439,7 +1439,15 @@ def validate_manifest(
     for key in path_fields:
         if key in manifest:
             value = manifest[key]
-            if isinstance(value, str) and not value.startswith("./"):
+            # plugins-reference.md:636/641 — every path field must start with './',
+            # EXCEPT `skills`, which also accepts the bare "." (the plugin root
+            # itself holding a SKILL.md; the doc's own example is `"skills": ["."]`).
+            # Scoped to that field and that exact string: "." in any other path
+            # field, "./" prefixes elsewhere, and '..' anywhere still MAJOR.
+            # Before v2.1.221 the bare "." failed CC's own manifest validation, so
+            # this widens only as far as the current spec does.
+            dot_ok = key == "skills"
+            if isinstance(value, str) and not value.startswith("./") and not (dot_ok and value == "."):
                 report.major(
                     f"Field '{key}' path must start with './': {value}",
                     ".claude-plugin/plugin.json",
@@ -1471,7 +1479,7 @@ def validate_manifest(
                             f"Field '{key}[{i}]' must be a string path, got {type(path).__name__}",
                             ".claude-plugin/plugin.json",
                         )
-                    elif not path.startswith("./"):
+                    elif not path.startswith("./") and not (dot_ok and path == "."):
                         report.major(
                             f"Field '{key}[{i}]' path must start with './': {path}",
                             ".claude-plugin/plugin.json",
@@ -6114,10 +6122,20 @@ _COVERAGE_SKIP_SEGMENTS: frozenset[str] = frozenset(
     }
 )
 
-# Cap the total test-file content read for the content-mention fallback so a
-# pathologically large suite can't slow this advisory check down. Filename
-# matching stays unbounded (cheap).
-_COVERAGE_CONTENT_SCAN_CAP = 5_000_000
+# Runaway guard on the total test-file content read for the content-mention
+# fallback. Filename matching stays unbounded (cheap).
+#
+# This used to be 5 MB and the scan simply STOPPED there, which made the advisory
+# LIE about big suites: CPV's own tree is 7.7 MB of tests, so 35% of its test
+# files were never read and every component tested only in that tail was reported
+# as having "no discoverable test" — a finding that changed with filesystem
+# iteration order. The bound now guards runtime WITHOUT inventing findings: the
+# scan stops as soon as every component is accounted for, and if the budget is
+# genuinely exhausted with components still unmatched, the check says it could
+# not determine coverage instead of naming them untested. A truncated scan is
+# not evidence of an untested component (the mirror of "cannot check is never a
+# pass" — cannot check is not a FAILURE either).
+_COVERAGE_CONTENT_SCAN_CAP = 64_000_000
 
 # Top-level-module imports written in either canonical form, ANYWHERE in a file —
 # the leading `[ \t]*` is load-bearing, not cosmetic: a dispatcher routinely imports
@@ -6137,6 +6155,43 @@ def _coverage_path_is_vendored(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return any(seg in _COVERAGE_SKIP_SEGMENTS for seg in rel.parts)
+
+
+def _coverage_drop_unshipped(paths: list[Path], root: Path) -> tuple[list[Path], int]:
+    """Drop paths git proves are not part of the published artifact.
+
+    Returns ``(kept, dropped_count)``. This removes DEAD COPIES that are
+    indistinguishable from live ones by content alone: safe-delete staging
+    (``.trashcan/``), archived scratch under a gitignored ``*_dev/`` tree, and a
+    second CHECKOUT of the same repo under ``.claude/worktrees/``. Each holds
+    real files with real frontmatter, so no parser can tell them from the live
+    article — only a population rule can, and the honest population rule is
+    "does git say this ships?", not a list of directory names. Naming
+    conventions are this author's, and CPV validates everyone's plugins.
+
+    Measured on CPV's own tree: 7 such test files, all untracked AND gitignored.
+    They credited no component today, but a DEAD test file crediting a live
+    component is the FN direction — it mutes the advisory silently — and the
+    reported suite size was overstated by 7 either way.
+
+    ANTI-EVASION, inherited from v2.126.26: a ``tracked + gitignored`` file
+    still ships in ``git archive``, so ``gitignored_unshipped_paths`` excludes
+    it from this set and it is KEPT. Without git the set is ``None`` and nothing
+    is dropped — the present tree IS the artifact.
+    """
+    unshipped = gitignored_unshipped_paths(root)
+    if not unshipped:
+        return paths, 0
+    kept: list[Path] = []
+    for p in paths:
+        try:
+            rel = p.relative_to(root).as_posix()
+        except ValueError:
+            kept.append(p)
+            continue
+        if not path_is_unshipped(rel, unshipped):
+            kept.append(p)
+    return kept, len(paths) - len(kept)
 
 
 def _coverage_enumerate_components(plugin_root: Path) -> list[tuple[str, str]]:
@@ -6181,10 +6236,15 @@ def _coverage_enumerate_components(plugin_root: Path) -> list[tuple[str, str]]:
     return components
 
 
-def _coverage_discover_tests(plugin_root: Path) -> list[Path]:
-    """Test files anywhere under the plugin, by conventional filename patterns,
-    excluding vendored/installed-package trees (so their tests never count as
-    the plugin's own coverage)."""
+def _coverage_discover_tests(plugin_root: Path) -> tuple[list[Path], int]:
+    """(test files, count dropped as not-shipped).
+
+    Conventional filename patterns anywhere under the plugin, excluding
+    vendored/installed-package trees AND dead copies git proves do not ship
+    (see ``_coverage_drop_unshipped``) — so neither an installed package's
+    tests nor a deleted one in safe-delete staging can be credited as this
+    plugin's coverage.
+    """
     test_files: list[Path] = []
     seen: set[Path] = set()
     for pattern in _COVERAGE_TEST_GLOBS:
@@ -6192,15 +6252,16 @@ def _coverage_discover_tests(plugin_root: Path) -> list[Path]:
             if tf.is_file() and tf not in seen and not _coverage_path_is_vendored(tf, plugin_root):
                 seen.add(tf)
                 test_files.append(tf)
-    return test_files
+    return _coverage_drop_unshipped(test_files, plugin_root)
 
 
 def _coverage_test_blobs(test_files: list[Path]) -> tuple[str, str]:
     """(filename-blob, bounded-content-blob), both lowercased, for matching.
 
-    Filename matching is cheap and unbounded; the content scan is capped
-    (``_COVERAGE_CONTENT_SCAN_CAP``) so a huge suite can't slow this advisory
-    down. Any read error is swallowed — best-effort, never crashes the run.
+    Kept for callers that want the raw blobs. Prefer
+    ``_coverage_match_tokens``: this concatenation is bounded by BYTES, so on a
+    suite larger than the cap it silently drops the tail, and a component tested
+    only there looks untested.
     """
     name_blob = "\n".join(tf.name.lower() for tf in test_files)
     content_parts: list[str] = []
@@ -6215,6 +6276,40 @@ def _coverage_test_blobs(test_files: list[Path]) -> tuple[str, str]:
         content_parts.append(text)
         total += len(text)
     return name_blob, "\n".join(content_parts)
+
+
+def _coverage_match_tokens(test_files: list[Path], tokens: set[str]) -> tuple[set[str], bool]:
+    """Which ``tokens`` the suite mentions, and whether the scan COMPLETED.
+
+    Returns ``(matched, complete)``. ``complete`` is False only when the byte
+    budget ran out with tokens still unmatched — in that case the caller must
+    NOT report those tokens as untested, because it did not look at every file.
+
+    Scanning per-token instead of concatenating one giant blob is what makes the
+    budget a runtime guard rather than a source of false findings: the loop drops
+    each token the moment it is seen and stops as soon as none remain, so a
+    healthy suite is fully accounted for after only as many files as it takes.
+    Read errors are swallowed (best-effort, never crashes the run) but they do
+    NOT count as a completed look at that file.
+    """
+    remaining = set(tokens)
+    matched: set[str] = set()
+    total = 0
+    for tf in test_files:
+        if not remaining:
+            return matched, True
+        if total >= _COVERAGE_CONTENT_SCAN_CAP:
+            return matched, False
+        try:
+            text = tf.read_text(encoding="utf-8", errors="ignore").lower()
+        except OSError:
+            continue
+        total += len(text)
+        hit = {tok for tok in remaining if tok in text}
+        if hit:
+            matched |= hit
+            remaining -= hit
+    return matched, True
 
 
 def _coverage_indirect_python_tokens(
@@ -6439,23 +6534,44 @@ def check_test_coverage(plugin_root: Path, report: ValidationReport) -> None:
         # Nothing testable — not an error (mirrors the no-directory convention).
         return
 
-    test_files = _coverage_discover_tests(plugin_root)
+    test_files, dropped_unshipped = _coverage_discover_tests(plugin_root)
     if not test_files:
         # No test suite at all → stay silent (conservative: only audit plugins
         # that have opted into testing; see the docstring).
         return
 
-    name_blob, content_blob = _coverage_test_blobs(test_files)
+    name_blob = "\n".join(tf.name.lower() for tf in test_files)
+    tokens = {token for _rel, token in components if token}
+    # Filenames are cheap and unbounded, so settle what they cover first and let
+    # the (bounded) content pass work on the remainder only.
+    by_name = {tok for tok in tokens if tok in name_blob}
+    matched, scan_complete = _coverage_match_tokens(test_files, tokens - by_name)
+    matched |= by_name
+
+    if not scan_complete:
+        # The budget ran out with components still unaccounted for. Naming them
+        # untested would assert something never checked, so report the limit
+        # instead — an honest "could not determine" beats a confident wrong list.
+        report.warning(
+            "[RC-TEST-COVERAGE] could not determine test coverage: the suite exceeds the "
+            f"{_COVERAGE_CONTENT_SCAN_CAP}-byte scan budget, so some test files were not read. "
+            "No component is reported as untested on a partial scan. "
+            "Advisory only — this WARNING does not block the publish."
+        )
+        return
+
     # A module the suite reaches only THROUGH a dispatcher it does name is tested;
     # crediting it is what keeps this advisory from calling covered code untested.
-    indirect = _coverage_indirect_python_tokens(plugin_root, name_blob, content_blob)
+    # Built from the FULL content only for the tokens still unmatched, so the
+    # indirect credit costs nothing on a suite that already names everything.
+    unmatched = tokens - matched
+    indirect: set[str] = set()
+    if unmatched:
+        _nb, content_blob = _coverage_test_blobs(test_files)
+        indirect = _coverage_indirect_python_tokens(plugin_root, name_blob, content_blob)
+
     untested = [
-        rel_path
-        for rel_path, token in components
-        if token
-        and token not in name_blob
-        and token not in content_blob
-        and token not in indirect
+        rel_path for rel_path, token in components if token and token not in matched and token not in indirect
     ]
     if not untested:
         return
@@ -6467,10 +6583,20 @@ def check_test_coverage(plugin_root: Path, report: ValidationReport) -> None:
     shown = untested[:20]
     more = len(untested) - len(shown)
     listing = ", ".join(shown) + (f", … (+{more} more)" if more else "")
+    # State the POPULATION beside the count. A count whose scope is invisible is
+    # the shape that misleads: a capped walk, an unfiltered tree and a wrong root
+    # each produce a plausible number, and none of them announces itself. Only
+    # printed when something was actually excluded, so the common case stays terse.
+    excluded = (
+        f" ({dropped_unshipped} non-shipped test file(s) excluded — gitignored and untracked,"
+        " e.g. safe-delete staging, archived scratch, or a second checkout)"
+        if dropped_unshipped
+        else ""
+    )
     report.warning(
         f"[RC-TEST-COVERAGE] {len(untested)} of {len(components)} testable "
         f"component(s) have no discoverable test (the plugin ships a suite of "
-        f"{len(test_files)} test file(s), so its coverage looks thin): {listing}. "
+        f"{len(test_files)} test file(s){excluded}, so its coverage looks thin): {listing}. "
         "Advisory only — this WARNING does not block the publish."
     )
 

@@ -124,7 +124,13 @@ def get_submodule_paths(marketplace_dir: Path) -> list[dict[str, str]]:
                     submodules.append(current_submodule)
                 # Extract name from [submodule "name"]
                 name = line.split('"')[1] if '"' in line else ""
-                current_submodule = {"name": name, "path": ""}
+                # `url` is seeded alongside `path` so every returned dict has the
+                # same shape. A .gitmodules stanza may legally omit `url`, and
+                # without the seed the key was simply absent — a caller doing
+                # `submodule["url"]` would KeyError on that one stanza only,
+                # which is the kind of defect that surfaces on someone else's
+                # repo long after this code was last read.
+                current_submodule = {"name": name, "path": "", "url": ""}
             elif line.startswith("path = "):
                 current_submodule["path"] = line.split("=", 1)[1].strip()
             elif line.startswith("url = "):
@@ -628,6 +634,19 @@ def setup_marketplace_automation(
             print("         (Copy to each plugin repo's .github/workflows/ and configure)")
         if not dry_run:
             shutil.copy2(src_notify, dst_notify)
+    else:
+        # NOT `setup_ok = False`: this template is a reference copy the user
+        # hand-installs into each plugin repo, so its absence does not stop the
+        # automation working, and failing here would newly break setups that are
+        # fine today. But it must not be SILENT either — the old code fell
+        # through with no output at all, so the run printed "Setup complete!"
+        # while the file the next step tells you to copy was never created.
+        print(
+            "  [WARN] notify-marketplace.yml template not found — "
+            "scripts/notify-marketplace.yml.template was NOT created. "
+            "The automation still works; you will have to write that workflow by hand.",
+            file=sys.stderr,
+        )
 
     if not setup_ok:
         # A required template was missing — the marketplace automation is NOT

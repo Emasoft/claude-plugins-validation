@@ -138,7 +138,15 @@ def parse_corpus(corpus_path: Path) -> list[Exemplar]:
         elif heading.startswith("fp exemplars"):
             section_label = "FP"
         elif heading.startswith(("tp-", "fp-")) and section_label is not None:
-            section_starts.append((section_label, m.end()))
+            # The BLOCK's own prefix wins over the enclosing section. Labelling by
+            # section meant a `### FP-1:` misfiled under `## TP exemplars` was
+            # recorded as a TP — and then retitled `TP-<n>`, erasing the evidence —
+            # so a corpus typo silently moved an exemplar to the wrong side of the
+            # precision/recall ledger. A bench whose ledger can be wrong without
+            # saying so is worse than no bench. The section still gates whether a
+            # block counts at all; it just no longer overrides an explicit label.
+            block_label = "TP" if heading.startswith("tp-") else "FP"
+            section_starts.append((block_label, m.end()))
 
     exemplars: list[Exemplar] = []
     # Counters per label so titles read naturally — TP-1, TP-2, …
