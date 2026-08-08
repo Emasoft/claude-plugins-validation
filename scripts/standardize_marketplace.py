@@ -35,17 +35,32 @@ NC = "\033[0m"
 # Kebab-case: lowercase letters/digits/hyphens, starts with letter, ends with letter/digit
 KEBAB_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$")
 
-# Reserved marketplace names (aligned with validate_marketplace.py)
-RESERVED_MARKETPLACE_NAMES = frozenset(
+# Names a NEW marketplace should not be scaffolded with. Two sources, and the
+# split is the point:
+#
+#   1. The SPEC-RESERVED names, IMPORTED from validate_marketplace so there is
+#      one source. This list used to be a second hand-maintained copy whose own
+#      comment claimed it was "aligned with validate_marketplace.py" — it had
+#      drifted by NINE names (every addition since it was written, including
+#      `healthcare` and `first-party-plugins`), so standardize silently accepted
+#      names the validator rejects. A copy that asserts it is in sync is worse
+#      than an obvious fork: it stops the next reader from checking.
+#   2. The single-word names that are merely POOR choices for a new marketplace
+#      (aligned with generate_marketplace_repo.py). These are scaffolding advice,
+#      not spec-reserved, which is why they live here and not upstream.
+#
+# The Desktop-sync names are included too: standardize is a create/fix tool, and
+# steering a NEW marketplace away from a name Claude Desktop drops costs nothing,
+# where the validator must stay non-blocking about an EXISTING one.
+from validate_marketplace import (  # noqa: E402
+    DESKTOP_SYNC_REJECTED_MARKETPLACE_NAMES as _SPEC_DESKTOP_NAMES,
+)
+from validate_marketplace import (  # noqa: E402
+    RESERVED_MARKETPLACE_NAMES as _SPEC_RESERVED_NAMES,
+)
+
+_SCAFFOLDING_DISCOURAGED_NAMES = frozenset(
     {
-        "claude-code-marketplace",
-        "claude-code-plugins",
-        "claude-plugins-official",
-        "anthropic-marketplace",
-        "anthropic-plugins",
-        "agent-skills",
-        "life-sciences",
-        # Single-word reserved names (aligned with generate_marketplace_repo.py)
         "official",
         "anthropic",
         "claude",
@@ -53,6 +68,10 @@ RESERVED_MARKETPLACE_NAMES = frozenset(
         "example",
         "demo",
     }
+)
+
+RESERVED_MARKETPLACE_NAMES = frozenset(
+    set(_SPEC_RESERVED_NAMES) | set(_SPEC_DESKTOP_NAMES) | _SCAFFOLDING_DISCOURAGED_NAMES
 )
 
 # Impersonation keywords -- marketplace names containing BOTH a brand word AND

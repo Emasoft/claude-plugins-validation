@@ -51,6 +51,7 @@ if TYPE_CHECKING:
 __all__ = [
     "PROJECT_REJECTED_KEYS",
     "PROJECT_REJECTED_NESTED_KEYS",
+    "USER_MANAGED_SETTINGS_ONLY_KEYS",
     "MANAGED_ONLY_KEYS",
     "MANAGED_ONLY_NESTED_KEYS",
     "GLOBAL_CONFIG_KEYS",
@@ -159,6 +160,17 @@ PROJECT_REJECTED_KEYS: frozenset[str] = frozenset(
 PROJECT_REJECTED_NESTED_KEYS: frozenset[tuple[str, ...]] = frozenset(
     {
         ("permissions", "skipDangerousModePermissionPrompt"),
+    }
+)
+
+# Per settings.md: keys read from USER, MANAGED and ``--settings`` sources ONLY.
+# This is STRICTER than PROJECT_REJECTED_KEYS, which is why it cannot reuse it:
+# that set's remediation offers ``.claude/settings.local.json`` as a valid home,
+# and for these keys it is NOT one. Sending an author there would be a fix that
+# does not fix anything — the key stays ignored and looks addressed.
+USER_MANAGED_SETTINGS_ONLY_KEYS: frozenset[str] = frozenset(
+    {
+        "dialogExpiry",  # v2.1.224 — settings.md "Read from user, managed, and --settings sources only"
     }
 )
 
@@ -275,6 +287,9 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         "teammateMode",
         "autoConnectIde",
         "autoInstallIdeExtension",
+        # v2.1.224 (settings.md) — deadline for a dialog forwarded to a remote
+        # client (Remote Control / an SDK host). Accepts "60s"/"5m"/"10m"/"never".
+        "dialogExpiry",
         # Git hint overrides
         "includeGitInstructions",
         "respectGitignore",

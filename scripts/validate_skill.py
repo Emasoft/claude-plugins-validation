@@ -68,6 +68,7 @@ from cpv_validation_common import (  # noqa: E402  (import below conditional yam
     save_report_and_print_summary,
     validate_component_name,
     validate_no_duplicate_frontmatter_keys,
+    warn_fork_background_default,
 )
 from cpv_validation_common import parse_frontmatter as _shared_parse_frontmatter  # noqa: E402
 
@@ -285,6 +286,7 @@ def validate_context_field(frontmatter: dict[str, Any], report: ValidationReport
         return
 
     report.passed(f"'context' field valid: {context}", "SKILL.md")
+    warn_fork_background_default(frontmatter, report, "SKILL.md")
 
 
 def validate_agent_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:

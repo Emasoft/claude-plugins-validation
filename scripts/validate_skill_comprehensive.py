@@ -74,6 +74,7 @@ from cpv_validation_common import (
     save_report_and_print_summary,
     validate_component_name,
     validate_toc_embedding,
+    warn_fork_background_default,
 )
 from cpv_validation_common import (
     ValidationReport as BaseValidationReport,
@@ -1373,6 +1374,7 @@ def validate_context_field(frontmatter: dict[str, Any], report: ValidationReport
         return
 
     report.passed(f"'context' field valid: {context}", "SKILL.md", category="Frontmatter")
+    warn_fork_background_default(frontmatter, report, "SKILL.md")
 
 
 def validate_agent_field(frontmatter: dict[str, Any], report: ValidationReport) -> None:
