@@ -759,6 +759,7 @@ VALID_PLUGIN_ENV_VARS = {
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_BEDROCK_BASE_URL",
+    "ANTHROPIC_BEDROCK_REGION_PREFIX",  # v2.1.222 — Bedrock inference-profile region prefix
     "ANTHROPIC_BEDROCK_SERVICE_TIER",  # v2.1.122 — Bedrock service tier (default/flex/priority)
     "ANTHROPIC_BETAS",  # v2.1.98 — beta opt-ins as env var
     "ANTHROPIC_CUSTOM_HEADERS",
@@ -804,6 +805,9 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_CODE_CERT_STORE",  # v2.1.101 — "bundled" to force bundled CAs
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",  # v2.0.17
     "CLAUDE_CODE_DISABLE_TERMINAL_TITLE",  # v2.1.79
+    # v2.1.223 — allow a model id whose context window Claude Code does not know
+    "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT",
+    "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS",  # v2.1.224 (env-vars.md) — overrides the `dialogExpiry` setting
     "CLAUDE_CODE_EXIT_AFTER_STOP_DELAY",  # v2.0.35
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY",  # v2.1.108
     "CLAUDE_CODE_ENABLE_TASKS",  # v2.1.19
@@ -1450,6 +1454,44 @@ def is_accepted_frontmatter_bool(value: object) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in _FRONTMATTER_BOOL_STRINGS
     return False
+
+
+def warn_fork_background_default(
+    frontmatter: dict[str, Any],
+    report: "ValidationReport",
+    filename: str,
+) -> None:
+    """Warn when a ``context: fork`` skill leaves ``background`` unset (v2.1.218+).
+
+    Per skills.md:271/573, ``background`` defaults to **true** for a forked
+    skill: the subagent runs in the background and its result arrives LATER, so
+    the turn that invoked the skill gets only a handle — no output, no error,
+    no warning. Before v2.1.218 a forked skill always blocked until it finished,
+    so every skill authored against the old behaviour changed meaning in place
+    without its file changing. A backgrounded fork also runs with the narrower
+    background-subagent tool set, so a skill whose steps need a tool outside it
+    silently loses that tool too.
+
+    WARNING, deliberately: backgrounding is a legitimate choice and Claude Code
+    still waits in several documented cases (non-interactive ``-p`` / the Agent
+    SDK, ``CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1``, a re-entrant invocation, a
+    scheduled task). CPV cannot know which case applies, and WARNING never
+    blocks — not even under ``--strict`` — so this can never fail a plugin that
+    meant it. An EXPLICIT ``background:`` either way is silent: the author has
+    decided, and re-asking would be noise.
+    """
+    if frontmatter.get("context") != "fork":
+        return
+    if "background" in frontmatter:
+        return
+    report.warning(
+        "'context: fork' without an explicit 'background' — since Claude Code v2.1.218 a forked "
+        "skill runs in the BACKGROUND by default, so the turn that invoked it receives only an "
+        "agent handle, not the skill's result (and the fork runs with the narrower "
+        "background-subagent tool set). Add 'background: false' to wait for the result in the "
+        "invoking turn, or 'background: true' to state the intent explicitly.",
+        filename,
+    )
 
 
 def _to_kebab(key: str) -> str:

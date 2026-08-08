@@ -100,6 +100,7 @@ from cc_scope_rules import (
     PROJECT_REJECTED_KEYS,
     PROJECT_REJECTED_NESTED_KEYS,
     SECRET_ENV_VAR_NAMES,
+    USER_MANAGED_SETTINGS_ONLY_KEYS,
     OversizedFileError,
     classify_file_scope,
     classify_folder_scope,
@@ -258,6 +259,27 @@ def _flag_rejected_top_level_keys(data: dict[str, Any], report: ValidationReport
                     f"settings.json has '{key}' — Claude Code silently ignores this "
                     "key when set in project settings.json. Move it to "
                     ".claude/settings.local.json or ~/.claude/settings.json."
+                ),
+                file_label,
+            )
+
+
+def _flag_user_managed_only_keys(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
+    """Flag keys Claude Code reads only from user / managed / ``--settings``.
+
+    Deliberately a SEPARATE message from ``_flag_rejected_top_level_keys``: that
+    one offers ``.claude/settings.local.json`` as a valid destination, which for
+    these keys it is not. Reusing it would hand the author a move that leaves the
+    key just as ignored as it was.
+    """
+    for key in sorted(USER_MANAGED_SETTINGS_ONLY_KEYS):
+        if key in data:
+            report.critical(
+                (
+                    f"settings.json has '{key}' — Claude Code reads this key from user, "
+                    "managed and --settings sources ONLY, so it has no effect in project "
+                    "settings. Move it to ~/.claude/settings.json (or managed settings). "
+                    "NOTE: .claude/settings.local.json does not work for this key either."
                 ),
                 file_label,
             )
@@ -590,6 +612,7 @@ def validate_settings_json_project_scope(settings_path: Path, report: Validation
         return None
 
     _flag_rejected_top_level_keys(data, report, file_label)
+    _flag_user_managed_only_keys(data, report, file_label)
     _flag_rejected_nested_keys(data, report, file_label)
     _flag_managed_only_keys(data, report, file_label)
     _flag_managed_only_nested_keys(data, report, file_label)

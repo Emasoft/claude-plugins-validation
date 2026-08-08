@@ -116,10 +116,12 @@ ValidationReport = MarketplaceValidationReport
 # "directory" is a Layout-B source for nested plugins inside the marketplace repo:
 # {"source": {"source": "directory", "path": "./plugins/my-plugin"}}
 # Equivalent to the shorthand form "./plugins/my-plugin" as a plain string.
-# Per plugin-marketplaces.md:223-229 the 5 official per-plugin source types are
-# relative-path string, github, url, git-subdir, npm. "file" is a settings-level
-# source for extraKnownMarketplaces, NOT valid as a per-plugin source.
-VALID_SOURCE_TYPES = {"github", "url", "npm", "git", "git-subdir", "directory"}
+# Per plugin-marketplaces.md the official per-plugin source types are the
+# relative-path string, github, url, git-subdir, npm and — since CC v2.1.224 —
+# archive (a zip downloaded over HTTPS; plugin-marketplaces.md:248/440-492).
+# "file" is a settings-level source for extraKnownMarketplaces, NOT valid as a
+# per-plugin source.
+VALID_SOURCE_TYPES = {"github", "url", "npm", "git", "git-subdir", "directory", "archive"}
 
 # Source types that are valid at the settings.json level (extraKnownMarketplaces)
 # but NOT inside per-plugin source entries in marketplace.json. If authors use
@@ -242,6 +244,9 @@ _KNOWN_SOURCE_FIELDS_BY_TYPE: dict[str, frozenset[str]] = {
     "git": frozenset({"source", "url", "ref", "sha", "subdir", "skipLfs"}),
     "git-subdir": frozenset({"source", "url", "subdir", "ref", "sha", "path"}),
     "directory": frozenset({"source", "path"}),
+    # v2.1.224 — zip archive over HTTPS. `url` required, `sha256` optional
+    # (plugin-marketplaces.md:483-488).
+    "archive": frozenset({"source", "url", "sha256"}),
     # "relative-path" is the bare string form ("./path") — never reached via
     # a dict-shaped source — listed here so callers can reference the type.
     "relative-path": frozenset({"source", "path"}),
@@ -286,6 +291,117 @@ def _validate_known_entry_fields(
                     f"Remove the '{field_name}' field from the marketplace entry. "
                     "See marketplace-upstream-drift.md §3 for the bulk-fix recipe."
                 ),
+            )
+        )
+    return results
+
+
+_ARCHIVE_SHA256_RE = re.compile(r"\A[0-9a-fA-F]{64}\Z")
+
+# Hosts Claude Code refuses for an `archive` url (plugin-marketplaces.md:487).
+# Name-based forms only — a numeric host goes through `_archive_ip_is_blocked`.
+_ARCHIVE_BLOCKED_HOSTNAMES = frozenset({"localhost", "metadata.google.internal", "metadata.goog"})
+
+
+def _archive_ip_is_blocked(host: str) -> str | None:
+    """Reason CC refuses this literal IP host, or None when it is fine.
+
+    Returns None for a NON-IP host too — name resolution is a runtime property
+    CPV cannot evaluate offline, and guessing would false-block a legitimate
+    artifact server. Only the shapes the spec names verbatim are flagged.
+    """
+    import ipaddress  # noqa: PLC0415 — only needed on the archive path
+
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return None
+    if ip.is_loopback:
+        return "a loopback address"
+    # 169.254.169.254 is link-local AND the cloud-metadata endpoint; report the
+    # more specific reason so the author knows why it is singled out.
+    if str(ip) == "169.254.169.254":
+        return "the cloud-metadata endpoint"
+    if ip.is_link_local:
+        return "a link-local address"
+    return None
+
+
+def _validate_archive_source(
+    plugin: dict[str, Any],
+    plugin_id: str,
+    json_path: str,
+) -> list[ValidationResult]:
+    """Shape-check an ``archive`` source (CC v2.1.224+).
+
+    Every finding here is a case Claude Code REFUSES at install time
+    (plugin-marketplaces.md:483-488), so the entry ships an uninstallable
+    plugin — MAJOR, the same tier as the other "this will not install"
+    marketplace findings.
+    """
+    results: list[ValidationResult] = []
+    src = plugin.get("source")
+    if not isinstance(src, dict) or src.get("source") != "archive":
+        return results
+
+    url = src.get("url")
+    if not isinstance(url, str) or not url.strip():
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="plugin",
+                message=(f"[RC-MKPL-ARCHIVE-URL] entry '{plugin_id}' has an archive source with no 'url'"),
+                file=json_path,
+                suggestion="Add \"url\": \"https://…/plugin.zip\" — it is required for archive sources.",
+            )
+        )
+    else:
+        parsed = urlparse(url.strip())
+        if parsed.scheme.lower() != "https":
+            results.append(
+                ValidationResult(
+                    level="MAJOR",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-ARCHIVE-URL] entry '{plugin_id}' archive url is not HTTPS: {url!r}. "
+                        "Claude Code rejects non-HTTPS archive downloads, so this plugin cannot install."
+                    ),
+                    file=json_path,
+                    suggestion="Serve the zip over HTTPS. Every redirect hop must also be HTTPS.",
+                )
+            )
+        else:
+            blocked = _archive_ip_is_blocked((parsed.hostname or "").strip())
+            if blocked is None and (parsed.hostname or "").lower() in _ARCHIVE_BLOCKED_HOSTNAMES:
+                blocked = "a loopback or cloud-metadata host"
+            if blocked is not None:
+                results.append(
+                    ValidationResult(
+                        level="MAJOR",
+                        category="plugin",
+                        message=(
+                            f"[RC-MKPL-ARCHIVE-URL] entry '{plugin_id}' archive url points at {blocked}: "
+                            f"{url!r}. Claude Code refuses loopback, link-local and cloud-metadata hosts."
+                        ),
+                        file=json_path,
+                        suggestion="Host the zip on a reachable HTTPS server (S3, Artifactory, nginx, …).",
+                    )
+                )
+
+    sha = src.get("sha256")
+    if sha is not None and (not isinstance(sha, str) or not _ARCHIVE_SHA256_RE.match(sha)):
+        shown = sha if isinstance(sha, str) else type(sha).__name__
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-ARCHIVE-SHA256] entry '{plugin_id}' archive sha256 is not 64 hex "
+                    f"characters: {shown!r}. Claude Code verifies every download against it and "
+                    "refuses the install on a mismatch."
+                ),
+                file=json_path,
+                suggestion="Use the archive's full SHA-256 digest — 64 hex characters, either case.",
             )
         )
     return results
@@ -360,6 +476,17 @@ RESERVED_MARKETPLACE_NAMES = {
     "first-party-plugins",  # v2.1.205 — reserved (plugin-marketplaces.md:163)
     "healthcare",  # v2.1.205 — reserved (plugin-marketplaces.md:163)
 }
+
+# Names Claude CODE accepts but Claude DESKTOP's managed marketplace sync
+# rejects, taking the WHOLE marketplace with it (plugin-marketplaces.md:1153,
+# "in any casing"). `claude plugin validate` has checked this since v2.1.221.
+#
+# DELIBERATELY NOT in RESERVED_MARKETPLACE_NAMES, which is the CRITICAL set:
+# these names work perfectly in Claude Code, so blocking a publish on one would
+# invent a gate the spec does not have — the v2.154.1 ruling. A marketplace that
+# is never distributed through Desktop org sync is unaffected, and CPV cannot
+# tell from the file which is which. WARNING: visible, never blocking.
+DESKTOP_SYNC_REJECTED_MARKETPLACE_NAMES = frozenset({"org", "org-provisioned", "unknown"})
 
 # Impersonation prefix patterns — names that LOOK like official Anthropic
 # marketplaces but are not in the canonical reserved list. Per
@@ -591,6 +718,24 @@ def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResul
                 message=f"Marketplace name '{name}' does not match naming pattern (lowercase letters, digits, hyphens; must start with letter, no trailing hyphen)",
                 file=json_path,
                 suggestion="Use format: my-marketplace-name",
+            )
+        )
+
+    # Claude Desktop's managed marketplace sync rejects these outright, in any
+    # casing — independent of the reserved/impersonation checks below, so it is
+    # evaluated separately rather than as another branch of that chain.
+    if name.lower() in DESKTOP_SYNC_REJECTED_MARKETPLACE_NAMES:
+        results.append(
+            ValidationResult(
+                level="WARNING",
+                category="marketplace",
+                message=(
+                    f"[RC-MKPL-DESKTOP-NAME] Marketplace name '{name}' is reserved in Claude "
+                    "Desktop — Claude Code accepts it, but Claude Desktop's managed marketplace "
+                    "sync rejects the WHOLE marketplace. Rename it if you distribute through "
+                    "Organization settings."
+                ),
+                file=json_path,
             )
         )
 
@@ -1128,6 +1273,7 @@ def validate_plugin_entry(
     # the fixer skill can route on.
     results.extend(_validate_known_entry_fields(plugin, plugin_id, json_path))
     results.extend(_validate_known_source_subfields(plugin, plugin_id, json_path))
+    results.extend(_validate_archive_source(plugin, plugin_id, json_path))
 
     # Validate tags if present
     tags = plugin.get("tags")
@@ -1895,8 +2041,8 @@ def validate_plugin_source(
                         ),
                         file=json_path,
                         suggestion=(
-                            "Per plugin-marketplaces.md:223-229 the only per-plugin source types are: "
-                            "relative path (./path), github, url, git-subdir, npm"
+                            "Per plugin-marketplaces.md the only per-plugin source types are: "
+                            "relative path (./path), github, url, git-subdir, npm, archive"
                         ),
                     )
                 )
@@ -1956,8 +2102,8 @@ def validate_plugin_source(
                 ),
                 file=json_path,
                 suggestion=(
-                    "Per plugin-marketplaces.md:223-229 the only per-plugin source types are: "
-                    "relative path (./path), github, url, git-subdir, npm"
+                    "Per plugin-marketplaces.md the only per-plugin source types are: "
+                    "relative path (./path), github, url, git-subdir, npm, archive"
                 ),
             )
         )

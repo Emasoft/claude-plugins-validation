@@ -103,6 +103,29 @@ allowed-tools: Bash(git:*), Bash(npm:*), Read, Edit
 context: fork
 ```
 
+**A forked skill runs in the BACKGROUND by default (v2.1.218+).** Its result
+arrives later, so the turn that invoked the skill receives only an agent
+handle — no output, no error. Before v2.1.218 a forked skill always blocked
+until it finished, so a skill written against the old behaviour changed meaning
+without its file changing. A backgrounded fork also gets the narrower
+background-subagent tool set. Set `background: false` when the invoking turn
+needs the result. CPV reports an implicit background as a non-blocking WARNING.
+
+### background
+
+| Property | Value |
+|----------|-------|
+| **Type** | boolean |
+| **Required** | No (only applies with `context: fork`) |
+| **Default** | `true` — the fork runs in the background |
+| **Purpose** | `false` waits for the forked subagent's result in the invoking turn |
+
+**Example**:
+```yaml
+context: fork
+background: false
+```
+
 ### agent
 
 | Property | Value |
