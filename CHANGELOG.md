@@ -2,6 +2,21 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.4.0] - 2026-08-08
+
+### Bug Fixes
+
+- **canon:** Bound the release body, and port the release proofs into the emitted pipeline
+- **coverage:** The byte budget was inventing findings, and dead files were padding the population
+
+### Documentation
+
+- V5.4.0 paragraph + inventory sync (139 scripts, 467 test files); manifests regen LAST
+
+### Features
+
+- **spec:** Sync to Claude Code v2.1.220-224, verified against the raw docs
+
 ## [5.3.0] - 2026-08-06
 
 ### Bug Fixes
