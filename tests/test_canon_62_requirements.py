@@ -254,13 +254,62 @@ def test_changelog_migrator_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_changelog_migrator_reports_an_unrecognised_shape(tmp_path: Path) -> None:
-    """An unrecognisable changelog step is left byte-identical and reported, never half-rewritten."""
+    """An unmigratable changelog step is left byte-identical and reported, never half-rewritten.
+
+    Asserts the CONTRACT (reported + byte-identical + not falsely claimed
+    migrated), not one word of the wording. The message used to say
+    "unrecognised" for two different situations — no git-cliff step at all, and
+    a step that IS present but spelled differently — which is exactly the
+    conflation that made an already-correct pipeline get told to run
+    --force-templates.
+    """
     pub = tmp_path / "scripts" / "publish.py"
     pub.parent.mkdir(parents=True)
     pub.write_text("def stage_changelog():\n    something_else()\n", encoding="utf-8")
     before = pub.read_text(encoding="utf-8")
     notes = std.migrate_publish_py_changelog_history(tmp_path)
-    assert notes and "unrecognised" in notes[0]
+    assert notes, "an unmigratable shape must be REPORTED, never silently skipped"
+    assert "NOT migrated" in notes[0]
+    assert pub.read_text(encoding="utf-8") == before
+
+
+def test_changelog_migrator_leaves_a_differently_spelled_correct_call_alone(tmp_path: Path) -> None:
+    """An already-correct call spelled unlike canon is silent — NOT pointed at --force-templates.
+
+    CPV's own publish.py resolves the binary first
+    (``run([cliff_bin, "--bump", "--tag", tag_name, "-o", "CHANGELOG.md"])``),
+    matching neither recognised spelling. Reporting it unmigrated recommended
+    ``--force-templates`` — the one action that would overwrite the hand-tuned
+    release machinery it was right to keep.
+    """
+    pub = tmp_path / "scripts" / "publish.py"
+    pub.parent.mkdir(parents=True)
+    pub.write_text(
+        '    run([cliff_bin, "--bump", "--tag", tag_name, "-o", "CHANGELOG.md"], cwd=root)\n',
+        encoding="utf-8",
+    )
+    before = pub.read_text(encoding="utf-8")
+    assert std.migrate_publish_py_changelog_history(tmp_path) == []
+    assert pub.read_text(encoding="utf-8") == before
+
+
+def test_changelog_migrator_still_flags_a_differently_spelled_DEFECTIVE_call(tmp_path: Path) -> None:
+    """The FN-safety half: an odd spelling that still passes --unreleased must be reported.
+
+    Non-vacuity control for the test above — a detector that called every
+    unrecognised file "already correct" would satisfy that test while silently
+    skipping the migration and letting the changelog be destroyed.
+    """
+    pub = tmp_path / "scripts" / "publish.py"
+    pub.parent.mkdir(parents=True)
+    pub.write_text(
+        '    run([cliff_bin, "--bump", "--unreleased", "--tag", tag_name, "-o", "CHANGELOG.md"], cwd=root)\n',
+        encoding="utf-8",
+    )
+    before = pub.read_text(encoding="utf-8")
+    notes = std.migrate_publish_py_changelog_history(tmp_path)
+    assert notes and "--unreleased" in notes[0]
+    assert "by hand" in notes[0], "must point at the hand fix, not --force-templates first"
     assert pub.read_text(encoding="utf-8") == before
 
 

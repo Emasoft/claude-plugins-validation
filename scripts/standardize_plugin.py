@@ -2393,7 +2393,15 @@ _CI_VERIFY_IMPORT_ANCHOR = "from pathlib import Path\n"
 # drifted from the generator's wording on its very first run (em-dash vs hyphen),
 # which the byte-identity test caught — exactly the duplicate-source defect these
 # migrators exist to repair.
-_CI_VERIFY_CALL_END = "\n    cprint("
+#
+# The span ENDS at the CI-verify call this migrator owns, not at "the next
+# cprint". Ending on the next cprint silently assumed this was the LAST
+# post-release call, so the moment canon gained a second one (the install smoke)
+# the lift swallowed it and the migrator emitted it TWICE — into a file that
+# already had it. `_slice_between` excludes its end anchor, so the call line is
+# appended back explicitly; slicing to it and stopping would define the stage and
+# never call it, which is the dead-code half `_inject_ci_verify` refuses to ship.
+_CI_VERIFY_CALL_LINE = "    stage_verify_ci_green(root, args.dry_run)\n"
 
 
 def _inject_ci_verify(text: str) -> tuple[str | None, str]:
@@ -2418,7 +2426,8 @@ def _inject_ci_verify(text: str) -> tuple[str | None, str]:
     if canon_stage is None:
         return None, "publish.py: canon has no CI-verify stage to lift — skipped"
 
-    canon_call = _slice_between(canon, _CI_VERIFY_CALL_ANCHOR, _CI_VERIFY_CALL_END)
+    canon_call_head = _slice_between(canon, _CI_VERIFY_CALL_ANCHOR, _CI_VERIFY_CALL_LINE)
+    canon_call = None if canon_call_head is None else canon_call_head + _CI_VERIFY_CALL_LINE
     if _CI_VERIFY_CALL_ANCHOR not in text or canon_call is None:
         return None, (
             "publish.py: unrecognised release stage — the post-release CI verification was NOT "
@@ -2538,6 +2547,90 @@ def _lift_statement(source: str, needle: str) -> str | None:
     return None
 
 
+def _cliff_changelog_statements(text: str) -> list[str]:
+    """Every balanced statement that invokes git-cliff to write CHANGELOG.md.
+
+    Spelling-independent on purpose. The exact-string anchors recognise only
+    canon's own rendering, so a plugin that resolves the binary first and calls
+    ``run([cliff_bin, "--bump", "--tag", tag_name, "-o", "CHANGELOG.md"], ...)``
+    — the shape CPV's OWN publish.py uses — matches neither the old nor the new
+    spelling. Without this, an already-correct pipeline is reported unmigrated
+    and pointed at ``--force-templates``, the single action that would destroy
+    the hand-tuned release machinery it was right to keep.
+
+    Brackets are balanced as well as parens because the argv is a list literal
+    that may wrap across lines.
+    """
+    lines = text.splitlines(keepends=True)
+    found: list[str] = []
+    for idx, line in enumerate(lines):
+        if "--bump" not in line:
+            continue
+        out = [line]
+        depth = (line.count("(") - line.count(")")) + (line.count("[") - line.count("]"))
+        cursor = idx
+        while depth > 0 and cursor + 1 < len(lines):
+            cursor += 1
+            out.append(lines[cursor])
+            depth += (lines[cursor].count("(") - lines[cursor].count(")")) + (
+                lines[cursor].count("[") - lines[cursor].count("]")
+            )
+        stmt = "".join(out)
+        if "CHANGELOG.md" in stmt:
+            found.append(stmt)
+    return found
+
+
+def _canon_version_anchor_problem(text: str) -> str | None:
+    """Why ``text`` cannot safely receive the --canon-version migration, or None.
+
+    ALL-OR-NOTHING is only real if every anchor is checked BEFORE any write.
+    Two ways the previous version produced a broken publish.py while reporting
+    success — both verified empirically, both invisible to the
+    migrated-file-must-compile assertion because the result still PARSES:
+
+    * The helper block is inserted with ``text.replace(_CANON_VER_END, ...)``.
+      ``str.replace`` on an absent needle is a SILENT no-op, so a plugin whose
+      main carries any other signature (``def main(argv: list[str] | None =
+      None) -> int:``) got the flag and the call with NO ``print_canon_version``
+      — a NameError at exactly the moment someone is diagnosing their canon.
+    * The call is inserted at the ``root = get_repo_root()`` anchor. A
+      publish.py that resolves the repo root at the TOP of main(), before the
+      parser is built, then begins main() with ``if args.canon_version:`` —
+      every invocation dies with ``NameError: name 'args' is not defined``
+      before any gate runs. A routine ``--fix`` bricks the release pipeline.
+
+    Indices are compared on the FIRST occurrence because that is the one
+    ``str.replace(..., 1)`` will actually rewrite.
+    """
+    if _CANON_VER_END not in text:
+        return (
+            "publish.py: no `def main() -> int:` — --canon-version was NOT migrated "
+            "(left byte-identical). The helper block has no insertion point, and writing "
+            "the flag without it would NameError. Re-run with --force-templates."
+        )
+    parse_at = text.find("parse_args()")
+    if parse_at < 0:
+        return (
+            "publish.py: no `parse_args()` call found — --canon-version was NOT migrated "
+            "(left byte-identical); the migrator cannot prove where `args` becomes defined. "
+            "Re-run with --force-templates."
+        )
+    if text.index(_CANON_VER_ARG_ANCHOR) > parse_at:
+        return (
+            "publish.py: the `--dry-run` argument is declared AFTER parse_args() — "
+            "--canon-version was NOT migrated (left byte-identical); the added flag would "
+            "never be parsed. Re-run with --force-templates."
+        )
+    if text.index(_CANON_VER_CALL_ANCHOR) < parse_at:
+        return (
+            "publish.py: `root = get_repo_root()` runs BEFORE parse_args() — --canon-version "
+            "was NOT migrated (left byte-identical); inserting the check there would reference "
+            "an undefined `args` and break EVERY invocation. Re-run with --force-templates."
+        )
+    return None
+
+
 def migrate_publish_py_changelog_history(plugin_path: Path, dry_run: bool = False) -> list[str]:
     """Stop an EXISTING ``scripts/publish.py`` from destroying CHANGELOG history.
 
@@ -2557,10 +2650,28 @@ def migrate_publish_py_changelog_history(plugin_path: Path, dry_run: bool = Fals
     if _CLIFF_OLD_CALL not in text:
         if _CLIFF_NEW_CALL in text:
             return []  # already migrated — idempotent
+        # Spelling-independent second opinion before calling anything broken.
+        # CONSERVATIVE in the safe direction: "already correct" is asserted only
+        # from a git-cliff→CHANGELOG.md statement we positively found and that
+        # positively lacks `--unreleased`. A false "correct" would skip a real
+        # migration and destroy a changelog; a false "unrecognised" only repeats
+        # today's behaviour.
+        statements = _cliff_changelog_statements(text)
+        if statements and not any("--unreleased" in s for s in statements):
+            return []  # differently-spelled but already correct — nothing to do
+        if statements:
+            return [
+                "publish.py: the git-cliff call writing CHANGELOG.md still passes `--unreleased`, "
+                "but is spelled differently from canon — the CHANGELOG-history fix was NOT migrated "
+                "(left byte-identical). Drop `--unreleased` from that call by hand; `-o` OVERWRITES, "
+                "so it destroys every prior entry (ai-maestro#62). Prefer the hand fix: "
+                "--force-templates would overwrite the whole customized publish.py."
+            ]
         return [
-            "publish.py: unrecognised git-cliff changelog step — the CHANGELOG-history fix was NOT "
-            "migrated (left byte-identical). Re-run with --force-templates, or drop `--unreleased` "
-            "from the call that writes CHANGELOG.md by hand."
+            "publish.py: no git-cliff step writing CHANGELOG.md was found — the CHANGELOG-history "
+            "fix was NOT migrated (left byte-identical). If this pipeline generates its changelog "
+            "another way, nothing is owed; otherwise drop `--unreleased` from the call that writes "
+            "CHANGELOG.md by hand."
         ]
     new_text = text.replace(_CLIFF_OLD_CALL, _CLIFF_NEW_CALL, 1)
     if _CLIFF_OLD_DRYRUN in new_text:
@@ -2613,6 +2724,11 @@ def migrate_publish_py_canon_version(plugin_path: Path, dry_run: bool = False) -
             "publish.py: unrecognised main() shape — --canon-version was NOT migrated "
             "(left byte-identical). Re-run with --force-templates."
         ]
+    # Every remaining anchor is proven sound BEFORE the first write, so a
+    # refusal leaves the file byte-identical rather than half-migrated.
+    problem = _canon_version_anchor_problem(text)
+    if problem is not None:
+        return [problem]
     new_text = text.replace(_CANON_VER_END, canon_block + _CANON_VER_END, 1)
     new_text = new_text.replace(_CANON_VER_ARG_ANCHOR, _CANON_VER_ARG_ANCHOR + canon_arg, 1)
     new_text = new_text.replace(

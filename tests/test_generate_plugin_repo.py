@@ -841,12 +841,34 @@ class TestPublishPyPipelineOrder:
         assert "ruff" in body
         assert "mypy" in body
 
-    def test_changelog_uses_git_cliff_bump_unreleased_tag(self):
-        """stage_changelog must use the --bump --unreleased --tag pattern."""
+    def test_changelog_uses_git_cliff_bump_tag_without_unreleased(self):
+        """stage_changelog must invoke `--bump --tag <tag> -o` and NEVER `--unreleased`.
+
+        Asserted against the git-cliff ARGV, not the whole file. The previous
+        version of this test asserted ``"--unreleased" in src`` over the entire
+        rendered publish.py, so once the flag was removed from the command it
+        kept passing on the prose of the warning comment that replaced it —
+        pinning the very defect the fix removed, and primed to go red on
+        correct code the moment anyone reworded that comment.
+        """
         src = self._src()
-        assert "--bump" in src
-        assert "--unreleased" in src
-        assert '"--tag", tag' in src or "'--tag', tag" in src
+        start = src.index("def stage_changelog(")
+        end = src.index("\ndef ", start + 1)
+        body = src[start:end]
+
+        # The argv literal is the only thing that decides behaviour.
+        argv_start = body.index('["git-cliff"')
+        argv = body[argv_start : body.index("]", argv_start) + 1]
+
+        assert '"--bump"' in argv
+        assert '"--tag", tag' in argv
+        assert '"-o", "CHANGELOG.md"' in argv
+        # `-o` OVERWRITES, so scoping content to the unreleased window and then
+        # writing destroys every prior entry (ai-maestro#62).
+        assert "--unreleased" not in argv
+        # Non-vacuity: the prose explaining WHY must survive, but it lives in
+        # the docstring — never in the argv the assertion above reads.
+        assert "`--unreleased` MUST NOT appear here" in body
 
 
 class TestPublishPyAutoBump:
