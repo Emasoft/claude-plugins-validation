@@ -79,24 +79,51 @@ jobs:
         run: uv run pytest tests/ -v
 
       - name: Generate changelog
+        # The release body is THIS release's section, never the whole file.
+        # `cp CHANGELOG.md changelog.txt` shipped every past release's notes
+        # as the body of each new one: measured on v5.3.0 that was 109,539
+        # chars against GitHub's 125,000-char release-body limit, i.e. a few
+        # releases from failing `gh release create` outright — after the tag
+        # is already public. The generated canon (generate_plugin_repo.py
+        # ::gen_release_yml) has carried this extractor for releases; CPV's
+        # own workflow never got it.
+        #
+        # EVERY branch is BOUNDED. The no-section-match fallback is the
+        # git log since the previous tag, NOT the full CHANGELOG — falling
+        # back to the whole file re-introduces the exact defect above the
+        # moment the section-header format drifts.
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          # Prefer the curated CHANGELOG.md when present — publish.py keeps
-          # it in lockstep with conventional commits via git-cliff, and the
-          # body is more useful than a flat git log. Only fall back to a
-          # generated git-log changelog when CHANGELOG.md is absent, so the
-          # git-log work (and its failure modes) is skipped in the common
-          # case where the curated file exists.
-          if [ -f "CHANGELOG.md" ]; then
-            cp CHANGELOG.md changelog.txt
+          set -e
+          # Strip leading 'v' so v1.2.3 matches ## [1.2.3] — ...
+          VERSION="${TAG#v}"
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            GITLOG=$(git log --pretty=format:"- %s (%h)" HEAD)
           else
-            # No curated changelog: synthesize one from commits since the
-            # previous tag (or the whole history if this is the first tag).
-            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-            if [ -z "$PREV_TAG" ]; then
-              git log --pretty=format:"- %s (%h)" HEAD > changelog.txt
+            GITLOG=$(git log --pretty=format:"- %s (%h)" "$PREV_TAG..HEAD")
+          fi
+          if [ -f "CHANGELOG.md" ]; then
+            # Print the matching header through the NEXT `## ` at column 0
+            # (or EOF). The `[—-]` class accepts the canonical em-dash and
+            # the legacy hyphen separator — CPV's own CHANGELOG uses the
+            # hyphen form, so matching only the em-dash would silently take
+            # the fallback on every release.
+            SECTION=$(awk -v ver="$VERSION" '
+              $0 ~ "^## \\[" ver "\\] [—-] " {found=1; print; next}
+              found && /^## / {exit}
+              found {print}
+            ' CHANGELOG.md)
+            if [ -n "$SECTION" ]; then
+              printf '%s\n' "$SECTION" > changelog.txt
+              echo "::notice::Release body extracted from CHANGELOG.md section for $VERSION"
             else
-              git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD" > changelog.txt
+              echo "::warning::No CHANGELOG.md section matched ## [$VERSION] — falling back to the git log since $PREV_TAG"
+              printf '%s\n' "$GITLOG" > changelog.txt
             fi
+          else
+            printf '%s\n' "$GITLOG" > changelog.txt
           fi
 
       - name: Create or update GitHub Release (idempotent)

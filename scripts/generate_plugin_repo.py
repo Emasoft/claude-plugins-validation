@@ -3470,6 +3470,28 @@ def _local_tag_exists(root: Path, tag: str) -> bool:
     return r.returncode == 0
 
 
+def _remote_tag_exists(root: Path, tag: str) -> bool:
+    """True iff `tag` exists on origin, per `git ls-remote`.
+
+    Asks the REMOTE rather than trusting that the push stage ran: a push that
+    executed and silently failed its ref-update is otherwise indistinguishable
+    from one that worked, and the plugin then reports a green publish while
+    being undependable (ai-maestro#62 R3).
+
+    Any failure to answer (network down, timeout, git error) returns False, so
+    the caller reports UNVERIFIED — never a false green.
+    """
+    try:
+        r = subprocess.run(
+            ["git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}"],
+            capture_output=True, text=True, cwd=str(root),
+            check=False, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and bool(r.stdout.strip())
+
+
 def _plugin_name(root: Path) -> str | None:
     """Read the plugin name from .claude-plugin/plugin.json."""
     pj = root / ".claude-plugin" / "plugin.json"
@@ -3779,6 +3801,21 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     )
     _pushed = tag if dep_tag is None else f"{tag} + {dep_tag}"
     cprint(f"  {GREEN}Pushed {_pushed} atomically.{NC}")
+    # PROVE THE TAG, not the stage (ai-maestro#62 R3). A push stage that ran and
+    # silently failed its ref-update looks exactly like one that worked, and the
+    # plugin then reports a green publish while being undependable. ls-remote
+    # asks the remote itself.
+    #
+    # Never a false green AND never a false block: the refs are already pushed by
+    # this point, so failing the run could not un-push them — an unverifiable tag
+    # is reported UNVERIFIED with the command to check it by hand.
+    for _verify_tag in (tag, *([dep_tag] if dep_tag else [])):
+        if _remote_tag_exists(root, _verify_tag):
+            cprint(f"  {GREEN}Verified on remote: {_verify_tag}{NC}")
+        else:
+            cprint(f"  {YELLOW}Could NOT verify {_verify_tag} on remote (ls-remote found "
+                   f"nothing, or the network was unreachable).{NC}")
+            cprint(f"  {YELLOW}  Check with: git ls-remote --tags origin '*{_verify_tag}'{NC}")
 
 def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     """Step 11: Create GitHub release via gh CLI.
@@ -3835,10 +3872,188 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     sys.exit(1)
 
 
+_SEMVER_RE = re.compile(r"\bv?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?)\b")
+
+# The CLI's own wording when a plugin cannot be resolved inside a marketplace.
+_NOT_IN_MARKETPLACE_RE = re.compile(
+    r"not found in marketplace|marketplace .*not found|marketplace update",
+    re.IGNORECASE,
+)
+
+
+def _semvers_in(text: str) -> list[str]:
+    """Every semver-shaped token in `text`, in order, without the leading v."""
+    return _SEMVER_RE.findall(text)
+
+
+def _resolve_marketplace_name(root: Path) -> str | None:
+    """The marketplace NAME Claude Code installs by (`<plugin>@<name>`).
+
+    Layout B reads the parent marketplace.json directly; Layout A resolves the
+    remote marketplace repo from notify-marketplace.yml and reads its manifest.
+    Anything unresolvable returns None, which makes the smoke test SKIP with a
+    reason — NEVER guess a marketplace name, because installing from the wrong
+    one would prove nothing at all.
+    """
+    layout, details = _detect_layout(root)
+    if layout == "B":
+        mp_root = details.get("marketplace_root")
+        if isinstance(mp_root, Path):
+            try:
+                data = json.loads((mp_root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return None
+            name = data.get("name") if isinstance(data, dict) else None
+            return name if isinstance(name, str) and name else None
+        return None
+    if layout == "A":
+        owner, repo = details.get("mkt_owner"), details.get("mkt_repo")
+        if not (isinstance(owner, str) and isinstance(repo, str)):
+            return None
+        data = _fetch_remote_marketplace_json(owner, repo)
+        name = data.get("name") if isinstance(data, dict) else None
+        return name if isinstance(name, str) and name else None
+    return None
+
+
+def _marketplace_is_registered(claude_bin: str, marketplace: str) -> bool:
+    """True when `marketplace` appears in `claude plugin marketplace list`.
+
+    READ-ONLY on purpose: running `marketplace add`/`update` to make the smoke
+    test pass would mutate the user's global registry as a side effect of
+    publishing.
+
+    FAIL-SAFE towards the HARD FAILURE — any inability to answer returns True
+    ("assume registered"), so a genuinely uninstallable release is never
+    downgraded to SKIPPED by a probe that simply could not run.
+    """
+    try:
+        listing = subprocess.run(
+            [claude_bin, "plugin", "marketplace", "list"],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+    if listing.returncode != 0:
+        return True
+    return marketplace in ((listing.stdout or "") + (listing.stderr or ""))
+
+
+def stage_install_smoke(root: Path, new_ver: str, dry_run: bool) -> None:
+    """Prove the just-published release actually INSTALLS (ai-maestro#62 R2).
+
+    No static check catches an uninstallable release: the manifest validates,
+    the tags exist, the marketplace entry is correct — and eleven plugins still
+    shipped releases nobody could install. The only proof is installing it.
+
+    Runs POST-RELEASE by necessity, so by DEFAULT it reports loudly rather than
+    failing the run: a non-zero exit here could not un-ship anything. Set
+    `PLUGIN_REQUIRE_INSTALL_SMOKE=1` for fail-the-release semantics.
+
+    CANNOT-CHECK IS NEVER A PASS, and never a false FAILURE either: a missing
+    `claude` CLI (normal on CI), an unresolvable marketplace, or a marketplace
+    this host never registered are each reported SKIPPED with the reason.
+    """
+    cprint(f"\n{BOLD}[post-release] Proving the release installs...{NC}")
+    if dry_run:
+        cprint(f"  {YELLOW}(dry-run) skipped.{NC}")
+        return
+    if os.environ.get("PLUGIN_SKIP_INSTALL_SMOKE") == "1":
+        cprint(f"  {YELLOW}SKIPPED - PLUGIN_SKIP_INSTALL_SMOKE=1{NC}")
+        return
+    strict = os.environ.get("PLUGIN_REQUIRE_INSTALL_SMOKE") == "1"
+    claude_bin = shutil.which("claude")
+    if claude_bin is None:
+        cprint(f"  {YELLOW}SKIPPED - the `claude` CLI is not on PATH (normal on a CI runner).{NC}")
+        cprint(f"  {YELLOW}  This is NOT a pass: the release was not proven installable here.{NC}")
+        return
+    plugin_name = _read_plugin_name(root)
+    marketplace = _resolve_marketplace_name(root)
+    if not (plugin_name and marketplace):
+        cprint(f"  {YELLOW}SKIPPED - could not resolve <plugin>@<marketplace> "
+               f"(name={plugin_name!r}, marketplace={marketplace!r}).{NC}")
+        cprint(f"  {YELLOW}  Not a pass - nothing was installed.{NC}")
+        return
+    target = f"{plugin_name}@{marketplace}"
+    import tempfile  # noqa: PLC0415 - stdlib, imported only on this path
+    with tempfile.TemporaryDirectory(prefix="plugin-install-smoke-") as tmp:
+        cprint(f"  {BLUE}$ (cd {tmp} && claude plugin install {target} --scope local){NC}")
+        try:
+            result = subprocess.run(
+                [claude_bin, "plugin", "install", target, "--scope", "local"],
+                cwd=tmp, capture_output=True, text=True, timeout=300, check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            cprint(f"  {YELLOW}SKIPPED - the install could not be run ({exc}). Not a pass.{NC}")
+            return
+        # Put back what we took. `--scope local` scopes only the SETTINGS file
+        # (in this temp dir, about to vanish) - the payload and its marketplace
+        # registration land in shared ~/.claude state, so without this every
+        # publish leaves another cached copy behind forever.
+        #
+        # `--scope local` + `--keep-data` are BOTH safety, not tidiness: the
+        # author almost certainly has this plugin installed at USER scope, and a
+        # wider uninstall - or one that dropped the persistent data dir - would
+        # destroy their real installation to clean up after a smoke test.
+        if result.returncode == 0:
+            try:
+                subprocess.run(
+                    [claude_bin, "plugin", "uninstall", target,
+                     "--scope", "local", "--keep-data", "-y"],
+                    cwd=tmp, capture_output=True, text=True, timeout=120, check=False,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                cprint(f"  {YELLOW}Note: smoke-install cleanup did not run ({exc}).{NC}")
+    if result.returncode == 0:
+        cprint(f"  {GREEN}{target} installs cleanly (dependencies resolved).{NC}")
+        # EVIDENCE REQUIRED for the async-lag note: install stdout is a progress
+        # line naming the plugin, not the semver, so a bare
+        # `new_ver not in stdout` test fires on EVERY successful run - a note
+        # that always fires carries no information and trains you to ignore it.
+        resolved = _semvers_in(result.stdout or "")
+        if resolved and new_ver not in resolved:
+            cprint(f"  {YELLOW}Note: the marketplace resolved v{resolved[0]}, not v{new_ver} "
+                   f"(async notify lag) - installability is proven, the listing lags.{NC}")
+        return
+    combined = (result.stderr or "") + "\n" + (result.stdout or "")
+    # Distinguish "this host never registered the marketplace" (an environment
+    # gap) from "the marketplace IS registered and does not carry this plugin"
+    # (a REAL uninstallable release). Both produce the same message, and
+    # reporting the first as a hard failure inverts cannot-check-is-not-a-pass
+    # into cannot-check-is-a-fail. FAIL-SAFE: only a marketplace PROVEN
+    # unregistered downgrades to SKIPPED.
+    if _NOT_IN_MARKETPLACE_RE.search(combined) and not _marketplace_is_registered(claude_bin, marketplace):
+        cprint(f"  {YELLOW}SKIPPED - the marketplace {marketplace!r} is not registered on this{NC}")
+        cprint(f"  {YELLOW}  host, so the install could not resolve {target}. Not a pass.{NC}")
+        cprint(f"  {YELLOW}  Register it (`claude plugin marketplace add <source>`) and re-run.{NC}")
+        return
+    tail = combined.strip().splitlines()[-8:]
+    cprint(f"  {RED}RELEASE IS NOT INSTALLABLE: {target}{NC}")
+    cprint(f"  {RED}The release is already public - fix forward with a new release.{NC}")
+    for ln in tail:
+        cprint(f"  {RED}  {ln}{NC}")
+    cprint(f"  {RED}Reproduce: cd $(mktemp -d) && claude plugin install {target} --scope local{NC}")
+    if strict:
+        cprint(f"  {RED}PLUGIN_REQUIRE_INSTALL_SMOKE=1 - failing the publish run.{NC}")
+        sys.exit(1)
+
+
 # How long to wait for the released commit's CI runs to conclude. Generous on
 # purpose: a cold runner installing a toolchain can take many minutes, and a gate
 # that gives up early reports UNVERIFIED on a healthy run — noise that teaches the
 # reader to ignore it. Expiry is never a failure verdict.
+#
+# PLACEMENT IS LOAD-BEARING. This line opens the CI-verify unit that
+# `migrate_publish_py_ci_verify` lifts VERBATIM out of rendered canon, and its
+# test fixture strips exactly the span from here to the main-section banner.
+# Anything added inside that span is stripped by the fixture and NOT restored by
+# the migrator, which breaks the byte-identity test that is the only thing
+# stopping migrator and generator from silently diverging. So: add unrelated
+# helpers ABOVE this line, never below it.
+#
+# Keep this prose free of the literal anchor strings themselves — the fixture
+# searches the rendered text for them, so quoting one in a comment relocates the
+# span or trips the fixture's own sanity assertion.
 CI_VERIFY_TIMEOUT_S = 900
 
 
@@ -4110,6 +4325,9 @@ def main() -> int:
     # Runs AFTER the release on purpose — it verifies the commit that actually
     # shipped. Never aborts (the release is already public; see its docstring).
     stage_verify_ci_green(root, args.dry_run)
+    # Same post-release contract: no static check catches an uninstallable
+    # release, so the only proof is installing it (ai-maestro#62 R2).
+    stage_install_smoke(root, new_ver, args.dry_run)
 
     cprint(f"\n{GREEN}{BOLD}Published {new_ver} successfully!{NC}")
     return 0
@@ -5145,11 +5363,17 @@ jobs:
         # ``## [X.Y.Z] — YYYY-MM-DD`` block from CHANGELOG.md instead of
         # uploading the entire file. The release body should be the
         # release-specific notes, not the whole project history.
-        # Fallback chain:
+        # Fallback chain — EVERY branch is BOUNDED:
         #   1. CHANGELOG.md ## [version] section (curated, em-dash separator)
         #   2. CHANGELOG.md ## [version] section (legacy hyphen separator)
-        #   3. Full CHANGELOG.md (when no section header matches)
+        #   3. Auto-generated git log (when no section header matches)
         #   4. Auto-generated git log (when no CHANGELOG.md at all)
+        # 3 used to be the FULL CHANGELOG.md, which re-introduces the exact
+        # defect this step exists to prevent: on a long-lived plugin the whole
+        # file runs to six figures of characters against GitHub's 125,000-char
+        # release-body limit (measured 109,539 on CPV itself), so a drifted
+        # section-header format would turn a silent fallback into a failed
+        # `gh release create` — after the tag is already public.
         env:
           TAG: ${{{{ github.ref_name }}}}
         run: |
@@ -5176,8 +5400,8 @@ jobs:
               printf '%s\\n' "$SECTION" > changelog.txt
               echo "::notice::Release body extracted from CHANGELOG.md section for $VERSION"
             else
-              echo "::warning::No CHANGELOG.md section matched ## [$VERSION] — falling back to full CHANGELOG.md"
-              cp CHANGELOG.md changelog.txt
+              echo "::warning::No CHANGELOG.md section matched ## [$VERSION] — falling back to the git log since $PREV_TAG"
+              printf '%s\\n' "$GITLOG" > changelog.txt
             fi
           else
             echo "$GITLOG" > changelog.txt

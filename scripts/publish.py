@@ -523,7 +523,15 @@ def print_canon_version(installed: str | None) -> int:
     print(f"* Installed Canon Version:  {installed_display}")
     print(f"* Latest Version Available: {latest_display}")
     print()
-    if installed and latest and installed == latest:
+    # THREE-STATE, because "could not compare" is not a verdict in either
+    # direction. Collapsing the unknown case into the update advice told an
+    # OFFLINE author — the exact case fetch_latest_canon_version() exists to
+    # survive — that a perfectly current canon was stale, and sent them to run
+    # a migration they did not need.
+    if not installed or not latest:
+        print("Could not compare: one of the two versions above is unknown.")
+        print("This is NOT a statement that the canon is stale.")
+    elif installed == latest:
         print("The canon is up to date.")
     else:
         print('Run "/cpv-agent update the canon" to update')
@@ -3472,6 +3480,50 @@ def _resolve_marketplace_name(plugin_root: Path) -> str | None:
     return None
 
 
+_SEMVER_RE = re.compile(r"\bv?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?)\b")
+
+# The CLI's own wording when a plugin cannot be resolved inside a marketplace.
+# Matching the SHAPE rather than one exact sentence, because this only ever
+# gates a DOWNGRADE that is additionally proven by _marketplace_is_registered.
+_NOT_IN_MARKETPLACE_RE = re.compile(
+    r"not found in marketplace|marketplace .*not found|marketplace update",
+    re.IGNORECASE,
+)
+
+
+def _semvers_in(text: str) -> list[str]:
+    """Every semver-shaped token in ``text``, in order, without the leading v."""
+    return _SEMVER_RE.findall(text)
+
+
+def _marketplace_is_registered(claude_bin: str, marketplace: str) -> bool:
+    """True when ``marketplace`` appears in ``claude plugin marketplace list``.
+
+    READ-ONLY on purpose: the alternative — running ``marketplace add``/``update``
+    to make the smoke test pass — would mutate the user's global registry as a
+    side effect of publishing, which is the same class of unwanted side effect
+    the local-scope uninstall exists to prevent.
+
+    FAIL-SAFE towards the HARD FAILURE: any inability to answer (CLI error,
+    timeout, unreadable output) returns True, i.e. "assume registered", so a
+    genuinely uninstallable release is never downgraded to SKIPPED by a probe
+    that simply could not run.
+    """
+    try:
+        listing = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            [claude_bin, "plugin", "marketplace", "list"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+    if listing.returncode != 0:
+        return True
+    return marketplace in ((listing.stdout or "") + (listing.stderr or ""))
+
+
 def stage_install_smoke(plugin_root: Path, new_version: str) -> int:
     """Gate 15: prove the just-published release actually INSTALLS.
 
@@ -3530,19 +3582,69 @@ def stage_install_smoke(plugin_root: Path, new_version: str) -> int:
         except (OSError, subprocess.SubprocessError) as exc:
             print(f"{YELLOW}  SKIPPED — the install could not be run ({exc}). Not a pass.{NC}")
             return 0
+        # Put back what we took. `--scope local` scopes only the SETTINGS file
+        # (written into this temp dir, which is about to vanish) — the plugin
+        # payload and its marketplace registration land in shared ~/.claude
+        # state, so without this every publish left another cached copy behind,
+        # growing unboundedly with nothing cleaning it up.
+        #
+        # `--scope local` + `--keep-data` are BOTH load-bearing safety, not
+        # tidiness: the author of the plugin being published almost certainly
+        # has it installed at USER scope, and a wider uninstall — or one that
+        # dropped ~/.claude/plugins/data/{id}/ — would destroy their real
+        # installation to clean up after a smoke test. Best-effort by design:
+        # a cleanup failure is reported, never fatal, and never changes the
+        # verdict, which belongs to the install above.
+        if result.returncode == 0:
+            try:
+                subprocess.run(  # noqa: S603 - fixed argv, no shell
+                    [claude_bin, "plugin", "uninstall", target,
+                     "--scope", "local", "--keep-data", "-y"],
+                    cwd=tmp,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                print(f"{YELLOW}  Note: smoke-install cleanup did not run ({exc}).{NC}")
     if result.returncode == 0:
         print(f"{GREEN}✓ {target} installs cleanly (dependencies resolved){NC}")
         # The marketplace entry is updated ASYNCHRONOUSLY (notify-marketplace
         # dispatch), so right after a release the resolved version may still be
         # the previous one. That is a lag, NOT an install failure — report it
         # without failing, or every Layout-A release would flap.
-        if new_version not in (result.stdout or ""):
+        #
+        # EVIDENCE REQUIRED. This used to be `if new_version not in stdout`,
+        # but install stdout is a progress line naming the plugin and the
+        # marketplace — it does not print the semver at all, so the condition
+        # was true on EVERY successful run and the note fired unconditionally,
+        # including when the marketplace was perfectly current. A note that
+        # always fires carries no information and trains the reader to ignore
+        # it. Claim a lag only from a version we actually read.
+        resolved = _semvers_in(result.stdout or "")
+        if resolved and new_version not in resolved:
             print(
-                f"{YELLOW}  Note: the marketplace has not published v{new_version} yet "
-                f"(async notify) — installability is proven, the version listing lags.{NC}"
+                f"{YELLOW}  Note: the marketplace resolved v{resolved[0]}, not v{new_version} "
+                f"(async notify lag) — installability is proven, the version listing lags.{NC}"
             )
         return 0
-    tail = (result.stderr or result.stdout or "").strip().splitlines()[-8:]
+    combined = (result.stderr or "") + "\n" + (result.stdout or "")
+    # Disambiguate "this host never registered the marketplace" (an environment
+    # gap — cannot check) from "the marketplace is registered and does not carry
+    # this plugin" (a REAL uninstallable release). Both produce the same
+    # not-found message, and reporting the first as a hard failure inverts
+    # cannot-check-is-not-a-pass into cannot-check-is-a-fail: `--scope local`
+    # isolates the install, never the marketplace registry, which is user-scope
+    # in ~/.claude. FAIL-SAFE: only a marketplace we can PROVE is unregistered
+    # downgrades to SKIPPED; if the probe cannot answer, the hard failure stands.
+    if _NOT_IN_MARKETPLACE_RE.search(combined) and not _marketplace_is_registered(claude_bin, marketplace):
+        print(f"{YELLOW}  SKIPPED — the marketplace {marketplace!r} is not registered on this host,{NC}")
+        print(f"{YELLOW}  so `claude plugin install` could not resolve {target} here. Not a pass:{NC}")
+        print(f"{YELLOW}  the release was not proven installable. Register it with{NC}")
+        print(f"{YELLOW}  `claude plugin marketplace add <source>` and re-run to get a real verdict.{NC}")
+        return 0
+    tail = combined.strip().splitlines()[-8:]
     print(f"{RED}========================================{NC}")
     print(f"{RED}  RELEASE IS NOT INSTALLABLE: {target}{NC}")
     print(f"{RED}  The release is already public — fix forward with a new release.{NC}")
