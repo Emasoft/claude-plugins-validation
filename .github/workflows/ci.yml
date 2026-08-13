@@ -112,8 +112,17 @@ jobs:
         # serial-pollution catch and the no-re2 catastrophic-backtracking (ReDoS)
         # catch both stay alive within every shard. The ONLY thing a shard cannot
         # catch is cross-shard ordering pollution (a polluter in one shard, its
-        # victim in another) — that is covered by the mandatory LOCAL full-serial
-        # pre-publish run, which is the authoritative cross-shard ordering gate.
+        # victim in another).
+        #
+        # This comment used to claim that gap was "covered by the mandatory LOCAL
+        # full-serial pre-publish run, which is the authoritative cross-shard
+        # ordering gate". No such gate exists: publish.py's Gate 2 runs
+        # `pytest -n auto --dist=worksteal`, and so does the Gate 3c fork-parity
+        # probe — every pytest invocation in the publish path is xdist. A serial
+        # run is a CONVENTION documented in CLAUDE.md, not something the pipeline
+        # enforces, so nothing stopped a cross-shard polluter from shipping.
+        # serial-suite.yml now runs the full suite serially on a schedule, which
+        # is where that coverage actually lives.
         run: uv run pytest tests/ --splits 4 --group ${{ matrix.group }} -v
 
   test:
