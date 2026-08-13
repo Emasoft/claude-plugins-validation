@@ -264,7 +264,12 @@ def test_rc8_release_no_longer_falls_through_on_a_non_verdict_exit() -> None:
     """release.yml must not publish a tag whose validation never ran (fail-closed)."""
     rel = gen_release_yml(_params())
     block_start = rel.index("Run full plugin validation")
-    block_end = rel.index("- name: Run tests", block_start)
+    # End anchor is the step that FOLLOWS validation in the same job. It used to
+    # be "- name: Run tests", but the suite moved into a separate sharded job
+    # whose step is named "Run tests (shard N of M)" — so that anchor still
+    # matched, just far later in the file, silently widening this slice across
+    # two jobs and breaking the endswith("exit 1") check for the wrong reason.
+    block_end = rel.index("- name: Lint Python scripts", block_start)
     block = rel[block_start:block_end]
     # The unconditional `exit 1` tail is what fails the job on a non-verdict exit;
     # the old handler simply fell through to the release steps.

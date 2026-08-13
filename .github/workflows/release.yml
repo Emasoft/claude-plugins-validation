@@ -11,16 +11,45 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+# WHY THIS IS THREE JOBS AND NOT ONE (measured, 2026-08-13).
+# It used to be a single job running validation (241s) then the whole suite
+# SERIALLY (`uv run pytest tests/ -v`, 577s) — 839s of wall clock. publish.py's
+# Gate 14 waits for EVERY workflow on the released commit to complete, so that
+# 14 minutes was ~70% of a publish, and it was spent re-running, the slow way,
+# the exact work ci.yml had already done on the same commit in 251s.
+# Validation and the suite are independent, so they run CONCURRENTLY, and the
+# suite is sharded with the SAME 4-way pytest-split matrix ci.yml uses. Each
+# shard stays SERIAL (no -n) and no-re2 (bare `uv sync` omits the `performance`
+# extra), which is what keeps the order-dependent serial-pollution catch and the
+# no-re2 catastrophic-backtracking catch alive inside every shard — sharding
+# buys wall clock, never coverage.
+# The release job needs validation-report.txt (it is uploaded as a release
+# asset), so the validate job hands it over as an artifact rather than the
+# release job re-running the validator to regenerate a file it already had.
+#
+# zizmor reports `cache-poisoning` on each setup-uv step here (2 now, 1 before
+# the split — the count tracks the number of setup-uv steps, not a new defect
+# class). It is KEPT, deliberately: the audit fires because this workflow is
+# tag-triggered and setup-uv caches by default, and the cache is exactly what
+# makes the 5 dependency installs below cheap — disabling it would give back a
+# large share of the wall clock this restructure was written to reclaim. The
+# job that actually cuts the release installs nothing and has no cache at all.
+# Do not "fix" this by dropping the cache without re-measuring.
 jobs:
-  release:
+  validate:
+    name: Validate
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
+          # Nothing in this job pushes; leaving the token in .git/config only
+          # widens what a compromised step could reach (zizmor `artipacked`).
+          # The canon CPV emits has carried this since v2.145.0 — its own tree
+          # never got it.
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
@@ -75,8 +104,73 @@ jobs:
           echo "::error::Validator FAILED TO RUN (exit $exit_code) — infra/install failure, NOT a validation verdict. No findings were produced; do not read this as CRITICAL/MAJOR/MINOR/NIT."
           exit 1
 
-      - name: Run tests
-        run: uv run pytest tests/ -v
+      - name: Upload validation report
+        # The release job uploads this as a release asset. Handing it over as an
+        # artifact is what lets validation run beside the suite instead of inside
+        # the release job.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: validation-report
+          path: validation-report.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  test-shard:
+    name: Test Shard ${{ matrix.group }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests (shard ${{ matrix.group }} of 4)
+        # serial + no-re2 WITHIN each shard is deliberate (TRDD-K7P2XR4Q), exactly
+        # as in ci.yml: each shard runs pytest WITHOUT -n (serial) and without the
+        # google-re2 `performance` extra (bare `uv sync` omits it), so the
+        # order-dependent serial-pollution catch and the no-re2 ReDoS catch both
+        # stay alive within every shard.
+        run: uv run pytest tests/ --splits 4 --group ${{ matrix.group }} -v
+
+  release:
+    name: Release
+    # Fail-closed: the release is cut only if validation passed AND every test
+    # shard passed. `needs` already short-circuits on failure — there is
+    # deliberately no `if: always()` here, because a release is exactly the thing
+    # that must not proceed on a red gate.
+    needs: [validate, test-shard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The changelog step walks back to the previous tag.
+          fetch-depth: 0
+          # `gh release` authenticates via GH_TOKEN, and nothing here pushes, so
+          # the checkout credential is dead weight in .git/config.
+          persist-credentials: false
+
+      - name: Download validation report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: validation-report
 
       - name: Generate changelog
         # The release body is THIS release's section, never the whole file.

@@ -5245,6 +5245,9 @@ def gen_release_yml(p: PluginParams) -> str:
     # shared helper emits real multi-line shell continuations instead; the
     # command is identical, only its line-wrapping changed.
     validate_block = gen_cpv_validate_run_block(p, "validation-report.txt")
+    # Same shard vocabulary as gen_ci_yml — both are driven by TEST_SHARD_COUNT
+    # so the matrix and pyproject's pytest-split dev requirement cannot desync.
+    shard_groups = ", ".join(str(i) for i in range(1, TEST_SHARD_COUNT + 1))
     return f"""name: Release
 
 on:
@@ -5259,7 +5262,18 @@ permissions:
   contents: read
 
 jobs:
-  release:
+  # THREE JOBS, NOT ONE. This was a single job that ran validation and then the
+  # WHOLE suite SERIALLY (`pytest tests/ -v`) before cutting the release. Both
+  # are gates on the same commit and neither consumes the other's result, so
+  # they now run CONCURRENTLY, and the suite is sharded with the SAME
+  # pytest-split matrix ci.yml already uses. Each shard stays SERIAL (no -n),
+  # which is what keeps an order-dependent serial-pollution bug catchable
+  # inside a shard — sharding buys wall clock, never coverage.
+  # The release job needs validation-report.txt (it is a release asset), so the
+  # validate job hands it over as an artifact rather than the release job
+  # re-running the validator to regenerate a file it already produced.
+  validate:
+    name: Validate
     runs-on: ubuntu-latest
     # VALIDATION budget (issues #90 + #114 + #180) — not a build budget.
     # A timeout here is NOT a git-fetch or cold-build stall: with the cache
@@ -5269,13 +5283,11 @@ jobs:
     # 30 min with headroom; do NOT lower it below 25.
     timeout-minutes: 30
     permissions:
-      contents: write       # create the release + upload assets
-      id-token: write       # OIDC token for build-provenance attestation (#121)
-      attestations: write   # write the provenance attestation (#121)
+      contents: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          fetch-depth: 0
+          # zizmor artipacked: nothing in this job pushes (issue #151).
           persist-credentials: false
 
       - name: Install uv
@@ -5331,17 +5343,105 @@ jobs:
         run: |
           {validate_block}
 
-      - name: Run tests
-        run: |
-          if [ -d "tests" ]; then
-            uv run pytest tests/ -v
-          fi
-
       - name: Lint Python scripts
         run: uv run ruff check scripts/
 
       - name: Type check
         run: uv run mypy scripts/ --ignore-missing-imports
+
+      - name: Upload validation report
+        # Handed to the release job, which uploads it as a release asset. This
+        # artifact hand-off is what lets validation run BESIDE the test shards
+        # instead of inside the release job.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: validation-report
+          path: validation-report.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  test-shard:
+    name: Test Shard ${{{{ matrix.group }}}}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Ubuntu-only on purpose: ci.yml already ran the ubuntu+macOS matrix on
+    # this same commit, so re-running macOS here buys no coverage and costs
+    # wall clock on the release path.
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [{shard_groups}]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install {p.python_version}
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run tests (shard ${{{{ matrix.group }}}} of {TEST_SHARD_COUNT})
+        # Same serial + pytest-split shape as ci.yml (TRDD-K7P2XR4Q): each shard
+        # runs WITHOUT -n, so an order-dependent serial-pollution bug still
+        # surfaces within a shard. `--splits`/`--group` come from pytest-split,
+        # which the dev extra MUST declare (RC-9) — this matrix and pyproject's
+        # `dev` list are both driven by TEST_SHARD_COUNT /
+        # PYTEST_SPLIT_REQUIREMENT so they cannot desync.
+        run: |
+          if [ -d "tests" ] && ls tests/test_*.py 1>/dev/null 2>&1; then
+            set +e
+            uv run pytest tests/ --splits {TEST_SHARD_COUNT} --group ${{{{ matrix.group }}}} -v
+            code=$?
+            set -e
+            # Exit 5 = pytest "no tests collected": a legitimately-empty shard
+            # when the suite has fewer tests than splits (common on a small
+            # downstream suite). That is NOT a failure — propagate any other
+            # non-zero code as a real one.
+            if [ "$code" -eq 5 ]; then
+              echo "Empty shard (no tests landed in this split) — OK"
+              exit 0
+            fi
+            exit $code
+          else
+            echo "No test files found, skipping"
+          fi
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    # Fail-closed: the release is cut only if validation passed AND every test
+    # shard passed. `needs` already short-circuits on failure — there is
+    # deliberately no `if: always()` here, because a release is exactly the
+    # thing that must not proceed on a red gate.
+    needs: [validate, test-shard]
+    timeout-minutes: 15
+    permissions:
+      contents: write       # create the release + upload assets
+      id-token: write       # OIDC token for build-provenance attestation (#121)
+      attestations: write   # write the provenance attestation (#121)
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # The changelog step walks back to the previous tag.
+          fetch-depth: 0
+          # `gh release` authenticates via GH_TOKEN and nothing here pushes.
+          persist-credentials: false
+
+      - name: Download validation report
+        # Restores validation-report.txt into the workspace root, where the
+        # SHA256SUMS step and `gh release upload` both reference it by name.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: validation-report
 
       - name: Generate SBOM (SPDX)
         # SLSA supply-chain control (issue #121): produce an SPDX SBOM of the
