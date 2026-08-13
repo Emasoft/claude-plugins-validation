@@ -1,0 +1,71 @@
+name: Serial Suite
+
+# THE CROSS-SHARD ORDERING GATE.
+#
+# ci.yml and release.yml both run the suite as a 4-way pytest-split matrix.
+# Each shard is serial, so an order-dependent pollution bug is still caught
+# WITHIN a shard — but a polluter in shard 1 whose victim lands in shard 3 is
+# invisible to every shard, because the two tests never run in the same process
+# in that order.
+#
+# ci.yml's own comment used to assert that gap was covered by "the mandatory
+# LOCAL full-serial pre-publish run". It is not: publish.py's Gate 2 runs
+# `pytest -n auto --dist=worksteal --maxfail=1` and the Gate 3c fork-parity
+# probe runs `pytest -n auto --dist=worksteal` — every pytest invocation in the
+# publish path is xdist. Running the suite serially is a convention documented
+# in CLAUDE.md, and a convention is not a gate. This workflow is.
+#
+# It is deliberately NOT on the publish path. The full serial suite takes
+# roughly 10 minutes, and publish.py's Gate 14 waits for every workflow on the
+# released commit — putting this there would hand back the wall clock the
+# release-workflow sharding was written to reclaim, to re-check a property that
+# changes only when tests change. A weekly run plus manual dispatch catches a
+# cross-shard polluter within days of it landing, which is the right cadence for
+# a bug class that is latent rather than release-blocking.
+
+on:
+  schedule:
+    # 06:17 on Mondays. Off the hour on purpose: :00 is when every scheduled
+    # job on the platform fires at once and GitHub queues the overflow.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: serial-suite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  serial:
+    name: Full suite, serial
+    runs-on: ubuntu-latest
+    # The whole suite in one process with no xdist. Generous, because the point
+    # of this job is completeness, not speed — but bounded, so a genuine hang
+    # (the deadlock class Gate 3c exists for) fails instead of burning the
+    # 360-minute default.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        # Bare `uv sync` omits the `performance` extra, so this runs WITHOUT
+        # google-re2 — the same no-re2 path CI shards use, which is what keeps
+        # the catastrophic-backtracking (ReDoS) catch alive.
+        run: uv sync
+
+      - name: Run the full suite serially
+        # -p no:cacheprovider and -o addopts="" reproduce CLAUDE.md's documented
+        # pre-publish invocation exactly: no xdist, no cached test ordering, no
+        # inherited addopts. Any of those would reintroduce the reordering this
+        # job exists to rule out.
+        run: uv run pytest -p no:cacheprovider -o addopts="" -q tests/

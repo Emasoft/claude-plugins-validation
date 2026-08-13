@@ -774,7 +774,12 @@ def do_bump(plugin_root: Path, new_version: str, dry_run: bool = False) -> bool:
 GATES: list[tuple[str, str]] = [
     ("Gate 0", "Bypass-var rejection (CPV_SKIP_*, SKIP_*, NO_VERIFY)"),
     ("Gate 1", "Clean working tree (git status --porcelain)"),
-    ("Gate 2", "Tests (uv run pytest tests/ -x)"),
+    # Keep this string in step with stage_run_tests' actual argv. It read
+    # `pytest tests/ -x` long after the real command became a worksteal-xdist
+    # run, so anyone reading the gate table to reproduce a failure locally ran
+    # a materially different suite (serial, and stopping at a different point)
+    # than the gate that had just rejected them.
+    ("Gate 2", "Tests (uv run pytest tests/ -n auto --dist=worksteal --maxfail=1)"),
     (
         "Gate 3",
         "Plugin validation (validate_plugin.py --strict) — owns repo-wide "
