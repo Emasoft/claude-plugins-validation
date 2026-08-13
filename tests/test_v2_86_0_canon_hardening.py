@@ -309,10 +309,26 @@ def test_ci_yml_validate_job_enables_uv_cache():
 
 
 def test_release_yml_job_has_cold_install_timeout():
-    """Issue #114: the release job's timeout must allow a cold uvx build (>= 25)."""
+    """Issue #114: the cold-uvx-build budget (>= 25) sits on the job that validates.
+
+    Located by STEP, not by job name. This asserted
+    ``jobs["release"]["timeout-minutes"]`` back when release.yml was a single
+    job; once validation moved into its own job so it could run beside the test
+    shards, the job NAMED "release" became pure coordination (download an
+    artifact, call `gh`) and its budget no longer has anything to do with a cold
+    `uvx --from git+...` build. Pinned to the name, this check would have gone
+    on measuring the wrong job and let the real ceiling drop unnoticed.
+    """
     yml = gen_release_yml(_params())
     parsed = yaml.safe_load(yml)
-    assert parsed["jobs"]["release"]["timeout-minutes"] >= 25
+    hosts = [
+        (name, job)
+        for name, job in parsed["jobs"].items()
+        if any("cpv-remote-validate" in s.get("run", "") for s in job["steps"])
+    ]
+    assert len(hosts) == 1, f"expected exactly one validating job, found {[n for n, _ in hosts]}"
+    name, job = hosts[0]
+    assert job["timeout-minutes"] >= 25, f"job {name!r} validates but is capped below 25 min"
 
 
 def test_notify_marketplace_yml_job_has_timeout():
