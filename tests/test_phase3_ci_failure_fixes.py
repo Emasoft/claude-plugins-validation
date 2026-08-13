@@ -144,6 +144,27 @@ def _validate_step(yml_text: str, job: str, name_prefix: str) -> dict:
     return next(s for s in steps if s.get("name", "").startswith(name_prefix))
 
 
+def _hosting_job(yml_text: str, name_prefix: str) -> tuple[str, dict, dict]:
+    """Find the ONE job whose steps include the named step.
+
+    Keyed on the STEP rather than a hardcoded job name: release.yml used to be a
+    single `release` job, and when the suite was sharded across
+    validate/test-shard/release the validation step moved, which broke three
+    assertions that were really about the step, not about where it lived.
+    Asserting uniqueness matters as much as finding it — two copies of the
+    validation step would mean one of them is ungoverned by these checks.
+    """
+    parsed = yaml.safe_load(yml_text)
+    hits = [
+        (job_name, job, step)
+        for job_name, job in parsed["jobs"].items()
+        for step in job["steps"]
+        if step.get("name", "").startswith(name_prefix)
+    ]
+    assert len(hits) == 1, f"expected exactly one {name_prefix!r} step, found {len(hits)}"
+    return hits[0]
+
+
 def test_ci_yml_validate_step_has_integrity_skip_env() -> None:
     """ci.yml validate step keeps PLUGIN_SKIP_GITHUB_INTEGRITY and (per #140) drops private-usernames.
 
@@ -160,8 +181,13 @@ def test_ci_yml_validate_step_has_integrity_skip_env() -> None:
 
 
 def test_release_yml_validate_step_has_integrity_skip_env() -> None:
-    """release.yml validate step keeps PLUGIN_SKIP_GITHUB_INTEGRITY and (per #140) drops private-usernames."""
-    step = _validate_step(gen_release_yml(_params()), "release", "Run full plugin validation")
+    """release.yml validate step keeps PLUGIN_SKIP_GITHUB_INTEGRITY and (per #140) drops private-usernames.
+
+    Located by STEP, not by job name — the step moved from the single `release`
+    job into the `validate` job when the release workflow was split so
+    validation and the test shards run concurrently.
+    """
+    _job_name, _job, step = _hosting_job(gen_release_yml(_params()), "Run full plugin validation")
     assert step["env"]["PLUGIN_SKIP_GITHUB_INTEGRITY"] == "1"
     assert "CLAUDE_PRIVATE_USERNAMES" not in step["env"]
 
@@ -245,9 +271,17 @@ def test_ci_yml_validate_timeout_is_at_least_25() -> None:
 
 
 def test_release_yml_validate_timeout_is_at_least_25() -> None:
-    """The release job's cold-install ceiling stays >= 25 (root-cause #1)."""
-    parsed = yaml.safe_load(gen_release_yml(_params()))
-    assert parsed["jobs"]["release"]["timeout-minutes"] >= 25
+    """The cold-install ceiling stays >= 25 on the job that actually validates (root-cause #1).
+
+    The budget belongs to whichever job runs CPV validation, which is where a
+    cold `uvx --from git+...` install is paid. After the release workflow was
+    split that is the `validate` job; the `release` job only downloads an
+    artifact and calls `gh`, so pinning this assertion to the job NAMED
+    "release" would have measured a coordination step's budget and let the real
+    validation ceiling drop unnoticed.
+    """
+    job_name, job, _step = _hosting_job(gen_release_yml(_params()), "Run full plugin validation")
+    assert job["timeout-minutes"] >= 25, f"job {job_name!r} validates but is capped below 25 min"
 
 
 # ---------------------------------------------------------------------------
