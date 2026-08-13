@@ -99,10 +99,16 @@ uv run python scripts/_plugin_compute_hashes.py
 PLUGIN_SKIP_GITHUB_INTEGRITY=1 CLAUDE_PRIVATE_USERNAMES="$(whoami)" \
   uv run --with pyyaml python scripts/remote_validation.py plugin . --strict -o /tmp/selfval.txt
 
-# Test suite — run it SERIALLY before publishing. CI shards it into a 4-way
-# pytest-split MATRIX (count-based round-robin), but each shard is serial + no-re2 and
-# THIS full local serial run is the authoritative cross-shard ordering gate
-# (xdist+re2 mask serial-pollution & no-re2 ReDoS; TRDD-K7P2XR4Q):
+# Test suite — run it SERIALLY before publishing. CI and release both shard it
+# into a pytest-split MATRIX (count-based round-robin); each shard is serial +
+# no-re2, so serial-pollution and no-re2 ReDoS stay catchable WITHIN a shard,
+# but a polluter in one shard whose victim lands in another is invisible to all
+# of them (TRDD-K7P2XR4Q).
+# This local run is a CONVENTION, not a gate: publish.py's Gate 2 runs
+# `pytest -n auto --dist=worksteal --maxfail=1` and the Gate 3c fork-parity
+# probe runs `pytest -n auto --dist=worksteal`, so NOTHING in the publish path
+# enforces a serial run. The enforced cross-shard ordering gate is
+# .github/workflows/serial-suite.yml (weekly + workflow_dispatch).
 uv run pytest -p no:cacheprovider -o addopts="" -q tests/
 
 # Publish (bumps version, runs every gate, pushes, releases):
@@ -115,9 +121,17 @@ uv run python scripts/publish.py --patch   # | --minor | --major
    self-validate — else CPV flags its own changed files (their SHA no longer
    matches the skip list). New/changed files → `_plugin_compute_hashes.py`.
 2. **`CPV_SCAN_CACHE=0` for same-version classifier testing** (see above).
-3. **Serial suite before publish** — CI shards into a 4-way pytest-split serial
-   matrix (count-based round-robin; each shard serial + no-re2); THIS local
-   full-serial run is the authoritative cross-shard ordering gate (TRDD-K7P2XR4Q).
+3. **Serial suite before publish** — CI and release both shard into a
+   pytest-split serial matrix (count-based round-robin; each shard serial +
+   no-re2), which leaves cross-shard ordering pollution uncovered
+   (TRDD-K7P2XR4Q). Running the suite serially locally is a CONVENTION and NOT
+   a gate — every pytest invocation in the publish path is xdist (Gate 2:
+   `-n auto --dist=worksteal --maxfail=1`; Gate 3c fork-parity: same). The
+   enforced cross-shard ordering gate is `.github/workflows/serial-suite.yml`
+   (weekly + dispatch). This entry used to call the local run "the
+   authoritative cross-shard ordering gate", which was false in the direction
+   that matters: it described a guarantee nobody was providing, so nobody went
+   looking for the gap.
 4. **Never suppress a security rule / never relax `--strict`** — the only
    auto-clear is provably-inert data (a pattern string in a rule-table never
    reaching a sink) or a non-instruction-loadable / comment / doc context;
