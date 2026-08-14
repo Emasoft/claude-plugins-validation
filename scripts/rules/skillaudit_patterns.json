@@ -257,21 +257,21 @@
       "name": "Agent memory/config modification",
       "description": "Skill attempts to modify agent memory, soul, or config files",
       "patterns": [
-        "write.*MEMORY\\.md",
-        "write.*SOUL\\.md",
-        "write.*AGENTS\\.md",
-        "edit.*MEMORY\\.md",
-        "edit.*SOUL\\.md",
-        "edit.*AGENTS\\.md",
-        "overwrite.*MEMORY\\.md",
-        "modify.*SOUL\\.md",
-        "append.*MEMORY\\.md",
-        "replace.*SOUL\\.md",
-        "echo.*>.*MEMORY\\.md",
-        "echo.*>.*SOUL\\.md",
-        "cat.*>.*AGENTS\\.md"
+        "(?:^|[^\\w-])(?:over|re)?write.*MEMORY\\.md",
+        "(?:^|[^\\w-])(?:over|re)?write.*SOUL\\.md",
+        "(?:^|[^\\w-])(?:over|re)?write.*AGENTS\\.md",
+        "(?:^|[^\\w-])edit.*MEMORY\\.md",
+        "(?:^|[^\\w-])edit.*SOUL\\.md",
+        "(?:^|[^\\w-])edit.*AGENTS\\.md",
+        "(?:^|[^\\w-])overwrite.*MEMORY\\.md",
+        "(?:^|[^\\w-])modify.*SOUL\\.md",
+        "(?:^|[^\\w-])append.*MEMORY\\.md",
+        "(?:^|[^\\w-])replace.*SOUL\\.md",
+        "(?:^|[^\\w-])echo.*>.*MEMORY\\.md",
+        "(?:^|[^\\w-])echo.*>.*SOUL\\.md",
+        "(?:^|[^\\w-])cat.*>.*AGENTS\\.md"
       ],
-      "remediation": "Do not modify agent memory, soul, or configuration files (MEMORY.md, SOUL.md, AGENTS.md). Skills should only output results through their declared interface, never modify the agent's core files."
+      "remediation": "Do not modify agent memory, soul, or configuration files (MEMORY.md, SOUL.md, AGENTS.md). Skills should only output results through their declared interface, never modify the agent's core files. NOTE: issue #208 residual (2026-08-14) - every verb is now anchored at a word START via the re2-safe `(?:^|[^\\w-])` prefix (RE2 has no lookbehind, so `(?<![-\\w])` is not an option). Without it the matched \"verb\" could be the TAIL of a hyphenated identifier - the skill name `/janitor-memory-write`, `*-memory-edit`, `*-config-append` - which made any doc naming the file it manages a false positive; it also matched `cat` inside `certificate`/`location` and `edit` inside `credit`. `write` keeps the `(?:over|re)?` prefixes so a genuine `overwrite`/`rewrite MEMORY.md` instruction still fires (dropping them would have traded a false positive for a false negative)."
     },
     {
       "id": "TOOL_POISONING",

@@ -6146,6 +6146,83 @@ _COVERAGE_IMPORT_RE = re.compile(
     r"(?m)^[ \t]*(?:from[ \t]+([A-Za-z_]\w*)[ \t]+import\b|import[ \t]+([A-Za-z_]\w*))"
 )
 
+# The component ROOTS of the generic Claude-Code layout. A component's root is
+# half of its identity: `commands/x.md` and `skills/x/SKILL.md` are DIFFERENT
+# components that happen to share a name, and issue #207 measured a repo where
+# the command was credited by a test of the same-named skill that never reads
+# `commands/` at all — so no assertion anywhere failed if that command broke.
+_COVERAGE_COMPONENT_ROOTS: tuple[str, ...] = ("scripts", "hooks", "skills", "commands", "agents")
+
+# Characters that continue a path/module identifier. A needle flanked by one of
+# these on either side is part of a LONGER name, not a reference to this
+# component (`commands/x` inside `commands/x-ray.md`, or inside `subcommands/x`).
+_COVERAGE_NAME_CHARS: frozenset[str] = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_-")
+
+# Directory-ITERATION call tokens. A test whose source enumerates a component
+# ROOT covers that root's members BY CONSTRUCTION — that is the shape issue #207
+# showed the check was PENALISING: `COMMANDS_ROOT.glob("*.md")` + parametrize
+# genuinely asserts six contracts over all 23 commands while naming none of
+# them, so a literal-name scan scored it zero and steered authors toward the
+# weaker per-name form that silently fails to cover the 24th command.
+_COVERAGE_ITER_TOKENS: tuple[str, ...] = (
+    ".glob(",
+    ".rglob(",
+    ".iterdir(",
+    ".scandir(",
+    "listdir(",
+    "walk(",
+)
+
+_COVERAGE_ROOT_ALT = "|".join(_COVERAGE_COMPONENT_ROOTS)
+
+# `NAME = <expr>` — the binding a test uses for its component root.
+_COVERAGE_ASSIGN_RE = re.compile(r"(?m)^[ \t]*([A-Za-z_]\w*)[ \t]*=[ \t]*(.+)$")
+# Every quoted literal on one line; only the LAST one is the path's tail, which
+# is what keeps `SKILL_MENUS_DIR = ROOT / "skills" / "x" / "menus"` from being
+# read as the skills root (verified against CPV's own suite: without the
+# last-segment rule, three test files were credited with globbing a root they
+# only reach THROUGH — a reference dir, a per-skill subdir, and a fixture path
+# inside a string literal).
+_COVERAGE_QUOTED_RE = re.compile(r"""["']([^"'\n]*)["']""")
+# `(root / "commands").glob(...)` / `Path("skills").iterdir()` — the root named
+# inline, with no variable to resolve.
+_COVERAGE_ROOT_EXPR_ITER_RE = re.compile(
+    rf"""["'](?P<root>{_COVERAGE_ROOT_ALT})["']\s*\)?\s*\.\s*(?:glob|rglob|iterdir|scandir)\s*\(""",
+    re.IGNORECASE,
+)
+# `.glob("commands/*.md")` — the root named inside the PATTERN.
+_COVERAGE_ROOT_PATTERN_ITER_RE = re.compile(
+    rf"""\.\s*(?:glob|rglob)\s*\(\s*[A-Za-z]*["'](?:\./)?(?P<root>{_COVERAGE_ROOT_ALT})/""",
+    re.IGNORECASE,
+)
+# `.glob("*/SKILL.md")` — unambiguously an enumeration of skills whatever the
+# receiver is called, and the single most common way a suite walks them.
+_COVERAGE_SKILL_MD_GLOB_RE = re.compile(
+    r"""\.\s*(?:glob|rglob)\s*\(\s*[A-Za-z]*["'][^"']*\*[^"']*/skill\.md["']""",
+    re.IGNORECASE,
+)
+
+
+def _coverage_path_needle_in(text: str, needle: str) -> bool:
+    """True if ``needle`` occurs in ``text`` as a WHOLE path reference.
+
+    Plain ``in`` would let `commands/x` match inside `commands/x-ray.md` and let
+    `subcommands/x` credit `commands/x`. Both flanks must therefore be
+    something other than a name character. Checked per OCCURRENCE, not on the
+    first hit only: a benign earlier occurrence must not hide a real one.
+    """
+    start = 0
+    width = len(needle)
+    while True:
+        i = text.find(needle, start)
+        if i < 0:
+            return False
+        before = text[i - 1] if i else ""
+        after = text[i + width] if i + width < len(text) else ""
+        if before not in _COVERAGE_NAME_CHARS and after not in _COVERAGE_NAME_CHARS:
+            return True
+        start = i + width
+
 
 def _coverage_path_is_vendored(path: Path, root: Path) -> bool:
     """True if any segment of ``path`` (relative to ``root``) is a vendored /
@@ -6194,20 +6271,36 @@ def _coverage_drop_unshipped(paths: list[Path], root: Path) -> tuple[list[Path],
     return kept, len(paths) - len(kept)
 
 
-def _coverage_enumerate_components(plugin_root: Path) -> list[tuple[str, str]]:
-    """Testable components as (display-path, match-token) by generic layout.
+def _coverage_enumerate_components(plugin_root: Path) -> list[tuple[str, str, str]]:
+    """Testable components as (display-path, component ROOT, reference needle).
 
     Mirrors the per-directory glob idiom of validate_scripts/validate_commands/
     validate_agents/validate_hooks/validate_skills (there is no shared
-    enumeration helper — each inlines its own glob). The token is the stem a
-    conventional test filename/content would reference.
+    enumeration helper — each inlines its own glob).
+
+    THE NEEDLE IS KIND-SCOPED, which is the #207 fix. A component is credited by
+    a reference to ITS OWN kind and path — `commands/x.md` by `commands/x`, a
+    skill by `skills/x` — never by a bare `x` that a same-named component of a
+    different kind owns. Measured: `commands/maintainer-config-lint.md` was
+    counted as tested because a SKILL contract test listed the string
+    `"maintainer-config-lint"`, in a file that never reads `commands/` at all.
+    A repo could reach "0 untested" that way with its whole command surface
+    unguarded, which is the failure the check exists to prevent.
+
+    ``scripts/*.py`` is the ONE deliberate exception: a Python module's canonical
+    reference IS its import name, so `import cpv_fix_ledger` — not
+    `"scripts/cpv_fix_ledger"` — is what a real test of it contains. Scoping
+    scripts to a path form would report every unit-tested module as untested,
+    and would silently kill the one-hop dispatcher credit (v5.1.1) that is built
+    on the same module-name identity.
     """
-    components: list[tuple[str, str]] = []
+    components: list[tuple[str, str, str]] = []
 
     scripts_dir = plugin_root / "scripts"
     if scripts_dir.is_dir():
         for py in sorted(scripts_dir.glob("*.py")):
-            components.append((str(py.relative_to(plugin_root)), py.stem.lower()))
+            # Module identity, not a path — see the docstring.
+            components.append((str(py.relative_to(plugin_root)), "scripts", py.stem.lower()))
 
     hooks_dir = plugin_root / "hooks"
     if hooks_dir.is_dir():
@@ -6217,23 +6310,102 @@ def _coverage_enumerate_components(plugin_root: Path) -> list[tuple[str, str]]:
                 and hook.suffix.lower() in _COVERAGE_HOOK_SCRIPT_EXTS
                 and not _coverage_path_is_vendored(hook, plugin_root)
             ):
-                components.append((str(hook.relative_to(plugin_root)), hook.stem.lower()))
+                rel = hook.relative_to(plugin_root)
+                components.append(
+                    (str(rel), "hooks", rel.with_suffix("").as_posix().lower())
+                )
 
     skills_dir = plugin_root / "skills"
     if skills_dir.is_dir():
-        # A skill's identity is its directory name, not the literal "SKILL".
+        # A skill's identity is its directory name, not the literal "SKILL", so
+        # the needle is the DIRECTORY — which `skills/x/SKILL.md`,
+        # `skills/x/references/y.md` and a bare `skills/x` all contain.
         for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
             components.append(
-                (str(skill_md.relative_to(plugin_root)), skill_md.parent.name.lower())
+                (
+                    str(skill_md.relative_to(plugin_root)),
+                    "skills",
+                    skill_md.parent.relative_to(plugin_root).as_posix().lower(),
+                )
             )
 
     for comp_dir_name in ("commands", "agents"):
         comp_dir = plugin_root / comp_dir_name
         if comp_dir.is_dir():
             for md in sorted(comp_dir.glob("*.md")):
-                components.append((str(md.relative_to(plugin_root)), md.stem.lower()))
+                rel = md.relative_to(plugin_root)
+                # `commands/x` is a prefix of `commands/x.md`, so one needle
+                # covers both spellings a test might use.
+                components.append(
+                    (str(rel), comp_dir_name, rel.with_suffix("").as_posix().lower())
+                )
 
     return components
+
+
+def _coverage_globbed_roots(test_files: list[Path]) -> tuple[set[str], bool]:
+    """Component roots the suite ENUMERATES, and whether the scan completed.
+
+    Returns ``(roots, complete)``. A test whose source globs / iterates
+    ``commands/`` asserts over every command that exists — including one added
+    tomorrow — so it covers that root's members by construction. Crediting it is
+    the #207 under-credit half: without this, the check gives ZERO to the
+    table-driven form and full marks to a hand-maintained list of literal names,
+    i.e. it rewards the construction that silently fails to cover the next
+    component added. A real commit measured that inversion: replacing a stale
+    24-name list with a filesystem glob raised coverage from 24 to 32 skills and
+    moved this advisory 16 -> 29 "untested".
+
+    Detection is line-scoped with one file-scoped variable pass:
+
+    * a variable whose assignment's LAST quoted segment is a root name, used on
+      a line that iterates (``COMMANDS_ROOT.glob("*.md")``);
+    * the root named inline on the iterating line (``(p / "skills").iterdir()``);
+    * the root named inside the pattern (``.glob("commands/*.md")``);
+    * the unambiguous ``*/SKILL.md`` skills walk.
+
+    It deliberately errs toward CREDITING, like the rest of this check: a glob
+    over a root built as a temp FIXTURE is indistinguishable from one over the
+    shipped tree without executing the test, and the honest bias for an advisory
+    is to under-warn rather than to accuse.
+    """
+    found: set[str] = set()
+    scanned = 0
+    for tf in test_files:
+        if len(found) == len(_COVERAGE_COMPONENT_ROOTS):
+            return found, True
+        if scanned >= _COVERAGE_CONTENT_SCAN_CAP:
+            return found, False
+        try:
+            src = tf.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue  # best-effort, exactly like the content scan
+        scanned += len(src)
+        if not any(tok in src for tok in _COVERAGE_ITER_TOKENS):
+            continue
+
+        root_vars: dict[str, set[str]] = {}
+        for match in _COVERAGE_ASSIGN_RE.finditer(src):
+            quoted = _COVERAGE_QUOTED_RE.findall(match.group(2))
+            if not quoted:
+                continue
+            tail = quoted[-1].rstrip("/").rsplit("/", 1)[-1].lower()
+            if tail in _COVERAGE_COMPONENT_ROOTS:
+                root_vars.setdefault(match.group(1), set()).add(tail)
+
+        for line in src.splitlines():
+            if not any(tok in line for tok in _COVERAGE_ITER_TOKENS):
+                continue
+            for match in _COVERAGE_ROOT_EXPR_ITER_RE.finditer(line):
+                found.add(match.group("root").lower())
+            for match in _COVERAGE_ROOT_PATTERN_ITER_RE.finditer(line):
+                found.add(match.group("root").lower())
+            if _COVERAGE_SKILL_MD_GLOB_RE.search(line):
+                found.add("skills")
+            for var, roots in root_vars.items():
+                if re.search(rf"\b{re.escape(var)}\b", line):
+                    found |= roots
+    return found, True
 
 
 def _coverage_discover_tests(plugin_root: Path) -> tuple[list[Path], int]:
@@ -6278,12 +6450,22 @@ def _coverage_test_blobs(test_files: list[Path]) -> tuple[str, str]:
     return name_blob, "\n".join(content_parts)
 
 
-def _coverage_match_tokens(test_files: list[Path], tokens: set[str]) -> tuple[set[str], bool]:
+def _coverage_match_tokens(
+    test_files: list[Path],
+    tokens: set[str],
+    *,
+    path_tokens: frozenset[str] | set[str] = frozenset(),
+) -> tuple[set[str], bool]:
     """Which ``tokens`` the suite mentions, and whether the scan COMPLETED.
 
     Returns ``(matched, complete)``. ``complete`` is False only when the byte
     budget ran out with tokens still unmatched — in that case the caller must
     NOT report those tokens as untested, because it did not look at every file.
+
+    A token listed in ``path_tokens`` is a PATH reference (`commands/x`) and is
+    matched with identifier boundaries so it cannot be satisfied by a longer
+    name that merely contains it; everything else keeps plain substring
+    semantics, which is what a Python module stem needs.
 
     Scanning per-token instead of concatenating one giant blob is what makes the
     budget a runtime guard rather than a source of false findings: the loop drops
@@ -6305,7 +6487,11 @@ def _coverage_match_tokens(test_files: list[Path], tokens: set[str]) -> tuple[se
         except OSError:
             continue
         total += len(text)
-        hit = {tok for tok in remaining if tok in text}
+        hit = {
+            tok
+            for tok in remaining
+            if (_coverage_path_needle_in(text, tok) if tok in path_tokens else tok in text)
+        }
         if hit:
             matched |= hit
             remaining -= hit
@@ -6502,8 +6688,8 @@ def check_dependency_resolution_tags(plugin_root: Path, report: ValidationReport
 
 
 def check_test_coverage(plugin_root: Path, report: ValidationReport) -> None:
-    """Advisory WARNING (NON-BLOCKING): flag shipped components that have no
-    discoverable test, in a plugin that DOES ship a test suite (issue #155).
+    """Advisory WARNING (NON-BLOCKING): flag shipped components no test refers
+    to, in a plugin that DOES ship a test suite (issue #155, corrected by #207).
 
     A green CI "Test" job does not prove real coverage — a plugin can ship many
     scripts behind a suite that exercises only one of them. This enumerates
@@ -6512,22 +6698,39 @@ def check_test_coverage(plugin_root: Path, report: ValidationReport) -> None:
     ``agents/*.md``) and cross-references them against tests discovered
     generically (the conventional ``test_*.py`` / ``*_test.py`` /
     ``*.test.{js,ts}`` / ``*.spec.{js,ts}`` filename patterns, anywhere under the
-    plugin), matching a component to a test by filename stem or content mention.
+    plugin).
+
+    WHAT IT ACTUALLY MEASURES, stated honestly (issue #207's third suggestion,
+    and the reason the wording changed): whether the suite REFERS to a
+    component — by naming its own path, or by enumerating the directory it
+    lives in. That is not the same claim as "has a test", and the old sentence
+    ("N components have no discoverable test") asserted more than any
+    name-scanning implementation can support. A message that overstates its
+    method is one a reader eventually learns to discount, which costs the
+    advisory the credibility it needs to be read at all.
+
+    Three credit paths, each closing a measured wrong answer:
+
+    * PATH reference, scoped to the component's own kind — the #207 over-credit
+      fix. A bare name shared with a component of another kind no longer counts.
+    * ROOT enumeration — the #207 under-credit fix. A test that globs
+      ``commands/`` covers every command by construction, including the next one
+      added; without this the check scored the stronger, glob-driven shape ZERO.
+    * ONE-HOP dispatcher import for ``scripts/*.py`` (v5.1.1), unchanged.
 
     UNIVERSAL: zero marketplace / ai-maestro / author-naming-convention
     assumptions — only the standard plugin directory layout and the conventional
     test-file shapes. WARN-only: emitted through ``report.warning(...)``, which
     ``exit_code_strict()`` never blocks on — it NEVER changes the VALID/INVALID
-    verdict or a ``--strict`` / publish outcome.
+    verdict or a ``--strict`` / publish outcome. This must stay true: #207 is a
+    report of an advisory being WRONG, and an advisory nobody can be blocked by
+    is one that can be corrected without breaking anyone's publish.
 
     CONSERVATIVE (does not spam): it fires ONLY when the plugin already ships at
     least one test file — i.e. it opted into testing but its suite looks thin. A
     plugin with no test suite at all gets ZERO findings here (nagging every
     test-less plugin would be noise, and issue #155 is specifically about the
-    deceptive green-suite case, which by definition has a suite). Matching is
-    generous (a component counts as covered on any filename-stem OR content
-    mention), so the check under-warns rather than over-warns — the safe
-    direction for an advisory.
+    deceptive green-suite case, which by definition has a suite).
     """
     components = _coverage_enumerate_components(plugin_root)
     if not components:
@@ -6541,11 +6744,20 @@ def check_test_coverage(plugin_root: Path, report: ValidationReport) -> None:
         return
 
     name_blob = "\n".join(tf.name.lower() for tf in test_files)
-    tokens = {token for _rel, token in components if token}
+    tokens = {needle for _rel, _root, needle in components if needle}
+    # Every needle except a script's module stem is a PATH and must match with
+    # identifier boundaries — see `_coverage_enumerate_components`.
+    path_tokens = frozenset(
+        needle for _rel, root, needle in components if needle and root != "scripts"
+    )
     # Filenames are cheap and unbounded, so settle what they cover first and let
-    # the (bounded) content pass work on the remainder only.
-    by_name = {tok for tok in tokens if tok in name_blob}
-    matched, scan_complete = _coverage_match_tokens(test_files, tokens - by_name)
+    # the (bounded) content pass work on the remainder only. A path needle
+    # contains a "/" and therefore never matches a filename — no special case
+    # needed, it simply falls through to the content pass.
+    by_name = {tok for tok in tokens if tok not in path_tokens and tok in name_blob}
+    matched, scan_complete = _coverage_match_tokens(
+        test_files, tokens - by_name, path_tokens=path_tokens
+    )
     matched |= by_name
 
     if not scan_complete:
@@ -6564,15 +6776,34 @@ def check_test_coverage(plugin_root: Path, report: ValidationReport) -> None:
     # crediting it is what keeps this advisory from calling covered code untested.
     # Built from the FULL content only for the tokens still unmatched, so the
     # indirect credit costs nothing on a suite that already names everything.
+    # The root-enumeration pass is gated the same way, for the same reason.
     unmatched = tokens - matched
     indirect: set[str] = set()
+    globbed_roots: set[str] = set()
+    glob_complete = True
     if unmatched:
         _nb, content_blob = _coverage_test_blobs(test_files)
         indirect = _coverage_indirect_python_tokens(plugin_root, name_blob, content_blob)
+        globbed_roots, glob_complete = _coverage_globbed_roots(test_files)
 
     untested = [
-        rel_path for rel_path, token in components if token and token not in matched and token not in indirect
+        rel_path
+        for rel_path, root, needle in components
+        if needle
+        and needle not in matched
+        and root not in globbed_roots
+        and not (root == "scripts" and needle in indirect)
     ]
+    if untested and not glob_complete:
+        # Same asymmetry as the token scan above: a root-enumeration pass that
+        # stopped short is not evidence that nothing enumerates these roots.
+        report.warning(
+            "[RC-TEST-COVERAGE] could not determine test coverage: the suite exceeds the "
+            f"{_COVERAGE_CONTENT_SCAN_CAP}-byte scan budget, so some test files were not read. "
+            "No component is reported as untested on a partial scan. "
+            "Advisory only — this WARNING does not block the publish."
+        )
+        return
     if not untested:
         return
 
@@ -6593,9 +6824,16 @@ def check_test_coverage(plugin_root: Path, report: ValidationReport) -> None:
         if dropped_unshipped
         else ""
     )
+    # WORDING (issue #207, suggestion 3). The old sentence was "have no
+    # discoverable test", which is a claim about TESTING that a name-and-path
+    # scan cannot support: this check knows whether the suite REFERS to a
+    # component, not whether anything asserts on it. Say the measurable thing.
+    # An advisory that overstates its method is one its reader learns to
+    # discount, and then it is worth nothing at all.
     report.warning(
         f"[RC-TEST-COVERAGE] {len(untested)} of {len(components)} testable "
-        f"component(s) have no discoverable test (the plugin ships a suite of "
+        f"component(s) are not referenced by any test — no test names their path, "
+        f"and none enumerates the directory they live in (the plugin ships a suite of "
         f"{len(test_files)} test file(s){excluded}, so its coverage looks thin): {listing}. "
         "Advisory only — this WARNING does not block the publish."
     )
@@ -8015,10 +8253,15 @@ def _make_validator_report() -> ValidationReport:
 def _serial_phase(name: str, callable_: Any, *args: Any, **kwargs: Any) -> Any:
     """Run a SERIAL orchestrator step wrapped in #180 progress markers.
 
-    The parallel batch gets its markers from ``_run_one_validator``; the
+    The parallel batch gets its markers from ``_run_parallel_batch``; the
     serial Phase 1 / Phase 3 steps run outside it, and a hang in one of
     those would otherwise be just as unattributable as before. Exceptions
     propagate unchanged — this only observes.
+
+    A serial step is measured HERE because here IS where the work happens:
+    nothing else runs between ``started`` and the ``finally``, so the elapsed
+    time is the step's own. That is exactly the property the parallel batch
+    could not have from its dispatcher, which is why #211 happened.
     """
     emit_phase_start(name)
     started = time.monotonic()
@@ -8054,6 +8297,40 @@ def _run_one_validator(
         return (name, sub_report, exc)
 
 
+def _run_one_validator_timed(
+    name: str,
+    callable_: Any,
+    plugin_root: Path,
+    args_kwargs: tuple[tuple, dict] = ((), {}),
+) -> tuple[tuple[str, ValidationReport, Exception | None], float]:
+    """Run one validator and return its result plus ITS OWN wall-clock cost.
+
+    Issue #211: a phase's duration has to be measured AROUND THAT PHASE'S WORK,
+    and the only thread that can do that is the one doing the work. The
+    dispatcher cannot: it stamps t0 at SUBMIT time (before the task is
+    necessarily picked up) and t1 when its collect loop REACHES that future, so
+    every member of a concurrently-dispatched batch inherits the batch's wall
+    time. Measured on CPV's own tree before this fix: 30 phases collapsed into
+    clusters of identical values — 6 at 82.4s, 6 at 28.6s, 4 at 82.7s — with
+    `validate_license` and `validate_readme` both claiming 82.7s. The reporter
+    saw the same shape at 27 phases × ~601.2s. That is precisely the number the
+    instrumentation exists to produce, and it was the batch's, not the phase's.
+
+    So the worker times itself and RETURNS the number; the dispatching thread
+    prints it. The split is NOT stylistic — a worker thread must never write to
+    stderr (see the fork/mutex deadlock documented in ``_run_parallel_batch``),
+    so measuring here and emitting there is the only shape that is accurate AND
+    fork-safe. Deliberately NO progress marker is emitted in this function, for
+    the same reason.
+
+    Errors are still swallowed by ``_run_one_validator``, so the duration is
+    reported for a crashed validator too — a crash is a phase that FINISHED.
+    """
+    started = time.monotonic()
+    result = _run_one_validator(name, callable_, plugin_root, args_kwargs)
+    return result, time.monotonic() - started
+
+
 def _run_parallel_batch(
     tasks: list[tuple[str, Any, tuple[tuple, dict]]],
     plugin_root: Path,
@@ -8074,7 +8351,7 @@ def _run_parallel_batch(
         return
 
     # Lazy import — only pay the cost when parallel mode is actually used.
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     # n_workers = len(tasks) lets every validator start immediately. The
     # outer pool only dispatches; the inner ProcessPool inside each
@@ -8102,16 +8379,55 @@ def _run_parallel_batch(
     # Emitting from the dispatching thread keeps the diagnostic contract intact
     # — a killed run still ends with STARTs that never got a DONE — while no
     # worker thread ever touches stderr.
-    started_at: dict[int, float] = {}
+    #
+    # WHAT THE DISPATCHER MAY NOT DO IS *MEASURE* (issue #211). The elapsed time
+    # it can see is submit-to-collect, which for a concurrent batch is the
+    # BATCH's wall time, not the phase's — so every member reported the same
+    # number and the log could not answer the one question it exists for
+    # ("which phase was slow?"). The worker now measures its own t0/t1 and
+    # RETURNS the duration (`_run_one_validator_timed`); this thread only
+    # prints it. Measuring where the work happens, emitting where it is safe.
+    #
+    # The SLOT id `[wNN]` on both markers is #211's cheap second ask. The pool
+    # is sized to one worker per task, so a slot is the unit of concurrency: a
+    # START carrying `[w07]` with no matching DONE names exactly which
+    # concurrent unit was still in flight when a run was killed, even if several
+    # phases happen to share a duration. It is per-TASK by construction, so the
+    # pool recycling an OS thread whose previous task finished cannot confuse
+    # the attribution. The name stays the FIRST whitespace-delimited field of
+    # both markers, so every existing `START (\S+)` / `DONE  (\S+)` consumer
+    # keeps parsing exactly what it parsed before.
+    def _marker(idx: int) -> str:
+        return f"{tasks[idx][0]} [w{idx:02d}]"
+
     with ThreadPoolExecutor(max_workers=n_workers, thread_name_prefix="cpv-orch") as executor:
         future_to_index = {}
+        submitted_at: dict[int, float] = {}
         for idx, (name, fn, args) in enumerate(tasks):
-            emit_phase_start(name)
-            started_at[idx] = time.monotonic()
-            future_to_index[executor.submit(_run_one_validator, name, fn, plugin_root, args)] = idx
-        for future, idx in future_to_index.items():
+            emit_phase_start(_marker(idx))
+            submitted_at[idx] = time.monotonic()
+            future_to_index[executor.submit(_run_one_validator_timed, name, fn, plugin_root, args)] = idx
+
+        # COMPLETION order, not submit order — the other half of #211. Iterating
+        # `future_to_index` in submit order meant `future.result()` on task 0
+        # blocked until the slowest task in the batch had finished, by which
+        # time every later future was already done: their DONE lines all landed
+        # in one burst at the end of the batch, timestamped as if each phase had
+        # taken the whole batch. `as_completed` yields each future when it
+        # actually completes, so a DONE now appears when its phase finishes.
+        # The MERGE below is still strictly input-ordered, so the report's
+        # result sequence is unchanged.
+        for future in as_completed(future_to_index):
+            idx = future_to_index[future]
+            # Dispatcher fallback, computed FIRST so the `finally` can always
+            # emit something even if `result()` raises a BaseException. It is
+            # the submit-relative time — i.e. the wrong-by-construction number
+            # #211 is about — and it is used ONLY when the worker never got to
+            # report its own, which cannot happen while `_run_one_validator`
+            # catches its own exceptions.
+            elapsed = time.monotonic() - submitted_at[idx]
             try:
-                results[idx] = future.result()
+                results[idx], elapsed = future.result()
             except Exception as exc:  # noqa: BLE001 — last-resort defensive
                 # Should never fire because _run_one_validator catches its
                 # own exceptions, but if the future itself errors we mark
@@ -8122,7 +8438,7 @@ def _run_parallel_batch(
                 # DONE on both paths: a validator that crashed still FINISHED,
                 # and is not what a killed job was stuck on. Leaving its START
                 # unmatched would point triage at the wrong phase.
-                emit_phase_done(tasks[idx][0], time.monotonic() - started_at[idx])
+                emit_phase_done(_marker(idx), elapsed)
 
     # Merge in input order. The serial baseline's result sequence is
     # task[0].results ++ task[1].results ++ ... ++ task[N-1].results.

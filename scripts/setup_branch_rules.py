@@ -1,27 +1,47 @@
 #!/usr/bin/env python3
 """Set up branch-protection rules (GitHub rulesets) on a plugin/marketplace repo.
 
-This script creates or updates a GitHub ruleset that enforces the CPV CI pipeline
-as a required status check — the real security boundary that the local pre-push
-hook alone cannot provide. See docs: any dev can bypass a local hook with
-`git push --no-verify`, so the *enforceable* gate must live on the server.
+This script installs the branch protection that the local pre-push hook alone
+cannot provide: any dev can bypass a local hook with `git push --no-verify`, so
+the *enforceable* gate must live on the server.
+
+TWO MODES — read this before running it against a fleet repo
+------------------------------------------------------------
+RATIFIED (default)
+    Applies the fleet-ratified baseline PAIR — `baseline-history-protect` and
+    `baseline-pr-and-checks` — by NAME: it UPDATES them in place when they
+    already exist and CREATES them when they do not. Applying the ratified
+    baseline as-is (and restoring a drifted one back to it) is the
+    approval-EXEMPT operation under `manager-approval-defaults.md` §F.
+
+LEGACY (`--legacy-cpv-ruleset`)
+    Applies CPV's own pre-#203 ruleset `cpv-branch-rules`. This is NOT
+    approval-exempt: §F lists "adding a new ruleset that affects the default
+    branch" as requiring MANAGER approval. It is kept only for non-fleet repos
+    that already run on it, and it REFUSES to run on a repo that already
+    carries any `baseline-*` ruleset (adding a parallel ruleset beside the
+    ratified pair is exactly the §F violation issue #203 reported).
+
+Two invariants this command will not break, whatever else changes:
+  * A ruleset named `baseline-*` is NEVER nominated for deletion, in any mode.
+  * `baseline-history-protect` carries `deletion` + `non_fast_forward` ONLY.
+    `required_linear_history` was removed by an explicit owner ruling and MUST
+    NEVER be re-added.
 
 Design goals:
-  1. Enforceable — required_status_checks rule blocks PR merges until CI is green.
-  2. Bot-friendly — trusted GitHub Apps (dependabot, github-actions, Claude,
-     Copilot, etc.) bypass the PR-review requirement so the maintainer is not
-     spammed with manual approvals for routine bot changes.
-  3. Auto-merge friendly — does not block GitHub's auto-merge; once CI passes,
-     the PR is merged automatically without requiring a manual approve click.
-  4. Idempotent — running the script twice is a no-op. Updating preserves any
-     existing bypass_actors that the user previously configured (so adding a
-     new trusted App through the GitHub UI is not clobbered by a subsequent run).
-  5. Reusable — same ruleset shape is applied to plugin repos and marketplace
-     repos. Called from generate_plugin_repo.py and generate_marketplace_repo.py
-     post-push, and also available as a standalone CLI.
+  1. Enforceable — required_status_checks blocks PR merges until CI is green.
+  2. Fail closed — a repo whose ruleset state cannot be READ is never written
+     to. "Could not list the rulesets" is reported as UNKNOWN, never as an
+     empty list, because an empty list reads as "no ratified baseline here"
+     and would step the guard aside on precisely the repo nobody could inspect.
+  3. Idempotent — running the script twice is a no-op.
+  4. Non-destructive — it never deletes a ruleset. Removal advice is printed
+     only for a ruleset this command itself supersedes, by exact name.
+  5. Reusable — called from generate_plugin_repo.py and
+     generate_marketplace_repo.py post-push, and available as a standalone CLI.
 
 Usage:
-    # Create or update the ruleset on a repo (auto-detects plugin vs marketplace)
+    # Bring a repo to the ratified baseline (auto-detects plugin vs marketplace)
     uv run python scripts/setup_branch_rules.py Emasoft/my-plugin
 
     # Preview without applying
@@ -30,12 +50,19 @@ Usage:
     # List installed GitHub Apps (so you can decide which to trust)
     uv run python scripts/setup_branch_rules.py Emasoft/my-plugin --list-apps
 
-    # Reset bypass_actors instead of preserving existing ones
-    uv run python scripts/setup_branch_rules.py Emasoft/my-plugin --reset-bypass
+    # Legacy, non-fleet, NOT approval-exempt
+    uv run python scripts/setup_branch_rules.py Emasoft/my-plugin \\
+        --legacy-cpv-ruleset
 
-    # Add extra GitHub App IDs to bypass
+    # Add extra GitHub App IDs to bypass (a baseline DEVIATION in ratified mode)
     uv run python scripts/setup_branch_rules.py Emasoft/my-plugin \\
         --add-bypass-app-id 15368 --add-bypass-app-id 29110
+
+Exit codes:
+    0  applied (or dry-run printed)
+    1  a GitHub API write failed
+    2  refused — `gh` missing/unauthenticated, the repo's ruleset state could
+       not be read, or legacy mode was asked for on a baselined repo
 
 Requirements: `gh` CLI authenticated with a token that has `admin:repo_hook`
 and `repo` scopes on the target repo.
@@ -107,7 +134,58 @@ DEFAULT_TRUSTED_ROLE_IDS: list[int] = [
     5,  # Maintain (covers maintainer merges without manual review)
 ]
 
-RULESET_NAME = "cpv-branch-rules"
+# ── Ruleset names ─────────────────────────────────────────────────────────
+#
+# CPV's own pre-#203 ruleset. It is NOT the fleet-ratified shape, so creating
+# it is not approval-exempt; it now lives behind --legacy-cpv-ruleset.
+LEGACY_RULESET_NAME = "cpv-branch-rules"
+# Back-compat alias: build_ruleset() and existing callers/tests bind this name.
+RULESET_NAME = LEGACY_RULESET_NAME
+
+# The fleet-ratified baseline is a PAIR of rulesets with fixed names. This
+# command targets them BY NAME so that a repo already carrying the baseline is
+# brought to spec instead of gaining a third, parallel ruleset beside it.
+BASELINE_HISTORY_PROTECT_NAME = "baseline-history-protect"
+BASELINE_PR_AND_CHECKS_NAME = "baseline-pr-and-checks"
+RATIFIED_BASELINE_NAMES: tuple[str, ...] = (
+    BASELINE_HISTORY_PROTECT_NAME,
+    BASELINE_PR_AND_CHECKS_NAME,
+)
+
+# Any ruleset whose name starts with this prefix is fleet-ratified and is
+# NEVER nominated for deletion by this command, in any mode, for any reason.
+#
+# WHY THIS IS A PREFIX AND NOT THE TWO NAMES ABOVE: the fleet ships more
+# baseline rulesets than this command manages (`baseline-tag-protect` is one),
+# and the pre-#203 classifier nominated for deletion every ruleset that was
+# not CPV's own — i.e. it keyed on the ABSENCE of a name match, so each new
+# ratified ruleset was nominated the day it was introduced. Keying on a
+# positive `baseline-` signal makes the protection hold for names this file
+# has never heard of.
+BASELINE_NAME_PREFIX = "baseline-"
+
+# The ratified `baseline-pr-and-checks` bypass: the repository role the
+# ratified spec designates for admin direct-push, so a scripted release
+# (publish.py) can push to the default branch while everything outside a
+# release stays gated by the pull_request + required_status_checks rules.
+#
+# Pinned here rather than derived from DEFAULT_TRUSTED_ROLE_IDS: that seed
+# belongs to the legacy ruleset and may change independently. Note the two
+# disagree on what role id 5 is CALLED (the legacy comment above says
+# "Maintain", the ratified spec says admin) — the id is what both the API and
+# the spec key on, so neither comment is silently "corrected" here.
+RATIFIED_ADMIN_BYPASS_ROLE_ID = 5
+RATIFIED_ADMIN_BYPASS_MODE = "always"
+
+
+def is_ratified_baseline_name(name: object) -> bool:
+    """True when `name` is a fleet-ratified `baseline-*` ruleset name.
+
+    Used as a hard veto on the deletion-advice path. Non-string names (a
+    malformed API response) are not baselines but are also never nominated —
+    the nomination path requires an exact positive name match.
+    """
+    return isinstance(name, str) and name.startswith(BASELINE_NAME_PREFIX)
 
 
 # ── Shell helpers ─────────────────────────────────────────────────────────
@@ -260,13 +338,23 @@ class BypassActor:
         }
 
 
-def _fetch_all_rulesets(owner: str, repo: str) -> list[dict]:
+class RulesetReadError(RuntimeError):
+    """The repo's ruleset state could not be READ.
+
+    Deliberately distinct from "this repo has no rulesets". Every caller on a
+    decision path must refuse rather than treat an unreadable repo as an
+    unprotected one — see the fail-closed note in the module docstring.
+    """
+
+
+def fetch_all_rulesets_or_unknown(owner: str, repo: str) -> list[dict] | None:
     """Return every ruleset on the repo (list view — no rules array).
 
-    On a gh-API or JSON-decode failure this returns ``[]`` BUT first logs the
-    underlying error to stderr — a silent empty list would be indistinguishable
-    from "this repo genuinely has no rulesets", which on first-run setup would
-    silently skip adopting existing bypass actors and weaken branch protection.
+    Returns ``None`` — UNKNOWN — on a gh-API or JSON-decode failure, and logs
+    the underlying error to stderr. UNKNOWN is NOT ``[]``: an empty list reads
+    as "this repo carries no ratified baseline", which would send the caller
+    down the create-a-new-ruleset path against precisely the repo whose
+    existing protection nobody was able to inspect.
     """
     result = run(
         ["gh", "api", f"repos/{owner}/{repo}/rulesets", "--paginate"],
@@ -278,16 +366,43 @@ def _fetch_all_rulesets(owner: str, repo: str) -> list[dict]:
             f"(gh exit {result.returncode}): {result.stderr.strip()}",
             file=sys.stderr,
         )
-        return []
+        return None
     try:
         rulesets = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         print(f"warning: rulesets response for {owner}/{repo} was not valid JSON: {exc}", file=sys.stderr)
-        return []
+        return None
     if not isinstance(rulesets, list):
         print(f"warning: rulesets response for {owner}/{repo} was not a JSON list", file=sys.stderr)
-        return []
+        return None
+    return [rs for rs in rulesets if isinstance(rs, dict)]
+
+
+def require_all_rulesets(owner: str, repo: str) -> list[dict]:
+    """Return every ruleset on the repo, or raise :class:`RulesetReadError`.
+
+    This is the reader every decision path uses. The raise is what makes the
+    command fail CLOSED on an unreadable repo.
+    """
+    rulesets = fetch_all_rulesets_or_unknown(owner, repo)
+    if rulesets is None:
+        raise RulesetReadError(
+            f"could not read the ruleset list for {owner}/{repo} — "
+            "its current branch protection is UNKNOWN, not absent"
+        )
     return rulesets
+
+
+def _fetch_all_rulesets(owner: str, repo: str) -> list[dict]:
+    """Lossy view over :func:`fetch_all_rulesets_or_unknown` — diagnostics only.
+
+    It collapses UNKNOWN into "no rulesets", which is the exact confusion that
+    let a compliant baseline become invisible to the guard (issue #203), so no
+    decision path in this module calls it. Retained because external callers
+    bind this name; use :func:`require_all_rulesets` for anything that then
+    creates, updates, or nominates a ruleset.
+    """
+    return fetch_all_rulesets_or_unknown(owner, repo) or []
 
 
 def _fetch_full_ruleset(owner: str, repo: str, ruleset_id: int) -> dict | None:
@@ -315,41 +430,171 @@ def _fetch_full_ruleset(owner: str, repo: str, ruleset_id: int) -> dict | None:
     return None
 
 
+def require_full_ruleset(owner: str, repo: str, ruleset_id: int) -> dict:
+    """Return the full ruleset JSON, or raise :class:`RulesetReadError`.
+
+    Used before OVERWRITING a ruleset: we report which bypass actors the
+    restore is about to drop, and a ruleset we could not read is one whose
+    actors we cannot name. Refusing beats silently overwriting it.
+    """
+    full = _fetch_full_ruleset(owner, repo, ruleset_id)
+    if full is None:
+        raise RulesetReadError(f"could not read ruleset {ruleset_id} on {owner}/{repo} before overwriting it")
+    return full
+
+
+def find_rulesets_by_name(rulesets: list[dict], name: str) -> list[dict]:
+    """Return EVERY list-view entry named `name`. Pure — no I/O.
+
+    GitHub does not enforce ruleset-name uniqueness, so a repo can legitimately
+    carry two rulesets called `baseline-pr-and-checks` with different rules.
+    Callers act on the first and report the rest rather than pretending the
+    duplicates are not there.
+    """
+    return [rs for rs in rulesets if rs.get("name") == name]
+
+
+def find_ruleset_by_name(rulesets: list[dict], name: str) -> dict | None:
+    """Return the FIRST list-view entry for `name`, or None. Pure — no I/O."""
+    matches = find_rulesets_by_name(rulesets, name)
+    return matches[0] if matches else None
+
+
+def warn_duplicate_ruleset_names(rulesets: list[dict], names: tuple[str, ...]) -> list[str]:
+    """Warn about duplicate names among `names`; return the warnings emitted.
+
+    A duplicate is not fatal — updating the first match still brings a
+    compliant ruleset into place — but the shadow copy keeps enforcing its own
+    (possibly weaker or stricter) rules, so it must not pass unmentioned.
+    """
+    warnings: list[str] = []
+    for name in names:
+        matches = find_rulesets_by_name(rulesets, name)
+        if len(matches) > 1:
+            ids = ", ".join(str(rs.get("id")) for rs in matches)
+            message = (
+                f"⚠ {len(matches)} rulesets are named '{name}' (ids: {ids}). "
+                f"Only the first is updated; the others are left untouched and keep enforcing "
+                f"their own rules — review them."
+            )
+            warnings.append(message)
+            sys.stderr.write(message + "\n")
+    return warnings
+
+
+def present_baseline_names(rulesets: list[dict]) -> list[str]:
+    """Return the names of every `baseline-*` ruleset present. Pure — no I/O."""
+    return [rs["name"] for rs in rulesets if is_ratified_baseline_name(rs.get("name"))]
+
+
+# A ruleset is "protection-shaped" if its rules include any of these. This set
+# answers ONE question — "is this a ruleset I can learn bypass actors from?" —
+# and nothing else.
+#
+# It used to answer a second question as well ("is this a ruleset that should
+# be removed?"), and that conflation is the root of issue #203, not the
+# hardcoded name: `baseline-pr-and-checks` intersects the set, so the
+# compliant configuration was nominated for deletion while
+# `baseline-history-protect`, which does not intersect it, survived — leaving
+# a repo that still LOOKED protected with its only merge gate deleted.
+# Removal is now driven by a positive name signal instead; see
+# rulesets_superseded_by_baseline().
+PROTECTION_SHAPED_RULE_TYPES = frozenset(
+    {
+        "pull_request",
+        "required_status_checks",
+        "required_signatures",
+        "code_quality",
+    }
+)
+
+
+def is_protection_shaped(full_ruleset: dict) -> bool:
+    """True when the ruleset carries at least one protection rule. Pure."""
+    rule_types = {r.get("type") for r in full_ruleset.get("rules", []) if isinstance(r, dict)}
+    return bool(rule_types & PROTECTION_SHAPED_RULE_TYPES)
+
+
 def fetch_existing_ruleset(owner: str, repo: str) -> dict | None:
-    """Return the CPV-managed ruleset (named cpv-branch-rules) if present."""
-    for rs in _fetch_all_rulesets(owner, repo):
-        if rs.get("name") == RULESET_NAME:
-            return _fetch_full_ruleset(owner, repo, rs["id"])
-    return None
+    """Return the legacy CPV-managed ruleset (cpv-branch-rules) if present.
+
+    Raises :class:`RulesetReadError` when the repo's ruleset state cannot be
+    read — "I could not look" must never be reported as "it is not there".
+    """
+    entry = find_ruleset_by_name(require_all_rulesets(owner, repo), LEGACY_RULESET_NAME)
+    if entry is None:
+        return None
+    return require_full_ruleset(owner, repo, entry["id"])
 
 
-def fetch_legacy_protection_rulesets(
+def fetch_bypass_adoption_sources(
     owner: str,
     repo: str,
+    rulesets: list[dict],
+    *,
+    exclude_names: tuple[str, ...] = (),
 ) -> list[dict]:
-    """Return non-CPV rulesets that look like branch-protection rules.
+    """Return pre-existing protection-shaped rulesets to learn bypass actors from.
 
-    Used to adopt bypass_actors from a pre-existing ruleset on first run.
-    A ruleset is considered "protection-shaped" if its rules include any of:
-    pull_request, required_status_checks, required_signatures, or code_quality.
+    This is the ADOPTION set and only the adoption set. Membership here says
+    nothing about whether a ruleset should be removed — the two questions are
+    answered by different functions on purpose (issue #203).
+
+    `rulesets` is the already-read list view, so the caller has necessarily
+    passed the fail-closed read first. A ruleset whose full body cannot be
+    fetched is skipped: it contributes no actors, which is the conservative
+    direction for adoption.
+
+    A ratified `baseline-*` ruleset is never a source: its bypass list is
+    pinned by the ratified spec, so there is nothing to learn from it that the
+    spec does not already state. Skipping it here rather than at each call
+    site makes that structural instead of something a future caller can forget.
     """
-    legacy: list[dict] = []
-    for rs in _fetch_all_rulesets(owner, repo):
-        if rs.get("name") == RULESET_NAME:
-            continue  # skip our managed one
+    sources: list[dict] = []
+    for rs in rulesets:
+        name = rs.get("name")
+        if name in exclude_names or is_ratified_baseline_name(name):
+            continue
         full = _fetch_full_ruleset(owner, repo, rs["id"])
         if not full:
             continue
-        rule_types = {r.get("type") for r in full.get("rules", [])}
-        protection_rules = {
-            "pull_request",
-            "required_status_checks",
-            "required_signatures",
-            "code_quality",
-        }
-        if rule_types & protection_rules:
-            legacy.append(full)
-    return legacy
+        if is_protection_shaped(full):
+            sources.append(full)
+    return sources
+
+
+def fetch_legacy_protection_rulesets(owner: str, repo: str) -> list[dict]:
+    """Back-compat wrapper for the bypass-actor ADOPTION set.
+
+    Kept for external callers. Note the historical name: these rulesets are
+    adoption SOURCES, never deletion candidates.
+    """
+    rulesets = require_all_rulesets(owner, repo)
+    return fetch_bypass_adoption_sources(owner, repo, rulesets, exclude_names=(LEGACY_RULESET_NAME,))
+
+
+def rulesets_superseded_by_baseline(rulesets: list[dict]) -> list[dict]:
+    """Return the rulesets this command supersedes when it applies the baseline.
+
+    POSITIVE SIGNAL ONLY: a ruleset qualifies by being CPV's own legacy managed
+    ruleset, by exact name — something this command created and is now
+    replacing. Everything else, including every `baseline-*` ruleset and every
+    ruleset an owner configured by hand, is left alone and never mentioned as
+    a deletion candidate.
+
+    The `is_ratified_baseline_name` veto below is redundant against the exact
+    equality test on the line after it. It is deliberate belt-and-braces: the
+    cost of the redundancy is one branch, and the cost of its absence was a
+    printed `DELETE` aimed at the compliant configuration.
+    """
+    superseded: list[dict] = []
+    for rs in rulesets:
+        name = rs.get("name")
+        if is_ratified_baseline_name(name):
+            continue
+        if name == LEGACY_RULESET_NAME:
+            superseded.append(rs)
+    return superseded
 
 
 def _parse_paginated_jq_arrays(stdout: str, *, source: str) -> list[dict]:
@@ -467,7 +712,13 @@ def build_ruleset(
     check_contexts: list[str],
     bypass_actors: list[BypassActor],
 ) -> dict:
-    """Build the full ruleset payload for the POST/PUT call."""
+    """Build the LEGACY `cpv-branch-rules` payload (--legacy-cpv-ruleset only).
+
+    This is not the fleet-ratified shape, so creating it on a repo is not
+    approval-exempt under `manager-approval-defaults.md` §F. The ratified pair
+    is built by build_baseline_history_protect_ruleset() and
+    build_baseline_pr_and_checks_ruleset().
+    """
     return {
         "name": RULESET_NAME,
         "target": "branch",
@@ -512,6 +763,202 @@ def build_ruleset(
         ],
         "bypass_actors": [a.to_dict() for a in bypass_actors],
     }
+
+
+# ── The ratified baseline pair ────────────────────────────────────────────
+
+
+def ratified_pr_and_checks_bypass_actors() -> list[BypassActor]:
+    """The bypass_actors the ratified `baseline-pr-and-checks` carries.
+
+    Exactly one entry: the admin repository role, direct-push always. That is
+    what makes a scripted release possible; outside a release, pushes are
+    still gated by the pull_request + required_status_checks rules.
+    """
+    return [BypassActor(RATIFIED_ADMIN_BYPASS_ROLE_ID, "RepositoryRole", RATIFIED_ADMIN_BYPASS_MODE)]
+
+
+def build_baseline_history_protect_ruleset() -> dict:
+    """Build the ratified `baseline-history-protect` payload.
+
+    `bypass_actors` is EMPTY — nobody bypasses it, including an admin. That is
+    the point of the ruleset, and it is why --adopt-bypass-actors deliberately
+    cannot reach this payload.
+
+    DO NOT ADD `required_linear_history`. It was part of an earlier draft of
+    this baseline and was REMOVED by an explicit owner ruling; a non-linear
+    history is allowed in every repo. Some prose describing the baseline still
+    lists it — the prose is stale, this is not.
+    """
+    return {
+        "name": BASELINE_HISTORY_PROTECT_NAME,
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {
+            "ref_name": {
+                "include": ["~DEFAULT_BRANCH"],
+                "exclude": [],
+            },
+        },
+        "rules": [
+            {"type": "deletion"},
+            {"type": "non_fast_forward"},
+        ],
+        "bypass_actors": [],
+    }
+
+
+def build_baseline_pr_and_checks_ruleset(
+    check_contexts: list[str],
+    bypass_actors: list[BypassActor] | None = None,
+) -> dict:
+    """Build the ratified `baseline-pr-and-checks` payload.
+
+    `bypass_actors=None` yields the ratified value (admin only), which is the
+    approval-exempt form. Passing a list is a deliberate DEVIATION from the
+    ratified baseline — adding or removing a bypass actor on a ratified
+    ruleset is a §F non-exempt operation — and the caller is responsible for
+    saying so out loud.
+
+    `required_status_checks` contexts are resolved at apply time from the
+    repo's detected type (or --check-context), so the payload is per-repo
+    while every other parameter is fixed by the ratified spec.
+    """
+    actors = ratified_pr_and_checks_bypass_actors() if bypass_actors is None else list(bypass_actors)
+    return {
+        "name": BASELINE_PR_AND_CHECKS_NAME,
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {
+            "ref_name": {
+                "include": ["~DEFAULT_BRANCH"],
+                "exclude": [],
+            },
+        },
+        "rules": [
+            {
+                "type": "pull_request",
+                "parameters": {
+                    "required_approving_review_count": 1,
+                    "dismiss_stale_reviews_on_push": True,
+                    "require_code_owner_review": False,
+                    "require_last_push_approval": False,
+                    "required_review_thread_resolution": True,
+                },
+            },
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "strict_required_status_checks_policy": True,
+                    "required_status_checks": [{"context": ctx} for ctx in check_contexts],
+                },
+            },
+        ],
+        "bypass_actors": [a.to_dict() for a in actors],
+    }
+
+
+def non_ratified_bypass_actors(actors: list[BypassActor]) -> list[BypassActor]:
+    """Return the actors that the ratified `baseline-pr-and-checks` does not carry.
+
+    These are what a restore-to-baseline drops, and what --adopt-bypass-actors
+    keeps. Either way they are NAMED in the output: silently removing a bypass
+    actor an owner added by hand is destructive-adjacent, and silently keeping
+    one turns an exempt restore into a non-exempt deviation.
+    """
+    ratified = {(a.actor_type, a.actor_id) for a in ratified_pr_and_checks_bypass_actors()}
+    return [a for a in actors if (a.actor_type, a.actor_id) not in ratified]
+
+
+def bypass_actors_from_ruleset(full_ruleset: dict) -> list[BypassActor]:
+    """Read a ruleset's bypass_actors into BypassActor objects. Pure — no I/O."""
+    return [
+        BypassActor(
+            actor_id=a.get("actor_id"),
+            actor_type=a.get("actor_type", "Integration"),
+            bypass_mode=a.get("bypass_mode", "always"),
+        )
+        for a in full_ruleset.get("bypass_actors", [])
+        if isinstance(a, dict)
+    ]
+
+
+def ruleset_drift_notes(current: dict, ratified: dict) -> list[str]:
+    """Describe what restoring `current` to `ratified` CHANGES. Pure — no I/O.
+
+    A restore sends the full payload, so anything the ratified spec does not
+    carry is stripped: an extra rule someone added, a downgraded enforcement,
+    a hand-added bypass actor. Stripping it is the intended effect of a
+    restore, but doing it silently is how a deliberate local decision
+    disappears without anyone noticing. Every difference gets named.
+    """
+    notes: list[str] = []
+
+    current_enforcement = current.get("enforcement")
+    if current_enforcement != ratified.get("enforcement"):
+        notes.append(f"enforcement {current_enforcement!r} -> {ratified.get('enforcement')!r}")
+
+    current_rules = {r.get("type") for r in current.get("rules", []) if isinstance(r, dict)}
+    ratified_rules = {r.get("type") for r in ratified.get("rules", []) if isinstance(r, dict)}
+    for removed in sorted(str(t) for t in current_rules - ratified_rules):
+        notes.append(f"rule removed: {removed}")
+    for added in sorted(str(t) for t in ratified_rules - current_rules):
+        notes.append(f"rule added: {added}")
+
+    # Compared as (type, id) STRINGS so the two sides are one type: a
+    # BypassActor carries `int | None` while the raw API dict carries Any, and
+    # a DeployKey legitimately has actor_id null.
+    current_actors = {(str(a.actor_type), str(a.actor_id)) for a in bypass_actors_from_ruleset(current)}
+    ratified_actors = {
+        (str(a.get("actor_type")), str(a.get("actor_id")))
+        for a in ratified.get("bypass_actors", [])
+        if isinstance(a, dict)
+    }
+    for actor_type, actor_id in sorted(current_actors - ratified_actors):
+        notes.append(f"bypass actor removed: {actor_type} id={actor_id}")
+    for actor_type, actor_id in sorted(ratified_actors - current_actors):
+        notes.append(f"bypass actor added: {actor_type} id={actor_id}")
+
+    return notes
+
+
+@dataclass
+class RulesetPlan:
+    """One ruleset this run will write: what, where, and create-vs-update."""
+
+    name: str
+    action: str  # "CREATE" | "UPDATE"
+    existing_id: int | None
+    payload: dict
+
+
+def plan_baseline_rulesets(
+    rulesets: list[dict],
+    check_contexts: list[str],
+    pr_bypass_actors: list[BypassActor] | None = None,
+) -> list[RulesetPlan]:
+    """Plan the ratified pair against the repo's current rulesets. Pure — no I/O.
+
+    Each of the two is planned independently, so a repo carrying only one of
+    them gets that one UPDATED and the other CREATED — the half-baselined
+    state a partial hand-fix or an interrupted earlier run leaves behind.
+    """
+    plans: list[RulesetPlan] = []
+    for name, payload in (
+        (BASELINE_HISTORY_PROTECT_NAME, build_baseline_history_protect_ruleset()),
+        (BASELINE_PR_AND_CHECKS_NAME, build_baseline_pr_and_checks_ruleset(check_contexts, pr_bypass_actors)),
+    ):
+        entry = find_ruleset_by_name(rulesets, name)
+        existing_id = entry.get("id") if entry else None
+        plans.append(
+            RulesetPlan(
+                name=name,
+                action="UPDATE" if existing_id is not None else "CREATE",
+                existing_id=existing_id,
+                payload=payload,
+            )
+        )
+    return plans
 
 
 def apply_ruleset(
@@ -561,12 +1008,60 @@ def apply_ruleset(
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
-            "Create/update the CPV branch-protection ruleset on a plugin or "
-            "marketplace repo. Idempotent. Preserves existing bypass_actors by default."
+            "Bring a plugin or marketplace repo to the fleet-ratified branch-protection "
+            "baseline. Idempotent, and it never deletes anything."
+        ),
+        epilog=(
+            "MODES AND APPROVAL\n"
+            "  default (ratified)     Applies the ratified pair 'baseline-history-protect' +\n"
+            "                         'baseline-pr-and-checks' BY NAME: updates them in place\n"
+            "                         when present, creates them when absent. Applying the\n"
+            "                         ratified baseline as-is, and restoring a drifted one back\n"
+            "                         to it, are APPROVAL-EXEMPT under manager-approval-defaults\n"
+            "                         section F.\n"
+            "  --legacy-cpv-ruleset   Applies CPV's own 'cpv-branch-rules' instead. This is NOT\n"
+            "                         approval-exempt: section F lists adding a new ruleset that\n"
+            "                         affects the default branch as requiring MANAGER approval.\n"
+            "                         It refuses to run on a repo that already carries any\n"
+            "                         baseline-* ruleset.\n"
+            "\n"
+            "  Adding, removing, or adopting a bypass actor on a ratified ruleset is likewise\n"
+            "  NOT exempt: --adopt-bypass-actors and --add-bypass-app-id produce a payload that\n"
+            "  DEVIATES from the ratified baseline, and the run says so.\n"
+            "\n"
+            "  A ruleset named baseline-* is never nominated for deletion, in either mode.\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("repo", help="Target repo slug (OWNER/REPO)")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--ratified-baseline",
+        action="store_true",
+        help=(
+            "Apply the ratified baseline pair (the DEFAULT; pass it to state the "
+            "intent explicitly in automation). Approval-exempt."
+        ),
+    )
+    mode.add_argument(
+        "--legacy-cpv-ruleset",
+        action="store_true",
+        help=(
+            "Apply CPV's legacy 'cpv-branch-rules' ruleset instead of the ratified "
+            "pair. NOT approval-exempt, and refuses on a repo that already carries "
+            "a baseline-* ruleset."
+        ),
+    )
+    p.add_argument(
+        "--adopt-bypass-actors",
+        action="store_true",
+        help=(
+            "Ratified mode only: keep bypass actors found on a pre-existing ruleset "
+            "instead of restoring 'baseline-pr-and-checks' to its ratified admin-only "
+            "list. This DEVIATES from the ratified baseline and is not approval-exempt. "
+            "It never touches 'baseline-history-protect', which is always no-bypass."
+        ),
+    )
     p.add_argument(
         "--check-context",
         action="append",
@@ -590,8 +1085,9 @@ def parse_args() -> argparse.Namespace:
         "--reset-bypass",
         action="store_true",
         help=(
-            "Reset bypass_actors to defaults only (ignores existing). "
-            "WARNING: this removes any manually configured trust."
+            "Legacy mode only: reset bypass_actors to defaults (ignores existing). "
+            "WARNING: this removes any manually configured trust. In ratified mode "
+            "the bypass list is pinned by the baseline, so the flag has no effect."
         ),
     )
     p.add_argument(
@@ -626,6 +1122,261 @@ def cmd_list_apps(owner: str, repo: str) -> int:
     return 0
 
 
+def resolve_check_contexts(args: argparse.Namespace, owner: str, repo: str) -> list[str]:
+    """Pick the required status-check contexts for this repo.
+
+    User-supplied --check-context flags always win. Otherwise use the defaults
+    for the detected repo type.
+
+    We intentionally do NOT treat the live check-runs from
+    `gh api /commits/HEAD/check-runs` as authoritative, because:
+      1. On a fresh repo, no check-runs exist yet
+      2. Check-run *names* and ruleset *contexts* aren't always the same
+         (a multi-job workflow can report check-runs as bare job names on
+         the API while the ruleset requires `workflow_name / job_name`)
+      3. Stale workflows (e.g. Dependabot runs on main) pollute the name
+         list with contexts that have nothing to do with CI validation
+    For dry-runs we print the live check-run names as a diagnostic so the user
+    can sanity-check that the defaults match their actual CI.
+    """
+    if args.check_context:
+        check_contexts: list[str] = args.check_context
+        sys.stderr.write(f"Using user-specified check contexts: {', '.join(check_contexts)}\n")
+        return check_contexts
+
+    repo_type = detect_repo_type(owner, repo)
+    check_contexts = default_check_contexts_for(repo_type)
+    sys.stderr.write(f"Detected repo type: {repo_type} (defaults: {', '.join(check_contexts)})\n")
+    if args.dry_run:
+        live = fetch_latest_check_contexts(owner, repo)
+        if live:
+            sys.stderr.write(f"  For reference, check-runs currently reported on HEAD: {', '.join(live)}\n")
+            sys.stderr.write(
+                "  If these differ from the defaults above, pass "
+                "--check-context explicitly for each name you actually need.\n"
+            )
+        else:
+            sys.stderr.write(
+                "  No check-runs reported on HEAD yet — the first CI run "
+                "must complete before the ruleset can be enforced.\n"
+            )
+    return check_contexts
+
+
+def report_superseded_rulesets(owner: str, repo: str, rulesets: list[dict]) -> None:
+    """Print removal ADVICE for rulesets the ratified pair supersedes.
+
+    Nothing is deleted here or anywhere else in this script. Only CPV's own
+    legacy ruleset can appear, by exact name; a `baseline-*` ruleset never can.
+    """
+    superseded = rulesets_superseded_by_baseline(rulesets)
+    if not superseded:
+        return
+    sys.stderr.write(
+        f"\nNote: the ratified baseline supersedes CPV's own '{LEGACY_RULESET_NAME}' ruleset.\n"
+        "  Nothing was deleted. Review it, and remove it yourself if you no longer want it:\n"
+    )
+    for rs in superseded:
+        sys.stderr.write(f"    gh api --method DELETE repos/{owner}/{repo}/rulesets/{rs.get('id')}\n")
+
+
+def fetch_existing_baseline_bodies(owner: str, repo: str, rulesets: list[dict]) -> dict[str, dict]:
+    """Read the full body of every ratified ruleset already on the repo.
+
+    Read ONCE, up front, and reused for both the bypass-actor decision and the
+    drift report — and fail-closed: a ruleset we cannot read is one whose
+    contents we cannot report, and we do not overwrite what we could not read.
+    """
+    bodies: dict[str, dict] = {}
+    for name in RATIFIED_BASELINE_NAMES:
+        entry = find_ruleset_by_name(rulesets, name)
+        if entry is not None:
+            bodies[name] = require_full_ruleset(owner, repo, entry["id"])
+    return bodies
+
+
+def resolve_ratified_pr_bypass_actors(
+    args: argparse.Namespace,
+    owner: str,
+    repo: str,
+    rulesets: list[dict],
+    existing_pr_ruleset: dict | None,
+) -> list[BypassActor] | None:
+    """Decide the bypass_actors for `baseline-pr-and-checks`, and say why.
+
+    Returns None to mean "the ratified value" (the approval-exempt form), or an
+    explicit list when the user asked for a deviation. Either way, every actor
+    that differs from the ratified list is NAMED on stderr before anything is
+    written — an actor silently dropped by a restore, or silently kept, is the
+    kind of change nobody notices until it matters.
+    """
+    candidates: list[BypassActor] = []
+
+    # Actors already on the ratified ruleset we are about to overwrite.
+    if existing_pr_ruleset is not None:
+        candidates.extend(bypass_actors_from_ruleset(existing_pr_ruleset))
+
+    # First-run adoption: actors configured on a pre-existing protection
+    # ruleset that predates the baseline (the ratified pair is skipped by
+    # fetch_bypass_adoption_sources itself — its bypass list is pinned).
+    for source in fetch_bypass_adoption_sources(owner, repo, rulesets):
+        found = bypass_actors_from_ruleset(source)
+        if found:
+            sys.stderr.write(
+                f"⚠ Pre-existing protection ruleset '{source.get('name')}' "
+                f"(id={source.get('id')}) carries {len(found)} bypass actor(s).\n"
+            )
+            candidates.extend(found)
+
+    extras = non_ratified_bypass_actors(merge_bypass_actors(candidates, []))
+    cli_additions = [BypassActor(app_id, "Integration", "always") for app_id in args.add_bypass_app_id]
+
+    if not args.adopt_bypass_actors and not cli_additions:
+        if extras:
+            sys.stderr.write(
+                "  These actors are NOT part of the ratified baseline and will not be applied:\n"
+            )
+            for actor in extras:
+                sys.stderr.write(f"    {actor.actor_type} id={actor.actor_id} ({actor.bypass_mode})\n")
+            sys.stderr.write(
+                "  Restoring the ratified baseline drops them. Pass --adopt-bypass-actors "
+                "to keep them (a baseline DEVIATION — not approval-exempt).\n"
+            )
+        return None
+
+    kept = extras if args.adopt_bypass_actors else []
+    actors = merge_bypass_actors(kept + cli_additions, ratified_pr_and_checks_bypass_actors())
+    if not non_ratified_bypass_actors(actors):
+        # --adopt-bypass-actors was passed but there was nothing extra to keep.
+        # The payload is the ratified one, so do not claim a deviation.
+        return None
+    sys.stderr.write(
+        f"⚠ '{BASELINE_PR_AND_CHECKS_NAME}' will carry {len(actors)} bypass actor(s), which "
+        "DEVIATES from the ratified baseline.\n"
+        "  Adding or removing a bypass actor on a ratified ruleset is NOT approval-exempt "
+        "under manager-approval-defaults section F.\n"
+    )
+    return actors
+
+
+def run_ratified_mode(args: argparse.Namespace, owner: str, repo: str, rulesets: list[dict]) -> int:
+    """Apply the ratified baseline pair — update in place, or create if absent."""
+    if args.reset_bypass:
+        sys.stderr.write(
+            "Note: --reset-bypass has no effect in ratified mode — the baseline pins its own "
+            "bypass actors.\n"
+        )
+
+    check_contexts = resolve_check_contexts(args, owner, repo)
+    existing_bodies = fetch_existing_baseline_bodies(owner, repo, rulesets)
+    pr_bypass_actors = resolve_ratified_pr_bypass_actors(
+        args,
+        owner,
+        repo,
+        rulesets,
+        existing_bodies.get(BASELINE_PR_AND_CHECKS_NAME),
+    )
+    plans = plan_baseline_rulesets(rulesets, check_contexts, pr_bypass_actors)
+
+    for plan in plans:
+        current = existing_bodies.get(plan.name)
+        if current is None:
+            continue
+        for note in ruleset_drift_notes(current, plan.payload):
+            sys.stderr.write(f"  {plan.name}: {note}\n")
+
+    if args.dry_run:
+        print(f"# Dry run — {owner}/{repo} (ratified baseline)")
+        for plan in plans:
+            existing = f" (id={plan.existing_id})" if plan.existing_id is not None else ""
+            print(f"# {plan.action} {plan.name}{existing}")
+            print(json.dumps(plan.payload, indent=2))
+            print()
+        report_superseded_rulesets(owner, repo, rulesets)
+        return 0
+
+    for plan in plans:
+        response = apply_ruleset(owner, repo, plan.payload, plan.existing_id)
+        verb = "updated" if plan.existing_id is not None else "created"
+        print(f"✓ Ruleset {verb}: {plan.name} (id={response.get('id')})")
+        print(f"  View: https://github.com/{owner}/{repo}/rules/{response.get('id')}")
+    print(f"  Check contexts required: {', '.join(check_contexts)}")
+    report_superseded_rulesets(owner, repo, rulesets)
+    return 0
+
+
+def run_legacy_mode(args: argparse.Namespace, owner: str, repo: str, rulesets: list[dict]) -> int:
+    """Apply CPV's legacy `cpv-branch-rules` ruleset.
+
+    Refuses on a repo that already carries a ratified `baseline-*` ruleset:
+    creating a parallel ruleset beside the ratified pair is the §F violation
+    issue #203 reported, and CPV must not perform it unasked on a fleet repo.
+    """
+    baselines = present_baseline_names(rulesets)
+    if baselines:
+        sys.stderr.write(
+            f"REFUSING: {owner}/{repo} already carries the ratified baseline "
+            f"({', '.join(sorted(baselines))}).\n"
+            f"  Creating '{LEGACY_RULESET_NAME}' beside it would add a parallel ruleset on the "
+            "default branch, which is not approval-exempt.\n"
+            "  Run without --legacy-cpv-ruleset to bring the ratified baseline to spec, or use "
+            "scripts/setup_branch_rules_generic.py for a deliberately custom ruleset.\n"
+        )
+        return 2
+
+    check_contexts = resolve_check_contexts(args, owner, repo)
+
+    entry = find_ruleset_by_name(rulesets, LEGACY_RULESET_NAME)
+    existing = require_full_ruleset(owner, repo, entry["id"]) if entry else None
+    existing_id = existing.get("id") if existing else None
+
+    # Source bypass actors to preserve, in priority order:
+    #   1. The CPV-managed ruleset (most recent state)
+    #   2. Any pre-existing protection ruleset (first run adoption)
+    #   3. Empty (only when --reset-bypass is passed)
+    existing_actors: list[BypassActor] = []
+    if not args.reset_bypass:
+        source: dict | None = existing
+        if source is None:
+            sources = fetch_bypass_adoption_sources(
+                owner,
+                repo,
+                rulesets,
+                exclude_names=(LEGACY_RULESET_NAME,),
+            )
+            if sources:
+                # Adopt bypass actors from the first source found. Adoption is
+                # all this set is for — it nominates nothing for deletion.
+                source = sources[0]
+                source_names = ", ".join(str(rs.get("name", "?")) for rs in sources)
+                sys.stderr.write(f"⚠ Found {len(sources)} pre-existing protection ruleset(s): {source_names}\n")
+                sys.stderr.write(f"  Adopting bypass_actors from '{source.get('name')}' (id={source.get('id')}).\n")
+        if source is not None:
+            existing_actors = bypass_actors_from_ruleset(source)
+
+    # Merge: existing + defaults + CLI additions
+    defaults = build_default_bypass_actors()
+    additions = [BypassActor(app_id, "Integration", "always") for app_id in args.add_bypass_app_id]
+    bypass_actors = merge_bypass_actors(existing_actors, defaults + additions)
+
+    ruleset = build_ruleset(check_contexts, bypass_actors)
+
+    if args.dry_run:
+        print(f"# Dry run — {owner}/{repo} (legacy {LEGACY_RULESET_NAME})")
+        print(f"# Existing ruleset: {'found (id=' + str(existing_id) + ')' if existing else 'none'}")
+        print(f"# Action: {'UPDATE' if existing_id else 'CREATE'}")
+        print()
+        print(json.dumps(ruleset, indent=2))
+        return 0
+
+    response = apply_ruleset(owner, repo, ruleset, existing_id)
+    print(f"✓ Ruleset {'updated' if existing_id else 'created'}: {LEGACY_RULESET_NAME} (id={response.get('id')})")
+    print(f"  Check contexts required: {', '.join(check_contexts)}")
+    print(f"  Bypass actors preserved/added: {len(bypass_actors)}")
+    print(f"  View: https://github.com/{owner}/{repo}/rules/{response.get('id')}")
+    return 0
+
+
 def main() -> int:
     args = parse_args()
     check_gh_available()
@@ -636,93 +1387,29 @@ def main() -> int:
     if args.list_apps:
         return cmd_list_apps(owner, repo)
 
-    # Pick default check contexts. User-supplied --check-context flags always
-    # win. Otherwise use the hardcoded defaults from detect_repo_type().
-    #
-    # Note: we intentionally do NOT use the live check-runs reported by
-    # `gh api /commits/HEAD/check-runs` as authoritative, because:
-    #   1. On a fresh repo, no check-runs exist yet
-    #   2. Check-run *names* and ruleset *contexts* aren't always the same
-    #      (a multi-job workflow can report check-runs as bare job names on
-    #      the API while the ruleset requires `workflow_name / job_name`)
-    #   3. Stale workflows (e.g. Dependabot runs on main) pollute the name
-    #      list with contexts that have nothing to do with CI validation
-    # For dry-runs we print the live check-run names as a diagnostic so the
-    # user can sanity-check that the hardcoded defaults match their actual CI.
-    if args.check_context:
-        check_contexts = args.check_context
-        sys.stderr.write(f"Using user-specified check contexts: {', '.join(check_contexts)}\n")
-    else:
-        repo_type = detect_repo_type(owner, repo)
-        check_contexts = default_check_contexts_for(repo_type)
-        sys.stderr.write(f"Detected repo type: {repo_type} (defaults: {', '.join(check_contexts)})\n")
-        if args.dry_run:
-            live = fetch_latest_check_contexts(owner, repo)
-            if live:
-                sys.stderr.write(f"  For reference, check-runs currently reported on HEAD: {', '.join(live)}\n")
-                sys.stderr.write(
-                    "  If these differ from the defaults above, pass "
-                    "--check-context explicitly for each name you actually need.\n"
-                )
-            else:
-                sys.stderr.write(
-                    "  No check-runs reported on HEAD yet — the first CI run "
-                    "must complete before the ruleset can be enforced.\n"
-                )
+    # ONE read of the repo's ruleset state, and every decision below is taken
+    # from it. Fail closed: an unreadable repo is UNKNOWN, not unprotected, so
+    # nothing is created, updated, or nominated for removal.
+    try:
+        rulesets = require_all_rulesets(owner, repo)
+    except RulesetReadError as exc:
+        sys.stderr.write(f"REFUSING: {exc}.\n")
+        sys.stderr.write(
+            "  Nothing was applied. Re-run once the GitHub API is reachable and the token "
+            "has repo admin scope.\n"
+        )
+        return 2
 
-    # Fetch CPV-managed ruleset (if any) — update in place to preserve history
-    existing = fetch_existing_ruleset(owner, repo)
-    existing_id = existing.get("id") if existing else None
+    warn_duplicate_ruleset_names(rulesets, RATIFIED_BASELINE_NAMES + (LEGACY_RULESET_NAME,))
 
-    # Source bypass actors to preserve, in priority order:
-    #   1. The CPV-managed ruleset (most recent state)
-    #   2. Any legacy/pre-existing protection ruleset (first run adoption)
-    #   3. Empty (only when --reset-bypass is passed)
-    existing_actors: list[BypassActor] = []
-    if not args.reset_bypass:
-        source: dict | None = existing
-        if source is None:
-            legacy = fetch_legacy_protection_rulesets(owner, repo)
-            if legacy:
-                # Adopt bypass actors from the first legacy ruleset found.
-                source = legacy[0]
-                legacy_names = ", ".join(str(rs.get("name", "?")) for rs in legacy)
-                sys.stderr.write(f"⚠ Found {len(legacy)} pre-existing protection ruleset(s): {legacy_names}\n")
-                sys.stderr.write(f"  Adopting bypass_actors from '{source.get('name')}' (id={source.get('id')}).\n")
-                sys.stderr.write("  After applying cpv-branch-rules, consider deleting the legacy ruleset(s) with:\n")
-                for rs in legacy:
-                    sys.stderr.write(f"    gh api --method DELETE repos/{owner}/{repo}/rulesets/{rs.get('id')}\n")
-        if source is not None:
-            existing_actors = [
-                BypassActor(
-                    actor_id=a.get("actor_id"),
-                    actor_type=a.get("actor_type", "Integration"),
-                    bypass_mode=a.get("bypass_mode", "always"),
-                )
-                for a in source.get("bypass_actors", [])
-            ]
-
-    # Merge: existing + defaults + CLI additions
-    defaults = build_default_bypass_actors()
-    additions = [BypassActor(app_id, "Integration", "always") for app_id in args.add_bypass_app_id]
-    bypass_actors = merge_bypass_actors(existing_actors, defaults + additions)
-
-    ruleset = build_ruleset(check_contexts, bypass_actors)
-
-    if args.dry_run:
-        print(f"# Dry run — {owner}/{repo}")
-        print(f"# Existing ruleset: {'found (id=' + str(existing_id) + ')' if existing else 'none'}")
-        print(f"# Action: {'UPDATE' if existing_id else 'CREATE'}")
-        print()
-        print(json.dumps(ruleset, indent=2))
-        return 0
-
-    response = apply_ruleset(owner, repo, ruleset, existing_id)
-    print(f"✓ Ruleset {'updated' if existing_id else 'created'}: {RULESET_NAME} (id={response.get('id')})")
-    print(f"  Check contexts required: {', '.join(check_contexts)}")
-    print(f"  Bypass actors preserved/added: {len(bypass_actors)}")
-    print(f"  View: https://github.com/{owner}/{repo}/rules/{response.get('id')}")
-    return 0
+    try:
+        if args.legacy_cpv_ruleset:
+            return run_legacy_mode(args, owner, repo, rulesets)
+        return run_ratified_mode(args, owner, repo, rulesets)
+    except RulesetReadError as exc:
+        sys.stderr.write(f"REFUSING: {exc}.\n")
+        sys.stderr.write("  Nothing was applied.\n")
+        return 2
 
 
 if __name__ == "__main__":

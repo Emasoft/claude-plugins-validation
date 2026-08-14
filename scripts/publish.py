@@ -3529,6 +3529,84 @@ def _marketplace_is_registered(claude_bin: str, marketplace: str) -> bool:
     return marketplace in ((listing.stdout or "") + (listing.stderr or ""))
 
 
+_INSTALLED_PLUGINS_REGISTRY = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
+
+
+def _smoke_records_still_registered(
+    target: str, smoke_dir: Path, registry_path: Path | None = None
+) -> list[str] | None:
+    """Local-scope records still pointing at ``smoke_dir``, or None when unreadable.
+
+    Issue #209: `claude plugin uninstall --scope local` does not always drop the
+    local-scope record from ``installed_plugins.json``. When it does not, the
+    temp dir is deleted moments later and the record is left pointing at a path
+    that no longer exists — invisible, and it accumulates across releases.
+
+    READ-ONLY, deliberately. The registry is Claude Code's shared state, not
+    CPV's: a publish pipeline that edits another tool's state file to tidy up
+    after itself is a worse failure mode than the orphan it removes. Reporting
+    is the whole remedy here.
+
+    Returns None for "could not check" rather than an empty list, so a missing
+    or malformed registry can never be read as "verified clean" — the same
+    cannot-check-is-not-a-pass rule Gate 15 applies to the install itself.
+
+    Paths are compared RESOLVED: on macOS ``mktemp`` yields ``/var/folders/...``
+    while the registry records ``/private/var/folders/...``, and a raw string
+    compare would silently find nothing on exactly the platform that reported
+    this.
+    """
+    path = registry_path if registry_path is not None else _INSTALLED_PLUGINS_REGISTRY
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    plugins = data.get("plugins")
+    if not isinstance(plugins, dict):
+        return None
+    try:
+        wanted = os.path.realpath(str(smoke_dir))
+    except (OSError, ValueError):
+        return None
+    stale: list[str] = []
+    for key, records in plugins.items():
+        # Scoped to THIS plugin's records: a record another publish left behind
+        # is not this run's to report, and claiming it would inflate the signal.
+        if key != target or not isinstance(records, list):
+            continue
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            project_path = rec.get("projectPath")
+            if not isinstance(project_path, str) or not project_path:
+                continue
+            try:
+                resolved = os.path.realpath(os.path.expanduser(project_path))
+            except (OSError, ValueError):
+                continue
+            if resolved == wanted:
+                stale.append(project_path)
+    return stale
+
+
+def _report_smoke_registry_orphan(target: str, smoke_dir: Path) -> None:
+    """Print the Gate-15 registry-cleanup verdict. Never fatal, never a verdict."""
+    stale = _smoke_records_still_registered(target, smoke_dir)
+    if stale is None:
+        print(f"{YELLOW}  Note: could not read {_INSTALLED_PLUGINS_REGISTRY} — smoke-install "
+              f"registry cleanup UNVERIFIED (not a failure, and not a pass either).{NC}")
+        return
+    if not stale:
+        return
+    print(f"{YELLOW}  Note: the local-scope record for {target} survived the uninstall and now "
+          f"points at a temp dir that is about to be deleted (#209):{NC}")
+    for project_path in stale[:5]:
+        print(f"{YELLOW}    projectPath: {project_path}{NC}")
+    print(f"{YELLOW}  Harmless to this release; it accumulates in {_INSTALLED_PLUGINS_REGISTRY}.{NC}")
+
+
 def stage_install_smoke(plugin_root: Path, new_version: str) -> int:
     """Gate 15: prove the just-published release actually INSTALLS.
 
@@ -3613,6 +3691,10 @@ def stage_install_smoke(plugin_root: Path, new_version: str) -> int:
                 )
             except (OSError, subprocess.SubprocessError) as exc:
                 print(f"{YELLOW}  Note: smoke-install cleanup did not run ({exc}).{NC}")
+            else:
+                # Assert the cleanup actually happened. Nothing else does, which
+                # is why #209 was only found by reading the registry by hand.
+                _report_smoke_registry_orphan(target, Path(tmp))
     if result.returncode == 0:
         print(f"{GREEN}✓ {target} installs cleanly (dependencies resolved){NC}")
         # The marketplace entry is updated ASYNCHRONOUSLY (notify-marketplace

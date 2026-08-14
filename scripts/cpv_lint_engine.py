@@ -518,6 +518,22 @@ def _run_linter(
     The effective deadline is ``PLUGIN_REPO_LINT_TIMEOUT`` when set to a
     positive value, else the caller's ``timeout`` (issue #148) — so a single
     env var caps EVERY linter spawn without editing each call site.
+
+    ``cwd`` is optional in the signature but NOT in spirit (issue #200):
+    every call site MUST pass the tree being validated, because a linter's
+    config discovery is anchored to its working directory, not to the file
+    paths it is handed — pyright's project root IS its cwd, mypy reads
+    ``mypy.ini`` / ``pyproject.toml`` from the current directory, hadolint
+    reads ``.hadolint.yaml`` from it, and shellcheck ``-x`` resolves a
+    relative ``source`` against it. Launched from a scratch dir — the normal
+    case for an agent or a CI wrapper — those lookups silently find nothing
+    and the target's own configuration is never applied, so the verdict
+    depends on where CPV happened to be started. ``lint_markdown`` is the ONE
+    deliberate exception: it runs from an isolated empty temp dir on purpose
+    (issue #84, for node module resolution) and passes absolute file paths,
+    so its cwd cannot change WHICH files are linted.
+    ``tests/test_issue_200_lint_cwd.py`` pins the invariant at source level so
+    a linter added later cannot inherit the bug by omission.
     """
     # Resolve the hard ceiling here (issue #148): every call site passes its own
     # default, but a CI runner can shrink/raise them all uniformly via the env
@@ -830,6 +846,7 @@ def lint_python(
                 "--output-format=concise",
                 *targets,
             ],
+            cwd=repo_root,
             timeout=120,
         )
     except subprocess.TimeoutExpired:
@@ -926,6 +943,20 @@ def lint_python(
         try:
             pr = _run_linter(
                 pyright_cmd + ["--outputjson", *mypy_targets],
+                # Issue #200 — this is the whole fix. With no `--project`,
+                # pyright treats its CWD as the project root and looks for
+                # `pyrightconfig.json` THERE, not beside the files it was
+                # handed. Run from a scratch dir, it therefore found no
+                # config, applied none of the target's `extraPaths` /
+                # `venvPath`, and reported every first-party import as
+                # unresolved — a wall of false MINORs (capped at 20) on a
+                # tree that reports 0 findings when the identical command is
+                # run from its own root. `--project` was considered and
+                # rejected: it would also have to handle the
+                # `[tool.pyright]`-in-pyproject case this branch accepts,
+                # whereas anchoring the cwd covers both and matches how every
+                # sibling linter here is invoked.
+                cwd=repo_root,
                 timeout=180,
             )
         except subprocess.TimeoutExpired:
@@ -961,6 +992,14 @@ def lint_python(
                     "scripts_dev|docs_dev|builds_dev|tests_dev|tests/fixtures",
                     *mypy_targets,
                 ],
+                # Same bug as pyright's (issue #200), one branch over: mypy
+                # discovers `mypy.ini` / `.mypy.ini` / `pyproject.toml` /
+                # `setup.cfg` in the CURRENT DIRECTORY. Worse here than
+                # elsewhere, because `_canonical_python_typechecker` already
+                # read those files under `repo_root` to CHOOSE mypy — so
+                # without this the config that selected the checker was not
+                # the config the checker ran under.
+                cwd=repo_root,
                 timeout=180,
             )
         except subprocess.TimeoutExpired:
@@ -1122,6 +1161,12 @@ def lint_shell(
         try:
             result = _run_linter(
                 cmd + ["-f", "json", "-x", str(f)],
+                # `-x` (follow `source`d files) resolves a RELATIVE source
+                # path against the working directory — that is exactly why
+                # shellcheck ships a `source-path=SCRIPTDIR` directive. From a
+                # foreign cwd every `source ./lib.sh` becomes an unresolved
+                # SC1091 (issue #200).
+                cwd=repo_root,
                 timeout=60,
             )
         except subprocess.TimeoutExpired:
@@ -1442,6 +1487,74 @@ def lint_markdown(
     return True
 
 
+# ---------------------------------------------------------------------------
+# JSONC-by-definition config files (issue #210)
+# ---------------------------------------------------------------------------
+#
+# A handful of `.json` config files are JSONC *by the definition of the tool
+# that owns them*: `//` line comments and trailing commas are legal, documented
+# and idiomatic. Parsing those with strict `json.loads` made CPV STRICTER THAN
+# THE FORMAT'S OWN SPEC — a `pyrightconfig.json` that pyright reads with 0
+# errors became a publish-blocking MAJOR here, so the only configuration that
+# satisfied both tools forbade documenting the file at all.
+#
+# The set is deliberately NARROW. A plain `.json` is still strict JSON, so a
+# stray comment in `package.json` / `plugin.json` / a marketplace manifest
+# still fires MAJOR — as it must, because the tool that owns THOSE files would
+# reject them too. Every entry below is here because the owning tool documents
+# comment support, and each carries that owner inline.
+_JSONC_BASENAMES: frozenset[str] = frozenset(
+    {
+        "pyrightconfig.json",  # pyright (the issue-#210 reproducer)
+        "tsconfig.json",  # TypeScript — JSONC by spec
+        "jsconfig.json",  # TypeScript — JSONC by spec
+        ".eslintrc.json",  # ESLint legacy config: "JavaScript-style comments"
+        # markdownlint(-cli2) parses its `.json` config with jsonc-parser; this
+        # engine already treats the `.jsonc` spelling as the same config file
+        # (see `_LANG_CONFIG_FILENAMES["markdown"]`).
+        ".markdownlint.json",
+        ".markdownlint-cli2.json",
+    }
+)
+
+# `tsconfig.build.json`, `jsconfig.app.json`, … — the same TypeScript grammar
+# under a project-suffixed name. Mirrors the `basename.startswith("tsconfig.")`
+# convention already used by `validate_security._TOOLING_CONFIG_BASENAMES`.
+_JSONC_BASENAME_PREFIXES: tuple[str, ...] = ("tsconfig.", "jsconfig.")
+
+# Every `.json` under `.vscode/` — VS Code parses that directory as JSONC and
+# generates commented templates there itself (settings/launch/tasks/extensions).
+_JSONC_DIR_NAMES: frozenset[str] = frozenset({".vscode"})
+
+
+def _is_jsonc_path(repo_root: Path, path: Path) -> bool:
+    """True iff ``path`` is a config file whose OWNING TOOL defines it as JSONC.
+
+    Membership is decided by NAME/LOCATION only — never by content — so a
+    comment can never talk this function into accepting a file that is plain
+    JSON. That asymmetry is the point: a false positive here would let CPV pass
+    a file the owning tool rejects (a false negative in the validator), which
+    is strictly worse than the over-strict MAJOR being fixed.
+    """
+    name = path.name.lower()
+    # `.jsonc` is JSONC by extension. `detect_languages` does not bucket it
+    # today (the glob is `*.json`), but `lint_json` is public API and other
+    # callers feed it their own file lists.
+    if name.endswith(".jsonc"):
+        return True
+    if name in _JSONC_BASENAMES:
+        return True
+    if name.endswith(".json") and name.startswith(_JSONC_BASENAME_PREFIXES):
+        return True
+    try:
+        parts = path.resolve().relative_to(repo_root.resolve()).parts
+    except (ValueError, OSError):
+        # Outside the tree (or unresolvable): fall back to the full path's own
+        # parts rather than silently answering "not JSONC".
+        parts = path.parts
+    return any(part.lower() in _JSONC_DIR_NAMES for part in parts[:-1])
+
+
 def lint_json(
     repo_root: Path,
     files: list[Path],
@@ -1449,18 +1562,43 @@ def lint_json(
     *,
     strict_missing_tools: bool = True,  # noqa: ARG001
 ) -> bool:
-    """Validate JSON syntax with stdlib json (always available)."""
+    """Validate JSON syntax with stdlib json (always available).
+
+    Files the owning tool defines as JSONC (see `_is_jsonc_path`) are parsed
+    with CPV's JSONC parser instead — a genuine syntax error in one of them
+    (unclosed brace, missing comma between members) still fires the same MAJOR.
+    """
     if not files:
         return True
+
+    # ONE JSONC parser, not two. `cpv_management_common.load_jsonc` is the
+    # implementation `validate_settings_marketplace`, `manage_doctor` and
+    # `validate_cache` already use; a second copy here would drift, and a
+    # drifted copy is how a validator accepts on one path what it rejects on
+    # another. Imported lazily so this module's importability never depends on
+    # `cpv_management_common`'s import-time `Path.home()` (same idiom as
+    # `cc_scope_rules.safe_load_jsonc`).
+    from cpv_management_common import load_jsonc
 
     ok = True
     for f in files:
         rel = _relpath(repo_root, str(f))
+        jsonc = _is_jsonc_path(repo_root, f)
         try:
-            with open(f, encoding="utf-8") as fp:
-                json.load(fp)
+            if jsonc:
+                load_jsonc(f)
+            else:
+                with open(f, encoding="utf-8") as fp:
+                    json.load(fp)
         except json.JSONDecodeError as e:
-            report.major(f"JSON syntax error in {rel}: {e}", rel, getattr(e, "lineno", None))
+            # Keep the greppable "JSON syntax error in <file>" prefix (the
+            # fixer skills key on it) and name the grammar actually used, so an
+            # author is never told their JSONC is bad JSON without being told
+            # it was read as JSONC. The reported line is that of the
+            # comment-stripped text: exact for `//` comments (the stripper
+            # preserves their newlines), shifted by a multi-line `/* */` block.
+            label = "JSON syntax error" + (" (parsed as JSONC)" if jsonc else "")
+            report.major(f"{label} in {rel}: {e}", rel, getattr(e, "lineno", None))
             ok = False
         except UnicodeDecodeError as e:
             report.major(f"JSON encoding error in {rel}: {e}", rel)
@@ -1550,6 +1688,10 @@ def lint_dockerfile(
         try:
             result = _run_linter(
                 cmd + [str(f)],
+                # hadolint discovers `.hadolint.yaml` in the working directory
+                # (then `$HOME/.config`) — from a foreign cwd the target's own
+                # rule-ignore config is never applied (issue #200).
+                cwd=repo_root,
                 timeout=60,
             )
         except subprocess.TimeoutExpired:
@@ -1618,6 +1760,11 @@ def lint_xml(
         try:
             result = _run_linter(
                 cmd + ["--noout", str(f)],
+                # No cwd-discovered config of its own, but anchored anyway so
+                # the engine holds ONE invariant — every linter runs from the
+                # tree it validates (issue #200) — instead of a per-tool list a
+                # future contributor has to re-derive.
+                cwd=repo_root,
                 timeout=60,
             )
         except subprocess.TimeoutExpired:
@@ -1887,6 +2034,10 @@ def lint_powershell(
         try:
             result = _run_linter(
                 cmd + ["-Path", str(f), "-Severity", "Error,Warning"],
+                # Anchored for the same one-invariant reason as xmllint above
+                # (issue #200); PSScriptAnalyzer takes its settings via
+                # `-Settings`, so no cwd-discovered config is at stake here.
+                cwd=repo_root,
                 timeout=60,
             )
         except subprocess.TimeoutExpired:
