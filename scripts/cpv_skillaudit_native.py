@@ -4989,6 +4989,10 @@ def report_findings(
         return 1
 
     appended = 0
+    # Demoted findings that a consent entry COULD resolve — the protected
+    # family is excluded because pointing at a lever that refuses those rules
+    # would send the reader to write an entry the loader will never honour.
+    consentable_demoted = 0
     consents = _load_audit_consent_registry(plugin_path)
     for finding in result.findings:
         line = finding.line_number
@@ -5028,6 +5032,8 @@ def report_findings(
         prefix = f"[skillaudit:{category} {finding.rule_id}]"
         if is_demoted:
             prefix = f"⚠ {prefix} (demoted, needs review)"
+            if finding.rule_id not in _CONSENT_PROTECTED_RULES:
+                consentable_demoted += 1
         message = f"{prefix} {finding.message}".strip()
         if finding.severity == "info":
             report.info(message, rel)
@@ -5035,7 +5041,46 @@ def report_findings(
             method = getattr(report, finding.severity, None) or report.minor
             method(message, rel, line)
         appended += 1
+    if consentable_demoted:
+        _emit_consent_pointer(report, consentable_demoted)
     return appended
+
+
+def _emit_consent_pointer(report: Any, count: int) -> None:
+    """Name the documented way to resolve a "needs review" finding — ONCE per run.
+
+    Issue #201/#208: "(demoted, needs review)" asks for a human verdict and
+    then gives the reader nowhere to record one, so a plugin sitting at
+    CRITICAL=0 MAJOR=0 MINOR=0 with a single demoted NIT reads as permanently
+    unreleasable. The resolution mechanism has existed since the audit-consent
+    registry landed — but it is a REPO-ROOT FILE, not a CLI flag, and a
+    reporter who ran ``--help``, saw no flag and concluded no lever existed was
+    looking in the one place it could not be. That is a discoverability defect,
+    not a missing feature, so the fix is to say the name.
+
+    ONE line per run, not per finding: N copies of the same paragraph is the
+    shape a reader learns to skip, which would cost the pointer the only thing
+    it is for. INFO, so it can never change a verdict in either direction.
+
+    Deliberately states the CONSTRAINTS, not just the filename. The registry is
+    not a mute button and must not read as one: only an ALREADY-DEMOTED finding
+    can be consented, it stays visible as a non-blocking WARNING, the
+    prompt-injection / exfil / secret / decode family can never be consented at
+    all, and the sha256 pins the exact line so any edit re-blocks it. A pointer
+    that omitted those would be read as "here is how to silence the scanner".
+    """
+    info = getattr(report, "info", None)
+    if not callable(info):
+        return
+    info(
+        f"{count} finding(s) marked '(demoted, needs review)'. To record a reviewed "
+        f"false-positive verdict, add an entry to {_AUDIT_CONSENT_REGISTRY_BASENAME} at the "
+        f"plugin root: {{\"consents\": [{{\"file\": <path>, \"ruleId\": <rule>, "
+        f"\"lineSha256\": <sha256 of the stripped flagged line>, \"reason\": <why>}}]}}. "
+        f"This is NOT a suppression: only an already-demoted finding can be consented, it "
+        f"stays visible as a non-blocking WARNING, the hard prompt-injection / exfil / "
+        f"secret / decode rules can never be consented, and editing the line re-blocks it."
+    )
 
 
 def _relativise(file_path: str, plugin_root: Path) -> str:

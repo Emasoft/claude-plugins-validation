@@ -988,6 +988,181 @@ def _ssrf_url_is_loopback_with_literal_host_py(line: str, match: str) -> bool:
     return host in _LOOPBACK_HOSTS_PY
 
 
+# ── Issue #198 — SSRF_ADVANCED static-DESTINATION discriminator (Python) ──
+# SSRF_PATTERN has forgiven a fully static URL literal since issue #41: a
+# destination fixed at author time cannot be attacker-influenced, which is
+# the whole premise of SSRF. SSRF_ADVANCED never got the same carve-out, so
+# the canonical-pipeline template's own version probe
+#
+#     req = urllib.request.Request(  # nosec B310 - fixed https constant, never user input
+#         CANON_LATEST_URL, headers={"User-Agent": "cpv-publish-canon-version"}
+#     )
+#
+# drew a publish-blocking MAJOR in every plugin that adopted the canon:
+# catalog pattern 0 matches ``request(`` plus ANY later ``\binput\b`` on the
+# line — here the word "input" inside the nosec justification comment.
+#
+# _ssrf_url_is_static_literal_py canNOT be reused verbatim (measured, not
+# assumed): it locates the string literal CONTAINING the match, and an
+# SSRF_ADVANCED match is a call fragment rather than a URL substring, so it
+# returns False on every shape here — the FP and the real threats alike, i.e.
+# it would have cleared nothing. The equivalent test at this rule's
+# granularity is on the DESTINATION: every argument of the flagged call (or
+# the value of the flagged assignment) must be a provably static literal. An
+# f-string, a concatenation, a nested call, an attribute, a subscript, or a
+# variable that is not a single-assignment module-level literal all keep the
+# finding VISIBLE.
+
+# The user-input identifiers catalog patterns 0/3/7 key on. The carve-out is
+# scoped to matches carrying one of these. The other SSRF_ADVANCED patterns
+# identify a threat by URL/technique CONTENT (decimal/hex-encoded loopback,
+# IPv6-mapped loopback, metadata hosts, ``curl $(...)``, redirect following),
+# and there a static literal is exactly what must keep firing.
+_SSRF_ADV_USER_INPUT_TOKEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"\breq\."
+    r"|\binput\b|\bparam\b|\bquery\b"
+    r"|user(?:Input|Data|Query|Id|Body|Param|Token|Provided)\b"
+    r"|\buser_(?:input|data|query)\b",
+    re.IGNORECASE,
+)
+
+# Any of these inside the match means the match was earned by CONTENT, not by
+# an incidental user-input word — never clear it, however static the args are.
+_SSRF_ADV_HARD_SIGNAL_RE: Final[re.Pattern[str]] = re.compile(
+    r"169\.254|metadata|instance-data"
+    r"|0177\.0\.0\.1|0x7f|2130706433|017700000001|\[0:0:0:0:0:"
+    r"|\bredirect\b|\bfollow\b|\blocation\b"
+    r"|\$\{|\$\(",
+    re.IGNORECASE,
+)
+
+
+def _expr_is_static_literal_py(node: ast.expr, static_names: frozenset[str]) -> bool:
+    """True iff ``node`` evaluates to a value fixed at author time.
+
+    Strict whitelist: a constant, a container of constants, a unary op on
+    one, or a name proven to be a single-assignment module-level literal.
+    Everything else — f-string, concatenation, call, attribute, subscript,
+    comprehension, lambda, star-arg, walrus — can differ per invocation and
+    is therefore a destination the caller may be able to influence.
+    """
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, ast.Name):
+        return node.id in static_names
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return all(_expr_is_static_literal_py(e, static_names) for e in node.elts)
+    if isinstance(node, ast.Dict):
+        # A ``**spread`` entry has a None key — dynamic by construction.
+        if any(k is None for k in node.keys):
+            return False
+        return all(_expr_is_static_literal_py(k, static_names) for k in node.keys if k is not None) and all(
+            _expr_is_static_literal_py(v, static_names) for v in node.values
+        )
+    if isinstance(node, ast.UnaryOp):
+        return _expr_is_static_literal_py(node.operand, static_names)
+    return False
+
+
+def _module_static_literal_names_py(tree: ast.AST) -> frozenset[str]:
+    """Module-level names bound EXACTLY ONCE, to a pure literal.
+
+    A name rebound anywhere else — a second assignment, a ``global`` write, a
+    loop / with / except target, a function parameter, an import alias, a def
+    or class of the same name — is excluded, because its value at call time
+    is not the module-level literal. That guard is what stops the carve-out
+    from clearing
+
+        CANON_LATEST_URL = "https://..."     # looks static ...
+        def set_url(u):
+            global CANON_LATEST_URL
+            CANON_LATEST_URL = u             # ... but is not
+
+    The module-level literal itself is required to be a PURE literal (an
+    empty ``static_names`` is passed down), so no resolution ordering between
+    constants can be exploited.
+    """
+    binding_counts: dict[str, int] = {}
+    rebound_elsewhere: set[str] = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            binding_counts[node.id] = binding_counts.get(node.id, 0) + 1
+        elif isinstance(node, ast.arg):
+            rebound_elsewhere.add(node.arg)
+        elif isinstance(node, ast.alias):
+            rebound_elsewhere.add((node.asname or node.name).split(".")[0])
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            rebound_elsewhere.add(node.name)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            rebound_elsewhere.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            rebound_elsewhere.update(node.names)
+
+    candidates: set[str] = set()
+    for stmt in getattr(tree, "body", []):
+        # AnnAssign.value is Optional (a bare ``X: str`` annotation binds
+        # nothing), so the union is the honest type for both branches.
+        value: ast.expr | None
+        if isinstance(stmt, ast.Assign):
+            targets: list[ast.expr] = list(stmt.targets)
+            value = stmt.value
+        elif isinstance(stmt, ast.AnnAssign):
+            targets = [stmt.target]
+            value = stmt.value
+        else:
+            continue
+        if value is None or not _expr_is_static_literal_py(value, frozenset()):
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                candidates.add(target.id)
+
+    return frozenset(n for n in candidates if binding_counts.get(n, 0) == 1 and n not in rebound_elsewhere)
+
+
+def _ssrf_advanced_destination_is_static_py(tree: ast.AST, line: int, match: str) -> bool:
+    """True iff the SSRF_ADVANCED match on ``line`` has a provably static
+    destination — the SSRF_PATTERN static-literal carve-out (issue #41)
+    applied at SSRF_ADVANCED's granularity (issue #198)."""
+    if not _SSRF_ADV_USER_INPUT_TOKEN_RE.search(match):
+        return False
+    if _SSRF_ADV_HARD_SIGNAL_RE.search(match):
+        return False
+
+    static_names = _module_static_literal_names_py(tree)
+
+    # Assignment shape (catalog pattern 3): ``url = <static>``.
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and getattr(node, "lineno", None) == line:
+            value = node.value
+            if value is not None and _expr_is_static_literal_py(value, static_names):
+                return True
+
+    # Call shape (catalog patterns 0/7). EVERY call whose source range covers
+    # the line must have provably static arguments. Checking only the
+    # innermost call would clear ``Request(get_url())`` — the inner call has
+    # no args at all — and checking only the outermost would miss a dynamic
+    # sibling call sharing the physical line.
+    saw_call = False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", None)
+        if start is None or end is None or not (start <= line <= end):
+            continue
+        saw_call = True
+        for arg in node.args:
+            if not _expr_is_static_literal_py(arg, static_names):
+                return False
+        for kw in node.keywords:
+            # ``**spread`` has kw.arg None — dynamic by construction.
+            if kw.arg is None or not _expr_is_static_literal_py(kw.value, static_names):
+                return False
+    return saw_call
+
+
 # ── Issue #41 — TOOL_SHADOW monkeypatch-in-test discriminator (Python) ──
 # pytest's ``monkeypatch`` fixture is standard test scaffolding; the
 # TOOL_SHADOW rule fires on the substring ``monkey?patch``. In a test file
@@ -3256,6 +3431,16 @@ def classify(
         # parameter name ``request)`` after ``def …_request(``. A function
         # def is the OPPOSITE of an outbound network call.
         if _line_is_python_function_def(source.splitlines()[line_idx]):
+            return "safe_literal"
+        # Issue #198 — the static-DESTINATION carve-out SSRF_PATTERN has had
+        # since issue #41, applied here too. A destination fixed at author
+        # time has no input path, so it is not attacker-controlled under
+        # EITHER rule id; forgiving it under one and not the other was an
+        # oversight, and it hard-blocked every plugin adopting canon v5.3.0.
+        # Scoped to the user-input patterns and refused whenever any argument
+        # is dynamic, so an f-string / concatenated / variable destination
+        # keeps firing exactly as before.
+        if _ssrf_advanced_destination_is_static_py(tree, line, match):
             return "safe_literal"
 
     line_text = lines[line_idx] if 0 <= line_idx < len(lines) else ""
