@@ -239,16 +239,23 @@ def test_dialog_expiry_is_a_known_settings_key() -> None:
     assert "dialogExpiry" in cc_scope_rules.KNOWN_SETTINGS_KEYS
 
 
-def test_cross_session_inbound_stays_unknown() -> None:
-    """DELIBERATE OMISSION — do not "helpfully" add this on the next sync.
+def test_cross_session_inbound_is_now_a_known_settings_key() -> None:
+    """The v5.4.0 omission is RETIRED, and this records why rather than flipping silently.
 
-    ``crossSessionInbound`` appears only in the changelog; it is absent from
-    settings.md, so whether it is top-level or nested under another key is
-    unverifiable. ``KNOWN_SETTINGS_KEYS`` is a TYPO DETECTOR, so an entry added
-    at the wrong level would excuse a genuine typo written there — the
-    ``sandbox.network.strictAllowlist`` precedent from v5.1.0.
+    v5.4.0 deliberately held ``crossSessionInbound`` out of
+    ``KNOWN_SETTINGS_KEYS`` because it appeared only in the changelog: its LEVEL
+    was unverifiable, and this set is a TYPO DETECTOR, so an entry at the wrong
+    level excuses a genuine typo written there (the
+    ``sandbox.network.strictAllowlist`` precedent from v5.1.0).
+
+    That reason EXPIRED — it is not that the judgement was wrong, it is that the
+    evidence changed. settings.md now carries the key in its Available-settings
+    table (top-level) and documents a project/local value being honored when it
+    is stricter on the ``accept < hold < refuse`` ladder. An omission pinned
+    with its reason is exactly what makes this checkable on the next sync
+    instead of being re-litigated from memory.
     """
-    assert "crossSessionInbound" not in cc_scope_rules.KNOWN_SETTINGS_KEYS
+    assert "crossSessionInbound" in cc_scope_rules.KNOWN_SETTINGS_KEYS
 
 
 def test_dialog_expiry_in_project_settings_is_flagged(tmp_path: Path) -> None:
