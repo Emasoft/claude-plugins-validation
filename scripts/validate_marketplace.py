@@ -117,11 +117,13 @@ ValidationReport = MarketplaceValidationReport
 # {"source": {"source": "directory", "path": "./plugins/my-plugin"}}
 # Equivalent to the shorthand form "./plugins/my-plugin" as a plain string.
 # Per plugin-marketplaces.md the official per-plugin source types are the
-# relative-path string, github, url, git-subdir, npm and — since CC v2.1.224 —
-# archive (a zip downloaded over HTTPS; plugin-marketplaces.md:248/440-492).
+# relative-path string, github, url, git-subdir, npm, archive (a zip downloaded
+# over HTTPS since CC v2.1.224; plugin-marketplaces.md:248/440-492) and — since
+# CC v2.1.229 — command (a plugin directory printed by a local command;
+# plugin-marketplaces.md:249/495-551).
 # "file" is a settings-level source for extraKnownMarketplaces, NOT valid as a
 # per-plugin source.
-VALID_SOURCE_TYPES = {"github", "url", "npm", "git", "git-subdir", "directory", "archive"}
+VALID_SOURCE_TYPES = {"github", "url", "npm", "git", "git-subdir", "directory", "archive", "command"}
 
 # Source types that are valid at the settings.json level (extraKnownMarketplaces)
 # but NOT inside per-plugin source entries in marketplace.json. If authors use
@@ -247,6 +249,9 @@ _KNOWN_SOURCE_FIELDS_BY_TYPE: dict[str, frozenset[str]] = {
     # v2.1.224 — zip archive over HTTPS. `url` required, `sha256` optional
     # (plugin-marketplaces.md:483-488).
     "archive": frozenset({"source", "url", "sha256"}),
+    # v2.1.229 — plugin directory printed by a local command. `command`
+    # required, `timeout` and `mode` optional (plugin-marketplaces.md:520-531).
+    "command": frozenset({"source", "command", "timeout", "mode"}),
     # "relative-path" is the bare string form ("./path") — never reached via
     # a dict-shaped source — listed here so callers can reference the type.
     "relative-path": frozenset({"source", "path"}),
@@ -297,6 +302,18 @@ def _validate_known_entry_fields(
 
 
 _ARCHIVE_SHA256_RE = re.compile(r"\A[0-9a-fA-F]{64}\Z")
+
+# CC v2.1.229 command sources. Every constraint below is one Claude Code
+# enforces on the command string so the user can review the whole thing before
+# accepting it (plugin-marketplaces.md:523): printable ASCII only, at most 500
+# characters, and no run of four or more spaces — a long space run is how a
+# command hides its tail past the edge of the acceptance prompt.
+_COMMAND_MAX_LEN = 500
+_COMMAND_NON_PRINTABLE_ASCII_RE = re.compile(r"[^\x20-\x7e]")
+_COMMAND_SPACE_RUN_RE = re.compile(r" {4,}")
+# Default 60, maximum 600 (plugin-marketplaces.md:530).
+_COMMAND_MAX_TIMEOUT_S = 600
+_COMMAND_VALID_MODES = ("copy", "link")
 
 # Hosts Claude Code refuses for an `archive` url (plugin-marketplaces.md:487).
 # Name-based forms only — a numeric host goes through `_archive_ip_is_blocked`.
@@ -402,6 +419,129 @@ def _validate_archive_source(
                 ),
                 file=json_path,
                 suggestion="Use the archive's full SHA-256 digest — 64 hex characters, either case.",
+            )
+        )
+    return results
+
+
+def _validate_command_source(
+    plugin: dict[str, Any],
+    plugin_id: str,
+    json_path: str,
+) -> list[ValidationResult]:
+    """Shape-check a ``command`` source (CC v2.1.229+).
+
+    Same tier and rationale as :func:`_validate_archive_source`: every finding
+    here is a case Claude Code REFUSES at install time
+    (plugin-marketplaces.md:520-531), so the entry ships an uninstallable
+    plugin — MAJOR.
+
+    The command-string constraints exist so the user can review the WHOLE
+    command in the acceptance prompt, which is the only thing standing between
+    a marketplace entry and arbitrary code on the user's machine. That makes
+    them a security surface rather than a style rule: a command carrying a
+    control character or a long space run renders as something shorter than it
+    is, so what the user accepts is not what runs.
+    """
+    results: list[ValidationResult] = []
+    src = plugin.get("source")
+    if not isinstance(src, dict) or src.get("source") != "command":
+        return results
+
+    command = src.get("command")
+    if not isinstance(command, str) or not command.strip():
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="plugin",
+                message=(f"[RC-MKPL-COMMAND-CMD] entry '{plugin_id}' has a command source with no 'command'"),
+                file=json_path,
+                suggestion=(
+                    'Add "command": "my-tool claude-plugin-path" — the command must print the '
+                    "plugin directory's absolute path on stdout and exit 0."
+                ),
+            )
+        )
+    else:
+        if len(command) > _COMMAND_MAX_LEN:
+            results.append(
+                ValidationResult(
+                    level="MAJOR",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-COMMAND-CMD] entry '{plugin_id}' command is {len(command)} characters, "
+                        f"over the {_COMMAND_MAX_LEN}-character limit. Claude Code refuses it, so this "
+                        "plugin cannot install."
+                    ),
+                    file=json_path,
+                    suggestion=(
+                        f"Shorten the command to at most {_COMMAND_MAX_LEN} characters — move the logic "
+                        "into the tool it invokes."
+                    ),
+                )
+            )
+        if _COMMAND_NON_PRINTABLE_ASCII_RE.search(command):
+            results.append(
+                ValidationResult(
+                    level="MAJOR",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-COMMAND-CMD] entry '{plugin_id}' command contains a character that is "
+                        "not printable ASCII. Claude Code refuses it, because a command the user cannot "
+                        "fully read is a command they cannot meaningfully accept."
+                    ),
+                    file=json_path,
+                    suggestion="Use printable ASCII only — no tabs, newlines, control or non-ASCII characters.",
+                )
+            )
+        if _COMMAND_SPACE_RUN_RE.search(command):
+            results.append(
+                ValidationResult(
+                    level="MAJOR",
+                    category="plugin",
+                    message=(
+                        f"[RC-MKPL-COMMAND-CMD] entry '{plugin_id}' command contains a run of four or more "
+                        "spaces. Claude Code refuses it, because the run can push the rest of the command "
+                        "out of the acceptance prompt the user reads."
+                    ),
+                    file=json_path,
+                    suggestion="Collapse each run of spaces to a single space.",
+                )
+            )
+
+    timeout = src.get("timeout")
+    # bool is a subclass of int, so `True` would otherwise pass as a timeout of 1.
+    if timeout is not None and (
+        isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0 or timeout > _COMMAND_MAX_TIMEOUT_S
+    ):
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-COMMAND-TIMEOUT] entry '{plugin_id}' command timeout is not a whole number "
+                    f"of seconds between 1 and {_COMMAND_MAX_TIMEOUT_S}: {timeout!r}"
+                ),
+                file=json_path,
+                suggestion=f"Use a whole number of seconds, at most {_COMMAND_MAX_TIMEOUT_S} (default: 60).",
+            )
+        )
+
+    mode = src.get("mode")
+    if mode is not None and mode not in _COMMAND_VALID_MODES:
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-COMMAND-MODE] entry '{plugin_id}' command mode is not "
+                    f"{' or '.join(repr(m) for m in _COMMAND_VALID_MODES)}: {mode!r}"
+                ),
+                file=json_path,
+                suggestion=(
+                    '"copy" (the default) copies the printed directory into the plugin cache; '
+                    '"link" uses it in place and is not supported on Windows.'
+                ),
             )
         )
     return results
@@ -520,6 +660,15 @@ RESERVED_MARKETPLACE_IMPERSONATION_PATTERNS = (
 # Used to reject slash-bearing garbage like "a/b/c/d" or "not a url just/slash"
 # that older slash-only checks accepted as a "valid shorthand" (m11).
 GITHUB_SHORTHAND_PATTERN = re.compile(r"[\w.-]+/[\w.-]+")
+
+# The scp-like SSH form every git host serves: ``git@host:owner/repo[.git]``.
+# urlparse reports NO scheme for it (the ``@`` disqualifies everything before
+# the colon from being one), so without this it falls through to the
+# "owner/repo" shorthand branch and is reported as an invalid URL. Host-agnostic
+# on purpose — gitlab.com, bitbucket.org and self-hosted servers all use it, and
+# a check that recognised only github.com would be the same defect this pattern
+# was added to repair.
+SCP_LIKE_SSH_PATTERN = re.compile(r"\A[\w.-]+@[\w.-]+:[\w./-]+\Z")
 
 # Required README sections for GitHub deployment
 # These patterns match common section header formats (# Section, ## Section, ### Section)
@@ -1274,6 +1423,7 @@ def validate_plugin_entry(
     results.extend(_validate_known_entry_fields(plugin, plugin_id, json_path))
     results.extend(_validate_known_source_subfields(plugin, plugin_id, json_path))
     results.extend(_validate_archive_source(plugin, plugin_id, json_path))
+    results.extend(_validate_command_source(plugin, plugin_id, json_path))
 
     # Validate tags if present
     tags = plugin.get("tags")
@@ -2391,14 +2541,16 @@ def validate_repository_url(
         # merely contains a "/": "a/b/c/d" and "not a url just/slash" used to pass
         # silently (m11). A valid shorthand is exactly two path segments of
         # url-safe chars with no whitespace.
-        if not GITHUB_SHORTHAND_PATTERN.fullmatch(repository):
+        if not (
+            GITHUB_SHORTHAND_PATTERN.fullmatch(repository) or SCP_LIKE_SSH_PATTERN.fullmatch(repository)
+        ):
             results.append(
                 ValidationResult(
                     level="MINOR",
                     category="plugin",
                     message=f"Plugin '{plugin_id}' repository URL may be invalid: {repository}",
                     file=json_path,
-                    suggestion="Use full URL or GitHub shorthand (owner/repo)",
+                    suggestion="Use a full URL, an SSH URL (git@host:owner/repo), or GitHub shorthand (owner/repo)",
                 )
             )
     elif parsed.scheme not in ("http", "https", "git", "ssh"):
@@ -3277,7 +3429,7 @@ def validate_github_source_required(
                     level="WARNING",
                     category="github-source",
                     message=f"Plugin '{plugin_name}' has no 'repository' field - "
-                    "recommended (not required) so users can find the upstream GitHub repo",
+                    "recommended (not required) so users can find the upstream repo",
                     file=json_path,
                     suggestion=f'Optionally add: "repository": "https://github.com/OWNER/{plugin_name}"',
                 )
@@ -3296,23 +3448,21 @@ def validate_github_source_required(
             )
             continue
 
-        # Validate it looks like a GitHub URL. The schemeless branch accepts only
-        # a well-formed "owner/repo" shorthand — not any string containing a "/"
-        # (m11; the bare slash test silently accepted "a/b/c/d").
-        if not (
-            repository.startswith("https://github.com/")
-            or repository.startswith("git@github.com:")
-            or GITHUB_SHORTHAND_PATTERN.fullmatch(repository)
-        ):
-            results.append(
-                ValidationResult(
-                    level="MINOR",
-                    category="github-source",
-                    message=f"Plugin '{plugin_name}' repository doesn't look like a GitHub URL: {repository}",
-                    file=json_path,
-                    suggestion="Use format: https://github.com/OWNER/REPO",
-                )
-            )
+        # Validate it looks like a repository URL — HOST-AGNOSTICALLY.
+        #
+        # This used to require github.com and emit a MINOR otherwise, which
+        # BLOCKS `--strict`. The spec has never said that: plugins-reference.md
+        # and plugin-marketplaces.md both describe `repository` as a "source
+        # code repository URL", and CC v2.1.232 made bare gitlab.com marketplace
+        # URLs clone exactly like github.com ones. So the old check invented a
+        # publish gate the spec does not have, and it fired on precisely the
+        # hosts that had just become first-class (the v2.154.1 ruling).
+        #
+        # Delegating to validate_repository_url rather than re-deriving a
+        # host-agnostic check here is deliberate: two copies of the same rule
+        # drift, and a drifted copy of a URL rule is how a validator ends up
+        # accepting on one path what it rejects on another.
+        results.extend(validate_repository_url(repository, plugin_name, json_path))
 
         # Warn if source is NOT a relative path (local submodule)
         # For published marketplaces using submodules, source should be ./plugin-name

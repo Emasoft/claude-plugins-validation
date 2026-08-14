@@ -1102,15 +1102,36 @@ class TestValidateGithubSourceRequired:
         assert not any(r.level == "MAJOR" for r in results), [r.message for r in results]
         assert any(r.level == "WARNING" and "repository" in r.message for r in results)
 
-    def test_non_github_url_produces_minor(self):
-        """Repository URL that does not look like GitHub must produce MINOR (lines 1471-1484)."""
+    def test_malformed_repository_url_produces_minor(self):
+        """A repository value that is not a URL at all must still produce MINOR.
+
+        Rewritten for the v2.1.232 sync, which made this check HOST-AGNOSTIC.
+        It used to demand github.com and its message said so; the spec calls
+        `repository` a "source code repository URL" and CC now clones bare
+        gitlab.com marketplace URLs like github.com ones, so requiring GitHub
+        was a publish gate CPV invented. The finding still fires on junk — only
+        the reason it fires changed — which is what keeps this from being a
+        test that was deleted rather than corrected.
+        """
         from validate_marketplace import validate_github_source_required
 
-        # The check requires: no "https://github.com/", no "git@github.com:", no "/" in string
-        # A bare string without slashes will trigger the warning
         plugins = [{"name": "p", "source": "./p", "repository": "not-a-github-url"}]
         results = validate_github_source_required(plugins, "mp.json")
-        assert any(r.level == "MINOR" and "doesn't look like a GitHub URL" in r.message for r in results)
+        assert any(r.level == "MINOR" and "repository URL may be invalid" in r.message for r in results)
+
+    def test_non_github_host_is_accepted(self):
+        """The FP half: a GitLab/Bitbucket/self-hosted repository URL must NOT be flagged."""
+        from validate_marketplace import validate_github_source_required
+
+        for repo in (
+            "https://gitlab.com/team/plugins",
+            "https://gitlab.com/group/subgroup/nested/plugin",
+            "git@gitlab.com:team/plugin.git",
+            "https://bitbucket.org/team/plugin",
+        ):
+            plugins = [{"name": "p", "source": "./p", "repository": repo}]
+            results = validate_github_source_required(plugins, "mp.json")
+            assert not [r for r in results if r.level in ("MINOR", "MAJOR")], repo
 
     def test_all_valid_repos_produce_info(self):
         """All plugins with valid GitHub repos must produce INFO summary (lines 1501-1509)."""

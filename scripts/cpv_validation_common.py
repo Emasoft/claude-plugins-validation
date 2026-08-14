@@ -1874,6 +1874,16 @@ SECRET_PATTERNS = [
     (re.compile(r"aws_secret_access_key\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{40}", re.I), "AWS Secret Access Key"),
     # Phase 2b RC-13/14 — additional provider-specific tokens
     (re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"), "GitLab Personal Access Token"),
+    # CC v2.1.232 added redaction for the rest of the GitLab token families.
+    # They are separate prefixes, not variants of glpat-, so the single glpat-
+    # pattern above matched NONE of them — a runner token or an OAuth access
+    # token committed to a plugin was invisible to this scanner. One alternation
+    # rather than nine patterns: the shapes are identical, and nine near-copies
+    # is nine chances for one to drift.
+    (
+        re.compile(r"\bgl(?:rt|oas|ptt|agent|imt|soat|cbt|ft|ffct|dt)-[A-Za-z0-9_-]{20,}\b"),
+        "GitLab Token",
+    ),
     (re.compile(r"\bAKID[A-Za-z0-9]{32,}\b"), "Tencent Cloud SecretId"),
     (re.compile(r"\bhf_[A-Za-z]{32,}\b"), "Hugging Face Token"),
 ]

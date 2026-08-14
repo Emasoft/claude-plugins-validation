@@ -198,6 +198,12 @@ MANAGED_ONLY_KEYS: frozenset[str] = frozenset(
         "parentSettingsBehavior",  # v2.1.133 — admin-tier 'first-wins' | 'merge' for SDK managedSettings
         "allowAllClaudeAiMcps",  # v2.1.149 — enterprise: load claude.ai cloud MCP connectors alongside managed-mcp.json
         "pluginSuggestionMarketplaces",  # v2.1.152 — admin allowlist of org marketplaces whose plugins may be suggested
+        # v2.1.229 — settings.md:267 "(Managed settings only)". Blocks the
+        # `command` plugin source, which installs a plugin by RUNNING a
+        # marketplace-declared command on the user's machine; when unset it
+        # follows allowManagedHooksOnly. An org kill-switch for arbitrary
+        # code execution has to be managed-scoped or it is not a kill-switch.
+        "disableCommandPluginSources",
     }
 )
 
@@ -290,12 +296,26 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         # v2.1.224 (settings.md) — deadline for a dialog forwarded to a remote
         # client (Remote Control / an SDK host). Accepts "60s"/"5m"/"10m"/"never".
         "dialogExpiry",
+        # v2.1.224, ADDED v2.1.232 sync. Held OUT at v5.4.0 because it appeared
+        # only in the changelog, which left its LEVEL unverifiable — and a
+        # wrong-level entry in a typo detector excuses a genuine typo. That
+        # reason has since expired: settings.md now carries it in the
+        # Available-settings table (top-level), and documents a project/local
+        # value being honored when it is STRICTER on the accept < hold < refuse
+        # ladder. Verified before adding rather than assumed.
+        "crossSessionInbound",
         # Git hint overrides
         "includeGitInstructions",
         "respectGitignore",
         "awaySummaryEnabled",
         # Plugin / marketplace configuration
         "extraKnownMarketplaces",
+        # v2.1.232 — friendlier ALIASES accepted for the two keys above/below
+        # (extraKnownMarketplaces and strictKnownMarketplaces). They resolve to
+        # the same settings, so a file using them is correct and must not draw
+        # an "unknown key" typo hint.
+        "additionalMarketplaces",
+        "allowedMarketplaces",
         "enableAllProjectMcpServers",
         "enabledMcpjsonServers",
         "disabledMcpjsonServers",
@@ -316,6 +336,7 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         "forceRemoteSettingsRefresh",
         "pluginTrustMessage",
         "strictKnownMarketplaces",
+        "disableCommandPluginSources",  # v2.1.229 — managed-only (semantics enforced via MANAGED_ONLY_KEYS)
         "allowAllClaudeAiMcps",  # v2.1.149 — managed-only (semantics enforced via MANAGED_ONLY_KEYS)
         "pluginSuggestionMarketplaces",  # v2.1.152 — managed-only (semantics enforced via MANAGED_ONLY_KEYS)
         # Plugin-only (kept here for typo detection; emits CRITICAL when misplaced)
