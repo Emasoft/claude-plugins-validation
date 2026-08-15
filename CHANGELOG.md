@@ -2,6 +2,27 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.5.0] - 2026-08-15
+
+### Bug Fixes
+
+- **ci:** Restore the cross-shard ordering gate, and stop advertising gates that do not exist
+- **test:** The cold-install budget assertion measured the wrong job after the release split
+- Close 12 reported issues — scanner FPs, canon release path, lint cwd/JSONC, phase timing
+
+### Documentation
+
+- CLAUDE.md claimed a cross-shard ordering gate that does not exist
+- Record the reported-issue batch in CLAUDE.md (test files 469 -> 478)
+
+### Features
+
+- **spec:** CC sync v2.1.225-232 — command sources, GitLab, and a host-only gate
+
+### Performance
+
+- **release:** Run validation beside the suite, and shard the suite
+
 ## [5.4.0] - 2026-08-08
 
 ### Bug Fixes
