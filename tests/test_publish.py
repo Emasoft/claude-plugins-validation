@@ -1068,7 +1068,10 @@ class TestOrphanReleaseCommitRecovery:
         monkeypatch.setattr(publish, "git_with_retry", fake_git_with_retry)
         monkeypatch.setattr(publish, "_head_commit_message", lambda _root: expected_subject)
         monkeypatch.setattr(publish, "_git_porcelain_clean", lambda _root: False)
-        monkeypatch.setattr(publish, "_remote_tag_exists", lambda _root, _tag: False)
+        # TRDD-6UW0KZVY: the recovery now consults the three-valued
+        # _remote_tag_state and REFUSES on None (unreadable remote); this test
+        # models the read-succeeded-tag-absent answer that permits recovery.
+        monkeypatch.setattr(publish, "_remote_tag_state", lambda _root, _tag: False)
         monkeypatch.setattr(publish, "_local_tag_exists", lambda _root, _tag: local_tag_state["exists"])
         monkeypatch.setattr(publish, "_resolve_owner_repo", lambda _root: ("Alice", "repo"))
         monkeypatch.setattr(publish, "_ensure_gh_auth", lambda _o, _r: None)

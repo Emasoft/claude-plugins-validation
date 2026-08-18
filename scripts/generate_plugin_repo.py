@@ -3507,16 +3507,14 @@ def _local_tag_exists(root: Path, tag: str) -> bool:
     return r.returncode == 0
 
 
-def _remote_tag_exists(root: Path, tag: str) -> bool:
-    """True iff `tag` exists on origin, per `git ls-remote`.
+def _remote_tag_state(root: Path, tag: str) -> bool | None:
+    """Three-valued remote-tag probe (amvcp TRDD-YY5ISKCJ shape).
 
-    Asks the REMOTE rather than trusting that the push stage ran: a push that
-    executed and silently failed its ref-update is otherwise indistinguishable
-    from one that worked, and the plugin then reports a green publish while
-    being undependable (ai-maestro#62 R3).
-
-    Any failure to answer (network down, timeout, git error) returns False, so
-    the caller reports UNVERIFIED — never a false green.
+    True = ls-remote succeeded and the tag exists; False = succeeded and it
+    does not (a real answer — first-publish relies on it); None = the remote
+    could NOT be read. None is deliberately DISTINCT from False: any consumer
+    about to act destructively (undo a commit, move a tag) must REFUSE on
+    None rather than treat an unanswered question as "no tag".
     """
     try:
         r = subprocess.run(
@@ -3525,8 +3523,26 @@ def _remote_tag_exists(root: Path, tag: str) -> bool:
             check=False, timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
-        return False
-    return r.returncode == 0 and bool(r.stdout.strip())
+        return None
+    if r.returncode != 0:
+        return None
+    return bool(r.stdout.strip())
+
+
+def _remote_tag_exists(root: Path, tag: str) -> bool:
+    """True only on a POSITIVE remote answer, per `git ls-remote`.
+
+    Asks the REMOTE rather than trusting that the push stage ran: a push that
+    executed and silently failed its ref-update is otherwise indistinguishable
+    from one that worked, and the plugin then reports a green publish while
+    being undependable (ai-maestro#62 R3).
+
+    Any failure to answer (network down, timeout, git error) maps to False
+    here, so the post-push verify reports UNVERIFIED — never a false green.
+    A caller that would act DESTRUCTIVELY on "absent" must use
+    `_remote_tag_state` and refuse on None instead.
+    """
+    return _remote_tag_state(root, tag) is True
 
 
 def _plugin_name(root: Path) -> str | None:
