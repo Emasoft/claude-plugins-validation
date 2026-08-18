@@ -8,11 +8,14 @@ the *enforceable* gate must live on the server.
 TWO MODES — read this before running it against a fleet repo
 ------------------------------------------------------------
 RATIFIED (default)
-    Applies the fleet-ratified baseline PAIR — `baseline-history-protect` and
-    `baseline-pr-and-checks` — by NAME: it UPDATES them in place when they
-    already exist and CREATES them when they do not. Applying the ratified
-    baseline as-is (and restoring a drifted one back to it) is the
-    approval-EXEMPT operation under `manager-approval-defaults.md` §F.
+    Applies the fleet-ratified baseline TRIO — `baseline-history-protect`,
+    `baseline-pr-and-checks` and `baseline-tag-protect` — by NAME: it UPDATES
+    them in place when they already exist and CREATES them when they do not.
+    Applying the ratified baseline as-is (and restoring a drifted one back to
+    it) is the approval-EXEMPT operation under `manager-approval-defaults.md`
+    §F. Payload semantics follow the janitor's code SSOT
+    (branch_protection_lib.baseline_ruleset_payloads), NEVER the machine-global
+    prose, which still describes the pre-2026-08-13-ruling shape.
 
 LEGACY (`--legacy-cpv-ruleset`)
     Applies CPV's own pre-#203 ruleset `cpv-branch-rules`. This is NOT
@@ -147,10 +150,17 @@ RULESET_NAME = LEGACY_RULESET_NAME
 # brought to spec instead of gaining a third, parallel ruleset beside it.
 BASELINE_HISTORY_PROTECT_NAME = "baseline-history-protect"
 BASELINE_PR_AND_CHECKS_NAME = "baseline-pr-and-checks"
+BASELINE_TAG_PROTECT_NAME = "baseline-tag-protect"
 RATIFIED_BASELINE_NAMES: tuple[str, ...] = (
     BASELINE_HISTORY_PROTECT_NAME,
     BASELINE_PR_AND_CHECKS_NAME,
+    BASELINE_TAG_PROTECT_NAME,
 )
+
+# The release-tag pattern baseline-tag-protect makes immutable. Creating a NEW
+# tag stays unrestricted (publish.py still cuts each vX.Y.Z release); only
+# repointing or deleting an EXISTING one is blocked.
+TAG_PROTECT_REF = "refs/tags/v*.*.*"
 
 # Any ruleset whose name starts with this prefix is fleet-ratified and is
 # NEVER nominated for deletion by this command, in any mode, for any reason.
@@ -715,9 +725,10 @@ def build_ruleset(
     """Build the LEGACY `cpv-branch-rules` payload (--legacy-cpv-ruleset only).
 
     This is not the fleet-ratified shape, so creating it on a repo is not
-    approval-exempt under `manager-approval-defaults.md` §F. The ratified pair
-    is built by build_baseline_history_protect_ruleset() and
-    build_baseline_pr_and_checks_ruleset().
+    approval-exempt under `manager-approval-defaults.md` §F. The ratified trio
+    is built by build_baseline_history_protect_ruleset(),
+    build_baseline_pr_and_checks_ruleset() and
+    build_baseline_tag_protect_ruleset().
     """
     return {
         "name": RULESET_NAME,
@@ -781,14 +792,21 @@ def ratified_pr_and_checks_bypass_actors() -> list[BypassActor]:
 def build_baseline_history_protect_ruleset() -> dict:
     """Build the ratified `baseline-history-protect` payload.
 
-    `bypass_actors` is EMPTY — nobody bypasses it, including an admin. That is
-    the point of the ruleset, and it is why --adopt-bypass-actors deliberately
-    cannot reach this payload.
+    The OWNER (admin role) bypasses history-protect. USER Tier-3 ruling
+    2026-08-13: "both baseline-history-protect and baseline-pr-and-checks must
+    be changed to allow mutations in history and direct pushing/merging by the
+    owner." This was `[]` — nobody, explicitly including the admin — which on
+    a repo whose only human IS the owner is not protection but a lock with no
+    key: an amend, a rebase, or a force-push to undo a bad commit becomes
+    impossible for the one person entitled to do it. `deletion` +
+    `non_fast_forward` still bind EVERY non-admin actor (CI, agents, outside
+    contributors), so only the owner is exempt. Do NOT "restore" the empty
+    list: the machine-global prose describing the baseline still states the
+    pre-ruling shape — the prose is stale, this is not.
 
     DO NOT ADD `required_linear_history`. It was part of an earlier draft of
     this baseline and was REMOVED by an explicit owner ruling; a non-linear
-    history is allowed in every repo. Some prose describing the baseline still
-    lists it — the prose is stale, this is not.
+    history is allowed in every repo.
     """
     return {
         "name": BASELINE_HISTORY_PROTECT_NAME,
@@ -804,13 +822,15 @@ def build_baseline_history_protect_ruleset() -> dict:
             {"type": "deletion"},
             {"type": "non_fast_forward"},
         ],
-        "bypass_actors": [],
+        "bypass_actors": [a.to_dict() for a in ratified_pr_and_checks_bypass_actors()],
     }
 
 
 def build_baseline_pr_and_checks_ruleset(
     check_contexts: list[str],
     bypass_actors: list[BypassActor] | None = None,
+    *,
+    require_pull_request: bool = False,
 ) -> dict:
     """Build the ratified `baseline-pr-and-checks` payload.
 
@@ -820,11 +840,47 @@ def build_baseline_pr_and_checks_ruleset(
     ruleset is a §F non-exempt operation — and the caller is responsible for
     saying so out loud.
 
-    `required_status_checks` contexts are resolved at apply time from the
-    repo's detected type (or --check-context), so the payload is per-repo
-    while every other parameter is fixed by the ratified spec.
+    The `pull_request` rule is CONDITIONAL (USER Tier-3 ruling 2026-08-13):
+    on a solo-owner repo the author and the reviewer are the same person, so
+    a PR is addressed to its own author — it reviews nothing and only blocks
+    the merge. It is emitted only when `require_pull_request` is True (repo
+    owned by someone other than the authenticated login, or forced via
+    --require-pr). When emitted, `required_approving_review_count` is 0, NOT
+    1: GitHub forbids an author approving their own PR, so on a solo-owner
+    repo 1 is not strict — it is unsatisfiable, and branches pile up behind
+    it forever. Do NOT "restore" it to 1; if a repo genuinely has two humans,
+    raise it FOR THAT REPO, never in the fleet-wide baseline.
+
+    The `required_status_checks` rule is OMITTED ENTIRELY when
+    `check_contexts` is empty. That is forced by the API: GitHub 422s a
+    `required_status_checks` rule whose context list is empty, and the 422
+    fails the WHOLE ruleset write, taking the other rules down with it.
     """
     actors = ratified_pr_and_checks_bypass_actors() if bypass_actors is None else list(bypass_actors)
+    rules: list[dict] = []
+    if require_pull_request:
+        rules.append(
+            {
+                "type": "pull_request",
+                "parameters": {
+                    "required_approving_review_count": 0,
+                    "dismiss_stale_reviews_on_push": True,
+                    "require_code_owner_review": False,
+                    "require_last_push_approval": False,
+                    "required_review_thread_resolution": True,
+                },
+            }
+        )
+    if check_contexts:
+        rules.append(
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "strict_required_status_checks_policy": True,
+                    "required_status_checks": [{"context": ctx} for ctx in check_contexts],
+                },
+            }
+        )
     return {
         "name": BASELINE_PR_AND_CHECKS_NAME,
         "target": "branch",
@@ -835,27 +891,58 @@ def build_baseline_pr_and_checks_ruleset(
                 "exclude": [],
             },
         },
-        "rules": [
-            {
-                "type": "pull_request",
-                "parameters": {
-                    "required_approving_review_count": 1,
-                    "dismiss_stale_reviews_on_push": True,
-                    "require_code_owner_review": False,
-                    "require_last_push_approval": False,
-                    "required_review_thread_resolution": True,
-                },
-            },
-            {
-                "type": "required_status_checks",
-                "parameters": {
-                    "strict_required_status_checks_policy": True,
-                    "required_status_checks": [{"context": ctx} for ctx in check_contexts],
-                },
-            },
-        ],
+        "rules": rules,
         "bypass_actors": [a.to_dict() for a in actors],
     }
+
+
+def build_baseline_tag_protect_ruleset() -> dict:
+    """Build the ratified `baseline-tag-protect` payload.
+
+    No bypass actor: creating a NEW tag is unrestricted, so publish.py still
+    cuts each vX.Y.Z release — zero publish-path impact, nobody needs to
+    bypass. Rules are `deletion` + `update` (NOT non_fast_forward): `update`
+    blocks EVERY repoint of an existing tag, including a fast-forward move
+    onto a descendant commit — the bypass a non_fast_forward-only rule would
+    miss (append a malicious child commit, ff-move vX.Y.Z onto it).
+    """
+    return {
+        "name": BASELINE_TAG_PROTECT_NAME,
+        "target": "tag",
+        "enforcement": "active",
+        "conditions": {
+            "ref_name": {
+                "include": [TAG_PROTECT_REF],
+                "exclude": [],
+            },
+        },
+        "rules": [
+            {"type": "deletion"},
+            {"type": "update"},
+        ],
+        "bypass_actors": [],
+    }
+
+
+def require_pull_request_for(owner: str) -> bool:
+    """Should the baseline demand a PULL REQUEST on this repo?
+
+    True only when the repo is owned by SOMEONE ELSE than the authenticated
+    gh login — collaborating on another owner's project means the PR is a
+    genuine request to a genuine second party. False on your own repo (the
+    common case): the same person writes and reviews, so a PR gates nothing
+    and is the direct cause of repos "eternally stuck with dozens of feature
+    branches" (USER ruling 2026-08-13).
+
+    Fail-open toward the WORKFLOW: an undeterminable login returns False. A
+    wrongly-DEMANDED PR silently halts all merging; a wrongly-omitted one
+    only means a solo owner pushes to their own default branch.
+    """
+    result = run(["gh", "api", "user", "--jq", ".login"], check=False)
+    if result.returncode != 0:
+        return False
+    login = result.stdout.strip()
+    return bool(login) and login.lower() != owner.lower()
 
 
 def non_ratified_bypass_actors(actors: list[BypassActor]) -> list[BypassActor]:
@@ -936,17 +1023,25 @@ def plan_baseline_rulesets(
     rulesets: list[dict],
     check_contexts: list[str],
     pr_bypass_actors: list[BypassActor] | None = None,
+    *,
+    require_pull_request: bool = False,
 ) -> list[RulesetPlan]:
-    """Plan the ratified pair against the repo's current rulesets. Pure — no I/O.
+    """Plan the ratified trio against the repo's current rulesets. Pure — no I/O.
 
-    Each of the two is planned independently, so a repo carrying only one of
-    them gets that one UPDATED and the other CREATED — the half-baselined
+    Each ruleset is planned independently, so a repo carrying only some of
+    them gets those UPDATED and the rest CREATED — the half-baselined
     state a partial hand-fix or an interrupted earlier run leaves behind.
     """
     plans: list[RulesetPlan] = []
     for name, payload in (
         (BASELINE_HISTORY_PROTECT_NAME, build_baseline_history_protect_ruleset()),
-        (BASELINE_PR_AND_CHECKS_NAME, build_baseline_pr_and_checks_ruleset(check_contexts, pr_bypass_actors)),
+        (
+            BASELINE_PR_AND_CHECKS_NAME,
+            build_baseline_pr_and_checks_ruleset(
+                check_contexts, pr_bypass_actors, require_pull_request=require_pull_request
+            ),
+        ),
+        (BASELINE_TAG_PROTECT_NAME, build_baseline_tag_protect_ruleset()),
     ):
         entry = find_ruleset_by_name(rulesets, name)
         existing_id = entry.get("id") if entry else None
@@ -1013,8 +1108,9 @@ def parse_args() -> argparse.Namespace:
         ),
         epilog=(
             "MODES AND APPROVAL\n"
-            "  default (ratified)     Applies the ratified pair 'baseline-history-protect' +\n"
-            "                         'baseline-pr-and-checks' BY NAME: updates them in place\n"
+            "  default (ratified)     Applies the ratified trio 'baseline-history-protect' +\n"
+            "                         'baseline-pr-and-checks' + 'baseline-tag-protect' BY NAME:\n"
+            "                         updates them in place\n"
             "                         when present, creates them when absent. Applying the\n"
             "                         ratified baseline as-is, and restoring a drifted one back\n"
             "                         to it, are APPROVAL-EXEMPT under manager-approval-defaults\n"
@@ -1059,7 +1155,8 @@ def parse_args() -> argparse.Namespace:
             "Ratified mode only: keep bypass actors found on a pre-existing ruleset "
             "instead of restoring 'baseline-pr-and-checks' to its ratified admin-only "
             "list. This DEVIATES from the ratified baseline and is not approval-exempt. "
-            "It never touches 'baseline-history-protect', which is always no-bypass."
+            "It never touches 'baseline-history-protect' (pinned admin-only bypass) "
+            "or 'baseline-tag-protect' (pinned no-bypass)."
         ),
     )
     p.add_argument(
@@ -1089,6 +1186,25 @@ def parse_args() -> argparse.Namespace:
             "WARNING: this removes any manually configured trust. In ratified mode "
             "the bypass list is pinned by the baseline, so the flag has no effect."
         ),
+    )
+    pr_group = p.add_mutually_exclusive_group()
+    pr_group.add_argument(
+        "--require-pr",
+        dest="require_pr",
+        action="store_true",
+        default=None,
+        help=(
+            "Force the pull_request rule into 'baseline-pr-and-checks'. Default is "
+            "AUTO: required only when the repo is owned by someone other than the "
+            "authenticated gh login (solo-owner repos omit it — Tier-3 ruling "
+            "2026-08-13: a PR addressed to its own author reviews nothing)."
+        ),
+    )
+    pr_group.add_argument(
+        "--no-require-pr",
+        dest="require_pr",
+        action="store_false",
+        help="Force the pull_request rule OFF regardless of ownership detection.",
     )
     p.add_argument(
         "--dry-run",
@@ -1145,6 +1261,18 @@ def resolve_check_contexts(args: argparse.Namespace, owner: str, repo: str) -> l
         return check_contexts
 
     repo_type = detect_repo_type(owner, repo)
+    if repo_type == "unknown":
+        # No CI contexts are DETECTABLE for a repo we cannot even type-probe.
+        # Fabricating the plugin defaults here would require checks that may
+        # never report (PRs pending forever); GitHub also 422s an EMPTY
+        # required_status_checks list, so the ratified shape OMITS the rule
+        # entirely and it reappears once the repo type is detectable (or via
+        # explicit --check-context).
+        sys.stderr.write(
+            "Detected repo type: unknown — no check contexts detectable; the "
+            "required_status_checks rule will be OMITTED (pass --check-context to force).\n"
+        )
+        return []
     check_contexts = default_check_contexts_for(repo_type)
     sys.stderr.write(f"Detected repo type: {repo_type} (defaults: {', '.join(check_contexts)})\n")
     if args.dry_run:
@@ -1276,7 +1404,16 @@ def run_ratified_mode(args: argparse.Namespace, owner: str, repo: str, rulesets:
         rulesets,
         existing_bodies.get(BASELINE_PR_AND_CHECKS_NAME),
     )
-    plans = plan_baseline_rulesets(rulesets, check_contexts, pr_bypass_actors)
+    if args.require_pr is None:
+        want_pr = require_pull_request_for(owner)
+    else:
+        want_pr = args.require_pr
+    sys.stderr.write(
+        f"pull_request rule: {'REQUIRED' if want_pr else 'omitted (solo-owner repo — Tier-3 ruling 2026-08-13)'}\n"
+    )
+    plans = plan_baseline_rulesets(
+        rulesets, check_contexts, pr_bypass_actors, require_pull_request=want_pr
+    )
 
     for plan in plans:
         current = existing_bodies.get(plan.name)
@@ -1300,7 +1437,10 @@ def run_ratified_mode(args: argparse.Namespace, owner: str, repo: str, rulesets:
         verb = "updated" if plan.existing_id is not None else "created"
         print(f"✓ Ruleset {verb}: {plan.name} (id={response.get('id')})")
         print(f"  View: https://github.com/{owner}/{repo}/rules/{response.get('id')}")
-    print(f"  Check contexts required: {', '.join(check_contexts)}")
+    if check_contexts:
+        print(f"  Check contexts required: {', '.join(check_contexts)}")
+    else:
+        print("  Check contexts required: (none — required_status_checks rule omitted)")
     report_superseded_rulesets(owner, repo, rulesets)
     return 0
 
@@ -1325,6 +1465,14 @@ def run_legacy_mode(args: argparse.Namespace, owner: str, repo: str, rulesets: l
         return 2
 
     check_contexts = resolve_check_contexts(args, owner, repo)
+    if not check_contexts:
+        # The legacy build_ruleset always emits a required_status_checks rule,
+        # and GitHub 422s an empty context list — keep the legacy mode's
+        # historical behavior (plugin defaults) rather than a guaranteed 422.
+        check_contexts = default_check_contexts_for("plugin")
+        sys.stderr.write(
+            f"Legacy mode: falling back to plugin default contexts: {', '.join(check_contexts)}\n"
+        )
 
     entry = find_ruleset_by_name(rulesets, LEGACY_RULESET_NAME)
     existing = require_full_ruleset(owner, repo, entry["id"]) if entry else None

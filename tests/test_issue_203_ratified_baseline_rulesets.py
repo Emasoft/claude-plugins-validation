@@ -41,6 +41,7 @@ sbr = importlib.import_module("scripts.setup_branch_rules")
 
 HISTORY = sbr.BASELINE_HISTORY_PROTECT_NAME
 PR_CHECKS = sbr.BASELINE_PR_AND_CHECKS_NAME
+TAG_PROTECT = sbr.BASELINE_TAG_PROTECT_NAME
 LEGACY = sbr.LEGACY_RULESET_NAME
 
 
@@ -184,6 +185,11 @@ class FakeGh:
         if cmd[:2] == ["gh", "--version"] or cmd[:3] == ["gh", "auth", "status"]:
             return self._ok(cmd, "ok")
 
+        if cmd[:3] == ["gh", "api", "user"]:
+            # The authenticated login IS the test repo owner ("o"), so the
+            # solo-owner default applies and no pull_request rule is emitted.
+            return self._ok(cmd, "o\n")
+
         if "--method" in cmd:
             method = cmd[cmd.index("--method") + 1]
             endpoint = cmd[cmd.index("--method") + 2]
@@ -263,9 +269,13 @@ class TestBaselineHistoryProtectPayload:
         rendered = json.dumps(sbr.build_baseline_history_protect_ruleset())
         assert "required_linear_history" not in rendered
 
-    def test_bypass_actors_is_empty_nobody_bypasses(self):
-        """Nobody bypasses history protection — not even an admin."""
-        assert sbr.build_baseline_history_protect_ruleset()["bypass_actors"] == []
+    def test_bypass_actors_is_admin_only(self):
+        """The OWNER (admin role) bypasses history-protect — USER Tier-3 ruling
+        2026-08-13. The pre-ruling `[]` was a lock with no key on solo-owner
+        repos; every NON-admin actor is still bound by deletion/non_fast_forward."""
+        assert sbr.build_baseline_history_protect_ruleset()["bypass_actors"] == [
+            {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+        ]
 
 
 class TestBaselinePrAndChecksPayload:
@@ -291,15 +301,28 @@ class TestBaselinePrAndChecksPayload:
             {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}
         ]
 
-    def test_pull_request_parameters_are_ratified(self):
-        """PR params: 1 approval, dismiss-stale, no codeowner, no last-push, threads resolved."""
+    def test_pull_request_rule_is_omitted_by_default(self):
+        """Solo-owner default: NO pull_request rule (Tier-3 ruling 2026-08-13 —
+        a PR addressed to its own author reviews nothing and only blocks)."""
         payload = sbr.build_baseline_pr_and_checks_ruleset(["Validate"])
+        assert "pull_request" not in {r["type"] for r in payload["rules"]}
+
+    def test_pull_request_parameters_when_required(self):
+        """When required (other-owner repo), approvals is 0 NOT 1: GitHub forbids
+        self-approval, so 1 is unsatisfiable on a solo-owner repo. Do not restore."""
+        payload = sbr.build_baseline_pr_and_checks_ruleset(["Validate"], require_pull_request=True)
         params = next(r for r in payload["rules"] if r["type"] == "pull_request")["parameters"]
-        assert params["required_approving_review_count"] == 1
+        assert params["required_approving_review_count"] == 0
         assert params["dismiss_stale_reviews_on_push"] is True
         assert params["require_code_owner_review"] is False
         assert params["require_last_push_approval"] is False
         assert params["required_review_thread_resolution"] is True
+
+    def test_empty_check_contexts_omit_the_status_checks_rule(self):
+        """GitHub 422s an empty required_status_checks list and the 422 fails the
+        WHOLE ruleset write — the rule must be OMITTED, never emitted empty."""
+        payload = sbr.build_baseline_pr_and_checks_ruleset([])
+        assert "required_status_checks" not in {r["type"] for r in payload["rules"]}
 
     def test_status_checks_are_strict_and_carry_the_detected_contexts(self):
         """strict policy is true and the auto-detected CI contexts are required."""
@@ -367,26 +390,32 @@ class TestPlanBaselineRulesets:
     """Verifies create-vs-update planning against the repo's current rulesets."""
 
     def test_baselined_repo_updates_both_in_place(self):
-        """Both ratified rulesets are UPDATEd by id — no new ruleset is planned."""
+        """Present ratified rulesets are UPDATEd by id; the missing tag-protect is CREATEd."""
         rulesets = [_history_protect_body(101), _pr_and_checks_body(102)]
         plans = sbr.plan_baseline_rulesets(rulesets, ["Validate"])
         assert [(p.name, p.action, p.existing_id) for p in plans] == [
             (HISTORY, "UPDATE", 101),
             (PR_CHECKS, "UPDATE", 102),
+            (TAG_PROTECT, "CREATE", None),
         ]
 
-    def test_bare_repo_creates_the_pair(self):
-        """A repo with no rulesets gets both ratified rulesets CREATEd."""
+    def test_bare_repo_creates_the_trio(self):
+        """A repo with no rulesets gets all three ratified rulesets CREATEd."""
         plans = sbr.plan_baseline_rulesets([], ["Validate"])
         assert [(p.name, p.action, p.existing_id) for p in plans] == [
             (HISTORY, "CREATE", None),
             (PR_CHECKS, "CREATE", None),
+            (TAG_PROTECT, "CREATE", None),
         ]
 
-    def test_half_baselined_repo_updates_one_and_creates_the_other(self):
-        """A partial hand-fix leaves one of the pair — that one is updated, the other created."""
+    def test_half_baselined_repo_updates_one_and_creates_the_others(self):
+        """A partial hand-fix leaves one of the trio — that one is updated, the rest created."""
         plans = sbr.plan_baseline_rulesets([_pr_and_checks_body(102)], ["Validate"])
-        assert [(p.name, p.action) for p in plans] == [(HISTORY, "CREATE"), (PR_CHECKS, "UPDATE")]
+        assert [(p.name, p.action) for p in plans] == [
+            (HISTORY, "CREATE"),
+            (PR_CHECKS, "UPDATE"),
+            (TAG_PROTECT, "CREATE"),
+        ]
 
     def test_no_plan_ever_carries_the_legacy_name(self):
         """Planning cannot emit a `cpv-branch-rules` payload, on any repo shape."""
@@ -420,21 +449,22 @@ class TestMainRatifiedMode:
         assert [(m, e) for m, e, _ in fake.writes] == [
             ("PUT", "repos/Emasoft/plugin/rulesets/101"),
             ("PUT", "repos/Emasoft/plugin/rulesets/102"),
+            ("PUT", "repos/Emasoft/plugin/rulesets/103"),
         ]
-        assert _payload_names(fake) == [HISTORY, PR_CHECKS]
+        assert _payload_names(fake) == [HISTORY, PR_CHECKS, TAG_PROTECT]
         assert LEGACY not in _payload_names(fake)
         assert "DELETE" not in captured.out
         assert "DELETE" not in captured.err
 
-    def test_bare_repo_creates_the_ratified_pair(self, monkeypatch, capsys):
-        """Two-sided: with nothing present, both ratified rulesets are POSTed."""
+    def test_bare_repo_creates_the_ratified_trio(self, monkeypatch, capsys):
+        """Two-sided: with nothing present, all three ratified rulesets are POSTed."""
         fake = FakeGh([])
         rc = _run_main(fake, ["Emasoft/plugin"], monkeypatch)
         capsys.readouterr()
 
         assert rc == 0
-        assert [m for m, _, _ in fake.writes] == ["POST", "POST"]
-        assert _payload_names(fake) == [HISTORY, PR_CHECKS]
+        assert [m for m, _, _ in fake.writes] == ["POST", "POST", "POST"]
+        assert _payload_names(fake) == [HISTORY, PR_CHECKS, TAG_PROTECT]
 
     def test_plugin_repo_gets_the_three_ci_contexts(self, monkeypatch, capsys):
         """Check contexts are still auto-detected from the repo type."""
@@ -536,7 +566,7 @@ class TestMainFailsClosed:
         rc = _run_main(fake, ["Emasoft/plugin"], monkeypatch)
         capsys.readouterr()
         assert rc == 0
-        assert [m for m, _, _ in fake.writes] == ["POST", "POST"]
+        assert [m for m, _, _ in fake.writes] == ["POST", "POST", "POST"]
 
 
 class TestMainLegacyMode:
@@ -624,7 +654,8 @@ class TestRatifiedBypassActorHandling:
         assert "not approval-exempt" in err.lower()
 
     def test_adopt_flag_never_weakens_history_protect(self, monkeypatch, capsys):
-        """history-protect stays no-bypass even under --adopt-bypass-actors."""
+        """history-protect stays pinned admin-only even under --adopt-bypass-actors —
+        the adopted Integration actor must never leak into it."""
         pr = _pr_and_checks_body(
             102,
             bypass_actors=[{"actor_id": 4242, "actor_type": "Integration", "bypass_mode": "always"}],
@@ -633,7 +664,9 @@ class TestRatifiedBypassActorHandling:
         _run_main(fake, ["Emasoft/plugin", "--adopt-bypass-actors"], monkeypatch)
         capsys.readouterr()
         payload = next(p for _, _, p in fake.writes if p["name"] == HISTORY)
-        assert payload["bypass_actors"] == []
+        assert payload["bypass_actors"] == [
+            {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+        ]
 
     def test_add_bypass_app_id_is_reported_as_a_deviation(self, monkeypatch, capsys):
         """An explicitly added app id lands in the payload and is flagged as a deviation."""
@@ -787,3 +820,72 @@ class TestCliModes:
         with mock.patch.object(sys, "argv", ["setup_branch_rules.py", "Emasoft/x", "--adopt-bypass-actors"]):
             args = sbr.parse_args()
         assert args.adopt_bypass_actors is True
+
+
+# ── TRDD-QOZXF6A6: the 2026-08-13 Tier-3 ruling shape ──────────────────────
+
+
+class TestStaleByContentRepoIsPatchedToRatifiedShape:
+    """Acceptance for TRDD-QOZXF6A6: a repo PRESENT-BY-NAME but STALE-BY-CONTENT
+    (the pre-ruling bypass_actors=[] / approvals=1 shape) is PUT back to the
+    ratified 2026-08-13 shape, and non-admin actors stay fully constrained."""
+
+    def test_stale_history_protect_is_updated_to_admin_bypass(self, monkeypatch, capsys):
+        """The fixture history-protect body carries the STALE bypass_actors=[]
+        — the PUT payload must carry the ratified admin bypass instead, and the
+        drift report must NAME the added actor (nothing changes silently)."""
+        fake = FakeGh([_history_protect_body(101)])
+        rc = _run_main(fake, ["Emasoft/plugin"], monkeypatch)
+        captured = capsys.readouterr()
+        assert rc == 0
+        method, endpoint, payload = next(w for w in fake.writes if w[2]["name"] == HISTORY)
+        assert (method, endpoint) == ("PUT", "repos/Emasoft/plugin/rulesets/101")
+        assert payload["bypass_actors"] == [
+            {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+        ]
+        assert "bypass actor added: RepositoryRole id=5" in captured.err
+
+    def test_non_admin_actors_remain_refused_deletion_and_non_fast_forward(self):
+        """Post-apply property: the rules bind everyone, and the ONLY bypass is
+        the admin repository role — so any non-admin actor is still refused
+        deletion and non_fast_forward."""
+        payload = sbr.build_baseline_history_protect_ruleset()
+        assert {r["type"] for r in payload["rules"]} == {"deletion", "non_fast_forward"}
+        for actor in payload["bypass_actors"]:
+            assert actor["actor_type"] == "RepositoryRole"
+            assert actor["actor_id"] == sbr.RATIFIED_ADMIN_BYPASS_ROLE_ID
+
+    def test_tag_protect_has_no_bypass_and_blocks_repoint(self):
+        """tag-protect: no bypass at all; deletion + update (update also blocks a
+        fast-forward repoint, the hole non_fast_forward alone would leave)."""
+        payload = sbr.build_baseline_tag_protect_ruleset()
+        assert payload["bypass_actors"] == []
+        assert [r["type"] for r in payload["rules"]] == ["deletion", "update"]
+
+
+class TestRequirePullRequestFor:
+    """Ownership detection for the conditional pull_request rule."""
+
+    def _with_login(self, monkeypatch, returncode: int, stdout: str):
+        def fake_run(cmd, *, check=True, input_data=None, timeout=60):
+            assert cmd[:3] == ["gh", "api", "user"]
+            return subprocess.CompletedProcess(cmd, returncode, stdout, "")
+
+        monkeypatch.setattr(sbr, "run", fake_run)
+
+    def test_own_repo_needs_no_pr(self, monkeypatch):
+        self._with_login(monkeypatch, 0, "Emasoft\n")
+        assert sbr.require_pull_request_for("Emasoft") is False
+
+    def test_other_owner_repo_requires_pr(self, monkeypatch):
+        self._with_login(monkeypatch, 0, "Emasoft\n")
+        assert sbr.require_pull_request_for("someone-else") is True
+
+    def test_undeterminable_login_fails_open_to_no_pr(self, monkeypatch):
+        """A wrongly-DEMANDED PR silently halts all merging; fail open."""
+        self._with_login(monkeypatch, 1, "")
+        assert sbr.require_pull_request_for("Emasoft") is False
+
+    def test_case_insensitive_owner_match(self, monkeypatch):
+        self._with_login(monkeypatch, 0, "emasoft\n")
+        assert sbr.require_pull_request_for("Emasoft") is False
