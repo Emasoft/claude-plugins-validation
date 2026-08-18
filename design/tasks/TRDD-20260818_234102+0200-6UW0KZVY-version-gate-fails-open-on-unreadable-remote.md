@@ -1,9 +1,9 @@
 ---
 trdd-id: 6UW0KZVY
 title: publish version gate fails open when the remote is unreadable
-column: dev
+column: ai_review
 created: 2026-08-18T23:41:02+0200
-updated: 2026-08-18T23:41:02+0200
+updated: 2026-08-19T00:05:00+0200
 current-owner: cpv-session
 task-type: bugfix
 priority: 2
@@ -25,8 +25,8 @@ on that False:
 
 - publish.py:2640 — recovery consolidation: unreadable remote → treats the
   prior chore(release) commit as NOT published → `git reset --soft HEAD~1`
-  + deletes the local tag. If the tag IS published, this mangles local state
-  against the public source of truth.
+  and deletes the local tag. If the tag IS published, this mangles local
+  state against the public source of truth.
 - publish.py:2694 — stale-tag guard: unreadable remote → moves the local tag.
 
 The POST-push verify sites (publish.py:2823, template :3930) are already
