@@ -2772,14 +2772,25 @@ def stage_commit_tag_push(
     # git_with_retry still wraps the call so transient network hiccups
     # retry; 4xx-class permanent errors fall through immediately.
     print(f"  $ git push --atomic origin HEAD {tag_name}")
-    git_with_retry(
-        # Both tags in ONE atomic push: a release can never ship with the plain tag
-        # and not the dependency tag (which is exactly how this defect hid).
-        ["git", "push", "--atomic", "origin", "HEAD", tag_name, *([dep_tag_name] if dep_tag_name else [])],
-        cwd=plugin_root,
-        env=os.environ.copy(),
-        capture_output=False,
-    )
+    # capture_output MUST be True (TRDD-WC2GEDOC): the transient classifier
+    # reads result.stderr, and with capture_output=False stderr is None, so
+    # `if not stderr: return False` classified EVERY failure as permanent and
+    # the release push could never retry a network blip. The captured stderr
+    # is echoed below (success and failure) so nothing git says is swallowed.
+    try:
+        push_result = git_with_retry(
+            # Both tags in ONE atomic push: a release can never ship with the plain tag
+            # and not the dependency tag (which is exactly how this defect hid).
+            ["git", "push", "--atomic", "origin", "HEAD", tag_name, *([dep_tag_name] if dep_tag_name else [])],
+            cwd=plugin_root,
+            env=os.environ.copy(),
+        )
+    except subprocess.CalledProcessError as exc:
+        if exc.stderr:
+            print(exc.stderr, file=sys.stderr, end="")
+        raise
+    if push_result.stderr:
+        print(push_result.stderr, file=sys.stderr, end="")
     print(f"{GREEN}✓ Pushed branch and tag {tag_name} atomically{NC}")
     # Prove the TAG, not the stage (ai-maestro#62 R3, filed by the ai-maestro
     # server Claude): a push stage that ran and silently failed its ref-update
