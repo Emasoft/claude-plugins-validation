@@ -3858,7 +3858,21 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
             for _p in _stray[:20]:
                 cprint(f"  {YELLOW}    ?? {_p}{NC}")
             cprint(f"  {YELLOW}  If one belongs in the release, `git add` it BY NAME and re-run.{NC}")
-        run(["git", "commit", "-m", expected_subject], cwd=root)
+        # PRRD G1.1: every commit this tool creates carries an `Agent:` trailer
+        # self-identifying which plugin's pipeline authored it. The slug is
+        # DERIVED from the manifest (never hardcoded — this file is a shared
+        # template), and the trailer carries NO `@`: a bare handle in a commit
+        # message pages a real GitHub account. A second `-m` paragraph is a
+        # proper git trailer (last paragraph, `Token: value`).
+        # Any `@` in the name is stripped: GitHub linkifies `@word` in commit
+        # messages, so a handle-shaped name would PAGE a real account.
+        _agent_slug = (_plugin_name(root) or "").replace("@", "")
+        _commit_cmd = ["git", "commit", "-m", expected_subject]
+        if _agent_slug:
+            _commit_cmd += ["-m", f"Agent: {_agent_slug}"]
+        else:
+            cprint(f"  {YELLOW}plugin.json name unreadable — commit carries no Agent: trailer (G1.1).{NC}")
+        run(_commit_cmd, cwd=root)
 
     if tag_exists:
         cprint(f"  {YELLOW}Tag {tag} already exists locally — skipping tag step.{NC}")

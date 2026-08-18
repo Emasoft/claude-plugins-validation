@@ -1,7 +1,7 @@
 ---
 trdd-id: 1YNY73NT
 title: canonical release tool cannot emit the Agent self-identification trailer mandated by golden rule G1.1
-column: todo
+column: dev
 created: 2026-08-18T20:29:38+0200
 updated: 2026-08-18T20:29:38+0200
 current-owner: cpv-session
