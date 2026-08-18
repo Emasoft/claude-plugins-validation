@@ -2357,19 +2357,17 @@ def _dependency_tag_name(plugin_root: Path, tag_name: str) -> str | None:
     return f"{name}--v{tag_name.removeprefix('v')}"
 
 
-def _remote_tag_exists(plugin_root: Path, tag_name: str) -> bool:
-    """True when ``tag_name`` exists on origin (per ``git ls-remote``).
+def _remote_tag_state(plugin_root: Path, tag_name: str) -> bool | None:
+    """Three-valued remote-tag probe (TRDD-6UW0KZVY, amvcp TRDD-YY5ISKCJ shape).
 
-    Used by Gate 10's recovery path to confirm a half-published release
-    can be safely consolidated into one commit. If the tag is already on
-    remote, the prior commit is the source-of-truth for that release and
-    we MUST NOT undo it.
-
-    Network failure → returns False conservatively. The caller's recovery
-    branch is only entered when HEAD already has the chore(release) commit
-    AND the tree is dirty; in the failure-to-check case, we'd just skip
-    the recovery and create a second chore commit (same as the pre-fix
-    behaviour, no regression).
+    Returns:
+      True  — ls-remote SUCCEEDED and the tag exists on origin.
+      False — ls-remote SUCCEEDED and the tag does not exist (a real answer:
+              first-publish and the pre-push recovery both rely on it).
+      None  — the remote could NOT be read (non-zero exit / timeout). This is
+              NOT "no tags": collapsing it into False made the destructive
+              recovery branches act on a question the remote never answered
+              — undoing a commit whose tag may well be published.
     """
     try:
         result = subprocess.run(
@@ -2381,8 +2379,16 @@ def _remote_tag_exists(plugin_root: Path, tag_name: str) -> bool:
             timeout=30,
         )
     except subprocess.TimeoutExpired:
-        return False
-    return result.returncode == 0 and bool(result.stdout.strip())
+        return None
+    if result.returncode != 0:
+        return None
+    return bool(result.stdout.strip())
+
+
+def _remote_tag_exists(plugin_root: Path, tag_name: str) -> bool:
+    """True only on a POSITIVE remote answer — for the post-push verify,
+    where None and False alike must report UNVERIFIED, never green."""
+    return _remote_tag_state(plugin_root, tag_name) is True
 
 
 def _ensure_submodules_pushed(plugin_root: Path) -> None:
@@ -2631,13 +2637,35 @@ def stage_commit_tag_push(
     expected_subject = f"chore(release): {tag_name}"
     head_subject = _head_commit_message(plugin_root)
     porcelain_clean = _git_porcelain_clean(plugin_root)
+    # FAIL-CLOSED remote read (TRDD-6UW0KZVY, the amvcp TRDD-YY5ISKCJ shape):
+    # the recovery branch below undoes the release commit and deletes its
+    # local tag — safe ONLY on the remote's positive answer that the tag is
+    # unpublished. An unreadable remote (ls-remote non-zero / timeout) is NOT
+    # that answer; the old bool helper collapsed it into "no tag" and took
+    # the destructive branch on a question the remote never answered.
+    # Refusing costs a re-run; guessing wrong mangles local state against a
+    # published release.
+    _recovery_candidate = (not porcelain_clean) and head_subject == expected_subject
+    _tag_on_remote: bool | None = False
+    if _recovery_candidate:
+        _tag_on_remote = _remote_tag_state(plugin_root, tag_name)
+        if _tag_on_remote is None:
+            print(
+                f"{RED}✗ Cannot read origin's tags (ls-remote failed) while deciding the "
+                f"interrupted-publish recovery for {tag_name}. Refusing to consolidate: "
+                f"the recovery undoes the release commit, which is only safe when the "
+                f"remote confirms the tag is unpublished. Re-run once the remote is "
+                f"reachable.{NC}",
+                file=sys.stderr,
+            )
+            return 1
     if porcelain_clean and head_subject == expected_subject:
         print(
             f"{YELLOW}  Working tree clean and HEAD already has '{expected_subject}' — "
             f"skipping commit (interrupted-publish recovery).{NC}"
         )
         print(f"{GREEN}✓ Already committed {tag_name}{NC}")
-    elif (not porcelain_clean) and head_subject == expected_subject and not _remote_tag_exists(plugin_root, tag_name):
+    elif _recovery_candidate and _tag_on_remote is False:
         # Bug fix (task #151): the previous publish run got interrupted between
         # Gate 10 (commit) and Gate 12 (push), so HEAD already has the
         # `chore(release): v<tag>` commit but the tag was never pushed to
@@ -2656,8 +2684,9 @@ def stage_commit_tag_push(
         # (preserves all changes in the index + working tree), then make ONE
         # consolidated commit that includes the prior bump AND the new
         # manifest refresh. This is safe because:
-        # - The commit being undone is local-only (`_remote_tag_exists`
-        #   confirmed it).
+        # - The commit being undone is local-only (`_remote_tag_state`
+        #   POSITIVELY confirmed the tag is absent from origin — an
+        #   unreadable remote refused above instead of guessing).
         # - `--soft` doesn't touch files; only the commit pointer moves back.
         # - Git's reflog still has the old commit recoverable via
         #   `git reset HEAD@{1}` for the next ~90 days.
@@ -2691,7 +2720,21 @@ def stage_commit_tag_push(
         # any remaining drift cases (manual tag created out-of-band, etc.).
         tag_sha = run(["git", "rev-list", "-n", "1", tag_name], cwd=plugin_root, check=False).stdout.strip()
         head_sha = run(["git", "rev-parse", "HEAD"], cwd=plugin_root, check=False).stdout.strip()
-        if tag_sha and head_sha and tag_sha != head_sha and not _remote_tag_exists(plugin_root, tag_name):
+        _drift_remote_state: bool | None = None
+        if tag_sha and head_sha and tag_sha != head_sha:
+            # FAIL-CLOSED (TRDD-6UW0KZVY): moving the tag is only safe on the
+            # remote's positive answer that it is unpushed.
+            _drift_remote_state = _remote_tag_state(plugin_root, tag_name)
+            if _drift_remote_state is None:
+                print(
+                    f"{RED}✗ Local tag {tag_name} points at {tag_sha[:8]} (HEAD {head_sha[:8]}) "
+                    f"and origin's tags cannot be read (ls-remote failed). Refusing to move "
+                    f"the tag: that is only safe when the remote confirms it is unpushed. "
+                    f"Re-run once the remote is reachable.{NC}",
+                    file=sys.stderr,
+                )
+                return 1
+        if tag_sha and head_sha and tag_sha != head_sha and _drift_remote_state is False:
             print(
                 f"{YELLOW}  Local tag {tag_name} points at {tag_sha[:8]}, HEAD is at "
                 f"{head_sha[:8]}. Tag is unpushed; moving it to HEAD.{NC}"
