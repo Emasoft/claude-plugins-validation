@@ -54,6 +54,26 @@ class TestClassifierNeedsStderr:
         """The old capture_output=False shape: stderr None -> '' -> permanent."""
         assert not nr.is_transient_subprocess_error("", 1)
 
+    def test_real_git_dns_failure_stderr_is_transient(self):
+        """REAL producer shape (captured from an actual `git push` to an
+        unresolvable host on 2026-08-18, exit 128) — not synthesized from the
+        classifier's own pattern list."""
+        real = (
+            "fatal: unable to access 'https://nonexistent-host-cpv-test.invalid/o/r.git/': "
+            "Could not resolve host: nonexistent-host-cpv-test.invalid\n"
+        )
+        assert nr.is_transient_subprocess_error(real, 128)
+
+    def test_real_git_non_fast_forward_stderr_is_permanent(self):
+        """REAL producer shape (captured from an actual rejected push after an
+        amend, exit 1) — permanent, never retried."""
+        real = (
+            "To /tmp/bare\n"
+            " ! [rejected]        HEAD -> master (non-fast-forward)\n"
+            "error: failed to push some refs to '/tmp/bare'\n"
+        )
+        assert not nr.is_transient_subprocess_error(real, 1)
+
     def test_run_with_retry_retries_when_stderr_is_captured(self):
         """End-to-end through run_with_retry: transient stderr on attempt 1,
         success on attempt 2 — the retry MUST happen."""
