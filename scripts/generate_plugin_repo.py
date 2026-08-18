@@ -3887,10 +3887,21 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     # update fails. git_with_retry still wraps the call so transient
     # network hiccups (4xx-class permanent errors fall through immediately).
     cprint(f"  {BLUE}$ git push --atomic origin {' '.join(push_refs)}{NC}")
-    git_with_retry(
-        ["git", "push", "--atomic", "origin", *push_refs],
-        cwd=str(root), capture_output=False,
-    )
+    # capture_output MUST stay True (the default): the transient classifier
+    # reads result.stderr, and with capture_output=False stderr is None, so
+    # every failure classified as permanent and the release push could never
+    # retry a network blip. Echo the captured stderr so nothing is swallowed.
+    try:
+        _push_res = git_with_retry(
+            ["git", "push", "--atomic", "origin", *push_refs],
+            cwd=str(root),
+        )
+    except subprocess.CalledProcessError as _push_exc:
+        if _push_exc.stderr:
+            print(_push_exc.stderr, file=sys.stderr, end="")
+        raise
+    if _push_res.stderr:
+        print(_push_res.stderr, file=sys.stderr, end="")
     _pushed = tag if dep_tag is None else f"{tag} + {dep_tag}"
     cprint(f"  {GREEN}Pushed {_pushed} atomically.{NC}")
     # PROVE THE TAG, not the stage (ai-maestro#62 R3). A push stage that ran and
