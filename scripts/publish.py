@@ -1199,7 +1199,10 @@ def stage_check_working_tree(plugin_root: Path) -> int:
         if sole_uv_lock_modification:
             print(f"{YELLOW}Auto-committing uv.lock (modified by uv run){NC}")
             run(["git", "add", "uv.lock"], cwd=plugin_root)
-            run(["git", "commit", "-m", "chore: update uv.lock"], cwd=plugin_root)
+            run(
+                ["git", "commit", "-m", "chore: update uv.lock", *_agent_trailer_args(plugin_root)],
+                cwd=plugin_root,
+            )
         else:
             print(f"{RED}✗ Uncommitted changes detected. Commit or stash first.{NC}", file=sys.stderr)
             print("\n".join(dirty_lines))
@@ -1873,6 +1876,23 @@ def _check_layout_b(plugin_root: Path, details: dict) -> int:
     print(f"  {GREEN}✓ Plugin '{plugin_name}' registered in parent marketplace.json{NC}")
     print(f"{GREEN}✓ Layout B marketplace registration verified{NC}")
     return 0
+
+
+def _agent_trailer_args(plugin_root: Path) -> list[str]:
+    """Extra `git commit` args carrying the PRRD G1.1 `Agent:` trailer.
+
+    Every commit this tool creates self-identifies which plugin's pipeline
+    authored it. The slug is DERIVED from the manifest (dir-name fallback via
+    _read_plugin_name — never hardcoded) and carries NO `@`: a bare handle in
+    a commit message pages a real GitHub account. A second `-m` paragraph is
+    a proper git trailer (last paragraph, `Token: value`).
+
+    Any `@` in the derived name is stripped: GitHub linkifies `@word` at a
+    word boundary in commit messages, so a handle-shaped name would PAGE a
+    real account (github-mentions iron rule).
+    """
+    slug = _read_plugin_name(plugin_root).replace("@", "")
+    return ["-m", f"Agent: {slug}"]
 
 
 def _read_plugin_name(plugin_root: Path) -> str:
@@ -2657,11 +2677,11 @@ def stage_commit_tag_push(
             run(["git", "tag", "-d", tag_name], cwd=plugin_root)
             print(f"{YELLOW}  Removed local-only tag {tag_name} (will re-create on the consolidated commit).{NC}")
         stage_release_changes(plugin_root)
-        run(["git", "commit", "-m", expected_subject], cwd=plugin_root)
+        run(["git", "commit", "-m", expected_subject, *_agent_trailer_args(plugin_root)], cwd=plugin_root)
         print(f"{GREEN}✓ Re-committed {tag_name} with manifest refresh folded in{NC}")
     else:
         stage_release_changes(plugin_root)
-        run(["git", "commit", "-m", expected_subject], cwd=plugin_root)
+        run(["git", "commit", "-m", expected_subject, *_agent_trailer_args(plugin_root)], cwd=plugin_root)
         print(f"{GREEN}✓ Committed {tag_name}{NC}")
     print(f"\n{BLUE}═══ Gate 11: Create git tag {tag_name} ═══{NC}")
     if _local_tag_exists(plugin_root, tag_name):
