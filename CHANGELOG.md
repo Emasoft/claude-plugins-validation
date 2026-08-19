@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.7.1] - 2026-08-19
+
+### Documentation
+
+- MCP discouraged-but-never-cut-off policy (owner directive 2026-08-19)
+
 ## [5.7.0] - 2026-08-19
 
 ### Documentation
