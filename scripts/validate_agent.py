@@ -469,9 +469,26 @@ def validate_tools_field(frontmatter: dict[str, Any], filename: str, report: Age
                 "Tool 'Task' was renamed to 'Agent' in v2.1.63; 'Task' still works as an alias",
                 filename,
             )
-        elif base_tool in ("TodoRead", "Notebook", "MultiEdit"):
+        elif base_tool in ("TodoRead", "Notebook", "MultiEdit", "SlashCommand", "MCPSearch"):
             report.warning(
                 f"Tool '{base_tool}' is not in the current tools-reference spec. Verify existence before shipping.",
+                filename,
+            )
+        elif base_tool == "TodoWrite":
+            # tools-reference: disabled by default in favor of the Task tools,
+            # and (v2.1.233) not provided at all on Opus 4.8 / Sonnet 5 /
+            # Fable 5 / Mythos 5+ without CLAUDE_CODE_ENABLE_TODO_TOOLS=1.
+            report.warning(
+                "Tool 'TodoWrite' is disabled by default in favor of TaskCreate/TaskGet/TaskList/TaskUpdate, "
+                "and absent on Opus 4.8 / Sonnet 5 / Fable 5+ unless the user opts in (CLAUDE_CODE_ENABLE_TODO_TOOLS=1)",
+                filename,
+            )
+        elif base_tool in ("TaskCreate", "TaskGet", "TaskList", "TaskUpdate"):
+            # INFO, not WARNING: still provided by default on pre-2.1.233-gated
+            # models (e.g. Opus 4.7), so listing it is only conditionally moot.
+            report.info(
+                f"Tool '{base_tool}' is not provided on Opus 4.8 / Sonnet 5 / Fable 5+ (CC v2.1.233) "
+                "unless the user opts in (CLAUDE_CODE_ENABLE_TODO_TOOLS=1 or --allowedTools)",
                 filename,
             )
 
