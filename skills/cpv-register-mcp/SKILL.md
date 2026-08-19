@@ -7,6 +7,14 @@ user-invocable: false
 
 # cpv-register-mcp
 
+> **Policy note (owner, 2026-08-19):** MCP is supported but **strongly
+> discouraged** for plugin integrations — prefer a CLI or script the agent
+> invokes directly. Register an MCP server only when the target service runs
+> exclusively over MCP. This skill stays fully functional (the option is never
+> cut off — plugins, agent `mcpServers`, or user-scoped settings all remain
+> valid homes); `validate_mcp` emits a non-blocking INFO advisory when a
+> plugin ships MCP.
+
 ## Overview
 
 Registers a new MCP server in a plugin's `.mcp.json`. The default transport is stdio (executable spawned per session). HTTP transport is also supported via the `--http-url` flag. The server's `command` MUST be cross-platform — invoke it via `node`, `python3`, `uv run`, or `npx` so it runs identically on Linux, macOS, and Windows. A bare relative shell-script command (e.g. `./run.sh`) is a portability footgun: `validate_mcp` flags a relative file path that omits `${CLAUDE_PLUGIN_ROOT}` as a MINOR finding, and a `.sh` entry point will not run on Windows at all — always wrap it in a cross-platform interpreter. Loaded dynamically via cpv-the-skills-menu, reached via the Create → Add MCP server menu branch.
