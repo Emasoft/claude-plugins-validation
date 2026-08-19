@@ -2,6 +2,29 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.6.0] - 2026-08-19
+
+### Bug Fixes
+
+- Setup_branch_rules emits the ratified 2026-08-13 baseline shapes (TRDD-QOZXF6A6)
+- Atomic release push can retry transients again (TRDD-WC2GEDOC)
+- Remote-tag probe is three-valued; destructive recovery refuses on unreadable remote (TRDD-6UW0KZVY)
+
+### Documentation
+
+- Add TRDD-QOZXF6A6, TRDD-WC2GEDOC, TRDD-1YNY73NT — Phase-2 hub dispatch cards
+- Phase-2 cards to ai_review; CLAUDE.md v5.6.0 snapshot (TRDD-QOZXF6A6 WC2GEDOC 1YNY73NT 6UW0KZVY)
+- **memory:** Flatten dangling wikimem links (memgrep normalization)
+- **memory:** Two owed wikimem lessons — real-producer fixtures, three-valued remote reads
+
+### Features
+
+- Release tool emits the G1.1 Agent commit trailer (TRDD-1YNY73NT)
+
+### Testing
+
+- Pin REAL git stderr shapes on the retry classifier (TRDD-WC2GEDOC)
+
 ## [5.5.0] - 2026-08-15
 
 ### Bug Fixes
