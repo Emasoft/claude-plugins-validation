@@ -1,9 +1,9 @@
 ---
 trdd-id: 6UW0KZVY
 title: publish version gate fails open when the remote is unreadable
-column: ai_review
+column: complete
 created: 2026-08-18T23:41:02+0200
-updated: 2026-08-19T00:05:00+0200
+updated: 2026-08-19T05:02:12+0200
 current-owner: cpv-session
 task-type: bugfix
 priority: 2

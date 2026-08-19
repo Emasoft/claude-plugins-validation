@@ -1,9 +1,9 @@
 ---
 trdd-id: WC2GEDOC
 title: canonical publish.py atomic release push cannot retry on transient errors
-column: ai_review
+column: complete
 created: 2026-08-18T20:29:38+0200
-updated: 2026-08-19T00:05:00+0200
+updated: 2026-08-19T05:02:12+0200
 current-owner: cpv-session
 task-type: bugfix
 priority: 1
