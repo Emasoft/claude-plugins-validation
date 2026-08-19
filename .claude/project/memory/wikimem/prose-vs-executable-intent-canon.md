@@ -59,7 +59,7 @@ discipline lives in the USER-scope `debugging-methodology` page.
 
 ## See also
 
-- [[lesson-greedy-match-truncates-right-context]] — the sibling failure mode: a determiner
+- lesson-greedy-match-truncates-right-context — the sibling failure mode: a determiner
   or verb matched without enough right-context (`other` in "the other daemon"; `an-other`
   matched inside the word "another" before `\b` anchoring).
 

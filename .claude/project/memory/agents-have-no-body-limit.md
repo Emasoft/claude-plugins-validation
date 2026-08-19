@@ -39,7 +39,7 @@ decision, not an oversight. The regression lock is
 `tests/test_validate_agent.py::TestAgentBodyHasNoLengthLimit` (a 6000-word body emits
 no length finding; the `MIN_BODY_CHARS` floor still fires). A body cap belongs ONLY on
 skills. Supersedes the "lean agents under 2000 words" note in
-[[agent-trim-and-release-gotchas]].
+agent-trim-and-release-gotchas.
 
 ## Governed by
 
