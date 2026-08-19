@@ -147,6 +147,9 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 
 ## Open issues snapshot (update as they close)
 
+**v5.7.1 — MCP discouraged-but-never-cut-off policy (owner directive 2026-08-19)**
+— `validate_mcp` now emits a non-blocking INFO advisory noting MCP servers are discouraged (prefer CLI tools/skills for token economy) but NEVER a blocking finding — plugins with MCP servers remain fully valid; policy note added to `cpv-register-mcp`; rationale recorded in wikimem page `mcp-discouraged-but-never-cut-off`. No severity model change, no gate change.
+
 **v5.7.0 — CC spec sync for the v2.1.233–235 window (raw-doc mechanical set-diff, per the recorded drift method)**
 — **Tools:** `ListAgents` added to `VALID_TOOLS` (a tools-reference row since v2.1.224, surfaced by this window's set-diff); `SlashCommand`/`MCPSearch` demoted to the legacy-emits-WARNING bucket (dropped from the tools-reference table; kept in the set per the MultiEdit precedent — runtime removal unproven); `CANONICAL_TOOLS` backfilled with the 5 current rows it lacked (`Artifact`, `ListAgents`, `ReportFindings`, `SendUserFile`, `Workflow`) plus the retained-legacy names its docstring promises, and a structural test now pins `VALID_TOOLS − {Task} ⊆ CANONICAL_TOOLS`.
 — **v2.1.233 todo/task-tool model gating:** `TodoWrite`+`TaskCreate/Get/List/Update` aren't provided on Opus 4.8 / Sonnet 5 / Fable 5 / Mythos 5+ without opt-in (`CLAUDE_CODE_ENABLE_TODO_TOOLS=1`). They stay VALID (availability is a runtime/model property); `validate_agent` now emits WARNING for `TodoWrite` (disabled by default everywhere in favor of the Task tools) and INFO for the four Task tools. `TaskStop`/`TaskOutput` are NOT gated and draw no note (control-tested).
