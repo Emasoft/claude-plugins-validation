@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-08-19T08:32:46+00:00",
+  "computed_at": "2026-08-19T12:06:10+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:2b486554796204d2fa5077ebeb0ecb6fb7f6cfce28164c6326ec224ec3f3622d",
@@ -332,7 +332,7 @@
     "scripts/validate_lsp.py": "sha256:7d7a37812f63082fb86c6984d90a45ebe3d4f6316ffe382f03b6b1fe34eca2f6",
     "scripts/validate_marketplace.py": "sha256:7a0f89ed665c80c9ac7fe9bf05cf7329dcc6bf3cd08cc39d635ded52dbb750d1",
     "scripts/validate_marketplace_pipeline.py": "sha256:530e7dbfe558fb386a7dba5976869b71ff1777cb39e3ecc126e73f5ac9637c8b",
-    "scripts/validate_mcp.py": "sha256:50d7fcc64b9cb0908f8043c42d03fbf8994554a65fecaa5c84fcc72625c50abb",
+    "scripts/validate_mcp.py": "sha256:67f4bcbe558758243db6407adf2dd888769baee8de3be71d1c006cb0d74a69cc",
     "scripts/validate_plugin.py": "sha256:b60b930b5a9d62e1591e47c9170c234b6b1d967ebe81c1b47071b49f58d51b5c",
     "scripts/validate_project_scope.py": "sha256:8cd962de3674ba0c6c79012e5558c1ca7533d1808f3d9077d3cef80060354d68",
     "scripts/validate_rules.py": "sha256:2d8d4ecf266bbde1a5d8f982a0285a5d433d47264a9ed35425725cd989e57185",
@@ -498,7 +498,7 @@
     "skills/cpv-publish-to-marketplace/SKILL.md": "sha256:19cb9fe76559be9c7cbf5a6ccbc67ffc10ab25c79d76d07b1050af4e66211985",
     "skills/cpv-publish-to-marketplace/references/publish-pipeline-guide.md": "sha256:67dbd60d76085905a23abe248ebfb80c22892955a0d6da18b0c5ffbbe7650036",
     "skills/cpv-refresh-readme/SKILL.md": "sha256:685b2a555f6a39d8abccfaef714abb0c364ea6cfcd2adc4e80d3ab9c1379f550",
-    "skills/cpv-register-mcp/SKILL.md": "sha256:db79fd933444e5c0c2614bbd49681fc7bf967f3351bdeec35708965333ce98a7",
+    "skills/cpv-register-mcp/SKILL.md": "sha256:7de3baeb5f25673d94f0751a5ebefdfc0a20ddbe429be29d156e2d9646762e18",
     "skills/cpv-scaffold-agent/SKILL.md": "sha256:a2b096c89395bd1972b6873b5addcffd61addd227dcc17a407c0c7988641ae2a",
     "skills/cpv-scaffold-command/SKILL.md": "sha256:2a4b13618594696ed5bb22fc301eaabbc4595a08c05dcfc82f30aabab6fa6fda",
     "skills/cpv-scaffold-skill/SKILL.md": "sha256:0e0108ebae116ce2e168931418371f3ecaea9255cd05cd65a6f548f6e12b2076",

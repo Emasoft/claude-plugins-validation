@@ -686,6 +686,16 @@ def validate_plugin_mcp(plugin_root: Path, report: ValidationReport | None = Non
     # Source 1: .mcp.json at plugin root (auto-discovered)
     mcp_json = plugin_root / ".mcp.json"
     if mcp_json.exists():
+        # Owner policy (2026-08-19): MCP integrations are SUPPORTED but strongly
+        # DISCOURAGED in plugins — prefer a CLI/script the agent invokes directly.
+        # Keep MCP only for services that run exclusively over MCP. INFO on
+        # purpose: this must never block validation or --strict — the option to
+        # ship MCP (in plugins, agents, or user-scoped settings) stays open.
+        report.info(
+            "MCP server(s) declared — supported but discouraged; prefer a CLI/script "
+            "integration and keep MCP only for services that run exclusively over MCP",
+            ".mcp.json",
+        )
         validate_mcp_config(mcp_json, plugin_root, report)
         names = _extract_server_names_from_config_file(mcp_json)
         if names:
