@@ -55,6 +55,7 @@ from typing import Protocol
 CANONICAL_TOOLS: frozenset[str] = frozenset(
     {
         "Agent",
+        "Artifact",  # tools-reference — publishes an HTML/MD artifact
         "AskUserQuestion",
         "Bash",
         "CronCreate",
@@ -68,19 +69,26 @@ CANONICAL_TOOLS: frozenset[str] = frozenset(
         "ExitWorktree",
         "Glob",
         "Grep",
+        "ListAgents",  # v2.1.224 — cross-session messaging (tools-reference)
         "ListMcpResourcesTool",
         "LSP",
+        "MCPSearch",  # legacy — dropped from tools-reference by v2.1.235; retained here (see docstring)
         "Monitor",
+        "MultiEdit",  # legacy — retained here (see docstring)
+        "Notebook",  # legacy — retained here (see docstring)
         "NotebookEdit",
         "PowerShell",
         "PushNotification",
         "Read",
         "ReadMcpResourceTool",
         "RemoteTrigger",
+        "ReportFindings",  # v2.1.196 — structured code-review findings (tools-reference)
         "ScheduleWakeup",
         "SendMessage",
+        "SendUserFile",  # tools-reference — sends a session file to the user
         "ShareOnboardingGuide",
         "Skill",
+        "SlashCommand",  # legacy — dropped from tools-reference by v2.1.235; retained here (see docstring)
         "TaskCreate",
         "TaskGet",
         "TaskList",
@@ -89,11 +97,13 @@ CANONICAL_TOOLS: frozenset[str] = frozenset(
         "TaskUpdate",
         "TeamCreate",
         "TeamDelete",
+        "TodoRead",  # legacy — retained here (see docstring)
         "TodoWrite",
         "ToolSearch",
         "WaitForMcpServers",
         "WebFetch",
         "WebSearch",
+        "Workflow",  # v2.1.147 — multi-agent orchestration (tools-reference)
         "Write",
     }
 )

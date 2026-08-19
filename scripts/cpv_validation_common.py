@@ -603,6 +603,12 @@ VALID_TOOLS = {
     "ExitPlanMode",
     "EnterWorktree",
     "ExitWorktree",  # v2.1.72
+    # v2.1.233: TaskCreate/TaskUpdate/TaskList/TaskGet (and TodoWrite below) are
+    # NOT provided on Opus 4.8 / Sonnet 5 / Fable 5 / Mythos 5 or later members
+    # of those families unless the user opts in (CLAUDE_CODE_ENABLE_TODO_TOOLS=1
+    # or an --allowedTools naming one). They stay VALID here — availability is a
+    # runtime/model property CPV cannot know — but validate_agent emits an INFO
+    # so authors targeting new models learn the tool may be absent.
     "TaskCreate",
     "TaskUpdate",
     "TaskList",
@@ -613,7 +619,7 @@ VALID_TOOLS = {
     "MultiEdit",  # [legacy — emits WARNING] not in current tools-reference spec
     "Notebook",  # [legacy — emits WARNING] not in current tools-reference spec
     "TodoRead",  # [legacy — emits WARNING] not in current tools-reference spec
-    "TodoWrite",
+    "TodoWrite",  # disabled by default in favor of the Task tools (tools-reference); absent on new models per the v2.1.233 gating above
     "CronCreate",  # v2.1.71
     "CronDelete",  # v2.1.71
     "CronList",  # v2.1.71
@@ -625,6 +631,7 @@ VALID_TOOLS = {
     "ListMcpResourcesTool",  # Lists MCP server resources
     "ReadMcpResourceTool",  # Reads a specific MCP resource by URI
     "SendMessage",  # Agent teams — message teammates or resume subagents
+    "ListAgents",  # v2.1.224 — lists SendMessage-reachable agents/sessions (tools-reference; cross-session messaging)
     # NOTE: TeamCreate/TeamDelete were REMOVED in v2.1.178 — they are no longer
     # in the tools-reference table; the only agent-team tool that remains is
     # SendMessage. Listing them would let a stale plugin pass validation while
@@ -640,8 +647,8 @@ VALID_TOOLS = {
     # claimed it was absent from tools-reference and asked for a revisit). Re-checked
     # against the live tools-reference table: it IS enumerated there. Note resolved.
     "PushNotification",
-    "SlashCommand",  # v1.0.123 — enables Claude to invoke your slash commands
-    "MCPSearch",  # v2.1.7 — MCP-specific tool search (distinct from generic ToolSearch)
+    "SlashCommand",  # [legacy — emits WARNING] dropped from the tools-reference table by v2.1.235
+    "MCPSearch",  # [legacy — emits WARNING] dropped from the tools-reference table by v2.1.235
     "EndConversation",  # v2.1.214 — end a session with an abusive user / jailbreak attempt (tools-reference)
     # NOTE: "Workflow" is defined once above (after "Monitor"); a second entry here
     # was a redundant duplicate with a conflicting version annotation (audit b07).
