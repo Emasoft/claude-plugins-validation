@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.7.0] - 2026-08-19
+
+### Documentation
+
+- Phase-2 cards ai_review -> complete after v5.6.0 ship (TRDD-QOZXF6A6 WC2GEDOC 1YNY73NT 6UW0KZVY)
+
+### Features
+
+- CC spec sync v2.1.233-235 — ListAgents, todo-tool model gating, settings backfill
+
 ## [5.6.0] - 2026-08-19
 
 ### Bug Fixes
