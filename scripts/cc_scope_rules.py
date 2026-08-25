@@ -447,6 +447,28 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         "voice",
         "wheelScrollAccelerationEnabled",
         "workflowKeywordTriggerEnabled",
+        # v2.1.236–240 sync backfill. The authoritative "Available settings"
+        # table MOVED: it is now settings-reference.md, not settings.md — the
+        # v2.1.233–235 pass above diffed settings.md, which no longer carries a
+        # single key, so that diff had silently become vacuous (a table that
+        # matches nothing reads exactly like a table with nothing new).
+        # Each key below is a verified row of settings-reference.md's table.
+        # TOP-LEVEL keys only, as above.
+        "diffTool",
+        "enableWorkflows",
+        "externalEditorContext",
+        "keybindingFlavor",  # v2.1.238 — "classic" (default) | "readline" Ctrl+W behaviour
+        "permissionExplainerEnabled",
+        "skipAutoPermissionPrompt",
+        "skipDangerousModePermissionPrompt",
+        "sshHostAllowlist",
+        "syncClaudeAiSkills",
+        # v2.1.234 removed the "Default teammate model" row from /config, but
+        # settings-reference.md still documents the KEY. Listed deliberately:
+        # this set is a typo detector, and a real (if deprecated) setting name
+        # is not a typo — omitting it would flag a settings file that works.
+        "teammateDefaultModel",
+        "terminalTitleFromRename",
     }
 )
 
