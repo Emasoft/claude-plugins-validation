@@ -1,9 +1,11 @@
 ---
 trdd-id: 12f8196d-3482-486d-91ef-d809faeab747
 title: Optional cheap-model AI triage for SkillAudit residual findings
-status: not-started
+column: blocked
+blocked-by: [llm-externalizer#6]
+pre-block-column: todo
 created: 2026-05-23T23:03:28+0200
-updated: 2026-05-23T23:09:02+0200
+updated: 2026-08-25T17:25:45+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->

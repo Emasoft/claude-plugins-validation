@@ -1,9 +1,9 @@
 ---
 trdd-id: 747d7bbc-6cbc-4acc-8a89-a4bdacb3a17e
 title: CC v2.1.143 plugin dependency cascade detection — static graph validation
-status: not-started
+column: todo
 created: 2026-05-23T15:34:13+0200
-updated: 2026-05-23T15:34:13+0200
+updated: 2026-08-25T17:25:45+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->
