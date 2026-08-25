@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.8.0] - 2026-08-25
+
+### Documentation
+
+- CLAUDE.md v5.7.1 snapshot paragraph (post-release)
+
+### Features
+
+- CC spec sync v2.1.236-240 — re-anchored settings diff, classifierContext, headersHelper, BUILTIN_SLASH_COMMANDS backfill
+
 ## [5.7.1] - 2026-08-19
 
 ### Documentation
