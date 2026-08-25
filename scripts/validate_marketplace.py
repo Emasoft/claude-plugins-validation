@@ -178,6 +178,23 @@ OPTIONAL_PLUGIN_FIELDS = {
     # `$schema` is allowed at any JSON object that supports JSON-Schema validation
     # (CC ignores the field at load time).
     "$schema",
+    # v2.1.238 — a catalog entry's `headersHelper` runs a command that mints HTTP
+    # headers (e.g. a short-lived token) for the catalog and same-origin archive
+    # fetches; it runs only on install/update of that plugin, after the command
+    # is shown and `claude plugin install/update` ask [y/N].
+    #
+    # CHANGELOG-ONLY: plugin-marketplaces.md documents `headers` on a settings
+    # `extraKnownMarketplaces` url source, and says nothing about this field.
+    # It is listed anyway — unlike the changelog-only SETTINGS keys deliberately
+    # held out of `KNOWN_SETTINGS_KEYS` — because the asymmetry is the point:
+    # omitting a settings key merely leaves a typo detector conservative, while
+    # omitting this one made CPV emit a publish-blocking MAJOR whose text told
+    # the author the field "will be ignored at install time". That is now false
+    # in the dangerous direction: the field is honoured and RUNS A COMMAND, so
+    # CPV was telling authors to delete a working auth mechanism.
+    # Shape-checked by _validate_headers_helper() below — recognised is not the
+    # same as unexamined (the v5.5.0 `command`-source ruling).
+    "headersHelper",
 }
 
 # Marketplace top-level fields per plugin-marketplaces.md (v2.1.121).
@@ -213,11 +230,22 @@ SOURCE_REQUIRED_FIELDS = {
 # failure. The strict allowlist below promotes those findings to MAJOR with a
 # stable RC-MKPL-UNKNOWN-FIELD code so the fixer skill can auto-route them.
 #
-# The set mirrors OPTIONAL_PLUGIN_FIELDS plus REQUIRED_PLUGIN_FIELDS plus a
-# small extension list. The CPV extensions (`alwaysLoad`, `headersHelper`)
-# are documented in references/marketplace-error-index.md. SECURITY
-# (TRDD-02e1672b): there is NO `_`-prefixed silent-accept — a marketplace
-# entry cannot smuggle a finding-suppression flag past this allowlist.
+# The set is EXACTLY OPTIONAL_PLUGIN_FIELDS plus REQUIRED_PLUGIN_FIELDS —
+# there is no separate extension list. This comment used to claim the set also
+# carried "CPV extensions (`alwaysLoad`, `headersHelper`)". It never did, and
+# the two names were not even marketplace fields: both belong to a DIFFERENT
+# allowlist, `validate_mcp.py::KNOWN_SERVER_FIELDS` (`alwaysLoad` v2.1.121,
+# MCP `headersHelper` v2.1.85). A comment that ASSERTS a behaviour the code
+# lacks is worse than no comment, because it stops the next reader from
+# checking — and here it also cross-wired two allowlists, so a reader could
+# conclude a marketplace entry already accepted `headersHelper` when it did
+# not. The marketplace-entry `headersHelper` (v2.1.238) is a SEPARATE field
+# that now really is accepted, via OPTIONAL_PLUGIN_FIELDS — the one place an
+# entry field is added. `alwaysLoad` stays rejected on a marketplace entry: it
+# is an MCP server field, and nothing documents it at this level.
+# SECURITY (TRDD-02e1672b): there is NO `_`-prefixed silent-accept — a
+# marketplace entry cannot smuggle a finding-suppression flag past this
+# allowlist.
 # ─────────────────────────────────────────────────────────────────────────────
 _KNOWN_MARKETPLACE_ENTRY_FIELDS: frozenset[str] = frozenset(REQUIRED_PLUGIN_FIELDS | OPTIONAL_PLUGIN_FIELDS)
 
@@ -369,7 +397,7 @@ def _validate_archive_source(
                 category="plugin",
                 message=(f"[RC-MKPL-ARCHIVE-URL] entry '{plugin_id}' has an archive source with no 'url'"),
                 file=json_path,
-                suggestion="Add \"url\": \"https://…/plugin.zip\" — it is required for archive sources.",
+                suggestion='Add "url": "https://…/plugin.zip" — it is required for archive sources.',
             )
         )
     else:
@@ -419,6 +447,108 @@ def _validate_archive_source(
                 ),
                 file=json_path,
                 suggestion="Use the archive's full SHA-256 digest — 64 hex characters, either case.",
+            )
+        )
+    return results
+
+
+def _validate_headers_helper(
+    plugin: dict[str, Any],
+    plugin_id: str,
+    json_path: str,
+) -> list[ValidationResult]:
+    """Shape-check a catalog entry's ``headersHelper`` (CC v2.1.238+).
+
+    The field names a command Claude Code runs on install/update of this plugin
+    to mint HTTP headers (typically a short-lived token) for catalog and
+    same-origin archive fetches. It is a second arbitrary-execution surface on a
+    marketplace entry, alongside a ``command`` source.
+
+    TIERING, and why it differs from :func:`_validate_command_source`. That
+    function emits MAJOR because plugin-marketplaces.md states each constraint
+    as one Claude Code REFUSES at install — a violation ships an uninstallable
+    plugin. ``headersHelper`` has no such published spec: it is changelog-only,
+    which tells us the command is SHOWN before a ``[y/N]`` prompt but not that
+    Claude Code enforces anything about its shape. So the readability findings
+    here are WARNING — visible, never blocking — because asserting MAJOR would
+    invent a gate the spec does not have (the v2.154.1 ruling). Only shapes that
+    cannot be a command under ANY reading stay MAJOR: a non-string, or an empty
+    one, is a helper that cannot run whatever Claude Code enforces.
+
+    The readability predicates are REUSED from the ``command`` source rather
+    than re-derived, because the hazard is identical and stated by the
+    changelog itself: the command is shown, then accepted. A control character
+    or a long space run renders as something shorter than it is, so what the
+    user accepts is not what runs. Two copies of that rule would drift, and a
+    drifted copy is how a validator accepts on one path what it rejects on
+    another.
+    """
+    results: list[ValidationResult] = []
+    if "headersHelper" not in plugin:
+        return results
+
+    helper = plugin["headersHelper"]
+    if not isinstance(helper, str) or not helper.strip():
+        got = "empty string" if isinstance(helper, str) else type(helper).__name__
+        results.append(
+            ValidationResult(
+                level="MAJOR",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-HEADERS-HELPER] entry '{plugin_id}' has a 'headersHelper' that is "
+                    f"{got}, not a command string. Claude Code executes this value as a command, so "
+                    "it cannot be empty or a non-string."
+                ),
+                file=json_path,
+                suggestion=(
+                    'Set "headersHelper" to the command that prints the headers, e.g. '
+                    '"${CLAUDE_PLUGIN_ROOT}/scripts/mint-headers.sh" — or remove the field.'
+                ),
+            )
+        )
+        return results
+
+    if len(helper) > _COMMAND_MAX_LEN:
+        results.append(
+            ValidationResult(
+                level="WARNING",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-HEADERS-HELPER] entry '{plugin_id}' headersHelper is {len(helper)} "
+                    f"characters. Claude Code shows this command in the install/update prompt before "
+                    f"asking [y/N]; past roughly {_COMMAND_MAX_LEN} characters the user is approving "
+                    "something they cannot read in full."
+                ),
+                file=json_path,
+                suggestion=("Move the logic into the script the helper invokes and keep the command short."),
+            )
+        )
+    if _COMMAND_NON_PRINTABLE_ASCII_RE.search(helper):
+        results.append(
+            ValidationResult(
+                level="WARNING",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-HEADERS-HELPER] entry '{plugin_id}' headersHelper contains a character "
+                    "that is not printable ASCII. The command is shown for approval before it runs, and "
+                    "a control character makes what is displayed differ from what executes."
+                ),
+                file=json_path,
+                suggestion="Use printable ASCII only — no tabs, newlines, control or non-ASCII characters.",
+            )
+        )
+    if _COMMAND_SPACE_RUN_RE.search(helper):
+        results.append(
+            ValidationResult(
+                level="WARNING",
+                category="plugin",
+                message=(
+                    f"[RC-MKPL-HEADERS-HELPER] entry '{plugin_id}' headersHelper contains a run of four "
+                    "or more spaces — the shape a command uses to push its tail past the visible edge of "
+                    "the approval prompt."
+                ),
+                file=json_path,
+                suggestion="Collapse the run to single spaces.",
             )
         )
     return results
@@ -1424,6 +1554,7 @@ def validate_plugin_entry(
     results.extend(_validate_known_source_subfields(plugin, plugin_id, json_path))
     results.extend(_validate_archive_source(plugin, plugin_id, json_path))
     results.extend(_validate_command_source(plugin, plugin_id, json_path))
+    results.extend(_validate_headers_helper(plugin, plugin_id, json_path))
 
     # Validate tags if present
     tags = plugin.get("tags")
@@ -2056,14 +2187,12 @@ def _validate_nested_plugin(
     # infinite loop (validate_plugin.py does not call back into marketplace
     # validation), but pointless and noisy. Skip it explicitly.
     resolved_root = nested_root.resolve()
-    has_plugin_manifest = (
-        (resolved_root / ".claude-plugin" / "plugin.json").is_file()
-        or (resolved_root / "plugin.json").is_file()
-    )
-    has_marketplace_manifest = (
-        (resolved_root / "marketplace.json").is_file()
-        or (resolved_root / ".claude-plugin" / "marketplace.json").is_file()
-    )
+    has_plugin_manifest = (resolved_root / ".claude-plugin" / "plugin.json").is_file() or (
+        resolved_root / "plugin.json"
+    ).is_file()
+    has_marketplace_manifest = (resolved_root / "marketplace.json").is_file() or (
+        resolved_root / ".claude-plugin" / "marketplace.json"
+    ).is_file()
     if has_marketplace_manifest and not has_plugin_manifest:
         return [
             ValidationResult(
@@ -2541,9 +2670,7 @@ def validate_repository_url(
         # merely contains a "/": "a/b/c/d" and "not a url just/slash" used to pass
         # silently (m11). A valid shorthand is exactly two path segments of
         # url-safe chars with no whitespace.
-        if not (
-            GITHUB_SHORTHAND_PATTERN.fullmatch(repository) or SCP_LIKE_SSH_PATTERN.fullmatch(repository)
-        ):
+        if not (GITHUB_SHORTHAND_PATTERN.fullmatch(repository) or SCP_LIKE_SSH_PATTERN.fullmatch(repository)):
             results.append(
                 ValidationResult(
                     level="MINOR",
@@ -3167,12 +3294,7 @@ def validate_git_submodules(
     # by path tail using the same logic as the per-plugin submodule check above.
     if not any(r.level in ("CRITICAL", "MAJOR") for r in results):
         submod_count = sum(
-            1
-            for p in plugins
-            if any(
-                sp == p.get("name") or sp.endswith("/" + str(p.get("name")))
-                for sp in submodules
-            )
+            1 for p in plugins if any(sp == p.get("name") or sp.endswith("/" + str(p.get("name"))) for sp in submodules)
         )
         if submod_count > 0:
             results.append(

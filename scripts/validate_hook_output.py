@@ -166,7 +166,20 @@ HOOK_OUTPUT_EVENT_FIELDS: dict[str, frozenset[str]] = {
     # hooks.md L1177-1182
     # v2.1.121 generalized hookSpecificOutput.updatedToolOutput from MCP-only
     # to all tools — both names accepted (legacy + new).
-    "PostToolUse": frozenset({"decision", "reason", "additionalContext", "updatedMCPToolOutput", "updatedToolOutput"}),
+    # v2.1.236 added `classifierContext`: a note about THIS call's result routed
+    # to the auto-mode classifier instead of to Claude. It is a sibling of
+    # `additionalContext` under hookSpecificOutput (hooks.md:1939 + the example
+    # at :1973), NOT a top-level field — so it belongs in this per-event set.
+    "PostToolUse": frozenset(
+        {
+            "decision",
+            "reason",
+            "additionalContext",
+            "classifierContext",  # v2.1.236
+            "updatedMCPToolOutput",
+            "updatedToolOutput",
+        }
+    ),
     # hooks.md L1234
     "PostToolUseFailure": frozenset({"additionalContext"}),
     # hooks.md L1278

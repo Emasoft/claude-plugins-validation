@@ -519,6 +519,88 @@ BUILTIN_SLASH_COMMANDS: frozenset[str] = frozenset(
         # Review skills exposed as invocable commands (v2.1.215)
         "verify",  # v2.1.215 — invoke the verify skill
         "code-review",  # v2.1.215 — invoke the code-review skill
+        # ── v2.1.236–240 sync: 62-name backfill from commands.md ──────────────
+        # This set had 53 entries against the doc's 108, so a plugin shipping
+        # `commands/plan.md`, `commands/run.md`, `commands/diff.md`, … collided
+        # with a built-in and CPV said nothing. A FALSE NEGATIVE, and the one
+        # direction that matters here: the collision WARNING exists precisely
+        # because the bare `/name` form resolves to the built-in, so the
+        # plugin's command is the one that silently never runs.
+        #
+        # Found only by disproving a grep-miss: a search for
+        # `BUILTIN_COMMAND|RESERVED_COMMAND|builtin_commands` returned nothing
+        # and was briefly read as "CPV has no such check" — the constant is
+        # named BUILTIN_SLASH_COMMANDS. A grep that misses is not an absence.
+        #
+        # Bundled SKILLS exposed as slash commands are included: they collide
+        # identically, and commands.md lists them in the same table.
+        "advisor",
+        "agents",
+        "artifacts",
+        "auto-mode-setup",
+        "autocompact",
+        "autofix-pr",
+        "batch",
+        "branch",
+        "cd",
+        "chrome",
+        "claude-api",  # v2.1.239 — gained an `upgrade` subcommand
+        "copy",
+        "dataviz",
+        "debug",
+        "deep-research",
+        "design-login",
+        "design-sync",
+        "desktop",
+        "diff",
+        "export",
+        "fast",
+        "fewer-permission-prompts",  # supersedes the older `less-permission-prompts` spelling
+        "goal",
+        "heapdump",
+        "hooks",
+        "ide",
+        "import",
+        "insights",
+        "install-github-app",
+        "install-slack-app",
+        "keybindings",
+        "list-agents",  # v2.1.239 — now also lists agent-team teammates
+        "mobile",
+        "passes",
+        "plan",
+        "powerup",
+        "pr-comments",
+        "privacy-settings",
+        "radio",
+        "reload-plugins",
+        "reload-skills",
+        "remote-control",
+        "remote-env",
+        "run",
+        "run-skill-generator",
+        "sandbox",
+        "schedule",
+        "scroll-speed",
+        "simplify",
+        "statusline",
+        "stickers",
+        "stop",
+        "tasks",
+        "team-onboarding",
+        "teleport",
+        "ultraplan",
+        "upgrade",
+        "vim",
+        "voice",
+        "web-setup",
+        "workflows",
+        # NOT removed although absent from today's commands.md: `extra-usage`,
+        # `less-permission-prompts`, `permission-mode`, `proactive`, `quit`,
+        # `setup-token`. Retained-legacy precedent (MultiEdit / SlashCommand in
+        # VALID_TOOLS): a name leaving the doc table is not proof the runtime
+        # dropped it, and keeping a stale name only over-warns on a collision,
+        # whereas dropping a live one under-warns. Asymmetric, so retain.
     }
 )
 
@@ -1527,6 +1609,7 @@ def is_known_skill_frontmatter_key(key: str) -> bool:
     if key in SKILL_FRONTMATTER_FIELDS:
         return True
     return _to_kebab(key) in _CASING_TOLERANT_SKILL_KEYS
+
 
 # Skill template-substitution variables recognised by skills.md (v2.1.121).
 # Static set: keys never beginning with `$ARGUMENTS[`, `$<digit>` (positional),
@@ -3311,9 +3394,7 @@ def _has_close_pair(decoder_cols: list[int], sink_cols: list[int], window: int) 
     return any(abs(d - s) <= window for d in decoder_cols for s in sink_cols)
 
 
-def find_obfuscated_exec(
-    content: str, proximity_lines: int = 3, file_path: str | None = None
-) -> list[tuple[int, str]]:
+def find_obfuscated_exec(content: str, proximity_lines: int = 3, file_path: str | None = None) -> list[tuple[int, str]]:
     """Return list of (line_number, message) for decoder + exec-sink within proximity.
 
     A finding fires when:
@@ -7143,9 +7224,7 @@ def _classify_security_buckets(report: ValidationReport) -> set[str]:
     return present
 
 
-def _print_security_gate_banners(
-    report: ValidationReport, report_path: Path | None, *, markdown: bool = False
-) -> None:
+def _print_security_gate_banners(report: ValidationReport, report_path: Path | None, *, markdown: bool = False) -> None:
     """Render the Gate A / Gate B security-gate warning banners.
 
     Calls :func:`_classify_security_buckets`; prints the Gate A block when
@@ -7185,9 +7264,7 @@ def _print_security_gate_banners(
     if "A" in present:
         _print_gate_a_terminal(report_arg, red, bold, reset)
     if present & {"B", "C"}:
-        _print_gate_b_terminal(
-            report_arg, yellow, bold, reset, leaks="B" in present, safeguards="C" in present
-        )
+        _print_gate_b_terminal(report_arg, yellow, bold, reset, leaks="B" in present, safeguards="C" in present)
 
 
 _GATE_BORDER = "=" * 60  # Fits comfortably in 80-col terminals (matches the fixer block).
@@ -7228,7 +7305,7 @@ def _print_gate_a_terminal(report_arg: str, color: str, bold: str, reset: str) -
     print('     Agent(subagent_type: "cpv-plugin-devitalizer-agent",')
     print('           prompt: "Devitalize the execution-class findings in')
     print(f"                    {report_arg} — make each threat irreversibly")
-    print('                    inert; flag load-bearing code, never break')
+    print("                    inert; flag load-bearing code, never break")
     print('                    it; re-scan to prove inert.")')
     print()
     print("   Or pick it from the menu:  /cpv-main-menu  ->  Fix  ->")
@@ -7300,7 +7377,7 @@ def _print_gate_b_terminal(
     print('     Agent(subagent_type: "cpv-plugin-leaks-preventer-agent",')
     print('           prompt: "Redact every secret and implement the')
     print(f"                    missing safeguards reported in {report_arg};")
-    print('                    runtime-read genuinely-needed secrets; flag')
+    print("                    runtime-read genuinely-needed secrets; flag")
     print('                    what cannot be safely fixed; re-scan clean.")')
     print()
     print("   Or pick it from the menu:  /cpv-main-menu  ->  Fix  ->")
@@ -7351,7 +7428,7 @@ def _print_gate_a_markdown(report_arg: str) -> None:
     print("```")
     print('Agent(subagent_type: "cpv-plugin-devitalizer-agent",')
     print(f'      prompt: "Devitalize the execution-class findings in {report_arg} —')
-    print('               make each threat irreversibly inert; flag load-bearing')
+    print("               make each threat irreversibly inert; flag load-bearing")
     print('               code, never break it; re-scan to prove inert.")')
     print("```")
     print()
@@ -7406,8 +7483,12 @@ def _print_gate_b_markdown(report_arg: str, *, leaks: bool, safeguards: bool) ->
             "(TLS verification on, SSRF guards, host-pinning against rebinding, sandbox not disabled)."
         )
         print("- Input sanitization on everything processed at runtime.")
-        print("- SAFE parsing of config files (yaml -> safe_load, and the safe loaders for toml / json / cfg / ini / .plist).")
-        print("- Safe loading of files to process (no untrusted pickle / XML external entities / arbitrary deserialization).")
+        print(
+            "- SAFE parsing of config files (yaml -> safe_load, and the safe loaders for toml / json / cfg / ini / .plist)."
+        )
+        print(
+            "- Safe loading of files to process (no untrusted pickle / XML external entities / arbitrary deserialization)."
+        )
         print(
             "- Prompt-injection prevention for skills and agents, via a by-code-only preventive scan that runs "
             "BEFORE any agent reads untrusted content."
@@ -7419,7 +7500,7 @@ def _print_gate_b_markdown(report_arg: str, *, leaks: bool, safeguards: bool) ->
     print("```")
     print('Agent(subagent_type: "cpv-plugin-leaks-preventer-agent",')
     print(f'      prompt: "Redact every secret and implement the missing safeguards reported in {report_arg};')
-    print('               runtime-read genuinely-needed secrets; flag what cannot be safely')
+    print("               runtime-read genuinely-needed secrets; flag what cannot be safely")
     print('               fixed; re-scan clean.")')
     print("```")
     print()
@@ -8041,8 +8122,10 @@ def scan_file_for_absolute_paths(
             # (a detector's pattern list, a test-input fixture dict) that does
             # NOT feed a live fs/exec/network sink. Never suppresses a path
             # that reaches open() / subprocess / os.remove / requests, etc.
-            if _inert_check is not None and py_tree is not None and _inert_check(
-                content, line_num, matched_text, is_py_test, tree=py_tree
+            if (
+                _inert_check is not None
+                and py_tree is not None
+                and _inert_check(content, line_num, matched_text, is_py_test, tree=py_tree)
             ):
                 continue
 
@@ -9190,9 +9273,7 @@ def _collect_package_repo_urls(content: str) -> set[str]:
     repo_urls: set[str] = set()
     for line in content.splitlines():
         is_repo_line = bool(
-            _APT_SOURCE_LINE_RE.match(line)
-            or _DNF_REPO_KEY_RE.match(line)
-            or _DNF_ADD_REPO_RE.search(line)
+            _APT_SOURCE_LINE_RE.match(line) or _DNF_REPO_KEY_RE.match(line) or _DNF_ADD_REPO_RE.search(line)
         )
         if not is_repo_line:
             continue
