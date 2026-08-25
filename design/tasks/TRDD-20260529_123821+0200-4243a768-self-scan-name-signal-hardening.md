@@ -1,9 +1,9 @@
 ---
 trdd-id: 4243a768-a7b8-4bba-96a6-143a88100f85
 title: Self-scan name-signal hardening + dead-code removal of the *_self_scan_eligible helpers
-status: not-started
+column: dev
 created: 2026-05-29T12:38:21+0200
-updated: 2026-05-29T12:38:21+0200
+updated: 2026-08-25T17:25:45+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->

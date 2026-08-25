@@ -1,9 +1,9 @@
 ---
 trdd-id: ef3fc7d8-04f2-438f-b861-66f23d40115b
 title: Menu fixed/dynamic split — print_menu.py with skill-menus dirs and minimal dynamic payload
-status: in-progress
+column: todo
 created: 2026-05-24T13:07:53+0200
-updated: 2026-05-24T18:12:48+0200
+updated: 2026-08-25T17:25:45+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->
