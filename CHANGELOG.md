@@ -2,6 +2,17 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.9.0] - 2026-08-26
+
+### Documentation
+
+- Archive 34 terminal TRDDs (complete/published) out of design/tasks (board drain)
+- Board drain — close and archive 80 terminal TRDDs, add 2 dev cards
+
+### Features
+
+- Dependency cascade, D13 namespace recal, GHA expr-injection rule; drain board
+
 ## [5.8.0] - 2026-08-25
 
 ### Documentation
