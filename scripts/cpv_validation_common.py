@@ -595,6 +595,30 @@ BUILTIN_SLASH_COMMANDS: frozenset[str] = frozenset(
         "voice",
         "web-setup",
         "workflows",
+        # CC spec sync v2.1.241–246 (commands.md). One genuinely new command
+        # plus the documented ALIASES, which the previous pass missed because it
+        # read only column 1 — an alias a user types is not a typo, so leaving
+        # it out would warn on a working command.
+        "rate-limit-options",
+        "adddir",  # alias of /add-dir
+        "allowed-tools",  # alias of /permissions
+        "android",  # alias of /mobile
+        "ios",  # alias of /mobile
+        "app",
+        "bashes",
+        "bg",
+        "checkpoint",  # alias pair with /undo
+        "undo",
+        "checkup",
+        "continue",
+        "new",  # alias pair with /reset (both highlight /clear)
+        "reset",
+        "peers",  # v2.1.224+
+        "rc",  # alias of /remote-control
+        "routines",
+        "settings",
+        "share",
+        "tp",  # alias of /teleport
         # NOT removed although absent from today's commands.md: `extra-usage`,
         # `less-permission-prompts`, `permission-mode`, `proactive`, `quit`,
         # `setup-token`. Retained-legacy precedent (MultiEdit / SlashCommand in
@@ -1510,6 +1534,11 @@ SKILL_FRONTMATTER_FIELDS = {
     "default-enabled",  # v2.1.186 — opt-in enablement (skill-frontmatter alias of plugin.json `defaultEnabled`)
     "fallback",  # v2.1.186 — skill fallback config
     "metadata",  # Agent-Skills open standard (agentskills.io) free-form map; v2.1.186 `metadata.*` casing grant
+    # Agent Skills spec fields Claude Code accepts (skills.md frontmatter table).
+    # Outside Claude Code only the agentskills.io subset is portable, but CPV
+    # validates what the runtime accepts, so both belong here.
+    "license",
+    "compatibility",
 }
 
 # The v2.1.186 keys that the runtime accepts in kebab-case, snake_case, AND
