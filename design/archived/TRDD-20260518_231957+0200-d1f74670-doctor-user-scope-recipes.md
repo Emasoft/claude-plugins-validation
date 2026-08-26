@@ -3,7 +3,7 @@ trdd-id: d1f74670-539c-488e-8145-eb8a964315f4
 title: CPV doctor user-scope recipes — stub files, stale years, dead refs, namespace correctness
 column: complete
 created: 2026-05-18T23:19:57+0200
-updated: 2026-08-26T05:54:23+0200
+updated: 2026-08-26T18:34:00+0200
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-25
@@ -266,12 +266,30 @@ Target: ~35 new tests.
 
 ## Acceptance criteria
 
-- [ ] `scripts/cpv_doctor_user_scope.py` exists with four functions (one per D10..D13; D9 delegates)
-- [ ] `agents/cpv-doctor-agent.md` recipe list updated with D9..D13; mode gating documented
-- [ ] `references/finding-codes.md` registers 7 new RC codes (D9 inherits from TRDD-25b9be90)
-- [ ] `scripts/format_menu.py` breakdown chart handles every new code
-- [ ] All ~35 new tests pass; no regressions on the existing 5000+ test suite
-- [ ] `/cpv-doctor` option 9 on the user's real `~/.claude/` produces findings that match the audit results from session 2026-05-18 (the ones already fixed should now be 0; any unfixed ones should be flagged)
+- [x] `scripts/cpv_doctor_user_scope.py` exists with four functions (one per D10..D13; D9 delegates)
+      — verified 2026-08-26: `check_stub_files`, `check_stale_year`, `check_dead_script_refs`,
+      `check_namespace_correctness`, plus `check_ghost_dispatch` for the D9 delegation.
+- [x] `agents/cpv-doctor-agent.md` recipe list updated with D9..D13; mode gating documented
+      — verified 2026-08-26: 24 D9–D13 references, 4 `user_scope` mode-gating references.
+- [x] `references/finding-codes.md` registers 7 new RC codes (D9 inherits from TRDD-25b9be90)
+      — verified 2026-08-26: all 10 codes the script emits are registered, one entry each
+      (the 7 new + the 3 `RC-GHOST-DISPATCH-*` inherited from [[TRDD-25b9be90]]).
+- [~] `scripts/format_menu.py` breakdown chart handles every new code
+      — **OBSOLETE, not unmet.** `scripts/format_menu.py` was deliberately REMOVED by
+      TRDD-4de479a0 Phase 4 (commit `3d68d9d0`, "remove legacy format_menu + cpv-format-menu
+      surfaces"), so there is no breakdown chart left for these codes to reach. Recorded as
+      obsolete rather than ticked: ticking it would claim work on a file that does not exist,
+      and unticking it would claim a gap that no longer has anywhere to be filled.
+- [x] All ~35 new tests pass; no regressions on the existing 5000+ test suite
+      — verified 2026-08-26: 41 tests across `test_doctor_user_scope_recipes.py` +
+      `test_local_scope_user_recipes_wiring.py`, and the full serial suite is
+      13,087 passed / 3 skipped (`PYTEST5_EXIT=0`).
+- [x] `/cpv-doctor` option 9 on the user's real `~/.claude/` produces findings that match the audit results from session 2026-05-18 (the ones already fixed should now be 0; any unfixed ones should be flagged)
+      — verified 2026-08-25 by running the recipe against the real `~/.claude`:
+      `RC-NAMESPACE-UNRESOLVED-001` 34 → 1, measured on both sides in one session.
+      The control is that the four NON-D13 counters stayed byte-identical across
+      all three scans, which is what makes the drop attributable to D13 rather
+      than to the tree changing underneath the measurement.
 
 ## Risks + mitigations
 
@@ -305,3 +323,18 @@ Target: ~35 new tests.
   tests green, and the full pre-publish gate clean — serial suite 13,076
   passed / 3 skipped (`PYTEST4_EXIT=0`) and cache-cold strict self-validate
   0 CRITICAL / 0 MAJOR / 0 MINOR / 0 NIT (`SELFVAL4_EXIT=0`).
+- 2026-08-26T18:34:00+0200 — CORRECTION to the closing edit above, same session.
+  That edit set `column: complete` and wrote this evidence, but left all SIX
+  acceptance boxes UNTICKED — so the card asserted complete while its own
+  acceptance list asserted that nothing had been done. A terminal card
+  contradicting itself is worse than an open one, because the contradiction is
+  invisible to the board view. Each criterion has now been re-verified
+  FIRST-HAND (not carried over from the earlier report) and annotated inline
+  with what was measured: 5 ticked, 1 marked `[~]` OBSOLETE because its target
+  (`scripts/format_menu.py`) was deliberately removed by TRDD-4de479a0 Phase 4,
+  commit `3d68d9d0`. **Found by an external prompt, not by me** — the closing
+  edit is exactly where a checklist gets forgotten, because ticking boxes feels
+  like ceremony once the work is already proven elsewhere. It is not: the
+  checklist is the only part of the card a reader checks before trusting the
+  column. Recorded here so the next closing edit treats the checklist as part
+  of the transition, not as an afterthought.

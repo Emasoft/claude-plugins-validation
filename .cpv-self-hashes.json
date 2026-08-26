@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-08-26T15:12:52+00:00",
+  "computed_at": "2026-08-26T16:45:30+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:fb166243b135d52f27f67ad8e3b663744628700f544e30f83adfc3e2a33a2bb4",
@@ -64,7 +64,7 @@
     "design/archived/TRDD-0f1f7889-0f22-41c5-a612-54d514865208-security-mega-upgrade.md": "sha256:976a8bb2712ac0717346dde8c3ef565dbf412050b3667f0ab424d9582b4949f8",
     "design/archived/TRDD-20108ab7-3fb1-4d20-8959-700992e9ee7c-cross-marketplace-deps.md": "sha256:7daba0d873ca0ce8640907dcf9cb182d739af0666498b1cb31cfb8c98018a7fe",
     "design/archived/TRDD-20260518_231956+0200-25b9be90-ghost-agent-dispatch-detection.md": "sha256:962067d69aa2b0ceec49c05a66df33701039d8b1afedf36ce8c9ad4ceb3b768b",
-    "design/archived/TRDD-20260518_231957+0200-d1f74670-doctor-user-scope-recipes.md": "sha256:2f7738b5d620e0730942bab2157ab4bce5f50edc5268fe823cc77c25fd7ca14d",
+    "design/archived/TRDD-20260518_231957+0200-d1f74670-doctor-user-scope-recipes.md": "sha256:7540641a299c03a9b2fa671e67d48b1c0e8b6e6f6b41f2921dfdf51877073c4e",
     "design/archived/TRDD-20260519_114050+0200-71e68ab5-batch-fix-parallel-sharding.md": "sha256:4f000ea279313c49a45d6207f60247e2d854bb5dc9b9136441cb2a53e6442c92",
     "design/archived/TRDD-20260519_130740+0200-14cc93a6-decouple-skills-runtime-routing.md": "sha256:17821a588daa8d988af8ff8fbfa1ee1e8ff4d9cb4df76383fb34fb5a4b51a551",
     "design/archived/TRDD-20260519_140653+0200-478d9687-skills-index-universal-loader.md": "sha256:502206a14f36ffe6af0ced70184eaeff97d1277aa652fed550880ce13945ac5c",
