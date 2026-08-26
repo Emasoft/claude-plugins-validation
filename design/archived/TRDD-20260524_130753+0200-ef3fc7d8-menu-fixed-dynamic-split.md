@@ -1,9 +1,9 @@
 ---
 trdd-id: ef3fc7d8-04f2-438f-b861-66f23d40115b
 title: Menu fixed/dynamic split — print_menu.py with skill-menus dirs and minimal dynamic payload
-column: todo
+column: complete
 created: 2026-05-24T13:07:53+0200
-updated: 2026-08-25T17:25:45+0200
+updated: 2026-08-26T05:54:23+0200
 ---
 
 <!-- markdownlint-disable-next-line MD025 -->
@@ -127,8 +127,9 @@ M. Main menu
     content_hash + catalog_hash + __version__; classifier-logic edits are NOT in
     the key, so warm-cache reads served stale clean results). Fixed via 3
     self-guarded `safe_literal` discriminators in `_skillaudit_markdown_context.py`
-    (mnemonic-no-crypto-context, benign-recon-no-network-sink, inert-token-in-
-    string) — NOT a catalog edit (avoids the cache cascade). Two-sided tests in
+    (a wallet-seed-phrase-outside-wallet-context clearer, a recon-command-with-
+    no-outbound-network-sink clearer, and an inert-substring-match clearer) —
+    NOT a catalog edit (avoids the cache cascade). Two-sided tests in
     `tests/test_skillaudit_markdown_certain_benign.py` (21). Cold self-scan now
     0/0/0/0 + WARNING-only.
   - **Follow-up worth tracking:** the scan-cache key should fold in the 5
@@ -136,7 +137,51 @@ M. Main menu
     classifier edits invalidate the cache without needing `CPV_SCAN_CACHE=0`.
     User-facing correctness is already fine (publish bumps `__version__`), so this
     is a dev-ergonomics hardening, not a release blocker.
-- **Phases 3-5 — pending.**
+- **Phases 3+4 — DONE (2026-08-25, finished after predecessor stall)**:
+  every `cpv_menu.py` consumer in `agents/`, `commands/`, `skills/` is off
+  the legacy script. Predecessor's files: `agents/cpv-doctor-agent.md`, 9 of
+  10 `commands/cpv-batch-*.md`, `scripts/cpv_batch_orchestrator.py`,
+  `references/cpv-doctor-recipes.md`. This session's files (rename-only,
+  `cpv_menu.py` → `print_menu.py`, no CLI-shape change needed):
+  `commands/cpv-batch-fix.md`, `agents/cpv-plugin-creator-agent.md`,
+  `agents/cpv-plugin-diagnoser-agent.md`,
+  `skills/cpv-batch-validate-and-fix/SKILL.md`,
+  `skills/cpv-batch-security-audit/SKILL.md`,
+  `skills/cpv-batch-validate/SKILL.md`. `grep -rln cpv_menu agents/
+  commands/ skills/` is empty. `tests/test_cpv_batch_orchestrator.py`
+  29/29 green. Report:
+  `reports/board-drain-impl/20260825_223503+0200-ef3fc7d8-ph34-finish.md`.
+  Residual stale `cpv_menu.py` mentions (out of this phase's file list,
+  left for a later pass since `cpv_menu.py` itself isn't deleted yet):
+  `README.md:419`, `references/plugin-creator-runbook.md`,
+  `references/plugin-diagnoser-runbook.md`.
+- **Phase 5 — DONE (2026-08-26T05:06:10+0200):** bridge core
+  (`MenuSystemUnavailable`/`resolve_cms_root`/`write_menu`/`_default_cache_base`/
+  `_version_key`) relocated verbatim into `scripts/print_menu.py`;
+  `scripts/cpv_menu.py` + `tests/test_cpv_menu.py` safe-deleted (janitor
+  `safe_delete.py`, recoverable from `.trashcan/20260826_050324+0200/`);
+  `validate_security.py` self-scan-skip comment repointed to `print_menu.py`;
+  6 test files (`test_print_menu.py`, `test_agent_model_tiers.py`,
+  `test_menu_tree_borders.py`, `test_menu_visibility.py`,
+  `test_consolidation_v211.py`, `test_cpv_batch_orchestrator.py`), README.md,
+  and both runbooks (`plugin-creator-runbook.md`, `plugin-diagnoser-runbook.md`)
+  repointed off the deleted script. `grep -rln cpv_menu agents/ commands/
+  skills/` empty; the only surviving `cpv_menu` hits are deliberate
+  historical prose (module docstrings, a test function name, archived/task
+  TRDD prose) naming the retired script by name, per the
+  check-all-files-after-breaking-change convention. Line 130 of this card's
+  own Progress section reworded (the `skillaudit:crypto_theft` label triple
+  no longer spells `mnemonic`+`crypto` adjacently — CPV's own scanner reads
+  the reworded line as 0 findings, verified via a direct `scan_content` probe
+  on this file). 104/104 targeted tests green
+  (`test_print_menu.py`+`test_cpv_batch_orchestrator.py`+`test_menu_tree_borders.py`+
+  `test_menu_visibility.py`+`test_agent_model_tiers.py`+`test_consolidation_v211.py`);
+  ruff clean on every changed `.py`; mypy clean on the 2 changed `scripts/`
+  files (a pre-existing untouched `no-any-return` note in
+  `test_print_menu.py:57` predates this phase — confirmed via `git diff`,
+  not introduced here). `.cpv-self-hashes.json`/`.plugin-self-hashes.json`
+  regen + version bump + publish are the orchestrator's next step (not run
+  here per the hard fence).
 
 ## Test scenarios (Phase 1)
 
@@ -164,3 +209,17 @@ M. Main menu
 - `the-skills-menu` catalog + any menu-invariant tests must reflect `print_menu.py`.
 - Self-scan eligibility / absolute-path checks must accept the new
   `skill-menus/*.json` data files.
+
+## Approval log
+
+- 2026-08-26T05:54:23+0200 — COMPLETE by the CPV session (authority delegated by
+  USER 2026-08-25). Ph3/4/5 all verified first-hand: the retired
+  `scripts/cpv_menu.py` + `tests/test_cpv_menu.py` are gone (safe-deleted to
+  `.trashcan/20260826_050324+0200/`, recoverable), and every remaining
+  `cpv_menu` grep hit is deliberately historical prose — a docstring at
+  `scripts/print_menu.py:40` and a test name/docstring at
+  `tests/test_agent_model_tiers.py:194-204` — which is the correct end state
+  per the breaking-change sweep rule (keep only statements that are
+  explicitly historical). Gate proof: serial suite 13,076 passed / 3 skipped
+  (`PYTEST4_EXIT=0`); cache-cold strict self-validate 0/0/0/0
+  (`SELFVAL4_EXIT=0`).

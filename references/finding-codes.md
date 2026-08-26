@@ -60,15 +60,34 @@ The previous list contained `scout`, `oracle`, `basic`, `task`, `haiku`,
 names that don't ship as built-ins; the model names (`haiku`/`sonnet`/
 `opus`) are model IDs, not agent types.
 
+## User-scope doctor recipes (TRDD-d1f74670, D9..D13)
+
+Findings emitted by `scripts/cpv_doctor_user_scope.py` when `/cpv-doctor`
+runs `mode=user_scope` (option 9). D9 delegates to the `GHOST-DISPATCH`
+family above, applied to `~/.claude/{skills,agents,commands}/`. D10..D12
+are user-scope-specific; D13 also runs in plugin scope.
+
+| Code | Severity | When emitted |
+|------|----------|--------------|
+| `RC-STUB-FILE-001` | MAJOR | A SKILL.md/agent/command body (after stripping frontmatter) is under 200 chars AND matches a case-insensitive HTTP-error/HTML pattern (`404`, `Not Found`, `Error 4\d\d`, `<html`, `access denied`, `<!DOCTYPE`) — a failed-download stub. |
+| `RC-STALE-YEAR-001` | MINOR | A hardcoded "current year is 20YY" / "the year is 20YY" / "as of 20YY" / `> Note:` note. Excludes matches near `copyright`/`changelog`/`since`/`migrated`/`released`/`version`/`as of N years` and matches inside `text`/`output`/`console`/`log` fences. Also emits an INFO when `allowed-tools` lacks `Bash(date *)` (needed for the suggested `!`date +%Y`` fix). |
+| `RC-DEAD-SCRIPT-REF-001` | MAJOR | A `~/.claude/...` or `$CLAUDE_PROJECT_DIR/...` script reference that does not exist on disk. Skipped when the resolved path is inside a plugin cache (`plugins/cache/`) or data (`plugins/data/`) dir, inside a `text`/`output`/`console` fence, or on a `# `-prefixed comment line. |
+| `RC-NAMESPACE-MISSING-001` | MAJOR | A bare `skill-name` reference where the name is shipped by an installed plugin but is NOT a user/local-scope skill — needs `<plugin>:<skill>`. |
+| `RC-NAMESPACE-SPURIOUS-001` | MINOR | A `<ns>:skill-name` reference where `skill-name` IS a user/local-scope skill and NOT a plugin skill — drop the namespace prefix. |
+| `RC-NAMESPACE-AMBIGUOUS-001` | MAJOR | A bare reference that exists in BOTH user/local scope and an installed plugin — ambiguous, pick one explicitly. |
+| `RC-NAMESPACE-UNRESOLVED-001` | **CRITICAL** | A referenced skill name resolves to nothing in user-scope, local-scope, or any installed plugin. |
+
 ## Other finding codes
 
 This registry intentionally only documents codes added or revised by
-TRDD-25b9be90. Pre-existing codes (e.g. `RC-MKPL-METADATA-DRIFT`,
-`RC-NONSTD-DIR-001`, `RC-STRIP-GITMODULES-IMPORT-FAILED`, `RC-DATA-INSTALLER-001`,
-`RC-021`, `RC-110..148`) are documented inline at their emission sites
-in `scripts/cpv_validation_common.py`, `scripts/validate_plugin.py`,
-and other validator modules.
+TRDD-25b9be90 and TRDD-d1f74670. Pre-existing codes (e.g.
+`RC-MKPL-METADATA-DRIFT`, `RC-NONSTD-DIR-001`,
+`RC-STRIP-GITMODULES-IMPORT-FAILED`, `RC-DATA-INSTALLER-001`, `RC-021`,
+`RC-110..148`) are documented inline at their emission sites in
+`scripts/cpv_validation_common.py`, `scripts/validate_plugin.py`, and
+other validator modules.
 
 A future consolidation TRDD may unify all codes into this single
 registry — for now, this file is the authoritative reference for the
-`GHOST-DISPATCH` family.
+`GHOST-DISPATCH`, `STUB-FILE`, `STALE-YEAR`, `DEAD-SCRIPT-REF`, and
+`NAMESPACE-*` families.

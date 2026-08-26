@@ -5,7 +5,7 @@
 The orchestrator is side-effect-free with respect to subagent
 dispatch: it turns a list of ``ResolvedInput`` into a JSON
 ``plan.json`` + a **claude-menu-system status_table spec** the
-slash-command body hands to ``cpv_menu.py`` (the CMS bridge). The
+slash-command body hands to ``print_menu.py`` (the CMS bridge). The
 CMS Stop hook then emits the table at turn end via
 ``systemMessage`` — never enters the agent transcript.
 
@@ -14,7 +14,7 @@ Test classes:
 1. ``TestShardGroups`` — the pure ``shard_groups()`` helper.
 2. ``TestMakePlan`` — building a ``BatchPlan`` from ``ResolvedInput``.
 3. ``TestStatusTableJson`` — the CMS-shaped spec emitted for
-   ``cpv_menu.write_menu`` consumption.
+   ``print_menu.write_menu`` consumption.
 4. ``TestWritePlan`` — JSON round-trip of plan.json and status_table.json.
 5. ``TestAggregateStatus`` — re-reading per-plugin status files merges
    into a current CMS status_table spec.

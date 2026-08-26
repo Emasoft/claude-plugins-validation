@@ -2061,7 +2061,7 @@ def is_validator_script(file_path: str) -> bool:
         # strings as data (remote_validation manipulates env vars for
         # child processes; audit/* scripts crawl official spec sources).
         # (format_menu.py removed in TRDD-4de479a0 Phase 4 — menus now
-        # render via claude-menu-system Stop hook through cpv_menu.py.)
+        # render via claude-menu-system Stop hook through print_menu.py.)
         "remote_validation.py",
         "spec_rule_extractor.py",
         "add_dependencies.py",

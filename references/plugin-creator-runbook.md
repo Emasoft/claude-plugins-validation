@@ -137,7 +137,7 @@ See the **cpv-plugin-management** skill for the full list of 19 hard-won lessons
 
 ## 6. Dev-stripping (TRDD-793ac32a — Sprint 2)
 
-When creating a NEW plugin from scratch, ask the user whether to enable dev-stripping (default ON for the ~12 MB install-size win; ships only the rc-2 enforcement + rc-3 metadata in plugin.json — actual `--auto` extraction deferred to rc-3). Render the choice via the claude-menu-system bridge (NOT `AskUserQuestion`): the Stop hook emits it post-turn via `systemMessage`, so it costs ZERO tokens and never enters the transcript. NEVER print the menu inline; END THE TURN right after the `cpv_menu.py` call, and resume on the user's next-turn reply using the FIXED letter→action map below.
+When creating a NEW plugin from scratch, ask the user whether to enable dev-stripping (default ON for the ~12 MB install-size win; ships only the rc-2 enforcement + rc-3 metadata in plugin.json — actual `--auto` extraction deferred to rc-3). Render the choice via the claude-menu-system bridge (NOT `AskUserQuestion`): the Stop hook emits it post-turn via `systemMessage`, so it costs ZERO tokens and never enters the transcript. NEVER print the menu inline; END THE TURN right after the `print_menu.py` call, and resume on the user's next-turn reply using the FIXED letter→action map below.
 
 **Fixed letter→action map (immutable, per TRDD-4de479a0 FIXED-KEY contract — the SOLE reference for routing the reply; never inspect the rendered menu):** `S` = standard (Standard/PSS pattern — one `cpv.strip` entry for `tests/`, default), `L` = legacy (keep everything in MAIN repo, discouraged), `0` = cancel. `M`/`B`/`X` are globally reserved for Main/Back/Exit and never assigned here.
 
@@ -160,7 +160,7 @@ cat > "$PLUGIN_DEV_STRIPPING_SPEC" <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$PLUGIN_DEV_STRIPPING_SPEC"
+uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py" "$PLUGIN_DEV_STRIPPING_SPEC"
 ```
 
 `standard` → pass `--strip-dev` (default) to `generate_plugin_repo.py`, which adds the `cpv.strip` block to plugin.json with ONE extract entry (`tests/`, matching PSS's single-submodule pattern); `cpv strip-dev-parts --auto` reads it later. `legacy` → `--no-strip-dev`. No GitHub repos created at scaffold time; add more extract entries by hand for additional heavy dev folders. Default-ON because new plugins start with the right structure, reviewers see the block from day 1, migration is just `cpv strip-dev-parts` later, and there's zero downside (no submodules until opt-in).

@@ -1391,6 +1391,15 @@ def main() -> int:
     report = ValidationReport()
     validate_local_scope(project_root, report)
 
+    if project_root == (Path.home() / ".claude").resolve():
+        # TRDD-d1f74670: auditing the USER scope itself also runs the D9..D13
+        # user-scope recipes (ghost dispatch, stub files, stale year, dead
+        # script refs, namespace correctness) — the cpv-doctor-agent
+        # mode=user_scope contract. Lazy import: every other target skips it.
+        from cpv_doctor_user_scope import run_user_scope_recipes
+
+        run_user_scope_recipes(project_root, report)
+
     if args.json:
         payload = {
             "exit_code": report.exit_code,

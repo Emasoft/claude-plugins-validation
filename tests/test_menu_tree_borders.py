@@ -3,7 +3,7 @@
 Before TRDD-4de479a0 this file validated the alignment of inline Unicode
 box-drawing tables (`┏━━━┓` / `┃ … ┃` / `└───┘`) embedded directly in
 `menu-tree.md`. Phase 3 of the menu-migration replaced every one of those
-inline tables with `cpv_menu.py` spec invocations — the claude-menu-system
+inline tables with `print_menu.py` spec invocations — the claude-menu-system
 Stop hook now renders and emits each menu via `systemMessage` at turn end,
 so menu rows never enter the transcript / prompt cache and there is no
 border-alignment risk at the source level.
@@ -38,7 +38,7 @@ def test_menu_tree_file_exists() -> None:
 def test_menu_tree_has_no_inline_box_drawing_tables() -> None:
     """Post-TRDD-4de479a0 invariant: zero hand-rendered inline tables.
 
-    Every menu surface migrated to `cpv_menu.py` spec invocations + the
+    Every menu surface migrated to `print_menu.py` spec invocations + the
     claude-menu-system Stop-hook emitter. Any line opening with the heavy
     top-left corner `┏` indicates a re-introduced inline table — that
     would re-create the cache / token-cost regression the migration
@@ -52,7 +52,7 @@ def test_menu_tree_has_no_inline_box_drawing_tables() -> None:
     ]
     assert not offenders, (
         "menu-tree.md re-introduces inline box-drawing tables — these were "
-        "all replaced by cpv_menu.py spec invocations in TRDD-4de479a0 "
+        "all replaced by print_menu.py spec invocations in TRDD-4de479a0 "
         "Phase 3 (the CMS Stop hook emits via systemMessage at turn end, "
         "zero token cost). Build a CMS spec instead:\n\n"
         + "\n".join(f"  line {ln}: {text!r}" for ln, text in offenders)

@@ -1,10 +1,102 @@
 ---
 trdd-id: 747d7bbc-6cbc-4acc-8a89-a4bdacb3a17e
 title: CC v2.1.143 plugin dependency cascade detection — static graph validation
-column: todo
+column: complete
 created: 2026-05-23T15:34:13+0200
-updated: 2026-08-25T17:25:45+0200
+updated: 2026-08-26T05:54:23+0200
 ---
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-26
+
+Implemented by a delegated worker, then CENTRALLY VERIFIED — the verification
+found two defects the worker's own gates structurally could not see.
+
+**THIS CARD CONTRADICTS ITSELF — §5.3 vs AC#4. Read this before "restoring"
+§5.3.** The contradiction is in the card's own words, quoted so nobody
+re-litigates it from memory: §5.3's table row reads *"Missing dep | `dep not in
+node_map and dep not in allowlist` | CRITICAL (marketplace ctx) / **MAJOR
+(standalone)**"*, and §2 restates it in prose — *"We emit MAJOR for standalone
+validation, CRITICAL when run with marketplace context."* So §5.3 explicitly
+governs the standalone case; it is not scoped to marketplace scans. Meanwhile
+§8 acceptance criterion **#4** requires CPV's own self-scan to stay
+`0/0/0/0`. CPV declares a dependency and always self-scans standalone, so
+obeying §5.3 turns CPV's own gate RED — which is exactly what happened
+(`SELFVAL_EXIT=2`). The acceptance criterion names an OBSERVABLE OUTCOME, so it
+wins over a table entry. Resolution: the no-marketplace-context case emits a
+non-blocking **WARNING**; the marketplace-held case keeps **CRITICAL**.
+
+That is severity-correctness, not gate relaxation, and the distinguishing test
+is PROVABILITY: with the marketplace in hand, absence is proven; without it,
+absence is unprovable and a blocking severity is not stricter but
+**unfalsifiable** — nothing an author can do to a correct plugin clears it.
+Same shape as this project's own v2.156.0 ruling (RC-DEP-TAG stays a WARNING
+because an offline scan cannot know whether a plugin has dependents) and
+v2.154.1 (an over-strict severity WAS the defect). No rule is muted, no
+allowlist added, the finding stays visible.
+
+**Second defect — a false negative that made the feature inert for its main
+use case.** `normalize_deps` ran `str(x)` over list elements, so the canonical
+**pinned** form `[{"name": …, "version": …}]` — the shape
+`cpv_dependency_schema.DEPENDENCY_SUBKEYS` blesses, that CPV's own manifest
+uses, and that CPV ADVISES authors to use — became the *repr of a dict* used as
+a plugin name. Every pinned dependency was therefore unresolvable against any
+marketplace. Fixed to read `name`; a malformed element is SKIPPED rather than
+stringified, because `validate_dependency_element` already reports that defect
+(verified wired at `validate_plugin.py:300` and `validate_marketplace.py:1602`
+— not assumed), and a bogus graph node would emit a second, wrong finding for
+one cause.
+
+**Non-vacuity — stating exactly what was measured vs inferred.** MEASURED:
+`normalize_deps` old-vs-new on the pinned shape — old returns
+`["{'name': 'a', 'version': '>=1.0.0'}"]`, new returns `["a"]`. The two
+`normalize_deps` tests follow directly from that measurement. The
+marketplace-resolution test's failure on old code follows by INFERENCE (a
+dict-repr name cannot match a node-map key, so old code yields a finding where
+it asserts `[]`) — sound, but not separately executed. The fourth is a labelled
+positive control and passes in both states by design.
+
+**Worker's deviations — ADJUDICATED 2026-08-26.**
+
+- **§6's `commands/cpv-validate-dependencies.md`, the batch skill, the agent
+  mode and the menu-tree row: deviation ACCEPTED, worker was right.** CLAUDE.md
+  carries a hard *single-visible-command invariant* ("only `/cpv-main-menu` is
+  meant to be the user's entry point … Adding a new top-level visible command
+  breaks this — don't, unless explicitly asked"), and three test files pin the
+  command-set allowlist. §6 itself marks that command **"Optional"**. A card's
+  optional convenience item does not override a project-wide invariant.
+- **Programmatic fixtures instead of `tests/fixtures/dependency_graphs/` and
+  `tests/scenarios/`: ACCEPTED.** `_make_marketplace()` builds each scenario at
+  its assertion site; `tests/scenarios/` exists nowhere else in this repo.
+- **20 of 24 §7 scenarios directly tested: ACCEPTED.** #19 is a documented
+  non-goal; #23 and #9's severity ties depend on the cross-marketplace
+  allowlist from TRDD-20108ab7, which §5.7 itself calls a SOFT dependency this
+  card "can ship without".
+- **AC7 (README blurb): CLOSED by me**, not by the worker — a row added to
+  README's "What Does CPV Check?" table covering the graph checks, the three
+  accepted declaration shapes, and the WARNING-vs-CRITICAL provability split.
+  **Stale reference in AC7 itself:** it names the section *"What CPV checks"*;
+  the real heading is **"What Does CPV Check?"** (README:92). A literal grep
+  for the card's wording returns nothing and reads as "the section does not
+  exist" — it does. A table row is the right form: every sibling capability in
+  that section is a row, several a paragraph long.
+
+**STILL OPEN:** the `cpv-the-skills-menu` 5000-token-cap check has NOT been
+run. It is moot for the accepted deviation (nothing was added to that file),
+but it was never executed, so it is not evidence of anything yet.
+
+**INHERITED FROM A CANCELLED CARD — outstanding coverage, parked here on
+purpose.** TRDD-4243a768 was cancelled, and a terminal card is frozen and
+archive-bound, so a follow-up recorded only inside it would be a sentence
+nobody greps — "queueing is a HANDOFF, not a resolution", and an archived card
+is not even a queue. The real outstanding item: **two two-sided tests for the
+self-scan name-signal gate** (genuine-CPV → self-scan mode ON; a third-party
+lookalike → mode OFF). `validate_security._CPV_IS_RUNNING_CPV` is verified by
+source-reading only; the code needs NO change, just that coverage. Carried here
+because this card is still open and someone will actually read it.
+
+**NEXT ACTION:** re-run the cache-cold gate with hashes regenerated AFTER the
+last edit; the previous run was RED (`SELFVAL_EXIT=2`) on exactly the two
+defects fixed above plus 12 MD004 NITs since repaired.
 
 <!-- markdownlint-disable-next-line MD025 -->
 # TRDD-747d7bbc — CC v2.1.143 plugin dependency cascade detection — static graph validation
@@ -494,3 +586,18 @@ seen in the marketplace scan.
   intentionally contains payloads the security scanner would
   otherwise flag — the dep validator's fixtures should not trip
   unrelated detectors.
+
+## Approval log
+
+- 2026-08-26T05:54:23+0200 — COMPLETE by the CPV session (authority delegated by
+  USER 2026-08-25). Two defects the delegated worker's own gates structurally
+  could not see were found and fixed centrally: (1) a blocking MAJOR for an
+  unresolvable dep turned CPV's own gate RED, violating this card's AC#4 —
+  demoted to WARNING (the §5.3-vs-AC#4 self-contradiction is quoted verbatim in
+  the STATE block so nobody "restores" §5.3); (2) `normalize_deps` did `str(x)`
+  on list elements, so the canonical PINNED form `[{"name":…,"version":…}]` —
+  which CPV's own manifest uses and CPV advises — became a dict repr that could
+  never resolve. Gate proof this session: serial suite 13,076 passed / 3 skipped
+  (`PYTEST4_EXIT=0`); cache-cold strict self-validate 0/0/0/0 with the single
+  expected non-blocking WARNING emitted by this card's own validator
+  (`SELFVAL4_EXIT=0`) — i.e. the demotion is observable in the gate output.

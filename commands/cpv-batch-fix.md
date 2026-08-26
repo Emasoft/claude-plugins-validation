@@ -140,7 +140,7 @@ serially. The planner already caps the index's ``max_parallel`` field.
 Queue the per-shard table (so the user sees what will run) via the
 claude-menu-system Stop hook. Build a CMS-shaped status_table spec
 inline — one row per shard — and write it to a tempfile, then hand
-the path to ``cpv_menu.py``:
+the path to ``print_menu.py``:
 
 Read the planner's index from ``$INDEX_PATH`` (captured in Step 1 — it
 resolves to ``$SESSION_DIR/index.json``). Each entry in its ``shards[]``
@@ -148,7 +148,7 @@ array carries ``shard_id``, ``file_count``, ``finding_count``, and
 ``manifest_path`` (shape defined by ``scripts/cpv_batch_planner.py``).
 Map one shard per CMS ``status_table`` row — ``status: pending`` is the
 right enum for queued rows — then write the spec to a tempfile and hand
-the path to ``cpv_menu.py``:
+the path to ``print_menu.py``:
 
 ```bash
 PLAN_SPEC="/tmp/cpv-batch-fix-shard-plan-$$.json"
@@ -169,7 +169,7 @@ cat > "$PLAN_SPEC" <<EOF
 }
 EOF
 
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$PLAN_SPEC"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py" "$PLAN_SPEC"
 ```
 
 NEVER print menu inline; the CMS Stop hook emits via systemMessage at
@@ -295,7 +295,7 @@ post-turn via ``systemMessage`` — zero token cost, NEVER printed
 inline by the orchestrator):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$STATUS_TABLE"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py" "$STATUS_TABLE"
 ```
 
 NEVER print menu inline; the CMS Stop hook emits via systemMessage at
@@ -358,7 +358,7 @@ for plugin_index in group:
 
 Queue the live status table via the orchestrator's ``emit-status``
 subcommand (aggregates every per-plugin status JSON, hands the CMS
-spec to ``cpv_menu`` — Stop hook emits at turn end):
+spec to ``print_menu`` — Stop hook emits at turn end):
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \

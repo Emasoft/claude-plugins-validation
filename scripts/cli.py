@@ -134,6 +134,13 @@ def validate_xref() -> None:
     sys.exit(main())
 
 
+def validate_dependencies() -> None:
+    """Dependency-graph (cascade) validator (TRDD-747d7bbc)."""
+    from validate_dependencies import main
+
+    sys.exit(main())
+
+
 def validate_telemetry() -> None:
     """OTEL telemetry supply-chain risk validator (TRDD-e3e74f69)."""
     from validate_telemetry import main

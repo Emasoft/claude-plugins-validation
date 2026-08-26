@@ -482,4 +482,4 @@ Fixtures:
 
 - 2026-08-25T17:25:22+0200 — CLOSED as complete by the CPV session (board drain;
   authority delegated by USER 2026-08-25). SHIPPED v2.15.0/.1 — cc_scope_rules.py
-  + scope validators live (commands renamed cpv-batch-scope-*) (batch_ag).
+  - scope validators live (commands renamed cpv-batch-scope-*) (batch_ag).

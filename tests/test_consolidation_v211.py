@@ -489,7 +489,7 @@ class TestSkillAgentArchitecture:
             "cpv-marketplace-authoring-contract",
             # (cpv-format-menu was safe-deleted in TRDD-4de479a0 Phase 4 —
             # menu rendering moved to the externalised claude-menu-system
-            # Stop hook via scripts/cpv_menu.py; no orphan to allowlist.)
+            # Stop hook via scripts/print_menu.py; no orphan to allowlist.)
             # TRDD-c50531c2 (v2.90.0 menu unification) created these 14
             # skills as replacements for the deleted commands of the same
             # role. The orchestrator wiring (which agent loads which skill)

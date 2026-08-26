@@ -7,7 +7,7 @@ TRDD-3ce2f864) moved menu rendering into a fork-skill and pre-rendered
 the first-contact menus directly in each orchestrator command body.
 TRDD-4de479a0 Phase 4 (Wave 1 + this wave) replaces both with the
 externalised `claude-menu-system` Stop-hook emitter, brokered through
-`scripts/cpv_menu.py` — zero-token `systemMessage` render, no fork.
+`scripts/print_menu.py` — zero-token `systemMessage` render, no fork.
 
 **v2.90.0 change.** Per TRDD-c50531c2 the four menu-orchestrator commands
 (`cpv-doctor`, `cpv-fix-validation`, `cpv-fix-marketplace-validation`,

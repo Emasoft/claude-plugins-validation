@@ -90,6 +90,57 @@ class TestTarFilterErrorIsCleanAbort:
             shutil.rmtree(work, ignore_errors=True)
 
 
+class TestZipTraversalIsCleanAbort:
+    """#4 sibling — the ZIP path shares the traversal-abort code, so it needs
+    the same two-sided cover. It carried the identical defect (bare sys.exit,
+    no cleanup) and was never tested; the tar test's own docstring claimed the
+    ZIP path was already the clean-abort reference."""
+
+    def _make_zip(self, path: Path, entries: dict[str, bytes]) -> None:
+        import zipfile
+
+        with zipfile.ZipFile(path, "w") as zf:
+            for arcname, content in entries.items():
+                zf.writestr(arcname, content)
+
+    def test_traversal_entry_aborts_cleanly(self):
+        from cpv_management_common import extract_archive
+
+        work = Path(tempfile.mkdtemp())
+        try:
+            archive = work / "evil.zip"
+            self._make_zip(archive, {"../escape.txt": b"pwned"})
+            dest = work / "dest"
+            dest.mkdir()
+            with pytest.raises(SystemExit) as ei:
+                extract_archive(str(archive), dest)
+            assert ei.value.code == 1
+            assert not (work / "escape.txt").exists()
+            assert not dest.exists()
+        finally:
+            import shutil
+
+            shutil.rmtree(work, ignore_errors=True)
+
+    def test_benign_zip_extracts(self):
+        """Two-sided: a safe zip extracts with no SystemExit and no cleanup."""
+        from cpv_management_common import extract_archive
+
+        work = Path(tempfile.mkdtemp())
+        try:
+            archive = work / "ok.zip"
+            self._make_zip(archive, {"a/b.txt": b"hello", "a/c.txt": b"world"})
+            dest = work / "dest"
+            dest.mkdir()
+            extract_archive(str(archive), dest)
+            assert (dest / "a" / "b.txt").read_bytes() == b"hello"
+            assert (dest / "a" / "c.txt").read_bytes() == b"world"
+        finally:
+            import shutil
+
+            shutil.rmtree(work, ignore_errors=True)
+
+
 class TestMarketplaceJsonAtomicWrite:
     """#5 - update_marketplace_json uses the atomic save_json_safe helper."""
 

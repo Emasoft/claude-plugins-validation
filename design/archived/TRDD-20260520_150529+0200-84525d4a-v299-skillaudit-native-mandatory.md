@@ -132,4 +132,4 @@ Reference: https://github.com/megamind-0x/skillaudit
 
 ## Approval log
 
-- 2026-08-25T17:25:05+0200 — CLOSED as complete by the CPV session (board drain; authority delegated by USER 2026-08-25). SHIPPED v2.99.0 — cpv_skillaudit_native.py is the live core scanner (batch_ab)
+* 2026-08-25T17:25:05+0200 — CLOSED as complete by the CPV session (board drain; authority delegated by USER 2026-08-25). SHIPPED v2.99.0 — cpv_skillaudit_native.py is the live core scanner (batch_ab)

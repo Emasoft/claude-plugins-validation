@@ -203,4 +203,4 @@ don't need any local state beyond a clone).
 
 ## Approval log
 
-- 2026-08-25T17:25:14+0200 — CLOSED as complete by the CPV session (board drain; authority delegated by USER 2026-08-25). SHIPPED — cpv-batch-scope-{diagnose,fix,diagnose-and-fix} live (batch_ac)
+* 2026-08-25T17:25:14+0200 — CLOSED as complete by the CPV session (board drain; authority delegated by USER 2026-08-25). SHIPPED — cpv-batch-scope-{diagnose,fix,diagnose-and-fix} live (batch_ac)

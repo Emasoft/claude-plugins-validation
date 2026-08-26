@@ -3715,6 +3715,55 @@ def validate_workflow_inline_python(
     return results
 
 
+def validate_dependency_cascade(marketplace_dir: Path) -> list[ValidationResult]:
+    """Run the dependency-graph (cascade) validator ONCE for the whole bundle
+    (TRDD-747d7bbc §5.5) — builds the graph once, then feeds every plugin's
+    findings into the same result list, rather than re-parsing every
+    plugin.json per plugin (O(N) re-builds).
+
+    Runs WITH marketplace context, so an unresolvable dep reports at the
+    CRITICAL tier (§2 of the TRDD) rather than the standalone MAJOR tier
+    ``validate_plugin.py`` uses.
+    """
+    try:
+        from validate_dependencies import build_marketplace_context, validate_dependencies
+    except ImportError as e:
+        return [
+            ValidationResult(
+                level="MINOR",
+                category="dependencies",
+                message=f"Dependency-graph validator unavailable: {e}",
+                file=str(marketplace_dir),
+            )
+        ]
+
+    from cpv_validation_common import ValidationReport as _DepReport
+
+    try:
+        ctx = build_marketplace_context(marketplace_dir)
+        dep_report = _DepReport()
+        for name in ctx.plugins:
+            node = ctx.plugins[name]
+            if node.source is None:
+                continue
+            validate_dependencies(node.source.parent.parent, ctx, dep_report)
+    except Exception as e:  # noqa: BLE001 — defensive boundary
+        return [
+            ValidationResult(
+                level="MINOR",
+                category="dependencies",
+                message=f"Dependency-graph validation crashed: {type(e).__name__}: {e}",
+                file=str(marketplace_dir),
+            )
+        ]
+
+    return [
+        ValidationResult(level=r.level, category="dependencies", message=r.message, file=r.file or str(marketplace_dir))
+        for r in dep_report.results
+        if r.level != "PASSED"
+    ]
+
+
 def validate_marketplace(marketplace_path: Path) -> ValidationReport:
     """
     Validate a complete marketplace configuration.
@@ -3841,6 +3890,12 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
             # (dict bracket access in f-strings inside shell-quoted python3 -c blocks)
             workflow_results = validate_workflow_inline_python(marketplace_dir)
             report.results.extend(workflow_results)
+
+            # TRDD-747d7bbc — dependency-graph (cascade) validation, once per
+            # bundle: cycles, missing deps, disabled-target deps that would
+            # trip CC v2.1.143's `claude plugin disable` cascade refusal.
+            dependency_cascade_results = validate_dependency_cascade(marketplace_dir)
+            report.results.extend(dependency_cascade_results)
 
     # Validate optional fields — description and version can be top-level or
     # nested under metadata. v2.22.3 — GAP-32/33: top-level `description` and

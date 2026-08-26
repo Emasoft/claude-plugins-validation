@@ -177,13 +177,15 @@ class TestTrddCrossReference:
     """Sanity — the TRDD that motivates this test file must exist."""
 
     def test_trdd_file_exists(self) -> None:
-        trdd = (
-            Path(__file__).parent.parent
-            / "design"
-            / "tasks"
-            / "TRDD-ebc745b5-5563-44af-860d-5e2f5e002f46-cc-changelog-v2_1_143.md"
-        )
-        assert trdd.is_file(), f"Expected TRDD at {trdd}"
+        # Search every lifecycle folder, not just tasks/: a card legitimately
+        # moves tasks/ -> archived/ (or refused/) when it reaches a terminal
+        # column, and this test only asserts the TRDD *exists*, not that it is
+        # still open. Hardcoding tasks/ made archiving a card fail the suite.
+        design = Path(__file__).parent.parent / "design"
+        name = "TRDD-ebc745b5-5563-44af-860d-5e2f5e002f46-cc-changelog-v2_1_143.md"
+        matches = [p for p in design.rglob(name) if p.is_file()]
+        assert matches, f"Expected TRDD {name} somewhere under {design}"
+        trdd = matches[0]
         body = trdd.read_text(encoding="utf-8")
         assert "TRDD-ebc745b5" in body
         assert "v2.1.143" in body

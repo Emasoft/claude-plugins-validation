@@ -27,11 +27,11 @@ orchestrator body lives in this plugin's
 
 - `claude-plugins-validation` plugin installed (provides
   `scripts/validate_security.py`, the universal input resolver,
-  `scripts/cpv_menu.py` (the claude-menu-system bridge), and the
+  `scripts/print_menu.py` (the claude-menu-system bridge), and the
   `cpv-plugin-validator-agent` agent).
 - `claude-menu-system` plugin installed — the slash command emits the
-  status table via its Stop-hook (through `scripts/cpv_menu.py`).
-  Declared as a hard dependency in CPV's `plugin.json`; `cpv_menu.py`
+  status table via its Stop-hook (through `scripts/print_menu.py`).
+  Declared as a hard dependency in CPV's `plugin.json`; `print_menu.py`
   fails fast with an install hint if missing (there is no inline
   fallback renderer — TRDD-4de479a0).
 - The five external scanners installed (cc-audit, tirith,
@@ -57,7 +57,7 @@ table — every shape is supported identically.
 3. The command dispatches one `cpv-plugin-validator-agent` subagent per plugin
    in `batch_security_audit` mode (each runs `validate_security`
    only) and aggregates the per-plugin status JSONs into a CMS-shaped
-   status-table spec, queued via `scripts/cpv_menu.py`. The
+   status-table spec, queued via `scripts/print_menu.py`. The
    claude-menu-system Stop hook emits the Unicode-bordered table
    post-turn via `systemMessage` (zero token cost — never enters the
    agent transcript). NEVER print the table inline.
@@ -69,7 +69,7 @@ table — every shape is supported identically.
 ## Output
 
 - Unicode-bordered status table (one row per plugin), queued via
-  `scripts/cpv_menu.py` and emitted post-turn by the claude-menu-system
+  `scripts/print_menu.py` and emitted post-turn by the claude-menu-system
   Stop hook through `systemMessage` (zero token cost — never enters the
   agent transcript).
 - One-line DONE summary.
