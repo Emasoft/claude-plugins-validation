@@ -64,7 +64,7 @@ post-turn via ``systemMessage`` — zero token cost, NEVER printed
 inline by the orchestrator):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$STATUS_TABLE"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py" "$STATUS_TABLE"
 ```
 
 NEVER print menu inline; the CMS Stop hook emits via systemMessage at
@@ -130,7 +130,7 @@ for plugin_index in group:
 
 Queue the live status table via the orchestrator's ``emit-status``
 subcommand (aggregates every per-project status JSON, hands the CMS
-spec to ``cpv_menu`` — Stop hook emits at turn end):
+spec to ``print_menu`` — Stop hook emits at turn end):
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_batch_orchestrator.py" \

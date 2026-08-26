@@ -93,6 +93,16 @@ jobs:
           set -euo pipefail
           NAME=$(python3 -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['name'])")
           VERSION=$(python3 -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['version'])")
+          # Reject anything shaped to break out of the downstream env/JSON
+          # context before it ever reaches an env: var or a dispatch payload.
+          if ! [[ "$NAME" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+            echo "::error::plugin.json name does not match the expected slug pattern: $NAME" >&2
+            exit 1
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::plugin.json version does not match the expected semver pattern: $VERSION" >&2
+            exit 1
+          fi
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
@@ -182,6 +192,16 @@ jobs:
             VERSION=$(python3 -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['version'])")
           fi
           NAME=$(python3 -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['name'])")
+          # Reject anything shaped to break out of the downstream env/JSON
+          # context before it ever reaches an env: var or a dispatch payload.
+          if ! [[ "$NAME" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+            echo "::error::plugin.json name does not match the expected slug pattern: $NAME" >&2
+            exit 1
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::resolved version does not match the expected semver pattern: $VERSION" >&2
+            exit 1
+          fi
           echo "name=$NAME"       >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
@@ -229,24 +249,29 @@ actions policy), you can call the REST API directly:
           GH_TOKEN: ${{ secrets.MARKETPLACE_PAT }}
           OWNER: ${{ env.MARKETPLACE_OWNER }}
           REPO: ${{ env.MARKETPLACE_REPO }}
+          # Step outputs are untrusted (they carry whatever plugin.json held).
+          # Bind them here and let `jq` build the JSON from the environment —
+          # splicing `${{ }}` into the heredoc would make a crafted name or
+          # version part of the shell/JSON source (RC-WORKFLOW-EXPR-INJECT).
+          PLUGIN_NAME: ${{ steps.plugin.outputs.name }}
+          PLUGIN_VERSION: ${{ steps.plugin.outputs.version }}
+          PLUGIN_REF: ${{ steps.plugin.outputs.ref }}
+          SOURCE_REPO: ${{ github.repository }}
+          TRIGGERED_BY: ${{ github.actor }}
         run: |
-          curl -fsSL -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/$OWNER/$REPO/dispatches" \
-            -d @- <<JSON
-          {
-            "event_type": "plugin-updated",
-            "client_payload": {
-              "plugin":       "${{ steps.plugin.outputs.name }}",
-              "version":      "${{ steps.plugin.outputs.version }}",
-              "ref":          "${{ steps.plugin.outputs.ref }}",
-              "source_repo":  "${{ github.repository }}",
-              "triggered_by": "${{ github.actor }}"
-            }
-          }
-          JSON
+          jq -n \
+            --arg plugin "$PLUGIN_NAME" \
+            --arg version "$PLUGIN_VERSION" \
+            --arg ref "$PLUGIN_REF" \
+            --arg source_repo "$SOURCE_REPO" \
+            --arg triggered_by "$TRIGGERED_BY" \
+            '{event_type: "plugin-updated", client_payload: {plugin: $plugin, version: $version, ref: $ref, source_repo: $source_repo, triggered_by: $triggered_by}}' \
+          | curl -fsSL -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$OWNER/$REPO/dispatches" \
+              -d @-
 ```
 
 A `204 No Content` response means the dispatch was accepted. Any 4xx is a
@@ -259,13 +284,21 @@ If `gh` CLI is available on the runner, an even shorter form works:
       - name: Dispatch via gh cli
         env:
           GH_TOKEN: ${{ secrets.MARKETPLACE_PAT }}
+          OWNER: ${{ env.MARKETPLACE_OWNER }}
+          REPO: ${{ env.MARKETPLACE_REPO }}
+          # Same rule as the curl form: every event/step value is read from the
+          # environment, never interpolated into the run-script.
+          PLUGIN_NAME: ${{ steps.plugin.outputs.name }}
+          PLUGIN_VERSION: ${{ steps.plugin.outputs.version }}
+          PLUGIN_REF: ${{ steps.plugin.outputs.ref }}
+          SOURCE_REPO: ${{ github.repository }}
         run: |
-          gh api "repos/${{ env.MARKETPLACE_OWNER }}/${{ env.MARKETPLACE_REPO }}/dispatches" \
+          gh api "repos/$OWNER/$REPO/dispatches" \
             -f event_type=plugin-updated \
-            -f "client_payload[plugin]=${{ steps.plugin.outputs.name }}" \
-            -f "client_payload[version]=${{ steps.plugin.outputs.version }}" \
-            -f "client_payload[ref]=${{ steps.plugin.outputs.ref }}" \
-            -f "client_payload[source_repo]=${{ github.repository }}"
+            -f "client_payload[plugin]=$PLUGIN_NAME" \
+            -f "client_payload[version]=$PLUGIN_VERSION" \
+            -f "client_payload[ref]=$PLUGIN_REF" \
+            -f "client_payload[source_repo]=$SOURCE_REPO"
 ```
 
 ---

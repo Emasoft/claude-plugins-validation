@@ -11,7 +11,7 @@ Given a list of ``ResolvedInput`` (the output of
    spec shape (``spec_version: 1``, ``mode: "status_table"``,
    ``plugin: "cpv"``, ``slug``, ``row_header``, ``rows: [{label,
    status, notes}]``). The slash-command orchestrator hands this
-   spec to ``cpv_menu.py`` (the CMS bridge), which queues the
+   spec to ``print_menu.py`` (the CMS bridge), which queues the
    table for the CMS Stop hook to emit POST-TURN via
    ``systemMessage`` — zero token cost, no fork, no context
    pollution.
@@ -165,7 +165,7 @@ def status_table_json(
     *,
     slug: str = "batch-status",
 ) -> dict[str, Any]:
-    """Build a **claude-menu-system status_table spec** for ``cpv_menu.py``.
+    """Build a **claude-menu-system status_table spec** for ``print_menu.py``.
 
     Returned shape (CMS v0.1.5):
         {
@@ -179,7 +179,7 @@ def status_table_json(
         }
 
     The orchestrator MUST hand this dict (or its JSON) to
-    ``cpv_menu.py`` (the CMS bridge), which queues it for the CMS Stop
+    ``print_menu.py`` (the CMS bridge), which queues it for the CMS Stop
     hook to emit at turn end via ``systemMessage`` — zero token cost,
     never enters the transcript.
 
@@ -308,7 +308,7 @@ def write_status_table(plan: BatchPlan, **kwargs: Any) -> Path:
 
     The file lives in the session dir alongside ``plan.json`` so the
     slash-command body (Step 1 of every batch command) can hand its
-    path to ``cpv_menu.py`` without rebuilding the spec.
+    path to ``print_menu.py`` without rebuilding the spec.
     """
     kwargs.setdefault("slug", _cms_slug_for(plan.agent_type))
     data = status_table_json(plan.plugins, **kwargs)
@@ -343,7 +343,7 @@ def aggregate_status(
     state.
 
     Returns a full CMS ``status_table`` spec dict ready to hand to
-    ``cpv_menu.write_menu()`` / the ``cpv_menu.py`` CLI.
+    ``print_menu.write_menu()`` / the ``print_menu.py`` CLI.
     """
     plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
     session_dir = Path(plan_data["session_dir"])
@@ -389,9 +389,9 @@ def aggregate_status(
 
 
 def emit_status_table(plan_path: Path) -> Path:
-    """Build the live CMS status_table spec and queue it via ``cpv_menu``.
+    """Build the live CMS status_table spec and queue it via ``print_menu``.
 
-    Programmatic counterpart to invoking ``cpv_menu.py`` from Bash. This
+    Programmatic counterpart to invoking ``print_menu.py`` from Bash. This
     is what ``cpv_batch_orchestrator.py emit-status`` calls (Step 3 in
     every batch command). The CMS Stop hook will emit the menu at the
     end of THIS turn via ``systemMessage`` (zero token cost). Returns
@@ -401,11 +401,11 @@ def emit_status_table(plan_path: Path) -> Path:
     END after this call so the Stop hook can fire. This is the single
     invariant of the TRDD-4de479a0 routing model.
     """
-    # Local import — keeps ``cpv_menu`` (which requires CMS) optional for
+    # Local import — keeps ``print_menu`` (which requires CMS) optional for
     # the side-effect-free plan/aggregate functions above. Importing only
     # here means tests that exercise plan/aggregate don't need a CMS
     # install to pass.
-    from cpv_menu import write_menu  # noqa: PLC0415
+    from print_menu import write_menu  # noqa: PLC0415
 
     spec = aggregate_status(plan_path)
     return write_menu(spec)
@@ -456,7 +456,7 @@ def _cli(argv: list[str] | None = None) -> int:
 
     p_emit = sub.add_parser(
         "emit-status",
-        help="Re-aggregate + hand the spec to cpv_menu (CMS Stop hook emits post-turn)",
+        help="Re-aggregate + hand the spec to print_menu (CMS Stop hook emits post-turn)",
     )
     p_emit.add_argument("plan_path", type=Path, help="Path to plan.json")
 

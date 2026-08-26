@@ -1,10 +1,120 @@
 ---
 trdd-id: d1f74670-539c-488e-8145-eb8a964315f4
 title: CPV doctor user-scope recipes — stub files, stale years, dead refs, namespace correctness
-column: todo
+column: complete
 created: 2026-05-18T23:19:57+0200
-updated: 2026-08-25T17:25:45+0200
+updated: 2026-08-26T05:54:23+0200
 ---
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-25
+
+Implemented in `scripts/cpv_doctor_user_scope.py`: `check_ghost_dispatch` (D9,
+delegates to `validate_xref._extract_dispatch_refs`/`_resolve_dispatch_ref`
+from TRDD-25b9be90 — that TRDD is `column: complete`/archived, so its engine
+is available), `check_stub_files` (D10), `check_stale_year` (D11),
+`check_dead_script_refs` (D12), `check_namespace_correctness` (D13, usable at
+both user-scope and plugin-scope), plus `run_user_scope_recipes()` running
+all five. `references/finding-codes.md` registers all 7 RC codes.
+`agents/cpv-doctor-agent.md` has a new "User-scope recipes D9..D13" section,
+explicitly gated to `mode=user_scope`, distinguished from the pre-existing
+D1..D9 design-correctness pass by its `RC-*` (not `DOC-*`) code namespace.
+22 real two-sided tests in `tests/test_doctor_user_scope_recipes.py`, all
+green; ruff + mypy clean.
+
+**NOT done (explicitly out of scope for this bounded pass, not blocked by
+any banned file):**
+- `scripts/format_menu.py` does not exist in this repo anymore (only a stale
+  `.pyc` remains — superseded by the externalised `claude-menu-system` Stop-hook
+  renderer per CLAUDE.md's "Menu architecture" section). The acceptance
+  criterion naming it is stale; there is no breakdown-chart script left to wire.
+- `scripts/validate_local_scope.py` (the script the doctor agent's mode table
+  says to invoke for `mode=user_scope`) does NOT yet call
+  `run_user_scope_recipes()` — the module is written and tested standalone but
+  not wired into the live `/cpv-doctor` option-9 pipeline. Not a banned file;
+  descoped for time. **NEXT ACTION for whoever resumes this card:** add a call
+  to `cpv_doctor_user_scope.run_user_scope_recipes(Path.home()/".claude", report)`
+  inside `validate_local_scope.py`'s `main()`/`validate_local_scope()` when the
+  target is `~/.claude` (or add a dedicated `--user-scope-recipes` flag), then
+  re-run `/cpv-doctor` option 9 against the real `~/.claude` to satisfy the
+  card's last acceptance box (matching the 2026-05-18 audit results).
+- "Target ~35 new tests" — shipped 22 real tests covering every function's
+  core branches (positive + negative per rule); not padded to 35.
+
+**2026-08-25 (D13 recalibration retry)** — verified `check_namespace_correctness`
+in `scripts/cpv_doctor_user_scope.py` against this card's D13 row 8 FP guard
+(a prior worker's session already landed the fix; this pass re-verified it
+end-to-end rather than redoing it). `_extract_skill_mentions` counts a
+reference ONLY for: `Skill({skill:"name"})` calls (regardless of fence — a
+literal tool invocation, not example code, per row 8's "Skill(" marker),
+plausible slash-command invocations via `_SKILL_SLASH_RE` (start-of-line or
+after-whitespace `/name`, `(?!\S)` after the name so `/usr/bin` and `a/b`
+never match, and fenced-code-block lines are skipped), and frontmatter
+`skills:`/`allowed-skills:` list entries. Backtick-only mentions (a bare
+`` `name` `` with no `Skill(`, no leading `/`, no `skills:` list) were never
+extracted by any pattern, so they already produce zero findings — verified
+directly against the module (see report). Confirmed two-sided: prose
+`/usr/bin`, prose `a/b`, and a backtick-only mention → 0 mentions; a real
+`Skill({skill:"ghost-x"})`, a real line-start `/ghost-cmd`, and a
+`skills: [ghost-y]` frontmatter entry → each fires. 31/31 tests green
+(`test_doctor_user_scope_recipes.py` + `test_local_scope_user_recipes_wiring.py`),
+ruff + mypy clean on the touched files. No code change was needed — the
+prior worker's landed fix already satisfies the card's spec; this entry
+documents the re-verification. Report:
+`reports/board-drain-impl/20260825_230311+0200-d13-recal-retry.md`.
+
+**2026-08-26 — orchestrator central verification on the REAL `~/.claude`
+corpus; three further D13 accuracy fixes landed.** The delegated pass was
+verified rather than trusted, and the real-corpus re-run surfaced residual FPs
+the unit tests could not see:
+
+- **MEASURED, same session and same corpus, both sides:**
+  `RC-NAMESPACE-UNRESOLVED-001` **34 → 7 → 1** across the two fix rounds
+  (total findings `55 → 29 → 22`). This is the controlled figure.
+- **The control that makes those three scans comparable:** other workers were
+  editing shared validator modules between runs, so the scans were not
+  same-code-except-my-fix. What settles it is that the four non-D13 counters
+  are **byte-identical across all three scans** — `DEAD-SCRIPT-REF=9`,
+  `GHOST-001=4`, `GHOST-002=1`, `STALE-YEAR=5` — while only `UNRESOLVED`
+  moves. Four independent counters holding steady is the evidence that
+  nothing else in the pipeline shifted underneath the measurement.
+- **NOT a controlled comparison:** the `6,978` baseline quoted in the pre-clear
+  handoff was measured at an EARLIER corpus state, before a `/reload-plugins`
+  that changed `~/.claude/plugins/cache` — the very tree `p_plugin` is globbed
+  from. The reduction is real and large, but do not cite `6,978 → 22` as a
+  before/after: the two numbers came from different resolution maps, and
+  `scripts/cpv_doctor_user_scope.py` is untracked at HEAD, so no same-corpus
+  baseline is recoverable. Cite `34 → 1`.
+- Fixes in `scripts/cpv_doctor_user_scope.py`: (a) `/plan`, `/clear`, `/help`
+  … resolve to Claude Code **built-ins** (`BUILTIN_SLASH_COMMANDS`) and a bare
+  `/tmp`, `/usr` … is a **filesystem root** — neither is a skill reference;
+  (b) `commands/*.md` (user-scope AND plugin-cache) are now **resolution
+  targets**, since a typed `/name` reaches a command exactly as it reaches a
+  skill — without this every command's own usage doc self-referenced into a
+  false UNRESOLVED; (c) an **inline `` `code span` ``** is documentation by
+  this card's own D13 rule (only *fenced* blocks were skipped before), so
+  `` `powercfg /h off` ``, `` `cmd /c ver` `` no longer read as invocations,
+  and an **HTTP route** in prose (`GET /health`, `the /search endpoint`) is a
+  URL path, not a command.
+- **`Skill({...})` is deliberately exempt from the inline-code carve-out** —
+  that token is an invocation marker even inside an example (positive control
+  pinned by test).
+- The handoff's must-survive figures were themselves a proxy (measured on an
+  earlier corpus state). Verified **per instance** instead, with a *permissive*
+  extraction as control: `GHOST-001=4`, `GHOST-002=1`, `DEAD-SCRIPT-REF=9`,
+  `STALE-YEAR=5` all intact; `MISSING`/`SPURIOUS` have **no instance in the
+  current corpus under either extraction variant tested** (the one `MISSING`
+  seen mid-pass was the `/health` HTTP-route FP). **Scope that control
+  honestly:** the permissive fn drops the fence-skip and the
+  builtin/fs-root filters but still uses TODAY's `_SKILL_SLASH_RE` and today's
+  resolution maps, so it cannot surface an instance only a LOOSER pre-
+  recalibration regex would have found. Blast radius if wrong is a missed
+  non-blocking advisory, and both code paths stay pinned by synthetic tests.
+- The single residual finding is **unresolved and correctly reported** (which
+  is all the rule claims — not necessarily actionable):
+  `skills/explore/SKILL.md:372` references a `/build` command that resolves to
+  nothing in this environment.
+- `40/40` tests green (was 31; +9 two-sided, each FP-clear paired with a
+  still-fires control), ruff + mypy clean.
 
 <!-- markdownlint-disable-next-line MD025 -->
 # TRDD-d1f74670 — CPV doctor user-scope recipes (D9..D13)
@@ -184,3 +294,14 @@ Target: ~35 new tests.
 | 2 | Add `/cpv-fix-validation` auto-fixes for D11 (mechanical year-note → `` !`date +%Y` `` replacement) | Doctor is diagnose-only; fixers ship separately |
 | 3 | Wire D10, D11 into plugin-scope structural validators | After D10/D11 prove value at user-scope |
 | 4 | Cross-plugin dependency check (plugin A dispatches to plugin B's agent; B not installed) | Covered by future `RC-GHOST-DISPATCH-003` in [[TRDD-25b9be90]] follow-ups |
+
+## Approval log
+
+- 2026-08-26T05:54:23+0200 — COMPLETE by the CPV session (authority delegated by
+  USER 2026-08-25 "decide yourself, base decisions on verified facts").
+  Evidence measured first-hand this session: D13 `RC-NAMESPACE-UNRESOLVED-001`
+  34 → 1 on the real `~/.claude` tree (both sides same session; the four
+  non-D13 counters byte-identical across all three scans = the control), 40
+  tests green, and the full pre-publish gate clean — serial suite 13,076
+  passed / 3 skipped (`PYTEST4_EXIT=0`) and cache-cold strict self-validate
+  0 CRITICAL / 0 MAJOR / 0 MINOR / 0 NIT (`SELFVAL4_EXIT=0`).

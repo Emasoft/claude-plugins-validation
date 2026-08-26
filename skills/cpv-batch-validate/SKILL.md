@@ -15,7 +15,7 @@ Resolves the user's input via `scripts/cpv_marketplace_input.py`
 `scripts/cpv_batch_orchestrator.py`, dispatches one
 `cpv-plugin-validator-agent` subagent per plugin in `batch_validate` mode,
 and aggregates per-plugin status JSONs into a CMS-shaped
-``status_table`` spec which is queued via `scripts/cpv_menu.py`.
+``status_table`` spec which is queued via `scripts/print_menu.py`.
 The claude-menu-system Stop hook emits the table to the user
 post-turn (zero token cost — never enters the agent transcript).
 
@@ -29,11 +29,11 @@ slash command directly.
 
 - `claude-plugins-validation` plugin installed (provides
   `scripts/cpv_marketplace_input.py`,
-  `scripts/cpv_batch_orchestrator.py`, `scripts/cpv_menu.py` (the
+  `scripts/cpv_batch_orchestrator.py`, `scripts/print_menu.py` (the
   claude-menu-system bridge), and the `cpv-plugin-validator-agent` agent).
 - `claude-menu-system` plugin installed (the Stop-hook menu emitter
-  that ``cpv_menu.py`` queues specs for). Declared as a hard
-  dependency in CPV's ``plugin.json``; ``cpv_menu.py`` fails fast
+  that ``print_menu.py`` queues specs for). Declared as a hard
+  dependency in CPV's ``plugin.json``; ``print_menu.py`` fails fast
   with an install hint if missing.
 - For URL inputs: `git` on PATH and network access to
   `github.com` so the resolver can `git clone --depth 1` each

@@ -139,4 +139,4 @@ These go in a new test file under `tests/semantic/`.
 
 - 2026-08-25T17:25:22+0200 — CLOSED as complete by the CPV session (board drain;
   authority delegated by USER 2026-08-25). Done 2026-05-10; cpv_channel_source_predicate.py
-  + tests live (batch_ag).
+  - tests live (batch_ag).

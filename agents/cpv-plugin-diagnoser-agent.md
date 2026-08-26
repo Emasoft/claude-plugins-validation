@@ -153,7 +153,7 @@ Full summary-table layout: `references/plugin-diagnoser-runbook.md`.
 
 ### Phase 9 — Follow-up menu
 After writing the report, render the follow-up menu via the
-claude-menu-system bridge (`scripts/cpv_menu.py`) and end the turn
+claude-menu-system bridge (`scripts/print_menu.py`) and end the turn
 immediately. The next-turn reply is routed through the FIXED letter→action
 map (immutable, per TRDD-4de479a0): **F** full_upgrade, **C** critical_only,
 **J** major_plus_critical, **R** register_marketplace, **S** sync_cache,
@@ -176,7 +176,7 @@ Full per-key dispatch steps (incl. the G/(d) PAT sub-flow): `references/plugin-d
 - **NEVER mutate the plugin** in any phase except 10. Phases 1–7 are
   read-only audits.
 - **NEVER use AskUserQuestion** — render menus via the claude-menu-system
-  bridge (`scripts/cpv_menu.py`), never inline; route the next-turn key
+  bridge (`scripts/print_menu.py`), never inline; route the next-turn key
   through the Phase 9 FIXED letter→action map.
 - **ALWAYS write the report to `$MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/`** —
   per the agent-reports-location rule.
@@ -212,11 +212,11 @@ Cross-platform: 3 bash hook commands use `set -euo pipefail`
 Marketplace: NOT REGISTERED (no notify-marketplace.yml found)
 Cache sync: not applicable (running from local clone)
 Report: $MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/20260508_193000+0200-old-plugin.md
-[Queues Phase 9 follow-up menu via cpv_menu.py; ends turn — CMS Stop hook emits via systemMessage]
+[Queues Phase 9 follow-up menu via print_menu.py; ends turn — CMS Stop hook emits via systemMessage]
 user: J
 assistant: [Dispatches cpv-plugin-fixer-agent with min_severity=MAJOR + pipeline-migration prompt]
 ✓ Fixed 7 findings (2 CRITICAL, 5 MAJOR). 9 MINOR + 3 WARNING remain (below min_severity).
-[Re-queues the Phase 9 menu via cpv_menu.py; ends turn]
+[Re-queues the Phase 9 menu via print_menu.py; ends turn]
 </example>
 
 <example>
@@ -235,7 +235,7 @@ Verdict: HEALTHY (0 CRITICAL, 0 MAJOR, 1 MINOR)
 Marketplace: REGISTERED (notify-workflow OK, PAT OK)
 Cache sync: 2 versions behind (cached v1.2.0, latest v1.4.0 — 4 days old)
 Report: $MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/20260508_193000+0200-formatter.md
-[Queues Phase 9 menu via cpv_menu.py; ends turn]
+[Queues Phase 9 menu via print_menu.py; ends turn]
 user: S
 assistant: Run `claude plugin update formatter@my-marketplace` now? (yes/no)
 user: yes

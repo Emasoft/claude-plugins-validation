@@ -103,6 +103,7 @@ CPV ships **25 on-disk `validate_*.py` scripts** covering **190+ rules** across 
 | **Quality** | Missing documentation, no license, inconsistent versions, dead links |
 | **v2.1.80+ Plugin Features** | `Monitor` tool, `userConfig` (5-type whitelist + required `title`/`type`), `channels` (server cross-ref), `CLAUDE_PLUGIN_OPTION_<KEY>` env vars, inline marketplace in `settings.json`, `managed-settings.d/` drop-ins, plugin skill `name` field (v2.1.98) — full reference: [`skills/cpv-create-plugin/references/v2-1-80-features.md`](skills/cpv-create-plugin/references/v2-1-80-features.md) |
 | **v2.1.207 Plugin Options** *(v2.158.0+)* | `${user_config.*}` interpolated into a **shell-form** hook / monitor / MCP `headersHelper` command — Claude Code now rejects it, so the plugin is broken at runtime, not merely unsafe. Blocking CRITICAL; exec form stays legal — see below |
+| **v2.1.143 Dependency Cascade** | The plugin dependency GRAPH, statically: cycles (self, 2-node, N-node via Tarjan), a dep on a plugin that does not exist, a dep on a **disabled** plugin (the v2.1.143 cascade refusal), a dep naming a *component* rather than its owning plugin, duplicate entries, and high-fanin plugins whose disable would orphan others. Accepts every declaration shape — bare list, `{name: range}` object, and the pinned `[{"name", "version"}]` form. Absence is CRITICAL only when a marketplace is supplied and can prove it; a standalone scan reports a non-blocking WARNING, because without a marketplace the dep may simply live in one this run never saw |
 | **Empirical Loading Bugs** *(v2.23.0+)* | Silent-failure modes in CC's plugin loader that `claude plugin validate` doesn't catch — see below |
 
 ### Empirical Plugin-Loading Bugs CPV Catches
@@ -416,7 +417,7 @@ For the full CLI commands reference, see the [official Anthropic docs](https://c
 
 #### Dependencies
 
-CPV depends on **`claude-menu-system >= 0.1.5`** (same `emasoft-plugins` marketplace). It provides the post-turn Stop/SubagentStop hook that renders every CPV menu at zero token cost (see [Menu Architecture](#menu-architecture) below). `claude plugin install` auto-resolves this dependency — no manual step needed. If CMS is missing at runtime, CPV's `cpv_menu` helper fails fast with an actionable install hint (fail-fast, no silent fallback).
+CPV depends on **`claude-menu-system >= 0.1.5`** (same `emasoft-plugins` marketplace). It provides the post-turn Stop/SubagentStop hook that renders every CPV menu at zero token cost (see [Menu Architecture](#menu-architecture) below). `claude plugin install` auto-resolves this dependency — no manual step needed. If CMS is missing at runtime, CPV's `print_menu` helper fails fast with an actionable install hint (fail-fast, no silent fallback).
 
 ```bash
 ## Add the Emasoft marketplace (first time only)
@@ -575,7 +576,7 @@ The 37 individual slash commands from prior versions were consolidated:
 - **23 redundant commands** were deleted (their content was already in the corresponding skill — `cpv-plugin-validation-skill`, `cpv-fix-validation`, `cpv-plugin-management`, etc.)
 - **14 unique commands** were converted to `user-invocable: false` skills (`cpv-add-component-to-plugin`, `cpv-add-dependency`, `cpv-bump-version`, `cpv-deterministic-codemod`, `cpv-scaffold-agent`, `cpv-scaffold-command`, `cpv-add-hook`, `cpv-register-mcp`, `cpv-scaffold-skill`, `cpv-link-plugin-marketplace`, `cpv-pack-components`, `cpv-refresh-readme`, `cpv-strip-dev-submodules`, `cpv-show-version`) — invoked by `cpv-main-menu` behind the scenes, not visible in the slash-command palette
 
-See [`design/tasks/TRDD-c50531c2-menu-unification.md`](design/tasks/TRDD-c50531c2-menu-unification.md) for the full migration rationale.
+See [`design/archived/TRDD-c50531c2-menu-unification.md`](design/archived/TRDD-c50531c2-menu-unification.md) for the full migration rationale.
 
 For CI/CD and scripting, the Python validators are still callable directly (no menu): `python3 scripts/validate_plugin.py <path>`, `python3 scripts/validate_skill.py <path>`, etc.
 

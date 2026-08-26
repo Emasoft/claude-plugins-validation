@@ -2,9 +2,8 @@
 
 `assemble_dynamic_spec` and `load_fixed_spec` are pure and exercised directly.
 The CLI is exercised end-to-end against a REAL stub `menu_write.py` in a temp
-CMS cache (same approach as test_cpv_menu.py — no mocking of the bridge). The
-stub echoes the received spec to `queue/last-spec.json` so we can assert exactly
-what print_menu queued.
+CMS cache (no mocking of the bridge). The stub echoes the received spec to
+`queue/last-spec.json` so we can assert exactly what print_menu queued.
 
 Routing model (TRDD-4de479a0): numbers = dynamic positional list; letters =
 fixed actions/nav. These tests pin: alphabetical numbering, the auto-appended
@@ -24,7 +23,6 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-import cpv_menu  # noqa: E402
 import print_menu  # noqa: E402
 from print_menu import (  # noqa: E402
     MenuSystemUnavailable,
@@ -224,7 +222,7 @@ class TestCli:
     def _cms(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         cache = tmp_path / "cache"
         _make_cms(cache, "0.1.5")
-        monkeypatch.setattr(cpv_menu, "_default_cache_base", lambda: cache)
+        monkeypatch.setattr(print_menu, "_default_cache_base", lambda: cache)
         return cache
 
     def test_fixed_queues_named_menu(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -320,7 +318,7 @@ class TestCli:
         assert "usage" in capsys.readouterr().err
 
     def test_cms_absent_exits_5(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(cpv_menu, "_default_cache_base", lambda: tmp_path / "absent")
+        monkeypatch.setattr(print_menu, "_default_cache_base", lambda: tmp_path / "absent")
         rc = print_menu._cli(["print_menu.py", "dynamic", json.dumps(["x"])])
         assert rc == 5
 

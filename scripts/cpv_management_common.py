@@ -10,6 +10,7 @@ Provides common infrastructure used by all manage_*.py modules:
 - Colored terminal output helpers
 """
 
+import copy
 import datetime
 import json
 import os
@@ -20,6 +21,7 @@ import tarfile
 import uuid
 import zipfile
 from pathlib import Path
+from typing import IO, NoReturn
 
 __all__ = [
     "IS_WINDOWS",
@@ -369,7 +371,7 @@ def _archive_limits() -> dict[str, int]:
     }
 
 
-def _abort_archive(dest: Path, archive: Path, reason: str) -> None:
+def _abort_archive(dest: Path, archive: Path, reason: str) -> NoReturn:
     """Print the quota violation, clean up partial extraction, exit non-zero.
 
     Callers of `extract_archive` always pass a fresh dest (per-call tmp dir
@@ -392,6 +394,64 @@ def _path_nesting(member_path: str) -> int:
     if not cleaned:
         return 0
     return cleaned.count("/") + 1
+
+
+EXTRACT_CHUNK_BYTES = 1024 * 1024
+
+
+def _stream_entry(
+    src: IO[bytes],
+    target: Path,
+    entry_name: str,
+    written: int,
+    limits: dict[str, int],
+) -> tuple[int, str | None]:
+    """Copy one member to `target` in bounded chunks, counting the REAL bytes.
+
+    An archive header is attacker-controlled, so the declared size is only a
+    cheap preflight hint; this running count is what actually enforces the
+    quota. Returns the new aggregate total and a quota-violation reason (None
+    when the member fit). The overflowing chunk is never written.
+    """
+    per_file = 0
+    with open(target, "wb") as out:
+        while True:
+            chunk = src.read(EXTRACT_CHUNK_BYTES)
+            if not chunk:
+                break
+            per_file += len(chunk)
+            written += len(chunk)
+            if per_file > limits["max_per_file_bytes"]:
+                return written, (
+                    f"entry '{entry_name}' expands past {limits['max_per_file_bytes']:,} bytes "
+                    f"(header under-declared its size); override with CPV_ARCHIVE_MAX_PER_FILE_BYTES"
+                )
+            if written > limits["max_bytes"]:
+                return written, (
+                    f"archive expands past {limits['max_bytes']:,} bytes while extracting "
+                    f"'{entry_name}' (headers under-declared their sizes); "
+                    f"override with CPV_ARCHIVE_MAX_BYTES"
+                )
+            out.write(chunk)
+    return written, None
+
+
+def _write_member(
+    src: IO[bytes],
+    target: Path,
+    entry_name: str,
+    written: int,
+    limits: dict[str, int],
+    dest: Path,
+    archive: Path,
+) -> int:
+    """Stream one member into place, aborting (and removing the partial) on quota."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    written, quota_error = _stream_entry(src, target, entry_name, written, limits)
+    if quota_error:
+        target.unlink(missing_ok=True)
+        _abort_archive(dest, archive, quota_error)
+    return written
 
 
 def extract_archive(archive_path: str, dest: Path):
@@ -427,13 +487,15 @@ def _extract_zip(archive: Path, dest: Path):
     """Extract a zip archive with path traversal AND quota enforcement.
 
     Extracts members individually after validation to prevent TOCTOU issues.
-    Quotas (entry count, total size, compression ratio, per-file size,
-    nesting depth) are checked from `info.file_size` BEFORE any data is
-    written to disk — a malicious archive cannot consume more than the
-    quota allows.
+    The declared-size quotas (entry count, total size, compression ratio,
+    per-file size, nesting depth) run as a cheap preflight, but the central
+    directory is attacker-controlled, so each member is then streamed in
+    bounded chunks with a running byte counter that enforces the real quota
+    on the bytes actually written.
     """
     limits = _archive_limits()
     archive_size = archive.stat().st_size
+    written = 0
 
     with zipfile.ZipFile(archive, "r") as zf:
         infos = zf.infolist()
@@ -485,25 +547,69 @@ def _extract_zip(archive: Path, dest: Path):
             # Path-traversal checks (unchanged)
             member_path = os.path.normpath(info.filename)
             if member_path.startswith("..") or os.path.isabs(member_path):
-                err(f"Refusing to extract path-traversal entry: {info.filename}")
-                sys.exit(1)
+                # Route through _abort_archive, not a bare sys.exit: a refused
+                # archive must not leave a half-extracted tree behind that a
+                # later step could mistake for a valid extraction. The quota
+                # aborts already did this; the traversal aborts did not.
+                _abort_archive(dest, archive, f"path-traversal entry: {info.filename}")
             target = (dest / member_path).resolve()
             if not (str(target) + os.sep).startswith(dest_resolved):
-                err(f"Refusing to extract path-traversal entry: {info.filename}")
-                sys.exit(1)
-            zf.extract(info, dest)
+                # Route through _abort_archive, not a bare sys.exit: a refused
+                # archive must not leave a half-extracted tree behind that a
+                # later step could mistake for a valid extraction. The quota
+                # aborts already did this; the traversal aborts did not.
+                _abort_archive(dest, archive, f"path-traversal entry: {info.filename}")
+            if info.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            # zipfile stops reading a member at its DECLARED file_size, so a
+            # header claiming 16 bytes hides the rest of the inflated stream
+            # from the counter below. Read against our own cap instead (on a
+            # copy, so the ZipFile's own records stay untouched) and let the
+            # running count decide where extraction really stops.
+            member = copy.copy(info)
+            member.file_size = limits["max_per_file_bytes"] + 1
+            try:
+                with zf.open(member) as src:
+                    written = _write_member(src, target, info.filename, written, limits, dest, archive)
+            except zipfile.BadZipFile:
+                # ZipExtFile validates the CRC once its internal `_left`
+                # counter (seeded from our deliberately-lowered file_size)
+                # hits zero — which only happens when the REAL inflated
+                # stream is longer than our declared override, i.e. the
+                # entry is already over max_per_file_bytes. The CRC check
+                # then compares our truncated read against the CRC for the
+                # FULL (longer) stream and always mismatches. That mismatch
+                # IS the quota signal here, not corruption — translate it to
+                # the same abort a caller sees from every other quota check.
+                target.unlink(missing_ok=True)
+                _abort_archive(
+                    dest,
+                    archive,
+                    f"entry '{info.filename}' expands past {limits['max_per_file_bytes']:,} bytes "
+                    f"(header under-declared its size); override with CPV_ARCHIVE_MAX_PER_FILE_BYTES",
+                )
 
 
 def _extract_tar(archive: Path, dest: Path, mode: str):
     """Extract a tar archive with security filtering AND quota enforcement.
 
     Quota preflight uses tarfile's getmembers() (which streams headers for
-    compressed tars without decompressing the data). On 3.12+ the safe
-    `extractall(filter="data")` path is still used; quotas are checked
-    BEFORE that call so an oversized archive never reaches extractall.
+    compressed tars without decompressing the data) as a cheap early reject.
+    But a tar header is attacker-controlled, same as a zip central directory,
+    so a member under-reporting its `size` would let unbounded data pass the
+    preflight while `extractall`/`extract` write it in full. Regular-file
+    members are therefore streamed ourselves via `tf.extractfile()` in
+    bounded chunks with a running byte counter (see `_stream_entry`), which
+    is what actually enforces the quota; declared size is only the fast path
+    for an honest archive. Non-file members (dirs/symlinks/hardlinks/etc.)
+    carry no data blocks worth streaming and go through tarfile's own safe
+    extraction (filter="data" on 3.12+, the manual traversal checks below on
+    older Python).
     """
     limits = _archive_limits()
     archive_size = archive.stat().st_size
+    written = 0
 
     with tarfile.open(archive, mode) as tf:  # type: ignore[call-overload]
         members = tf.getmembers()
@@ -552,39 +658,58 @@ def _extract_tar(archive: Path, dest: Path, mode: str):
                     f"{limits['max_nesting']}; override with CPV_ARCHIVE_MAX_NESTING",
                 )
 
-        if PYTHON_VERSION >= (3, 12):
-            # extractall with filter="data" is safe against path traversal (Python 3.12+)
-            # NOTE: filter kwarg only works on extractall(), NOT on extract()
-            # filter="data" raises a tarfile.FilterError subclass
-            # (OutsideDestinationError / AbsoluteLinkError / SpecialFileError / …)
-            # on a malicious entry. Catch it so an unsafe tar fails IDENTICALLY to
-            # the ZIP path and the pre-3.12 manual loop — clean message + cleanup +
-            # exit 1 — instead of a raw traceback that leaves a partial tree behind.
-            try:
-                tf.extractall(dest, filter="data")
-            except tarfile.FilterError as exc:
-                _abort_archive(dest, archive, f"unsafe tar entry: {exc}")
-        else:
-            # Manual path-traversal and symlink prevention for older Python
-            # Append os.sep so /tmp/abc doesn't match /tmp/abcdef (path traversal bypass)
-            dest_resolved = str(dest.resolve()) + os.sep
-            for member in members:
-                member_path = os.path.normpath(member.name)
-                if member_path.startswith("..") or os.path.isabs(member_path):
-                    err(f"Refusing to extract path-traversal entry: {member.name}")
-                    sys.exit(1)
-                # Block symlinks pointing outside dest
+        # Append os.sep so /tmp/abc doesn't match /tmp/abcdef (path traversal bypass)
+        dest_resolved = str(dest.resolve()) + os.sep
+
+        for member in members:
+            # Path-traversal checks apply to every member regardless of type
+            # or Python version — this is defense-in-depth alongside 3.12+'s
+            # own filter="data", and it is the ONLY traversal check on <3.12.
+            member_path = os.path.normpath(member.name)
+            if member_path.startswith("..") or os.path.isabs(member_path):
+                _abort_archive(dest, archive, f"path-traversal entry: {member.name}")
+            if PYTHON_VERSION < (3, 12):
+                # Block symlinks pointing outside dest (3.12+'s filter="data"
+                # covers this on the tf.extract() call below instead).
                 if member.issym() or member.islnk():
                     link_target = os.path.normpath(os.path.join(os.path.dirname(member.name), member.linkname))
                     if link_target.startswith("..") or os.path.isabs(link_target):
-                        err(f"Refusing to extract symlink escaping archive: {member.name} -> {member.linkname}")
-                        sys.exit(1)
-                # Verify resolved path stays within dest
-                target = (dest / member_path).resolve()
-                if not (str(target) + os.sep).startswith(dest_resolved):
-                    err(f"Refusing to extract path-traversal entry: {member.name}")
-                    sys.exit(1)
-                # Extract each member individually right after validation
+                        _abort_archive(
+                            dest,
+                            archive,
+                            f"symlink escaping archive: {member.name} -> {member.linkname}",
+                        )
+            target = (dest / member_path).resolve()
+            if not (str(target) + os.sep).startswith(dest_resolved):
+                _abort_archive(dest, archive, f"path-traversal entry: {member.name}")
+
+            if member.isfile():
+                # tarfile.extractfile() hands us the raw member stream without
+                # truncating it to the declared `size` — read it ourselves in
+                # bounded chunks so the running counter (not the header) is
+                # what decides where extraction stops.
+                try:
+                    src = tf.extractfile(member)
+                except (OSError, tarfile.TarError) as exc:
+                    _abort_archive(dest, archive, f"cannot read entry '{member.name}': {exc}")
+                if src is None:
+                    continue
+                with src:
+                    written = _write_member(src, target, member.name, written, limits, dest, archive)
+            elif PYTHON_VERSION >= (3, 12):
+                # extract with filter="data" is safe against path traversal (Python 3.12+)
+                # filter="data" raises a tarfile.FilterError subclass
+                # (OutsideDestinationError / AbsoluteLinkError / SpecialFileError / …)
+                # on a malicious entry. Catch it so an unsafe tar fails IDENTICALLY to
+                # the ZIP path and the pre-3.12 manual loop — clean message + cleanup +
+                # exit 1 — instead of a raw traceback that leaves a partial tree behind.
+                try:
+                    tf.extract(member, dest, filter="data")
+                except tarfile.FilterError as exc:
+                    _abort_archive(dest, archive, f"unsafe tar entry: {exc}")
+            else:
+                # Non-file member (dir/symlink/hardlink/etc.) on pre-3.12:
+                # already traversal-checked above; no data blocks to stream.
                 tf.extract(member, dest)
 
 

@@ -136,4 +136,4 @@ CPV_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/validate_plugin.py . --strict
 
 ## Approval log
 
-- 2026-08-25T17:25:05+0200 — CLOSED as complete by the CPV session (board drain; authority delegated by USER 2026-08-25). SHIPPED v2.85.0 — marketplace_owner override in generate_plugin_repo.py (batch_aa)
+* 2026-08-25T17:25:05+0200 — CLOSED as complete by the CPV session (board drain; authority delegated by USER 2026-08-25). SHIPPED v2.85.0 — marketplace_owner override in generate_plugin_repo.py (batch_aa)

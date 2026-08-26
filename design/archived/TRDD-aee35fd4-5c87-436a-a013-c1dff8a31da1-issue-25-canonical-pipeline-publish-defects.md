@@ -180,4 +180,4 @@ CPV_SKIP_GITHUB_INTEGRITY=1 uv run python scripts/validate_plugin.py . --strict
 
 ## Approval log
 
-- 2026-08-25T17:25:27+0200 — CLOSED as complete by the CPV session (board drain; authority delegated by USER 2026-08-25). SHIPPED v2.87.1 — test_issue_25_publish_defects.py in tree (batch_ai)
+* 2026-08-25T17:25:27+0200 — CLOSED as complete by the CPV session (board drain; authority delegated by USER 2026-08-25). SHIPPED v2.87.1 — test_issue_25_publish_defects.py in tree (batch_ai)

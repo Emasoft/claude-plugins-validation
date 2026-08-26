@@ -9778,3 +9778,24 @@ def validate_md_urls(
             if not is_alive:
                 label = f"Dead URL ({suffix})" if suffix else "Dead URL"
                 report.warning(f"{label}: {raw_url} in {rel_md}", rel_md)
+
+
+@dataclass
+class MarketplaceContext:
+    """Shared, once-built context for the dependency-graph validator (TRDD-747d7bbc).
+
+    A single instance is built once per marketplace scan and reused across
+    every per-plugin dependency validation — identical to how
+    ``marketplace_resolver`` caches in ``validate_marketplace.py``.
+
+    ``plugins`` maps plugin name -> ``cpv_dependency_graph.PluginNode``.
+    ``allowlist`` is the cross-marketplace dependency allowlist (TRDD-20108ab7)
+    — an opaque set of plugin names this bundle explicitly permits depending
+    on even though they live outside it. Empty until that TRDD ships; this
+    validator degrades to MAJOR-with-warning for any extra-marketplace edge
+    until then (§5.7 of TRDD-747d7bbc).
+    """
+
+    plugins: dict = field(default_factory=dict)
+    allowlist: set = field(default_factory=set)
+    scope: str = "marketplace"

@@ -310,6 +310,111 @@ def test_finding3_env_var_override_increases_limit(monkeypatch: pytest.MonkeyPat
     assert limits["max_bytes"] == 500 * 1024**3
 
 
+def _patch_zip_central_dir_size(path: Path, declared_size: int) -> None:
+    """Overwrite the CENTRAL DIRECTORY uncompressed-size field on the sole
+    entry in `path`, leaving the local header, compressed data, and CRC
+    untouched — exactly what an attacker controls (the central directory
+    is what `zipfile.infolist()` and CPV's preflight quota check read).
+    """
+    raw = bytearray(path.read_bytes())
+    idx = raw.find(b"PK\x01\x02")
+    assert idx != -1, "central directory record not found"
+    raw[idx + 24 : idx + 28] = struct.pack("<I", declared_size)
+    path.write_bytes(bytes(raw))
+
+
+def test_finding3_zip_under_declared_size_still_aborts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """TRDD-627GMQLD: a zip whose central directory LIES about file_size
+    (declares 16 bytes) while the real inflated data is 8 KB must still be
+    caught by the running byte counter during streaming — the declared-size
+    preflight alone would have let this through.
+    """
+    monkeypatch.setenv("CPV_ARCHIVE_MAX_PER_FILE_BYTES", "4096")
+    monkeypatch.setenv("CPV_ARCHIVE_MAX_RATIO", "1000000")  # isolate the size-lie path
+    src = tmp_path / "lying.zip"
+    real_data = b"A" * 8192
+    _write_zip(src, {"big.bin": real_data})
+    _patch_zip_central_dir_size(src, 16)
+    with zipfile.ZipFile(src) as zf:
+        assert zf.infolist()[0].file_size == 16, "central directory patch didn't take"
+
+    dest = tmp_path / "out"
+    with pytest.raises(SystemExit) as exc:
+        mgmt.extract_archive(str(src), dest)
+    assert exc.value.code != 0
+    assert not dest.exists() or not any(dest.iterdir()), (
+        "under-declared-size abort must leave no partial file behind."
+    )
+
+
+def test_finding3_zip_honest_large_file_extracts_byte_identical(tmp_path: Path) -> None:
+    """An honestly-declared file within caps extracts with unchanged bytes —
+    the streaming rewrite must not corrupt or truncate legitimate content.
+    """
+    src = tmp_path / "honest.zip"
+    real_data = os.urandom(8192)  # incompressible, so ratio check can't interfere
+    _write_zip(src, {"data.bin": real_data})
+    dest = tmp_path / "out"
+    mgmt.extract_archive(str(src), dest)
+    assert (dest / "data.bin").read_bytes() == real_data
+
+
+def test_finding3_tar_aggregate_running_cap_aborts_mid_stream(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """TRDD-627GMQLD, tar side: Python's tarfile bounds `extractfile()`
+    reads to the header-declared size (verified empirically — a header
+    lying about a SMALLER size than the real data cannot be used to smuggle
+    extra bytes past a per-member read, unlike zipfile's DEFLATE decoder).
+    So the exploitable surface for tar is the AGGREGATE cap across several
+    honestly-declared members: this proves the NEW running-total counter in
+    `_stream_entry` (not just the old up-front declared-size sum) is what
+    trips mid-extraction, and that it cleans up the in-progress file.
+    """
+    monkeypatch.setenv("CPV_ARCHIVE_MAX_BYTES", "6000")
+    monkeypatch.setenv("CPV_ARCHIVE_MAX_PER_FILE_BYTES", "1000000")
+    monkeypatch.setenv("CPV_ARCHIVE_MAX_RATIO", "1000000")
+    src = tmp_path / "many.tar.gz"
+    _write_tar(src, {f"f{i}.bin": os.urandom(2000) for i in range(5)})  # 10,000 real bytes > 6,000 cap
+    dest = tmp_path / "out"
+    with pytest.raises(SystemExit) as exc:
+        mgmt.extract_archive(str(src), dest)
+    assert exc.value.code != 0
+    assert not dest.exists() or not any(dest.iterdir())
+
+
+def test_finding3_tar_under_reported_member_size_is_capped_not_smuggled(tmp_path: Path) -> None:
+    """A tar header's declared `size` is a hard read ceiling enforced by
+    stdlib tarfile itself, not just a hint — patching a member's header to
+    claim 16 bytes while 8 KB of real data physically follows still yields
+    only 16 bytes through `extractfile()`. Documents the actual boundary
+    `_extract_tar`'s streaming defends: unlike zip, tar cannot be tricked
+    into handing back more bytes than its own header declares.
+    """
+    src = tmp_path / "lying.tar"
+    real_data = b"A" * 8192
+    with tarfile.open(src, "w") as tf:
+        info = tarfile.TarInfo(name="big.bin")
+        info.size = len(real_data)
+        tf.addfile(info, fileobj=io.BytesIO(real_data))
+
+    raw = bytearray(src.read_bytes())
+    header = bytearray(raw[0:512])
+    header[124:136] = b"%011o\0" % 16  # USTAR size field, offset 124, 12 bytes octal
+    header[148:156] = b" " * 8  # checksum field must read as spaces while summing
+    checksum = sum(header)
+    header[148:156] = b"%06o\0 " % checksum
+    raw[0:512] = header
+    src.write_bytes(bytes(raw))
+
+    with tarfile.open(src, "r") as tf:
+        member = tf.getmembers()[0]
+        assert member.size == 16
+        extracted = tf.extractfile(member)
+        assert extracted is not None
+        assert extracted.read() == real_data[:16]
+
+
 def test_finding3_invalid_env_var_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Garbage env values fall back to the default — never silently disable a quota."""
     monkeypatch.setenv("CPV_ARCHIVE_MAX_ENTRIES", "not-a-number")

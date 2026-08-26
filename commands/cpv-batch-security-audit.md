@@ -96,7 +96,7 @@ Queue the initial status table for the claude-menu-system Stop hook
 printed inline by the orchestrator):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$STATUS_TABLE"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py" "$STATUS_TABLE"
 ```
 
 NEVER print menu inline; the CMS Stop hook emits via systemMessage at turn end.
@@ -151,7 +151,7 @@ for plugin_index in group:
 
 Queue the live status table via the orchestrator's ``emit-status``
 subcommand (one shot — aggregates every per-plugin status JSON and
-hands the CMS spec to ``cpv_menu`` for emission via the Stop hook at
+hands the CMS spec to ``print_menu`` for emission via the Stop hook at
 turn end):
 
 ```bash

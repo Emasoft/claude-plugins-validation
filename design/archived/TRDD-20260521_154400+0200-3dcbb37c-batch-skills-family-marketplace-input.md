@@ -268,4 +268,4 @@ The design here keeps every same-turn scanner colocated in the per-plugin agent 
 
 ## Approval log
 
-- 2026-08-25T17:25:14+0200 — CLOSED as complete by the CPV session (board drain; authority delegated by USER 2026-08-25). SHIPPED — all six cpv-batch-* command files live (batch_ac)
+* 2026-08-25T17:25:14+0200 — CLOSED as complete by the CPV session (board drain; authority delegated by USER 2026-08-25). SHIPPED — all six cpv-batch-* command files live (batch_ac)

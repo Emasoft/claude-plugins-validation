@@ -150,9 +150,9 @@ SLUG="doctor-<scan-id>"
 # sidecars 1+2 already on disk as <report>.{summary,breakdown}.json — copy/symlink
 # into spec paths; build the ACTION spec from the Surface-4 map, omitting
 # conditional rows that don't apply.
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$SUMMARY_SPEC"
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$BREAKDOWN_SPEC"
-python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$ACTION_SPEC"
+python "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py" "$SUMMARY_SPEC"
+python "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py" "$BREAKDOWN_SPEC"
+python "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py" "$ACTION_SPEC"
 # END TURN. The CMS Stop hook emits all three menus via systemMessage.
 ```
 

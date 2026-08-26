@@ -23,7 +23,7 @@ still enforced here because they are independent of the model field:
 * **TRDD-4de479a0 → Phase 4**: the `cpv-format-menu` fork-skill +
   `scripts/format_menu.py` were REMOVED (safe-deleted into `.trashcan/`).
   Menus now render via the externalised `claude-menu-system` plugin's
-  Stop-hook emitter, brokered through the `scripts/cpv_menu.py` bridge.
+  Stop-hook emitter, brokered through the `scripts/print_menu.py` bridge.
   The hook prints via the `systemMessage` JSON field — zero cache cost,
   no subagent fork, no transcript entry.
 """
@@ -190,29 +190,33 @@ def test_work_agent_has_no_first_contact_menu(work: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# cpv_menu.py bridge — claude-menu-system Stop-hook emit (TRDD-4de479a0 Phase 4)
+# print_menu.py bridge — claude-menu-system Stop-hook emit (TRDD-4de479a0 Phase 4,
+# TRDD-ef3fc7d8 Phase 5 relocated the bridge core here and retired cpv_menu.py)
 # ---------------------------------------------------------------------------
 
 
 def test_cpv_menu_bridge_exists_and_no_legacy_format_menu() -> None:
-    """`scripts/cpv_menu.py` is the sole CPV-side menu bridge (TRDD-4de479a0).
+    """`scripts/print_menu.py` is the sole CPV-side menu bridge (TRDD-ef3fc7d8).
 
-    Phase 4 removed `scripts/format_menu.py` and the `cpv-format-menu`
-    fork-skill (safe-deleted). Menus now go through `cpv_menu.write_menu()`,
-    which writes a claude-menu-system spec and ends the orchestrator's turn;
-    the bundled Stop / SubagentStop / StopFailure hook (`menu_emit.py`)
-    prints the rendered menu via the hook JSON `systemMessage` field —
-    zero token cost, no transcript entry, no subagent fork.
+    TRDD-4de479a0 Phase 4 removed `scripts/format_menu.py` and the
+    `cpv-format-menu` fork-skill (safe-deleted). TRDD-ef3fc7d8 Phase 5 then
+    relocated the bridge core out of the interim `cpv_menu.py` script into
+    `print_menu.py` and deleted `cpv_menu.py` (no-legacy: one script).
+    Menus go through `print_menu.write_menu()`, which writes a
+    claude-menu-system spec and ends the orchestrator's turn; the bundled
+    Stop / SubagentStop / StopFailure hook (`menu_emit.py`) prints the
+    rendered menu via the hook JSON `systemMessage` field — zero token
+    cost, no transcript entry, no subagent fork.
 
     This test pins the new invariant: the bridge exists, and the legacy
     `format_menu.py` script does not.
     """
-    bridge = PLUGIN_ROOT / "scripts" / "cpv_menu.py"
-    assert bridge.is_file(), f"{bridge} is the sole CPV-side menu bridge after TRDD-4de479a0 Phase 4 — it must exist."
+    bridge = PLUGIN_ROOT / "scripts" / "print_menu.py"
+    assert bridge.is_file(), f"{bridge} is the sole CPV-side menu bridge after TRDD-ef3fc7d8 Phase 5 — it must exist."
     legacy_script = PLUGIN_ROOT / "scripts" / "format_menu.py"
     assert not legacy_script.exists(), (
         f"{legacy_script} was safe-deleted in TRDD-4de479a0 Phase 4 and "
-        f"must not be re-introduced. Use cpv_menu.write_menu() instead."
+        f"must not be re-introduced. Use print_menu.write_menu() instead."
     )
     legacy_skill = PLUGIN_ROOT / "skills" / "cpv-format-menu" / "SKILL.md"
     assert not legacy_skill.exists(), (

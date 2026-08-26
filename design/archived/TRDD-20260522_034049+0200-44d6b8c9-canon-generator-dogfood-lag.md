@@ -154,4 +154,4 @@ the now-closed upstream-bug citations.)
 
 ## Approval log
 
-- 2026-08-25T17:25:14+0200 — CLOSED as complete by the CPV session (board drain; authority delegated by USER 2026-08-25). SHIPPED — generator emits timeout-minutes + SHA-pinned checkouts (batch_ac)
+* 2026-08-25T17:25:14+0200 — CLOSED as complete by the CPV session (board drain; authority delegated by USER 2026-08-25). SHIPPED — generator emits timeout-minutes + SHA-pinned checkouts (batch_ac)

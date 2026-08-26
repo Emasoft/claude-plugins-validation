@@ -83,4 +83,4 @@ invocation from prose.
   and all skills accessible to each agent").
 - 2026-08-25T17:25:22+0200 — CLOSED as complete by the CPV session (board drain;
   authority delegated by USER 2026-08-25). SHIPPED v4.0.0 — cpv_agent_closure.py
-  + AC1-AC5 in validate_agent.py, verified first-hand (batch_af).
+  - AC1-AC5 in validate_agent.py, verified first-hand (batch_af).

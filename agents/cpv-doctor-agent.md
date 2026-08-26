@@ -98,6 +98,28 @@ Run for every plugin / marketplace / skill-folder mode in the validator table ab
 
 Full per-bullet detection thresholds, exact finding strings, and the D6 missing-file table are in **`references/cpv-doctor-recipes.md` §1**. (Required-fields presence is the validator's job; D1 only confirms shape.) When D9 produces findings, the post-scan menu offers "Migrate to cpv-the-skills-menu method" (Surface 4 key `T`), dispatching `cpv-the-skills-menu-create` on the target.
 
+### User-scope recipes D9..D13 (TRDD-d1f74670, `mode=user_scope` ONLY)
+
+**Note:** these are a SEPARATE recipe family from the D1..D9 design-correctness
+pass above — same "D<N>" numbering scheme by TRDD-d1f74670's own design, but a
+DIFFERENT code namespace (`RC-*`, not `DOC-*`) and a different engine
+(`scripts/cpv_doctor_user_scope.py`, imported by `scripts/validate_local_scope.py`
+when auditing `~/.claude`). They fire ONLY when `mode=user_scope` (option 9);
+every other mode runs only the D1..D9 design-correctness pass above.
+
+| Recipe | Checks | RC-codes |
+|---|---|---|
+| D9 Ghost-agent dispatch | `Task()`/`subagent_type:` literal resolving to no real agent, across `~/.claude/{skills,agents,commands}/` — delegates to the TRDD-25b9be90 engine (`validate_xref._extract_dispatch_refs`/`_resolve_dispatch_ref`) | `RC-GHOST-DISPATCH-001..003` |
+| D10 Stub/broken file | short (<200 char) body matching an HTTP-error/HTML pattern — a failed-download stub | `RC-STUB-FILE-001` |
+| D11 Stale hardcoded year | "current year is 20YY" / "the year is 20YY" / "as of 20YY" note; suggests the `!`date +%Y`` dynamic-context fix | `RC-STALE-YEAR-001` |
+| D12 Dead local-script reference | a `~/.claude/...`/`$CLAUDE_PROJECT_DIR/...` script reference missing on disk (excludes plugin cache/data paths) | `RC-DEAD-SCRIPT-REF-001` |
+| D13 Namespace correctness | bare/namespaced skill-invocation mismatches vs the user-scope + installed-plugin skill inventory (also runs at plugin scope) | `RC-NAMESPACE-MISSING-001`, `RC-NAMESPACE-SPURIOUS-001`, `RC-NAMESPACE-AMBIGUOUS-001`, `RC-NAMESPACE-UNRESOLVED-001` |
+
+Findings land in the same report under `## Design-correctness findings`,
+alongside D1..D9, distinguished by their `RC-*` code prefix. Full spec:
+`design/tasks/TRDD-20260518_231957+0200-d1f74670-doctor-user-scope-recipes.md`
+and `references/finding-codes.md`.
+
 ## Output format
 
 Write ALL findings (validator + D1..D9) to ONE markdown report at `$MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (`$MAIN_ROOT` = `git worktree list | head -n1 | awk '{print $1}'`). Sections: title/Generated/Target/Mode header, `## Severity summary` (one-line counts), `## Findings by recipe` (Schema-validation + D1..D9 + TOTAL severity matrix), `## Schema-correctness findings (validator)` (severity / RC-id / file / line / message rows), `## Design-correctness findings (D1..D9)` (same rows keyed DOC-id), `## Verdict` (VALID / INVALID). Exact template: **`references/cpv-doctor-recipes.md` §4**.
@@ -110,11 +132,11 @@ Return EXACTLY ONE line:
 Findings: <C> CRITICAL, <M> MAJOR, <n> MINOR, <t> NIT, <w> WARNING — <VALID|INVALID> (report: <absolute-path>)
 ```
 
-ALSO write TWO claude-menu-system spec sidecars beside the report so the orchestrator can hand them to `scripts/cpv_menu.py` (the CPV → claude-menu-system bridge, TRDD-4de479a0). The orchestrator NEVER prints a menu inline: it writes the spec, calls `cpv_menu.py`, and ENDS its turn; the CMS Stop hook emits the rendered menu via `systemMessage` at zero context cost.
+ALSO write TWO claude-menu-system spec sidecars beside the report so the orchestrator can hand them to `scripts/print_menu.py` (the CPV → claude-menu-system bridge, TRDD-4de479a0 / TRDD-ef3fc7d8). The orchestrator NEVER prints a menu inline: it writes the spec, calls `print_menu.py <spec.json>` (raw passthrough), and ENDS its turn; the CMS Stop hook emits the rendered menu via `systemMessage` at zero context cost.
 
 ### Sidecar 1 — per-recipe BREAKDOWN spec
 
-Path `…/<ts>-<slug>.breakdown.json`. A CMS `breakdown` spec (one `rows[]` entry per recipe: Schema validation, then D1…D9). `cpv_menu.py` injects `renumber: false`.
+Path `…/<ts>-<slug>.breakdown.json`. A CMS `breakdown` spec (one `rows[]` entry per recipe: Schema validation, then D1…D9). `print_menu.py` injects `renumber: false`.
 
 ```json
 {
@@ -144,11 +166,11 @@ Path `…/<ts>-<slug>.summary.json`. A CMS `summary` spec (lowercase count keys 
 }
 ```
 
-The orchestrator passes each sidecar to `python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" <sidecar.json>`; `write_menu()` injects `renumber: false`, queues the spec, and the CMS Stop hook emits it at turn end.
+The orchestrator passes each sidecar to `python "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py" <sidecar.json>`; `write_menu()` injects `renumber: false`, queues the spec, and the CMS Stop hook emits it at turn end.
 
 ## Menu surfaces & fixed key→action contract (TRDD-4de479a0)
 
-The doctor's menu lifecycle has **four surfaces**, ALL rendered by the orchestrator (main session) — this agent NEVER re-renders one: (1) first-contact "Diagnose what?" (emitted by `/cpv-main-menu` BEFORE this agent runs; user's pick → `<context>` `mode` + `target_path`), (2) SUMMARY + (3) BREAKDOWN (post-scan, presentation only — NO routing), (4) post-scan ACTION. Surfaces 1 & 4 carry FIXED letter→action maps that are the SOLE routing reference; the orchestrator routes the user's typed key from those tables, never from the rendered output. An action that doesn't apply is **omitted** (never relettered). The full Surface-1/Surface-4 key→action tables, mnemonics, and the canonical orchestrator emit-contract (`cpv_menu.py` for SUMMARY/BREAKDOWN/ACTION specs, then END TURN so the CMS Stop hook emits) are in **`references/cpv-doctor-recipes.md` §2**.
+The doctor's menu lifecycle has **four surfaces**, ALL rendered by the orchestrator (main session) — this agent NEVER re-renders one: (1) first-contact "Diagnose what?" (emitted by `/cpv-main-menu` BEFORE this agent runs; user's pick → `<context>` `mode` + `target_path`), (2) SUMMARY + (3) BREAKDOWN (post-scan, presentation only — NO routing), (4) post-scan ACTION. Surfaces 1 & 4 carry FIXED letter→action maps that are the SOLE routing reference; the orchestrator routes the user's typed key from those tables, never from the rendered output. An action that doesn't apply is **omitted** (never relettered). The full Surface-1/Surface-4 key→action tables, mnemonics, and the canonical orchestrator emit-contract (`print_menu.py` for SUMMARY/BREAKDOWN/ACTION specs, then END TURN so the CMS Stop hook emits) are in **`references/cpv-doctor-recipes.md` §2**.
 
 **Iron rule:** NEVER print a menu inline. Never call the legacy format_menu renderer (removed in TRDD-4de479a0 Phase 4) or embed a Unicode-bordered table in prose — both bypass the zero-cost emit and re-enter the cached transcript.
 
@@ -209,7 +231,7 @@ Findings: 1 CRITICAL, 9 MAJOR, 18 MINOR, 28 NIT, 2 WARNING — INVALID (report: 
 
 ## Architecture
 
-The doctor's first-contact menu lives in the slash-command body, not a menu-subagent, because only the main session can dispatch subagents (TRDD-bcbceeed, v2.89.0). The nine D1..D9 recipes are the design-correctness pass that distinguishes the doctor from `/cpv-validate-plugin` (TRDD-81e7fa34, v2.89.3). All four menu surfaces render through the externalised `claude-menu-system` Stop-hook emitter via the `scripts/cpv_menu.py` bridge; the fixed letter→action maps above are the SOLE routing reference (TRDD-4de479a0, Phase 2). The legacy CPV menu renderer (format_menu) and the cpv-format-menu fork-skill were safe-deleted in TRDD-4de479a0 Phase 4.
+The doctor's first-contact menu lives in the slash-command body, not a menu-subagent, because only the main session can dispatch subagents (TRDD-bcbceeed, v2.89.0). The nine D1..D9 recipes are the design-correctness pass that distinguishes the doctor from `/cpv-validate-plugin` (TRDD-81e7fa34, v2.89.3). All four menu surfaces render through the externalised `claude-menu-system` Stop-hook emitter via the `scripts/print_menu.py` bridge; the fixed letter→action maps above are the SOLE routing reference (TRDD-4de479a0, Phase 2). The legacy CPV menu renderer (format_menu) and the cpv-format-menu fork-skill were safe-deleted in TRDD-4de479a0 Phase 4.
 
 ## Iterate to a clean, green result (loop discipline)
 

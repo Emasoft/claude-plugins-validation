@@ -175,7 +175,7 @@ summary table:
 ## Phase 9 — Follow-up menu (render recipe)
 
 After writing the report, render this menu via the claude-menu-system bridge
-(`scripts/cpv_menu.py`) and end the turn immediately. The user's next-turn
+(`scripts/print_menu.py`) and end the turn immediately. The user's next-turn
 reply is routed through the FIXED letter→action map below — NEVER inspect the
 rendered menu to decide what a key means.
 
@@ -222,7 +222,7 @@ cat > "$PLUGIN_DIAGNOSER_PHASE9_SPEC" <<'JSON'
   "footer": "Type a key:"
 }
 JSON
-uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_menu.py" "$PLUGIN_DIAGNOSER_PHASE9_SPEC"
+uv run python "${CLAUDE_PLUGIN_ROOT}/scripts/print_menu.py" "$PLUGIN_DIAGNOSER_PHASE9_SPEC"
 ```
 
 End the turn immediately after this call. NEVER print this menu inline.
