@@ -469,6 +469,12 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         # is not a typo — omitting it would flag a settings file that works.
         "teammateDefaultModel",
         "terminalTitleFromRename",
+        # CC spec sync v2.1.241–246 (settings-reference.md `### <key>` headings)
+        "autoContinueAtUsageLimit",  # v2.1.234 — continue automatically at usage limit
+        "disableDesktopLocalSessions",
+        "modelPicker",  # v2.1.243 — curate the /model picker
+        "promptCacheTtl",  # v2.1.243 — 1h prompt cache on the main conversation
+        "subagentPromptCacheTtl",  # v2.1.243 — separate TTL for subagents
     }
 )
 
