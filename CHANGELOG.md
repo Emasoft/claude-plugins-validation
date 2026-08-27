@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.11.0] - 2026-08-27
+
+### Features
+
+- **spec-sync:** Accept the SendFeedback tool and the feedbackDrafts setting (CC v2.1.247)
+
 ## [5.10.0] - 2026-08-27
 
 ### Documentation
