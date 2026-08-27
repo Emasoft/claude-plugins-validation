@@ -475,6 +475,8 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         "modelPicker",  # v2.1.243 — curate the /model picker
         "promptCacheTtl",  # v2.1.243 — 1h prompt cache on the main conversation
         "subagentPromptCacheTtl",  # v2.1.243 — separate TTL for subagents
+        # CC spec sync v2.1.247
+        "feedbackDrafts",  # v2.1.247 — off | quiet | on for Claude-drafted feedback
     }
 )
 

@@ -84,6 +84,7 @@ CANONICAL_TOOLS: frozenset[str] = frozenset(
         "RemoteTrigger",
         "ReportFindings",  # v2.1.196 — structured code-review findings (tools-reference)
         "ScheduleWakeup",
+        "SendFeedback",  # v2.1.238 — drafts a Claude Code feedback report (tools-reference)
         "SendMessage",
         "SendUserFile",  # tools-reference — sends a session file to the user
         "ShareOnboardingGuide",
