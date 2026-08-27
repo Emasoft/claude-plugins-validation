@@ -7,6 +7,7 @@ metadata:
   node_type: memory
   type: project
   tier: aspect
+publish-globally: false
 ---
 
 CPV imposes **NO body-length limit on AGENTS** — no word cap, no token cap, at any

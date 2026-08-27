@@ -9,6 +9,7 @@ metadata:
   tier: hub
   functionality: claude-plugins-validation-overview
   globs: ["scripts/**", "skills/**", "agents/**", "commands/**", "hooks/**", "tests/**"]
+publish-globally: false
 ---
 **CPV (`claude-plugins-validation`) is a UNIVERSAL quality gate for Claude Code plugins
 and marketplaces.** It answers one question — *is this plugin correct, safe, and

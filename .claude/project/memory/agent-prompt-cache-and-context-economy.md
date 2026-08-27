@@ -7,6 +7,7 @@ metadata:
   node_type: memory
   type: project
   tier: aspect
+publish-globally: false
 ---
 
 Verified against the official documentation (Anthropic prompt-caching, Agent Skills
