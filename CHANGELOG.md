@@ -2,6 +2,20 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.10.0] - 2026-08-27
+
+### Documentation
+
+- Tick TRDD-d1f74670 acceptance checklist — the closing edit left all 6 boxes unticked
+
+### Features
+
+- CC spec sync v2.1.241-246 — settings keys, skill OpenSpec fields, command aliases
+
+### Miscellaneous Tasks
+
+- **memory:** Memgrep normalizes publish-globally into 6 PROJECT pages
+
 ## [5.9.0] - 2026-08-26
 
 ### Documentation
