@@ -8,6 +8,7 @@ metadata:
   type: project
   tier: aspect
   globs: ["scripts/rules/**", "scripts/_skillaudit_*.py", "scripts/cpv_skillaudit_native.py"]
+publish-globally: false
 ---
 
 When a CPV security rule fires on **documentation prose** rather than on an executable
