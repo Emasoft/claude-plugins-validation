@@ -749,6 +749,7 @@ VALID_TOOLS = {
     "WaitForMcpServers",  # v2.1.142 — waits for connecting MCP servers (tools-reference)
     "ReportFindings",  # v2.1.196 — structured code-review findings (tools-reference)
     "SendUserFile",  # sends a session file to the user with an optional caption (tools-reference)
+    "SendFeedback",  # v2.1.238 — drafts a Claude Code feedback report for the user to review (tools-reference)
     # `PushNotification` was previously carried on an UNVERIFIED rationale (a note here
     # claimed it was absent from tools-reference and asked for a revisit). Re-checked
     # against the live tools-reference table: it IS enumerated there. Note resolved.
