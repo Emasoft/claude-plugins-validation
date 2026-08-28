@@ -2,6 +2,20 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.12.0] - 2026-08-28
+
+### Documentation
+
+- Record v5.12.0 spec-sync findings; drop false plugins-reference citation
+
+### Features
+
+- CC spec sync v2.1.248 — validate experimental.cacheTtl, add CLAUDE_CODE_RESTRICTED
+
+### Miscellaneous Tasks
+
+- Regen self-hashes after CLAUDE.md v5.12.0 edits
+
 ## [5.11.0] - 2026-08-27
 
 ### Features
