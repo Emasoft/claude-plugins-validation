@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.13.1] - 2026-08-28
+
+### Bug Fixes
+
+- **tests:** Stop the Gate 3d suite depending on the dev box having trufflehog
+
 ## [5.13.0] - 2026-08-28
 
 ### Documentation
