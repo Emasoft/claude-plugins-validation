@@ -103,7 +103,12 @@ class TestDestructiveConsumersRefuseOnNone:
         assert "Refusing to consolidate" in self.SRC
 
     def test_tag_move_requires_positive_false(self):
-        assert "_drift_remote_state is False" in self.SRC
+        # The drift check moved into the shared `_ensure_tag_at_head` helper
+        # when issue #216 extended it to the dependency tag. The invariant is
+        # unchanged and is what this pins: a tag is moved ONLY on the remote's
+        # positive `False`, so BOTH other answers must refuse first.
+        assert "remote_state is None:" in self.SRC
+        assert "remote_state is True:" in self.SRC
         assert "Refusing to move" in self.SRC
 
     def test_no_destructive_site_uses_the_bool_wrapper(self):

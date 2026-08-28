@@ -95,6 +95,12 @@ def _init_repo(tmp_path: Path) -> tuple[Path, str]:
         cwd=str(repo),
         capture_output=True,
     )
+    # A real local `feat` ref, because every feature-push case below feeds the
+    # hook a `refs/heads/feat` line and real git only produces one when the ref
+    # exists locally. Without it the fixture was silently exercising the
+    # unresolvable-ref shape of issue #213 — which the hook now (correctly)
+    # blocks — while claiming to test the ordinary clean push.
+    _git(repo, "branch", "feat")
     head = _git(repo, "rev-parse", "HEAD").stdout.strip()
     return repo, head
 
@@ -196,7 +202,7 @@ def _fake_aws_creds() -> str:
 
 
 def _add_feature_commit(repo: Path, filename: str, content: str) -> str:
-    _git(repo, "checkout", "-q", "-b", "feat")
+    _git(repo, "checkout", "-q", "feat")
     (repo / filename).write_text(content)
     _git(repo, "add", filename)
     _git(repo, "commit", "-qm", "feature work")
@@ -216,6 +222,23 @@ class TestGeneratedHook:
         _write_generated_hook(repo)
         r = _run_generated(repo, binp, _stdin("refs/heads/feat", head))
         assert r.returncode == 0, r.stderr
+        assert not (repo / "GATE_CALLED").exists(), "release gate must NOT run for a feature push"
+
+    def test_feature_branch_blocked_when_remote_name_has_no_local_ref(self, tmp_path: Path) -> None:
+        """Issue #213 — `git push origin HEAD:refs/heads/new-name` must BLOCK.
+
+        Negative control for the test above: the stub trufflehog exits 0 here
+        too, so nothing about the scanner's verdict differs. What differs is
+        that the pushed remote branch name resolves to no local ref, which made
+        the real trufflehog log 'unable to resolve ref', scan 0 bytes and exit
+        0 — a push allowed on a scan that never looked.
+        """
+        repo, head = _init_repo(tmp_path)
+        binp = _stub_bin(tmp_path, trufflehog_exit=0)
+        _write_generated_hook(repo)
+        r = _run_generated(repo, binp, _stdin("refs/heads/no-such-branch", head))
+        assert r.returncode != 0, "an unscannable push must fail closed, not pass"
+        assert "does not resolve to a local ref" in r.stderr
         assert not (repo / "GATE_CALLED").exists(), "release gate must NOT run for a feature push"
 
     def test_feature_branch_blocked_when_scan_finds_secret(self, tmp_path: Path) -> None:

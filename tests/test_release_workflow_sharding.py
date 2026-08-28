@@ -152,10 +152,17 @@ def test_shards_stay_serial_in_both_own_and_canon() -> None:
     """
     for label, parsed in (("own", _own()), ("canon", _canon())):
         for cmd in _pytest_commands(parsed):
-            assert " -n " not in cmd and "--dist" not in cmd, (
-                f"{label} release shard runs under xdist, losing the "
-                f"order-dependent pollution catch: {cmd}"
-            )
+            # Judge the pytest INVOCATION lines, not the whole `run:` block. The
+            # block is shell, and ` -n ` is also POSIX test's string-is-non-empty
+            # operator — the guard around the test-discovery `find` (issue #215)
+            # uses it, and a whole-block substring match read that as xdist.
+            for line in cmd.splitlines():
+                if "pytest" not in line:
+                    continue
+                assert " -n " not in line and "--dist" not in line, (
+                    f"{label} release shard runs under xdist, losing the "
+                    f"order-dependent pollution catch: {line.strip()}"
+                )
 
 
 # ---------------------------------------------------------------------------
