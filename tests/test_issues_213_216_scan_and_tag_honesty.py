@@ -12,6 +12,7 @@ Each test below fails if the corresponding lie comes back.
 
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 from pathlib import Path
@@ -52,6 +53,22 @@ class TestTimeoutIsNotAVerdict:
         """Positive control: the predicate is not simply always-True."""
         assert validate_security.scan_was_incomplete("no-such-scanner") is False
 
+    def test_cache_hit_does_not_inherit_an_earlier_timeout(self) -> None:
+        """A mark from plugin A must not make plugin B's table say TIMEOUT.
+
+        The mark is keyed by scanner NAME, not by tree, and a cache hit returns
+        without ever calling the scanner — so clearing it only inside
+        ``check_trufflehog`` left the flag set across the marketplace path's
+        serial validate_security() calls. The clear lives in
+        ``_run_scanner_with_cache`` for exactly that reason.
+        """
+        src = (REPO_ROOT / "scripts" / "validate_security.py").read_text(encoding="utf-8")
+        lookup = src.index("def _run_scanner_with_cache(")
+        body = src[lookup : src.index("def _task_cc_audit(", lookup)]
+        clear_at = body.index('_mark_scan_incomplete(scanner_name, False)')
+        hit_return_at = body.index('return int(cached.get("findings_count"')
+        assert clear_at < hit_return_at, "the clear must run BEFORE the cache-hit early return"
+
 
 # ---------------------------------------------------------------------------
 # #219 regression — the cache must key on the flags actually passed
@@ -62,7 +79,13 @@ class TestCacheKeyTracksTheRealFlags:
     SRC = (REPO_ROOT / "scripts" / "validate_security.py").read_text(encoding="utf-8")
 
     def test_results_flag_has_exactly_one_spelling(self) -> None:
-        """The literal must appear once — in the constant — and nowhere else.
+        """One spelling WITHIN validate_security.py — where the drift happened.
+
+        Scope is deliberate and worth stating, because the name over-promises:
+        ``generate_plugin_repo.py`` carries its own copy of the same literal for
+        the canon it EMITS, which is a separate module with a separate
+        lifecycle. This test does not police that one.
+
 
         v5.13.0 added the widened result set to the subprocess call but left the
         cache's curated flag copy at the old list, so hosts holding a pre-fix
@@ -74,23 +97,77 @@ class TestCacheKeyTracksTheRealFlags:
         assert "TRUFFLEHOG_RESULTS_FLAG" in self.SRC
 
     def test_cache_argv_includes_the_constant_and_exclude_paths(self) -> None:
-        """The cache's flag list must carry both post-fix flags."""
+        """The cache's flag list must carry both post-fix flags.
+
+        Read out of the AST, not out of a fixed-size slice of the source: a
+        1200-character window straddles unrelated code the moment the stub
+        grows, so it would keep passing while measuring the wrong bytes.
+        """
         assert validate_security.TRUFFLEHOG_RESULTS_FLAG.startswith("--results=")
-        # The stub is built inline in _task_specialist; pin its two additions.
-        assert "TRUFFLEHOG_RESULTS_FLAG,\n" in self.SRC
-        stub_start = self.SRC.index('if binary_hint == "trufflehog":')
-        stub = self.SRC[stub_start : stub_start + 1200]
-        assert "TRUFFLEHOG_RESULTS_FLAG" in stub
-        assert '"--exclude-paths"' in stub
+        tree = ast.parse(self.SRC)
+        stub: list[str] = []
+        for node in ast.walk(tree):
+            # `if binary_hint == "trufflehog": scanner_argv = [...]`
+            if not isinstance(node, ast.If):
+                continue
+            if not (
+                isinstance(node.test, ast.Compare)
+                and getattr(node.test.left, "id", "") == "binary_hint"
+                and any(getattr(c, "value", None) == "trufflehog" for c in node.test.comparators)
+            ):
+                continue
+            for assign in node.body:
+                if not isinstance(assign, ast.Assign) or not isinstance(assign.value, ast.List):
+                    continue
+                if not any(getattr(t, "id", "") == "scanner_argv" for t in assign.targets):
+                    continue
+                for elt in assign.value.elts:
+                    if isinstance(elt, ast.Constant):
+                        stub.append(str(elt.value))
+                    elif isinstance(elt, ast.Name):
+                        stub.append(elt.id)
+        assert stub, "no trufflehog scanner_argv literal found — this test is measuring nothing"
+        assert "TRUFFLEHOG_RESULTS_FLAG" in stub, "the cache key no longer tracks the result-set flag"
+        assert "--exclude-paths" in stub, "the cache key no longer tracks the exclude-paths flag"
 
     def test_incomplete_scan_is_not_cached(self) -> None:
-        """A timed-out run must not be frozen into the cache as a result."""
-        assert "if scan_was_incomplete(scanner_name):" in self.SRC
+        """A timed-out run must not be frozen into the cache as a result.
+
+        Pins the ORDERING, not a spelling: the guard must RETURN before the
+        write. Asserting only that the ``if`` line exists would pass with the
+        branch body replaced by ``pass`` — the same vacuous-source-pin failure
+        this release had to repair in three older tests.
+        """
+        body = self.SRC[
+            self.SRC.index("def _run_scanner_with_cache(") : self.SRC.index("def _task_cc_audit(")
+        ]
+        guard_at = body.index("if scan_was_incomplete(scanner_name):")
+        put_at = body.index("cache.put(")
+        assert guard_at < put_at, "the incomplete-scan guard must precede the cache write"
+        between = body[guard_at:put_at]
+        assert "return int(count)" in between, "the guard falls through to the cache write"
 
 
 # ---------------------------------------------------------------------------
 # #215 — a tests/unit/ layout is a real suite
 # ---------------------------------------------------------------------------
+
+
+def _emitted_test_guards() -> list[str]:
+    """The guard lines AS EMITTED, lifted out of the generated workflow YAML.
+
+    Retyping the snippet into the test would prove only that the string the
+    test author typed behaves correctly. These templates are Python f-strings
+    carrying `{{{{ }}}}` brace-doubling, so a rendering bug is exactly the kind
+    of defect a retyped copy cannot see.
+    """
+    params = generate_plugin_repo.PluginParams(
+        name="demo-plugin", description="demo", author="t", author_email="t@t.t"
+    )
+    emitted = generate_plugin_repo.gen_release_yml(params) + generate_plugin_repo.gen_ci_yml(params)
+    guards = [ln.strip() for ln in emitted.splitlines() if "find tests -name" in ln]
+    assert guards, "no test-discovery guard found in the emitted workflows"
+    return guards
 
 
 class TestSubdirectoryTestLayoutIsFound:
@@ -99,20 +176,32 @@ class TestSubdirectoryTestLayoutIsFound:
         assert 'test_dir.rglob("test_*.py")' in src
         assert 'test_dir.glob("test_*.py")' not in src, "the top-level-only probe is back"
 
+    def test_no_emitted_guard_still_uses_the_ls_glob(self) -> None:
+        """`ls tests/test_*.py` is non-recursive AND lies on an unmatched glob."""
+        params = generate_plugin_repo.PluginParams(
+            name="demo-plugin", description="demo", author="t", author_email="t@t.t"
+        )
+        emitted = generate_plugin_repo.gen_release_yml(params) + generate_plugin_repo.gen_ci_yml(params)
+        # Executable lines only — the guard's own comment NAMES the rejected
+        # form to explain why it was replaced, and that mention is not a use.
+        code = [ln for ln in emitted.splitlines() if not ln.strip().startswith("#")]
+        offenders = [ln.strip() for ln in code if "ls tests/test_*.py" in ln]
+        assert not offenders, f"the non-recursive lying probe is back: {offenders}"
+
     def test_workflow_guard_finds_nested_tests(self, tmp_path: Path) -> None:
-        """Run the emitted shell guard for real against a tests/unit/ tree."""
+        """Run each EMITTED guard for real against a tests/unit/ tree."""
         (tmp_path / "tests" / "unit").mkdir(parents=True)
         (tmp_path / "tests" / "unit" / "test_x.py").write_text("def test_x(): pass\n")
-        guard = '[ -d "tests" ] && [ -n "$(find tests -name \'test_*.py\' -type f -print -quit)" ]'
-        r = subprocess.run(["/bin/sh", "-c", guard], cwd=str(tmp_path))
-        assert r.returncode == 0, "nested tests/unit/ suite read as absent"
+        for guard in _emitted_test_guards():
+            r = subprocess.run(["/bin/sh", "-c", guard.rstrip("; then").removeprefix("if ")], cwd=str(tmp_path))
+            assert r.returncode == 0, f"nested tests/unit/ suite read as absent by: {guard}"
 
     def test_workflow_guard_still_rejects_an_empty_tree(self, tmp_path: Path) -> None:
-        """Positive control: the guard must still say NO when there are no tests."""
+        """Positive control: the same emitted guard must say NO with no tests."""
         (tmp_path / "tests").mkdir()
-        guard = '[ -d "tests" ] && [ -n "$(find tests -name \'test_*.py\' -type f -print -quit)" ]'
-        r = subprocess.run(["/bin/sh", "-c", guard], cwd=str(tmp_path))
-        assert r.returncode != 0, "an empty tests/ dir passed the guard"
+        for guard in _emitted_test_guards():
+            r = subprocess.run(["/bin/sh", "-c", guard.rstrip("; then").removeprefix("if ")], cwd=str(tmp_path))
+            assert r.returncode != 0, f"an empty tests/ dir passed: {guard}"
 
 
 # ---------------------------------------------------------------------------

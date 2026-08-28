@@ -10636,6 +10636,14 @@ def validate_security(
         ``scanner_argv`` is a curated whitelist that captures the
         flags a developer would change when tuning the scanner.
         """
+        # Clear the "did not finish" mark HERE, not only inside the scanner:
+        # a cache HIT returns below without ever calling scanner_fn, so a mark
+        # left by an earlier timeout in this process would survive and make the
+        # NEXT plugin's step table report a TIMEOUT that never happened. The
+        # marketplace path calls validate_security() serially in one process,
+        # so that sequence is reachable: plugin A times out (no cache entry
+        # written), plugin B hits its cache, B inherits A's mark.
+        _mark_scan_incomplete(scanner_name, False)
         merkle = _compute_tree_merkle()
         version = get_scanner_version(scanner_name)
         # Bake plugin_path into the args hash so two plugins with
