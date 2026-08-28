@@ -96,11 +96,13 @@ def test_gates_2_3_4_5_run_concurrently(tmp_path: Path):
     fake_ci_preflight = _make_sleeping_stage("ci_preflight", 1.0)
     fake_mkpl_v = _make_sleeping_stage("mkpl_validate", 1.0)
     fake_mkpl_r = _make_sleeping_stage("mkpl_reg", 1.0)
+    fake_secret = _make_sleeping_stage("secret_scan", 1.0)
 
     stubbed = {
         "tests": "stage_run_tests",
         "validate": "stage_validate_plugin",
         "ci_preflight": "stage_ci_preflight",
+        "secret_scan": "stage_secret_scan",
         "mkpl_validate": "stage_validate_marketplace",
         "mkpl_reg": "stage_marketplace_registration_check",
     }
@@ -113,6 +115,7 @@ def test_gates_2_3_4_5_run_concurrently(tmp_path: Path):
         patch.object(publish, "stage_run_tests", fake_tests),
         patch.object(publish, "stage_validate_plugin", fake_validate),
         patch.object(publish, "stage_ci_preflight", fake_ci_preflight),
+        patch.object(publish, "stage_secret_scan", fake_secret),
         patch.object(publish, "stage_validate_marketplace", fake_mkpl_v),
         patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r),
     ):

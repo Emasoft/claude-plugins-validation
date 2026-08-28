@@ -79,22 +79,63 @@ def _is_owner_repo(s: str) -> bool:
     return bool(re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", s)) and "/" in s and " " not in s
 
 
-def _is_github_url(url: str) -> bool:
-    return _is_url(url) and "github.com/" in url.lower()
+# Git forges whose repo URLs must be CLONED rather than curl-downloaded. A
+# forge missing from this tuple is not merely unsupported: its URL falls
+# through to _curl_download and the repo is fetched as a single FILE, which
+# then scans as an unrecognised blob instead of a plugin. GitLab was in that
+# state until it was added here.
+_GIT_FORGES: tuple[str, ...] = ("github.com", "gitlab.com")
+
+
+def _forge_of(url: str) -> str | None:
+    """Return the forge host this URL belongs to, or None."""
+    if not _is_url(url):
+        return None
+    lowered = url.lower()
+    return next((host for host in _GIT_FORGES if f"{host}/" in lowered), None)
+
+
+def _is_forge_url(url: str) -> bool:
+    return _forge_of(url) is not None
 
 
 def _normalize_github_url(spec: str) -> str:
-    """Turn 'owner/repo' or 'https://github.com/owner/repo/...' into a clone URL."""
+    """Turn 'owner/repo' or a forge repo URL into a clone URL.
+
+    Bare ``owner/repo`` stays GitHub-defaulted — it is ambiguous across forges
+    and GitHub is the established meaning for that shorthand. A GitLab repo
+    must be given as a full URL.
+    """
     if _is_owner_repo(spec):
         return f"https://github.com/{spec}.git"
-    if _is_github_url(spec):
-        m = re.match(
-            r"^https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?(?:/.*)?$",
-            spec,
-        )
-        if m:
-            return f"https://github.com/{m.group(1)}/{m.group(2)}.git"
-    return spec
+    host = _forge_of(spec)
+    if host is None:
+        return spec
+
+    m = re.match(rf"^https?://{re.escape(host)}/(.+?)/?$", spec, re.IGNORECASE)
+    if not m:
+        return spec
+    path = m.group(1)
+
+    # The two forges need DIFFERENT parsing and a single regex gets one wrong.
+    # GitHub: repo is always segment 2; anything after is a web view
+    # (/tree/main/...). GitLab: namespaces nest arbitrarily deep
+    # (group/sub/sub2/repo), and its web views are marked by a `/-/` segment —
+    # so the repo is the LAST segment before `/-/`, not the second one.
+    # Parsing GitLab with GitHub's rule turns group/sub/repo into group/sub.
+    if host == "gitlab.com":
+        path = path.split("/-/", 1)[0]
+        segments = [s for s in path.split("/") if s]
+        if len(segments) < 2:
+            return spec
+        segments[-1] = segments[-1].removesuffix(".git")
+        return f"https://{host}/{'/'.join(segments)}.git"
+
+    segments = [s for s in path.split("/") if s]
+    if len(segments) < 2:
+        return spec
+    owner, repo = segments[0], segments[1].removesuffix(".git")
+    return f"https://{host}/{owner}/{repo}.git"
 
 
 def _fetch_target(spec: str, sandbox: Path) -> tuple[Path, str]:
@@ -128,7 +169,7 @@ def _fetch_target(spec: str, sandbox: Path) -> tuple[Path, str]:
     # GitHub / arbitrary URL
     if _is_url(spec) or _is_owner_repo(spec):
         clone_url = _normalize_github_url(spec)
-        if clone_url.endswith(".git") or _is_github_url(clone_url):
+        if clone_url.endswith(".git") or _is_forge_url(clone_url):
             return _git_clone(clone_url, sandbox), label
         # Direct URL to SKILL.md / file
         return _curl_download(spec, sandbox), label

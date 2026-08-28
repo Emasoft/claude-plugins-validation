@@ -317,6 +317,38 @@ def _is_always_skip_basename(file_ref: str) -> bool:
     return Path(str(file_ref)).name in ALWAYS_SKIP_BASENAMES
 
 
+_GIT_TRACKED_CACHE: dict[str, frozenset[str]] = {}
+
+
+def _git_tracked_relpaths(root: Path) -> frozenset[str]:
+    """Plugin-root-relative paths git TRACKS, or an empty set when unknowable.
+
+    Empty on a non-git tree, a git error, or a timeout — the fail-open
+    direction for this helper's only caller, which uses membership to REFUSE a
+    suppression. An empty set therefore changes no verdict; it never invents one.
+    """
+    key = str(root)
+    cached = _GIT_TRACKED_CACHE.get(key)
+    if cached is not None:
+        return cached
+    tracked: frozenset[str] = frozenset()
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=key,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if proc.returncode == 0:
+            tracked = frozenset(p for p in (proc.stdout or "").split("\0") if p)
+    except (OSError, subprocess.SubprocessError):
+        tracked = frozenset()
+    _GIT_TRACKED_CACHE[key] = tracked
+    return tracked
+
+
 def _external_finding_is_gitignored(file_ref: str, gi: Any) -> bool:
     """Return True iff an external scanner's finding path is excluded by the
     plugin's own ``.gitignore`` (issue #67).
@@ -333,17 +365,21 @@ def _external_finding_is_gitignored(file_ref: str, gi: Any) -> bool:
 
     Rationale + FN-safety: a gitignored AND UNTRACKED path is not in the
     published artifact → not installed by users, so a secret / pattern hit in it
-    is the author's LOCAL concern, not a published-plugin vulnerability. This
-    post-filter matches the gitignore PATTERN, so it also suppresses an external
-    finding on a TRACKED+gitignored file — but that case is BACKSTOPPED by
-    ``validate_plugin.check_tracked_gitignored_files``, which fails any plugin
-    that tracks a gitignored file (such a file SHIPS despite being ignored — the
-    scan-evasion vector), so it can never reach users. The skillaudit native
-    scanner is git-accurate: it skips only gitignored-AND-untracked paths via
-    ``gitignored_unshipped_paths`` and scans tracked+gitignored files. (Aligning
-    this external post-filter + the in-process secret ``gi.walk`` to be
-    git-accurate too is defense-in-depth follow-up; the gate is already closed by
-    the validator rule above.)
+    is the author's LOCAL concern, not a published-plugin vulnerability.
+
+    A TRACKED path is NEVER suppressed here, whatever ``.gitignore`` says.
+    ``.gitignore`` does not untrack an already-tracked file, so such a file still
+    ships in ``git archive`` — suppressing it would be the scan-evasion vector
+    (`git add payload` + `.gitignore payload` → invisible to every external
+    scanner). This mirrors the skillaudit native scanner, which has been
+    git-accurate since v2.126.26 via ``gitignored_unshipped_paths``, and it makes
+    the external post-filter agree with it rather than relying solely on
+    ``validate_plugin.check_tracked_gitignored_files`` (which independently fails
+    any plugin that tracks a gitignored file) as the only line of defence.
+
+    The tracked lookup FAILS OPEN toward today's behaviour: outside a git repo,
+    or on any git error, the tracked set is empty and the pattern verdict stands
+    unchanged — so a non-git tree keeps the issue-#67 noise suppression.
 
     ``file_ref`` may be absolute (cc-audit / tirith / Cisco hand them back) or
     plugin-root-relative; it is normalised against ``gi.root`` (the resolved
@@ -354,6 +390,9 @@ def _external_finding_is_gitignored(file_ref: str, gi: Any) -> bool:
         return False
     rel = _normalize_to_relpath(str(file_ref), gi.root)
     if rel is None:
+        return False
+    if rel in _git_tracked_relpaths(gi.root):
+        # Tracked ⇒ ships ⇒ never suppressed, whatever .gitignore says.
         return False
     try:
         return bool(gi.is_ignored(gi.root / rel))
@@ -9479,6 +9518,64 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
 # All optional — emit a single WARNING when binary missing and skip.
 
 
+def _trufflehog_exclude_args(plugin_path: Path, gi: object) -> list[str]:
+    """Build trufflehog's ``--exclude-paths`` argv from the plugin's gitignore.
+
+    Issue #218: the gitignore set was built before the scan and applied only to
+    its RESULTS, so every gitignored byte was read and then discarded. trufflehog
+    takes a FILE of newline-separated path regexes via ``-x``, so the same set can
+    gate the walk instead.
+
+    Fails OPEN by design: if the ignore set cannot be enumerated or the temp file
+    cannot be written, return no arguments and let the full scan proceed. Being
+    slow is recoverable; silently narrowing a SECURITY scan on an unreadable
+    config is not — the failure must never remove coverage.
+    """
+    try:
+        from cpv_validation_common import gitignored_unshipped_paths  # noqa: PLC0415
+
+        unshipped = gitignored_unshipped_paths(plugin_path)
+    except Exception:  # noqa: BLE001 - any failure falls back to a full scan
+        return []
+    if not unshipped:
+        return []
+    try:
+        import re as _re  # noqa: PLC0415
+        import tempfile as _tf  # noqa: PLC0415
+
+        fd, name = _tf.mkstemp(prefix="cpv-th-exclude-", suffix=".txt", text=True)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            root = str(plugin_path.resolve()).rstrip("/")
+            # `.git` and the build/cache dirs are NOT in the gitignore set —
+            # git internals live outside the worktree's own ignore rules — so
+            # the unshipped set never covers them and trufflehog walked every
+            # compressed object in `.git/objects/`. Measured on CPV's own tree:
+            # historical blobs produced AWS hits from commits long since
+            # rewritten. These are never SHIPPED content (a plugin ships its
+            # worktree, not its object store), so excluding them removes no
+            # coverage — the same reasoning as the skillaudit walker's
+            # unconditional `_ALWAYS_SKIP_DIRS` tier.
+            for always in (".git", ".pytest_cache", "__pycache__", ".mypy_cache", ".ruff_cache"):
+                fh.write("^" + _re.escape(f"{root}/{always}") + "\n")
+                # __pycache__ nests at every depth, so also match it anywhere
+                # under the root rather than only as a top-level child.
+                fh.write(_re.escape(f"/{always}/") + "\n")
+            for rel in sorted(unshipped):
+                # trufflehog matches --exclude-paths regexes against the
+                # ABSOLUTE path it walks, NOT the plugin-relative one. An
+                # earlier draft anchored on the relative path ("^downloads_dev")
+                # and matched NOTHING — the gitignored tree was still fully
+                # scanned while the code looked correct. Verified by running the
+                # real binary both ways.
+                #
+                # Escape first: these are REGEXES, so a path holding a dot, a
+                # plus, or a bracket would otherwise match the wrong set.
+                fh.write("^" + _re.escape(f"{root}/{rel.rstrip('/')}") + "\n")
+        return ["--exclude-paths", name]
+    except OSError:
+        return []
+
+
 def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
     """Run trufflehog for credential detection if installed (RC-102 part 1).
 
@@ -9512,6 +9609,26 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
                 "--json",
                 "--no-update",
                 "--fail",
+                # Issue #219 — WITHOUT this flag CPV is BLIND to any secret
+                # trufflehog cannot verify over the network. trufflehog's
+                # default result set is `verified,unverified,unknown`, which
+                # OMITS `filtered_unverified` — the bucket an expired,
+                # revoked, entropy-filtered, or unreachable-service credential
+                # lands in. Measured on the reporter's fixture and reproduced
+                # here: the default flags report 0 findings on a file where
+                # the same binary with the widened set reports the Tailscale
+                # key. A committed credential is a leak whether or not a
+                # runner can reach its API, so ask for every bucket and let
+                # CPV's own post-filter decide.
+                "--results=verified,unknown,unverified,filtered_unverified",
+                # Issue #218 — feed the gitignore set to the SCANNER instead
+                # of filtering its RESULTS. The filter below drops gitignored
+                # findings, but only AFTER trufflehog has walked every
+                # gitignored byte (the reporter measured 3.4 GB across 434
+                # gitignored zips scanned and then discarded, which is also
+                # what drove the 180s timeout). Excluding up-front is the same
+                # verdict for a fraction of the work.
+                *_trufflehog_exclude_args(plugin_path, gi),
                 f"--concurrency={truffle_concurrency}",
             ],
             capture_output=True,
@@ -9519,8 +9636,18 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
             timeout=180,
         )
     except subprocess.TimeoutExpired:
-        report.warning("trufflehog: timed out after 180s — scan aborted")
-        return 0
+        # Issue #218 defect 2 — a timed-out secret scan MUST NOT read as a
+        # clean one. Returning 0 here made "we never finished looking" and
+        # "we looked and found nothing" the same answer to the caller, which
+        # is the exact shape of a silent false negative. MAJOR, not WARNING:
+        # WARNING never blocks --strict, and an unscanned tree must not pass
+        # a security gate.
+        report.major(
+            "trufflehog: timed out after 180s — scan INCOMPLETE, secrets UNKNOWN. "
+            "This is not a clean result. Re-run with a narrower path, or exclude "
+            "large gitignored trees so the scan can finish."
+        )
+        return 1
     except FileNotFoundError:
         report.warning("trufflehog: binary disappeared between probe and exec")
         return 0

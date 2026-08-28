@@ -8,26 +8,14 @@ user-invocable: true
 
 ## Overview
 
-CPV has **two menus for two audiences**:
-
-- **Humans** get `/cpv-main-menu` — a real, interactive numbered menu
-  rendered post-turn by the `claude-menu-system` Stop hook (zero token
-  cost). Type a number, navigate, pick.
-- **Agents (and any routing Claude) get THIS skill** — not a rendered
-  menu, just a plain readable document that offers **every CPV skill,
-  agent, and script à la carte**. Read it, pick what the task needs,
-  invoke it.
+CPV has **two menus for two audiences**: humans get `/cpv-main-menu` — a real
+interactive numbered menu rendered post-turn by the `claude-menu-system` Stop
+hook (zero token cost); **agents and any routing Claude get THIS skill** — not a
+rendered menu, just a plain readable document offering **every CPV skill, agent
+and script à la carte**. Read it, pick what the task needs, invoke it.
 
 It is also the runtime catalog CPV's own agents load skills from on
 demand (TRDD-478d9687), for one plugin or a whole fleet.
-
-## Two execution surfaces
-
-**Route in this session** (the default): pick the row below and invoke the
-mapped agent / skill / script directly. **Or dispatch the whole job** with
-`Agent(subagent_type: "cpv-agent", prompt: "<request, verbatim>")` when it should
-run autonomously in an isolated context — that keeps your main context clean and
-returns a report path.
 
 ## Instructions
 
@@ -51,7 +39,7 @@ How to route a free-form request, autonomously:
 
 ## Intent → Action table
 
-Every "Claude Code" cell runs inside a session with CPV installed. Every
+Every "Claude Code" cell runs in a session with CPV installed. Every
 "Standalone (uvx)" cell runs from a terminal with **no install** (needs
 [uv](https://docs.astral.sh/uv/); prefix with
 `uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate`).
@@ -63,6 +51,7 @@ Every "Claude Code" cell runs inside a session with CPV installed. Every
 | 3 | **Validate an agent / command / hook / MCP / LSP** | Dispatch `cpv-plugin-validator-agent` (covers all components) | `… agent /path` · `… command /path` · `… hook /path` · `… mcp /path` · `… lsp /path` |
 | 4 | **Security-scan a plugin** (5 external scanners — trufflehog, cc-audit, tirith, semgrep, Cisco — + native skillaudit) | Dispatch `cpv-plugin-validator-agent` (runs the full security pipeline), or fleet-wide `Skill(claude-plugins-validation:cpv-batch-security-audit)` | `… security /path` |
 | 5 | **Security-scan BEFORE installing** an untrusted plugin / skill / marketplace | `/cpv-pre-install-scan <target>` (sandboxed; never writes to the plugin cache) | `… security <github-url-or-path>` |
+| 5b | **Full READ-ONLY scan of one folder or repo** (structure, rules, security, leaks, cache; no fixes) | `/cpv-validate-plugin-folder [path-or-url]`, or `Skill({skill: "claude-plugins-validation:cpv-validate-plugin-folder"})` | `… plugin /path` + `… security /path` |
 | 6 | **Fix validation findings in a plugin** (mechanical per-rule remediation) — **do NOT hand-edit** | Dispatch `cpv-plugin-fixer-agent` (validate → fix loop), or fleet-wide `/cpv-batch-fix` · `/cpv-batch-validate-and-fix` | — (fixing needs write access; run in Claude Code) |
 | 7 | **Fix marketplace findings / migrate marketplace layout** (A ⇄ B ⇄ C) | Dispatch `cpv-marketplace-fixer-agent`, or `Skill(claude-plugins-validation:cpv-migrate-marketplace-architecture)` | — |
 | 8 | **Devitalize security threats** (rewrite execution-class code to provably-inert data; never suppresses a rule) | Dispatch `cpv-plugin-devitalizer-agent` (scan → devitalize → re-scan; flags load-bearing code) | — (needs write access) |
@@ -76,7 +65,7 @@ Every "Claude Code" cell runs inside a session with CPV installed. Every
 | 16 | **AI-grade quality** (descriptions that won't trigger, unclear instructions, workflows with no exit) — **expensive, opt-in** | Dispatch `cpv-semantic-validator-agent` (warns about 10–50× token cost first) | — (needs Opus) |
 | 17 | **Do the same op across many plugins** (a marketplace / list / `@listfile`) | The `/cpv-batch-*` family — validate, security-audit, caching-audit/optimize, fix, validate-and-fix, full-scan-and-fix, scope-diagnose/fix | most aliases accept a `--marketplace <spec>` |
 | 18 | **Just show me an interactive numbered menu** | `/cpv-main-menu` (human picks a number; zero-token Stop-hook render) | — |
-| 19 | **Hand the whole free-form request to one autonomous worker** | `Agent(subagent_type: "cpv-agent", prompt: "<request>")` | — |
+| 19 | **Hand the whole free-form request to one autonomous worker** (isolated context; keeps yours clean, returns a report path) | `Agent(subagent_type: "cpv-agent", prompt: "<request, verbatim>")` | — |
 | 20 | **Migrate a compiled-component plugin to ship ONLY the binary** — create the separate PUBLIC source repo, extract the source, ship `bin/` only (the `RC-SHIP-BINARY-ONLY` remediation) | Dispatch `cpv-plugin-fixer-agent`, or `Skill(claude-plugins-validation:cpv-strip-dev-submodules)`; recipe: `cpv-fix-validation/references/ship-binary-only-fixes.md`. **Confirm with the user before creating a PUBLIC repo.** | — (needs write access + gh auth) |
 | 21 | **ONE agent + the skills it REACHES** — validate, security-scan, convert, or cost-compare variants | `agent --closure` · `agent-security` · `convert_agent.py --to <mode>` · `agent-eval` | same |
 
@@ -143,12 +132,11 @@ specialists it can dispatch directly.
 - **Namespace skills.** Always `claude-plugins-validation:<name>`.
 - **One skill at a time.** Don't load another until the first returns.
 - **Don't re-implement.** If a script or agent does the job, use it.
-- A skill description that still says "Loaded by `<agent>`" is advisory — any agent (and any routing Claude) can invoke any skill.
+- A skill description saying "Loaded by `<agent>`" is advisory — any agent or routing Claude can invoke any skill.
 
 ## Output
 
-This menu itself returns nothing — the chosen downstream tool produces
-the output. Typical shapes:
+This menu returns nothing — the chosen downstream tool produces the output:
 
 - Validation / security → severity counts + report path.
 - Fix → `[DONE]` / `[BLOCKED]` / `[BATCH_REQUIRED]` one-line summary.
@@ -157,9 +145,9 @@ the output. Typical shapes:
 
 ## Error Handling
 
-- **Unknown skill name** → the `Skill` tool errors out; re-check the name against the [Plugin Skills](#plugin-skills-full-catalog) table (CPV skills are always namespaced `claude-plugins-validation:<name>`).
-- **Ambiguous intent** (the request fits no single row, or several) → default to **validate** first, report what was found, then offer the matching fix/optimize/publish step.
-- **Standalone script refuses to run** from the plugin cache → that direct invocation is blocked by design; use the launcher `cpv-remote-validate <alias> <target>` or `remote_validation.py <alias> <target>`.
+- **Unknown skill name** → the `Skill` tool errors; re-check it against the [Plugin Skills](#plugin-skills-full-catalog) table (CPV skills are always namespaced `claude-plugins-validation:<name>`).
+- **Ambiguous intent** (fits no row, or several) → default to **validate** first, report findings, then offer the matching fix/optimize/publish step.
+- **Standalone script refuses to run** from the plugin cache → blocked by design; use `cpv-remote-validate <alias> <target>` or `remote_validation.py <alias> <target>`.
 - **No write access** (URL / read-only target) → fix/scaffold/publish rows cannot run; fall back to a read-only row (validate / security-scan / cache-audit) and report.
 
 ## Examples
