@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.14.1] - 2026-08-28
+
+### Bug Fixes
+
+- The new TIMEOUT mark leaked across a cache hit (post-5.14.0 self-review)
+
+### Documentation
+
+- Record the v5.14.1 cache-hit mark leak in CLAUDE.md
+
 ## [5.14.0] - 2026-08-28
 
 ### Bug Fixes
