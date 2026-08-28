@@ -39,6 +39,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -209,6 +210,8 @@ _line_offsets_last_value: list[int] = []
 #   - "RAN"       — external scanner ran (clean or with findings)
 #   - "SKIPPED"   — step was deliberately not run (e.g. external scanner's
 #                   binary is missing, or test isolation knob was off)
+#   - "TIMEOUT"   — external scanner started but ABORTED before reaching a
+#                   verdict; its findings column is NOT a clean result
 #   - "FAILED"    — step started but raised / timed out before completing
 #
 # `validate_security()` resets the log at start, populates it inline as
@@ -251,7 +254,7 @@ def _record_step(
     Args:
         num: Step number (1..N) — preserves order in the rendered table.
         name: Short human-readable name (e.g. "Injection scan").
-        status: One of "COMPLETED" / "RAN" / "SKIPPED" / "FAILED".
+        status: One of "COMPLETED" / "RAN" / "SKIPPED" / "TIMEOUT" / "FAILED".
         findings: Number of issues this step contributed to the report.
         files: File coverage summary (e.g. "53 scanned, 2 skipped").
         details: Free-form note explaining a SKIPPED/FAILED status.
@@ -287,6 +290,9 @@ def format_scan_step_table(steps: list[dict[str, Any]] | None = None) -> str:
         "COMPLETED": "[OK] COMPLETED",
         "RAN": "[OK] RAN",
         "SKIPPED": "[--] SKIPPED",
+        # Deliberately alarming, and deliberately NOT "[OK]": the findings
+        # column beside it is an incomplete count, not a clean bill of health.
+        "TIMEOUT": "[!!] TIMEOUT",
         "FAILED": "[!!] FAILED",
     }
     lines = [
@@ -9518,6 +9524,39 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
 # All optional — emit a single WARNING when binary missing and skip.
 
 
+# Issue #219 — the widened result set, as ONE constant. It is spelled here and
+# nowhere else inside this module because the scanner cache keys on a curated
+# copy of trufflehog's flags (`_run_scanner_with_cache`): when v5.13.0 added
+# this flag to the subprocess call but left the cache's copy at the old list,
+# every host holding a pre-fix "0 findings" entry for an unchanged tree kept
+# replaying that 0 — the fix shipped and stayed invisible. A shared constant
+# makes the two sites impossible to drift apart.
+TRUFFLEHOG_RESULTS_FLAG = "--results=verified,unknown,unverified,filtered_unverified"
+
+# Scanners that could NOT finish this process's current run, by scanner name.
+# A timeout is not a verdict, so the step table must not print it as one (issue
+# #218 defect 3) and the cache must not store it as one. Threads share this
+# process, so a plain set + lock is enough; each scanner clears its own entry on
+# entry so a later run in the same process starts from a clean slate.
+_SCAN_INCOMPLETE: set[str] = set()
+_SCAN_INCOMPLETE_LOCK = threading.Lock()
+
+
+def _mark_scan_incomplete(scanner: str, incomplete: bool) -> None:
+    """Record (or clear) 'this scanner did not finish' for the current run."""
+    with _SCAN_INCOMPLETE_LOCK:
+        if incomplete:
+            _SCAN_INCOMPLETE.add(scanner)
+        else:
+            _SCAN_INCOMPLETE.discard(scanner)
+
+
+def scan_was_incomplete(scanner: str) -> bool:
+    """True when ``scanner`` aborted (timed out) instead of reaching a verdict."""
+    with _SCAN_INCOMPLETE_LOCK:
+        return scanner in _SCAN_INCOMPLETE
+
+
 def _trufflehog_exclude_args(plugin_path: Path, gi: object) -> list[str]:
     """Build trufflehog's ``--exclude-paths`` argv from the plugin's gitignore.
 
@@ -9594,6 +9633,10 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
     # path the plugin's own .gitignore excludes (gitignored = not shipped). This
     # is the reported case: a gitignored INPUT_DEV/**/*.zip corpus = ~97 hits.
     gi = get_gitignore_filter(plugin_path)
+    # Clear any "did not finish" mark left by an earlier run in this process
+    # before we learn anything about THIS one — a stale mark would make a
+    # completed scan report itself as aborted.
+    _mark_scan_incomplete("trufflehog", False)
     # v2.48 — explicit --concurrency leverages trufflehog's internal goroutine
     # pool. Default is 8; we request `os.cpu_count() or 4` so dedicated 12+
     # core machines see the full benefit. This is the parallelism win that
@@ -9619,8 +9662,10 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
                 # the same binary with the widened set reports the Tailscale
                 # key. A committed credential is a leak whether or not a
                 # runner can reach its API, so ask for every bucket and let
-                # CPV's own post-filter decide.
-                "--results=verified,unknown,unverified,filtered_unverified",
+                # CPV's own post-filter decide. Spelled as a module constant so
+                # the scanner cache hashes the SAME string — see
+                # TRUFFLEHOG_RESULTS_FLAG.
+                TRUFFLEHOG_RESULTS_FLAG,
                 # Issue #218 — feed the gitignore set to the SCANNER instead
                 # of filtering its RESULTS. The filter below drops gitignored
                 # findings, but only AFTER trufflehog has walked every
@@ -9642,6 +9687,12 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
         # is the exact shape of a silent false negative. MAJOR, not WARNING:
         # WARNING never blocks --strict, and an unscanned tree must not pass
         # a security gate.
+        #
+        # Defect 3 of the same issue: returning a count was ALSO the only thing
+        # the step table saw, so it printed the abort as `[OK] RAN`. Mark the
+        # scanner incomplete so the table reports TIMEOUT and the cache refuses
+        # to store a verdict this run never reached.
+        _mark_scan_incomplete("trufflehog", True)
         report.major(
             "trufflehog: timed out after 180s — scan INCOMPLETE, secrets UNKNOWN. "
             "This is not a clean result. Re-run with a narrower path, or exclude "
@@ -10633,6 +10684,12 @@ def validate_security(
         before = len(local_report.results)
         count = scanner_fn(plugin_path, local_report)
         after_results = local_report.results[before:]
+        if scan_was_incomplete(scanner_name):
+            # The scanner aborted (timed out) rather than reaching a verdict.
+            # Caching that would freeze "we never finished looking" into a
+            # cache entry every later warm run replays as a real result — the
+            # silent false negative of issue #218, made permanent.
+            return int(count)
         try:
             cache.put(
                 key,
@@ -10798,7 +10855,20 @@ def validate_security(
             # update this list to invalidate the cache. Bumping the
             # scanner binary itself is auto-detected via scanner_version.
             if binary_hint == "trufflehog":
-                scanner_argv = ["filesystem", "--json", "--no-update", "--fail"]
+                scanner_argv = [
+                    "filesystem",
+                    "--json",
+                    "--no-update",
+                    "--fail",
+                    # The result-set flag comes from the SAME constant the real
+                    # argv uses, so widening it can never again leave stale
+                    # pre-fix entries readable (issue #219 regression).
+                    TRUFFLEHOG_RESULTS_FLAG,
+                    # The --exclude-paths VALUE is a per-run temp file, so hash
+                    # only the flag name: it flips absent→present exactly once
+                    # (issue #218 defect 1) instead of busting the cache hourly.
+                    "--exclude-paths",
+                ]
             elif binary_hint == "semgrep":
                 scanner_argv = [
                     "--config",
@@ -10811,14 +10881,19 @@ def validate_security(
             else:
                 scanner_argv = []
             count = _run_scanner_with_cache(binary_hint, scanner_fn, scanner_argv, local)
+            # Issue #218 defect 3 — a scanner that timed out must not be logged
+            # as `[OK] RAN`. "We aborted" and "we looked and found nothing" read
+            # identically in that table, which is what let an unscanned tree
+            # look clean to a human reading the coverage report.
+            aborted = scan_was_incomplete(binary_hint)
             steps.append(
                 {
                     "num": step_num,
                     "name": name,
-                    "status": "RAN",
+                    "status": "TIMEOUT" if aborted else "RAN",
                     "findings": count,
                     "files": f"{binary_hint} (PATH binary)",
-                    "details": "",
+                    "details": ("scan INCOMPLETE — secrets UNKNOWN, not a clean result" if aborted else ""),
                 }
             )
         return local, steps

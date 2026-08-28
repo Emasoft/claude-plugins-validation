@@ -1562,7 +1562,10 @@ def stage_fork_parity(plugin_root: Path) -> int:
         # we run here a real publish always has them; this guard only keeps the
         # gate honest when it is invoked outside that flow.
         tests_dir = plugin_root / "tests"
-        if not (tests_dir.is_dir() and any(tests_dir.glob("test_*.py"))):
+        # Issue #215 — rglob: a tests/unit/ layout is a real suite, and reading
+        # it as "no tests" would skip the probe on exactly the repos that most
+        # need it.
+        if not (tests_dir.is_dir() and any(tests_dir.rglob("test_*.py"))):
             print(f"  {YELLOW}! Skipped: no tests/ suite to probe (Gate 2 owns the missing-tests block).{NC}")
             return 0
 
@@ -2470,6 +2473,65 @@ def _dependency_tag_name(plugin_root: Path, tag_name: str) -> str | None:
     return f"{name}--v{tag_name.removeprefix('v')}"
 
 
+def _ensure_tag_at_head(plugin_root: Path, tag_name: str, message: str) -> bool:
+    """Guarantee ``tag_name`` exists AND points at HEAD, or refuse.
+
+    Issue #216 — after a publish that died between tagging and the push (a
+    blocking gate, a lost connection), the retry's recovery saw the tag already
+    present and skipped re-tagging, then pushed HEAD plus the OLD tag. Every
+    commit made between the attempts — typically the very fix that made the
+    retry pass — landed on the branch but OUTSIDE the released tag, so the
+    release archive differed from the tree the gates had just validated.
+
+    Fail-closed: the tag is moved ONLY on the remote's positive answer that it
+    is unpushed. A tag already on origin is immutable here, and an unreachable
+    remote is not consent (TRDD-6UW0KZVY).
+
+    Returns True when the tag is correct (created, moved, or already at HEAD),
+    False when the caller must abort.
+    """
+    if not _local_tag_exists(plugin_root, tag_name):
+        run(["git", "tag", "-a", tag_name, "-m", message], cwd=plugin_root)
+        print(f"{GREEN}✓ Tag {tag_name} created{NC}")
+        return True
+
+    tag_sha = run(["git", "rev-list", "-n", "1", tag_name], cwd=plugin_root, check=False).stdout.strip()
+    head_sha = run(["git", "rev-parse", "HEAD"], cwd=plugin_root, check=False).stdout.strip()
+    if not (tag_sha and head_sha) or tag_sha == head_sha:
+        # Already correct, or the shas are unreadable — the latter is the
+        # pre-existing behaviour and is safe: nothing is moved on a guess.
+        print(f"{GREEN}✓ Tag {tag_name} already present at HEAD{NC}")
+        return True
+
+    remote_state = _remote_tag_state(plugin_root, tag_name)
+    if remote_state is None:
+        print(
+            f"{RED}✗ Local tag {tag_name} points at {tag_sha[:8]} (HEAD {head_sha[:8]}) "
+            f"and origin's tags cannot be read (ls-remote failed). Refusing to move "
+            f"the tag: that is only safe when the remote confirms it is unpushed. "
+            f"Re-run once the remote is reachable.{NC}",
+            file=sys.stderr,
+        )
+        return False
+    if remote_state is True:
+        print(
+            f"{RED}✗ Local tag {tag_name} points at {tag_sha[:8]} but HEAD is "
+            f"{head_sha[:8]}, and the tag is ALREADY ON ORIGIN. Refusing to move a "
+            f"published tag. Bump to a new version instead.{NC}",
+            file=sys.stderr,
+        )
+        return False
+
+    print(
+        f"{YELLOW}  Local tag {tag_name} points at {tag_sha[:8]}, HEAD is at "
+        f"{head_sha[:8]}. Tag is unpushed; moving it to HEAD.{NC}"
+    )
+    run(["git", "tag", "-d", tag_name], cwd=plugin_root)
+    run(["git", "tag", "-a", tag_name, "-m", message], cwd=plugin_root)
+    print(f"{GREEN}✓ Tag {tag_name} re-created at HEAD{NC}")
+    return True
+
+
 def _remote_tag_state(plugin_root: Path, tag_name: str) -> bool | None:
     """Three-valued remote-tag probe (TRDD-6UW0KZVY, amvcp TRDD-YY5ISKCJ shape).
 
@@ -2826,41 +2888,8 @@ def stage_commit_tag_push(
         run(["git", "commit", "-m", expected_subject, *_agent_trailer_args(plugin_root)], cwd=plugin_root)
         print(f"{GREEN}✓ Committed {tag_name}{NC}")
     print(f"\n{BLUE}═══ Gate 11: Create git tag {tag_name} ═══{NC}")
-    if _local_tag_exists(plugin_root, tag_name):
-        # Validate that the existing tag points at HEAD. If it points at an
-        # older commit AND the tag is unpushed, the prior run's recovery
-        # branch above should already have handled it; this check catches
-        # any remaining drift cases (manual tag created out-of-band, etc.).
-        tag_sha = run(["git", "rev-list", "-n", "1", tag_name], cwd=plugin_root, check=False).stdout.strip()
-        head_sha = run(["git", "rev-parse", "HEAD"], cwd=plugin_root, check=False).stdout.strip()
-        _drift_remote_state: bool | None = None
-        if tag_sha and head_sha and tag_sha != head_sha:
-            # FAIL-CLOSED (TRDD-6UW0KZVY): moving the tag is only safe on the
-            # remote's positive answer that it is unpushed.
-            _drift_remote_state = _remote_tag_state(plugin_root, tag_name)
-            if _drift_remote_state is None:
-                print(
-                    f"{RED}✗ Local tag {tag_name} points at {tag_sha[:8]} (HEAD {head_sha[:8]}) "
-                    f"and origin's tags cannot be read (ls-remote failed). Refusing to move "
-                    f"the tag: that is only safe when the remote confirms it is unpushed. "
-                    f"Re-run once the remote is reachable.{NC}",
-                    file=sys.stderr,
-                )
-                return 1
-        if tag_sha and head_sha and tag_sha != head_sha and _drift_remote_state is False:
-            print(
-                f"{YELLOW}  Local tag {tag_name} points at {tag_sha[:8]}, HEAD is at "
-                f"{head_sha[:8]}. Tag is unpushed; moving it to HEAD.{NC}"
-            )
-            run(["git", "tag", "-d", tag_name], cwd=plugin_root)
-            run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=plugin_root)
-            print(f"{GREEN}✓ Tag {tag_name} re-created at HEAD{NC}")
-        else:
-            print(f"{YELLOW}  Tag {tag_name} already exists locally — skipping (interrupted-publish recovery).{NC}")
-            print(f"{GREEN}✓ Tag {tag_name} already present{NC}")
-    else:
-        run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=plugin_root)
-        print(f"{GREEN}✓ Tag {tag_name} created{NC}")
+    if not _ensure_tag_at_head(plugin_root, tag_name, f"Release {tag_name}"):
+        return 1
 
     # The DEPENDENCY-RESOLUTION tag. Claude Code resolves a version-constrained
     # dependency ONLY against `{name}--v*` tags and IGNORES the plain `vX.Y.Z` one,
@@ -2870,11 +2899,13 @@ def stage_commit_tag_push(
     dep_tag_name = _dependency_tag_name(plugin_root, tag_name)
     if dep_tag_name is None:
         print(f"{YELLOW}  WARNING: plugin name unreadable — skipping the dependency tag.{NC}")
-    elif _local_tag_exists(plugin_root, dep_tag_name):
-        print(f"{YELLOW}  Tag {dep_tag_name} already exists locally — skipping.{NC}")
-    else:
-        run(["git", "tag", "-a", dep_tag_name, "-m", dep_tag_name.replace("--v", " ")], cwd=plugin_root)
-        print(f"{GREEN}✓ Dependency tag {dep_tag_name} created{NC}")
+    # Issue #216 — the SAME staleness the release tag guards against, on the tag
+    # dependents actually resolve against. This branch used to be a bare
+    # "already exists locally — skipping", so an interrupted publish left the
+    # dependency tag pinned at the pre-fix commit while HEAD moved on: every
+    # dependent then installed a tree the gates never validated.
+    elif not _ensure_tag_at_head(plugin_root, dep_tag_name, dep_tag_name.replace("--v", " ")):
+        return 1
 
     print(f"\n{BLUE}═══ Gate 12: Push to origin (branch + tags) ═══{NC}")
     # TRDD-bbff5bc5: gh-auth precheck — fail fast with actionable error if
