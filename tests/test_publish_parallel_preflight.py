@@ -27,6 +27,7 @@ import io
 import sys
 import threading
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
@@ -68,6 +69,39 @@ def _make_sleeping_stage(name: str, sleep_s: float, *, rc: int = 0, log: list[st
     return fn
 
 
+# The gate map is the SINGLE place that knows which publish.py symbol backs each
+# gate in `_PARALLEL_GATE_ORDER`. Every test that calls `run_preflight_parallel`
+# stubs through `_patch_all_gates`, so a newly added gate can NEVER run for real
+# in this suite.
+#
+# This bit once: `stage_secret_scan` joined the pool and only ONE of the four tests
+# here carried an "is every gate stubbed?" assertion. The other three ran the
+# REAL gate, which on a CI runner with no trufflehog (and no brew) tried to
+# install it, failed, and returned 1 — green locally where trufflehog IS
+# installed, red in CI. A per-test stub list is a guard that protects only the
+# test that remembers it.
+_GATE_SYMBOLS = {
+    "tests": "stage_run_tests",
+    "validate": "stage_validate_plugin",
+    "ci_preflight": "stage_ci_preflight",
+    "secret_scan": "stage_secret_scan",
+    "mkpl_validate": "stage_validate_marketplace",
+    "mkpl_reg": "stage_marketplace_registration_check",
+}
+
+
+def _patch_all_gates(**overrides):
+    """Patch EVERY gate in the pool; `overrides` maps gate key -> fake stage."""
+    assert set(_GATE_SYMBOLS) == set(publish._PARALLEL_GATE_ORDER), (
+        "a gate was added to the parallel pool but not to _GATE_SYMBOLS — it "
+        "would run for real in these tests"
+    )
+    return [
+        patch.object(publish, sym, overrides.get(key) or _make_sleeping_stage(key, 0.01, rc=0))
+        for key, sym in _GATE_SYMBOLS.items()
+    ]
+
+
 # ---------------------------------------------------------------------------
 # 1. All preflight gates run concurrently — wall time ≈ slowest, not sum
 # ---------------------------------------------------------------------------
@@ -98,27 +132,14 @@ def test_gates_2_3_4_5_run_concurrently(tmp_path: Path):
     fake_mkpl_r = _make_sleeping_stage("mkpl_reg", 1.0)
     fake_secret = _make_sleeping_stage("secret_scan", 1.0)
 
-    stubbed = {
-        "tests": "stage_run_tests",
-        "validate": "stage_validate_plugin",
-        "ci_preflight": "stage_ci_preflight",
-        "secret_scan": "stage_secret_scan",
-        "mkpl_validate": "stage_validate_marketplace",
-        "mkpl_reg": "stage_marketplace_registration_check",
-    }
-    assert set(stubbed) == set(publish._PARALLEL_GATE_ORDER), (
-        "a gate was added to the parallel pool but not stubbed here — it would "
-        "run for real and make this timing test flaky"
-    )
+    stubbed = _GATE_SYMBOLS
 
-    with (
-        patch.object(publish, "stage_run_tests", fake_tests),
-        patch.object(publish, "stage_validate_plugin", fake_validate),
-        patch.object(publish, "stage_ci_preflight", fake_ci_preflight),
-        patch.object(publish, "stage_secret_scan", fake_secret),
-        patch.object(publish, "stage_validate_marketplace", fake_mkpl_v),
-        patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r),
-    ):
+    with ExitStack() as stack:
+        for _p in _patch_all_gates(
+            tests=fake_tests, validate=fake_validate, ci_preflight=fake_ci_preflight,
+            secret_scan=fake_secret, mkpl_validate=fake_mkpl_v, mkpl_reg=fake_mkpl_r,
+        ):
+            stack.enter_context(_p)
         t0 = time.monotonic()
         rc = publish.run_preflight_parallel(plugin_root, layout)
         elapsed = time.monotonic() - t0
@@ -149,12 +170,10 @@ def test_failure_in_validate_gate_propagates_rc(tmp_path: Path):
     fake_mkpl_v = _make_sleeping_stage("mkpl_validate", 0.05, rc=0)
     fake_mkpl_r = _make_sleeping_stage("mkpl_reg", 0.05, rc=0)
 
-    with (
-        patch.object(publish, "stage_run_tests", fake_tests),
-        patch.object(publish, "stage_validate_plugin", fake_validate),
-        patch.object(publish, "stage_validate_marketplace", fake_mkpl_v),
-        patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r),
-    ):
+    with ExitStack() as stack:
+        for p in _patch_all_gates(tests=fake_tests, validate=fake_validate,
+                                  mkpl_validate=fake_mkpl_v, mkpl_reg=fake_mkpl_r):
+            stack.enter_context(p)
         rc = publish.run_preflight_parallel(plugin_root, layout)
 
     assert rc == 2, f"Expected rc=2 from failed validate gate, got {rc}"
@@ -177,12 +196,10 @@ def test_first_failure_in_canonical_order_wins(tmp_path: Path):
     fake_mkpl_v = _make_sleeping_stage("mkpl_validate", 0.05, rc=0)
     fake_mkpl_r = _make_sleeping_stage("mkpl_reg", 0.05, rc=0)
 
-    with (
-        patch.object(publish, "stage_run_tests", fake_tests),
-        patch.object(publish, "stage_validate_plugin", fake_validate),
-        patch.object(publish, "stage_validate_marketplace", fake_mkpl_v),
-        patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r),
-    ):
+    with ExitStack() as stack:
+        for p in _patch_all_gates(tests=fake_tests, validate=fake_validate,
+                                  mkpl_validate=fake_mkpl_v, mkpl_reg=fake_mkpl_r):
+            stack.enter_context(p)
         rc = publish.run_preflight_parallel(plugin_root, layout)
 
     assert rc == 1, (
@@ -213,12 +230,10 @@ def test_output_replayed_in_canonical_order(tmp_path: Path, capfd):
     fake_mkpl_v = _make_sleeping_stage("mkpl_validate", 0.20, rc=0)
     fake_mkpl_r = _make_sleeping_stage("mkpl_reg", 0.10, rc=0)
 
-    with (
-        patch.object(publish, "stage_run_tests", fake_tests),
-        patch.object(publish, "stage_validate_plugin", fake_validate),
-        patch.object(publish, "stage_validate_marketplace", fake_mkpl_v),
-        patch.object(publish, "stage_marketplace_registration_check", fake_mkpl_r),
-    ):
+    with ExitStack() as stack:
+        for p in _patch_all_gates(tests=fake_tests, validate=fake_validate,
+                                  mkpl_validate=fake_mkpl_v, mkpl_reg=fake_mkpl_r):
+            stack.enter_context(p)
         rc = publish.run_preflight_parallel(plugin_root, layout)
 
     assert rc == 0

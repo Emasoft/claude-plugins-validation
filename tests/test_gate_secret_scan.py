@@ -136,10 +136,30 @@ def test_path_outside_the_plugin_root_is_not_suppressed(
     assert vs._external_finding_is_gitignored("/etc/hosts", gi) is False
 
 
+@pytest.fixture()
+def trufflehog_present(monkeypatch: pytest.MonkeyPatch):
+    """Report trufflehog as installed, whatever the runner actually has.
+
+    Gate 3d probes for the binary and installs-or-blocks BEFORE it reaches the
+    scan, so a test about the gate's arming / verdict logic would otherwise
+    measure whether the CI runner happens to have trufflehog — green on a dev
+    box, red on a bare runner. The tests that are ABOUT the absent path patch
+    `which` themselves, after this.
+    """
+    real = publish.shutil.which
+    monkeypatch.setattr(
+        publish.shutil,
+        "which",
+        lambda name, *a, **k: "/usr/local/bin/trufflehog" if name == "trufflehog" else real(name, *a, **k),
+    )
+
+
 # ------------------------------------------------------------- Gate 3d arming/disarming
 
 
-def test_gate_arms_self_scan_for_cpv_and_disarms_after(monkeypatch: pytest.MonkeyPatch):
+def test_gate_arms_self_scan_for_cpv_and_disarms_after(
+    monkeypatch: pytest.MonkeyPatch, trufflehog_present
+):
     seen: dict[str, object] = {}
 
     def _spy(plugin_path, report):
@@ -159,7 +179,7 @@ def test_gate_arms_self_scan_for_cpv_and_disarms_after(monkeypatch: pytest.Monke
 
 
 def test_gate_does_not_arm_self_scan_for_a_foreign_plugin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, trufflehog_present
 ):
     """The positive control for the test above: a third-party tree gets NO exemption."""
     foreign = tmp_path / "other"
@@ -178,7 +198,9 @@ def test_gate_does_not_arm_self_scan_for_a_foreign_plugin(
     assert seen["active"] is False
 
 
-def test_gate_disarms_even_when_the_scan_raises(monkeypatch: pytest.MonkeyPatch):
+def test_gate_disarms_even_when_the_scan_raises(
+    monkeypatch: pytest.MonkeyPatch, trufflehog_present
+):
     """A left-armed flag would let the NEXT plugin's scan read stale state."""
 
     def _boom(plugin_path, report):
@@ -194,7 +216,9 @@ def test_gate_disarms_even_when_the_scan_raises(monkeypatch: pytest.MonkeyPatch)
 # ------------------------------------------------------------------ Gate 3d verdicts
 
 
-def test_gate_blocks_on_a_blocking_finding(monkeypatch: pytest.MonkeyPatch):
+def test_gate_blocks_on_a_blocking_finding(
+    monkeypatch: pytest.MonkeyPatch, trufflehog_present
+):
     def _finding(plugin_path, report: ValidationReport):
         report.major("trufflehog UNVERIFIED secret: detector=Slack")
         return 1
@@ -203,13 +227,13 @@ def test_gate_blocks_on_a_blocking_finding(monkeypatch: pytest.MonkeyPatch):
     assert publish.stage_secret_scan(PLUGIN_ROOT) == 1
 
 
-def test_gate_passes_on_a_clean_scan(monkeypatch: pytest.MonkeyPatch):
+def test_gate_passes_on_a_clean_scan(monkeypatch: pytest.MonkeyPatch, trufflehog_present):
     monkeypatch.setattr(vs, "check_trufflehog", lambda plugin_path, report: 0)
     assert publish.stage_secret_scan(PLUGIN_ROOT) == 0
 
 
 def test_gate_names_the_fixer_and_does_not_redact(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], trufflehog_present
 ):
     """Redaction is the fixer agent's job; a gate that can silence itself is not a gate."""
 
@@ -270,7 +294,7 @@ def test_gate_runs_when_trufflehog_is_present(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_gate_refuses_when_the_scanner_cannot_be_imported(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, trufflehog_present
 ):
     """Cannot-check is not clean — a gate that skips must not report a pass."""
     empty = tmp_path / "noscripts"
