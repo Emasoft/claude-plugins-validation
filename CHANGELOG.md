@@ -2,6 +2,12 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.14.0] - 2026-08-28
+
+### Bug Fixes
+
+- Four runs that reported work they had not done (#213 #214 #215 #216)
+
 ## [5.13.1] - 2026-08-28
 
 ### Bug Fixes
