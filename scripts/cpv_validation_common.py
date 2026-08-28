@@ -1015,6 +1015,8 @@ VALID_PLUGIN_ENV_VARS = {
     "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
     "ANTHROPIC_WORKSPACE_ID",  # v2.1.141 — workload identity federation, scopes the minted token to a specific workspace when the federation rule covers more than one
+    # CC spec sync v2.1.248 (env-vars.md)
+    "CLAUDE_CODE_RESTRICTED",  # v2.1.248 — same as --restricted; strips run/code tools + WebFetch, refuses bypassPermissions, ignores settings files
 }
 
 # Env var name pattern matching for dynamic plugin env vars.

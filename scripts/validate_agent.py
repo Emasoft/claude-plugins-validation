@@ -77,6 +77,7 @@ KNOWN_FRONTMATTER_FIELDS = {
     "background",
     "isolation",
     "initialPrompt",  # v2.1.83 — auto-submit prompt when agent starts
+    "experimental",  # v2.1.248 — carries 'cacheTtl' (per-agent prompt cache TTL)
     # Claude Code-specific fields (legacy/extended — all emit WARNING when present)
     "context",  # [legacy — emits WARNING] not in current sub-agents spec (v2.1.98)
     "agent",  # [legacy — emits WARNING] not in current sub-agents spec (v2.1.98)
@@ -129,6 +130,11 @@ VALID_MEMORY_SCOPES = {"user", "project", "local"}
 
 # Valid values for the 'isolation' field
 VALID_ISOLATION_VALUES = {"worktree"}
+
+# Valid values for 'experimental.cacheTtl' (CC v2.1.248) — a per-agent prompt
+# cache TTL used when no subagent TTL setting is configured. The set is
+# CLOSED per the changelog: "5m" or "1h", nothing else.
+VALID_CACHE_TTL_VALUES = {"5m", "1h"}
 
 # Minimum required example blocks for agent documentation
 MIN_EXAMPLE_BLOCKS = 2
@@ -854,6 +860,39 @@ def validate_isolation_field(frontmatter: dict[str, Any], filename: str, report:
         report.passed(f"Valid isolation mode: {isolation_val}", rel_path)
 
 
+def validate_experimental_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
+    """Validate the 'experimental' frontmatter field (v2.1.248+).
+
+    Currently carries a single sub-key, 'cacheTtl' — a per-agent prompt
+    cache TTL used when no subagent TTL setting is configured. Per the
+    changelog the value set is CLOSED to "5m" or "1h"; anything else is
+    rejected as MAJOR (same severity as an invalid 'isolation'/'effort'
+    enum value).
+    """
+    if "experimental" not in frontmatter:
+        return
+
+    rel_path = filename
+    experimental_val = frontmatter["experimental"]
+    if not isinstance(experimental_val, dict):
+        report.major(f"'experimental' must be a mapping, got {type(experimental_val).__name__}", rel_path)
+        return
+
+    if "cacheTtl" not in experimental_val:
+        report.passed("'experimental' field present with no 'cacheTtl' sub-key", rel_path)
+        return
+
+    cache_ttl = experimental_val["cacheTtl"]
+    if not isinstance(cache_ttl, str) or cache_ttl not in VALID_CACHE_TTL_VALUES:
+        report.major(
+            f"Invalid 'experimental.cacheTtl' value: {cache_ttl!r}. "
+            f"Must be one of: {sorted(VALID_CACHE_TTL_VALUES)} (CC v2.1.248).",
+            rel_path,
+        )
+    else:
+        report.passed(f"Valid experimental.cacheTtl: {cache_ttl}", rel_path)
+
+
 def validate_max_turns_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
     """Validate the 'maxTurns' frontmatter field."""
     if "maxTurns" not in frontmatter:
@@ -1569,6 +1608,12 @@ def validate_plugin_shipped_allowed_fields(
     KNOWN_FRONTMATTER_FIELDS superset accepted for project/user agents) emit a
     MINOR so authors notice the drift.
 
+    ``experimental`` is deliberately NOT here (CC v2.1.248). The changelog adds
+    ``experimental.cacheTtl`` to "agent frontmatter", but the plugin-shipped
+    field list in plugins-reference.md still does not sanction it -- so a
+    plugin agent declaring it gets the MINOR drift nudge, not silence. The
+    changelog leads the reference table here; when the table catches up, add it.
+
     ``hooks``/``mcpServers``/``permissionMode`` are NOT double-reported here:
     those already trigger MAJORs via PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS
     (security restriction, stricter level). Truly-unknown keys are handled
@@ -1938,6 +1983,7 @@ def validate_agent(
         validate_max_turns_field(frontmatter, filename, report)
         validate_background_field(frontmatter, filename, report)
         validate_effort_field(frontmatter, filename, report)
+        validate_experimental_field(frontmatter, filename, report)
 
         # Cross-field validations
         validate_task_tool_prohibition(frontmatter, filename, report)

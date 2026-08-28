@@ -40,6 +40,7 @@ from validate_agent import (  # noqa: E402
     validate_disallowed_tools_field,
     validate_effort_field,
     validate_example_blocks,
+    validate_experimental_field,
     validate_frontmatter_exists,
     validate_hooks_field,
     validate_isolation_field,
@@ -1327,6 +1328,19 @@ class TestValidatePluginShippedRestrictionsUnit:
         for field in PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS:
             assert any(f"'{field}' is not supported for plugin-shipped agents" in m for m in major_msgs)
 
+    def test_experimental_is_not_in_the_plugin_shipped_allowed_set(self):
+        """'experimental' stays OUT of the plugin-shipped list until the docs sanction it.
+
+        CC v2.1.248's changelog adds ``experimental.cacheTtl`` to agent
+        frontmatter, but plugins-reference.md's plugin-shipped field list does
+        not carry it. Keeping it out preserves the MINOR drift nudge; this test
+        exists so a later spec sync does not re-add it by reflex.
+        """
+        from validate_agent import KNOWN_FRONTMATTER_FIELDS, PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS
+
+        assert "experimental" in KNOWN_FRONTMATTER_FIELDS
+        assert "experimental" not in PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS
+
 
 # ---------------------------------------------------------------------------
 # Monitor tool acceptance (audit item Mi6)
@@ -1489,6 +1503,58 @@ class TestV22AgentFrontmatterUpdates:
         assert any("isolation" in m and ("empty" in m.lower() or "Invalid" in m) for m in major_msgs), (
             f"Expected MAJOR for empty isolation; got MAJORs: {major_msgs}"
         )
+
+
+class TestValidateExperimentalCacheTtlField:
+    """v2.1.248: experimental.cacheTtl — a per-agent prompt cache TTL.
+
+    Spec source: CC CHANGELOG.md v2.1.248 — "Added `experimental.cacheTtl`
+    (`"5m"` or `"1h"`) to agent frontmatter: a per-agent prompt cache TTL
+    used when no subagent TTL setting is configured." The value set is
+    closed to exactly those two strings.
+    """
+
+    def test_cachettl_5m_accepted(self):
+        """experimental.cacheTtl: '5m' is accepted — no MAJOR."""
+        report = AgentValidationReport()
+        validate_experimental_field({"experimental": {"cacheTtl": "5m"}}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("Invalid 'experimental.cacheTtl'" in m for m in major_msgs), (
+            f"'5m' must be accepted per CC v2.1.248; got MAJORs: {major_msgs}"
+        )
+        passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
+        assert any("Valid experimental.cacheTtl: 5m" in m for m in passed_msgs), (
+            f"Expected PASSED 'Valid experimental.cacheTtl: 5m', got PASSEDs: {passed_msgs}"
+        )
+
+    def test_cachettl_1h_accepted(self):
+        """experimental.cacheTtl: '1h' is accepted — no MAJOR."""
+        report = AgentValidationReport()
+        validate_experimental_field({"experimental": {"cacheTtl": "1h"}}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert not any("Invalid 'experimental.cacheTtl'" in m for m in major_msgs)
+
+    def test_cachettl_invalid_value_rejected(self):
+        """experimental.cacheTtl: '7m' (outside the closed {5m,1h} set) must emit MAJOR."""
+        report = AgentValidationReport()
+        validate_experimental_field({"experimental": {"cacheTtl": "7m"}}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("Invalid 'experimental.cacheTtl'" in m and "7m" in m for m in major_msgs), (
+            f"Expected MAJOR rejecting '7m'; got MAJORs: {major_msgs}"
+        )
+
+    def test_experimental_non_mapping_rejected(self):
+        """experimental: a bare string (not a mapping) must emit MAJOR."""
+        report = AgentValidationReport()
+        validate_experimental_field({"experimental": "5m"}, "agent.md", report)
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("'experimental' must be a mapping" in m for m in major_msgs)
+
+    def test_experimental_absent_is_noop(self):
+        """No 'experimental' field at all — validator returns cleanly with no findings."""
+        report = AgentValidationReport()
+        validate_experimental_field({}, "agent.md", report)
+        assert report.results == []
 
 
 # ---------------------------------------------------------------------------
