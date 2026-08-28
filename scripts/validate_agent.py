@@ -1601,12 +1601,26 @@ def validate_plugin_shipped_allowed_fields(
 ) -> None:
     """GAP-79 (v2.22.3): Enforce the narrower plugin-shipped agent field list.
 
-    Per plugins-reference.md:70, plugin-shipped agents accept exactly these 15
-    fields: ``name, description, tools, disallowedTools, model, effort, skills,
-    system-prompt, context, memory, isolation, maxTurns, background,
-    initialPrompt, agent``. Fields OUTSIDE this set (but inside the broader
-    KNOWN_FRONTMATTER_FIELDS superset accepted for project/user agents) emit a
-    MINOR so authors notice the drift.
+    CPV allows these 15 fields for a plugin-shipped agent: ``name, description,
+    tools, disallowedTools, model, effort, skills, system-prompt, context,
+    memory, isolation, maxTurns, background, initialPrompt, agent``. Fields
+    OUTSIDE this set (but inside the broader KNOWN_FRONTMATTER_FIELDS superset
+    accepted for project/user agents) emit a MINOR so authors notice the drift.
+
+    This set is deliberately WIDER than the docs sentence, and the gap is
+    recorded rather than closed. plugins-reference.md (the "Plugin agents
+    support ..." sentence) enumerates only 11: it omits ``system-prompt``,
+    ``context``, ``initialPrompt`` and ``agent``. Measured 2026-08-28 against
+    the live raw docs: ``system-prompt`` and ``context`` appear in NEITHER
+    plugins-reference.md nor sub-agents.md; ``initialPrompt`` appears only in
+    sub-agents.md. They entered CPV in the v2.1.79-86 alignment and no evidence
+    says CC stopped loading them -- so narrowing to 11 would emit a MINOR on
+    agents that load fine, i.e. a false positive, which costs more than the
+    silence it buys. Narrow only on evidence that CC rejects them.
+
+    (A prior revision of this docstring cited "plugins-reference.md:70" for the
+    15-field list. The doc says 11, at line 68. The citation was false and is
+    removed rather than re-pointed -- do not restore it.)
 
     ``experimental`` is deliberately NOT here (CC v2.1.248). The changelog adds
     ``experimental.cacheTtl`` to "agent frontmatter", but the plugin-shipped
