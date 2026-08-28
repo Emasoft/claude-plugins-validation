@@ -801,6 +801,14 @@ GATES: list[tuple[str, str]] = [
         "fork-from-multithreaded-process deadlock (v3.23.0 shipped one). Skips "
         "as already-native on Linux; degrades to WARNING where fork is absent",
     ),
+    (
+        "Gate 3d",
+        "Secret scan (trufflehog via validate_security.check_trufflehog) — "
+        "BLOCKS the publish on any detected credential. Issue #217: this gate "
+        "did not exist, and a scanner-shaped credential reached main and sat "
+        "85 days. A missing binary or an incomplete scan reports UNKNOWN and "
+        "blocks; it is never treated as clean",
+    ),
     ("Gate 4", "Marketplace validation (validate_marketplace.py --strict) — Layout B only"),
     ("Gate 5", "Marketplace-registration check — verifies plugin is wired to its marketplace"),
     ("Gate 6", "Version consistency (plugin.json / pyproject.toml / __version__)"),
@@ -1579,6 +1587,111 @@ def stage_fork_parity(plugin_root: Path) -> int:
 
     print(f"{GREEN}✓ Suite passes under the Linux fork default{NC}")
     return 0
+
+
+def stage_secret_scan(plugin_root: Path) -> int:
+    """Gate 3d: BLOCK the publish on any detected credential (issue #217).
+
+    The canonical pipeline documented a pre-push secret scan it never
+    implemented — `grep -icE "trufflehog|gitleaks|secret[_ -]scan"` over this
+    file returned 0. A `tskey-auth-…` literal consequently reached a plugin's
+    `main`, GitHub's own secret scanning flagged it, and the alert sat open for
+    85 days while every local gate passed.
+
+    Placement is deliberate: this runs in the READ-ONLY parallel block with the
+    other gates, strictly BEFORE the bump/commit/tag/push, so a detected
+    credential aborts with the tree untouched. A gate that fired after the push
+    could not un-publish anything.
+
+    REDACTION IS NOT THIS GATE'S JOB. It reports and blocks, and names
+    `cpv-plugin-leaks-preventer-agent` as the fixer the user may launch. A
+    publish gate that edited source to make itself pass would be rewriting
+    security-relevant code with nobody reviewing the change — and a gate that
+    can silence itself is not a gate.
+
+    Cannot-check is NOT clean: a missing binary or an incomplete scan blocks
+    rather than passing, because "we never finished looking" and "we looked and
+    found nothing" must not produce the same verdict.
+    """
+    print(f"\n{BLUE}═══ Gate 3d: Secret scan — a leak BLOCKS the publish ═══{NC}")
+    # trufflehog is a DEPENDENCY of this gate, not a precondition the user is
+    # asked to satisfy: CPV installs it like every other external scanner
+    # (`cpv_install_scanners.ensure_trufflehog`, brew → `go install`). Telling a
+    # publisher to go install something is a worse answer than installing it.
+    #
+    # Only a FAILED install blocks. That block is load-bearing: `check_trufflehog`
+    # reports a missing binary as a WARNING and returns 0 — correct for a general
+    # validate run (an absent optional scanner must not fail someone's plugin)
+    # and wrong here, because WARNING never blocks, so the release path would
+    # publish having scanned nothing. That silent pass is exactly what issue #217
+    # was filed about. The probe lives in the GATE rather than in the shared
+    # checker so every other caller keeps the advisory behaviour it wants.
+    scripts_dir = plugin_root / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    if not shutil.which("trufflehog"):
+        print(f"{YELLOW}  trufflehog missing — installing it (CPV ships it as a dependency)…{NC}")
+        try:
+            from cpv_install_scanners import ensure_trufflehog  # noqa: PLC0415
+
+            ensure_trufflehog()
+        except Exception as exc:  # noqa: BLE001 - any installer failure is reported below
+            print(f"{YELLOW}  installer raised: {exc}{NC}", file=sys.stderr)
+    if not shutil.which("trufflehog"):
+        print(
+            f"{RED}✗ trufflehog could not be installed — the release was NOT secret-scanned.{NC}\n"
+            f"{YELLOW}  This is UNKNOWN, not clean, so the publish is blocked.\n"
+            f"  Install it manually and re-run:  brew install trufflehog{NC}",
+            file=sys.stderr,
+        )
+        return 1
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    try:
+        from cpv_validation_common import ValidationReport  # noqa: PLC0415
+        from validate_security import (  # noqa: PLC0415
+            _set_cpv_self_scan,
+            check_trufflehog,
+            is_cpv_self_scan,
+        )
+    except ImportError as exc:
+        print(f"{RED}✗ Secret scan unavailable ({exc}) — cannot verify, refusing to publish.{NC}", file=sys.stderr)
+        return 1
+
+    report = ValidationReport()
+    # Arm the SHA-verified self-scan exemption exactly as validate_plugin and
+    # cpv_agent_security do. Without it this gate reports CPV's own detector
+    # regexes as credentials — the "scanning the scanner" class — and CPV could
+    # never publish itself. It suppresses nothing the plugin gate does not
+    # already suppress: every skip still requires a per-file SHA match against
+    # the manifest, so a modified or unlisted file is scanned regardless, and
+    # `is_cpv_self_scan` is False for every other plugin.
+    #
+    # The DISARM is mandatory and must be a `finally`: the flag is a module
+    # GLOBAL, so leaving it armed would let a later scan in this process read
+    # stale state and skip files it must not.
+    try:
+        _set_cpv_self_scan(is_cpv_self_scan(plugin_root), plugin_root=plugin_root, notice_report=report)
+        issues = check_trufflehog(plugin_root, report)
+    finally:
+        _set_cpv_self_scan(False)
+    blocking = [r for r in report.results if r.level in ("CRITICAL", "MAJOR")]
+    if not blocking and issues == 0:
+        print(f"{GREEN}✓ No credentials detected{NC}")
+        return 0
+
+    print(f"{RED}✗ Secret scan BLOCKED the publish — {len(blocking)} finding(s){NC}", file=sys.stderr)
+    for r in blocking:
+        print(f"  [{r.level}] {r.message}", file=sys.stderr)
+    print(
+        f"\n{YELLOW}Fix before publishing. Redaction is NOT done by this gate — "
+        f"launch the fixer yourself:{NC}\n"
+        f"  Agent(subagent_type='claude-plugins-validation:cpv-plugin-leaks-preventer-agent')\n"
+        f"A verified live credential must be ROTATED and purged from git history, "
+        f"not merely deleted from the working tree.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def stage_validate_marketplace(plugin_root: Path, layout: str) -> int:
@@ -2984,6 +3097,7 @@ _PARALLEL_GATE_ORDER: tuple[str, ...] = (
     "tests",
     "validate",
     "ci_preflight",
+    "secret_scan",
     "mkpl_validate",
     "mkpl_reg",
 )
@@ -3249,6 +3363,7 @@ def run_preflight_parallel(
         "tests": lambda: stage_run_tests(plugin_root),
         "validate": lambda: stage_validate_plugin(plugin_root),
         "ci_preflight": lambda: stage_ci_preflight(plugin_root),
+        "secret_scan": lambda: stage_secret_scan(plugin_root),
         "mkpl_validate": lambda: stage_validate_marketplace(plugin_root, layout),
         "mkpl_reg": lambda: stage_marketplace_registration_check(plugin_root, prefetch=pf),
     }

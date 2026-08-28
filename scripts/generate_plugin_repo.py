@@ -1775,6 +1775,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -2801,6 +2802,99 @@ def run_gate(root: Path) -> int:
         cprint(f"  {RED}BLOCKED: {labels.get(ve, f'exit {ve}')} issues found{NC}")
         return 1
     cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
+
+    # Gate 3s: Secret scan. A leak BLOCKS the release.
+    #
+    # WHY here and not only in the pre-push hook: the hook secret-scans FEATURE
+    # branches only — a default-branch / tag push is gated on publish.py
+    # ancestry instead. So without this gate the ONE path that reaches users is
+    # the one path never scanned, which is the shape of CPV issue #217 (a
+    # committed auth key reached main and sat there for 85 days while every
+    # local gate passed).
+    #
+    # trufflehog is a DEPENDENCY of this pipeline, not a precondition the
+    # publisher is told to satisfy: if it is missing we INSTALL it. Only a
+    # FAILED install blocks — and it must block, because "we never looked" and
+    # "we looked and found nothing" are not the same answer.
+    cprint(f"\n{BLUE}[G3s] Secret scan (trufflehog)...{NC}")
+    if not shutil.which("trufflehog"):
+        cprint(f"  {YELLOW}trufflehog missing — installing it as a pipeline dependency...{NC}")
+        if shutil.which("brew"):
+            subprocess.run(["brew", "install", "trufflehog"], timeout=900)
+        if not shutil.which("trufflehog") and shutil.which("go"):
+            subprocess.run(
+                ["go", "install", "github.com/trufflesecurity/trufflehog/v3@latest"],
+                timeout=900)
+            # `go install` drops the binary in GOBIN/GOPATH/bin, which is often
+            # not yet on PATH in this process.
+            _gobin = os.environ.get("GOBIN") or str(
+                Path(os.environ.get("GOPATH") or (Path.home() / "go")) / "bin")
+            os.environ["PATH"] = _gobin + os.pathsep + os.environ.get("PATH", "")
+    if not shutil.which("trufflehog"):
+        cprint(f"  {RED}BLOCKED: trufflehog is not installed and could not be installed.{NC}")
+        cprint(f"  {RED}The release was NOT secret-scanned — UNKNOWN is not clean.{NC}")
+        cprint(f"  {RED}Install it and re-run:  brew install trufflehog{NC}")
+        return 1
+    # Exclude gitignored-AND-UNTRACKED paths from the WALK (not from the
+    # results): scanning a large ignored corpus and discarding the hits is the
+    # same verdict for far more work. `--others --ignored` lists exactly the
+    # untracked-ignored set, so a TRACKED file stays scanned even when it also
+    # matches .gitignore — such a file still ships, and skipping it would be a
+    # scan-evasion vector.
+    _sec_root = str(root.resolve()).rstrip("/")
+    _excl_args = []
+    _ign = subprocess.run(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"],
+        cwd=str(root), capture_output=True, text=True, timeout=120)
+    _ign_paths = [ln.strip() for ln in (_ign.stdout or "").splitlines() if ln.strip()]
+    _excl_fh = tempfile.NamedTemporaryFile(
+        "w", suffix=".txt", delete=False, encoding="utf-8")
+    try:
+        # trufflehog matches these regexes against ABSOLUTE paths.
+        _excl_fh.write("^" + re.escape(_sec_root + "/.git") + "\n")
+        for _rel in sorted(_ign_paths):
+            _excl_fh.write("^" + re.escape(_sec_root + "/" + _rel.rstrip("/")) + "\n")
+        _excl_fh.close()
+        _excl_args = ["-x", _excl_fh.name]
+        _th = subprocess.run(
+            ["trufflehog", "filesystem", _sec_root, "--json", "--no-update", "--fail",
+             # Without the widened set trufflehog OMITS `filtered_unverified`,
+             # the bucket an expired / revoked / unreachable credential lands
+             # in — a committed secret is a leak whether or not a runner can
+             # reach its API (CPV issue #219).
+             "--results=verified,unknown,unverified,filtered_unverified",
+             *_excl_args],
+            capture_output=True, text=True, timeout=900)
+    except subprocess.TimeoutExpired:
+        cprint(f"  {RED}BLOCKED: trufflehog timed out — scan INCOMPLETE, secrets UNKNOWN.{NC}")
+        return 1
+    finally:
+        try:
+            os.unlink(_excl_fh.name)
+        except OSError:
+            pass
+    if _th.returncode == 183:
+        _dets = []
+        for _ln in (_th.stdout or "").splitlines():
+            if not _ln.startswith("{"):
+                continue
+            try:
+                _f = json.loads(_ln)
+            except json.JSONDecodeError:
+                continue
+            _fs = _f.get("SourceMetadata", {}).get("Data", {}).get("Filesystem", {})
+            _dets.append(f"{_f.get('DetectorName', '?')} in {_fs.get('file', '?')}")
+        cprint(f"  {RED}BLOCKED: {len(_dets)} credential(s) detected.{NC}")
+        for _d in _dets[:20]:
+            cprint(f"    {RED}{_d}{NC}")
+        cprint(f"  {RED}Redaction is NOT done by this gate. A verified live credential"
+               f" must be ROTATED and purged from git history.{NC}")
+        return 1
+    if _th.returncode != 0:
+        cprint(f"  {RED}BLOCKED: trufflehog exited {_th.returncode} — scan did not"
+               f" complete, so secrets are UNKNOWN (that is not clean).{NC}")
+        return 1
+    cprint(f"  {GREEN}No credentials detected.{NC}")
 
     # Gate 4: Tests. MANDATORY — missing tests/ dir or zero tests is a BLOCK.
     cprint(f"\n{BLUE}[G4] Running tests...{NC}")

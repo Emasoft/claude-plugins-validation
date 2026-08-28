@@ -4125,18 +4125,15 @@ def _file_passes_scan_filters(
     # allowlist. Text → always scanned; binary → scanned by the binary
     # scanner when enabled, else skipped. Closes the arbitrary-extension
     # evasion vector (payload parked in payload.info / a .txt recipe).
-    if not _file_is_scannable(p):
-        return False
-    # Issue #42 — hash-anchored skip for plugins that bundle byte-identical
-    # copies of CPV's scanner catalog / context classifiers (an offline
-    # auditor packaging). Spoofed basenames (different bytes) fall through.
-    if _is_self_artifact_copy(p):
-        return False
-    # Issue #37 + gitignore-evasion hardening — skip ONLY genuinely-unshipped
-    # paths (gitignored AND untracked). A tracked+gitignored file ships and is
-    # scanned here (and separately flagged INVALID by validate_plugin's
-    # gitignore-enforcement rule). Applied AFTER _SKIP_DIRS / extension filters
-    # because most files won't be unshipped and a cheap negative path is preferred.
+    # ORDER IS LOAD-BEARING (owner report: a 4 GB gitignored zip in a
+    # downloads_dev/ tree was READ before being skipped). Every PATH-ONLY and
+    # stat-only rejection must run BEFORE any check that opens or hashes the
+    # file: `_file_is_scannable` sniffs CONTENT to classify text-vs-binary and
+    # `_is_self_artifact_copy` HASHES the bytes, so leaving the gitignore and
+    # size checks after them means an excluded multi-gigabyte file is fully
+    # read (and possibly hashed) only to be discarded. Reordering changes NO
+    # verdict — every step is an AND-ed rejection returning False — it only
+    # stops the work whose result is thrown away.
     if unshipped is not None and path_is_unshipped is not None:
         try:
             rel = p.relative_to(plugin_root).as_posix()
@@ -4149,6 +4146,18 @@ def _file_passes_scan_filters(
             return False
     except OSError:
         return False
+    if not _file_is_scannable(p):
+        return False
+    # Issue #42 — hash-anchored skip for plugins that bundle byte-identical
+    # copies of CPV's scanner catalog / context classifiers (an offline
+    # auditor packaging). Spoofed basenames (different bytes) fall through.
+    if _is_self_artifact_copy(p):
+        return False
+    # Issue #37 + gitignore-evasion hardening — skip ONLY genuinely-unshipped
+    # paths (gitignored AND untracked). A tracked+gitignored file ships and is
+    # scanned here (and separately flagged INVALID by validate_plugin's
+    # gitignore-enforcement rule). Applied AFTER _SKIP_DIRS / extension filters
+    # because most files won't be unshipped and a cheap negative path is preferred.
     return True
 
 

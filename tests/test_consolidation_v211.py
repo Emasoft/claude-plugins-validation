@@ -410,6 +410,11 @@ class TestSkillAgentArchitecture:
             # (TRDD-c50531c2), NOT drift — do NOT revert to user-invocable: false.
             "cpv-the-skills-menu",
             "cpv-the-skills-menu-create",
+            # v5.13.0 — the READ-ONLY full-folder scan. User-invocable by
+            # explicit owner directive: it must be launchable as `/cpv-validate-plugin-folder`
+            # AND auto-triggerable by Claude without the user. It is a rare
+            # exception to the false-by-default convention, not a lapse of it.
+            "cpv-validate-plugin-folder",
             # TRDD-3dcbb37c (v2.101.0) — Batch-skills family. Users invoke
             # these directly (`/cpv-batch-validate Emasoft/emasoft-plugins`),
             # so the SKILL.md MUST be user-invocable. The companion
