@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "computed_at": "2026-08-28T12:10:11+00:00",
+  "computed_at": "2026-08-28T12:16:18+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
-    ".claude-plugin/plugin.json": "sha256:192b3fc9eb7ae15b739e2e87bc17a2933b1b7d3d8743ba02a0ff84b6810327fb",
+    ".claude-plugin/plugin.json": "sha256:ad93edcee0b081ec2478a3c80403917c6a768938abe52f761d4a7e1dba859fcf",
     ".claude/project/memory/agent-prompt-cache-and-context-economy.md": "sha256:d12c3ae41937d6480ca535083e6c49e659c648e9ddabb18e59347d68919a9312",
     ".claude/project/memory/agents-have-no-body-limit.md": "sha256:b1f0d4fc4d5f6483bca5faa07d0da0a81e2e93abe5491ca7b135621416c5b113",
     ".claude/project/memory/wikimem/agent-skill-closure-and-architectures.md": "sha256:8ce9d313cd7ec9b2a21e5844345e817c28e3f4d86c181d814c5d505c7ca83381",
@@ -26,10 +26,10 @@
     ".python-version": "sha256:7b55f8e67b5623c4bef3fa691288da9437d79d3aba156de48d481db32ac7d16d",
     ".trashcan/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".trashcan/README.txt": "sha256:3106acc9af8415d37610ef0b9f138dc9622f25f81ac37a31f24a9ebd2d25f30f",
-    "CHANGELOG.md": "sha256:dd5fe117111503abd1d30490a1c884775b6609757c516ef2a24519052f4e445a",
+    "CHANGELOG.md": "sha256:c9eb98ccd0b8bdc01241b4d93c5fcb9dba4147b956df700f19e693fc21723aa6",
     "CLAUDE.md": "sha256:e566df3f7fffdd703cdf437954934e072e251ce510522d7854c9ff40f9346dbf",
     "LICENSE": "sha256:f79aeb8187cb5e63d27261eba76a2d771292c27489645b3410bd5e67edc02f5d",
-    "README.md": "sha256:59ef54c0d2689ee52f9de5584f4a854d14b6f6aec7a43aa58c7b23b793c25173",
+    "README.md": "sha256:5fbedc5ad63196568709e3504303ed7284e7ebb70638581a61db79d16b12c82a",
     "agents/cpv-agent.md": "sha256:5c6f53d3ee88f85e380f0b49bec2e714bf4d45ca575207eb509ec61903db31cb",
     "agents/cpv-cache-optimizer-agent.md": "sha256:09b58b53b0e7583a9a5c26995c2b93d1464e12b06f6e8a4abdd3ea69af5ab52d",
     "agents/cpv-doctor-agent.md": "sha256:8e5dae6eee3088c62c38ec0bbc67ab5e9fce8c5d0f84f668ef36e0e6bea0c7af",
@@ -189,7 +189,7 @@
     "design/tasks/TRDD-20260624_012443+0200-ETDWX70R-unambiguous-inplugin-path-determination.md": "sha256:7cd634572feb3e3b77a4ee3b1615bd25912b506c6e49b6011e0da52206c6bb7c",
     "git-hooks/pre-commit": "sha256:47cf32b6b340cd973b6a15466d8b752993a68534429dca2e6df7159ba7240810",
     "git-hooks/pre-push": "sha256:90880138be62d7cd5ec6b451bc8803127ee4a3ce430d0f5d9caa5fa86d57aa12",
-    "pyproject.toml": "sha256:fdb2f923b27b58796afbe251cf07ee2bceae25ca4a1858c95b48ab4ea250c1f8",
+    "pyproject.toml": "sha256:7e9636f4b4409f822a29df1da1ce34a2c5ef68e84d8bb8a07a7446fbcc2ccab6",
     "pyrightconfig.json": "sha256:9c2157ea520857e9283146265d967eeb54802e5078d89a559199cfd134cb29de",
     "pytest.ini": "sha256:6789e18df35616f4b02fcdfd72f9c15f60076aeb80de95361450539e2793db5f",
     "references/canonical-pipeline-migration-checklist.md": "sha256:0252597c8ccbb90388b1a00ee62a0fd24c4b884ff24cecfa6c2682ac418b79f0",
@@ -277,7 +277,7 @@
     "scripts/cpv_setup_auth.py": "sha256:268ee3e63ef0b7ee5b5113a6bf9d6b4581e53d517892a63f9b9c108636a4d857",
     "scripts/cpv_ship_canon.py": "sha256:5fc2b9ad0de3b1a8cdba331cdb20be9f7dd35ed8fbe3299dd1359bd0465dd629",
     "scripts/cpv_skill_scanner.py": "sha256:4a07671c967803af7dfe4e85b881f11b983b1ebe18310f66fc576fe085dea9e5",
-    "scripts/cpv_skillaudit_native.py": "sha256:28029159106444892a8fafa20e67425bd458aa7ee43ad938b31d22b92b680529",
+    "scripts/cpv_skillaudit_native.py": "sha256:8151cb86e902c5831b1c87595a0d39f6be385316acfaf544ca86cb7e9e70d418",
     "scripts/cpv_snyk_agent_scanner.py": "sha256:5e037a1df5758453ae4a65cc24d665c7ca02b58d7de8ed6e15ae2865b1792ee0",
     "scripts/cpv_staging.py": "sha256:22c067dfa11aeb56ac28112e6f4796618f1bd9f59366198899ba02734be8d5c9",
     "scripts/cpv_strip_dev.py": "sha256:5c8b0228ca6f8cedfb0e3f2aafeeb99eea6d746cc6051dd433c70177af273a38",
@@ -830,6 +830,7 @@
     "tests/test_cpv_strip_dev_unit.py": "sha256:e047d71cec20cec34527b0518feda02afcc7a11570e8df2585928d58b3e99976",
     "tests/test_cpv_token_estimate.py": "sha256:8c5d2afe2e33ef3d474f6ea06f307e3e77992da04dcbd7c578d671224ca5a706",
     "tests/test_cpv_validate_gitmodules.py": "sha256:61cd51cdbe402dacb360024fbd48a71d9510da86c49fa1860e0e572fb7c5aebd",
+    "tests/test_cpv_validate_plugin_folder.py": "sha256:4478010484eba8b4e3adeead014e7a7670f4599313716372453d0581ec34bab3",
     "tests/test_cpv_validation_common.py": "sha256:bec989ed6421b0d518aa25605dfdbceb36d875fe1cd8c9d430b8d5fe0ce7bddc",
     "tests/test_create_micro_agents_workflow.py": "sha256:c753adf186efaf31dff9e500b9fe0bcf67b8946d51326ebf1a39c009ff3d693f",
     "tests/test_create_mono_agent.py": "sha256:975f7f98407adc60735f8741fd2270be089d14a52a637905033975cc3391f861",
@@ -848,6 +849,7 @@
     "tests/test_fp_reduction.py": "sha256:c5bcb43c034e3ee05505f78ecbf91691246c8d5dd9e93c5abe8fc0054f6e2f2b",
     "tests/test_fp_v241_guards.py": "sha256:b7a073579cef3da219caa9ac91fe932a2f317a726a2fc05b305be13569e6f4e2",
     "tests/test_fp_v248_predicates.py": "sha256:6c4cf7ded5491d829cd396069551516c032a1f43067032c2427c25d00250dd9d",
+    "tests/test_gate_secret_scan.py": "sha256:f03ae93264638bf2d3b817bfb3daf414ec30f3fb96bba113005dc04d4479080b",
     "tests/test_generate_marketplace_repo.py": "sha256:b012d909ea45334bcdb650383a4bc25aeb3b3c4d6075a984e4c3357e023ff28a",
     "tests/test_generate_plugin_multi_language.py": "sha256:8a25889f5731a1589991d9fa9403d656e886b944d526d4a3c5532ac301f2ce8e",
     "tests/test_generate_plugin_repo.py": "sha256:e3e5edccff1a748fa470dffd54efecb7ab8d149313d6397ffb63a5ceb406cace",
@@ -1165,6 +1167,6 @@
     "tests/test_workflow_expression_injection.py": "sha256:440a9bfb96f4e9b488827f6e66a793bb7dd4f6b583221c92f9f60cbdc5d8bce1",
     "tests/test_workflow_path_download_artifact.py": "sha256:75d78d818818ca08df18e2745f0f7ee0bc5aae30c0aa9e591c1c991bbdb05223",
     "tests/test_workflow_path_validation.py": "sha256:a2c18fd5059e96762a3fe3587351c9ea7ede8a76fa541c954a4b988db06c82e1",
-    "uv.lock": "sha256:a9879527aee66642c7eec0ae4b7ad106becbd5228655b7304a538ce70650164d"
+    "uv.lock": "sha256:ad1cd783afcfd89d5c9869601a536f1f66387177285df61803786b23ea2adc14"
   }
 }

@@ -2,6 +2,21 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.13.0] - 2026-08-28
+
+### Documentation
+
+- Correct the v5.12.0 agent-frontmatter diff claim — first attempt was expectation-keyed
+- Measure the reach instead of guessing it — the humble version was also wrong
+- Attribute all 17 doc-only tokens, not just the 4 that looked doubtful
+- Compress the v5.12.0 method notes; record the computed_at manifest trap
+- Restore the env-var settlement the compression silently dropped
+- Restore two more facts the compression dropped; verify Gate 1 and the restore itself
+
+### Features
+
+- **security:** A leak BLOCKS the publish, in CPV's pipeline and the emitted canon
+
 ## [5.12.0] - 2026-08-28
 
 ### Documentation
