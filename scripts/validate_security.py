@@ -10142,6 +10142,61 @@ def check_snyk_agent_scan(plugin_path: Path, report: ValidationReport, *, step_n
     return snyk_findings
 
 
+def check_ai_triage(
+    plugin_path: Path,
+    report: ValidationReport,
+    skillaudit_result: Any,
+    *,
+    step_num: int = 29,
+) -> int:
+    """Run the opt-in AI triage of SkillAudit residual findings (Check 29).
+
+    Advisory-only, exactly like the Snyk step: it hands the SkillAudit
+    findings whose rule id is one of the five noisy "residual" categories
+    (INSECURE_CRYPTO / TOOL_SHADOW / SSRF_ADVANCED / ENV_INJECTION /
+    RESOURCE_ABUSE — see ``cpv_ai_triage.RESIDUAL_RULE_IDS``) to an external
+    LLM for a second opinion, and appends the verdicts as INFO lines. It
+    never touches the SkillAudit findings already on the report, and never
+    changes the validation verdict — the status string is RAN/SKIPPED only,
+    never FAILED, because a triage that could not run is advisory context
+    withheld, not a validation failure.
+
+    OPT-IN: it never invokes anything unless the caller has exported
+    ``CPV_AI_TRIAGE_BUDGET_USD``. See ``scripts/cpv_ai_triage.py`` for the
+    full contract and its three hard invariants.
+    """
+    from cpv_ai_triage import report_verdicts as ai_triage_report_verdicts  # noqa: PLC0415
+    from cpv_ai_triage import residual_findings as ai_triage_residual_findings  # noqa: PLC0415
+    from cpv_ai_triage import run_ai_triage  # noqa: PLC0415
+
+    triage_result = run_ai_triage(plugin_path, skillaudit_result.findings)
+    triage_len_before = len(report.results)
+    ai_triage_report_verdicts(triage_result, report)
+    triage_new_results = report.results[triage_len_before:]
+    triage_findings = len(triage_new_results)
+
+    if triage_result.invoked:
+        residual_count = len(ai_triage_residual_findings(skillaudit_result.findings))
+        _record_step(
+            step_num,
+            "External: AI triage of SkillAudit residuals (opt-in, advisory)",
+            "RAN",
+            findings=triage_findings,
+            files=f"{residual_count} residual finding(s)",
+            details="",
+        )
+    else:
+        _record_step(
+            step_num,
+            "External: AI triage of SkillAudit residuals (opt-in, advisory)",
+            "SKIPPED",
+            findings=0,
+            files="",
+            details=triage_result.skipped_reason,
+        )
+    return triage_findings
+
+
 def skillaudit_should_skip(file_path: str, line: int | None) -> bool:
     """Apply CPV's full self-scan filter chain to one skillaudit finding.
 
@@ -11002,6 +11057,10 @@ def validate_security(
         files=f"{skillaudit_result.files_scanned} files" if skillaudit_status == "RAN" else "",
         details=skillaudit_details,
     )
+
+    # Check 29 — opt-in AI triage of SkillAudit residual findings. Advisory
+    # only; never runs unless CPV_AI_TRIAGE_BUDGET_USD is set.
+    check_ai_triage(plugin_path, report, skillaudit_result)
 
     # --- RC-103 disposition — single INFO line, computed from the FINAL
     # counts (after EVERY native phase AND every external scanner above).
