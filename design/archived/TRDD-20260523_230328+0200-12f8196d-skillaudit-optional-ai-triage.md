@@ -296,13 +296,13 @@ only wheel-shipped data dir, per the catalog-location rule).
   GREEN while the gate has moved, i.e. the test did not guard the regression it named. Worse,
   the fixture already hands that trigger over (`injection_observed=True`).
   Two more tests close it, both through the REAL caller:
-  * `test_check_ai_triage_is_verdict_neutral_through_the_real_caller` — drives
+  - `test_check_ai_triage_is_verdict_neutral_through_the_real_caller` — drives
     `validate_security.check_ai_triage` against a report that ALREADY CARRIES A MAJOR, because
     an empty fixture cannot show a demotion (there is nothing there to demote). One assertion
     then covers both directions. **Measured: `before (2,2) after (2,2)`, levels
     `['INFO','MAJOR']`** — the pre-existing MAJOR survives (no demotion) and nothing escalates
     (no promotion).
-  * `test_a_triage_that_ran_is_not_recorded_as_a_failure` — pins the RAN/SKIPPED status
+  - `test_a_triage_that_ran_is_not_recorded_as_a_failure` — pins the RAN/SKIPPED status
     vocabulary: a NON-INVOKED result reports SKIPPED, never FAILED. That contract lived only in
     a docstring, which is not a thing that fails when broken. (Scope stated precisely because an
     earlier draft of this entry said "a TIMEOUT reports SKIPPED", which implies the real
@@ -317,15 +317,30 @@ only wheel-shipped data dir, per the catalog-location rule).
   in place with `.clear()`, twice, and never restored it. That pollutes in BOTH directions —
   destroying a log a previous test populated, and leaving a stale step-29 row for a later one —
   and a `-p no:xdist` single-file run is precisely the run that cannot observe it.
-  Not theoretical: **three other test files read that global** (`test_validate_security.py:1247`,
-  `test_security_parallelization.py:319`, `test_issues_213_216_scan_and_tag_honesty.py:39`), and
-  `cpv_agent_security.py` uses a dedicated `_reset_scan_step_log()` that I should have looked for.
-  This repo already carries a TRDD about cross-shard ordering pollution being invisible to every
-  shard (TRDD-K7P2XR4Q); I had just added a candidate producer of exactly that, inside a test
-  written to improve rigour.
   Fixed with `monkeypatch.setattr(vs, "_scan_step_log", [])`, which swaps the binding and RESTORES
-  the original, so the test is inert to its neighbours under any ordering. **Verified by running
-  the file together with all three real consumers in ONE process: 109 passed**, plus a direct
-  check that a sibling's planted log entry survives the swap-and-restore untouched.
-  *The lesson, for whoever reads this next:* a green single-file run is not an isolation check.
-  It is the one run shaped so that it cannot fail for the reason you need it to.
+  the original on teardown. Verified by running the file together with all three consumers in ONE
+  process: **109 passed**.
+  **CORRECTION, same day — an earlier draft of this entry called the pollution "not theoretical".
+  That was asserted from grep hits and is WRONG.** All three consumers are immune by construction,
+  established by reading the call sites rather than by running anything:
+  - `test_validate_security.py:1218` calls `validate_security()`, which calls
+    `_reset_scan_step_log()` at its top — it populates its own log before asserting.
+  - `test_security_parallelization.py:319` goes through the same reset path, and additionally
+    filters to steps 22-25, so a step-29 row could never have matched.
+  - `test_issues_213_216_scan_and_tag_honesty.py:39` passes an explicit list literal to
+    `format_scan_step_table([...])` and never reads the global at all.
+  So no collision was demonstrable, and the 109-green run proved less than it appeared to: a
+  post-fix green run contains no failing state, so it cannot distinguish "the pollution was real
+  and is fixed" from "nothing ever collided". **The fix is still correct** — an unrestored
+  mutation of a module global is a real hazard shape, and the immunity above is incidental
+  (it depends on every present consumer happening to reset first), not guaranteed for the next
+  one. But the severity was overstated, in a frozen card, from a grep.
+  Also corrected: `_reset_scan_step_log` REBINDS (`global _scan_step_log; _scan_step_log = []`),
+  it does not mutate in place — so it is the right idiom for production, where
+  `validate_security()` calls it at the top of a scan. It is still the WRONG tool for a test,
+  because it never restores; `monkeypatch` is right precisely because it does.
+  *The lesson, for whoever reads this next:* a green single-file run is not an isolation check —
+  it is the one run shaped so that it cannot fail for the reason you need it to. And its mirror
+  image, learned one turn later: a green run after a fix is not evidence the bug was ever there.
+  Reading the three call sites answered in seconds what a five-minute re-run would only have
+  hinted at, because it explains WHY the run is green instead of merely observing that it is.

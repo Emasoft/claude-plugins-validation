@@ -559,14 +559,20 @@ def test_a_triage_that_ran_is_not_recorded_as_a_failure(
     `subprocess.TimeoutExpired` path inside `run_ai_triage` — that path's own
     mapping to `invoked=False` is covered by the sibling parsing tests.
 
-    ISOLATION: `_scan_step_log` is a module GLOBAL that three other test files
-    read (`test_validate_security`, `test_security_parallelization`,
-    `test_issues_213_216_scan_and_tag_honesty`). Mutating it in place with
-    `.clear()` would pollute in both directions — destroying a log a previous
-    test populated, and leaving a stale row for a later one — and a single-file
-    run is exactly what cannot see that. `monkeypatch.setattr` swaps the binding
-    for a fresh list and RESTORES the original afterwards, so this test is inert
-    to its neighbours under any ordering.
+    ISOLATION: `_scan_step_log` is a module GLOBAL. Mutating it in place with
+    `.clear()` leaves no way back — it would destroy a log a previous test
+    populated and leave a stale row for a later one, and a single-file run is
+    exactly what cannot see that. `monkeypatch.setattr` swaps the binding for a
+    fresh list and RESTORES the original on teardown.
+
+    Three other test files read this global today
+    (`test_validate_security`, `test_security_parallelization`,
+    `test_issues_213_216_scan_and_tag_honesty`) and all three happen to be immune
+    — the first two call `validate_security()`, which resets the log at its top,
+    and the third passes an explicit list rather than reading the global. That
+    immunity is INCIDENTAL, not guaranteed: it holds only while every consumer
+    keeps resetting first. Restoring is what makes this test safe for the next
+    one that does not.
     """
     import validate_security as vs  # noqa: PLC0415
     from cpv_validation_common import ValidationReport  # noqa: PLC0415
