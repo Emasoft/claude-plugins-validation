@@ -289,3 +289,23 @@ only wheel-shipped data dir, per the catalog-location rule).
   planted MAJOR moves the same report to `exit_code 2 / strict 2`, so the assertion can fail.
   The invoked path had NO test before this: every other test in that file runs the opt-OUT path,
   where `report_verdicts` emits nothing and therefore proves nothing about the verdict.
+- 2026-08-29T23:52:00+0200 — THE UNIT TEST ABOVE DID NOT COVER THE CALLER, and the gap was
+  exactly where a future change would land. It drives `report_verdicts` directly, but the
+  production caller is `check_ai_triage` — and that is the more natural place for someone to
+  later add `if v.injection_observed: report.major(...)`. Such a change leaves the unit test
+  GREEN while the gate has moved, i.e. the test did not guard the regression it named. Worse,
+  the fixture already hands that trigger over (`injection_observed=True`).
+  Two more tests close it, both through the REAL caller:
+  * `test_check_ai_triage_is_verdict_neutral_through_the_real_caller` — drives
+    `validate_security.check_ai_triage` against a report that ALREADY CARRIES A MAJOR, because
+    an empty fixture cannot show a demotion (there is nothing there to demote). One assertion
+    then covers both directions. **Measured: `before (2,2) after (2,2)`, levels
+    `['INFO','MAJOR']`** — the pre-existing MAJOR survives (no demotion) and nothing escalates
+    (no promotion).
+  * `test_a_triage_that_ran_is_not_recorded_as_a_failure` — pins the RAN/SKIPPED status
+    vocabulary, including that a TIMEOUT reports SKIPPED and never FAILED. That contract lived
+    only in a docstring, which is not a thing that fails when broken.
+  **Both MUTATION-PROVEN rather than merely green:** injecting the escalation into the caller
+  moves the verdict `(2,2) → (1,1)` with a CRITICAL appearing, and forcing the step status to
+  FAILED is detected — so each test demonstrably fails for the reason it exists. 16/16 green,
+  ruff clean.
