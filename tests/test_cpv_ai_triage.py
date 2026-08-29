@@ -443,3 +443,46 @@ def test_one_malformed_item_among_good_ones_still_completes(
     assert result.invoked is True
     assert len(result.verdicts) == 1
     assert result.verdicts[0].verdict == "not_threat"
+
+
+def test_invoked_triage_cannot_change_the_verdict() -> None:
+    """The INVOKED path must not move the exit code — in EITHER direction.
+
+    Every other test here exercises the opt-OUT path, where `report_verdicts`
+    emits nothing, so none of them can see this. Two symmetric risks live on
+    the invoked path:
+
+    * DEMOTION — a `not_threat` verdict clearing a real finding. Prevented by
+      construction: `report_verdicts` only ever calls `report.info(...)`.
+    * PROMOTION — the triage's own output BLOCKING a clean plugin. If INFO were
+      a blocking tier, merely setting `CPV_AI_TRIAGE_BUDGET_USD` would flip a
+      clean plugin to INVALID: a security-gate change nobody asked for.
+
+    This asserts through the REAL `ValidationReport` rather than by reading
+    `exit_code`, so it also pins the tier `report.info()` actually writes and
+    the blocking sets `exit_code`/`exit_code_strict` actually consult. A
+    refactor of any of those three would break this test — which is the point,
+    because none of them is obviously coupled to this module.
+    """
+    from cpv_validation_common import ValidationReport  # noqa: PLC0415
+
+    report = ValidationReport()
+    before = (report.exit_code, report.exit_code_strict())
+    assert before == (0, 0), "precondition: a fresh report must be clean"
+
+    emitted = ait.report_verdicts(
+        ait.TriageResult(
+            invoked=True,
+            verdicts=(
+                ait.TriageVerdict("X", "TOOL_SHADOW", "a.py", 1, "not_threat", 0.9, "why", False),
+                ait.TriageVerdict("Y", "SSRF_ADVANCED", "b.py", 2, "threat", 0.9, "why", True),
+            ),
+        ),
+        report,
+    )
+
+    assert emitted == 2, "both verdicts should be reported, including the threat one"
+    assert {r.level for r in report.results} == {"INFO"}, "triage must emit INFO and nothing else"
+    assert (report.exit_code, report.exit_code_strict()) == before, (
+        "the AI triage changed the verdict — it must be verdict-neutral in both directions"
+    )

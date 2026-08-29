@@ -268,7 +268,24 @@ only wheel-shipped data dir, per the catalog-location rule).
   So the triage is verdict-neutral in BOTH directions — it cannot demote (it emits INFO only)
   and it cannot promote (INFO can never change the exit code). That is stronger than the
   original criterion-2 ruling claimed, and it is now a measured fact rather than an assumption.
-  *Doc note for the next reader:* several version paragraphs in `CLAUDE.md` describe WARNING as
-  "the ONLY non-blocking tier", which read literally would make INFO blocking. The code above is
-  authoritative and says otherwise; that prose is imprecise, and it is what made this assumption
-  feel safe enough to skip.
+  *Doc note, re-measured after being overstated once:* `CLAUDE.md` carries the phrase "the ONLY
+  non-blocking tier" EXACTLY ONCE (line 390, the v3.18.0 paragraph), not in "several paragraphs"
+  as first written here. In its own context it is making a narrower and correct point — that an
+  ADVISORY finding should be WARNING rather than MINOR/NIT — so it is not wrong so much as
+  quotable out of context. The code above is authoritative either way.
+- 2026-08-29T23:41:00+0200 — THE PREDICATE IS NOW EXERCISED, NOT JUST READ. The entry above
+  reached the right answer by reading `exit_code`/`exit_code_strict` and inferring three things
+  it never checked: that `has_critical`/`has_major`/`has_minor` test their own levels (assumed
+  by analogy with the one sibling actually read), that those are the predicates the validator's
+  exit status really comes from (the call graph was never traced), and that `report.info()`
+  writes level INFO (inferred from the method NAME). A derived conclusion was being recorded as
+  a measured one, in a frozen card, about a security gate.
+  Replaced with an executable check that exercises all three at once through the real objects —
+  `tests/test_cpv_ai_triage.py::test_invoked_triage_cannot_change_the_verdict`: build a real
+  `ValidationReport`, call `report_verdicts` with `invoked=True` and two verdicts (one
+  `not_threat`, one `threat`), then assert the emitted levels are exactly `{"INFO"}` and that
+  `exit_code`/`exit_code_strict` are byte-identical to the pre-call values. **Measured: 14/14
+  green; levels `{'INFO'}`; `(0, 0)` before and after.** Non-vacuity proven separately — a
+  planted MAJOR moves the same report to `exit_code 2 / strict 2`, so the assertion can fail.
+  The invoked path had NO test before this: every other test in that file runs the opt-OUT path,
+  where `report_verdicts` emits nothing and therefore proves nothing about the verdict.
