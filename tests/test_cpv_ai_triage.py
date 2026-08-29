@@ -547,12 +547,26 @@ def test_check_ai_triage_is_verdict_neutral_through_the_real_caller(
 def test_a_triage_that_ran_is_not_recorded_as_a_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A triage that RAN reports RAN — and one that could not run is not a FAILURE.
+    """A triage that RAN reports RAN — and a NON-INVOKED one is not a FAILURE.
 
     `check_ai_triage`'s status vocabulary is deliberately RAN/SKIPPED only: a
     triage that could not run is advisory context withheld, not a validation
     failure, so it must never surface as FAILED. That contract was asserted only
     in a docstring until now, which is not a thing that fails when broken.
+
+    SCOPE, stated precisely: this pins that a `TriageResult(invoked=False)` maps
+    to SKIPPED whatever produced it. It does NOT exercise the real
+    `subprocess.TimeoutExpired` path inside `run_ai_triage` — that path's own
+    mapping to `invoked=False` is covered by the sibling parsing tests.
+
+    ISOLATION: `_scan_step_log` is a module GLOBAL that three other test files
+    read (`test_validate_security`, `test_security_parallelization`,
+    `test_issues_213_216_scan_and_tag_honesty`). Mutating it in place with
+    `.clear()` would pollute in both directions — destroying a log a previous
+    test populated, and leaving a stale row for a later one — and a single-file
+    run is exactly what cannot see that. `monkeypatch.setattr` swaps the binding
+    for a fresh list and RESTORES the original afterwards, so this test is inert
+    to its neighbours under any ordering.
     """
     import validate_security as vs  # noqa: PLC0415
     from cpv_validation_common import ValidationReport  # noqa: PLC0415
@@ -566,7 +580,7 @@ def test_a_triage_that_ran_is_not_recorded_as_a_failure(
         return str(steps[0]["status"])
 
     # 1. The INVOKED path reports RAN.
-    vs._scan_step_log.clear()
+    monkeypatch.setattr(vs, "_scan_step_log", [])
     monkeypatch.setattr(
         ait,
         "run_ai_triage",
@@ -578,9 +592,10 @@ def test_a_triage_that_ran_is_not_recorded_as_a_failure(
     vs.check_ai_triage(Path("."), ValidationReport(), _FakeSkillauditResult())
     assert _status_of_step_29() == "RAN"
 
-    # 2. Every non-invoked path reports SKIPPED — never FAILED. A timeout is the
-    #    case most likely to be "helpfully" reclassified as a failure later.
-    vs._scan_step_log.clear()
+    # 2. A non-invoked result reports SKIPPED — never FAILED. The timed-out
+    #    reason string is the case most likely to be "helpfully" reclassified as
+    #    a failure later, which is why it is the one used here.
+    monkeypatch.setattr(vs, "_scan_step_log", [])
     monkeypatch.setattr(
         ait,
         "run_ai_triage",

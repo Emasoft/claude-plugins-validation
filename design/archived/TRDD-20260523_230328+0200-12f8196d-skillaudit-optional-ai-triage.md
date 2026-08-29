@@ -303,9 +303,29 @@ only wheel-shipped data dir, per the catalog-location rule).
     `['INFO','MAJOR']`** — the pre-existing MAJOR survives (no demotion) and nothing escalates
     (no promotion).
   * `test_a_triage_that_ran_is_not_recorded_as_a_failure` — pins the RAN/SKIPPED status
-    vocabulary, including that a TIMEOUT reports SKIPPED and never FAILED. That contract lived
-    only in a docstring, which is not a thing that fails when broken.
+    vocabulary: a NON-INVOKED result reports SKIPPED, never FAILED. That contract lived only in
+    a docstring, which is not a thing that fails when broken. (Scope stated precisely because an
+    earlier draft of this entry said "a TIMEOUT reports SKIPPED", which implies the real
+    `subprocess.TimeoutExpired` path was exercised. It was not — the test injects a
+    `TriageResult(invoked=False)`; that path's own mapping is covered by the parsing tests.)
   **Both MUTATION-PROVEN rather than merely green:** injecting the escalation into the caller
   moves the verdict `(2,2) → (1,1)` with a CRITICAL appearing, and forcing the step status to
   FAILED is detected — so each test demonstrably fails for the reason it exists. 16/16 green,
   ruff clean.
+- 2026-08-30T00:07:00+0200 — A DEFECT I SHIPPED IN THE GUARD ITSELF, and the single-file run is
+  what hid it. The status test above mutated the module-global `validate_security._scan_step_log`
+  in place with `.clear()`, twice, and never restored it. That pollutes in BOTH directions —
+  destroying a log a previous test populated, and leaving a stale step-29 row for a later one —
+  and a `-p no:xdist` single-file run is precisely the run that cannot observe it.
+  Not theoretical: **three other test files read that global** (`test_validate_security.py:1247`,
+  `test_security_parallelization.py:319`, `test_issues_213_216_scan_and_tag_honesty.py:39`), and
+  `cpv_agent_security.py` uses a dedicated `_reset_scan_step_log()` that I should have looked for.
+  This repo already carries a TRDD about cross-shard ordering pollution being invisible to every
+  shard (TRDD-K7P2XR4Q); I had just added a candidate producer of exactly that, inside a test
+  written to improve rigour.
+  Fixed with `monkeypatch.setattr(vs, "_scan_step_log", [])`, which swaps the binding and RESTORES
+  the original, so the test is inert to its neighbours under any ordering. **Verified by running
+  the file together with all three real consumers in ONE process: 109 passed**, plus a direct
+  check that a sibling's planted log entry survives the swap-and-restore untouched.
+  *The lesson, for whoever reads this next:* a green single-file run is not an isolation check.
+  It is the one run shaped so that it cannot fail for the reason you need it to.
