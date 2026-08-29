@@ -486,3 +486,107 @@ def test_invoked_triage_cannot_change_the_verdict() -> None:
     assert (report.exit_code, report.exit_code_strict()) == before, (
         "the AI triage changed the verdict — it must be verdict-neutral in both directions"
     )
+
+
+def test_check_ai_triage_is_verdict_neutral_through_the_real_caller(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same property, through the PRODUCTION caller and the production shape.
+
+    The sibling test above calls `report_verdicts` directly, which leaves a real
+    hole: `check_ai_triage` is the actual caller, and it is the more likely place
+    for someone to add an escalation later — e.g. `if v.injection_observed:
+    report.major(...)`. Such a change would leave the sibling test GREEN while the
+    gate had moved, which is the precise regression it claims to guard.
+
+    So this drives `validate_security.check_ai_triage` itself, and does it against
+    a report that ALREADY CARRIES A FINDING — an empty fixture cannot show a
+    demotion, because there is nothing there to demote. That makes one assertion
+    cover both directions:
+
+    * no PROMOTION — the exit code does not rise from the triage's own output;
+    * no DEMOTION   — the pre-existing MAJOR is still there afterwards, so a
+      `not_threat` verdict did not clear it.
+
+    The verdict deliberately carries `injection_observed=True` and
+    `confidence=0.99`, i.e. the strongest inputs an escalation would key on.
+    """
+    import validate_security as vs  # noqa: PLC0415
+    from cpv_validation_common import ValidationReport  # noqa: PLC0415
+
+    # `check_ai_triage` imports run_ai_triage inside its body, so it resolves
+    # from the module object at call time — no subprocess or network is reached.
+    monkeypatch.setattr(
+        ait,
+        "run_ai_triage",
+        lambda _path, _findings: ait.TriageResult(
+            invoked=True,
+            verdicts=(
+                ait.TriageVerdict("X", "TOOL_SHADOW", "a.py", 1, "not_threat", 0.99, "w", True),
+            ),
+        ),
+    )
+
+    class _FakeSkillauditResult:
+        findings: tuple[Any, ...] = ()
+
+    report = ValidationReport()
+    report.major("pre-existing skillaudit finding", "a.py")
+    before = (report.exit_code, report.exit_code_strict())
+    assert before == (2, 2), "precondition: the planted MAJOR must be blocking"
+
+    vs.check_ai_triage(Path("."), report, _FakeSkillauditResult())
+
+    levels = sorted({r.level for r in report.results})
+    assert levels == ["INFO", "MAJOR"], f"expected the MAJOR to survive beside an INFO, got {levels}"
+    assert (report.exit_code, report.exit_code_strict()) == before, (
+        "check_ai_triage moved the verdict — it must neither escalate nor clear"
+    )
+
+
+def test_a_triage_that_ran_is_not_recorded_as_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A triage that RAN reports RAN — and one that could not run is not a FAILURE.
+
+    `check_ai_triage`'s status vocabulary is deliberately RAN/SKIPPED only: a
+    triage that could not run is advisory context withheld, not a validation
+    failure, so it must never surface as FAILED. That contract was asserted only
+    in a docstring until now, which is not a thing that fails when broken.
+    """
+    import validate_security as vs  # noqa: PLC0415
+    from cpv_validation_common import ValidationReport  # noqa: PLC0415
+
+    class _FakeSkillauditResult:
+        findings: tuple[Any, ...] = ()
+
+    def _status_of_step_29() -> str:
+        steps = [s for s in vs.get_scan_step_log() if s["num"] == 29]
+        assert len(steps) == 1, f"expected exactly one step-29 row, got {len(steps)}"
+        return str(steps[0]["status"])
+
+    # 1. The INVOKED path reports RAN.
+    vs._scan_step_log.clear()
+    monkeypatch.setattr(
+        ait,
+        "run_ai_triage",
+        lambda _path, _findings: ait.TriageResult(
+            invoked=True,
+            verdicts=(ait.TriageVerdict("X", "TOOL_SHADOW", "a.py", 1, "uncertain", 0.5, "w", False),),
+        ),
+    )
+    vs.check_ai_triage(Path("."), ValidationReport(), _FakeSkillauditResult())
+    assert _status_of_step_29() == "RAN"
+
+    # 2. Every non-invoked path reports SKIPPED — never FAILED. A timeout is the
+    #    case most likely to be "helpfully" reclassified as a failure later.
+    vs._scan_step_log.clear()
+    monkeypatch.setattr(
+        ait,
+        "run_ai_triage",
+        lambda _path, _findings: ait.TriageResult(
+            invoked=False, skipped_reason="llm-ext timed out after 1200s"
+        ),
+    )
+    vs.check_ai_triage(Path("."), ValidationReport(), _FakeSkillauditResult())
+    assert _status_of_step_29() == "SKIPPED"
