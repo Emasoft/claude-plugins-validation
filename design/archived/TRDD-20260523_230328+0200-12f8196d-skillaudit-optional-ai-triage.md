@@ -254,3 +254,21 @@ only wheel-shipped data dir, per the catalog-location rule).
   whose `2>/dev/null` hid the only signal separating a clean scope from a non-existent path.
   Re-measured: neither scope root's `design/` directory exists, so the conclusion stands, but
   on the directory-absence evidence rather than on an empty result.
+- 2026-08-29T23:32:00+0200 — THE SYMMETRIC RISK, measured. A second review observed that every
+  claim above concerns DEMOTION, and that the opposite direction had never been checked: if
+  `INFO` were a blocking tier, then merely SETTING `CPV_AI_TRIAGE_BUDGET_USD` would flip a clean
+  plugin to INVALID — a gate change cleared on the unexamined assumption that the module's own
+  output tier is inert. The 85 green tests could not have caught it: they all run the opt-OUT
+  path, where `run_ai_triage` returns `_skipped()` and `report_verdicts` emits nothing, so they
+  say nothing about the invoked path.
+  Settled by reading the predicate rather than the prose: `ValidationReport.exit_code`
+  (`cpv_validation_common.py:5989`) branches on CRITICAL, then MAJOR, then MINOR, else
+  `EXIT_OK`; `exit_code_strict` (:6004) adds only NIT. **INFO appears in no blocking branch in
+  either mode**, and `score` (:6017) documents that WARNING, INFO and PASSED do not affect it.
+  So the triage is verdict-neutral in BOTH directions — it cannot demote (it emits INFO only)
+  and it cannot promote (INFO can never change the exit code). That is stronger than the
+  original criterion-2 ruling claimed, and it is now a measured fact rather than an assumption.
+  *Doc note for the next reader:* several version paragraphs in `CLAUDE.md` describe WARNING as
+  "the ONLY non-blocking tier", which read literally would make INFO blocking. The code above is
+  authoritative and says otherwise; that prose is imprecise, and it is what made this assumption
+  feel safe enough to skip.
