@@ -232,3 +232,25 @@ only wheel-shipped data dir, per the catalog-location rule).
   decisions on verified facts and tests"). Peer `ai-maestro-d7` consulted and concurred. The
   fable-advisor was UNAVAILABLE (`agentlenspro model-headroom fable` = exhausted, 100% of its
   weekly window) — no advisor verdict was obtained for this ruling.
+- 2026-08-29T23:20:00+0200 — CORRECTION to the entry above, from an adversarial review of the
+  closing turn. Two claims were overstated and are restated here rather than left standing:
+  1. **Criterion 3 is NOT met "as written".** It says the default run is "byte-for-byte
+     unchanged", and this change adds a `_record_step(29, …, "SKIPPED")` row to every default
+     run — so byte-identity is provably false. 85 passing tests prove only that no test asserts
+     on step count; a passing test is not a byte measurement. Criterion 3 is met in the AMENDED
+     sense: **the verdict, the findings and their severities are unchanged, plus one SKIPPED
+     step row** — the same shape Check 28 (Snyk, also opt-in and token-gated) has shipped for
+     releases. That is a house-style precedent, not a byte-identity claim, and it is recorded
+     as such.
+  2. **The "cannot demote" claim was first asserted from a grep, and has since been settled
+     properly.** The whole 365-line `scripts/cpv_ai_triage.py` was read: `report_verdicts`
+     calls `report.info(...)` twice and nothing else — no `.level=`/`.severity=` write, no
+     `.remove()`/`.pop()`/`del`, no `setattr`, no rebind of the report's results. The claim
+     holds, and is stronger than stated: lines 347-356 append an explicit "an LLM not_threat
+     verdict is NOT grounds to suppress, downgrade or close this finding" warning to every
+     `not_threat` line, because the fixer agent resolves findings mechanically from the report
+     and would otherwise turn a model opinion into a suppression instruction by workflow.
+  Also corrected: the session's "0 TRDDs in LOCAL and USER scope" was measured with a `find`
+  whose `2>/dev/null` hid the only signal separating a clean scope from a non-existent path.
+  Re-measured: neither scope root's `design/` directory exists, so the conclusion stands, but
+  on the directory-absence evidence rather than on an empty result.
