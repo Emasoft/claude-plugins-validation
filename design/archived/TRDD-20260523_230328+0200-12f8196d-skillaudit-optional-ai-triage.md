@@ -325,8 +325,15 @@ only wheel-shipped data dir, per the catalog-location rule).
   established by reading the call sites rather than by running anything:
   - `test_validate_security.py:1218` calls `validate_security()`, which calls
     `_reset_scan_step_log()` at its top — it populates its own log before asserting.
-  - `test_security_parallelization.py:319` goes through the same reset path, and additionally
-    filters to steps 22-25, so a step-29 row could never have matched.
+    **Verified on the CALL, not the docstring:** `validate_security` is defined at
+    `scripts/validate_security.py:10239` and the `_reset_scan_step_log()` call is at
+    **:10300**. The function's own docstring asserts that call, and a docstring asserting
+    behaviour is exactly what this repo has been bitten by twice (CLAUDE.md v5.1.2, v5.8.0) —
+    so it is cited by line here, not taken on the comment's word.
+  - `test_security_parallelization.py:319` goes through the same reset path — its
+    `run_validate_security` is an ALIAS, `validate_security as run_validate_security` at
+    that file's line 41, not a local helper — and additionally filters to steps 22-25, so a
+    step-29 row could never have matched.
   - `test_issues_213_216_scan_and_tag_honesty.py:39` passes an explicit list literal to
     `format_scan_step_table([...])` and never reads the global at all.
   So no collision was demonstrable, and the 109-green run proved less than it appeared to: a
