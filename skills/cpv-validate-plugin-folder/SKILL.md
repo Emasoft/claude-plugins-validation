@@ -1,6 +1,6 @@
 ---
 name: cpv-validate-plugin-folder
-description: "READ-ONLY full scan of ONE plugin or skill folder — structure and rules, the full security pipeline, secret and sensitive-data leaks, and prompt-cache CA-01..CA-07 findings in a single pass. Nothing in the target is modified. Prints a severity table, the report path, and the exact agent that fixes each finding class. Use to validate, audit, check or scan a plugin folder, a skill folder, or this project before publishing or installing. Takes a local path, a GitHub or GitLab URL, or an owner/repo slug; with no argument it scans the current project root."
+description: "READ-ONLY full scan of ONE plugin or skill folder — structure and rules, the full security pipeline, secret and sensitive-data leaks, and prompt-cache CA-01..CA-07 findings in a single pass. Nothing in the target is modified. Prints a severity table, the report path, and the exact agent that fixes each finding class. Use when validating, auditing, checking or scanning a plugin folder, a skill folder, or this project before publishing or installing. Trigger with a local path, a GitHub or GitLab URL, or an owner/repo slug; with no argument it scans the current project root."
 tags: [validation, security, cache, leaks, read-only, plugins, skills]
 user-invocable: true
 argument-hint: "[folder path, GitHub/GitLab URL, or owner/repo — defaults to the current project root]"
@@ -9,6 +9,28 @@ argument-hint: "[folder path, GitHub/GitLab URL, or owner/repo — defaults to t
 # cpv-validate-plugin-folder
 
 Read-only. Runs one script and reports what it printed.
+
+## Overview
+
+One command, full coverage, for one folder shape at a time. The skill
+composes CPV's existing validators — `plugin --strict`, `marketplace`,
+`skill --strict`, and the full `security` scan — behind a single entry
+point (`cpv_validate_plugin_folder.py`) so a caller never has to know in
+advance which validator applies. It never implements a rule of its own:
+every finding traces back to an existing CPV validator, and the skill's
+only job is detecting the folder's shape, dispatching the right
+validator combination, merging the results, and reporting a single
+severity table with the report path and the fixer to run next.
+
+## Prerequisites
+
+- A Python 3 interpreter on `PATH` (the script is invoked as
+  `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_validate_plugin_folder.py"`).
+- `git` on `PATH` when the target is a remote URL or an `owner/repo`
+  slug — the script clones it into a temp sandbox before scanning.
+- No other setup: the script requires no network access for a local
+  path, no installation step, and never runs the plugin/skill/repo it
+  scans.
 
 ## Instructions
 
@@ -83,3 +105,48 @@ No file inside the target is created, modified or deleted. The merged report is
 written to the CALLER's `reports/cpv-validate-plugin-folder/` — the
 conventional gitignored report location — never inside the scanned folder when
 it is a different tree.
+
+## Output
+
+On stdout: a severity table (CRITICAL/MAJOR/MINOR/NIT counts per scan
+that ran), the path to the merged report file under
+`reports/cpv-validate-plugin-folder/`, and — for every scan that did not
+come back clean — the name of the agent that fixes that finding class
+(for example `cpv-plugin-fixer-agent` for structural findings or
+`cpv-plugin-leaks-preventer-agent` for a leaked secret). The exit code
+is the worst of the four verdicts across every scan that ran: `0` clean,
+`1` CRITICAL, `2` MAJOR, `3` MINOR, `4` NIT.
+
+## Error Handling
+
+A scanner that could not run at all (missing dependency, crash, or any
+exit code outside `0..4`) is reported explicitly as UNKNOWN in the
+table rather than folded into a pass — a scan that never happened must
+never read as "clean". A remote URL that fails to clone, or a cloned
+repo that is neither a plugin nor a skill at its root, exits with an
+error naming what was missing; the temp clone is deleted on that path
+too, since cleanup runs on every exit, not only the success path.
+
+## Examples
+
+```bash
+# Scan the current project root (no argument).
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_validate_plugin_folder.py"
+
+# Scan a specific local plugin folder before publishing it.
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_validate_plugin_folder.py" ./my-plugin
+
+# Scan a GitHub repo by URL without cloning it yourself.
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_validate_plugin_folder.py" \
+  https://github.com/owner/repo
+
+# Scan by owner/repo slug.
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cpv_validate_plugin_folder.py" owner/repo
+```
+
+## Resources
+
+- `scripts/cpv_validate_plugin_folder.py` — the single script this
+  skill runs; it composes `remote_validation.py`'s `plugin`,
+  `marketplace`, `skill`, and `security` modes based on the detected
+  folder shape (see "What it covers" above).
