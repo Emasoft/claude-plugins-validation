@@ -135,6 +135,9 @@ Matcher-supporting events:
 - [ ] `ElicitationResult` (supports matcher)
 - [ ] `FileChanged` (supports matcher)
 - [ ] `UserPromptExpansion` (supports matcher)
+- [ ] `DirectoryAdded` (supports matcher)
+- [ ] `PreModelSwitch` (supports matcher; command/http/mcp_tool only)
+- [ ] `PostModelSwitch` (supports matcher)
 
 Events that do NOT support matchers (matcher field is silently ignored):
 

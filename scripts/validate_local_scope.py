@@ -80,6 +80,7 @@ from cc_scope_rules import (
     MAX_MARKDOWN_BYTES,
     MAX_SETTINGS_JSON_BYTES,
     PLUGIN_ONLY_KEYS,
+    PROJECT_LOCAL_REJECTED_ENV_VAR_NAMES,
     OversizedFileError,
     classify_file_scope,
     classify_folder_scope,
@@ -236,6 +237,50 @@ def _flag_permissions_default_mode_local(data: dict[str, Any], report: Validatio
             ),
             file_label,
         )
+        # CC v2.1.257: `"bypassPermissions"` in settings.local.json is now
+        # IGNORED — same treatment as `"auto"` already had (see
+        # `_flag_auto_mode_ignored_local` below). WARNING, mirroring that
+        # rule's severity for the identical shape: a VALUE silently ignored
+        # at runtime, no error, in a file the user owns rather than a
+        # shipped plugin manifest.
+        report.warning(
+            (
+                f"[RC-BYPASSPERMISSIONS-IGNORED] {file_label} sets "
+                "'permissions.defaultMode' to 'bypassPermissions', but since "
+                "Claude Code v2.1.257 this value is NO LONGER honored from "
+                "settings.local.json or project settings.json (the same "
+                "treatment 'auto' already had). The value is silently "
+                "ignored at runtime — no error. Fix: set it in "
+                "~/.claude/settings.json, managed settings, or pass "
+                "--permission-mode bypassPermissions instead. Advisory only "
+                "— this WARNING does not block the publish."
+            ),
+            file_label,
+        )
+
+
+def _flag_ignored_env_var_names_local(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
+    """Flag ``env`` entries Claude Code drops from settings.local.json.
+
+    Per settings-reference.md "Variables Claude Code ignores in env"
+    (v2.1.251+): project AND local settings files cannot set these — Claude
+    Code silently drops each one. CRITICAL, matching the severity every other
+    "key ignored at this scope" finding in this module uses.
+    """
+    env = data.get("env")
+    if not isinstance(env, dict):
+        return
+    for key in sorted(PROJECT_LOCAL_REJECTED_ENV_VAR_NAMES):
+        if key in env:
+            report.critical(
+                (
+                    f"{file_label} sets env.{key} — Claude Code v2.1.251+ "
+                    "silently ignores this variable in project and local "
+                    "settings and logs a warning visible with --debug. Set it "
+                    "in your shell, user settings, or managed settings instead."
+                ),
+                file_label,
+            )
 
 
 def _flag_managed_only_nested_keys_local(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
@@ -379,6 +424,7 @@ def validate_settings_local_json(settings_path: Path, report: ValidationReport) 
     _flag_global_config_keys_local(data, report, file_label)
     _flag_plugin_only_keys_local(data, report, file_label)
     _flag_permissions_default_mode_local(data, report, file_label)
+    _flag_ignored_env_var_names_local(data, report, file_label)
     _flag_auto_mode_ignored_local(data, report, file_label)
     _suggest_typically_shared_keys(data, report, file_label)
     _flag_deprecated_keys(data, report, file_label)

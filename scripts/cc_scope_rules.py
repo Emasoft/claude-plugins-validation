@@ -51,6 +51,7 @@ if TYPE_CHECKING:
 __all__ = [
     "PROJECT_REJECTED_KEYS",
     "PROJECT_REJECTED_NESTED_KEYS",
+    "PROJECT_LOCAL_REJECTED_ENV_VAR_NAMES",
     "USER_MANAGED_SETTINGS_ONLY_KEYS",
     "MANAGED_ONLY_KEYS",
     "MANAGED_ONLY_NESTED_KEYS",
@@ -160,6 +161,39 @@ PROJECT_REJECTED_KEYS: frozenset[str] = frozenset(
 PROJECT_REJECTED_NESTED_KEYS: frozenset[tuple[str, ...]] = frozenset(
     {
         ("permissions", "skipDangerousModePermissionPrompt"),
+    }
+)
+
+# Per settings-reference.md "Variables Claude Code ignores in env" (v2.1.251+):
+# project AND local settings files cannot set these ``env`` block entries —
+# Claude Code silently drops each one and logs a warning visible only with
+# ``claude --debug``. Three families, each verified against the live doc
+# table rather than the changelog summary alone (the changelog line reads
+# "project-level .claude/settings.json env", but the doc itself says
+# "Project and local settings can't set" — both scopes are affected):
+#   - where Claude Code stores/writes its own files (CLAUDE_CONFIG_DIR,
+#     CLAUDE_CODE_TMPDIR, TMPDIR/TMP/TEMP — the OS-generic HOME/XDG_* family
+#     is deliberately NOT modelled here, being a prefix pattern rather than a
+#     literal key name)
+#   - variables that export session content (the detailed-beta-tracing /
+#     raw-API-body-logging trio the v2.1.251 changelog line names but does
+#     not spell out; settings-reference.md names them explicitly)
+#   - variables that change how Claude Code starts or syncs
+PROJECT_LOCAL_REJECTED_ENV_VAR_NAMES: frozenset[str] = frozenset(
+    {
+        "CLAUDE_CONFIG_DIR",
+        "CLAUDE_CODE_TMPDIR",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "OTEL_LOG_RAW_API_BODIES",
+        "ENABLE_BETA_TRACING_DETAILED",
+        "BETA_TRACING_ENDPOINT",
+        "CLAUDE_CODE_PROCESS_WRAPPER",
+        "CLAUDE_CODE_SYNC_SKILLS",
+        "CLAUDE_CODE_SYNC_PLUGINS",
+        "CLAUDE_CODE_PLUGIN_CACHE_DIR",
+        "CLAUDE_CODE_PLUGIN_SEED_DIR",
     }
 )
 
@@ -477,6 +511,20 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         "subagentPromptCacheTtl",  # v2.1.243 — separate TTL for subagents
         # CC spec sync v2.1.247
         "feedbackDrafts",  # v2.1.247 — off | quiet | on for Claude-drafted feedback
+        # CC v2.1.257 spec sync — verified present in settings-reference.md's
+        # Available-settings table (top-level rows) before adding, per the
+        # recorded drift method.
+        "modelPricing",  # v2.1.243 — org-contracted-rate spend reporting (managed)
+        "managedSourcesBehavior",  # compose every managed source instead of highest-priority-only (managed)
+        "desktopSessionCleanupPeriodDays",  # v2.1.248 — Desktop/Cowork transcript age limit (user or managed)
+        "modelSettings",  # v2.1.251 — settings-reference.md:691, per-model saved /effort level (any file)
+        # `timeFormat`/`timeZone` (v2.1.257) are NOT yet in settings-reference.md's
+        # Available-settings table — same as `experimental` in validate_agent.py,
+        # sourced from the changelog alone until the reference doc catches up:
+        # "Added 'Time format' (timeFormat) and timeZone settings" (changelog.md,
+        # Update 2.1.257, "September 1, 2026").
+        "timeFormat",  # v2.1.257 — 12h | 24h | 24h-utc | a strftime pattern
+        "timeZone",  # v2.1.257 — companion to timeFormat
     }
 )
 

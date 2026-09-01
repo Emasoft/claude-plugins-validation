@@ -3269,3 +3269,122 @@ def test_linter_internal_bug_propagates(tmp_path: Path, monkeypatch) -> None:
 
     with pytest.raises(TypeError):
         vh.lint_python_script(script, r)
+
+
+def test_linter_timeout_retried_once_then_reports_warning_not_minor(tmp_path: Path, monkeypatch) -> None:
+    """Issue #221: a linter that times out TWICE reports exactly one WARNING (never a blocking MINOR).
+
+    A per-file linter timeout measures host load at that moment, not a defect
+    in the plugin being validated. Retrying once absorbs a transient blip; a
+    second timeout is reported as WARNING (non-blocking, even under --strict)
+    with text that says the result is UNKNOWN — never MINOR, which reads as a
+    finding and blocks --strict.
+    """
+    import subprocess
+
+    import validate_hook as vh
+
+    script = tmp_path / "x.py"
+    script.write_text("print('hi')\n")
+
+    calls: list[int] = []
+
+    def _always_timeout(*_a, **_k):
+        calls.append(1)
+        raise subprocess.TimeoutExpired(cmd="ruff", timeout=30)
+
+    monkeypatch.setattr(vh, "resolve_tool_command", lambda name: [name])
+    monkeypatch.setattr(vh.subprocess, "run", _always_timeout)
+
+    r = ValidationReport()
+    vh.lint_bash_script(script, r)
+
+    warnings = [res for res in r.results if res.level == "WARNING" and "shellcheck" in res.message]
+    minors = [res for res in r.results if res.level == "MINOR" and "timeout" in res.message.lower()]
+    assert len(warnings) == 1, f"expected exactly one WARNING, got {r.results}"
+    assert "twice" in warnings[0].message and "UNKNOWN" in warnings[0].message
+    assert minors == [], "a double timeout must never report a blocking MINOR"
+    # ruff is invoked twice: the original attempt + the one retry.
+    assert len(calls) == 2
+
+
+def test_linter_timeout_once_then_succeeds_reports_no_timeout_finding(tmp_path: Path, monkeypatch) -> None:
+    """Issue #221: a linter that times out ONCE then succeeds on retry reports no timeout finding at all."""
+    import subprocess
+
+    import validate_hook as vh
+
+    script = tmp_path / "x.sh"
+    script.write_text("#!/bin/bash\necho hi\n")
+
+    calls: list[int] = []
+
+    def _timeout_then_succeed(*_a, **_k):
+        calls.append(1)
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(cmd="shellcheck", timeout=30)
+        return subprocess.CompletedProcess(args=["shellcheck"], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(vh, "resolve_tool_command", lambda name: [name])
+    monkeypatch.setattr(vh.subprocess, "run", _timeout_then_succeed)
+
+    r = ValidationReport()
+    vh.lint_bash_script(script, r)
+
+    timeout_findings = [res for res in r.results if "timeout" in res.message.lower()]
+    assert timeout_findings == [], f"a resolved retry must leave no timeout-related finding: {r.results}"
+    assert len(calls) == 2
+    assert any(res.level == "PASSED" and "shellcheck" in res.message for res in r.results)
+
+
+def test_lint_timeout_scale_rejects_non_numeric(monkeypatch) -> None:
+    """Issue #221: CPV_LINT_TIMEOUT_SCALE=abc fails fast rather than silently defaulting."""
+    import pytest
+    import validate_hook as vh
+
+    monkeypatch.setenv("CPV_LINT_TIMEOUT_SCALE", "abc")
+    with pytest.raises(SystemExit):
+        vh._lint_timeout_scale()
+
+
+def test_lint_timeout_scale_rejects_non_positive(monkeypatch) -> None:
+    """Issue #221: CPV_LINT_TIMEOUT_SCALE=0 (and negative) fail fast rather than disabling the budget."""
+    import pytest
+    import validate_hook as vh
+
+    monkeypatch.setenv("CPV_LINT_TIMEOUT_SCALE", "0")
+    with pytest.raises(SystemExit):
+        vh._lint_timeout_scale()
+
+    monkeypatch.setenv("CPV_LINT_TIMEOUT_SCALE", "-2")
+    with pytest.raises(SystemExit):
+        vh._lint_timeout_scale()
+
+
+def test_lint_timeout_scale_defaults_to_one(monkeypatch) -> None:
+    """Issue #221: an unset CPV_LINT_TIMEOUT_SCALE leaves the linter budgets unchanged."""
+    import validate_hook as vh
+
+    monkeypatch.delenv("CPV_LINT_TIMEOUT_SCALE", raising=False)
+    assert vh._lint_timeout_scale() == 1.0
+
+
+def test_lint_timeout_scale_applies_to_subprocess_budget(tmp_path: Path, monkeypatch) -> None:
+    """Issue #221: CPV_LINT_TIMEOUT_SCALE multiplies the timeout passed to subprocess.run."""
+    import validate_hook as vh
+
+    seen_timeouts: list[float] = []
+
+    def _capture_timeout(_argv, **kwargs):
+        seen_timeouts.append(kwargs["timeout"])
+        return vh.subprocess.CompletedProcess(args=_argv, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(vh.subprocess, "run", _capture_timeout)
+    monkeypatch.setenv("CPV_LINT_TIMEOUT_SCALE", "2.5")
+
+    r = ValidationReport()
+    result = vh._run_lint_with_timeout_retry(
+        ["ruff"], timeout=30, script_path=tmp_path / "x.py", report=r, tool_name="ruff"
+    )
+    assert result is not None
+    assert seen_timeouts == [75.0]

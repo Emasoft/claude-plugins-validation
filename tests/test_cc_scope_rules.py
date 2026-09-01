@@ -165,6 +165,51 @@ class TestTaxonomyConstants:
         assert "wslInheritsWindowsSettings" in MANAGED_ONLY_KEYS
         assert "wslInheritsWindowsSettings" in KNOWN_SETTINGS_KEYS
 
+    def test_v2_1_257_new_known_settings_keys(self) -> None:
+        """modelPricing/managedSourcesBehavior/desktopSessionCleanupPeriodDays
+        (verified present in settings-reference.md's Available-settings
+        table) are recognized."""
+        from cc_scope_rules import KNOWN_SETTINGS_KEYS  # noqa: PLC0415
+
+        assert {"modelPricing", "managedSourcesBehavior", "desktopSessionCleanupPeriodDays"} <= KNOWN_SETTINGS_KEYS
+
+    def test_v2_1_251_model_settings_known(self) -> None:
+        """modelSettings (v2.1.251, settings-reference.md:691) is a known
+        top-level settings key — per-model saved /effort level."""
+        from cc_scope_rules import KNOWN_SETTINGS_KEYS  # noqa: PLC0415
+
+        assert "modelSettings" in KNOWN_SETTINGS_KEYS
+        assert "modelSetting" not in KNOWN_SETTINGS_KEYS  # positive control — near-miss typo stays unknown
+
+    def test_v2_1_257_time_format_and_zone_known_changelog_only(self) -> None:
+        """timeFormat/timeZone (v2.1.257) are recognized from the changelog
+        alone, same precedent as `experimental` in validate_agent.py — the
+        raw settings-reference.md table does not carry either yet."""
+        from cc_scope_rules import KNOWN_SETTINGS_KEYS  # noqa: PLC0415
+
+        assert {"timeFormat", "timeZone"} <= KNOWN_SETTINGS_KEYS
+        assert "timeFromat" not in KNOWN_SETTINGS_KEYS  # positive control — near-miss typo stays unknown
+
+    def test_project_local_rejected_env_var_names(self) -> None:
+        """PROJECT_LOCAL_REJECTED_ENV_VAR_NAMES covers the v2.1.251 env
+        keys settings-reference.md names as dropped from project AND local
+        settings — the TMPDIR family, config-dir, and the beta-tracing /
+        sync trio."""
+        from cc_scope_rules import PROJECT_LOCAL_REJECTED_ENV_VAR_NAMES  # noqa: PLC0415
+
+        for name in (
+            "CLAUDE_CONFIG_DIR",
+            "CLAUDE_CODE_TMPDIR",
+            "TMPDIR",
+            "TMP",
+            "TEMP",
+            "OTEL_LOG_RAW_API_BODIES",
+            "ENABLE_BETA_TRACING_DETAILED",
+            "BETA_TRACING_ENDPOINT",
+        ):
+            assert name in PROJECT_LOCAL_REJECTED_ENV_VAR_NAMES
+        assert "ANTHROPIC_BASE_URL" not in PROJECT_LOCAL_REJECTED_ENV_VAR_NAMES
+
 
 # =============================================================================
 # Secret detection

@@ -2971,6 +2971,187 @@ def validate_bin_executables(plugin_root: Path, report: ValidationReport) -> Non
         report.passed(f"bin/ directory: {executable_count} executable(s) found")
 
 
+# ── Component-path symlink handling (CC v2.1.257) ────────────────────────────
+# plugins-reference.md:833-841 documents exactly how Claude Code handles a
+# symlink that sits at a plugin's declared/default component path (commands,
+# agents, skills, hooks, mcpServers, lspServers, outputStyles, or any of the
+# default component dirs):
+#   - resolves WITHIN the plugin's own directory  -> preserved, works fine
+#   - resolves elsewhere in the SAME marketplace   -> dereferenced (copied
+#     into the cache), works fine
+#   - resolves OUTSIDE the marketplace             -> skipped for security
+#     (the component is silently refused at load)
+#   - for --plugin-dir / local-path / command-source (copy mode) installs,
+#     ONLY a symlink resolving within the plugin's own directory is kept —
+#     everything else is skipped, marketplace or not.
+# CPV cannot know at validate-time which install mode a plugin will use, so an
+# out-of-plugin, out-of-marketplace target is CRITICAL (definitely refused
+# either way); an out-of-plugin target with NO discoverable marketplace root
+# is a non-blocking WARNING (would work from inside a real marketplace
+# checkout, cannot be verified standalone, and is refused under
+# --plugin-dir/local-path/command-source regardless).
+_COMPONENT_PATH_FIELDS_FOR_SYMLINK_SCAN = (
+    "commands",
+    "agents",
+    "skills",
+    "hooks",
+    "mcpServers",
+    "lspServers",
+    "outputStyles",
+)
+_DEFAULT_COMPONENT_DIRS_FOR_SYMLINK_SCAN = ("commands", "agents", "skills", "hooks")
+_MARKETPLACE_ROOT_WALK_MAX_DEPTH = 6
+
+
+def _find_marketplace_root(plugin_root: Path) -> Path | None:
+    """Walk upward from ``plugin_root`` looking for an ancestor directory that
+    itself carries ``.claude-plugin/marketplace.json`` — i.e. ``plugin_root``
+    lives inside a marketplace checkout. Bounded walk; returns ``None`` when
+    no such ancestor is found (plugin validated standalone).
+    """
+    current = plugin_root.parent
+    for _ in range(_MARKETPLACE_ROOT_WALK_MAX_DEPTH):
+        try:
+            if (current / ".claude-plugin" / "marketplace.json").is_file():
+                return current
+        except OSError:
+            return None
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
+# Prune these directory NAMES during the whole-tree symlink walk (#w7 coordinator
+# fix) — VCS/cache/scratch dirs that are never part of what CC copies into the
+# cache as plugin content and that would otherwise flood the walk with noise.
+_SYMLINK_WALK_PRUNE_DIR_NAMES = {".git", ".trashcan", "node_modules", ".venv"}
+
+
+def _symlink_walk_prune(dirname: str) -> bool:
+    return dirname in _SYMLINK_WALK_PRUNE_DIR_NAMES or dirname.endswith("_dev")
+
+
+def _iter_declared_component_symlinks(
+    plugin_root: Path, manifest: dict[str, Any]
+) -> list[tuple[str, Path]]:
+    """Yield ``(label, on-disk-path)`` for every symlink that matters: every
+    declared/default component path (labelled by field) PLUS every symlink
+    anywhere in the plugin tree (labelled by its relative path).
+
+    plugins-reference.md:835-841 applies to ANY symlink inside the plugin
+    directory when Claude Code copies it into the cache — not just the ones
+    sitting at a declared component path. A symlinked skill/agent/command/hook
+    reached only via a subdirectory (e.g. ``skills/foo/evil -> /outside``) is
+    just as much at risk of silently vanishing at load time, so the whole tree
+    is walked (bounded by the usual VCS/cache/scratch prune set).
+    """
+    found: list[tuple[str, Path]] = []
+    seen: set[Path] = set()
+
+    def _add(label: str, path: Path) -> None:
+        if path not in seen:
+            seen.add(path)
+            found.append((label, path))
+
+    for field in _COMPONENT_PATH_FIELDS_FOR_SYMLINK_SCAN:
+        val = manifest.get(field)
+        candidates: list[str] = []
+        if isinstance(val, str):
+            candidates.append(val)
+        elif isinstance(val, list):
+            candidates.extend(v for v in val if isinstance(v, str))
+        for raw in candidates:
+            rel = raw[2:] if raw.startswith("./") else raw
+            candidate_path = plugin_root / rel
+            if candidate_path.is_symlink():
+                _add(f"{field}: {raw}", candidate_path)
+    for dirname in _DEFAULT_COMPONENT_DIRS_FOR_SYMLINK_SCAN:
+        default_path = plugin_root / dirname
+        if default_path.is_symlink():
+            _add(f"default {dirname}/ directory", default_path)
+
+    for dirpath, dirnames, filenames in os.walk(plugin_root, followlinks=False):
+        current = Path(dirpath)
+        # Prune BEFORE descending — os.walk honours in-place dirnames edits.
+        # A symlinked subdirectory must still be REPORTED (checked below) even
+        # though we never walk INTO it (followlinks=False already skips that).
+        symlinked_subdirs = [d for d in dirnames if (current / d).is_symlink()]
+        dirnames[:] = [d for d in dirnames if not _symlink_walk_prune(d)]
+        for d in symlinked_subdirs:
+            dpath = current / d
+            _add(dpath.relative_to(plugin_root).as_posix(), dpath)
+        for f in filenames:
+            fpath = current / f
+            if fpath.is_symlink():
+                _add(fpath.relative_to(plugin_root).as_posix(), fpath)
+
+    return found
+
+
+def validate_component_symlinks(plugin_root: Path, report: ValidationReport) -> None:
+    """CC v2.1.257 — evaluate every declared/default component-path symlink
+    per the documented internal/marketplace/external resolution rules above.
+    """
+    manifest_path = plugin_root / ".claude-plugin" / "plugin.json"
+    manifest: dict[str, Any] = {}
+    if manifest_path.is_file():
+        try:
+            loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                manifest = loaded
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+
+    plugin_root_resolved = plugin_root.resolve()
+    marketplace_root = _find_marketplace_root(plugin_root)
+    marketplace_root_resolved = marketplace_root.resolve() if marketplace_root else None
+
+    for label, symlink_path in _iter_declared_component_symlinks(plugin_root, manifest):
+        try:
+            rel_display = symlink_path.relative_to(plugin_root).as_posix()
+        except ValueError:
+            rel_display = str(symlink_path)
+        try:
+            target_resolved = symlink_path.resolve()
+        except OSError:
+            report.warning(
+                f"{label} is a symlink whose target could not be resolved "
+                "(broken link) — Claude Code will skip it at load time.",
+                rel_display,
+            )
+            continue
+
+        try:
+            target_resolved.relative_to(plugin_root_resolved)
+            continue  # internal — preserved as a relative symlink, works fine
+        except ValueError:
+            pass
+
+        if marketplace_root_resolved is not None:
+            try:
+                target_resolved.relative_to(marketplace_root_resolved)
+                continue  # elsewhere in the same marketplace — dereferenced, works fine
+            except ValueError:
+                report.critical(
+                    f"{label} is a symlink resolving OUTSIDE the marketplace "
+                    f"({target_resolved}) — Claude Code v2.1.257+ skips it for "
+                    "security at load time (the component is silently refused).",
+                    rel_display,
+                )
+                continue
+
+        report.warning(
+            f"{label} is a symlink resolving outside the plugin directory "
+            f"({target_resolved}). Per plugins-reference.md this is preserved "
+            "only when the plugin is installed from a marketplace whose "
+            "checkout contains the target — cannot verify standalone, and a "
+            "--plugin-dir / local-path / command-source install always skips it.",
+            rel_display,
+        )
+
+
 # ── Release-asset installer detection (issue #117) ───────────────────────────
 # A compiled-source plugin that ships its binaries as RELEASE ASSETS (out of
 # tree) plus a checksum-verified installer is NOT "users will need to compile":
@@ -9117,6 +9298,7 @@ def main() -> int:
         # any missing linter for a detected language fails the run with MAJOR.
         ("run_lint_engine", run_lint_engine, ((), {"strict_missing_tools": True, "quiet": args.json})),
         ("validate_bin_executables", validate_bin_executables, ((), {})),
+        ("validate_component_symlinks", validate_component_symlinks, ((), {})),
         ("validate_skills", validate_skills, ((skip_platform_checks,), {})),
         # TRDD-25b9be90 — cross-reference validation, including ghost-agent dispatch
         # detection (RC-GHOST-DISPATCH-001 CRITICAL when Task() / subagent_type

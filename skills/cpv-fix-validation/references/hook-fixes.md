@@ -268,6 +268,8 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
    - `FileChanged` (v2.1.83)
    - `MessageDisplay` (v2.1.152 — transform/hide assistant message text as displayed via `hookSpecificOutput.displayContent`)
    - `DirectoryAdded` (v2.1.219 — fires after `/add-dir` or the SDK `register_repo_root` control request registers a working directory mid-session. TAKES matchers (`slash_command`, `register_repo_root`), and has NO decision control — it cannot block an add that has already completed)
+   - `PreModelSwitch` (v2.1.251 — fires before a requested model switch. TAKES a matcher (the canonical name of the target model, ignoring any `[1m]` suffix). Runs `command`/`http`/`mcp_tool` hooks ONLY — `prompt`/`agent` are rejected. Can block/ask/allow the switch via `hookSpecificOutput.permissionDecision`)
+   - `PostModelSwitch` (v2.1.251 — fires after the session's model changes. TAKES a matcher, same rules as `PreModelSwitch`. Cannot block — it can only return `additionalContext` for the next request)
 3. **Wrong**: `"preToolUse"`, `"pre_tool_use"`, `"PreTooluse"`
 4. **Correct**: `"PreToolUse"`
 5. **New: Fuzzy matching** — the validator now suggests corrections for misspelled events. If you see `did you mean 'PreToolUse'?` in the error message, it detected a close match. Common typos:
@@ -596,13 +598,15 @@ Prior editions of this document INCORRECTLY claimed hooks used milliseconds — 
 2. **`command` + `http` + `mcp_tool`** (no `prompt` / `agent`) — mirrors `HOOK_EVENTS_NO_PROMPT_OR_AGENT` in `cpv_validation_common.py`:
    - `ConfigChange`, `CwdChanged`, `Elicitation`, `ElicitationResult`,
    - `FileChanged`, `InstructionsLoaded`, `Notification`,
-   - `PostCompact`, `PreCompact`, `SessionEnd`, `StopFailure`,
+   - `PostCompact`, `PreCompact`, `PreModelSwitch` (v2.1.251 — "runs command, http, and mcp_tool hooks only"),
+   - `SessionEnd`, `StopFailure`,
    - `SubagentStart`, `WorktreeCreate`, `WorktreeRemove`
 
-3. **Full 5-type set** (command + http + mcp_tool + prompt + agent) — every event not in groups 1 or 2; the Stop family (`PermissionDenied`, `TeammateIdle`, `TaskCreated`) belongs HERE, not group 2 (pinned by `test_prompt_on_tier1_event_is_accepted`):
+3. **Full 5-type set** (command + http + mcp_tool + prompt + agent) — every event not in groups 1 or 2; the Stop family (`PermissionDenied`, `TeammateIdle`, `TaskCreated`) belongs HERE, not group 2 (pinned by `test_prompt_on_tier1_event_is_accepted`). `PostModelSwitch` is undocumented as a restriction, so it also stays HERE (the doc states no type restriction for it, unlike its sibling `PreModelSwitch`):
    - `PermissionRequest`, `PostToolBatch`, `PostToolUse`, `PostToolUseFailure`,
    - `PreToolUse`, `Stop`, `SubagentStop`, `TaskCompleted`, `TaskCreated`,
-   - `PermissionDenied`, `TeammateIdle`, `UserPromptExpansion`, `UserPromptSubmit`
+   - `PermissionDenied`, `TeammateIdle`, `UserPromptExpansion`, `UserPromptSubmit`,
+   - `DirectoryAdded`, `PostModelSwitch`
 
 **Fix**:
 1. Identify which group your event belongs to.

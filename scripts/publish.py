@@ -3965,6 +3965,104 @@ def stage_install_smoke(plugin_root: Path, new_version: str) -> int:
     return 0
 
 
+def classify_ci_runs(
+    runs: list[dict[str, Any]], successors: dict[str, bool]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split completed CI runs for one commit into (failed, unknown).
+
+    A `success`/`skipped`/`neutral` conclusion is fine and appears in neither
+    list. Any OTHER conclusion is a genuine failure — EXCEPT `cancelled`,
+    which Gate 14 previously treated identically to a real failure even
+    though GitHub's own concurrency-group cancellation reports it that way
+    for a run that was merely SUPERSEDED by a newer push to the same branch
+    (issue #220). `successors` disambiguates: it maps a cancelled run's
+    workflow NAME to whether the caller resolved a newer run of that same
+    workflow on a commit descended from the one being verified. Found ⇒ the
+    cancellation was benign supersession, excluded from both lists. Not
+    found ⇒ we cannot tell a genuine user-cancel from a lost successor, so
+    it goes to `unknown` and Gate 14 must report UNKNOWN, never green — a
+    "cannot check" result is never folded into a pass.
+    """
+    failed: list[dict[str, Any]] = []
+    unknown: list[dict[str, Any]] = []
+    for r in runs:
+        conclusion = r.get("conclusion")
+        if conclusion in ("success", "skipped", "neutral"):
+            continue
+        if conclusion == "cancelled":
+            if successors.get(str(r.get("name", "?"))):
+                continue
+            unknown.append(r)
+            continue
+        failed.append(r)
+    return failed, unknown
+
+
+def _resolve_ci_run_successors(
+    gh_bin: str,
+    plugin_root: Path,
+    sha: str,
+    cancelled_runs: list[dict[str, Any]],
+) -> dict[str, bool]:
+    """For each cancelled run, look for a newer descendant-commit successor.
+
+    A `cancelled` run counts as superseded-not-failed only when a LATER run
+    of the SAME workflow exists on a commit that is a git descendant of
+    `sha` — i.e. a newer push to the same branch genuinely superseded this
+    one via the concurrency group. Any failure to determine that (no gh, no
+    branch info, an unresolved merge-base) leaves that workflow's entry
+    absent from the returned map, which `classify_ci_runs` treats as "no
+    successor found" — fail toward UNKNOWN, never toward green.
+    """
+    result: dict[str, bool] = {}
+    for r in cancelled_runs:
+        name = str(r.get("name", "?"))
+        if name in result:
+            continue
+        branch = r.get("headBranch")
+        if not branch:
+            continue
+        try:
+            listed = subprocess.run(
+                [
+                    gh_bin, "run", "list",
+                    "--workflow", name,
+                    "--branch", str(branch),
+                    "--limit", "20",
+                    "--json", "headSha,conclusion,status,createdAt",
+                ],
+                cwd=plugin_root,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if listed.returncode != 0:
+            continue
+        try:
+            candidates = json.loads(listed.stdout or "[]")
+        except json.JSONDecodeError:
+            continue
+        for c in candidates:
+            candidate_sha = c.get("headSha")
+            if not candidate_sha or candidate_sha == sha:
+                continue
+            try:
+                ancestry = subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", sha, candidate_sha],
+                    cwd=plugin_root,
+                    capture_output=True,
+                    timeout=30,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if ancestry.returncode == 0:
+                result[name] = True
+                break
+    return result
+
+
 def stage_verify_ci_green(
     plugin_root: Path, timeout_s: int = _CI_VERIFY_DEFAULT_TIMEOUT_S
 ) -> int:
@@ -4035,7 +4133,7 @@ def stage_verify_ci_green(
                     gh_bin, "run", "list",
                     "--commit", sha,
                     "--limit", "20",
-                    "--json", "name,status,conclusion",
+                    "--json", "name,status,conclusion,headBranch",
                 ],
                 cwd=plugin_root,
                 capture_output=True,
@@ -4088,11 +4186,18 @@ def stage_verify_ci_green(
         time.sleep(poll_s)
 
     # A conclusion of `skipped`/`neutral` is not a failure (CPV's own PyPI
-    # workflow is deliberately dormant and always reports `skipped`).
-    failed = [
-        r for r in runs
-        if r.get("conclusion") not in ("success", "skipped", "neutral")
-    ]
+    # workflow is deliberately dormant and always reports `skipped`). A
+    # `cancelled` run is not automatically a failure either (issue #220): the
+    # concurrency group cancels a run that a newer push to the same branch
+    # superseded, which looks identical to a genuine user-cancel unless we
+    # go find that newer run ourselves.
+    cancelled_runs = [r for r in runs if r.get("conclusion") == "cancelled"]
+    successors = (
+        _resolve_ci_run_successors(gh_bin, plugin_root, sha, cancelled_runs)
+        if cancelled_runs
+        else {}
+    )
+    failed, unknown = classify_ci_runs(runs, successors)
     if failed:
         detail = ", ".join(
             f"{r.get('name', '?')}={r.get('conclusion')}" for r in failed
@@ -4108,6 +4213,18 @@ def stage_verify_ci_green(
             f"{RED}  publish a follow-up patch; do NOT mute the check.{NC}\n"
             f"{RED}  Logs: gh run list --commit {sha}{NC}\n"
             f"{RED}        then: gh run view --log-failed <run-id>{NC}",
+            file=sys.stderr,
+        )
+        return 0
+
+    if unknown:
+        names = ", ".join(sorted({str(r.get("name", "?")) for r in unknown}))
+        print(
+            f"{YELLOW}? CI verdict UNKNOWN on {sha[:8]}: run cancelled and no "
+            f"successor found — not checked ({names}).{NC}\n"
+            f"{YELLOW}  This is either a genuine user-cancel or a superseding run{NC}\n"
+            f"{YELLOW}  we could not resolve. Verify manually: "
+            f"gh run list --commit {sha}{NC}",
             file=sys.stderr,
         )
         return 0

@@ -195,6 +195,12 @@ OPTIONAL_PLUGIN_FIELDS = {
     # Shape-checked by _validate_headers_helper() below — recognised is not the
     # same as unexamined (the v5.5.0 `command`-source ruling).
     "headersHelper",
+    # v2.1.222 — plugin-marketplaces.md:217, per-plugin-entry "Optional plugin
+    # fields" table: a free-form object for the author's own catalog/entitlement
+    # data; Claude Code never reads it. Before v2.1.222 `claude plugin validate`
+    # itself reported it as an unrecognized field — the doc names that history
+    # explicitly, so this is a real, current spec field, not a typo to catch.
+    "metadata",
 }
 
 # Marketplace top-level fields per plugin-marketplaces.md (v2.1.121).
@@ -1555,6 +1561,7 @@ def validate_plugin_entry(
     results.extend(_validate_archive_source(plugin, plugin_id, json_path))
     results.extend(_validate_command_source(plugin, plugin_id, json_path))
     results.extend(_validate_headers_helper(plugin, plugin_id, json_path))
+    results.extend(validate_component_path_traversal(plugin, plugin_id, marketplace_dir, json_path))
 
     # Validate tags if present
     tags = plugin.get("tags")
@@ -2059,6 +2066,117 @@ def _resolve_local_plugin_root(
     if isinstance(local_path, str) and not local_path.startswith("/") and ".." not in local_path:
         return _apply_plugin_root(marketplace_dir, local_path)
     return None
+
+
+# CC v2.1.251 — a marketplace entry's per-plugin component path field
+# (commands/agents/skills/hooks) that resolves OUTSIDE the plugin's own
+# directory is rejected by Claude Code as path-traversal. Only checkable for
+# a LOCAL source (the plugin directory is on disk at validate-time); a remote
+# source (github/url/npm/git/git-subdir) resolves its component paths only
+# after install, so this is skipped there — the installer itself performs the
+# real traversal rejection at that point.
+_COMPONENT_PATH_FIELDS_FOR_TRAVERSAL_CHECK = ("commands", "agents", "skills", "hooks")
+
+
+def _iter_component_path_strings(plugin: dict[str, Any], field_name: str) -> list[str]:
+    """Return every string path in a commands/agents/skills/hooks field.
+
+    Per plugins-reference.md the spec shape is string|array for
+    commands/agents and string|object for hooks — an object entry is an
+    INLINE config (not a filesystem path) and is skipped here.
+    """
+    val = plugin.get(field_name)
+    if isinstance(val, str):
+        return [val]
+    if isinstance(val, list):
+        return [v for v in val if isinstance(v, str)]
+    return []
+
+
+def validate_component_path_traversal(
+    plugin: dict[str, Any],
+    plugin_id: str,
+    marketplace_dir: Path,
+    json_path: str,
+) -> list[ValidationResult]:
+    """CC v2.1.251 — reject a component path field that escapes the plugin dir.
+
+    Resolves each ``commands``/``agents``/``skills``/``hooks`` string path
+    against the entry's on-disk local plugin directory and flags CRITICAL
+    when the resolved path lands outside it (absolute path, ``..``
+    traversal, or a symlink whose target escapes).
+    """
+    results: list[ValidationResult] = []
+    plugin_root = _resolve_local_plugin_root(plugin, marketplace_dir)
+    if plugin_root is None:
+        return results
+    try:
+        plugin_root_resolved = plugin_root.resolve()
+    except OSError:
+        return results
+
+    for field_name in _COMPONENT_PATH_FIELDS_FOR_TRAVERSAL_CHECK:
+        for raw in _iter_component_path_strings(plugin, field_name):
+            if not raw:
+                continue
+            if raw.startswith("/"):
+                results.append(
+                    ValidationResult(
+                        level="CRITICAL",
+                        category="plugin",
+                        message=(
+                            f"Plugin '{plugin_id}' {field_name} path '{raw}' is absolute — "
+                            "Claude Code v2.1.251+ rejects a component path resolving outside "
+                            "the plugin directory as path-traversal."
+                        ),
+                        file=json_path,
+                        suggestion=f"Use a path relative to the plugin root, e.g. './{Path(raw).name}'",
+                    )
+                )
+                continue
+            entry_path = plugin_root / raw
+            try:
+                candidate_resolved = entry_path.resolve()
+            except OSError:
+                continue
+            try:
+                candidate_resolved.relative_to(plugin_root_resolved)
+            except ValueError:
+                results.append(
+                    ValidationResult(
+                        level="CRITICAL",
+                        category="plugin",
+                        message=(
+                            f"Plugin '{plugin_id}' {field_name} path '{raw}' resolves outside the "
+                            f"plugin directory ({candidate_resolved}) — Claude Code v2.1.251+ "
+                            "rejects this as path-traversal."
+                        ),
+                        file=json_path,
+                        suggestion="Keep component paths inside the plugin directory (no '..' segments, no symlink escape)",
+                    )
+                )
+                continue
+            # A resolved-in-tree candidate may still be a symlink whose
+            # target escapes the plugin — check the symlink itself, not just
+            # where a fully-resolved path lands.
+            if entry_path.is_symlink():
+                try:
+                    entry_path.resolve().relative_to(plugin_root_resolved)
+                except (OSError, ValueError):
+                    results.append(
+                        ValidationResult(
+                            level="CRITICAL",
+                            category="plugin",
+                            message=(
+                                f"Plugin '{plugin_id}' {field_name} path '{raw}' is a symlink "
+                                "escaping the plugin directory — Claude Code v2.1.251+ rejects "
+                                "this as path-traversal."
+                            ),
+                            file=json_path,
+                            suggestion="Replace the symlink with a real file/directory inside the plugin",
+                        )
+                    )
+    return results
 
 
 def _read_plugin_json_version(plugin_root: Path) -> tuple[str | None, Path | None]:

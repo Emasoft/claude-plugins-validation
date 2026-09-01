@@ -1276,7 +1276,8 @@ VALID = {'PreToolUse','PostToolUse','PostToolUseFailure','PostToolBatch','Permis
          'UserPromptSubmit','UserPromptExpansion','Notification','Stop','StopFailure','SubagentStop','SubagentStart',
          'SessionStart','SessionEnd','PreCompact','PostCompact','TeammateIdle','TaskCompleted','TaskCreated',
          'ConfigChange','WorktreeCreate','WorktreeRemove','InstructionsLoaded','Elicitation','ElicitationResult',
-         'CwdChanged','FileChanged','Setup','MessageDisplay'}
+         'CwdChanged','FileChanged','Setup','MessageDisplay','DirectoryAdded',
+         'PreModelSwitch','PostModelSwitch'}
 hj = pathlib.Path('hooks/hooks.json')
 if not hj.exists(): sys.exit(0)
 cfg = json.loads(hj.read_text())

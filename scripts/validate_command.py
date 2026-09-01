@@ -38,6 +38,7 @@ from cpv_validation_common import (
     KNOWN_EXAMPLE_SECRETS,
     MIN_DESCRIPTION_CHARS,
     SECRET_PATTERNS,
+    SKILL_FRONTMATTER_FIELDS,
     USER_PATH_PATTERNS,
     VALID_EFFORT_VALUES,
     VALID_TOOLS,
@@ -62,27 +63,14 @@ from cpv_validation_common import parse_frontmatter as _shared_parse_frontmatter
 # Minimum body content length (characters)
 MIN_COMMAND_BODY_CHARS = 100
 
-# Known frontmatter fields per official docs (commands share the skill field set)
-KNOWN_FRONTMATTER_FIELDS = {
-    # Core command/skill fields
-    "name",
-    "description",
-    "allowed-tools",
-    "disallowed-tools",  # v2.1.152 — remove specific tools from the model while the command is active
-    "model",
-    "argument-hint",
-    # Skill fields now accepted for commands (commands-as-skills per skills.md)
-    "when_to_use",
-    "arguments",
-    "disable-model-invocation",
-    "user-invocable",
-    "effort",
-    "context",
-    "agent",
-    "shell",
-    "hooks",
-    "paths",
-}
+# Known frontmatter fields per official docs. skills.md:170 — "Files in
+# `.claude/commands/` support the same frontmatter [as skills], except `name`
+# and `paths`, which Claude Code ignores in a command file." So the field SET
+# is identical to skills' (one source of truth, as validate_skill.py:79 does)
+# — `name`/`paths` stay syntactically KNOWN (no "unknown field" warning), but
+# `validate_frontmatter_exists` below emits a NIT when either is declared,
+# since the runtime ignores them in a command file.
+KNOWN_FRONTMATTER_FIELDS = SKILL_FRONTMATTER_FIELDS
 
 # Pattern for allowed-tools with optional pattern: ToolName or ToolName(pattern*)
 TOOL_PATTERN_REGEX = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?$")
@@ -214,16 +202,43 @@ def validate_frontmatter_exists(content: str, report: CommandValidationReport, f
     # off the raw frontmatter text.
     validate_no_duplicate_frontmatter_keys(content, report, filename)
 
-    # Check for unknown fields. Commands share the skill field set, so the four
-    # v2.1.186 keys (display-name/default-enabled/fallback/metadata, any casing) are
-    # accepted via is_known_skill_frontmatter_key; command-specific fields stay
-    # covered by the local KNOWN_FRONTMATTER_FIELDS.
+    # Check for unknown fields. Commands share the skill field set (skills.md:170),
+    # so the four v2.1.186 keys (display-name/default-enabled/fallback/metadata,
+    # any casing) are accepted via is_known_skill_frontmatter_key; every other
+    # field stays covered by KNOWN_FRONTMATTER_FIELDS == SKILL_FRONTMATTER_FIELDS.
     for key in frontmatter.keys():
         if key not in KNOWN_FRONTMATTER_FIELDS and not is_known_skill_frontmatter_key(key):
             report.warning(
                 f"Unknown frontmatter field '{key}' (may be ignored by CLI)",
                 filename,
             )
+
+    # skills.md:170 — "except `name` and `paths`, which Claude Code ignores in
+    # a command file." Both are syntactically valid frontmatter (no unknown-field
+    # warning above), but the runtime never reads them here: a command is
+    # invoked by its file name, and `paths`-based activation-scoping is a skill
+    # concept that has no command-file equivalent.
+    #
+    # `name` is a WARNING, not a NIT: it is a harmless, widely-used field (it
+    # fires on all 14 of CPV's own commands) that carries no functional
+    # surprise — the file name always wins regardless. A NIT blocks
+    # `--strict`, which would turn this cosmetic no-op into a publish
+    # blocker for nearly every plugin shipping commands. `paths` stays a
+    # NIT: a silently-ignored `paths` is a real functional surprise (an
+    # author reasonably expects it to scope activation, per the skill
+    # convention it mirrors), so it is worth the stricter gate.
+    if "name" in frontmatter:
+        report.warning(
+            "'name' is ignored in a command file (per skills.md); "
+            "Claude Code invokes a command by its file name",
+            filename,
+        )
+    if "paths" in frontmatter:
+        report.nit(
+            "'paths' is ignored in a command file (per skills.md); "
+            "Claude Code invokes a command by its file name",
+            filename,
+        )
 
     return frontmatter
 

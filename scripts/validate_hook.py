@@ -2075,6 +2075,65 @@ def reconcile_python_runtime_deps(
         return
 
 
+def _lint_timeout_scale() -> float:
+    """Read the CPV_LINT_TIMEOUT_SCALE override (issue #221).
+
+    A per-file linter timeout is a measurement of *host load at that moment*,
+    not a property of the plugin being validated -- so a single fixed budget
+    either false-blocks a slow/loaded CI runner or is too generous everywhere
+    else. One multiplier applied to all four linter budgets (shellcheck/ruff/
+    mypy/eslint) lets a caller widen (or narrow) them without CPV inventing a
+    separate env var per tool. Fails fast on a non-positive/non-numeric value
+    instead of silently ignoring it -- a caller who mistypes the override
+    would otherwise believe it took effect.
+    """
+    raw = os.environ.get("CPV_LINT_TIMEOUT_SCALE")
+    if raw is None or raw.strip() == "":
+        return 1.0
+    try:
+        scale = float(raw)
+    except ValueError as e:
+        raise SystemExit(f"CPV_LINT_TIMEOUT_SCALE={raw!r} is not a valid number") from e
+    if scale <= 0:
+        raise SystemExit(f"CPV_LINT_TIMEOUT_SCALE={raw!r} must be a positive number")
+    return scale
+
+
+def _run_lint_with_timeout_retry(
+    argv: list[str],
+    *,
+    timeout: float,
+    script_path: Path,
+    report: ValidationReport,
+    tool_name: str,
+) -> subprocess.CompletedProcess[str] | None:
+    """Run a linter subprocess, retrying once on timeout (issue #221).
+
+    A timeout measures host load, not a plugin defect -- reporting it as a
+    blocking MINOR (which reads as "found an issue") can abort a --strict
+    release over nothing the plugin author can fix. Retry once (a transient
+    load spike often clears on the second attempt); if it still times out the
+    result is genuinely UNKNOWN, so this reports a non-blocking WARNING that
+    says so explicitly rather than a MINOR that reads as a finding, and
+    returns None so the caller skips processing output that never arrived.
+    OSError/SubprocessError are NOT retried here -- they are not a timeout and
+    the caller's own except-clause reports them as before.
+    """
+    scaled = timeout * _lint_timeout_scale()
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=scaled)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=scaled)
+    except subprocess.TimeoutExpired:
+        report.warning(
+            f"{tool_name} timed out twice for {script_path.name} "
+            f"(budget {scaled:g}s) -- result UNKNOWN, not checked"
+        )
+        return None
+
+
 def lint_bash_script(script_path: Path, report: ValidationReport) -> None:
     """Lint a bash script using shellcheck."""
     shellcheck_cmd = resolve_tool_command("shellcheck")
@@ -2083,12 +2142,15 @@ def lint_bash_script(script_path: Path, report: ValidationReport) -> None:
         return
 
     try:
-        result = subprocess.run(
+        result = _run_lint_with_timeout_retry(
             shellcheck_cmd + ["-f", "json", str(script_path)],
-            capture_output=True,
-            text=True,
             timeout=30,
+            script_path=script_path,
+            report=report,
+            tool_name="shellcheck",
         )
+        if result is None:
+            return
 
         if result.returncode == 0:
             report.passed(f"shellcheck: {script_path.name} OK")
@@ -2118,8 +2180,6 @@ def lint_bash_script(script_path: Path, report: ValidationReport) -> None:
                     line,
                 )
 
-    except subprocess.TimeoutExpired:
-        report.minor(f"shellcheck timeout for {script_path.name}")
     except (OSError, subprocess.SubprocessError) as e:
         # Only swallow subprocess/OS flakiness (spawn failure, weird exit,
         # broken pipe) as a soft MINOR. A programming error in CPV itself
@@ -2135,14 +2195,16 @@ def lint_python_script(script_path: Path, report: ValidationReport) -> None:
     ruff_cmd = resolve_tool_command("ruff")
     if ruff_cmd:
         try:
-            result = subprocess.run(
+            result = _run_lint_with_timeout_retry(
                 ruff_cmd + ["check", "--output-format=json", str(script_path)],
-                capture_output=True,
-                text=True,
                 timeout=30,
+                script_path=script_path,
+                report=report,
+                tool_name="ruff",
             )
-
-            if result.returncode == 0:
+            if result is None:
+                pass
+            elif result.returncode == 0:
                 report.passed(f"ruff check: {script_path.name} OK")
             else:
                 try:
@@ -2162,8 +2224,6 @@ def lint_python_script(script_path: Path, report: ValidationReport) -> None:
                         line,
                     )
 
-        except subprocess.TimeoutExpired:
-            report.minor(f"ruff timeout for {script_path.name}")
         except (OSError, subprocess.SubprocessError) as e:
             # Subprocess/OS flakiness only — a CPV-internal bug propagates
             # (fail-fast) rather than being downgraded to a soft MINOR.
@@ -2184,19 +2244,22 @@ def lint_python_script(script_path: Path, report: ValidationReport) -> None:
     mypy_cmd = resolve_tool_command("mypy")
     if mypy_cmd:
         try:
-            result = subprocess.run(
+            result = _run_lint_with_timeout_retry(
                 mypy_cmd
                 + [
                     "--ignore-missing-imports",
                     "--no-error-summary",
                     str(script_path),
                 ],
-                capture_output=True,
-                text=True,
                 timeout=60,
+                script_path=script_path,
+                report=report,
+                tool_name="mypy",
             )
 
-            if result.returncode == 0:
+            if result is None:
+                pass
+            elif result.returncode == 0:
                 report.passed(f"mypy: {script_path.name} OK")
             else:
                 # Parse mypy output
@@ -2213,8 +2276,6 @@ def lint_python_script(script_path: Path, report: ValidationReport) -> None:
                                 lineno,
                             )
 
-        except subprocess.TimeoutExpired:
-            report.minor(f"mypy timeout for {script_path.name}")
         except (OSError, subprocess.SubprocessError) as e:
             # Subprocess/OS flakiness only — a CPV-internal bug propagates
             # (fail-fast) rather than being downgraded to a soft MINOR.
@@ -2231,12 +2292,15 @@ def lint_js_script(script_path: Path, report: ValidationReport) -> None:
         return
 
     try:
-        result = subprocess.run(
+        result = _run_lint_with_timeout_retry(
             eslint_cmd + ["--format=json", str(script_path)],
-            capture_output=True,
-            text=True,
             timeout=30,
+            script_path=script_path,
+            report=report,
+            tool_name="eslint",
         )
+        if result is None:
+            return
 
         if result.returncode == 0:
             report.passed(f"eslint: {script_path.name} OK")
@@ -2267,8 +2331,6 @@ def lint_js_script(script_path: Path, report: ValidationReport) -> None:
                         line,
                     )
 
-    except subprocess.TimeoutExpired:
-        report.minor(f"eslint timeout for {script_path.name}")
     except (OSError, subprocess.SubprocessError) as e:
         # Subprocess/OS flakiness only — a CPV-internal bug propagates
         # (fail-fast) rather than being downgraded to a soft MINOR.

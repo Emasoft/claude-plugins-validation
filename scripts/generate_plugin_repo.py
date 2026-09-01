@@ -4442,7 +4442,7 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
     while True:
         listed = subprocess.run(
             ["gh", "run", "list", "--commit", sha, "--limit", "20",
-             "--json", "name,status,conclusion"],
+             "--json", "name,status,conclusion,headBranch"],
             cwd=str(root), capture_output=True, text=True,
         )
         if listed.returncode != 0:
@@ -4474,8 +4474,13 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
 
     # `skipped`/`neutral` are not failures — a dormant optional workflow
     # (e.g. a PyPI publish that only fires on a tag) always reports skipped.
-    failed = [r for r in runs
-              if r.get("conclusion") not in ("success", "skipped", "neutral")]
+    # `cancelled` is not automatically a failure either: the concurrency group
+    # cancels a run that a newer push to the same branch superseded, which
+    # looks identical to a genuine user-cancel unless we go find that newer
+    # run ourselves.
+    cancelled_runs = [r for r in runs if r.get("conclusion") == "cancelled"]
+    successors = _resolve_ci_run_successors(root, sha, cancelled_runs) if cancelled_runs else {}
+    failed, unknown = classify_ci_runs(runs, successors)
     if failed:
         detail = ", ".join(f"{r.get('name', '?')}={r.get('conclusion')}" for r in failed)
         cprint(f"  {RED}CI IS RED on the released commit {sha[:8]}: {detail}{NC}")
@@ -4488,8 +4493,87 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
         cprint(f"  {RED}        then: gh run view --log-failed <run-id>{NC}")
         return
 
+    if unknown:
+        names = ", ".join(sorted({str(r.get("name", "?")) for r in unknown}))
+        cprint(f"  {YELLOW}? CI verdict UNKNOWN on {sha[:8]}: run cancelled and no successor found - not checked ({names}).{NC}")
+        cprint(f"  {YELLOW}  Verify manually: gh run list --commit {sha}{NC}")
+        return
+
     names = ", ".join(sorted({str(r.get("name", "?")) for r in runs}))
     cprint(f"  {GREEN}CI green on {sha[:8]} ({names}){NC}")
+
+
+def classify_ci_runs(runs: list[dict], successors: dict[str, bool]) -> tuple[list[dict], list[dict]]:
+    """Split completed CI runs for one commit into (failed, unknown).
+
+    A `success`/`skipped`/`neutral` conclusion is fine and appears in neither
+    list. Any OTHER conclusion is a genuine failure — EXCEPT `cancelled`,
+    which used to be treated identically to a real failure even though
+    GitHub's own concurrency-group cancellation reports it that way for a run
+    that was merely SUPERSEDED by a newer push to the same branch. `successors`
+    disambiguates: it maps a cancelled run's workflow NAME to whether a newer
+    run of that same workflow was found on a commit descended from the one
+    being verified. Found -> the cancellation was benign supersession,
+    excluded from both lists. Not found -> we cannot tell a genuine
+    user-cancel from a lost successor, so it goes to `unknown` and the caller
+    must report UNKNOWN, never green.
+    """
+    failed: list[dict] = []
+    unknown: list[dict] = []
+    for r in runs:
+        conclusion = r.get("conclusion")
+        if conclusion in ("success", "skipped", "neutral"):
+            continue
+        if conclusion == "cancelled":
+            if successors.get(str(r.get("name", "?"))):
+                continue
+            unknown.append(r)
+            continue
+        failed.append(r)
+    return failed, unknown
+
+
+def _resolve_ci_run_successors(root: Path, sha: str, cancelled_runs: list[dict]) -> dict[str, bool]:
+    """For each cancelled run, look for a newer descendant-commit successor.
+
+    A `cancelled` run counts as superseded-not-failed only when a LATER run
+    of the SAME workflow exists on a commit that is a git descendant of
+    `sha` — i.e. a newer push to the same branch genuinely superseded this
+    one. Any failure to determine that (no branch info, an unresolved
+    merge-base) leaves that workflow's entry absent from the returned map,
+    which `classify_ci_runs` treats as "no successor found".
+    """
+    result: dict[str, bool] = {}
+    for r in cancelled_runs:
+        name = str(r.get("name", "?"))
+        if name in result:
+            continue
+        branch = r.get("headBranch")
+        if not branch:
+            continue
+        listed = subprocess.run(
+            ["gh", "run", "list", "--workflow", name, "--branch", str(branch),
+             "--limit", "20", "--json", "headSha,conclusion,status,createdAt"],
+            cwd=str(root), capture_output=True, text=True,
+        )
+        if listed.returncode != 0:
+            continue
+        try:
+            candidates = json.loads(listed.stdout or "[]")
+        except json.JSONDecodeError:
+            continue
+        for c in candidates:
+            candidate_sha = c.get("headSha")
+            if not candidate_sha or candidate_sha == sha:
+                continue
+            ancestry = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", sha, candidate_sha],
+                cwd=str(root), capture_output=True,
+            )
+            if ancestry.returncode == 0:
+                result[name] = True
+                break
+    return result
 
 
 # -- Main ----------------------------------------------------------------------
