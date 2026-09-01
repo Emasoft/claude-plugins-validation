@@ -2014,6 +2014,38 @@ class TestV2223MarketplaceMinorFixes:
         )
 
 
+class TestMetadataPluginEntryField:
+    """CC v2.1.222 — plugin-marketplaces.md:217 `metadata` at plugin-entry level."""
+
+    def test_metadata_field_accepted_no_unknown_field_finding(self, tmp_path):
+        """A plugin entry carrying `metadata` produces no unknown-field finding."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": {"source": "github", "repo": "owner/my-plugin"},
+            "metadata": {"entitlement": "pro", "catalogId": "abc123"},
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert not any("unknown" in r.message.lower() and "metadata" in r.message for r in results), (
+            f"metadata should be a known optional field: {[(r.level, r.message) for r in results]}"
+        )
+
+    def test_metadata_typo_still_flagged(self, tmp_path):
+        """A near-miss typo of `metadata` still fires RC-MKPL-UNKNOWN-FIELD (positive control)."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {
+            "name": "my-plugin",
+            "source": {"source": "github", "repo": "owner/my-plugin"},
+            "metadatx": {"entitlement": "pro"},
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert any(
+            r.level == "MAJOR" and "RC-MKPL-UNKNOWN-FIELD" in r.message and "metadatx" in r.message for r in results
+        ), f"a typo'd field name must still be flagged unknown: {[(r.level, r.message) for r in results]}"
+
+
 class TestNestedPluginSelfReferenceGuard:
     """n2: _validate_nested_plugin must not validate a marketplace root as a plugin."""
 
@@ -2096,3 +2128,96 @@ class TestMarketplaceReportAtomicWrite:
         assert report_path.read_text().strip() != ""
         # The atomic-rename helper must not leave the sibling temp file behind.
         assert not (report_path.parent / (report_path.name + ".tmp")).exists()
+
+
+class TestComponentPathTraversal:
+    """CC v2.1.251 — a marketplace entry's commands/agents/skills/hooks
+    component path resolving outside the plugin's own directory is rejected
+    as path-traversal. Only checkable for a local (relative-path) source.
+    """
+
+    def _make_local_plugin(self, tmp_path: Path, plugin_name: str = "myplugin") -> Path:
+        plugin_dir = tmp_path / plugin_name
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": plugin_name, "description": "d"})
+        )
+        (plugin_dir / "commands").mkdir()
+        return plugin_dir
+
+    def _codes(self, results, level: str) -> list:
+        return [r for r in results if r.level == level]
+
+    def test_outside_path_is_critical(self, tmp_path):
+        """A commands path escaping the plugin dir via '..' is CRITICAL."""
+        from validate_marketplace import validate_plugin_entry
+
+        self._make_local_plugin(tmp_path, "myplugin")
+        (tmp_path / "outside").mkdir()
+        plugin = {
+            "name": "myplugin",
+            "source": "./myplugin",
+            "commands": ["../outside"],
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        criticals = self._codes(results, "CRITICAL")
+        assert any("path-traversal" in r.message for r in criticals)
+
+    def test_in_tree_path_is_clean(self, tmp_path):
+        """A commands path resolving inside the plugin dir draws no
+        traversal finding (positive control)."""
+        from validate_marketplace import validate_plugin_entry
+
+        self._make_local_plugin(tmp_path, "myplugin2")
+        plugin = {
+            "name": "myplugin2",
+            "source": "./myplugin2",
+            "commands": ["./commands"],
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert not any("path-traversal" in r.message for r in results)
+
+    def test_absolute_component_path_is_critical(self, tmp_path):
+        """An absolute component path is CRITICAL."""
+        from validate_marketplace import validate_plugin_entry
+
+        self._make_local_plugin(tmp_path, "myplugin3")
+        plugin = {
+            "name": "myplugin3",
+            "source": "./myplugin3",
+            "agents": "/etc/passwd",
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        criticals = self._codes(results, "CRITICAL")
+        assert any("is absolute" in r.message for r in criticals)
+
+    def test_remote_source_is_skipped(self, tmp_path):
+        """A non-local (github) source cannot be checked at validate-time —
+        no traversal finding should fire even with a suspicious path."""
+        from validate_marketplace import validate_component_path_traversal
+
+        plugin = {
+            "name": "remote-plugin",
+            "source": {"source": "github", "repo": "owner/repo"},
+            "commands": ["../escape"],
+        }
+        results = validate_component_path_traversal(plugin, "remote-plugin", tmp_path, "mp.json")
+        assert results == []
+
+    def test_symlink_escaping_plugin_dir_is_critical(self, tmp_path):
+        """A commands path that is a symlink resolving outside the plugin
+        dir is CRITICAL, even though the raw string itself is in-tree."""
+        from validate_marketplace import validate_plugin_entry
+
+        plugin_dir = self._make_local_plugin(tmp_path, "myplugin4")
+        outside_target = tmp_path / "outside-target"
+        outside_target.mkdir()
+        (plugin_dir / "linked-commands").symlink_to(outside_target, target_is_directory=True)
+        plugin = {
+            "name": "myplugin4",
+            "source": "./myplugin4",
+            "commands": ["./linked-commands"],
+        }
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        criticals = self._codes(results, "CRITICAL")
+        assert any("symlink" in r.message for r in criticals)

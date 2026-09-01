@@ -139,6 +139,8 @@ Plugin hooks respond to the same lifecycle events as [user-defined hooks](/en/ho
 | `Elicitation`         | When an MCP server requests user input during a tool call                                                                                              |
 | `ElicitationResult`   | After a user responds to an MCP elicitation, before the response is sent back to the server                                                            |
 | `SessionEnd`          | When a session terminates                                                                                                                              |
+| `PreModelSwitch`      | Before Claude Code applies a requested model switch. Can block/ask/allow via permissionDecision                                                        |
+| `PostModelSwitch`     | After the session's model changes. Cannot block                                                                                                        |
 
 **Hook types**:
 

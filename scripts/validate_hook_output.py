@@ -88,6 +88,11 @@ UNIVERSAL_OUTPUT_FIELDS: frozenset[str] = frozenset(
 # one single source of truth.
 PRETOOLUSE_DECISIONS: frozenset[str] = frozenset({"allow", "deny", "ask", "defer"})
 
+# CC v2.1.251 — PreModelSwitch permissionDecision accepts "allow", "deny",
+# "ask" only; it does NOT accept "defer" (hooks.md #PreModelSwitch decision
+# control states this explicitly — unlike PreToolUse's superset above).
+PREMODELSWITCH_DECISIONS: frozenset[str] = frozenset({"allow", "deny", "ask"})
+
 # =============================================================================
 # Permission update entries — hooks.md L1115-1141
 # =============================================================================
@@ -246,6 +251,15 @@ HOOK_OUTPUT_EVENT_FIELDS: dict[str, frozenset[str]] = {
     # displayContent (str) replaces the on-screen text only; transcript and
     # what Claude sees keep the original.
     "MessageDisplay": frozenset({"displayContent"}),
+    # CC v2.1.251 — PreModelSwitch #PreModelSwitch decision control: accepts
+    # permissionDecision (allow/deny/ask) + permissionDecisionReason. Does NOT
+    # accept "defer", updatedInput, or additionalContext (doc says so
+    # explicitly) — deliberately excluded from this set.
+    "PreModelSwitch": frozenset({"permissionDecision", "permissionDecisionReason"}),
+    # CC v2.1.251 — PostModelSwitch #PostModelSwitch decision control: it
+    # cannot block (the model already changed); the only extra field is
+    # additionalContext, delivered with the next request after the switch.
+    "PostModelSwitch": frozenset({"additionalContext"}),
 }
 
 
@@ -364,6 +378,26 @@ def _validate_hook_specific_output(event_name: str, hso: Any, report: Validation
         _validate_worktree_create_hso(hso, report)
     elif event_name == "MessageDisplay":
         _validate_message_display_hso(hso, report)
+    elif event_name == "PreModelSwitch":
+        _validate_premodelswitch_hso(hso, report)
+
+
+def _validate_premodelswitch_hso(hso: dict[str, Any], report: ValidationReport) -> None:
+    """Validate PreModelSwitch hookSpecificOutput (hooks.md #PreModelSwitch decision control)."""
+    decision = hso.get("permissionDecision")
+    if decision is not None:
+        if not isinstance(decision, str):
+            report.major(f"PreModelSwitch permissionDecision must be a string, got {type(decision).__name__}")
+        elif decision not in PREMODELSWITCH_DECISIONS:
+            report.major(
+                f"Unknown PreModelSwitch permissionDecision: {decision!r}. "
+                f"Expected one of: {sorted(PREMODELSWITCH_DECISIONS)} "
+                "(hooks.md #PreModelSwitch decision control — 'defer' is NOT accepted here)"
+            )
+
+    reason = hso.get("permissionDecisionReason")
+    if reason is not None and not isinstance(reason, str):
+        report.major(f"PreModelSwitch permissionDecisionReason must be a string, got {type(reason).__name__}")
 
 
 def _validate_pretooluse_hso(hso: dict[str, Any], report: ValidationReport) -> None:
@@ -550,6 +584,7 @@ TOP_LEVEL_BLOCK_EVENTS: frozenset[str] = frozenset(
         "UserPromptSubmit",
         "UserPromptExpansion",  # v2.1.121 — same decision semantics as UserPromptSubmit
         "PostToolBatch",  # v2.1.121 — supports decision/block per hooks.md
+        "PreModelSwitch",  # CC v2.1.251 — top-level decision:"block" cancels the switch
     }
 )
 

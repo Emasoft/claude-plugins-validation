@@ -331,6 +331,8 @@ VALID_HOOK_EVENTS = {
     "PermissionDenied",  # v2.1.89 — fires when auto mode classifier denies a tool call
     "MessageDisplay",  # v2.1.152 — transform/hide assistant message text as displayed (hookSpecificOutput.displayContent)
     "DirectoryAdded",  # v2.1.219 — fires after /add-dir or the SDK register_repo_root registers a working dir mid-session
+    "PreModelSwitch",  # CC v2.1.251 — runs before a requested model switch; can block/ask/allow
+    "PostModelSwitch",  # CC v2.1.251 — runs after the session's model changes; cannot block
 }
 
 # =============================================================================
@@ -384,6 +386,7 @@ HOOK_EVENTS_NO_PROMPT_OR_AGENT: frozenset[str] = frozenset(
         "Notification",
         "PostCompact",
         "PreCompact",
+        "PreModelSwitch",  # CC v2.1.251 — "runs command, http, and mcp_tool hooks only"
         "SessionEnd",
         "StopFailure",
         "SubagentStart",

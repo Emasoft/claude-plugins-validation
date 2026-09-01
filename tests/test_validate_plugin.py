@@ -4247,3 +4247,156 @@ class TestAuditFixesV2106:
         only_settings.mkdir()
         (only_settings / "settings.json").write_text("{}")
         assert _classify_path(only_settings) != "claude_project_config"
+
+
+class TestComponentSymlinkHandling:
+    """CC v2.1.257 — plugins-reference.md:833-841 symlink resolution rules.
+
+    A component-path symlink resolving inside the plugin dir is preserved
+    (clean); one resolving elsewhere in the SAME marketplace is dereferenced
+    (clean); one resolving outside the marketplace is refused (CRITICAL); one
+    resolving outside the plugin dir with no discoverable marketplace root is
+    unverifiable standalone (WARNING, never CRITICAL/MAJOR).
+    """
+
+    def _make_plugin(self, root: Path, name: str = "p") -> Path:
+        plugin_dir = root / name
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": name, "description": "d"})
+        )
+        return plugin_dir
+
+    def _findings_for(self, report, level: str) -> list:
+        return [r for r in report.results if r.level == level]
+
+    def test_plain_directory_no_finding(self, tmp_path):
+        """A regular (non-symlink) commands/ dir draws no finding at all."""
+        from validate_plugin import validate_component_symlinks
+
+        plugin_dir = self._make_plugin(tmp_path)
+        (plugin_dir / "commands").mkdir()
+        report = ValidationReport()
+        validate_component_symlinks(plugin_dir, report)
+        assert self._findings_for(report, "CRITICAL") == []
+        assert self._findings_for(report, "WARNING") == []
+
+    def test_internal_symlink_is_clean(self, tmp_path):
+        """A symlink whose target stays inside the plugin's own dir is
+        preserved by Claude Code — must draw no finding."""
+        from validate_plugin import validate_component_symlinks
+
+        plugin_dir = self._make_plugin(tmp_path)
+        real_dir = plugin_dir / "real-commands"
+        real_dir.mkdir()
+        (plugin_dir / "commands").symlink_to(real_dir, target_is_directory=True)
+        report = ValidationReport()
+        validate_component_symlinks(plugin_dir, report)
+        assert self._findings_for(report, "CRITICAL") == []
+        assert self._findings_for(report, "WARNING") == []
+
+    def test_sibling_plugin_symlink_inside_marketplace_is_clean(self, tmp_path):
+        """A symlink pointing at another plugin's dir WITHIN the same
+        marketplace checkout is dereferenced by Claude Code — clean."""
+        from validate_plugin import validate_component_symlinks
+
+        marketplace_root = tmp_path
+        (marketplace_root / ".claude-plugin").mkdir(parents=True)
+        (marketplace_root / ".claude-plugin" / "marketplace.json").write_text("{}")
+        plugin_a = self._make_plugin(marketplace_root, "plugin-a")
+        plugin_b = self._make_plugin(marketplace_root, "plugin-b")
+        shared_skills = plugin_b / "shared-skills"
+        shared_skills.mkdir()
+        (plugin_a / "skills").symlink_to(shared_skills, target_is_directory=True)
+        report = ValidationReport()
+        validate_component_symlinks(plugin_a, report)
+        assert self._findings_for(report, "CRITICAL") == []
+        assert self._findings_for(report, "WARNING") == []
+
+    def test_symlink_outside_marketplace_is_critical(self, tmp_path):
+        """A symlink escaping the marketplace root is refused at load —
+        CRITICAL."""
+        from validate_plugin import validate_component_symlinks
+
+        marketplace_root = tmp_path / "marketplace"
+        (marketplace_root / ".claude-plugin").mkdir(parents=True)
+        (marketplace_root / ".claude-plugin" / "marketplace.json").write_text("{}")
+        plugin_dir = self._make_plugin(marketplace_root, "plugin-a")
+        outside_target = tmp_path / "outside-target"
+        outside_target.mkdir()
+        (plugin_dir / "agents").symlink_to(outside_target, target_is_directory=True)
+        report = ValidationReport()
+        validate_component_symlinks(plugin_dir, report)
+        criticals = self._findings_for(report, "CRITICAL")
+        assert len(criticals) == 1
+        assert "OUTSIDE the marketplace" in criticals[0].message
+        assert self._findings_for(report, "WARNING") == []
+
+    def test_standalone_escaping_symlink_is_warning_not_critical(self, tmp_path):
+        """No discoverable marketplace root + an escaping symlink is
+        unverifiable standalone — WARNING, never CRITICAL/MAJOR."""
+        from validate_plugin import validate_component_symlinks
+
+        plugin_dir = self._make_plugin(tmp_path, "standalone-plugin")
+        outside_target = tmp_path / "outside-target"
+        outside_target.mkdir()
+        (plugin_dir / "hooks").symlink_to(outside_target, target_is_directory=True)
+        report = ValidationReport()
+        validate_component_symlinks(plugin_dir, report)
+        assert self._findings_for(report, "CRITICAL") == []
+        warnings = self._findings_for(report, "WARNING")
+        assert len(warnings) == 1
+        assert "cannot verify standalone" in warnings[0].message
+
+    def test_declared_component_field_symlink_escaping_is_flagged(self, tmp_path):
+        """A plugin.json-declared `skills` path (not just a default dir) that
+        is a symlink escaping the plugin still gets caught."""
+        from validate_plugin import validate_component_symlinks
+
+        plugin_dir = self._make_plugin(tmp_path, "declared-plugin")
+        manifest_path = plugin_dir / ".claude-plugin" / "plugin.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["skills"] = ["./custom-skills"]
+        manifest_path.write_text(json.dumps(manifest))
+        outside_target = tmp_path / "outside-target"
+        outside_target.mkdir()
+        (plugin_dir / "custom-skills").symlink_to(outside_target, target_is_directory=True)
+        report = ValidationReport()
+        validate_component_symlinks(plugin_dir, report)
+        warnings = self._findings_for(report, "WARNING")
+        assert len(warnings) == 1
+        assert "skills: ./custom-skills" in warnings[0].message
+
+    def test_undeclared_nested_symlink_escaping_marketplace_is_critical(self, tmp_path):
+        """Coordinator FN (2026-09-01): a marketplace tree with sibling plugins
+        `a`/`b`. `a/skills/shared -> ../../b/skills/shared` (valid, same
+        marketplace) must draw NO finding; `a/skills/evil -> /tmp/outside/...`
+        (escapes the marketplace) must draw exactly 1 CRITICAL naming
+        `skills/evil` — neither symlink sits at a declared/default top-level
+        component path, so only a whole-tree walk can see them."""
+        from validate_plugin import validate_component_symlinks
+
+        marketplace_root = tmp_path / "marketplace"
+        (marketplace_root / ".claude-plugin").mkdir(parents=True)
+        (marketplace_root / ".claude-plugin" / "marketplace.json").write_text("{}")
+        plugin_a = self._make_plugin(marketplace_root, "a")
+        plugin_b = self._make_plugin(marketplace_root, "b")
+
+        shared_skill = plugin_b / "skills" / "shared"
+        shared_skill.mkdir(parents=True)
+        (plugin_a / "skills").mkdir()
+        (plugin_a / "skills" / "shared").symlink_to(shared_skill, target_is_directory=True)
+
+        outside_dir = tmp_path / "outside" / "skills" / "evil"
+        outside_dir.mkdir(parents=True)
+        (plugin_a / "skills" / "evil").symlink_to(outside_dir, target_is_directory=True)
+
+        report = ValidationReport()
+        validate_component_symlinks(plugin_a, report)
+
+        criticals = self._findings_for(report, "CRITICAL")
+        warnings = self._findings_for(report, "WARNING")
+        assert warnings == []
+        assert len(criticals) == 1
+        assert "skills/evil" in criticals[0].message
+        assert not any("skills/shared" in c.message for c in criticals)

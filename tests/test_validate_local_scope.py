@@ -1012,3 +1012,91 @@ class TestNewSettingsKeysV2_1_208:
 
         assert "axScreenReaderr" not in KNOWN_SETTINGS_KEYS
         assert "notARealSetting" not in KNOWN_SETTINGS_KEYS
+
+
+# =============================================================================
+# CC spec sync v2.1.257 — new settings keys + scope rules
+# =============================================================================
+
+
+class TestBypassPermissionsIgnoredAtLocalScope:
+    """CC v2.1.257: defaultMode 'bypassPermissions' is ignored in
+    settings.local.json — same treatment 'auto' already had."""
+
+    def test_bypass_permissions_fires_ignored_warning(self, tmp_path: Path) -> None:
+        f = tmp_path / "settings.local.json"
+        f.write_text(json.dumps({"permissions": {"defaultMode": "bypassPermissions"}}) + "\n", encoding="utf-8")
+        report = ValidationReport()
+        validate_settings_local_json(f, report)
+        assert any("RC-BYPASSPERMISSIONS-IGNORED" in m for m in _messages(report, "WARNING"))
+
+    def test_bypass_permissions_ignored_warning_is_not_blocking(self, tmp_path: Path) -> None:
+        f = tmp_path / "settings.local.json"
+        f.write_text(json.dumps({"permissions": {"defaultMode": "bypassPermissions"}}) + "\n", encoding="utf-8")
+        report = ValidationReport()
+        validate_settings_local_json(f, report)
+        assert not report.has_critical
+        levels = {r.level for r in report.results}
+        assert not levels & {"MAJOR", "MINOR"}
+
+    def test_a_different_mode_does_not_fire_the_ignored_warning(self, tmp_path: Path) -> None:
+        """Two-sided: 'acceptEdits' at local scope is honored, no ignored-warning."""
+        f = tmp_path / "settings.local.json"
+        f.write_text(json.dumps({"permissions": {"defaultMode": "acceptEdits"}}) + "\n", encoding="utf-8")
+        report = ValidationReport()
+        validate_settings_local_json(f, report)
+        assert not any("RC-BYPASSPERMISSIONS-IGNORED" in m for m in _messages(report, "WARNING"))
+
+
+class TestIgnoredEnvVarNamesAtLocalScope:
+    """CC v2.1.251+: the same env keys Claude Code drops from project
+    settings.json are ALSO dropped from settings.local.json — verified
+    against settings-reference.md's "Project and local settings can't set…"."""
+
+    def test_claude_config_dir_fires_critical(self, tmp_path: Path) -> None:
+        f = tmp_path / "settings.local.json"
+        f.write_text(json.dumps({"env": {"CLAUDE_CONFIG_DIR": "/tmp/x"}}) + "\n", encoding="utf-8")
+        report = ValidationReport()
+        validate_settings_local_json(f, report)
+        assert any("env.CLAUDE_CONFIG_DIR" in m for m in _messages(report, "CRITICAL"))
+
+    def test_tmpdir_family_fires_critical(self, tmp_path: Path) -> None:
+        f = tmp_path / "settings.local.json"
+        f.write_text(
+            json.dumps({"env": {"CLAUDE_CODE_TMPDIR": "/x", "TMPDIR": "/y", "TMP": "/z", "TEMP": "/w"}}) + "\n",
+            encoding="utf-8",
+        )
+        report = ValidationReport()
+        validate_settings_local_json(f, report)
+        critical = _messages(report, "CRITICAL")
+        for name in ("CLAUDE_CODE_TMPDIR", "TMPDIR", "TMP", "TEMP"):
+            assert any(f"env.{name}" in m for m in critical), name
+
+    def test_sync_process_wrapper_trio_fires_critical(self, tmp_path: Path) -> None:
+        f = tmp_path / "settings.local.json"
+        f.write_text(
+            json.dumps(
+                {
+                    "env": {
+                        "CLAUDE_CODE_PROCESS_WRAPPER": "1",
+                        "CLAUDE_CODE_SYNC_SKILLS": "1",
+                        "CLAUDE_CODE_PLUGIN_CACHE_DIR": "/x",
+                    }
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        report = ValidationReport()
+        validate_settings_local_json(f, report)
+        critical = _messages(report, "CRITICAL")
+        for name in ("CLAUDE_CODE_PROCESS_WRAPPER", "CLAUDE_CODE_SYNC_SKILLS", "CLAUDE_CODE_PLUGIN_CACHE_DIR"):
+            assert any(f"env.{name}" in m for m in critical), name
+
+    def test_unrelated_env_var_does_not_fire(self, tmp_path: Path) -> None:
+        """Two-sided: an ordinary env var at local scope is untouched."""
+        f = tmp_path / "settings.local.json"
+        f.write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://proxy.example.com"}}) + "\n", encoding="utf-8")
+        report = ValidationReport()
+        validate_settings_local_json(f, report)
+        assert not any("env.ANTHROPIC_BASE_URL" in m for m in _messages(report, "CRITICAL"))

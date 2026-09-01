@@ -254,6 +254,54 @@ class TestValidateFrontmatterExistsEdgeCases:
             for r in report.results
         )
 
+    def test_skill_shared_field_not_flagged_unknown(self):
+        """A field only in SKILL_FRONTMATTER_FIELDS (e.g. 'license') is now known for commands too,
+        since KNOWN_FRONTMATTER_FIELDS derives from the shared skill constant (skills.md:170)."""
+        content = "---\nname: test-cmd\ndescription: A valid description here\nlicense: MIT\n---\nBody text here."
+        report = CommandValidationReport()
+        result = validate_frontmatter_exists(content, report, "license-field.md")
+        assert result is not None
+        assert not any(
+            r.level == "WARNING" and "Unknown frontmatter field" in r.message and "license" in r.message
+            for r in report.results
+        )
+
+    def test_name_field_declared_reports_warning_ignored_in_command_file(self):
+        """A command file declaring 'name' gets a non-blocking WARNING (not a
+        NIT — the field is harmless, widely-used, and carries no functional
+        surprise): Claude Code ignores it in a command file."""
+        content = "---\nname: test-cmd\ndescription: A valid description here\n---\nBody text here."
+        report = CommandValidationReport()
+        result = validate_frontmatter_exists(content, report, "test-cmd.md")
+        assert result is not None
+        assert any(
+            r.level == "WARNING" and "'name'" in r.message and "ignored in a command file" in r.message
+            for r in report.results
+        )
+        assert not any(
+            r.level == "NIT" and "'name'" in r.message and "ignored in a command file" in r.message
+            for r in report.results
+        )
+
+    def test_paths_field_declared_reports_nit_ignored_in_command_file(self):
+        """A command file declaring 'paths' gets a NIT: Claude Code ignores it in a command file."""
+        content = "---\ndescription: A valid description here\npaths:\n  - '*.py'\n---\nBody text here."
+        report = CommandValidationReport()
+        result = validate_frontmatter_exists(content, report, "with-paths.md")
+        assert result is not None
+        assert any(
+            r.level == "NIT" and "'paths'" in r.message and "ignored in a command file" in r.message
+            for r in report.results
+        )
+
+    def test_no_name_or_paths_no_ignored_nit(self):
+        """A command file with neither 'name' nor 'paths' gets no ignored-field NIT (positive control)."""
+        content = "---\ndescription: A valid description here\n---\nBody text here."
+        report = CommandValidationReport()
+        result = validate_frontmatter_exists(content, report, "no-name-no-paths.md")
+        assert result is not None
+        assert not any("ignored in a command file" in r.message for r in report.results)
+
 
 class TestValidateNameFieldEdgeCases:
     """Tests for validate_name_field edge cases (lines 190-232)."""

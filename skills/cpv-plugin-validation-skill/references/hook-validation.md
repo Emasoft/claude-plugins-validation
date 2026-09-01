@@ -114,6 +114,9 @@ There are **30 valid hook events**:
 | UserPromptExpansion | Yes | When a slash command or MCP prompt expands (v2.1.121 era). Matcher: command/skill name |
 | PostToolBatch | No | After a parallel tool batch resolves (v2.1.121 era) |
 | MessageDisplay | No | Transform or hide assistant message text as displayed (v2.1.152). Output: `hookSpecificOutput.displayContent` |
+| DirectoryAdded | Yes | After `/add-dir` or the SDK `register_repo_root` registers a working dir mid-session (v2.1.219). Matchers: slash_command, register_repo_root. No decision control |
+| PreModelSwitch | Yes | Before a requested model switch (v2.1.251). Matcher: canonical model name. command/http/mcp_tool only. Can block/ask/allow via permissionDecision |
+| PostModelSwitch | Yes | After the session's model changes (v2.1.251). Matcher: canonical model name. Cannot block |
 
 ### Events With Matchers
 
@@ -132,6 +135,8 @@ These events support tool-specific or context-specific matchers:
 - FileChanged (filename/basename pattern)
 - UserPromptExpansion (command/skill name)
 - Setup (legacy)
+- DirectoryAdded (slash_command, register_repo_root)
+- PreModelSwitch, PostModelSwitch (canonical model name, ignoring any `[1m]` suffix)
 
 ### Events Without Matchers
 
@@ -178,10 +183,13 @@ so `"http"` is also excluded):
 - CwdChanged
 - FileChanged
 - InstructionsLoaded
+- PreModelSwitch (v2.1.251 — "runs command, http, and mcp_tool hooks only, so
+  the prompt and agent defaults don't apply")
 
-All other events (tool events, UserPromptSubmit, and the Stop family — Stop,
-SubagentStop, PermissionDenied, TeammateIdle, TaskCreated) accept the full
-5-type set, `"prompt"` and `"agent"` included.
+All other events (tool events, UserPromptSubmit, DirectoryAdded,
+PostModelSwitch, and the Stop family — Stop, SubagentStop, PermissionDenied,
+TeammateIdle, TaskCreated) accept the full 5-type set, `"prompt"` and
+`"agent"` included.
 
 ### Example for Each Event
 

@@ -66,7 +66,7 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/add_component.py" /path/to/my-plugin \
 
 ### Valid event names
 
-PreToolUse, PostToolUse, PostToolUseFailure, PostToolBatch, PermissionRequest, PermissionDenied, UserPromptSubmit, UserPromptExpansion, Notification, Stop, StopFailure, SubagentStop, SubagentStart, SessionStart, SessionEnd, PreCompact, PostCompact, TeammateIdle, TaskCompleted, TaskCreated, ConfigChange, WorktreeCreate, WorktreeRemove, InstructionsLoaded, Elicitation, ElicitationResult, CwdChanged, FileChanged.
+PreToolUse, PostToolUse, PostToolUseFailure, PostToolBatch, PermissionRequest, PermissionDenied, UserPromptSubmit, UserPromptExpansion, Notification, Stop, StopFailure, SubagentStop, SubagentStart, SessionStart, SessionEnd, PreCompact, PostCompact, TeammateIdle, TaskCompleted, TaskCreated, ConfigChange, WorktreeCreate, WorktreeRemove, InstructionsLoaded, Elicitation, ElicitationResult, CwdChanged, FileChanged, MessageDisplay, DirectoryAdded, PreModelSwitch, PostModelSwitch.
 
 ### When to use
 
