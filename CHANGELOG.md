@@ -2,6 +2,17 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.16.2] - 2026-09-02
+
+### Bug Fixes
+
+- **validate:** Symlink scan + install-combo scan prune gitignored dirs (TRDD-UW4CQ64E, v5.16.2)
+- **gitignore-filter:** Tolerate an unresolved root — retry relative_to with the parent resolved (TRDD-UW4CQ64E, v5.16.2)
+
+### Documentation
+
+- Archive TRDD-8LXW133B → complete (published v5.16.1; #226 closed)
+
 ## [5.16.1] - 2026-09-02
 
 ### Bug Fixes
