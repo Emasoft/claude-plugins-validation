@@ -304,15 +304,32 @@ def test_run_with_retry_on_retry_callback(tmp_path):
 # ── gh_with_retry / git_with_retry ───────────────────────────────────────────
 
 
+class _FakePopen:
+    """Minimal stand-in for the Popen run_with_retry drives (issue #224)."""
+
+    def __init__(self, cmd, returncode=0, stdout="", stderr=""):
+        self.args = cmd
+        self.pid = -1
+        self.returncode = returncode
+        self._out = (stdout, stderr)
+
+    def communicate(self, timeout=None):
+        return self._out
+
+    def poll(self):
+        return self.returncode
+
+
 def test_gh_with_retry_sets_http_timeout_env(tmp_path, monkeypatch):
     """gh_with_retry auto-injects GH_HTTP_TIMEOUT when not already set."""
     captured_env = {}
 
     def fake_run(cmd, **kwargs):
         captured_env.update(kwargs.get("env") or {})
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return _FakePopen(cmd)
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    # issue #224: run_with_retry drives Popen so it owns the pid (process-group kill).
+    monkeypatch.setattr(subprocess, "Popen", fake_run)
     monkeypatch.delenv("GH_HTTP_TIMEOUT", raising=False)
     cnr.gh_with_retry(["gh", "auth", "status"], max_attempts=1)
     assert captured_env.get("GH_HTTP_TIMEOUT") == str(cnr.GH_HTTP_TIMEOUT_SEC)
@@ -324,9 +341,10 @@ def test_gh_with_retry_preserves_existing_http_timeout(tmp_path, monkeypatch):
 
     def fake_run(cmd, **kwargs):
         captured_env.update(kwargs.get("env") or {})
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return _FakePopen(cmd)
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    # issue #224: run_with_retry drives Popen so it owns the pid (process-group kill).
+    monkeypatch.setattr(subprocess, "Popen", fake_run)
     cnr.gh_with_retry(
         ["gh", "auth", "status"],
         max_attempts=1,
@@ -341,9 +359,10 @@ def test_git_with_retry_injects_slow_transfer_config(tmp_path, monkeypatch):
 
     def fake_run(cmd, **kwargs):
         captured_cmd.append(list(cmd))
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return _FakePopen(cmd)
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    # issue #224: run_with_retry drives Popen so it owns the pid (process-group kill).
+    monkeypatch.setattr(subprocess, "Popen", fake_run)
     cnr.git_with_retry(["git", "push", "origin", "main"], cwd=tmp_path, max_attempts=1)
     assert captured_cmd, "subprocess.run was not called"
     cmd = captured_cmd[0]

@@ -1060,7 +1060,9 @@ class TestOrphanReleaseCommitRecovery:
                 local_tag_state["exists"] = False
             return _completed(returncode=0)
 
-        def fake_git_with_retry(cmd, cwd=None, env=None, capture_output=False):
+        def fake_git_with_retry(cmd, cwd=None, env=None, capture_output=False, **kwargs):
+            # **kwargs so a new retry knob (issue #224's timeout/max_attempts)
+            # does not fail this stub for a reason unrelated to what it asserts.
             commands.append(list(cmd))
             return _completed(returncode=0)
 

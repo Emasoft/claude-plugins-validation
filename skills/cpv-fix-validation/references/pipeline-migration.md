@@ -81,7 +81,7 @@ idempotency.
 `validate_plugin.py::validate_legacy_pipeline_scripts` (v2.69.0) emits a
 **`[MINOR] [RC-LEGACY-PIPELINE-001]`** finding for every known-legacy
 pipeline script that survives in the plugin's `scripts/` folder. These
-files are obsoleted by `publish.py`'s 14-gate pipeline — keeping them
+files are obsoleted by `publish.py`'s 15-stage pipeline — keeping them
 around invites users to invoke them and skip the canonical gates
 (security scans, gh-auth precheck, integrity manifest, idempotent
 commit/tag/push, cross-platform Python, etc.).
@@ -629,8 +629,9 @@ of these constructs during a manual upgrade step.
 ### Local detector (§6)
 
 **Since v2.157.0 you no longer have to REMEMBER to run this — it is
-`publish.py` Gate 3b, and it runs BEFORE the bump/commit/tag/push.** That
-is deliberate: prose in an agent prompt is advisory (an agent can skip it,
+`publish.py` stage 8/15 (CI-parity preflight), and it runs BEFORE the
+bump/commit/tag/push, in the full pipeline only (never in `--gate` mode).**
+That is deliberate: prose in an agent prompt is advisory (an agent can skip it,
 pass every other gate, push, tag, cut a release, and only THEN go red),
 whereas a gate is mechanical. Run it by hand anyway when you are *fixing*
 a plugin rather than publishing it:

@@ -77,8 +77,16 @@ def test_gate_runs_after_the_test_gate() -> None:
 
 
 def _gate_block(src: str) -> str:
-    start = src.index("[G4b] Linux fork-parity probe")
-    end = src.index("All gates passed.", start)
+    """The probe's implementation.
+
+    TRDD-EZHM759T audit row 14 moved the body out of ``run_gate`` into the
+    module-level ``_fork_parity_probe`` so the PIPELINE can run it too (with
+    hooks uninstalled the G4b gate copy never runs at all). The contract these
+    tests pin is unchanged — only where the code lives — so the slice follows it
+    to the helper instead of the old inline span.
+    """
+    start = src.index("def _fork_parity_probe(")
+    end = src.index("\ndef run_gate(", start)
     return src[start:end]
 
 
@@ -156,14 +164,17 @@ def test_probe_temp_dir_is_gitignored() -> None:
 
 
 def test_emitted_gate_dependencies_are_defined_before_it() -> None:
-    """The gate reuses ``_compiled_skip`` and ``suite_timeout`` from earlier in
-    the same function. Emitting it above either would be a NameError at publish
-    time — which py_compile cannot catch, because the file is syntactically
-    fine."""
+    """The G4b CALL SITE reuses ``suite_timeout`` from earlier in ``run_gate``.
+    Emitting it above that would be a NameError at publish time — which
+    py_compile cannot catch, because the file is syntactically fine.
+
+    The probe itself now lives in ``_fork_parity_probe``, defined ABOVE
+    ``run_gate`` and taking its budget as a parameter, so the only ordering
+    constraint left is this one."""
     src = _src()
     i_gate = src.index("[G4b] Linux fork-parity probe")
-    for dep in ("_compiled_skip = {", "suite_timeout = _test_suite_timeout"):
-        assert src.index(dep) < i_gate, f"{dep!r} must be defined before G4b uses it"
+    assert src.index("suite_timeout = _test_suite_timeout") < i_gate
+    assert src.index("def _fork_parity_probe(") < i_gate
 
 
 def test_contract_assertions_are_not_vacuous() -> None:

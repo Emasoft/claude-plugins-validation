@@ -81,7 +81,7 @@ Copy this checklist and track your progress:
 - [Examples](references/examples.md)
   > Create plugin · Create marketplace
 - [Pipeline Rules](references/pipeline-rules.md)
-  > Pre-Push Hook: The Quality Gate · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run · Post-Push CI Verification · Mega-Linter Configuration
+  > Pre-Push Hook: The Quality Gate · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Superseded validate.yml Removal · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run · Post-Push CI Verification · Generated-Pipeline Reliability Contract (v2.134.0 — CPV ref pinned, integrity-skip + timeout, `Test` aggregate gate, notify no-op without secret, "done" = green CI) · Mega-Linter Configuration · Copy-paste Gate Parity: `.jscpd.json` · Common Fixes Reference
 - [v2.1.80+ Plugin Features](references/v2-1-80-features.md)
   > Monitor tool · userConfig (plugin.json) · channels (plugin.json) · CLAUDE_PLUGIN_OPTION_<KEY> env vars · Inline marketplace (settings.json) · managed-settings.d/ drop-in directory · Plugin skill `name` field (v2.1.98)
 - [Marketplace Layouts](references/marketplace-layouts.md)

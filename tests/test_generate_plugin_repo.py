@@ -1031,10 +1031,16 @@ class TestPublishPyMarketplaceRegistration:
         assert "Marketplace-registration check" in src
 
     def test_stages_renumbered_to_eleven(self):
-        """The pipeline must show 11 numbered steps (was 10 before adding Gate 6)."""
+        """The pipeline must show 15 numbered steps.
+
+        Was 11 until TRDD-EZHM759T audit row 31: the docstring claimed 11 while
+        main() actually ran more, and the secret-scan + fork-parity stages (rows
+        6 and 14) added two more. `--print-gates` prints the same 15, and
+        tests/test_trdd_ezhm759t_canon.py pins that the two agree.
+        """
         src = self._src()
-        # At least one stage label must reference [N/11]
-        assert "/11]" in src
+        # At least one stage label must reference [N/15]
+        assert "/15]" in src
         # The old 10-step labels must all be gone from the code (docstring is fine)
         # Look for cprint calls with the old format only
         for stale in (

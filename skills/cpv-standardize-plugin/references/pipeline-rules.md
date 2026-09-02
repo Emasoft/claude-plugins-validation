@@ -17,6 +17,7 @@
 - [Post-Push CI Verification](#post-push-ci-verification)
 - [Generated-Pipeline Reliability Contract](#generated-pipeline-reliability-contract-v21340)
 - [Mega-Linter Configuration](#mega-linter-configuration)
+- [Copy-paste Gate Parity: `.jscpd.json`](#copy-paste-gate-parity-jscpdjson-issue-143)
 - [Common Fixes Reference](#common-fixes-reference)
 
 ## Checklist
@@ -24,10 +25,10 @@
 - [ ] Pre-push hook installed and enforcing --strict
 - [ ] All findings above WARNING fixed before push
 - [ ] CPV scripts invoked with `uv run --with pyyaml python`
-- [ ] GitHub secrets set via helper
-- [ ] Plugin scripts are all Python
+- [ ] GitHub secrets set via `scripts/set_marketplace_pat.py` (never pipe to `gh secret set`, never pass via `--body`)
+- [ ] Plugin scripts are all Python (no ad-hoc shell)
 - [ ] README has install/update/uninstall sections
-- [ ] Dry-run passes before first real publish
+- [ ] Dry-run passes before the first real publish
 - [ ] Generated CI pins the CPV ref (not HEAD) and the required `Test` aggregate-gate job is present
 - [ ] "Done" = green CI watched to green, not "files generated"
 
@@ -44,7 +45,10 @@ The pre-push hook is the **keystone of the entire pipeline**. It runs 4 gates in
 | 3. Validate | `validate_plugin.py . --strict` | CRITICAL, MAJOR, MINOR, NIT (exit codes 1-4) |
 | 4. Tests | `pytest tests/ -q` | Any test failure |
 
-**Only a clean exit 0 (WARNING / INFO / PASSED only) passes through.** WARNING never produces a non-zero exit code; CRITICAL / MAJOR / MINOR / NIT (exit codes 1-4) all block.
+**Only WARNING/INFO/PASSED findings pass through** — those map to exit
+code 0 under both `--strict` and non-strict. CRITICAL/MAJOR/MINOR/NIT
+map to exit codes 1-4 (NIT blocks only under `--strict`) and fail the
+gate. There is no exit code 5; WARNING never blocks.
 
 ## Fix-All Mandate
 
@@ -64,6 +68,47 @@ uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/<script>.py" <args>
 ```
 Without `--with pyyaml`, you get `ModuleNotFoundError: No module named 'yaml'`.
 
+### Reference recipe: a CI validate step
+
+The generated `ci.yml`/`release.yml` Validate step runs the validator through
+this exact shape — `tee` (not a blind `> file 2>&1` redirect, which
+makes a killed job indistinguishable from a healthy one), `PYTHONUNBUFFERED=1`
+(so the phase banners are correctly timestamped instead of surfacing only when
+a 4-8 KB buffer fills), `${PIPESTATUS[0]}` (never `$?` after a pipeline, which
+reads `tee`'s exit status and greens every failed validation), a quoted
+`"$exit_code"` on every use (shellcheck cannot infer numeric-ness through
+`PIPESTATUS` and raises SC2086 otherwise, which the Lint job's actionlint
+turns into red CI), and a fail-closed handler that requires the `SUMMARY:
+CRITICAL=` marker as proof the validator actually produced a verdict — CPV's
+exit codes stop at 4, so a bare `-ge 1 -le 4` check alone would silently pass
+`uvx: command not found` (127) or an OOM kill (137) as though they were
+findings:
+
+```yaml
+      - name: Validate plugin
+        env:
+          PLUGIN_SKIP_GITHUB_INTEGRITY: "1"
+        run: |
+          set +e
+          PYTHONUNBUFFERED=1 uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+              --with pyyaml \
+              cpv-remote-validate plugin . --strict \
+              2>&1 | tee "$RUNNER_TEMP/cpv-validation-report.txt"
+          exit_code=${PIPESTATUS[0]}
+          set -e
+          if [ "$exit_code" -eq 0 ]; then
+            echo "Validation passed"
+            exit 0
+          fi
+          if [ "$exit_code" -ge 1 ] && [ "$exit_code" -le 4 ] \
+             && grep -q "SUMMARY: CRITICAL=" "$RUNNER_TEMP/cpv-validation-report.txt"; then
+            echo "::error::Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT found)"
+            exit "$exit_code"
+          fi
+          echo "::error::CPV validator FAILED TO RUN (exit $exit_code) — infra/network/install failure, NOT a validation verdict."
+          exit 1
+```
+
 ## Processing Validation Output
 
 Always strip ANSI color codes and use macOS-compatible grep:
@@ -74,13 +119,13 @@ Use `grep -oE` (extended regex), NOT `grep -oP` (Perl regex — unavailable on m
 
 ## GitHub Secrets
 
-Always use `--body` flag:
+Prefer the canonical helper — it enforces the correct, secure invocation:
 ```bash
-gh secret set MARKETPLACE_PAT --repo <owner>/<repo> --body "$MARKETPLACE_PAT"
+uv run python scripts/set_marketplace_pat.py <owner>/<repo>
 ```
-Piping via `echo | gh secret set` does NOT work reliably.
+It reads the value from `$MARKETPLACE_PAT` and feeds it to `gh secret set` on **stdin with `--body` omitted**. Do NOT pass the token via `--body "$MARKETPLACE_PAT"`: that exposes the secret on the process command line (`ps -ef` / `/proc/<pid>/cmdline`). And do NOT use `echo "$MARKETPLACE_PAT" | gh secret set`: `echo` appends a trailing newline that gets stored inside the secret, producing a malformed Authorization header (`401 Bad credentials`).
 
-Check if the env var exists first: `test -n "$MARKETPLACE_PAT"`
+Check the env var exists first: `test -n "$MARKETPLACE_PAT"`
 
 ## CI Workflow Dependencies
 
@@ -187,18 +232,24 @@ Both must complete without crashes. This catches import errors, missing deps, an
 ## Post-Push CI Verification
 
 Since v5.1.1 `publish.py` does this automatically as its `[post-release]` stage
-(Reliability Contract item 7), so on a canon pipeline the check below is a
-BACKSTOP. Run it when the publish reported `UNVERIFIED`, or after any push that
-did not go through `publish.py`:
+(see Reliability Contract item 7) — so on a canon pipeline the check below is a
+BACKSTOP, not the primary mechanism. Run it whenever the publish reported
+`UNVERIFIED` (no `gh`, no runs found, or the wait expired), or after any push
+that did not go through `publish.py`:
 
 ```bash
 gh run list --repo <owner>/<plugin-name> --limit 5
 ```
 
 If any workflow failed, investigate with `gh run view <id> --log-failed | head -30`.
-Fix the cause and publish a follow-up patch. Do NOT leave failing CI as the final
-state, and NEVER mute a check to make it green. A green publish says nothing
-about CI: the release push bypasses the ruleset's required checks by design.
+Fix the cause on the plugin side and publish a follow-up patch. Do NOT leave
+failing CI as the final state, and NEVER mute a check to make it green.
+
+**Why this is not optional even though the publish "succeeded":** the release
+push bypasses the branch ruleset's required status checks (that bypass is what
+lets a scripted release run at all), so a green publish says nothing about CI.
+The release is already public by the time CI reports — which is exactly why a
+red result means "ship a follow-up patch", not "the publish failed".
 
 ## Generated-Pipeline Reliability Contract (v2.134.0)
 
@@ -219,26 +270,36 @@ The `.mega-linter.yml` config must include:
 - `REPOSITORY_CHECKOV_ARGUMENTS: "--skip-check CKV2_GHA_1"` — flags missing top-level workflow permissions, but we set permissions per-job
 - `.gitignore` must include `megalinter-reports/` and `mega-linter.log`
 
-**`--force-templates` MERGES this file; it does not overwrite it (issue #165, v2.158.0).** The plugin's `.mega-linter.yml` is the BASE — only the canon keys it LACKS are appended, so its values, key order, and the comment paragraphs justifying them survive verbatim. On a shared key the plugin's value is KEPT and reported. The divergence that motivated this is a custom **value inside a key canon also declares** (an author extending `REPOSITORY_CHECKOV_ARGUMENTS` with `,CKV_DOCKER_2` for ephemeral run-once Dockerfiles) — invisible to a custom-KEY detector, and a blind overwrite deleted it and turned their build red. Canon **JSON** configs merge the other way round: canon wins on canon-declared keys, the plugin's own extra keys are preserved and reported.
+**`--force-templates` MERGES `.mega-linter.yml`; it does not overwrite it (issue #165, v2.158.0).** The plugin's file is the BASE — only the canon keys it LACKS are appended, so its values, key order, and the comment paragraphs justifying them survive verbatim. On a key both declare, **the plugin's value is KEPT** and reported (`[merge] kept YOUR value for <key> (canon differs; reconcile by hand if you did not customize it)`). This is what a custom-KEY detector cannot see: the real divergence is a custom **value inside a key canon also declares** — e.g. an author extending canon's `REPOSITORY_CHECKOV_ARGUMENTS` to `"--skip-check CKV2_GHA_1,CKV_DOCKER_2"` because every Dockerfile they ship is an ephemeral run-once container with no HEALTHCHECK. A blind overwrite deleted that suppression and their rationale comment, and their build went red. Do NOT "restore canon" by hand over a kept value without asking the author why it diverges.
+
+**Canon JSON configs merge the other way round.** For `*.json` canon files the CANON is the base — canon wins on a key canon declares (that is the point of `--force-templates`) — and the plugin's OWN extra keys are carried over and reported (`[merge] preserved custom key(s): …`). JSON has no comments, so nothing else can be lost. A plugin that must diverge on a canon-declared JSON key marks it with `cpv.pipeline.intentional_divergence` instead.
 
 ## Copy-paste Gate Parity: `.jscpd.json` (issue #143)
 
 The local pre-push gate (`publish.py --gate`) now runs a **jscpd copy-paste
 check at parity with CI's Mega-Linter `COPYPASTE_JSCPD`** — so duplication over
-the threshold is surfaced LOCALLY, before the version bump / tag / push / release,
-instead of only on CI after the release is already tagged.
+the threshold is caught LOCALLY, before the version bump / tag / push / release,
+not only on CI after the release is already tagged (the pre-#143 failure mode:
+`publish.py` exits 0, tags + releases, then the CI Lint job fails on jscpd).
 
 - **`.jscpd.json` is the single source of truth** for the threshold and the
-  ignore globs, read by BOTH sides (jscpd auto-discovers `.jscpd.json` at the
-  repo root). Its `threshold: 5` matches `COPYPASTE_JSCPD_ARGUMENTS: "--threshold 5"`,
-  and its `ignore` globs mirror `.mega-linter.yml`'s `FILTER_REGEX_EXCLUDE`
-  (the `*_dev/` submodules, `**/fixtures/**`, vendored trees). Tune duplication
-  policy in ONE place and both gates stay in lock-step.
+  ignore globs, read by BOTH the local gate and CI (jscpd auto-discovers
+  `.jscpd.json` at the repo root). Its `threshold: 5` matches
+  `COPYPASTE_JSCPD_ARGUMENTS: "--threshold 5"`, and its `ignore` globs mirror
+  `.mega-linter.yml`'s `FILTER_REGEX_EXCLUDE` (the `*_dev/` submodules,
+  `**/fixtures/**`, vendored trees). Tune duplication policy in ONE place and
+  both gates stay in lock-step.
 - **Graceful degradation.** The local gate needs Node/npx to run jscpd. If
   neither is available it DEGRADES to a non-blocking WARNING and never
   false-blocks a push — but CI's Mega-Linter still enforces the check, so a
   green local gate does NOT guarantee green CI for the copy-paste dimension
   unless Node/npx is installed locally. Install Node/npx for full local parity.
+- **Provisioning on upgrade.** `standardize --fix` CREATES `.jscpd.json` (the
+  canonical threshold-5 config) when ABSENT and LEAVES an existing one untouched;
+  only `--force-templates` refreshes it, and since v2.158.0 that refresh MERGES —
+  canon wins on the keys canon declares, the plugin's own extra keys are preserved
+  and reported. The audit path only WARNs about a missing `.jscpd.json` or a stale
+  `publish.py`.
 
 ### `standardize` provisions `.jscpd.json`
 

@@ -1023,6 +1023,14 @@ _EXECUTION_CLASS_RULES: frozenset[str] = frozenset(
     {
         "CMD_INJECTION",
         "SHELL_EXEC",
+        # issue #223: CLAUDE.md documents the audit-consent sentinel as covering
+        # ENV_INJECTION ("CMD_INJECTION/SHELL_EXEC/SUPPLY_CHAIN/ENV_INJECTION/…"),
+        # but this set (what `_context_classifier_verdict` actually checks) lacked
+        # it, so a real env-var-poisoning finding never demoted to WARNING even
+        # with the sentinel comment above it — contradicting the documented
+        # contract. Env-var injection is an execution-class shape (a runtime
+        # write, not prose), so it belongs here.
+        "ENV_INJECTION",
         "REVERSE_SHELL",
         "OBFUSCATION",
         "PRIVILEGE_ESC",

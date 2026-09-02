@@ -81,7 +81,7 @@ def test_agent_has_pre_completion_verification_section() -> None:
     )
 
 
-def test_agent_runs_all_82_checks_via_run_all_checks() -> None:
+def test_agent_runs_all_87_checks_via_run_all_checks() -> None:
     """Agent body MUST invoke run_all_checks (the function defined in the checklist)."""
     body = AGENT_FILE.read_text()
     assert "run_all_checks" in body, (
@@ -89,6 +89,13 @@ def test_agent_runs_all_82_checks_via_run_all_checks() -> None:
         "function that executes the 87-check matrix from "
         "canonical-pipeline-migration-checklist.md and emits a "
         "Unicode-bordered Markdown table)."
+    )
+    checklist_body = CHECKLIST_FILE.read_text()
+    check_count = len(re.findall(r"^### CHECK-", checklist_body, flags=re.MULTILINE))
+    assert check_count == 87, (
+        f"canonical-pipeline-migration-checklist.md has {check_count} "
+        f"'### CHECK-' headings, not 87 — update this test (and every "
+        f"'87-check' reference in this file) to match reality."
     )
 
 

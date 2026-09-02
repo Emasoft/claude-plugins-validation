@@ -164,16 +164,100 @@ def test_submodule_variant_commits_before_gitlink_and_pushes_before_parent() -> 
         assert marker not in standard, f"standard unexpectedly carries {marker!r}"
 
 
-def test_submodule_variant_is_strictly_additive_over_standard() -> None:
-    """The variant is the standard body PLUS an appended section (additive)."""
+_GUARD = 'if __name__ == "__main__":\n    sys.exit(main())\n'
+
+
+def test_submodule_variant_puts_the_main_guard_last() -> None:
+    """The section is spliced in BEFORE the entry-point guard (audit row 10).
+
+    Appending it AFTER the guard left the four helpers in code the process never
+    reaches, so they could not be called from anywhere.
+    """
     from cpv_pipeline_profile import PROFILE_STANDARD, PROFILE_SUBMODULE_BUILD
     from generate_plugin_repo import gen_publish_py
 
     p = _params()
-    standard = gen_publish_py(p, PROFILE_STANDARD)
     variant = gen_publish_py(p, PROFILE_SUBMODULE_BUILD)
-    assert variant.startswith(standard)
+    assert variant.count(_GUARD) == 1
+    assert variant.rstrip("\n").endswith("sys.exit(main())")
+    assert variant.index("def submodule_source_changed(") < variant.index(_GUARD)
+    # The standard body keeps the same shape (the guard was already last there).
+    standard = gen_publish_py(p, PROFILE_STANDARD)
+    assert standard.rstrip("\n").endswith("sys.exit(main())")
     assert len(variant) > len(standard)
+
+
+def test_submodule_variant_wires_its_stage_into_main() -> None:
+    """`stage_submodule_release` is called from main(), before the commit stage."""
+    from cpv_pipeline_profile import PROFILE_STANDARD, PROFILE_SUBMODULE_BUILD
+    from generate_plugin_repo import gen_publish_py
+
+    p = _params()
+    variant = gen_publish_py(p, PROFILE_SUBMODULE_BUILD)
+    main_body = variant[variant.index("def main() -> int:") : variant.index(_GUARD)]
+    calls = [
+        ln.strip()
+        for ln in main_body.splitlines()
+        if ln.startswith("    stage_")
+    ]
+    assert "stage_submodule_release(root, new_ver, args.dry_run)" in calls
+    assert calls.index("stage_submodule_release(root, new_ver, args.dry_run)") < calls.index(
+        "stage_commit_and_push(root, new_ver, args.dry_run)"
+    )
+    # The standard profile gains no such stage.
+    assert "stage_submodule_release" not in gen_publish_py(p, PROFILE_STANDARD)
+
+
+def test_splice_refuses_when_an_anchor_is_missing() -> None:
+    """A silent no-op splice would re-create the row-10 defect one level up.
+
+    `.replace(..., 1)` on an absent anchor returns the body unchanged and reports
+    success — the stage would be defined and never called. Both anchors fail loud.
+    """
+    import pytest
+    from generate_plugin_repo import _PUBLISH_MAIN_GUARD, _splice_submodule_build_section
+
+    call = "    stage_commit_and_push(root, new_ver, args.dry_run)\n"
+    ok = f"def main() -> int:\n{call}    return 0\n\n\n{_PUBLISH_MAIN_GUARD}"
+    assert "stage_submodule_release" in _splice_submodule_build_section(ok)
+
+    with pytest.raises(RuntimeError, match="stage_commit_and_push"):
+        _splice_submodule_build_section(f"def main() -> int:\n    return 0\n\n\n{_PUBLISH_MAIN_GUARD}")
+    with pytest.raises(RuntimeError, match="__main__ guard"):
+        _splice_submodule_build_section(f"def main() -> int:\n{call}    return 0\n")
+
+
+def test_rendered_submodule_variant_defines_the_four_helpers_at_runtime() -> None:
+    """BEHAVIOURAL: execute the rendered file and prove the helpers are defined.
+
+    A plain whole-file exec would pass under the OLD appended shape too, so the
+    probe runs the body up to the guard and then the guard itself with `main`
+    stubbed — exactly what the interpreter does when publish.py runs as a script.
+    """
+    from cpv_pipeline_profile import PROFILE_SUBMODULE_BUILD
+    from generate_plugin_repo import gen_publish_py
+
+    src = gen_publish_py(_params(), PROFILE_SUBMODULE_BUILD)
+    head, _, _ = src.partition(_GUARD)
+    ns: dict = {"__name__": "publish_probe", "__file__": "publish.py"}
+    exec(compile(head, "publish.py", "exec"), ns)  # noqa: S102 - the code under test
+    for name in (
+        "submodule_source_changed",
+        "submodule_clean_tree_ok",
+        "submodule_commit_before_gitlink",
+        "ensure_submodule_pushed",
+        "stage_submodule_release",
+    ):
+        assert callable(ns.get(name)), f"{name} is not defined before the guard"
+
+    ns["__name__"] = "__main__"
+    ns["main"] = lambda: 0
+    try:
+        exec(compile(_GUARD, "publish.py", "exec"), ns)  # noqa: S102
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("the guard did not run main()")
 
 
 def test_both_bodies_compile_as_valid_python() -> None:

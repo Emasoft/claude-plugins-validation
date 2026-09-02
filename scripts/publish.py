@@ -9,11 +9,17 @@ Usage:
   uv run python scripts/publish.py --major            # bump major and publish
   uv run python scripts/publish.py --patch --dry-run  # preview only, no changes
   uv run python scripts/publish.py --print-gates      # print gate list and exit
+  uv run python scripts/publish.py --canon-version    # report canon version and exit
 
-HARD RULE: No checks can be skipped. There are no --skip-* flags, no env
-var bypasses, no --force. Every gate must pass before any version bump,
-tag, push, or GitHub release is performed. Publish is blocked on ANY
-CRITICAL, MAJOR, MINOR, or NIT severity finding. WARNING is advisory only.
+HARD RULE: No checks can be skipped. There are no --skip-* flags and no
+--force. Every gate must pass before any version bump, tag, push, or GitHub
+release is performed. Publish is blocked on ANY CRITICAL, MAJOR, MINOR, or
+NIT severity finding. WARNING is advisory only.
+
+The ONLY env vars this script reads are the sanctioned, test-pinned toggles
+listed by `--print-gates` (and repeated in `--help`). None of them can turn a
+FAILING gate green; the two that skip a gate outright (Gate 15's install
+smoke) report SKIPPED, which is never a pass.
 
 Exit codes:
     0 - Success
@@ -37,6 +43,7 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
@@ -369,30 +376,67 @@ def _print_result(result: subprocess.CompletedProcess[str], cmd: list[str], chec
         sys.exit(result.returncode)
 
 
+# Per-call wall-clock bounds for `run()`. The 600s default is right for a
+# lint/scan/git step; the two gates that run a WHOLE suite or a WHOLE validator
+# need their own, because a cap the work cannot finish inside does not make the
+# gate stricter — it makes it unprovable, and a timeout is then indistinguishable
+# from a real failure (canon issue #179, which fixed exactly this in the emitted
+# template while CPV's own copy kept the hardcoded 600s).
+_RUN_DEFAULT_TIMEOUT_SEC = 600.0
+# One validator PHASE was measured at 509s cold on CPV's own tree, so the 600s
+# default left ~90s of headroom for the whole run.
+_VALIDATOR_TIMEOUT_SEC = 1800.0
+
+# Budget for a READ-ONLY gh probe (a secret list, a contents fetch). Without an
+# explicit bound each one inherited cpv_network_resilience's 600s per-attempt
+# default times 30 attempts ≈ 5 h PER CALL, and `_remote_has_receiver_workflow`
+# makes one such call per workflow file. A read-only probe that has not answered
+# in a minute is not going to; three attempts absorb a real transient.
+_GH_PROBE_TIMEOUT_SEC = 60.0
+_GH_PROBE_MAX_ATTEMPTS = 3
+# Whole-phase ceiling for the Gate 5 remote probes, so N workflow files cannot
+# multiply the per-call budget without bound.
+_GH_PROBE_PHASE_BUDGET_SEC = 300.0
+
+
 def run(
     cmd: list[str],
     cwd: Path,
     *,
     check: bool = True,
     env: dict[str, str] | None = None,
+    timeout: float = _RUN_DEFAULT_TIMEOUT_SEC,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a command, print it, stream output, and fail fast on error.
+    """Run a command, print it, CAPTURE its output, and fail fast on error.
+
+    Output is captured (not streamed) and printed by `_print_result` after the
+    process exits — so a long gate prints nothing until it finishes, which is
+    why a hang and a slow run look identical in the log while one is in flight.
+    The parallel preflight block buffers per thread and replays in a fixed
+    order, so streaming here would need a router; the phase markers the
+    validator itself emits are the intended progress signal.
 
     `env=None` means use `os.environ` unchanged — the safe default. Use
     this for git/gh subprocesses, file operations, and anything that does
     not load CPV's own self-integrity verifier. For validator subprocesses
     (Gates 3, 4, 8) use `run_with_integrity_bypass` instead — that wrapper
     threads the bypass env through this helper.
+
+    `timeout` is the per-call wall-clock bound. Callers that run a whole suite
+    or a whole validator MUST pass their own; the default is sized for a single
+    lint/scan/git step.
     """
     print(f"  $ {' '.join(cmd)}")
     # A subprocess that runs past `timeout` raises TimeoutExpired. Without
     # this guard it would surface as a raw traceback (ugly, and not the
     # fail-fast contract the rest of the gate uses). Catch it and exit 1 with
-    # the same styled one-line message the non-zero-exit path prints.
+    # the same styled one-line message the non-zero-exit path prints. The
+    # message reports the ACTUAL bound — a hardcoded number starts lying the
+    # moment any caller overrides it.
     try:
-        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=600, env=env)
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
-        print(f"\n{RED}✗ Command timed out after 600s: {' '.join(cmd)}{NC}", file=sys.stderr)
+        print(f"\n{RED}✗ Command timed out after {timeout:.0f}s: {' '.join(cmd)}{NC}", file=sys.stderr)
         sys.exit(1)
     _print_result(result, cmd, check)
     return result
@@ -402,9 +446,14 @@ def _bypass_env() -> dict[str, str]:
     """Build the env dict that disables the GitHub-anchored integrity gate.
 
     Both names are set: new canonical PLUGIN_SKIP_GITHUB_INTEGRITY plus the
-    legacy CPV_SKIP_GITHUB_INTEGRITY (TRDD-bbff5bc5) for one release of
-    backward compat with v2.50.x verifier shims that may still be invoked
-    transitively. Legacy name removed in v2.53.0.
+    legacy CPV_SKIP_GITHUB_INTEGRITY (TRDD-bbff5bc5) for verifier shims that
+    may still be invoked transitively.
+
+    The legacy name is STILL EMITTED and still exempted by Gate 0. This
+    docstring used to claim it was "removed in v2.53.0" — false since the day
+    it was written, and worse than no comment: a reader checking whether the
+    legacy spelling was still live got a confident wrong answer from the very
+    function that emits it.
     """
     return {
         **os.environ,
@@ -413,7 +462,13 @@ def _bypass_env() -> dict[str, str]:
     }
 
 
-def run_with_integrity_bypass(cmd: list[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
+def run_with_integrity_bypass(
+    cmd: list[str],
+    cwd: Path,
+    *,
+    check: bool = True,
+    timeout: float = _RUN_DEFAULT_TIMEOUT_SEC,
+) -> subprocess.CompletedProcess[str]:
     """Run a validator subprocess WITH the GitHub-anchored integrity gate disabled.
 
     Trust trade-off (Codex adversarial review 2026-05-04, finding #2):
@@ -438,7 +493,7 @@ def run_with_integrity_bypass(cmd: list[str], cwd: Path, *, check: bool = True) 
     then, the maintainer's defense against tampered validator code is
     git history + code review + signed commits.
     """
-    return run(cmd, cwd, check=check, env=_bypass_env())
+    return run(cmd, cwd, check=check, env=_bypass_env(), timeout=timeout)
 
 
 # ── Semver helpers (absorbed from bump_version.py) ───────────────────────────
@@ -488,6 +543,23 @@ def bump_semver(current: str, bump_type: str) -> str | None:
 # the canon repo's manifest on GitHub.
 CANON_LATEST_URL = "https://raw.githubusercontent.com/Emasoft/claude-plugins-validation/master/.claude-plugin/plugin.json"
 CANON_FETCH_TIMEOUT_S = 6
+
+# Wall-clock bound for the RELEASE PUSH (issue #224). The push is not a bare
+# network transfer: the branch-aware pre-push hook runs the whole gate — remote
+# CPV validate plus the full test suite — INSIDE the push's own clock. Inheriting
+# cpv_network_resilience's 600s network default killed every attempt mid-gate and
+# retried it 60 times (a budget sized for a 4-second bare push), orphaning a gate
+# subtree each round. Size it to the gate's own work plus 30 min of slack, and
+# drop the attempt budget to 3: enough to absorb a real transfer hiccup AFTER a
+# green gate, which is the only failure a retry can still fix at that point.
+_CPV_TIMEOUT_SEC = 600.0
+_TEST_SUITE_TIMEOUT_SEC = 1800.0
+# The suite is budgeted TWICE: the branch-aware pre-push hook runs the full test
+# suite at G4 and again at G4b (the fork-parity probe re-runs it under a forced
+# `fork` start method), both inside the push's own clock. Budgeting one suite run
+# killed the push mid-G4b on a slow tree.
+_PUSH_TIMEOUT_SEC = _CPV_TIMEOUT_SEC + 2 * _TEST_SUITE_TIMEOUT_SEC + 1800.0
+_PUSH_MAX_ATTEMPTS = 3
 
 
 def fetch_latest_canon_version() -> str | None:
@@ -614,6 +686,16 @@ def update_pyproject_toml(plugin_root: Path, new_version: str) -> tuple[bool, st
             # whole-file first-match behavior.
             new_content, count = re.subn(pattern, _replace, content, flags=re.MULTILINE)
         if count == 0:
+            if block is not None:
+                # A [project] table exists but no `version = "X.Y.Z"` line in it
+                # matched. That is NOT "nothing to do" — it is a bump that did
+                # not apply, and reporting it as a skipped success ships a
+                # pyproject stuck at the old version (Gate 6 runs BEFORE the
+                # bump, so nothing downstream re-checks it).
+                return False, (
+                    "pyproject.toml has a [project] table but no bumpable "
+                    'version = "X.Y.Z" line — refusing to report a skipped bump as success'
+                )
             return True, "pyproject.toml has no version field (skipped)"
         path.write_text(new_content, encoding="utf-8")
         return True, f"pyproject.toml: {old_version} → {new_version}"
@@ -771,15 +853,66 @@ def do_bump(plugin_root: Path, new_version: str, dry_run: bool = False) -> bool:
 
 # ── Gate list for --print-gates and --help ──────────────────────────────────
 
+# The ONE definition of Gate 2's pytest invocation. `stage_run_tests` runs it and
+# the GATES table renders it, so the displayed command cannot drift from the one
+# that just rejected you — it did exactly that twice before (the table advertised
+# `pytest tests/ -x`, then a worksteal run missing `-q --tb=short`).
+_GATE2_PYTEST_ARGV: list[str] = [
+    "uv",
+    "run",
+    "pytest",
+    "tests/",
+    "-n",
+    "auto",
+    "--dist=worksteal",
+    "--maxfail=1",
+    "-q",
+    "--tb=short",
+]
+
+# Every env var this script reads, with its effect. `--print-gates` and the
+# `--help` epilog both render this, so a new getenv without a row here is a
+# documentation bug the tests catch.
+ENV_VARS: list[tuple[str, str]] = [
+    (
+        "CPV_SKIP_GH_AUTH_CHECK=1",
+        "skip the `gh auth status` + push-permission precheck (slow links). "
+        "Gate 12's real push and Gate 13's release still enforce auth. "
+        "Exempted by name from Gate 0.",
+    ),
+    (
+        "PLUGIN_SKIP_GITHUB_INTEGRITY / CPV_SKIP_GITHUB_INTEGRITY",
+        "SET BY THIS SCRIPT (not by you) for the validator subprocesses — the "
+        "release under construction necessarily differs from the last published "
+        "manifest. Exempted by name from Gate 0.",
+    ),
+    (
+        "PLUGIN_FORK_PARITY_TIMEOUT=<seconds>",
+        "Gate 3c deadline (default 1800). Zero/negative/unparseable falls back "
+        "to the default, so a typo cannot disable the guard.",
+    ),
+    (
+        "PLUGIN_FORK_PARITY_CMD=<extra pytest args>",
+        "EXTRA arguments appended to Gate 3c's fixed `uv run pytest tests/ …` "
+        "argv (e.g. a `-k` selector). It cannot REPLACE the command — a bare "
+        "`PLUGIN_FORK_PARITY_CMD=true` used to make the gate pass trivially.",
+    ),
+    (
+        "CPV_PUBLISH_REQUIRE_INSTALL_SMOKE=1",
+        "make a genuine Gate 15 install FAILURE exit non-zero (default: report loudly, exit 0).",
+    ),
+    (
+        "CPV_PUBLISH_SKIP_INSTALL_SMOKE=1",
+        "skip Gate 15 entirely, reported as SKIPPED — which is never a pass. "
+        "Post-release only: it cannot turn a failing pre-release gate green.",
+    ),
+]
+
 GATES: list[tuple[str, str]] = [
     ("Gate 0", "Bypass-var rejection (CPV_SKIP_*, SKIP_*, NO_VERIFY)"),
     ("Gate 1", "Clean working tree (git status --porcelain)"),
-    # Keep this string in step with stage_run_tests' actual argv. It read
-    # `pytest tests/ -x` long after the real command became a worksteal-xdist
-    # run, so anyone reading the gate table to reproduce a failure locally ran
-    # a materially different suite (serial, and stopping at a different point)
-    # than the gate that had just rejected them.
-    ("Gate 2", "Tests (uv run pytest tests/ -n auto --dist=worksteal --maxfail=1)"),
+    # DERIVED from the real argv, never retyped — see _GATE2_PYTEST_ARGV.
+    ("Gate 2", f"Tests ({' '.join(_GATE2_PYTEST_ARGV)})"),
     (
         "Gate 3",
         "Plugin validation (validate_plugin.py --strict) — owns repo-wide "
@@ -837,7 +970,9 @@ GATES: list[tuple[str, str]] = [
         "into a clean temp dir. Static validation cannot catch an uninstallable "
         "release (ai-maestro#62 R2); only an install can. SKIPPED (never a pass) "
         "when the claude CLI or the marketplace name is unavailable; set "
-        "CPV_PUBLISH_REQUIRE_INSTALL_SMOKE=1 to make a real failure exit non-zero",
+        "CPV_PUBLISH_REQUIRE_INSTALL_SMOKE=1 to make a real failure exit "
+        "non-zero, or CPV_PUBLISH_SKIP_INSTALL_SMOKE=1 to skip it (reported "
+        "as SKIPPED, which is never a pass)",
     ),
 ]
 
@@ -848,9 +983,13 @@ def print_gates() -> None:
     for name, desc in GATES:
         print(f"  {GREEN}{name}{NC}: {desc}")
     print(
-        f"\n{YELLOW}Hard rule: no --skip-* flags, no env var bypasses, no --force.{NC}\n"
-        f"{YELLOW}WARNING is the only severity that does not block.{NC}"
+        f"\n{YELLOW}Hard rule: no --skip-* flags, no --force. WARNING is the only "
+        f"severity that does not block.{NC}\n"
+        f"{YELLOW}There is no env var that turns a FAILING gate green. The sanctioned, "
+        f"test-pinned toggles below are the complete set this script reads:{NC}"
     )
+    for name, effect in ENV_VARS:
+        print(f"  {GREEN}{name}{NC}: {effect}")
 
 
 # ── Layout detection and marketplace-registration check (Task 2) ─────────────
@@ -927,12 +1066,16 @@ def _gh_secret_exists(
     secret_name: str,
     *,
     gh_bin: str | None = None,
-) -> bool:
-    """Check whether a GitHub secret with the given name is configured on this repo.
+) -> bool | None:
+    """Whether a GitHub secret with the given name is configured on this repo.
 
-    Uses `gh secret list --repo <owner>/<repo>` or just `gh secret list` from
-    within the repo; parses the output to check for the secret name. We never
-    attempt to read the secret value itself — that would be impossible anyway.
+    THREE-VALUED, like `_remote_tag_state`: True (present), False (gh answered
+    and it is absent), **None (gh could not answer)**. Collapsing None into
+    False told the user "MARKETPLACE_PAT is not configured" — a wrong
+    remediation — whenever the network or the API hiccupped. A cannot-check is
+    reported as a cannot-check.
+
+    We never read the secret value itself — that is impossible anyway.
     """
     if gh_bin is None:
         gh_bin = shutil.which("gh") or "gh"
@@ -944,9 +1087,11 @@ def _gh_secret_exists(
         cwd=str(plugin_root),
         check=False,
         capture_output=True,
+        timeout=_GH_PROBE_TIMEOUT_SEC,
+        max_attempts=_GH_PROBE_MAX_ATTEMPTS,
     )
     if result.returncode != 0:
-        return False
+        return None
     return secret_name in result.stdout.split()
 
 
@@ -971,6 +1116,8 @@ def _fetch_remote_marketplace_json(
         ],
         check=False,
         capture_output=True,
+        timeout=_GH_PROBE_TIMEOUT_SEC,
+        max_attempts=_GH_PROBE_MAX_ATTEMPTS,
     )
     if result.returncode != 0:
         return None
@@ -988,30 +1135,49 @@ def _remote_has_receiver_workflow(
     mkt_repo: str,
     *,
     gh_bin: str | None = None,
-) -> bool:
-    """Check whether the remote marketplace repo has a workflow with repository_dispatch."""
+) -> bool | None:
+    """Whether the remote marketplace repo has a workflow with repository_dispatch.
+
+    THREE-VALUED: True (found), False (gh answered for every workflow and none
+    has the trigger), **None (gh could not answer)**. Reporting a network
+    failure as "the marketplace has no receiver workflow" sent the maintainer to
+    fix a workflow that was already there.
+
+    Bounded twice: each call carries its own short timeout/attempt budget, and
+    the per-file loop shares one phase deadline — one call per workflow file
+    otherwise multiplies the per-call budget by the file count.
+    """
     if gh_bin is None:
         gh_bin = shutil.which("gh") or "gh"
+    deadline = time.monotonic() + _GH_PROBE_PHASE_BUDGET_SEC
     # List the workflow dir — wrapped with retry for the same transient-error reason.
     result = gh_with_retry(
         [gh_bin, "api", f"repos/{mkt_owner}/{mkt_repo}/contents/.github/workflows"],
         check=False,
         capture_output=True,
+        timeout=_GH_PROBE_TIMEOUT_SEC,
+        max_attempts=_GH_PROBE_MAX_ATTEMPTS,
     )
     if result.returncode != 0:
-        return False
+        return None
     try:
         entries = json.loads(result.stdout)
     except json.JSONDecodeError:
-        return False
+        return None
     if not isinstance(entries, list):
-        return False
+        return None
+    unread = False
     for entry in entries:
         if not isinstance(entry, dict):
             continue
         name = entry.get("name", "")
         if not isinstance(name, str) or not name.endswith((".yml", ".yaml")):
             continue
+        if time.monotonic() >= deadline:
+            # Out of budget with files still unread: we did not finish looking,
+            # so we must not answer "no".
+            unread = True
+            break
         file_result = gh_with_retry(
             [
                 gh_bin,
@@ -1022,10 +1188,15 @@ def _remote_has_receiver_workflow(
             ],
             check=False,
             capture_output=True,
+            timeout=_GH_PROBE_TIMEOUT_SEC,
+            max_attempts=_GH_PROBE_MAX_ATTEMPTS,
         )
-        if file_result.returncode == 0 and "repository_dispatch" in file_result.stdout:
+        if file_result.returncode != 0:
+            unread = True
+            continue
+        if "repository_dispatch" in file_result.stdout:
             return True
-    return False
+    return None if unread else False
 
 
 def _plugin_in_remote_marketplace(mkt_json: dict, plugin_name: str, expected_repo: str | None) -> bool:
@@ -1346,10 +1517,20 @@ def stage_run_tests(plugin_root: Path) -> int:
     # Issue #31: capture pre-test browser-process baseline.
     baseline_browser_pids = _snapshot_browser_pids()
     try:
+        # Spelled out here so the invocation is readable at the call site (and
+        # source-pinned by test_publish_parallelization), and rendered into the
+        # GATES table from _GATE2_PYTEST_ARGV. The equality check is what stops
+        # the two from drifting — the table has silently misreported this
+        # command twice already.
+        argv = ["uv", "run", "pytest", "tests/", "-n", "auto", "--dist=worksteal", "--maxfail=1", "-q", "--tb=short"]
+        if argv != _GATE2_PYTEST_ARGV:
+            raise AssertionError("Gate 2 argv drifted from the command the gate table advertises")
         result = run(
-            ["uv", "run", "pytest", "tests/", "-n", "auto", "--dist=worksteal", "--maxfail=1", "-q", "--tb=short"],
+            argv,
             cwd=plugin_root,
             check=False,
+            # A whole suite does not fit in run()'s single-step default (#179).
+            timeout=_TEST_SUITE_TIMEOUT_SEC,
         )
     finally:
         # Issue #31: always clean up (success OR failure path).
@@ -1385,6 +1566,9 @@ def stage_validate_plugin(plugin_root: Path) -> int:
         ["uv", "run", "python", "scripts/validate_plugin.py", ".", "--strict"],
         cwd=plugin_root,
         check=False,
+        # One validator PHASE measured 509s cold; run()'s single-step default
+        # left under two minutes of headroom for the whole run.
+        timeout=_VALIDATOR_TIMEOUT_SEC,
     )
     if vresult.returncode != 0:
         severity_map = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}
@@ -1539,8 +1723,9 @@ def stage_fork_parity(plugin_root: Path) -> int:
     failure here, because a hang is this defect's signature, not an inconclusive
     result.
 
-    Cost: ~162s measured on CPV's own suite. ``PLUGIN_FORK_PARITY_CMD`` narrows
-    the command; ``PLUGIN_FORK_PARITY_TIMEOUT`` adjusts the deadline.
+    Cost: ~162s measured on CPV's own suite. ``PLUGIN_FORK_PARITY_CMD`` APPENDS
+    extra pytest arguments to the fixed argv (it can narrow the run, never
+    replace it); ``PLUGIN_FORK_PARITY_TIMEOUT`` adjusts the deadline.
     """
     print(f"\n{BLUE}═══ Gate 3c: Linux fork-parity probe (run the suite as Linux would) ═══{NC}")
 
@@ -1550,24 +1735,31 @@ def stage_fork_parity(plugin_root: Path) -> int:
         print(f"  {YELLOW}! Skipped: {reason}{NC}")
         return 0
 
-    default_cmd = ["uv", "run", "pytest", "tests/", "-n", "auto", "--dist=worksteal", "-q", "--tb=short"]
+    # PLUGIN_FORK_PARITY_CMD appends EXTRA pytest arguments; it can never
+    # REPLACE the command. It used to be `shlex.split(raw) if raw else default`,
+    # so `PLUGIN_FORK_PARITY_CMD=true` made this gate pass trivially — an env
+    # var that turns a failing gate green, i.e. exactly the bypass the pipeline
+    # forbids. Mirrors `_fork_parity_timeout`'s "an override may only tighten"
+    # rule: it can narrow the run (a `-k` selector), never substitute for it.
+    cmd = ["uv", "run", "pytest", "tests/", "-n", "auto", "--dist=worksteal", "-q", "--tb=short"]
     raw_cmd = os.environ.get("PLUGIN_FORK_PARITY_CMD", "").strip()
-    cmd = shlex.split(raw_cmd) if raw_cmd else default_cmd
+    if raw_cmd:
+        cmd = [*cmd, *shlex.split(raw_cmd)]
+        print(f"  {YELLOW}PLUGIN_FORK_PARITY_CMD adds: {raw_cmd}{NC}")
 
-    if not raw_cmd:
-        # Nothing to probe. Say so rather than running pytest against a tree with
-        # no suite: that yields pytest's "no tests collected" exit code, which
-        # this gate would otherwise report as a fork failure — a fabricated
-        # finding. Gate 2 already BLOCKS a publish with no tests, so by the time
-        # we run here a real publish always has them; this guard only keeps the
-        # gate honest when it is invoked outside that flow.
-        tests_dir = plugin_root / "tests"
-        # Issue #215 — rglob: a tests/unit/ layout is a real suite, and reading
-        # it as "no tests" would skip the probe on exactly the repos that most
-        # need it.
-        if not (tests_dir.is_dir() and any(tests_dir.rglob("test_*.py"))):
-            print(f"  {YELLOW}! Skipped: no tests/ suite to probe (Gate 2 owns the missing-tests block).{NC}")
-            return 0
+    # Nothing to probe. Say so rather than running pytest against a tree with
+    # no suite: that yields pytest's "no tests collected" exit code, which
+    # this gate would otherwise report as a fork failure — a fabricated
+    # finding. Gate 2 already BLOCKS a publish with no tests, so by the time
+    # we run here a real publish always has them; this guard only keeps the
+    # gate honest when it is invoked outside that flow.
+    tests_dir = plugin_root / "tests"
+    # Issue #215 — rglob: a tests/unit/ layout is a real suite, and reading
+    # it as "no tests" would skip the probe on exactly the repos that most
+    # need it.
+    if not (tests_dir.is_dir() and any(tests_dir.rglob("test_*.py"))):
+        print(f"  {YELLOW}! Skipped: no tests/ suite to probe (Gate 2 owns the missing-tests block).{NC}")
+        return 0
 
     timeout = _fork_parity_timeout()
     print(f"  {reason}; deadline {timeout:.0f}s")
@@ -1648,8 +1840,8 @@ def stage_secret_scan(plugin_root: Path) -> int:
             file=sys.stderr,
         )
         return 1
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
+    # (The sys.path guard already ran unconditionally above; a second copy here
+    # was dead code.)
     try:
         from cpv_validation_common import ValidationReport  # noqa: PLC0415
         from validate_security import (  # noqa: PLC0415
@@ -1825,7 +2017,20 @@ def _check_layout_a(
         return 1
 
     # 3. MARKETPLACE_PAT secret must exist on this repo (value is never read)
-    if not _gh_secret_exists(plugin_root, "MARKETPLACE_PAT", gh_bin=gh_bin):
+    pat_state = _gh_secret_exists(plugin_root, "MARKETPLACE_PAT", gh_bin=gh_bin)
+    if pat_state is None:
+        # Cannot-check is reported as cannot-check. It still blocks (an
+        # unverified gate is not a passed gate), but the remediation must not
+        # assert a negative gh never confirmed.
+        print(
+            f"{RED}✗ UNVERIFIED — could not read this repo's secrets via gh.{NC}\n"
+            f"{RED}  The MARKETPLACE_PAT secret may or may not be configured; the check{NC}\n"
+            f"{RED}  did not complete, so it is not treated as a pass.{NC}\n"
+            f"{RED}  Diagnose: gh secret list{NC}",
+            file=sys.stderr,
+        )
+        return 1
+    if not pat_state:
         print(
             f"{RED}✗ MARKETPLACE_PAT secret is not configured on this plugin repo.{NC}\n"
             f"{RED}  Fix: gh secret set MARKETPLACE_PAT  (value: a PAT with 'repo' scope){NC}\n"
@@ -1904,7 +2109,17 @@ def _check_layout_a(
     print(f"  {GREEN}✓ Plugin registered in remote marketplace.json{NC}")
 
     # 5. Remote marketplace must have a receiver workflow
-    if not _remote_has_receiver_workflow(mkt_owner, mkt_repo, gh_bin=gh_bin):
+    receiver_state = _remote_has_receiver_workflow(mkt_owner, mkt_repo, gh_bin=gh_bin)
+    if receiver_state is None:
+        print(
+            f"{RED}✗ UNVERIFIED — could not read {mkt_owner}/{mkt_repo}'s workflows via gh.{NC}\n"
+            f"{RED}  The receiver workflow may or may not exist; the check did not{NC}\n"
+            f"{RED}  complete, so it is not treated as a pass.{NC}\n"
+            f"{RED}  Diagnose: gh api repos/{mkt_owner}/{mkt_repo}/contents/.github/workflows{NC}",
+            file=sys.stderr,
+        )
+        return 1
+    if not receiver_state:
         print(
             f"{RED}✗ Remote marketplace {mkt_owner}/{mkt_repo} has no workflow with{NC}\n"
             f"{RED}  a 'repository_dispatch' trigger. The notify-marketplace.yml event{NC}\n"
@@ -2131,13 +2346,54 @@ def _infer_bump_type(old: str, new: str) -> str | None:
     return None
 
 
+@lru_cache(maxsize=None)
+def _refresh_remote_tracking_refs(plugin_root: Path) -> bool:
+    """Fetch origin once per process so the tracking refs are not stale.
+
+    Nothing in this pipeline used to fetch, so `origin/master` was whatever the
+    last manual `git pull` left behind. On a stale clone the "remote version"
+    is arbitrarily old, and the bump baseline, the double-bump guard and the
+    interrupted-publish recovery all reason from it.
+
+    Returns False when the fetch could not run or failed. The caller then
+    reports the remote version as UNKNOWN rather than reading a stale ref —
+    "we could not look" must never render as "we looked and it is in sync".
+
+    ponytail: memoised per plugin_root, so a FAILED fetch also stays failed for
+    the life of the process. One publish makes one fetch, so there is nothing
+    to retry within a run; tests call `_refresh_remote_tracking_refs.cache_clear()`.
+    Drop the cache if this ever runs in a long-lived process.
+    """
+    try:
+        result = git_with_retry(
+            ["git", "fetch", "--tags", "origin"],
+            cwd=str(plugin_root),
+            check=False,
+            capture_output=True,
+            timeout=_GH_PROBE_TIMEOUT_SEC,
+            max_attempts=_GH_PROBE_MAX_ATTEMPTS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 def _read_remote_version(plugin_root: Path) -> str | None:
     """Read plugin.json `version` from the remote tracking branch (origin/master).
 
-    Returns None when the remote tracking branch isn't available (fresh clone
-    without origin, no internet, etc.) — caller falls back to bump-from-local
-    behaviour.
+    Fetches origin FIRST (once per process). Returns None when the fetch failed
+    or the remote tracking branch isn't available (fresh clone without origin,
+    no internet, etc.) — caller falls back to bump-from-local behaviour, which
+    is the conservative direction: a missing baseline is visible, a stale one
+    is not.
     """
+    if not _refresh_remote_tracking_refs(plugin_root):
+        print(
+            f"{YELLOW}  ⚠ Could not fetch origin — the remote version is UNKNOWN "
+            f"(not assumed in sync); bumping from the local plugin.json.{NC}",
+            file=sys.stderr,
+        )
+        return None
     for ref in ("origin/master", "origin/main", "origin/HEAD"):
         try:
             result = subprocess.run(
@@ -2159,6 +2415,43 @@ def _read_remote_version(plugin_root: Path) -> str | None:
         if isinstance(version, str):
             return version
     return None
+
+
+def _github_release_exists(plugin_root: Path, tag_name: str) -> bool | None:
+    """Three-valued: True (release present), False (gh answered, absent), None (unknown)."""
+    gh_bin = shutil.which("gh")
+    if gh_bin is None:
+        return None
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            [gh_bin, "release", "view", tag_name, "--json", "tagName"],
+            cwd=str(plugin_root),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode == 0:
+        return True
+    combined = f"{result.stdout or ''}\n{result.stderr or ''}"
+    if re.search(r"release not found|not found", combined, re.IGNORECASE):
+        return False
+    return None
+
+
+def _release_step_is_pending(plugin_root: Path, version: str) -> bool:
+    """True ONLY when the tag is provably pushed and the release is provably absent.
+
+    Both probes must answer positively. An unreadable remote or an unreadable
+    release list yields False, so an unanswered question can never route the
+    pipeline into the resume path.
+    """
+    tag_name = f"v{version}"
+    if _remote_tag_state(plugin_root, tag_name) is not True:
+        return False
+    return _github_release_exists(plugin_root, tag_name) is False
 
 
 def stage_bump(plugin_root: Path, bump_type: str, dry_run: bool) -> tuple[int, str | None]:
@@ -2202,6 +2495,21 @@ def stage_bump(plugin_root: Path, bump_type: str, dry_run: bool) -> tuple[int, s
         )
         print(f"{GREEN}✓ Version already bumped to {target}{NC}")
         return 0, target
+    if remote and current == remote and _release_step_is_pending(plugin_root, current):
+        # Gate 13 (`gh release create`) failed AFTER Gate 12 pushed both tags.
+        # The old advice — "re-run publish.py after fixing the cause" — was
+        # actively wrong: on the re-run current == remote, so neither guard
+        # above fires and do_bump runs again, bumping to a NEW version and
+        # orphaning the pushed tag with no GitHub release, permanently.
+        # RESUME at the release step instead of bumping.
+        print(f"\n{BLUE}═══ Gate 7: Bump version ({bump_type}) ═══{NC}")
+        print(
+            f"{YELLOW}  v{current} is already pushed but has no GitHub release — "
+            f"resuming at the release step instead of bumping (a bump here would "
+            f"orphan the pushed tag forever).{NC}"
+        )
+        print(f"{GREEN}✓ Resuming release of v{current}{NC}")
+        return 0, current
     if remote and current != remote and current != target:
         # Local is at some unexpected version (not remote, not the bump target).
         # Refuse to proceed rather than guess.
@@ -2766,6 +3074,9 @@ def stage_release_changes(plugin_root: Path) -> None:
         capture_output=True,
         text=True,
         check=False,
+        # Bounded like _git_porcelain_clean's. This ran between the staging and
+        # the commit, so a wedged git here hung the pipeline mid-release.
+        timeout=60,
     )
     stray = [ln[3:].strip() for ln in res.stdout.splitlines() if ln.startswith("??")]
     if stray:
@@ -2991,6 +3302,9 @@ def stage_commit_tag_push(
             ["git", "push", "--atomic", "origin", "HEAD", tag_name, *([dep_tag_name] if dep_tag_name else [])],
             cwd=plugin_root,
             env=os.environ.copy(),
+            # issue #224: the pre-push gate runs inside this call's wall clock.
+            timeout=_PUSH_TIMEOUT_SEC,
+            max_attempts=_PUSH_MAX_ATTEMPTS,
         )
     except subprocess.CalledProcessError as exc:
         if exc.stderr:
@@ -3106,8 +3420,12 @@ def stage_github_release(plugin_root: Path, tag_name: str, release_notes_file: P
     # the publish does not falsely report "✓ Published" (fail-fast invariant).
     print(
         f"{RED}✗ gh release create failed (exit {gh_result.returncode}). "
-        f"The tag {tag_name} is already pushed; create the release manually "
-        f"or re-run publish.py after fixing the cause.{NC}",
+        f"The tag {tag_name} is already pushed.{NC}\n"
+        f"{YELLOW}  Fix the cause, then create the release for the EXISTING tag:{NC}\n"
+        f"{YELLOW}    gh release create {tag_name} --title 'Release {tag_name}' "
+        f"--notes-file {release_notes_file}{NC}\n"
+        f"{YELLOW}  Re-running publish.py also works — Gate 7 detects "
+        f"'tag pushed, no release' and resumes here instead of bumping again.{NC}",
         file=sys.stderr,
     )
     return gh_result.returncode if gh_result.returncode != 0 else 1
@@ -3359,10 +3677,10 @@ def run_preflight_parallel(
       ``sys.stderr``. The proxies fall through to the real terminal for
       the orchestrator (main thread), so this function's own prints land
       on the user's screen as expected.
-    * After all four gates finish, captured buffers are replayed in the
-      fixed canonical order: tests → validate → mkpl_validate → mkpl_reg.
-      The original "═══ Gate N ═══" headers and ✓/✗ summary lines are
-      preserved verbatim.
+    * After all SIX gates finish, captured buffers are replayed in the fixed
+      canonical order of ``_PARALLEL_GATE_ORDER``: tests → validate →
+      ci_preflight → secret_scan → mkpl_validate → mkpl_reg. The original
+      "═══ Gate N ═══" headers and ✓/✗ summary lines are preserved verbatim.
 
     Failure semantics:
 
@@ -3375,6 +3693,10 @@ def run_preflight_parallel(
       exit code. Returning the first failure (not the last) keeps the
       reported severity stable — if Gate 3 fails CRITICAL and Gate 4
       fails MAJOR, the user sees CRITICAL.
+    * An UNEXPECTED exception in a gate (anything ``_run_stage_captured``'s
+      SystemExit conversion does not cover) is recorded as that gate's failure
+      with its traceback, so the other gates' buffers are still replayed
+      instead of being discarded behind a raw traceback.
     * If every gate passes, returns 0.
     """
     print(
@@ -3411,7 +3733,18 @@ def run_preflight_parallel(
         # otherwise the user sees an arbitrary subset based on completion
         # order.
         for name, fut in futures.items():
-            captured[name] = fut.result()
+            try:
+                captured[name] = fut.result()
+            except BaseException as exc:  # noqa: BLE001 - replayed then re-raised below
+                # _run_stage_captured converts SystemExit to a return code, but
+                # any OTHER exception propagates. Letting it escape here threw
+                # away every sibling gate's captured buffer, so the user saw a
+                # traceback and none of the output already produced. Record it
+                # as a failure with its traceback in the gate's own stderr slot,
+                # replay everything, then surface it as a non-zero return.
+                import traceback  # noqa: PLC0415 - stdlib, only on this path
+
+                captured[name] = (1, "", f"{RED}✗ {name} raised {exc!r}{NC}\n{traceback.format_exc()}")
 
     # Replay in canonical order so log diffs stay stable across runs.
     for name in _PARALLEL_GATE_ORDER:
@@ -3443,8 +3776,13 @@ def run_preflight_parallel(
 
 def main() -> int:
     gate_summary = "\n".join(f"  {name}: {desc}" for name, desc in GATES)
+    env_summary = "\n".join(f"  {name}\n      {effect}" for name, effect in ENV_VARS)
+    # CPV's own repo deliberately has NO --gate / --install-hook flags, unlike
+    # the publish.py this project GENERATES for consumer plugins: here the
+    # pre-push hook is the tracked git-hooks/pre-push, installed and diffed
+    # directly rather than re-emitted by the publisher.
     parser = argparse.ArgumentParser(
-        description="Publish pipeline: 15-gate fail-fast release with auto-bump (bypass-proof)",
+        description=f"Publish pipeline: {len(GATES)} gates, fail-fast release with auto-bump (bypass-proof)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Gates (all mandatory, run in order):
@@ -3455,6 +3793,11 @@ CRITICAL/MAJOR/MINOR/NIT findings before the version is bumped, committed,
 tagged, pushed, or released. There is no --skip-tests, no --skip-lint, no
 --skip-validate, no --force. WARNING is the only allowed severity and does
 not block. If a gate fails, fix the underlying problem — don't bypass.
+
+Environment variables (the COMPLETE set this script reads — sanctioned,
+test-pinned toggles; none of them can turn a FAILING gate green, and the two
+that skip Gate 15 report SKIPPED, which is never a pass):
+{env_summary}
 
 CORNERSTONE: every push is a version bump. Running publish.py with no flag
 auto-detects the bump type from conventional commits (feat → minor, fix →
@@ -3588,6 +3931,9 @@ Examples:
             return rc
 
         # ── Gate 7: bump ──
+        # Read the pre-bump version so we can tell "Gate 7 bumped" from
+        # "Gate 7 declined to bump" without changing stage_bump's signature.
+        pre_bump_version = get_current_version(root)
         rc, new_version = stage_bump(root, bump_type, args.dry_run)
         if rc != 0 or new_version is None:
             # Narrowing for mypy: stage_bump returns (0, str) or (nonzero, None).
@@ -3600,12 +3946,43 @@ Examples:
 
         tag_name = f"v{new_version}"
 
-        # ── Gate 8: refresh integrity manifest (issue #18) ──
-        rc = stage_refresh_self_hashes(root)
+        # Audit row 3 — RESUME an interrupted publish whose Gate 13 failed after
+        # Gate 12 pushed the tag. Gates 8-12 must be SKIPPED on this path, not
+        # merely tolerated: Gate 9 + Gate 10 would make a fresh commit, moving
+        # HEAD off the tag, and Gate 11's `_ensure_tag_at_head` then REFUSES to
+        # move a tag that is already on origin — so the pipeline would dead-end
+        # before reaching the release it came back to create. Only the notes
+        # generation (Gate 9's second half, idempotent) and Gate 13 run.
+        resume_release = new_version == pre_bump_version and _release_step_is_pending(root, new_version)
+        if resume_release:
+            print(
+                f"\n{YELLOW}Resuming the interrupted publish of {tag_name}: "
+                f"{tag_name} is on origin with no GitHub release, so Gates 8-12 "
+                f"are already done and are SKIPPED. Re-running Gate 13.{NC}"
+            )
+
+        # Gate 6 ran BEFORE the bump, so nothing had re-checked consistency
+        # AFTER it: a partially-applied bump (e.g. a pyproject.toml whose
+        # version line the regex never matched) used to ship unnoticed.
+        rc = stage_version_consistency(root)
         if rc != 0:
+            print(
+                f"{RED}  The bump did not apply consistently across every file. "
+                f"Nothing has been committed, tagged or pushed yet.{NC}",
+                file=sys.stderr,
+            )
             return rc
 
+        # ── Gate 8: refresh integrity manifest (issue #18) ──
+        if not resume_release:
+            rc = stage_refresh_self_hashes(root)
+            if rc != 0:
+                return rc
+
         # ── Gates 9-13: changelog, commit, tag, push, release ──
+        # Gate 9 runs on the resume path too: it is idempotent (git-cliff
+        # regenerates the FULL history, so re-running for the same tag
+        # reproduces the same file) and Gate 13 needs its notes file.
         rc, release_notes_file = stage_changelog(root, tag_name, new_version)
         if rc != 0 or release_notes_file is None:
             return rc
@@ -3618,17 +3995,18 @@ Examples:
         # historic root cause of every "CHANGELOG.md hash mismatch"
         # report. Iron rule preserved: the second refresh runs
         # ALWAYS, no opt-out.
-        print(f"\n{BLUE}═══ Gate 9b: Re-refresh manifest after CHANGELOG update ═══{NC}")
-        rc = stage_refresh_self_hashes(root)
-        if rc != 0:
-            return rc
+        if not resume_release:
+            print(f"\n{BLUE}═══ Gate 9b: Re-refresh manifest after CHANGELOG update ═══{NC}")
+            rc = stage_refresh_self_hashes(root)
+            if rc != 0:
+                return rc
 
-        # Phase E (v2.79.0): pass the prefetch results into Gate 12 so the
-        # synchronous _ensure_gh_auth call can be skipped when the
-        # background prefetch already completed cleanly.
-        rc = stage_commit_tag_push(root, tag_name, prefetch=prefetch)
-        if rc != 0:
-            return rc
+            # Phase E (v2.79.0): pass the prefetch results into Gate 12 so the
+            # synchronous _ensure_gh_auth call can be skipped when the
+            # background prefetch already completed cleanly.
+            rc = stage_commit_tag_push(root, tag_name, prefetch=prefetch)
+            if rc != 0:
+                return rc
 
         rc = stage_github_release(root, tag_name, release_notes_file)
         if rc != 0:
@@ -3643,10 +4021,20 @@ Examples:
         # Gate 15 — same post-release position, same reason. Only an actual
         # install can prove the artifact is installable (ai-maestro#62 R2).
         rc_smoke = stage_install_smoke(root, new_version)
-        if rc_smoke != 0:
-            return rc_smoke
 
+        # The release IS published by this point, so say so BEFORE reporting a
+        # post-release check failure. Previously a strict Gate 15 returned 1 and
+        # this line never printed, so a successful publish read as a failed run
+        # with no summary of what had actually shipped.
         print(f"\n{GREEN}✓ Published v{new_version}{NC}")
+        if rc_smoke != 0:
+            print(
+                f"{RED}  …but the post-release install smoke FAILED "
+                f"(CPV_PUBLISH_REQUIRE_INSTALL_SMOKE=1). v{new_version} is public "
+                f"and may be uninstallable — fix and publish a follow-up.{NC}",
+                file=sys.stderr,
+            )
+            return rc_smoke
         return 0
     finally:
         # Phase E: release the prefetch executor's worker threads on every
@@ -3898,23 +4286,27 @@ def stage_install_smoke(plugin_root: Path, new_version: str) -> int:
         # installation to clean up after a smoke test. Best-effort by design:
         # a cleanup failure is reported, never fatal, and never changes the
         # verdict, which belongs to the install above.
-        if result.returncode == 0:
-            try:
-                subprocess.run(  # noqa: S603 - fixed argv, no shell
-                    [claude_bin, "plugin", "uninstall", target,
-                     "--scope", "local", "--keep-data", "-y"],
-                    cwd=tmp,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                    check=False,
-                )
-            except (OSError, subprocess.SubprocessError) as exc:
-                print(f"{YELLOW}  Note: smoke-install cleanup did not run ({exc}).{NC}")
-            else:
-                # Assert the cleanup actually happened. Nothing else does, which
-                # is why #209 was only found by reading the registry by hand.
-                _report_smoke_registry_orphan(target, Path(tmp))
+        # Cleanup runs on EVERY path where the install was invoked, not only on
+        # rc == 0. A partially-successful install (non-zero rc but state already
+        # written) left the user-scope payload and the marketplace registration
+        # behind with nothing reporting it. Best-effort by design: a cleanup
+        # failure is reported, never fatal, and never changes the verdict.
+        try:
+            subprocess.run(  # noqa: S603 - fixed argv, no shell
+                [claude_bin, "plugin", "uninstall", target,
+                 "--scope", "local", "--keep-data", "-y"],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"{YELLOW}  Note: smoke-install cleanup did not run ({exc}).{NC}")
+        else:
+            # Assert the cleanup actually happened. Nothing else does, which
+            # is why #209 was only found by reading the registry by hand.
+            _report_smoke_registry_orphan(target, Path(tmp))
     if result.returncode == 0:
         print(f"{GREEN}✓ {target} installs cleanly (dependencies resolved){NC}")
         # The marketplace entry is updated ASYNCHRONOUSLY (notify-marketplace
@@ -4003,6 +4395,7 @@ def _resolve_ci_run_successors(
     plugin_root: Path,
     sha: str,
     cancelled_runs: list[dict[str, Any]],
+    deadline: float | None = None,
 ) -> dict[str, bool]:
     """For each cancelled run, look for a newer descendant-commit successor.
 
@@ -4013,15 +4406,30 @@ def _resolve_ci_run_successors(
     branch info, an unresolved merge-base) leaves that workflow's entry
     absent from the returned map, which `classify_ci_runs` treats as "no
     successor found" — fail toward UNKNOWN, never toward green.
+
+    BOUNDED AS A PHASE, not only per item. Each `gh run list` carries 120s and
+    each `git merge-base` 30s, but with N cancelled runs × up to 20 candidates
+    that multiplies into hours AFTER the release with no progress output. One
+    shared `deadline` (Gate 14's own) caps the whole phase; expiry leaves the
+    remaining workflows unresolved, which the classifier already renders as
+    UNKNOWN.
     """
     result: dict[str, bool] = {}
     for r in cancelled_runs:
         name = str(r.get("name", "?"))
         if name in result:
             continue
+        if deadline is not None and time.monotonic() >= deadline:
+            print(
+                f"{YELLOW}  successor resolution: out of time — remaining cancelled "
+                f"run(s) stay UNKNOWN.{NC}",
+                file=sys.stderr,
+            )
+            break
         branch = r.get("headBranch")
         if not branch:
             continue
+        print(f"  resolving successor for cancelled run '{name}'…", file=sys.stderr)
         try:
             listed = subprocess.run(
                 [
@@ -4193,7 +4601,7 @@ def stage_verify_ci_green(
     # go find that newer run ourselves.
     cancelled_runs = [r for r in runs if r.get("conclusion") == "cancelled"]
     successors = (
-        _resolve_ci_run_successors(gh_bin, plugin_root, sha, cancelled_runs)
+        _resolve_ci_run_successors(gh_bin, plugin_root, sha, cancelled_runs, deadline=deadline)
         if cancelled_runs
         else {}
     )
