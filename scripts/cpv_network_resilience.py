@@ -19,16 +19,24 @@ Defaults match the rule's documented retry budgets:
     gh: 30 attempts, 6s sleep, 300s per-attempt HTTP timeout
     git: 60 attempts, 4s sleep, 100 B/s slow-transfer floor over 300s
 
-Why these numbers: a 30×6=180s budget covers most github.com transient
-spikes (DNS hiccup, AWS edge restart, rate-limit window). For git
-pushes the 60×4=240s budget plus the lowSpeedTime tolerance handles
-slow uploads on flaky transit (Fastweb, mobile tethering).
+Why these numbers: the SLEEP-only sums (gh 30x6=180s, git 60x4=240s) are
+NOT the worst case a caller can actually see -- each attempt also pays up
+to DEFAULT_TIMEOUT_SEC=600s before it can even fail and trigger the sleep.
+worst_case_seconds(max_attempts, timeout, sleep) = max_attempts * (timeout
++ sleep) - sleep (no sleep follows the final, non-retried attempt). With
+the defaults (both use DEFAULT_TIMEOUT_SEC=600 as the per-attempt subprocess
+timeout) that is gh: worst_case_seconds(30, 600, 6) = 18174s (~5.0h), git:
+worst_case_seconds(60, 600, 4) = 36236s (~10.1h). There is still no aggregate
+wall-clock deadline -- a caller that must bound total retry time should pass
+a smaller max_attempts/timeout or enforce its own budget.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
+import signal
 import socket
 import ssl
 import subprocess
@@ -51,6 +59,19 @@ GIT_LOW_SPEED_LIMIT: int = 100  # bytes/sec floor below which transfer is "stall
 GIT_LOW_SPEED_TIME: int = 300  # seconds to tolerate stalled before aborting
 
 DEFAULT_TIMEOUT_SEC: float = 600.0  # per-attempt subprocess timeout
+
+
+def worst_case_seconds(max_attempts: int, timeout: float, sleep: float) -> float:
+    """Aggregate worst-case wall-clock time for a `run_with_retry`-shaped loop.
+
+    Every attempt can burn up to `timeout` seconds before it even fails and
+    triggers `sleep`; only max_attempts - 1 sleeps happen (none follows the
+    final, non-retried attempt). This is what the module docstring's ceiling
+    figures are computed from -- kept as a callable so those numbers cannot
+    silently drift out of sync with the constants (test_trdd_ezhm759t_resilience.py
+    pins the docstring text against this function's output).
+    """
+    return max_attempts * (timeout + sleep) - sleep
 
 # ── Transient-error classification (subprocess stderr) ───────────────────────
 
@@ -104,15 +125,32 @@ _PERMANENT_SUBPROCESS_PATTERNS: list[re.Pattern[str]] = [
 ]
 
 
-def is_transient_subprocess_error(stderr: str, returncode: int = 1) -> bool:
+# git/gh exit codes seen on a network failure when stderr was never captured
+# (run_with_retry(capture_output=False)). These are AMBIGUOUS -- git returns
+# 128 for most fatal errors, transient or not, so a 128 with no stderr is not
+# proof of a transient glitch. The caller (run_with_retry) caps retries at 1
+# for this fallback path rather than the full attempt budget, since we are
+# guessing rather than reading the actual error text.
+_AMBIGUOUS_NO_STDERR_TRANSIENT_CODES: frozenset[int] = frozenset({128})
+
+
+def is_transient_subprocess_error(stderr: str | None, returncode: int = 1) -> bool:
     """True iff the subprocess failure looks like a transient network glitch.
 
     Permanent matches always win — we never retry on auth failures or
     non-fast-forward errors, even if the stderr also contains a 5xx
     mention (which sometimes happens in chained error reports).
+
+    `stderr=None` (as opposed to `""`) means stderr was never captured at all
+    (run_with_retry(capture_output=False)) -- with no text to search, this
+    falls back to a small allowlist of exit codes known to plausibly mean a
+    transient git/gh network failure, rather than unconditionally reporting
+    "permanent" and silently disabling retries.
     """
     if returncode == 0:
         return False
+    if stderr is None:
+        return returncode in _AMBIGUOUS_NO_STDERR_TRANSIENT_CODES
     if not stderr:
         return False
     for pat in _PERMANENT_SUBPROCESS_PATTERNS:
@@ -156,6 +194,57 @@ def is_transient_http_error(exc: BaseException | None) -> bool:
 
 # ── Subprocess retry wrapper ─────────────────────────────────────────────────
 
+# Seconds to wait for a timed-out process group to die on SIGTERM before SIGKILL.
+_KILL_GRACE_SEC: float = 3.0
+
+
+def _new_process_group_kwargs() -> dict[str, Any]:
+    """Popen kwargs that put the child in its OWN process group.
+
+    Issue #224: a retried command is often a wrapper (`git push` → the pre-push
+    hook → publish.py --gate → pytest). `subprocess.run(timeout=...)` kills only
+    the DIRECT child, so every timed-out attempt orphaned that whole subtree to
+    pid 1 while the retry started a second copy alongside it. Owning the group is
+    the only way to kill what the child spawned.
+    """
+    if os.name == "nt":
+        # Attribute exists only on Windows, hence the getattr (mypy checks POSIX).
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    return {"start_new_session": True}
+
+
+def _kill_process_group(proc: "subprocess.Popen[Any]") -> None:
+    """SIGTERM the child's whole group, brief grace, then SIGKILL. Never raises.
+
+    A gone process (already reaped, or never grouped) is not an error here — the
+    caller is on the timeout path and must proceed to the retry either way.
+    """
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        # No process groups to signal portably; terminate the child and let the
+        # console-group break (sent first) ask its children to stop.
+        with contextlib.suppress(OSError, ValueError):
+            proc.send_signal(signal.CTRL_BREAK_EVENT)  # type: ignore[attr-defined]
+        with contextlib.suppress(OSError):
+            proc.kill()
+        return
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (ProcessLookupError, PermissionError, OSError):
+        with contextlib.suppress(OSError):
+            proc.kill()
+        return
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.killpg(pgid, signal.SIGTERM)
+    try:
+        proc.wait(timeout=_KILL_GRACE_SEC)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.killpg(pgid, signal.SIGKILL)
+
 
 def run_with_retry(
     cmd: list[str],
@@ -168,7 +257,7 @@ def run_with_retry(
     timeout: float | None = None,
     max_attempts: int = GH_MAX_ATTEMPTS,
     backoff: float = GH_BACKOFF_SEC,
-    transient_check: Callable[[str, int], bool] = is_transient_subprocess_error,
+    transient_check: Callable[[str | None, int], bool] = is_transient_subprocess_error,
     on_retry: Callable[[int, "subprocess.CompletedProcess[str]"], None] | None = None,
     print_cmd: bool = False,
 ) -> subprocess.CompletedProcess[str]:
@@ -198,6 +287,12 @@ def run_with_retry(
         print(f"  $ {' '.join(cmd)}")
 
     last_result: subprocess.CompletedProcess[str] | None = None
+    # With capture_output=False, result.stderr is always None -- the transient
+    # decision then falls back to a guess from the exit code alone (see
+    # _AMBIGUOUS_NO_STDERR_TRANSIENT_CODES). A guess should not burn the full
+    # attempt budget on a failure we cannot actually confirm is transient, so
+    # this path is capped at ONE retry regardless of max_attempts.
+    ambiguous_no_stderr_retry_used = False
     # A per-attempt timeout is the canonical symptom of a stalled network
     # transfer (hung git push / stuck gh API call) — exactly what this module
     # exists to survive. subprocess.run raises TimeoutExpired instead of
@@ -206,17 +301,29 @@ def run_with_retry(
     # as a transient failure: retry up to max_attempts, then re-raise the
     # timeout (fail-fast — never swallow it into a fake "success").
     for attempt in range(1, max_attempts + 1):
+        # Popen (not subprocess.run) because we must OWN the pid to kill the whole
+        # process group on timeout — see _new_process_group_kwargs (issue #224).
+        proc = subprocess.Popen(  # noqa: S603
+            cmd,
+            cwd=cwd,
+            env=env,
+            stdout=subprocess.PIPE if capture_output else None,
+            stderr=subprocess.PIPE if capture_output else None,
+            text=text,
+            **_new_process_group_kwargs(),
+        )
         try:
-            result = subprocess.run(
-                cmd,
-                cwd=cwd,
-                env=env,
-                check=False,
-                capture_output=capture_output,
-                text=text,
-                timeout=timeout,
+            stdout, stderr = proc.communicate(timeout=timeout)
+            result: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(
+                cmd, proc.returncode, stdout, stderr
             )
         except subprocess.TimeoutExpired:
+            # Kill the SUBTREE, not just the direct child, before retrying —
+            # otherwise each attempt leaves its work running and the next attempt
+            # competes with it.
+            _kill_process_group(proc)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.communicate(timeout=_KILL_GRACE_SEC)
             if attempt < max_attempts:
                 if on_retry is not None:
                     # No CompletedProcess exists on timeout; synthesize a
@@ -236,12 +343,29 @@ def run_with_retry(
             # Budget exhausted on a timeout — propagate the real cause so the
             # caller sees TimeoutExpired, not a swallowed/fake result.
             raise
+        except BaseException:
+            # subprocess.run kills its child on ANY exception and re-raises; Popen
+            # does not. Without this a KeyboardInterrupt would leak the whole gate
+            # subtree — the exact orphaning #224 is about, and Ctrl-C is how the
+            # reporter actually stopped their run.
+            _kill_process_group(proc)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.communicate(timeout=_KILL_GRACE_SEC)
+            raise
         if result.returncode == 0:
             return result
         last_result = result
-        stderr = result.stderr or ""
-        if not transient_check(stderr, result.returncode):
+        # Preserve the None/"" distinction for the classifier (a captured-but-
+        # empty stderr and an uncaptured stderr are different evidence); only
+        # coerce to "" for the on_retry summary line below.
+        raw_stderr = result.stderr
+        if not transient_check(raw_stderr, result.returncode):
             break  # permanent failure — don't waste retries
+        if raw_stderr is None:
+            if ambiguous_no_stderr_retry_used:
+                break  # already spent our one guess-based retry — stop guessing
+            ambiguous_no_stderr_retry_used = True
+        stderr = raw_stderr or ""
         if attempt < max_attempts:
             if on_retry is not None:
                 on_retry(attempt, result)

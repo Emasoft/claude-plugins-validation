@@ -8,6 +8,7 @@
 - [Processing Validation Output](#processing-validation-output)
 - [GitHub Secrets](#github-secrets)
 - [CI Workflow Dependencies](#ci-workflow-dependencies)
+- [Superseded validate.yml Removal](#superseded-validateyml-removal-issue-142-defect-4)
 - [Marketplace Notification](#marketplace-notification)
 - [All Scripts Are Python](#all-scripts-are-python)
 - [Binary Plugins](#binary-plugins)
@@ -16,6 +17,7 @@
 - [Post-Push CI Verification](#post-push-ci-verification)
 - [Generated-Pipeline Reliability Contract](#generated-pipeline-reliability-contract-v21340)
 - [Mega-Linter Configuration](#mega-linter-configuration)
+- [Copy-paste Gate Parity: `.jscpd.json`](#copy-paste-gate-parity-jscpdjson-issue-143)
 - [Common Fixes Reference](#common-fixes-reference)
 
 ## Checklist
@@ -23,7 +25,7 @@
 - [ ] Pre-push hook installed and enforcing --strict
 - [ ] All findings above WARNING fixed before push
 - [ ] CPV scripts invoked with `uv run --with pyyaml python`
-- [ ] GitHub secrets set via `set_marketplace_pat.py` (never pipe to `gh secret set`)
+- [ ] GitHub secrets set via `scripts/set_marketplace_pat.py` (never pipe to `gh secret set`, never pass via `--body`)
 - [ ] Plugin scripts are all Python (no ad-hoc shell)
 - [ ] README has install/update/uninstall sections
 - [ ] Dry-run passes before the first real publish
@@ -66,6 +68,47 @@ uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/<script>.py" <args>
 ```
 Without `--with pyyaml`, you get `ModuleNotFoundError: No module named 'yaml'`.
 
+### Reference recipe: a CI validate step
+
+The generated `ci.yml`/`release.yml` Validate step runs the validator through
+this exact shape — `tee` (not a blind `> file 2>&1` redirect, which
+makes a killed job indistinguishable from a healthy one), `PYTHONUNBUFFERED=1`
+(so the phase banners are correctly timestamped instead of surfacing only when
+a 4-8 KB buffer fills), `${PIPESTATUS[0]}` (never `$?` after a pipeline, which
+reads `tee`'s exit status and greens every failed validation), a quoted
+`"$exit_code"` on every use (shellcheck cannot infer numeric-ness through
+`PIPESTATUS` and raises SC2086 otherwise, which the Lint job's actionlint
+turns into red CI), and a fail-closed handler that requires the `SUMMARY:
+CRITICAL=` marker as proof the validator actually produced a verdict — CPV's
+exit codes stop at 4, so a bare `-ge 1 -le 4` check alone would silently pass
+`uvx: command not found` (127) or an OOM kill (137) as though they were
+findings:
+
+```yaml
+      - name: Validate plugin
+        env:
+          PLUGIN_SKIP_GITHUB_INTEGRITY: "1"
+        run: |
+          set +e
+          PYTHONUNBUFFERED=1 uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+              --with pyyaml \
+              cpv-remote-validate plugin . --strict \
+              2>&1 | tee "$RUNNER_TEMP/cpv-validation-report.txt"
+          exit_code=${PIPESTATUS[0]}
+          set -e
+          if [ "$exit_code" -eq 0 ]; then
+            echo "Validation passed"
+            exit 0
+          fi
+          if [ "$exit_code" -ge 1 ] && [ "$exit_code" -le 4 ] \
+             && grep -q "SUMMARY: CRITICAL=" "$RUNNER_TEMP/cpv-validation-report.txt"; then
+            echo "::error::Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT found)"
+            exit "$exit_code"
+          fi
+          echo "::error::CPV validator FAILED TO RUN (exit $exit_code) — infra/network/install failure, NOT a validation verdict."
+          exit 1
+```
+
 ## Processing Validation Output
 
 Always strip ANSI color codes and use macOS-compatible grep:
@@ -76,19 +119,70 @@ Use `grep -oE` (extended regex), NOT `grep -oP` (Perl regex — unavailable on m
 
 ## GitHub Secrets
 
-Always use `--body` flag:
+Prefer the canonical helper — it enforces the correct, secure invocation:
 ```bash
-gh secret set MARKETPLACE_PAT --repo <owner>/<repo> --body "$MARKETPLACE_PAT"
+uv run python scripts/set_marketplace_pat.py <owner>/<repo>
 ```
-Piping via `echo | gh secret set` does NOT work reliably.
+It reads the value from `$MARKETPLACE_PAT` and feeds it to `gh secret set` on **stdin with `--body` omitted**. Do NOT pass the token via `--body "$MARKETPLACE_PAT"`: that exposes the secret on the process command line (`ps -ef` / `/proc/<pid>/cmdline`). And do NOT use `echo "$MARKETPLACE_PAT" | gh secret set`: `echo` appends a trailing newline that gets stored inside the secret, producing a malformed Authorization header (`401 Bad credentials`).
 
-Check if the env var exists first: `test -n "$MARKETPLACE_PAT"`
+Check the env var exists first: `test -n "$MARKETPLACE_PAT"`
 
 ## CI Workflow Dependencies
 
 CI workflows MUST use `uv sync --extra dev` (NOT just `uv sync`).
 ruff, pytest, mypy, pyyaml are in `[project.optional-dependencies] dev`.
 Without `--extra dev`, ALL CI runs fail with "Failed to spawn: ruff".
+
+### The `dev` extra MUST exist (issue #142 Defect #2)
+
+Because `ci.yml` and `release.yml` run `uv sync --extra dev`, the adopting
+plugin's `pyproject.toml` MUST declare a `[project.optional-dependencies].dev`
+extra containing **pytest, ruff, mypy**. If the extra is ABSENT, CI fails at
+install with:
+
+```
+error: Extra `dev` is not defined in the project's `optional-dependencies` table
+```
+
+`standardize --fix` now PROVISIONS this automatically when it emits a canonical
+workflow:
+
+- **No dev extra** → it creates `[project.optional-dependencies]\ndev = ["pytest", "ruff", "mypy"]`
+  (the EXACT unpinned literal the generator scaffolds — they must match).
+- **Partial dev extra** → it AUGMENTS, adding only the missing tools and
+  preserving existing entries (with their version pins) and every other
+  extra/table verbatim.
+- **Complete dev extra** → no-op.
+- A `uv.lock` present is refreshed (`uv lock`); a missing/failed `uv` is
+  non-fatal — CI's `uv sync` regenerates it.
+
+The AUDIT path (`standardize` WITHOUT `--fix`) only WARNs about the missing
+extra and NEVER mutates `pyproject.toml`. Provisioning happens solely under
+`--fix`. Do NOT hand-pin floors the generator does not also emit — keep the
+two byte-identical.
+
+## Superseded validate.yml Removal (issue #142 Defect #4)
+
+The consolidated `ci.yml` carries a `Validate` job that runs
+`cpv-remote-validate plugin . --strict`, fully REPLACING the old standalone
+"Plugin Validation" `validate.yml` that pre-v2.12.32 CPV scaffolds shipped. If
+the superseded `validate.yml` is left in place, `ci.yml`'s actionlint `Lint`
+job trips on `validate.yml`'s pre-existing shellcheck SC2086
+(`$GITHUB_STEP_SUMMARY` unquoted) and CI fails.
+
+`standardize --fix` removes the superseded `validate.yml` when it ensures
+`ci.yml` — but ONLY when the file is recognisably a CPV-shipped plugin-validate
+workflow (it requires BOTH a CPV-validate command marker — `cpv-remote-validate
+plugin` / `validate_plugin.py` — AND a CPV-validate workflow `name:` such as
+"Plugin Validation"). An unrelated `validate.yml` (e.g. a project's own schema
+or test workflow) is NEVER removed. The file is moved into
+`scripts_dev/superseded-workflows/` (gitignored, git-recoverable), not
+hard-deleted.
+
+**Branch-protection follow-up:** removing `validate.yml` orphans the required
+status check named "Plugin Validation". After the upgrade, re-point that
+required check to `ci.yml`'s **Validate** / **Test** jobs. `standardize` emits
+this as an `[ACTION REQUIRED]` note.
 
 ## Marketplace Notification
 
@@ -159,16 +253,15 @@ red result means "ship a follow-up patch", not "the publish failed".
 
 ## Generated-Pipeline Reliability Contract (v2.134.0)
 
-The generator applies six reliability fixes so a scaffolded/upgraded plugin's first GitHub CI run is GREEN — and its release is actually installable — rather than the user's failure notification. The skill's guidance MUST match what the generator emits:
+The generator applies six reliability fixes so a scaffolded/upgraded plugin's first GitHub CI run is GREEN — and its release is actually installable — rather than the user's failure notification. The upgrade path MUST re-apply these (and re-run CI to green) so an upgraded plugin matches what a fresh scaffold emits:
 
 1. **CI pins the CPV ref** — the generated `ci.yml`/`release.yml`/`publish.py` pin the CPV install to an explicit **`@v<ver>` git tag** (the `git+` install URL carries a `@v<ver>` suffix), NOT CPV HEAD. So a new CPV release never silently red-lights a downstream plugin. The upgrade flow updates the pin DELIBERATELY (and re-runs CI to green) rather than letting every plugin track HEAD.
 2. **Validate steps skip the live integrity fetch + carry a real timeout** — every CPV-validate step sets `env: { PLUGIN_SKIP_GITHUB_INTEGRITY: "1" }` and a `timeout-minutes`. On a fresh-checkout runner the local manifest already matches the code, so the `raw.githubusercontent.com` anchor adds latency/hang risk but no security. **Never add `CLAUDE_PRIVATE_USERNAMES` to a CI step** (issue #140): that env names the usernames CPV treats as PRIVATE, so seeding it with the public `${{ github.repository_owner }}` makes CPV flag every `github.com/<owner>/` URL + the owner no-reply email as a CRITICAL private-path leak and fails the validate job under `--strict`. A CI runner has no developer local-username to protect — the `CLAUDE_PRIVATE_USERNAMES="$(whoami)"` form is for LOCAL scans only.
 3. **The `test` matrix is fronted by an aggregate gate job named exactly `Test`** (`needs: [test]`, succeeds only if the matrix passed). A bare required `Test` context against a matrix that reports `Test (ubuntu-latest)` / `Test (macos-latest)` is NEVER satisfied → PRs stuck pending forever; the aggregate job satisfies the required branch context.
 4. **`notify-marketplace` no-ops when `MARKETPLACE_PAT` is absent** — the job is guarded so a repo without the secret does not surface a red associated workflow on the release.
 5. **"Done" = green CI, not "files generated"** — the creator/fixer agents PUBLISH then watch every required run with `gh run watch <run-id> --exit-status`, treating a red run as the next fix iteration (read failing job → fix the cause on the plugin side → re-publish → re-watch; `gh run rerun --failed` for transient infra; NEVER mute a check). See `agents/cpv-plugin-creator-agent.md` "CI-green guarantee phase" and `agents/cpv-plugin-fixer-agent.md` §7d.
-6. **`publish.py` pushes the dependency-resolver tag `{name}--v{version}`** (DOUBLE hyphen, CC 2.1.110) alongside the release tag `v{version}`, in the SAME atomic push (one `git push origin HEAD v{version} {name}--v{version}` argv) so a release can never ship with one ref and not the other. A version-constrained plugin dependency resolves **only** against `{plugin-name}--v{version}`: without that tag, `claude plugin install` on a dependent fails with `no-matching-tag` and the dependent is DISABLED — a release that looks fine and is silently un-dependable. The generator has emitted this stage since v2.156.0; since v2.158.0 `standardize --fix` also MIGRATES an **existing** `publish.py` that lacks it, injecting only that stage (idempotent; a `publish.py` too customized to migrate safely is left byte-identical and reported, never half-migrated). Do NOT hand-roll `claude plugin tag --push` into a pipeline: it is the wrong layer, and `claude plugin tag <name>` takes a **path**, not a tag name — it silently creates nothing.
-
-7. **`publish.py` VERIFIES CI is green on the released commit** (v5.1.1, `stage_verify_ci_green`, printed as `[post-release]`). This closes a real hole rather than adding ceremony: the release push targets the default branch directly and the maintainer role holds `bypass_mode: always` on the branch ruleset, so GitHub prints `Bypassed rule violations … required status checks are expected` and lets it through. That bypass is deliberate — it is what makes a scripted release possible at all — but it means **the required status checks never actually gate a release**: the tag, the GitHub release and the marketplace notification are all public before CI has said a word. Point 5 above was the only thing covering that gap, and it lives in agent PROSE, which is skippable — the identical defect v2.157.0 fixed one gate earlier when `ci-preflight` was wired in as Gate 3b. The stage **never aborts the publish**, and that asymmetry is deliberate rather than a weak gate: by the time it runs the release is already published, so a non-zero exit could not un-ship anything — it would only discard the report that is the whole point. A RED result is surfaced as a loud notice naming the failing runs plus the exact `gh run view --log-failed` command, which is what feeds point 5's fix→re-publish loop. **"Cannot check" is never reported as green** (no `gh`, no runs found, a timeout → `UNVERIFIED` with the reason), and `skipped`/`neutral` conclusions are not failures — a dormant optional workflow reports `skipped` on every release and treating that as RED would cry wolf every time. The generator emits it for new plugins; **`standardize --fix` MIGRATES an existing `publish.py`** that lacks it (idempotent, on ANY `--fix` — NOT gated behind `--force-templates`, because the plugins that need it most are the ones with a customized `publish.py` they cannot safely force-overwrite). The migration is **all-or-nothing**: the stage, its call site and the top-level `import time` are one unit, since landing the call without the function is a `NameError` at publish time in someone else's repo, and landing the function without the call is dead code that silently keeps the gap open while *looking* migrated. A `publish.py` too customized to migrate safely is left **byte-identical** and reported, never half-migrated.
+6. **`publish.py` pushes the dependency-resolver tag `{name}--v{version}`** (DOUBLE hyphen, CC 2.1.110) alongside `v{version}`, in one atomic push (`git push origin HEAD v{version} {name}--v{version}`). A version-constrained dependency resolves ONLY against `{plugin-name}--v{version}`; without it a dependent install fails `no-matching-tag` and is DISABLED, while the release still looks fine. **This is the upgrade path's job on an EXISTING plugin:** `standardize` is profile-aware and refuses to overwrite an existing `publish.py`, so a plugin that already had one never gained the stage — since v2.158.0 a plain `--fix` injects only that stage into the existing file (idempotent; a `publish.py` too customized to migrate safely is left byte-identical and reported, never half-migrated). Do NOT hand-roll `claude plugin tag --push`: wrong layer, and `claude plugin tag <name>` takes a **path**, not a tag name — it silently creates nothing.
+7. **`publish.py` VERIFIES CI is green on the released commit** (v5.1.1, `stage_verify_ci_green`, printed as `[post-release]`). The release push targets the default branch directly and the maintainer role holds `bypass_mode: always` on the branch ruleset, so GitHub prints `Bypassed rule violations … required status checks are expected` and lets it through — meaning **the required checks never actually gate a release**: tag, GitHub release and marketplace notification are all public before CI has said a word. Item 5 above was the only cover for that, and it lives in agent PROSE, which is skippable (the defect v2.157.0 fixed one gate earlier for `ci-preflight`). It **never aborts the publish** — by then the release is public, so exiting non-zero could not un-ship it and would only discard the report; a RED result is a loud notice naming the failing runs plus the exact `gh run view --log-failed` command, feeding item 5's fix→re-publish loop. "Cannot check" is never green (no `gh` / no runs / timeout → `UNVERIFIED` with the reason); `skipped`/`neutral` are not failures. **This is the upgrade path's job on an EXISTING plugin:** a plain `--fix` injects the stage, its call site and the top-level `import time` as ONE all-or-nothing unit (the call without the function is a `NameError` at publish time; the function without the call is dead code that looks migrated) — idempotent, and a `publish.py` too customized to migrate safely is left byte-identical and reported, never half-migrated.
 
 ## Mega-Linter Configuration
 
@@ -207,6 +300,16 @@ not only on CI after the release is already tagged (the pre-#143 failure mode:
   canon wins on the keys canon declares, the plugin's own extra keys are preserved
   and reported. The audit path only WARNs about a missing `.jscpd.json` or a stale
   `publish.py`.
+
+### `standardize` provisions `.jscpd.json`
+
+Under `--fix`, `standardize` CREATES `.jscpd.json` (the canonical threshold-5
+config) when it is ABSENT, and LEAVES an existing one untouched — your tuned
+config is never clobbered on a plain `--fix`. Only `--force-templates` refreshes
+it, and since v2.158.0 that refresh MERGES rather than overwrites: canon wins on
+the keys canon declares, and your own extra keys are preserved and reported. The
+AUDIT (no `--fix`) path only WARNs: it surfaces a missing `.jscpd.json` and a
+`scripts/publish.py` that predates the gate, and never mutates anything.
 
 ## Common Fixes Reference
 

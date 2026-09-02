@@ -3560,7 +3560,8 @@ _CSPELL_IGNORE_PATHS: tuple[str, ...] = (
 #     npx cspell lint .        # in a freshly generated plugin
 #
 # Every word it reports is a word the GENERATOR'S OWN TEMPLATES emit, so a fresh
-# scaffold would fail its own publish gate (Gate 3b) on a box that has cspell on
+# scaffold would fail its own publish stage 8/15 (CI-parity preflight — runs in
+# the full pipeline only, never in --gate mode) on a box that has cspell on
 # PATH. Add exactly those, then re-run to exit 0. Two-sided check, mandatory:
 # inject a real typo afterwards and confirm cspell still exits 1 on it. That is
 # what proves this is a DICTIONARY and not a mute button — if a typo stops being
@@ -4828,7 +4829,7 @@ Examples (always invoke via the launcher):
         help=(
             "Move known-legacy pipeline scripts (bump_version.py, release.sh, "
             "lint.sh, compute_hashes.py, etc.) from scripts/ to scripts_dev/ — "
-            "they are obsoleted by publish.py's 14-gate pipeline. Files are "
+            "they are obsoleted by publish.py's 15-stage pipeline. Files are "
             "MOVED (not deleted) so the user can review before final removal. "
             "Auto-enabled when --force-templates is passed."
         ),

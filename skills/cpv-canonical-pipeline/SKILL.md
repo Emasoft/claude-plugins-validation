@@ -73,7 +73,7 @@ A fully configured plugin repository with:
 - Plugin manifest (`plugin.json`) and project config
 - CI/CD workflows for lint, validate, test, release, and marketplace notification
 - Pre-push hook running `publish.py --gate` (4-gate quality enforcement)
-- 11-stage release pipeline via `publish.py` (auto-bump via git-cliff; `--patch`/`--minor`/`--major` override the auto-detection)
+- 15-stage release pipeline via `publish.py` (auto-bump via git-cliff; `--patch`/`--minor`/`--major` override the auto-detection)
 
 ## Error Handling
 
@@ -103,7 +103,7 @@ A fully configured plugin repository with:
 - [Detailed Standard](references/detailed-standard.md) — complete tables for files, workflows, hooks, pipeline stages, marketplace, and language-specific additions
   > Standard Plugin Files · Standard CI/CD Workflows · Git Hooks · Release Pipeline (`scripts/publish.py`) · Marketplace Standard · Language-Specific Additions
 - [Pipeline Rules](references/pipeline-rules.md) — mandatory rules for all plugin operations
-  > Pre-Push Hook: The Quality Gate · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run · Post-Push CI Verification · Generated-Pipeline Reliability Contract (v2.134.0 — CPV ref pinned, integrity-skip + timeout, `Test` aggregate gate, notify no-op without secret, "done" = green CI) · Mega-Linter Configuration · Common Fixes Reference
+  > Pre-Push Hook: The Quality Gate · Fix-All Mandate · Running CPV Scripts · Processing Validation Output · GitHub Secrets · CI Workflow Dependencies · Superseded validate.yml Removal · Marketplace Notification · All Scripts Are Python · Binary Plugins · README Requirements · Pre-Publish Local Dry-Run · Post-Push CI Verification · Generated-Pipeline Reliability Contract (v2.134.0 — CPV ref pinned, integrity-skip + timeout, `Test` aggregate gate, notify no-op without secret, "done" = green CI) · Mega-Linter Configuration · Copy-paste Gate Parity: `.jscpd.json` · Common Fixes Reference
 - [Pipeline Standards (current)](references/pipeline-standards.md) — the standards every newly-scaffolded plugin ships with
   > Overview · Whole-repo lint via cpv_lint_engine · Idempotent publish.py · validate_pipeline_script_refs rule · Cross-platform scripts — no bash, no jq/sed/awk · Input sanitization — every script parameter · Hooks MUST persist state in CLAUDE_PLUGIN_DATA, never CLAUDE_PLUGIN_ROOT · Hook commands MUST be cross-platform (Python-delegated) · PEP 723 scripts MUST be invoked via uv run · Migrating a legacy plugin
 - [v2.1.80+ Plugin Features](references/v2-1-80-features.md)

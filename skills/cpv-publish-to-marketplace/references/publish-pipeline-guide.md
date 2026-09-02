@@ -198,24 +198,35 @@ uv run python scripts/publish.py --install-branch-rules  # apply the cpv-branch-
 test, every lint pass, and every validation run is mandatory. Only `WARNING`
 severity does not block a push. If a gate fails, fix the underlying problem.
 
-### Pipeline Stages (the 10-stage template pipeline)
+### Pipeline Stages (the 15-stage template pipeline + 2 post-release steps)
 
-The generated `publish.py` runs these stages in order. Every stage is
-fail-fast — any non-zero exit aborts the pipeline.
+The generated `publish.py` runs these stages in order (`_PIPELINE_STAGES` in
+`generate_plugin_repo.py` is the single source of truth — this list is
+derived from it, never retyped). Every numbered stage is fail-fast — any
+non-zero exit aborts the pipeline; the two post-release steps run after the
+release is public and can never abort it.
 
 ```
-Step 0: Bypass guard           reject CPV_SKIP_*, SKIP_*, NO_VERIFY env vars
-Step 1: Check working tree     git status --porcelain (must be clean)
-Step 2: Lint                   uv run ruff check scripts/
-Step 3: Validate plugin        uvx cpv-remote-validate plugin . --strict (remote CPV)
-Step 4: Tests                  uv run pytest tests/ -x -q --tb=short
-Step 5: Version consistency    plugin.json / pyproject.toml / __version__ must match
-Step 6: Bump version           updates plugin.json, pyproject.toml, __version__
-Step 7: Update README badge    replace version-X.Y.Z-blue shields.io badge
-Step 8: Generate changelog     git-cliff -o CHANGELOG.md
-Step 9: Commit + tag + push    (direct push is blocked by the pre-push hook
-                                unless publish.py is in the ancestry chain)
-Step 10: GitHub release        gh release create with notes
+ 1/15: Bypass guard                    reject CPV_SKIP_*, SKIP_*, NO_VERIFY env vars
+ 2/15: Check working tree is clean     git status --porcelain (must be clean)
+ 3/15: Lint + type-check (ruff + mypy)
+ 4/15: Run tests (pytest)
+ 5/15: Validate plugin (remote CPV)    uvx cpv-remote-validate plugin . --strict
+ 6/15: Secret scan (trufflehog)
+ 7/15: Linux fork-parity probe         re-run the suite forced to fork, Linux-style
+ 8/15: CI-parity preflight (remote CPV)  uvx cpv-remote-validate ci-preflight .
+ 9/15: Marketplace-registration check
+10/15: Check version consistency       plugin.json / pyproject.toml / __version__ must match
+11/15: Bump version                    updates plugin.json, pyproject.toml, __version__
+12/15: Update README version badge     replace version-X.Y.Z-blue shields.io badge
+13/15: Generate changelog              git-cliff -o CHANGELOG.md
+14/15: Commit, tag, push               (direct push is blocked by the pre-push hook
+                                        unless publish.py is in the ancestry chain)
+15/15: Create GitHub release           gh release create with notes
+
+Post-release (unnumbered — never abort the publish):
+      - Verify CI is green on the released commit
+      - Prove the release installs
 ```
 
 ### Version Update Targets

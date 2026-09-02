@@ -44,6 +44,22 @@ def _atomic_push_block(text: str) -> str:
 # ── 1. Mechanism ───────────────────────────────────────────────────────────
 
 
+class _FakePopen:
+    """Minimal stand-in for the Popen run_with_retry drives (issue #224)."""
+
+    def __init__(self, cmd, returncode=0, stdout="", stderr=""):
+        self.args = cmd
+        self.pid = -1
+        self.returncode = returncode
+        self._out = (stdout, stderr)
+
+    def communicate(self, timeout=None):
+        return self._out
+
+    def poll(self):
+        return self.returncode
+
+
 class TestClassifierNeedsStderr:
     """Why capture_output=False could never retry: the classifier is stderr-keyed."""
 
@@ -82,10 +98,12 @@ class TestClassifierNeedsStderr:
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
             if len(calls) == 1:
-                return subprocess.CompletedProcess(cmd, 1, "", "error: RPC failed; HTTP 502")
-            return subprocess.CompletedProcess(cmd, 0, "", "ok")
+                return _FakePopen(cmd, 1, "", "error: RPC failed; HTTP 502")
+            return _FakePopen(cmd, 0, "", "ok")
 
-        with mock.patch.object(nr.subprocess, "run", fake_run), mock.patch.object(nr.time, "sleep"):
+        # issue #224: run_with_retry owns the pid via Popen so it can kill the
+        # whole process group on timeout — patch Popen, not run.
+        with mock.patch.object(nr.subprocess, "Popen", fake_run), mock.patch.object(nr.time, "sleep"):
             result = nr.run_with_retry(["git", "push"], max_attempts=3, backoff=0)
         assert result.returncode == 0
         assert len(calls) == 2
@@ -96,9 +114,9 @@ class TestClassifierNeedsStderr:
 
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
-            return subprocess.CompletedProcess(cmd, 1, "", "fatal: Authentication failed")
+            return _FakePopen(cmd, 1, "", "fatal: Authentication failed")
 
-        with mock.patch.object(nr.subprocess, "run", fake_run), mock.patch.object(nr.time, "sleep"):
+        with mock.patch.object(nr.subprocess, "Popen", fake_run), mock.patch.object(nr.time, "sleep"):
             try:
                 nr.run_with_retry(["git", "push"], max_attempts=3, backoff=0)
                 raise AssertionError("expected CalledProcessError")

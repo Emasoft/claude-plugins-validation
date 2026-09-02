@@ -31,7 +31,7 @@
 | `cliff.toml` | YES | git-cliff changelog configuration |
 | `.commitlintrc.json` | YES | Sets `"body-max-line-length": [0]` (v2.157.0). WITHOUT it, commitlint falls back to `@commitlint/config-conventional` (limit 100) and **every Dependabot PR fails CI forever** — its machine-generated body always exceeds 100 chars. The `type-enum` rule stays ON: a *human's* badly-typed commit must still fail. Detected by CIP-7. |
 | `.cspell.json` | YES | Project dictionary (v2.157.0). Mega-Linter ships SPELL enabled, so WITHOUT a dictionary CI hard-errors on the plugin's own proper nouns (agent/skill names). **AUTHOR-OWNED**: `standardize --fix` augments, never clobbers — so it is deliberately NOT in `_FORCE_TEMPLATE_FILES`. It is a dictionary, not a mute button: a real typo must still fail. |
-| `scripts/publish.py` | YES | 11-stage release pipeline + --gate mode + --install-hook. Since v2.157.0 includes **Gate 3b — the CI-parity preflight**, run BEFORE the bump/commit/tag/push so a parity defect cannot strand a half-published repo. A missing tool degrades to WARNING and never false-blocks. |
+| `scripts/publish.py` | YES | 15-stage release pipeline + --gate mode + --install-hook. Stage 8/15 is the **CI-parity preflight**, run BEFORE the bump/commit/tag/push so a parity defect cannot strand a half-published repo — it runs only in the full pipeline, never in `--gate` mode. A missing tool degrades to WARNING and never false-blocks. |
 | `git-hooks/pre-push` | YES | Thin bash delegator to `publish.py --gate` |
 | `CHANGELOG.md` | YES | Auto-generated changelog |
 | `LICENSE` | YES | License file (MIT recommended) |
@@ -104,21 +104,30 @@ only in what G0/G1 enforce (issue cpv#192):
 Self-installs `git-hooks/pre-push` into `.git/hooks/` and sets `core.hooksPath`.
 
 ### Publish mode (`--patch`/`--minor`/`--major`, or no flag for auto-bump)
-The 11-stage release pipeline (all fail-fast — any non-zero exit aborts).
-A leading stage 0 ("bypass guard": reject `CPV_SKIP_*` / `SKIP_*` /
-`NO_VERIFY` env vars) runs before stage 1 but is not counted among the 11:
+The 15-stage release pipeline (all fail-fast — any non-zero exit aborts),
+plus 2 unnumbered post-release steps that run after the release is public
+and can never abort it (`_PIPELINE_STAGES` in `generate_plugin_repo.py` is
+the single source of truth — this list is derived from it, never retyped):
 
-1. **Pre-flight checks**: Clean working tree
-2. **Lint**: `uv run ruff check scripts/`
-3. **Validate plugin**: `uvx cpv-remote-validate plugin . --strict` (blocks on CRITICAL/MAJOR/MINOR/NIT)
+1. **Bypass guard**: reject `CPV_SKIP_*` / `SKIP_*` / `NO_VERIFY` env vars
+2. **Check working tree is clean**: `git status --porcelain`
+3. **Lint + type-check**: `uv run ruff check scripts/` + mypy
 4. **Run tests**: `uv run pytest tests/ -q`
-5. **Marketplace-registration check**: Layout A — notify workflow + PAT secret + remote registration; Layout B — run from marketplace root + nested plugin listed
-6. **Version consistency**: Check all version sources match (plugin.json, pyproject.toml)
-7. **Bump version**: Update plugin.json, pyproject.toml, `__version__` vars
-8. **Update README badge**: Replace `version-X.Y.Z-blue` with new version
-9. **Generate changelog**: `git-cliff -o CHANGELOG.md` (if git-cliff installed)
-10. **Commit, tag, push**: `git commit`, `git tag vX.Y.Z`, `git push --tags`
-11. **GitHub release**: `gh release create vX.Y.Z` (if gh CLI installed)
+5. **Validate plugin (remote CPV)**: `uvx cpv-remote-validate plugin . --strict` (blocks on CRITICAL/MAJOR/MINOR/NIT)
+6. **Secret scan**: trufflehog
+7. **Linux fork-parity probe**: re-runs the suite forced to fork, the way Linux does it
+8. **CI-parity preflight (remote CPV)**: `uvx cpv-remote-validate ci-preflight .` — runs ONLY in this full pipeline, never in `--gate` mode
+9. **Marketplace-registration check**: Layout A — notify workflow + PAT secret + remote registration; Layout B — run from marketplace root + nested plugin listed
+10. **Check version consistency**: all version sources must match (plugin.json, pyproject.toml)
+11. **Bump version**: update plugin.json, pyproject.toml, `__version__` vars
+12. **Update README version badge**: replace `version-X.Y.Z-blue` with new version
+13. **Generate changelog**: `git-cliff -o CHANGELOG.md` (if git-cliff installed)
+14. **Commit, tag, push**: `git commit`, `git tag vX.Y.Z`, `git push --tags`
+15. **Create GitHub release**: `gh release create vX.Y.Z` (if gh CLI installed)
+
+Post-release (unnumbered — never abort the publish):
+- Verify CI is green on the released commit
+- Prove the release installs
 
 ## Marketplace Standard
 

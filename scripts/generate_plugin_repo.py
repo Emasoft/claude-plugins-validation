@@ -34,6 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cpv_pipeline_profile import (  # noqa: E402 — sibling import after the path insert above
     KNOWN_PROFILES,
+    PROFILE_BINARY_RELEASE,
     PROFILE_STANDARD,
     PROFILE_SUBMODULE_BUILD,
     resolve_pipeline_profile,
@@ -1128,7 +1129,10 @@ extend-exclude = ["**/fixtures", "**/testdata", "**/__fixtures__"]
 # gates every push. CPV shipped a NameError in its own pre-push exactly this way. CPV's
 # lint engine now reads shebangs, but a plugin's OWN ruff run (its CI, its hooks) does
 # not go through CPV, so it needs this line too.
-extend-include = ["git-hooks/pre-push", "git-hooks/pre-commit"]
+# Only `pre-push` is listed: this scaffold has no pre-commit generator, so naming
+# `git-hooks/pre-commit` here pointed ruff at a file the scaffold cannot produce
+# (audit row 24). Add it back the same day a pre-commit hook is actually emitted.
+extend-include = ["git-hooks/pre-push"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
@@ -1687,44 +1691,59 @@ def gen_publish_py(p: PluginParams, profile: str = PROFILE_STANDARD) -> str:
 """Unified publish pipeline: bypass-guard -> lint -> validate (remote CPV) -> test -> bump -> badge -> changelog -> commit -> push -> release.
 
 Modes:
-  --gate                  Quality gate: lint (ruff/jscpd/actionlint/mypy) +
-                          validate + tests only (no bump/push). Runs STANDALONE
-                          for a local pre-release check. When invoked by the
-                          pre-push hook it ALSO enforces that the push was
-                          started by this script (G0) and that the version was
-                          bumped (G1) — those two protect a push, so they only
-                          apply while one is in flight (issue cpv#192).
+  --gate                  Quality gate, no bump/push. Runs, in order: ruff (G2),
+                          jscpd (G2b), actionlint (G2c), mypy (G2d), the compiled
+                          build gates (G2e), shellcheck (G2f), the remote CPV
+                          validate (G3), the trufflehog secret scan (G3s), the
+                          test suite (G4) and the Linux fork-parity probe (G4b).
+                          Runs STANDALONE for a local pre-release check. When
+                          invoked by the pre-push hook it ALSO enforces that the
+                          push was started by this script (G0) and that the
+                          version was bumped (G1) — those two protect a push, so
+                          they only apply while one is in flight (issue cpv#192).
+  --print-gates           Print the numbered pipeline stage list and exit 0.
+                          Pure information: no side effects, no repo lookup.
   --install-hook          Install git-hooks/pre-push into .git/hooks/ and set core.hooksPath.
   --install-branch-rules  Apply the cpv-branch-rules GitHub ruleset to the origin
                           (server-side CI enforcement — run once after first push).
-  (no flag)               Full release pipeline (11 stages, fail-fast). The bump type
+  (no flag)               Full release pipeline (15 stages, fail-fast). The bump type
                           is AUTO-DETECTED via `git-cliff --bumped-version` from the
                           conventional commits on HEAD.
   --patch/--minor/--major Force a specific bump type (overrides auto-detection).
 
-Pipeline stages (all fail-fast — any non-zero exit aborts):
-   0. Bypass guard — reject CPV_SKIP_*, SKIP_*, NO_VERIFY env vars
-   1. Check working tree is clean
-   2. Lint files (ruff)
-   3. Validate plugin (uvx cpv-remote-validate plugin . --strict — fetches
+Pipeline stages (all fail-fast — any non-zero exit aborts). The list below,
+`_PIPELINE_STAGES`, the `[N/M]` progress labels and `--print-gates` are ONE
+source of truth — the count is derived, never retyped (audit row 31):
+   1. Bypass guard — reject CPV_SKIP_*, SKIP_*, NO_VERIFY env vars
+   2. Check working tree is clean
+   3. Lint + type-check (ruff + mypy)
+   4. Run tests (pytest)
+   5. Validate plugin (uvx cpv-remote-validate plugin . --strict — fetches
       the canonical CPV validator from GitHub so this plugin never vendors
       a local copy and never drifts from upstream rules)
-   4. Run tests (pytest)
-  4b. CI-parity preflight (uvx cpv-remote-validate ci-preflight . — the
+   6. Secret scan (trufflehog). A pipeline stage as well as a gate stage: a
+      plugin whose hooks were never installed would otherwise publish having
+      scanned nothing.
+   7. Linux fork-parity probe. Same reason — with hooks uninstalled the gate
+      copy never runs.
+   8. CI-parity preflight (uvx cpv-remote-validate ci-preflight . — the
       jscpd / actionlint / mypy / uv-sync-dev / Mega-Linter / static-CIP gates
       that CI's Lint job runs but `validate_plugin --strict` does NOT). Runs
       BEFORE the bump/commit/tag/push, so a pipeline defect can never leave a
       half-published state. A MISSING local tool degrades to a WARNING and never
       blocks the publish.
-   5. Marketplace-registration check (Layout A: notify workflow + PAT secret +
+   9. Marketplace-registration check (Layout A: notify workflow + PAT secret +
       remote marketplace.json registration + remote receiver workflow;
       Layout B: must run from marketplace root + nested plugin must be listed)
-   6. Check version consistency across all sources
-   7. Bump version in plugin.json, pyproject.toml, and __version__ vars
-   8. Update README version badge
-   9. Generate changelog (git-cliff)
-  10. Commit, tag, push
-  11. Create GitHub release (gh CLI)
+  10. Check version consistency across all sources
+  11. Bump version in plugin.json, pyproject.toml, and __version__ vars
+  12. Update README version badge
+  13. Generate changelog (git-cliff)
+  14. Commit, tag, push
+  15. Create GitHub release (gh CLI)
+
+Post-release stages (deliberately UNNUMBERED — they run after the release is
+public and can never abort it): verify CI is green, prove the release installs.
 
 Gate stages (--gate mode, called by pre-push hook):
    G0. Orchestrator check — direct `git push` is blocked; only publish.py
@@ -1744,6 +1763,8 @@ Gate stages (--gate mode, called by pre-push hook):
    G2f. Shell lint (shellcheck, parity with ci.yml Mega-Linter BASH_SHELLCHECK;
         WARNs+skips if shellcheck unavailable so a push is never false-blocked)
    G3. Validate (uvx cpv-remote-validate plugin . --strict)
+   G3s. Secret scan (trufflehog; installed on demand — a FAILED install blocks,
+        because "we never looked" is not "we looked and found nothing")
    G4. Tests (pytest)
    G4b. Linux fork-parity probe — re-runs the suite with multiprocessing forced
         to fork, the way Linux does it, so a fork-from-multithreaded-process
@@ -1859,6 +1880,73 @@ def cprint(msg: str) -> None:
 _TEST_SUITE_TIMEOUT_ENV = "PLUGIN_TEST_SUITE_TIMEOUT"
 _DEFAULT_TEST_SUITE_TIMEOUT = 1800.0
 
+# Wall-clock bound for the RELEASE PUSH (issue #224). The push is not a bare
+# network transfer: the branch-aware pre-push hook runs the whole gate — remote
+# CPV validate plus the full test suite — INSIDE the push's own clock. Inheriting
+# cpv_network_resilience's 600s network default killed every attempt mid-gate and
+# retried it 60 times (a 4-second bare push's budget), orphaning a gate subtree
+# each round. Size it to the gate's own work plus 30 min of slack, and drop the
+# attempt budget to 3: enough to absorb a real transfer hiccup AFTER a green gate.
+#
+# _CPV_TIMEOUT_SEC is ALSO the single budget for every `uvx cpv-remote-validate`
+# invocation — gate G3, stage_validate and stage_ci_preflight all pass it
+# (audit row 4). Three different budgets for one command is a defect on its own:
+# the tightest one silently sits on the publish path. A cold `uvx` build + a full
+# remote validate was measured at ~76s, so 600s is ample headroom, not a stall.
+_CPV_TIMEOUT_SEC = 600.0
+# The suite is budgeted TWICE: the branch-aware pre-push hook runs the full test
+# suite at G4 and again at G4b (the fork-parity probe re-runs it under a forced
+# `fork` start method), both inside the push's own clock. Budgeting one suite run
+# killed the push mid-G4b on a slow tree.
+_PUSH_TIMEOUT_SEC = _CPV_TIMEOUT_SEC + 2 * _DEFAULT_TEST_SUITE_TIMEOUT + 1800.0
+_PUSH_MAX_ATTEMPTS = 3
+
+# The numbered pipeline stages, in the order main() runs them. SINGLE SOURCE OF
+# TRUTH for the `[N/M]` progress labels, the module docstring and --print-gates:
+# a hand-typed total is what let the docstring claim 11 while main() ran more
+# (audit row 31). Post-release stages are listed separately because they run
+# after the release is public and can never abort it, so numbering them would
+# misrepresent them as gates the publish is conditional on.
+_PIPELINE_STAGES = [
+    "Bypass guard",
+    "Check working tree is clean",
+    "Lint + type-check (ruff + mypy)",
+    "Run tests (pytest)",
+    "Validate plugin (remote CPV)",
+    "Secret scan (trufflehog)",
+    "Linux fork-parity probe",
+    "CI-parity preflight (remote CPV)",
+    "Marketplace-registration check",
+    "Check version consistency",
+    "Bump version",
+    "Update README version badge",
+    "Generate changelog (git-cliff)",
+    "Commit, tag, push",
+    "Create GitHub release",
+]
+_POST_RELEASE_STAGES = [
+    "Verify CI is green on the released commit",
+    "Prove the release installs",
+]
+_TOTAL_PIPELINE_STAGES = len(_PIPELINE_STAGES)
+
+
+def print_gates() -> int:
+    """Print the numbered stage list and return 0. No side effects whatsoever.
+
+    Deliberately runs BEFORE the repo lookup and every gate: it answers "what
+    does this pipeline do?", a question that must be answerable from a dirty
+    tree, outside a git repo, and offline.
+    """
+    print(f"Publish pipeline stages ({_TOTAL_PIPELINE_STAGES}):")
+    for _i, _name in enumerate(_PIPELINE_STAGES, start=1):
+        print(f"  {_i:>2}/{_TOTAL_PIPELINE_STAGES}. {_name}")
+    print()
+    print("Post-release stages (unnumbered — never abort the publish):")
+    for _name in _POST_RELEASE_STAGES:
+        print(f"      - {_name}")
+    return 0
+
 
 def _test_suite_timeout() -> float:
     """Seconds allowed for the pytest gate; the env override wins when positive.
@@ -1876,6 +1964,17 @@ def _test_suite_timeout() -> float:
     except ValueError:
         return _DEFAULT_TEST_SUITE_TIMEOUT
     return override if override > 0 else _DEFAULT_TEST_SUITE_TIMEOUT
+
+
+def _fork_parity_timeout() -> float:
+    """Budget for the fork-parity probe — the SAME one the test gate uses.
+
+    The probe re-runs the SAME suite, so it gets the SAME bound. A named alias
+    rather than a second env lookup: two parsers of one variable drift, and the
+    drifted one is the bound nobody notices. It also keeps every resolution of
+    this budget in one region of the file, beside the constants it derives from.
+    """
+    return _test_suite_timeout()
 
 
 def run(
@@ -2284,7 +2383,7 @@ def do_bump(root: Path, new_ver: str, dry_run: bool = False) -> bool:
 
 def install_hook(root: Path) -> int:
     """Copy git-hooks/pre-push to .git/hooks/pre-push and set core.hooksPath."""
-    cprint(f"\\n{BOLD}Installing git hooks...{NC}")
+    cprint(f"\n{BOLD}Installing git hooks...{NC}")
     source = root / "git-hooks" / "pre-push"
     if not source.is_file():
         cprint(f"  {RED}git-hooks/pre-push not found{NC}")
@@ -2299,9 +2398,19 @@ def install_hook(root: Path) -> int:
     shutil.copy2(source, dest)
     dest.chmod(dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     cprint(f"  {GREEN}Installed: git-hooks/pre-push -> .git/hooks/pre-push{NC}")
-    # Also set core.hooksPath so git finds hooks in git-hooks/ directly
-    subprocess.run(["git", "config", "core.hooksPath", "git-hooks"],
-                   cwd=str(root), check=False)
+    # Also set core.hooksPath so git finds hooks in git-hooks/ directly.
+    # The return code IS checked (audit row 15): the old code printed success
+    # unconditionally, so a failed config write reported "installed" and every
+    # later push was silently ungated — the worst possible thing to be wrong
+    # about, because the whole point of this command is that pushes ARE gated.
+    cfg = subprocess.run(["git", "config", "core.hooksPath", "git-hooks"],
+                         cwd=str(root), check=False)
+    if cfg.returncode != 0:
+        cprint(f"  {RED}FAILED to set git config core.hooksPath = git-hooks "
+               f"(exit {cfg.returncode}).{NC}")
+        cprint(f"  {RED}The hook file was copied, but git may not run it. Set it by hand:{NC}")
+        cprint(f"  {RED}  git config core.hooksPath git-hooks{NC}")
+        return 1
     cprint(f"  {GREEN}Set git config core.hooksPath = git-hooks{NC}")
     return 0
 
@@ -2310,8 +2419,11 @@ def _get_origin_slug(root: Path) -> str | None:
     """Return OWNER/REPO parsed from the current repo's origin remote, or None."""
     try:
         r = subprocess.run(
+            # timeout= for consistency with every sibling git helper in this
+            # file (audit row 18): a bare `git config` read is instant, and a
+            # hang here would stall the branch-rules install with no bound.
             ["git", "config", "--get", "remote.origin.url"],
-            capture_output=True, text=True, cwd=str(root), check=False,
+            capture_output=True, text=True, cwd=str(root), check=False, timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -2345,7 +2457,7 @@ def install_branch_rules(root: Path) -> int:
     hook alone is bypassable with `git push --no-verify`, but a ruleset is
     enforced by GitHub itself.
     """
-    cprint(f"\\n{BOLD}Installing branch-protection ruleset...{NC}")
+    cprint(f"\n{BOLD}Installing branch-protection ruleset...{NC}")
     slug = _get_origin_slug(root)
     if slug is None:
         cprint(f"  {RED}Could not read origin remote URL — skipping.{NC}")
@@ -2365,7 +2477,14 @@ def install_branch_rules(root: Path) -> int:
             ],
             cwd=str(root),
             check=False,
+            # Audit row 12: a cold uvx build or a network stall would otherwise
+            # hang this command forever. Same budget as every other uvx CPV call.
+            timeout=_CPV_TIMEOUT_SEC,
         )
+    except subprocess.TimeoutExpired:
+        cprint(f"  {RED}cpv-setup-branch-rules timed out after {_CPV_TIMEOUT_SEC:g}s "
+               f"— branch rules NOT applied.{NC}")
+        return 1
     except (OSError, subprocess.SubprocessError) as exc:
         cprint(f"  {RED}uvx call failed: {exc}{NC}")
         return 1
@@ -2420,7 +2539,7 @@ def _get_process_ancestry(max_depth: int = 30) -> list[tuple[int, str]]:
     return ancestry
 
 
-def _called_by_publish_orchestrator(root: Path) -> bool:
+def _called_by_publish_orchestrator(root: Path, ancestry: list | None = None) -> bool:
     """Verify that scripts/publish.py (in publish mode, NOT --gate) is an ancestor.
 
     Expected chain for an orchestrated push:
@@ -2433,10 +2552,14 @@ def _called_by_publish_orchestrator(root: Path) -> bool:
     Walk the parent chain. At least one ancestor must be scripts/publish.py
     WITHOUT the --gate flag (that is, a publish orchestrator — not our own
     gate-mode re-entry).
+
+    `ancestry` is passed in by callers that already walked it, so the gate does
+    ONE walk instead of two (audit row 30 — the walk costs up to 30 `ps`
+    subprocesses at 5s apiece and both predicates used to do it separately).
     """
     expected_abs = str((root / "scripts" / "publish.py").resolve())
     expected_rel = "scripts/publish.py"
-    for _pid, cmdline in _get_process_ancestry():
+    for _pid, cmdline in (_get_process_ancestry() if ancestry is None else ancestry):
         if "publish.py" not in cmdline:
             continue
         if "--gate" in cmdline:
@@ -2446,7 +2569,7 @@ def _called_by_publish_orchestrator(root: Path) -> bool:
     return False
 
 
-def _push_in_flight() -> bool | None:
+def _push_in_flight(ancestry: list | None = None) -> bool | None:
     """Is a `git push` actually being attempted right now? (issue cpv#192)
 
     Three-valued on purpose:
@@ -2464,11 +2587,199 @@ def _push_in_flight() -> bool | None:
     (``.git/hooks/pre-push``) — that process IS push context. A false
     positive (e.g. a wrapper shell whose cmdline mentions ``git push``)
     degrades to enforcing G0, i.e. fails closed.
+
+    `ancestry` is passed in by a caller that already walked it (audit row 30);
+    None means "walk it here".
     """
-    ancestry = _get_process_ancestry()
+    if ancestry is None:
+        ancestry = _get_process_ancestry()
     if not ancestry:
         return None
     return any(re.search(r"\bgit\b.*\bpush\b", cmdline) for _pid, cmdline in ancestry)
+
+
+# Directories no tree walk in this file should ever descend into: build output,
+# vendored deps and VCS internals. One constant, used by the compiled-build gate,
+# the shell lint and the fork-parity probe.
+_SCAN_SKIP_DIRS = {"target", ".git", "node_modules", ".venv", "vendor",
+                   "dist", "build", "obj", "zig-out", "zig-cache", ".zig-cache"}
+
+
+def _secret_scan(root: Path) -> int:
+    """Secret-scan the working tree with trufflehog. 0 = clean, 1 = BLOCK.
+
+    Shared by gate G3s and the `stage_secret_scan` pipeline stage (audit row 6).
+    It must exist in BOTH places: the pre-push hook secret-scans FEATURE branches
+    only — a default-branch / tag push is gated on publish.py ancestry instead —
+    so a plugin that never ran `--install-hook`, or whose `core.hooksPath` was
+    reset, would publish having scanned nothing. That is the shape of CPV issue
+    #217 (a committed auth key reached main and sat there for 85 days while every
+    local gate passed).
+
+    trufflehog is a DEPENDENCY of this pipeline, not a precondition the publisher
+    is told to satisfy: if it is missing we INSTALL it. Only a FAILED install
+    blocks — and it must block, because "we never looked" and "we looked and
+    found nothing" are not the same answer.
+    """
+    if not shutil.which("trufflehog"):
+        cprint(f"  {YELLOW}trufflehog missing — installing it as a pipeline dependency...{NC}")
+        # A stalled installer must land on the styled BLOCKED path below, not
+        # die with a raw TimeoutExpired traceback (audit row 16).
+        try:
+            if shutil.which("brew"):
+                subprocess.run(["brew", "install", "trufflehog"], timeout=900)
+            if not shutil.which("trufflehog") and shutil.which("go"):
+                subprocess.run(
+                    ["go", "install", "github.com/trufflesecurity/trufflehog/v3@latest"],
+                    timeout=900)
+                # `go install` drops the binary in GOBIN/GOPATH/bin, which is
+                # often not yet on PATH in this process.
+                _gobin = os.environ.get("GOBIN") or str(
+                    Path(os.environ.get("GOPATH") or (Path.home() / "go")) / "bin")
+                os.environ["PATH"] = _gobin + os.pathsep + os.environ.get("PATH", "")
+        except subprocess.TimeoutExpired:
+            cprint(f"  {YELLOW}The trufflehog installer timed out (>900s).{NC}")
+        except (OSError, subprocess.SubprocessError) as _exc:
+            cprint(f"  {YELLOW}The trufflehog installer failed to run: {_exc}{NC}")
+    if not shutil.which("trufflehog"):
+        cprint(f"  {RED}BLOCKED: trufflehog is not installed and could not be installed.{NC}")
+        cprint(f"  {RED}The release was NOT secret-scanned — UNKNOWN is not clean.{NC}")
+        cprint(f"  {RED}Install it and re-run:  brew install trufflehog{NC}")
+        return 1
+    # Exclude gitignored-AND-UNTRACKED paths from the WALK (not from the
+    # results): scanning a large ignored corpus and discarding the hits is the
+    # same verdict for far more work. `--others --ignored` lists exactly the
+    # untracked-ignored set, so a TRACKED file stays scanned even when it also
+    # matches .gitignore — such a file still ships, and skipping it would be a
+    # scan-evasion vector.
+    _sec_root = str(root.resolve()).rstrip("/")
+    _ign = subprocess.run(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"],
+        cwd=str(root), capture_output=True, text=True, timeout=120)
+    _ign_paths = [ln.strip() for ln in (_ign.stdout or "").splitlines() if ln.strip()]
+    _excl_fh = tempfile.NamedTemporaryFile(
+        "w", suffix=".txt", delete=False, encoding="utf-8")
+    try:
+        # trufflehog matches these regexes against ABSOLUTE paths.
+        _excl_fh.write("^" + re.escape(_sec_root + "/.git") + "\n")
+        for _rel in sorted(_ign_paths):
+            _excl_fh.write("^" + re.escape(_sec_root + "/" + _rel.rstrip("/")) + "\n")
+        _excl_fh.close()
+        _th = subprocess.run(
+            ["trufflehog", "filesystem", _sec_root, "--json", "--no-update", "--fail",
+             # Without the widened set trufflehog OMITS `filtered_unverified`,
+             # the bucket an expired / revoked / unreachable credential lands
+             # in — a committed secret is a leak whether or not a runner can
+             # reach its API (CPV issue #219).
+             "--results=verified,unknown,unverified,filtered_unverified",
+             "-x", _excl_fh.name],
+            capture_output=True, text=True, timeout=900)
+    except subprocess.TimeoutExpired:
+        cprint(f"  {RED}BLOCKED: trufflehog timed out — scan INCOMPLETE, secrets UNKNOWN.{NC}")
+        return 1
+    finally:
+        try:
+            os.unlink(_excl_fh.name)
+        except OSError:
+            pass
+    if _th.returncode == 183:
+        _dets = []
+        for _ln in (_th.stdout or "").splitlines():
+            if not _ln.startswith("{"):
+                continue
+            try:
+                _f = json.loads(_ln)
+            except json.JSONDecodeError:
+                continue
+            _fs = _f.get("SourceMetadata", {}).get("Data", {}).get("Filesystem", {})
+            _dets.append(f"{_f.get('DetectorName', '?')} in {_fs.get('file', '?')}")
+        cprint(f"  {RED}BLOCKED: {len(_dets)} credential(s) detected.{NC}")
+        for _d in _dets[:20]:
+            cprint(f"    {RED}{_d}{NC}")
+        cprint(f"  {RED}Redaction is NOT done by this gate. A verified live credential"
+               f" must be ROTATED and purged from git history.{NC}")
+        return 1
+    if _th.returncode != 0:
+        cprint(f"  {RED}BLOCKED: trufflehog exited {_th.returncode} — scan did not"
+               f" complete, so secrets are UNKNOWN (that is not clean).{NC}")
+        return 1
+    cprint(f"  {GREEN}No credentials detected.{NC}")
+    return 0
+
+
+def _fork_parity_probe(root: Path, suite_timeout: float) -> int:
+    """Re-run the suite with multiprocessing forced to fork. 0 = ok, 1 = BLOCK.
+
+    Shared by gate G4b and the `stage_fork_parity` pipeline stage (audit row 14).
+
+    `multiprocessing` defaults to FORK on Linux and SPAWN on macOS. Forking a
+    multithreaded process copies mutex state, so a child can inherit a lock
+    (sys.stderr's, logging's) held by a thread that does not exist in the child,
+    and hang forever on its first write. The defect is INVISIBLE on a macOS dev
+    box and fatal in CI: CPV shipped exactly that, turning an 8.7s run into a
+    >300s timeout that failed both CI and Release AFTER a fully green local suite
+    of 11,484 tests.
+
+    Self-detecting: runs ONLY when this plugin's own Python creates process
+    pools. Linux (already forks) -> skip, so CI is never doubled. No fork
+    available -> WARN+skip. Blocks only when the probe RAN and the suite failed
+    -- and a TIMEOUT counts, because a hang IS the signature.
+    """
+    _pool_src = []
+    for p in root.rglob("*.py"):
+        # `is_file()` + suppressed OSError (audit row 23): a DIRECTORY named
+        # `*.py`, or an unreadable file, used to raise IsADirectoryError /
+        # PermissionError out of read_text() and abort the whole gate with a
+        # traceback.
+        if not p.is_file():
+            continue
+        if any(part in _SCAN_SKIP_DIRS for part in p.relative_to(root).parts):
+            continue
+        try:
+            _text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if any(tok in _text for tok in ("ProcessPoolExecutor", "multiprocessing")):
+            _pool_src.append(p)
+    if not _pool_src:
+        cprint(f"  {GREEN}No process pools in this plugin -- skipped.{NC}")
+        return 0
+    import multiprocessing as _mp
+    if "fork" not in _mp.get_all_start_methods():
+        cprint(f"  {YELLOW}WARNING: fork unavailable here -- parity probe SKIPPED.{NC}")
+        cprint(f"  {YELLOW}Linux CI is the FIRST place the fork path will run.{NC}")
+        return 0
+    if _mp.get_start_method(allow_none=False) == "fork":
+        cprint(f"  {GREEN}Platform already defaults to fork -- the normal test run covers it.{NC}")
+        return 0
+    _site = root / ".cpv-forkparity"
+    _site.mkdir(exist_ok=True)
+    (_site / "sitecustomize.py").write_text(
+        "import multiprocessing as _m\n"
+        "try:\n    _m.set_start_method('fork', force=True)\n"
+        "except Exception:\n    pass\n",
+        encoding="utf-8")
+    try:
+        _env = dict(os.environ)
+        _env["PYTHONPATH"] = str(_site) + (
+            os.pathsep + _env["PYTHONPATH"] if _env.get("PYTHONPATH") else "")
+        try:
+            _fp = subprocess.run(
+                ["uv", "run", "pytest", "tests/", "-q", "--tb=short"],
+                cwd=str(root), env=_env, timeout=suite_timeout).returncode
+        except subprocess.TimeoutExpired:
+            cprint(f"  {RED}BLOCKED: suite HUNG under the Linux fork default.{NC}")
+            cprint(f"  {RED}Something forks a multithreaded process. Pass an explicit{NC}")
+            cprint(f"  {RED}mp_context (spawn) to every pool instead of the platform default.{NC}")
+            return 1
+        if _fp != 0:
+            cprint(f"  {RED}BLOCKED: tests fail under the Linux fork default.{NC}")
+            cprint(f"  {RED}They pass under spawn -- this is what Linux CI will do to this commit.{NC}")
+            return 1
+        cprint(f"  {GREEN}Suite passes under the Linux fork default.{NC}")
+        return 0
+    finally:
+        shutil.rmtree(_site, ignore_errors=True)
 
 
 def run_gate(root: Path) -> int:
@@ -2491,10 +2802,22 @@ def run_gate(root: Path) -> int:
     # user they attempted an action they never took (issue cpv#192). A direct
     # `git push` still carries git-push ancestry and is still blocked.
     cprint(f"{BLUE}[G0] Checking push orchestrator...{NC}")
-    push_ctx = _push_in_flight()
+    # POSIX-only, LOUDLY (audit row 2). Every ancestry probe below shells out to
+    # `ps -p`, which does not exist on Windows: there OSError makes the walk
+    # return [], `_push_in_flight` returns None (fail-closed) and
+    # `_called_by_publish_orchestrator` returns False — so G0 would block EVERY
+    # push including publish.py's own, and the plugin could never be released,
+    # with no explanation. Refuse explicitly instead of failing mysteriously.
+    if os.name != "posix":
+        cprint(f"  {RED}publish.py canon is POSIX-only (macOS/Linux); Windows is unsupported{NC}")
+        return 1
+    # ONE ancestry walk feeds BOTH predicates (audit row 30): the walk costs up
+    # to 30 `ps` subprocesses at 5s apiece, and it was being done twice per gate.
+    _ancestry = _get_process_ancestry()
+    push_ctx = _push_in_flight(_ancestry)
     if push_ctx is False:
         cprint(f"  {YELLOW}No push in flight — standalone gate run; orchestrator check not applicable.{NC}")
-    elif not _called_by_publish_orchestrator(root):
+    elif not _called_by_publish_orchestrator(root, _ancestry):
         # push_ctx is True (inside a pre-push hook) or None (ancestry
         # unknown — fail CLOSED: treat as a push we cannot vouch for).
         cprint("")
@@ -2580,9 +2903,13 @@ def run_gate(root: Path) -> int:
     if not scripts_dir.is_dir():
         cprint(f"  {RED}BLOCKED: scripts/ directory missing — cannot lint.{NC}")
         return 1
+    # 300s, not 120 (audit row 17): `uv run` CREATES/SYNCS the venv on a cold
+    # machine before ruff even starts, which routinely exceeds two minutes — so
+    # the tighter bound blocked a perfectly healthy tree with "Command failed".
+    # Same order as every other gate here.
     lint_result = subprocess.run(
         ["uv", "run", "ruff", "check", "scripts/"],
-        cwd=str(root), timeout=120)
+        cwd=str(root), timeout=300)
     if lint_result.returncode != 0:
         cprint(f"  {RED}BLOCKED: Lint issues found{NC}")
         return 1
@@ -2790,111 +3117,43 @@ def run_gate(root: Path) -> int:
     if not shutil.which("uvx"):
         cprint(f"  {RED}BLOCKED: uvx not found on PATH.{NC}")
         return 1
-    ve = subprocess.run(
-        ["uvx", "--from",
-         "git+https://github.com/Emasoft/claude-plugins-validation",
-         "--with", "pyyaml",
-         "cpv-remote-validate", "plugin", ".", "--strict"],
-        cwd=str(root), timeout=600).returncode
-    # Exit codes: 0=pass, 1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT, 5+=WARNING
-    if ve != 0 and ve < 5:
-        labels = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}
-        cprint(f"  {RED}BLOCKED: {labels.get(ve, f'exit {ve}')} issues found{NC}")
-        return 1
-    cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
-
-    # Gate 3s: Secret scan. A leak BLOCKS the release.
-    #
-    # WHY here and not only in the pre-push hook: the hook secret-scans FEATURE
-    # branches only — a default-branch / tag push is gated on publish.py
-    # ancestry instead. So without this gate the ONE path that reaches users is
-    # the one path never scanned, which is the shape of CPV issue #217 (a
-    # committed auth key reached main and sat there for 85 days while every
-    # local gate passed).
-    #
-    # trufflehog is a DEPENDENCY of this pipeline, not a precondition the
-    # publisher is told to satisfy: if it is missing we INSTALL it. Only a
-    # FAILED install blocks — and it must block, because "we never looked" and
-    # "we looked and found nothing" are not the same answer.
-    cprint(f"\n{BLUE}[G3s] Secret scan (trufflehog)...{NC}")
-    if not shutil.which("trufflehog"):
-        cprint(f"  {YELLOW}trufflehog missing — installing it as a pipeline dependency...{NC}")
-        if shutil.which("brew"):
-            subprocess.run(["brew", "install", "trufflehog"], timeout=900)
-        if not shutil.which("trufflehog") and shutil.which("go"):
-            subprocess.run(
-                ["go", "install", "github.com/trufflesecurity/trufflehog/v3@latest"],
-                timeout=900)
-            # `go install` drops the binary in GOBIN/GOPATH/bin, which is often
-            # not yet on PATH in this process.
-            _gobin = os.environ.get("GOBIN") or str(
-                Path(os.environ.get("GOPATH") or (Path.home() / "go")) / "bin")
-            os.environ["PATH"] = _gobin + os.pathsep + os.environ.get("PATH", "")
-    if not shutil.which("trufflehog"):
-        cprint(f"  {RED}BLOCKED: trufflehog is not installed and could not be installed.{NC}")
-        cprint(f"  {RED}The release was NOT secret-scanned — UNKNOWN is not clean.{NC}")
-        cprint(f"  {RED}Install it and re-run:  brew install trufflehog{NC}")
-        return 1
-    # Exclude gitignored-AND-UNTRACKED paths from the WALK (not from the
-    # results): scanning a large ignored corpus and discarding the hits is the
-    # same verdict for far more work. `--others --ignored` lists exactly the
-    # untracked-ignored set, so a TRACKED file stays scanned even when it also
-    # matches .gitignore — such a file still ships, and skipping it would be a
-    # scan-evasion vector.
-    _sec_root = str(root.resolve()).rstrip("/")
-    _excl_args = []
-    _ign = subprocess.run(
-        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"],
-        cwd=str(root), capture_output=True, text=True, timeout=120)
-    _ign_paths = [ln.strip() for ln in (_ign.stdout or "").splitlines() if ln.strip()]
-    _excl_fh = tempfile.NamedTemporaryFile(
-        "w", suffix=".txt", delete=False, encoding="utf-8")
     try:
-        # trufflehog matches these regexes against ABSOLUTE paths.
-        _excl_fh.write("^" + re.escape(_sec_root + "/.git") + "\n")
-        for _rel in sorted(_ign_paths):
-            _excl_fh.write("^" + re.escape(_sec_root + "/" + _rel.rstrip("/")) + "\n")
-        _excl_fh.close()
-        _excl_args = ["-x", _excl_fh.name]
-        _th = subprocess.run(
-            ["trufflehog", "filesystem", _sec_root, "--json", "--no-update", "--fail",
-             # Without the widened set trufflehog OMITS `filtered_unverified`,
-             # the bucket an expired / revoked / unreachable credential lands
-             # in — a committed secret is a leak whether or not a runner can
-             # reach its API (CPV issue #219).
-             "--results=verified,unknown,unverified,filtered_unverified",
-             *_excl_args],
-            capture_output=True, text=True, timeout=900)
+        ve = subprocess.run(
+            ["uvx", "--from",
+             "git+https://github.com/Emasoft/claude-plugins-validation",
+             "--with", "pyyaml",
+             "cpv-remote-validate", "plugin", ".", "--strict"],
+            cwd=str(root), timeout=_CPV_TIMEOUT_SEC).returncode
     except subprocess.TimeoutExpired:
-        cprint(f"  {RED}BLOCKED: trufflehog timed out — scan INCOMPLETE, secrets UNKNOWN.{NC}")
+        cprint(f"  {RED}BLOCKED: the validator timed out after {_CPV_TIMEOUT_SEC:g}s "
+               f"— it did not finish, so the verdict is UNKNOWN (not clean).{NC}")
         return 1
-    finally:
-        try:
-            os.unlink(_excl_fh.name)
-        except OSError:
-            pass
-    if _th.returncode == 183:
-        _dets = []
-        for _ln in (_th.stdout or "").splitlines():
-            if not _ln.startswith("{"):
-                continue
-            try:
-                _f = json.loads(_ln)
-            except json.JSONDecodeError:
-                continue
-            _fs = _f.get("SourceMetadata", {}).get("Data", {}).get("Filesystem", {})
-            _dets.append(f"{_f.get('DetectorName', '?')} in {_fs.get('file', '?')}")
-        cprint(f"  {RED}BLOCKED: {len(_dets)} credential(s) detected.{NC}")
-        for _d in _dets[:20]:
-            cprint(f"    {RED}{_d}{NC}")
-        cprint(f"  {RED}Redaction is NOT done by this gate. A verified live credential"
-               f" must be ROTATED and purged from git history.{NC}")
+    # FAIL-CLOSED (audit row 1). CPV's verdict vocabulary is 0..4 (0=pass,
+    # 1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT); WARNING never gets its own exit
+    # code. So anything >= 5 is not a verdict at all — it is the validator
+    # FAILING TO RUN (127 = entrypoint missing, 137 = OOM-kill, ...). The old
+    # `ve != 0 and ve < 5` test let every one of those fall through and print
+    # "Validation passed", which is the exact RC-8 fail-open the CI workflows
+    # were fixed for and this gate was not.
+    if ve == 0:
+        cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
+    elif ve < 5:
+        labels = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}
+        cprint(f"  {RED}BLOCKED: {labels[ve]} issues found{NC}")
         return 1
-    if _th.returncode != 0:
-        cprint(f"  {RED}BLOCKED: trufflehog exited {_th.returncode} — scan did not"
-               f" complete, so secrets are UNKNOWN (that is not clean).{NC}")
+    else:
+        cprint(f"  {RED}BLOCKED: the validator FAILED TO RUN (exit {ve}).{NC}")
+        cprint(f"  {RED}That is outside CPV's 0-4 verdict range, so nothing was"
+               f" validated — UNKNOWN is not clean.{NC}")
         return 1
-    cprint(f"  {GREEN}No credentials detected.{NC}")
+
+    # Gate 3s: Secret scan. A leak BLOCKS the release. Body lives in
+    # `_secret_scan` because it is ALSO a pipeline stage (audit row 6): a plugin
+    # that never ran --install-hook (or whose core.hooksPath was reset) would
+    # otherwise publish with zero secret scanning.
+    cprint(f"\n{BLUE}[G3s] Secret scan (trufflehog)...{NC}")
+    if _secret_scan(root) != 0:
+        return 1
 
     # Gate 4: Tests. MANDATORY — missing tests/ dir or zero tests is a BLOCK.
     cprint(f"\n{BLUE}[G4] Running tests...{NC}")
@@ -2926,62 +3185,13 @@ def run_gate(root: Path) -> int:
         return 1
     cprint(f"  {GREEN}Tests passed.{NC}")
 
-    # Gate 4b: Linux fork-parity probe (CPV v3.23.0 post-mortem).
-    # `multiprocessing` defaults to FORK on Linux and SPAWN on macOS. Forking a
-    # multithreaded process copies mutex state, so a child can inherit a lock
-    # (sys.stderr's, logging's) held by a thread that does not exist in the
-    # child, and hang forever on its first write. The defect is INVISIBLE on a
-    # macOS dev box and fatal in CI: CPV shipped exactly that, turning an 8.7s
-    # run into a >300s timeout that failed both CI and Release AFTER a fully
-    # green local suite of 11,484 tests.
-    # Self-detecting: runs ONLY when this plugin's own Python creates process
-    # pools. Linux (already forks) -> skip, so CI is never doubled. No fork
-    # available (Windows) -> WARN+skip. Blocks only when the probe RAN and the
-    # suite failed -- and a TIMEOUT counts, because a hang IS the signature.
+    # Gate 4b: Linux fork-parity probe. Body lives in `_fork_parity_probe`
+    # because it is ALSO a pipeline stage (audit row 14) — with hooks
+    # uninstalled the gate copy never runs, and CPV's own publish.py has had it
+    # as a stage all along.
     cprint(f"\n{BLUE}[G4b] Linux fork-parity probe...{NC}")
-    _pool_src = [
-        p for p in root.rglob("*.py")
-        if not any(part in _compiled_skip for part in p.relative_to(root).parts)
-        and any(tok in p.read_text(encoding="utf-8", errors="replace")
-                for tok in ("ProcessPoolExecutor", "multiprocessing"))
-    ]
-    if not _pool_src:
-        cprint(f"  {GREEN}No process pools in this plugin -- skipped.{NC}")
-    else:
-        import multiprocessing as _mp
-        if "fork" not in _mp.get_all_start_methods():
-            cprint(f"  {YELLOW}WARNING: fork unavailable here -- parity probe SKIPPED.{NC}")
-            cprint(f"  {YELLOW}Linux CI is the FIRST place the fork path will run.{NC}")
-        elif _mp.get_start_method(allow_none=False) == "fork":
-            cprint(f"  {GREEN}Platform already defaults to fork -- the normal test run covers it.{NC}")
-        else:
-            _site = root / ".cpv-forkparity"
-            _site.mkdir(exist_ok=True)
-            (_site / "sitecustomize.py").write_text(
-                "import multiprocessing as _m\n"
-                "try:\n    _m.set_start_method('fork', force=True)\n"
-                "except Exception:\n    pass\n",
-                encoding="utf-8")
-            try:
-                _env = dict(os.environ)
-                _env["PYTHONPATH"] = str(_site) + (
-                    os.pathsep + _env["PYTHONPATH"] if _env.get("PYTHONPATH") else "")
-                try:
-                    _fp = subprocess.run(
-                        ["uv", "run", "pytest", "tests/", "-q", "--tb=short"],
-                        cwd=str(root), env=_env, timeout=suite_timeout).returncode
-                except subprocess.TimeoutExpired:
-                    cprint(f"  {RED}BLOCKED: suite HUNG under the Linux fork default.{NC}")
-                    cprint(f"  {RED}Something forks a multithreaded process. Pass an explicit{NC}")
-                    cprint(f"  {RED}mp_context (spawn) to every pool instead of the platform default.{NC}")
-                    return 1
-                if _fp != 0:
-                    cprint(f"  {RED}BLOCKED: tests fail under the Linux fork default.{NC}")
-                    cprint(f"  {RED}They pass under spawn -- this is what Linux CI will do to this commit.{NC}")
-                    return 1
-                cprint(f"  {GREEN}Suite passes under the Linux fork default.{NC}")
-            finally:
-                shutil.rmtree(_site, ignore_errors=True)
+    if _fork_parity_probe(root, suite_timeout) != 0:
+        return 1
 
     cprint(f"\n{GREEN}{BOLD}All gates passed.{NC}")
     return 0
@@ -3010,6 +3220,10 @@ def stage_bypass_guard() -> None:
           the `gh auth status` round-trip on flaky networks. Auth still
           has to work for the actual `git push` / `gh release create`;
           this only skips the precheck.
+        * ``PLUGIN_SKIP_INSTALL_SMOKE=1`` — read and documented by
+          `stage_install_smoke`, which runs POST-RELEASE and can never fail the
+          publish. Without this entry the documented flag aborted the run here
+          instead (audit row 5), so the flag was dead code.
 
     The ``PLUGIN_`` spelling MUST be exempt: the hash-verify module renamed
     the var and instructs users to export it, yet ``PLUGIN_SKIP_`` is a
@@ -3023,12 +3237,18 @@ def stage_bypass_guard() -> None:
     All are documented exemptions, listed below and excluded from the
     pattern match.
     """
-    cprint(f"\n{BOLD}[0/11] Checking for bypass attempts...{NC}")
+    cprint(f"\n{BOLD}[1/15] Checking for bypass attempts...{NC}")
     # Explicit infrastructure exemptions — see docstring above.
     exemptions = {
         "PLUGIN_SKIP_GITHUB_INTEGRITY",
         "CPV_SKIP_GITHUB_INTEGRITY",
         "CPV_SKIP_GH_AUTH_CHECK",
+        # `stage_install_smoke` reads this and documents it (audit row 5).
+        # Without the exemption, setting the documented flag ABORTED the publish
+        # at stage 1 instead of skipping the post-release smoke test — a dead
+        # code path. It skips nothing that gates the release: the smoke test
+        # runs AFTER the release is already public and can never fail it.
+        "PLUGIN_SKIP_INSTALL_SMOKE",
     }
     forbidden_prefixes = ("PLUGIN_SKIP_", "CPV_SKIP_", "SKIP_")
     forbidden_exact = {"NO_VERIFY"}
@@ -3047,10 +3267,36 @@ def stage_bypass_guard() -> None:
     cprint(f"  {GREEN}No bypass vars set.{NC}")
 
 def stage_check_clean(root: Path) -> None:
-    """Step 1: Working tree must be clean."""
-    cprint(f"\n{BOLD}[1/11] Checking working tree...{NC}")
+    """Step 2: Working tree must be clean, apart from a lone re-resolved uv.lock.
+
+    THE uv.lock CARVE-OUT (audit row 26, CPV issue #149). The outer `uv run` that
+    launched this pipeline can re-resolve `uv.lock` before publish.py's first
+    line executes, so the tree is dirty through no fault of the author, on a file
+    the pipeline itself rewrites two stages later. Aborting on it makes the
+    publish unrunnable exactly when everything is correct. The carve-out is as
+    narrow as it can be: `uv.lock` ALONE and nothing else, auto-committed and
+    reported. Any other dirty path — including uv.lock beside a second file —
+    still aborts.
+
+    It keys on the porcelain STATUS CODE, not the path alone. `ln[3:]` by itself
+    cannot tell ` M uv.lock` (modified — the case above) from `?? uv.lock`
+    (UNTRACKED) or `UU uv.lock` (merge conflict), and auto-committing either of
+    those is wrong: adding an untracked file here contradicts the #186
+    never-sweep-untracked rule this same file enforces at the commit stage, and
+    committing a conflicted lockfile is worse. Renames (`R  old -> new`) and
+    quoted paths already fail closed — neither string equals `uv.lock`.
+    """
+    cprint(f"\n{BOLD}[2/15] Checking working tree...{NC}")
     r = run(["git", "status", "--porcelain"], cwd=root, capture=True)
-    if r.stdout.strip():
+    dirty = [ln for ln in r.stdout.splitlines() if ln.strip()]
+    if (len(dirty) == 1 and dirty[0][:2] in (" M", "M ", "MM")
+            and dirty[0][3:].strip() == "uv.lock"):
+        cprint(f"  {YELLOW}Only uv.lock is dirty (the launching `uv run` re-resolved "
+               f"it) — auto-committing it (issue #149).{NC}")
+        run(["git", "add", "--", "uv.lock"], cwd=root)
+        run(["git", "commit", "-m", "chore: re-resolve uv.lock"], cwd=root)
+        dirty = []
+    if dirty:
         cprint(f"  {RED}Working tree is dirty. Commit or stash changes first.{NC}")
         cprint(r.stdout)
         sys.exit(1)
@@ -3064,7 +3310,7 @@ def stage_lint(root: Path) -> None:
     type errors. Type-checking runs BEFORE the test suite so the cheap fails
     come before the expensive ones.
     """
-    cprint(f"\n{BOLD}[2/11] Linting + type-checking...{NC}")
+    cprint(f"\n{BOLD}[3/15] Linting + type-checking...{NC}")
     scripts_dir = root / "scripts"
     if not scripts_dir.is_dir():
         cprint(f"  {RED}BLOCKED: scripts/ directory missing — cannot lint.{NC}")
@@ -3096,44 +3342,74 @@ _BROWSER_ORPHAN_SIGNATURES = (
 )
 
 
-def _snapshot_browser_pids() -> set:
-    """Snapshot-then-grep — never live-grep — for browser-signature PIDs."""
+def _ps_table() -> dict:
+    """Snapshot the process table as {pid: (pgid, command)}. {} when unreadable.
+
+    Snapshot-then-grep — never live-grep: a `ps | grep <pattern>` pipeline finds
+    its own shell as a false positive, because that shell has the pattern in its
+    own argv.
+    """
     try:
         snap = subprocess.run(
-            ["ps", "-eo", "pid,command"],
+            ["ps", "-eo", "pid,pgid,command"],
             capture_output=True, text=True, check=False, timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
-        return set()
+        return {}
     if snap.returncode != 0 or not snap.stdout:
-        return set()
-    pids = set()
+        return {}
+    table = {}
     for raw_line in snap.stdout.strip().split("\n")[1:]:
-        line = raw_line.strip()
-        if not line:
+        parts = raw_line.strip().split(None, 2)
+        if len(parts) < 3:
             continue
         try:
-            pid_str, cmd = line.split(None, 1)
-            pid = int(pid_str)
-        except (ValueError, IndexError):
+            table[int(parts[0])] = (int(parts[1]), parts[2])
+        except ValueError:
             continue
-        if any(sig in cmd for sig in _BROWSER_ORPHAN_SIGNATURES):
-            pids.add(pid)
-    return pids
+    return table
 
 
-def _cleanup_browser_orphans(baseline_pids: set) -> int:
-    """Kill browser-signature PIDs that appeared since ``baseline_pids``.
+def _snapshot_browser_pids() -> set:
+    """Browser-signature PIDs currently alive."""
+    return {
+        pid for pid, (_pgid, cmd) in _ps_table().items()
+        if any(sig in cmd for sig in _BROWSER_ORPHAN_SIGNATURES)
+    }
 
-    Baseline-diff: PIDs in baseline are pre-existing (maintainer's own
-    daily browser) — NEVER killed. Only PIDs that came into existence
-    during the pytest run are candidates.
+
+def _cleanup_browser_orphans(baseline_pids: set, owner_pgid: int | None = None) -> int:
+    """Kill browser-signature PIDs this pytest run actually spawned.
+
+    TWO conditions, both required (audit row 20). Baseline-diff alone was not
+    enough: a PID that merely APPEARED during the window can just as easily be a
+    browser the maintainer opened by hand mid-run, and killing that is a real
+    (and very confusing) loss — appearing-since-baseline does not imply
+    ownership.
+
+    * NOT in `baseline_pids` — pre-existing processes are never candidates; and
+    * in the PROCESS GROUP that ran pytest. pytest is a child of this process
+      and every browser it spawns inherits the group, while a browser opened
+      from a GUI or another terminal is in a different session entirely. The
+      PPID chain is NOT usable here: once pytest exits its orphans are
+      reparented to init and the chain to pytest is gone — the pgid survives
+      exactly that.
+
+    `owner_pgid=None` disables the cleanup rather than falling back to the
+    unsafe global diff: when ownership cannot be established, killing nothing is
+    the correct answer.
     """
     import signal
     import time
 
-    current = _snapshot_browser_pids()
-    new_pids = current - baseline_pids
+    if owner_pgid is None:
+        return 0
+    new_pids = {
+        pid for pid, (pgid, cmd) in _ps_table().items()
+        if pid not in baseline_pids
+        and pgid == owner_pgid
+        and any(sig in cmd for sig in _BROWSER_ORPHAN_SIGNATURES)
+    }
     if not new_pids:
         return 0
     killed = 0
@@ -3168,18 +3444,24 @@ def stage_tests(root: Path) -> None:
     unconditionally — the cleanup is a safety net, not a skip
     mechanism.
     """
-    cprint(f"\n{BOLD}[3/11] Running tests...{NC}")
+    cprint(f"\n{BOLD}[4/15] Running tests...{NC}")
     test_dir = root / "tests"
     if not test_dir.is_dir():
         cprint(f"  {RED}BLOCKED: tests/ directory missing.{NC}")
         cprint(f"  {RED}Every CPV plugin MUST ship a tests/ directory.{NC}")
         sys.exit(1)
     baseline_browser_pids = _snapshot_browser_pids()
+    # pytest is a child of this process, so it and everything it spawns inherit
+    # THIS process group — which is what lets the cleanup below prove ownership
+    # (audit row 20) instead of killing anything that merely appeared during the
+    # window. A browser the maintainer opened by hand lives in a different
+    # session and a different group, so it is now structurally out of range.
+    owner_pgid = os.getpgrp()
     try:
         r = run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root,
                 check=False, timeout=_test_suite_timeout())
     finally:
-        killed = _cleanup_browser_orphans(baseline_browser_pids)
+        killed = _cleanup_browser_orphans(baseline_browser_pids, owner_pgid)
         if killed:
             cprint(f"  {YELLOW}Cleaned up {killed} orphaned browser process(es) spawned by pytest.{NC}")
     if r.returncode == 5:
@@ -3204,20 +3486,55 @@ def stage_validate(root: Path) -> None:
     Order: runs AFTER lint + tests so behavioral regressions fail fast
     before the structural validator even looks at the manifest.
     """
-    cprint(f"\n{BOLD}[4/11] Validating plugin (remote CPV)...{NC}")
+    cprint(f"\n{BOLD}[5/15] Validating plugin (remote CPV)...{NC}")
     if not shutil.which("uvx"):
         cprint(f"  {RED}BLOCKED: uvx not found on PATH.{NC}")
         cprint(f"  {RED}Install via: brew install uv  or  pip install uv{NC}")
         sys.exit(1)
     # Fetch CPV from GitHub and run validate_plugin remotely. --strict blocks
     # on CRITICAL(1), MAJOR(2), MINOR(3), NIT(4); WARNING(5+) passes.
+    #
+    # The budget is the SHARED `_CPV_TIMEOUT_SEC` (audit row 4). This call site
+    # used to inherit `run()`'s 300s default while gate G3 gave the IDENTICAL
+    # command 600s — three budgets for one command, with the tightest one on the
+    # publish path.
     run([
         "uvx", "--from",
         "git+https://github.com/Emasoft/claude-plugins-validation",
         "--with", "pyyaml",
         "cpv-remote-validate", "plugin", ".", "--strict",
-    ], cwd=root)
+    ], cwd=root, timeout=_CPV_TIMEOUT_SEC)
     cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
+
+
+def stage_secret_scan(root: Path) -> None:
+    """Step 6: Secret scan (trufflehog). MANDATORY — no skip.
+
+    A PIPELINE stage, not only a gate stage (audit row 6). The gate copy runs
+    from the pre-push hook; a plugin that never ran `--install-hook`, or whose
+    `core.hooksPath` was reset, would otherwise publish with zero secret
+    scanning. Runs BEFORE the bump/commit/tag/push, so a detected credential
+    aborts with the tree untouched — a gate that fired after the push could not
+    un-publish anything.
+    """
+    cprint(f"\n{BOLD}[6/15] Secret scan (trufflehog)...{NC}")
+    if _secret_scan(root) != 0:
+        sys.exit(1)
+
+
+def stage_fork_parity(root: Path) -> None:
+    """Step 7: Linux fork-parity probe. Self-detecting; blocks on a real failure.
+
+    A PIPELINE stage for the same reason as `stage_secret_scan` (audit row 14):
+    with hooks uninstalled the G4b gate copy never runs at all.
+
+    On a plugin with process pools the suite therefore runs up to FOUR times per
+    publish (stage_tests, stage_fork_parity, and the pre-push hook's G4 + G4b);
+    plugins without pools self-detect and skip.
+    """
+    cprint(f"\n{BOLD}[7/15] Linux fork-parity probe...{NC}")
+    if _fork_parity_probe(root, _fork_parity_timeout()) != 0:
+        sys.exit(1)
 
 
 def stage_ci_preflight(root: Path) -> None:
@@ -3241,17 +3558,26 @@ def stage_ci_preflight(root: Path) -> None:
     lean machine publishes exactly as before — it just gets less LOCAL coverage,
     which CI still enforces. Do not "harden" this into a hard tool requirement.
     """
-    cprint(f"\n{BOLD}[4b/11] CI-parity preflight (remote CPV)...{NC}")
+    cprint(f"\n{BOLD}[8/15] CI-parity preflight (remote CPV)...{NC}")
     if not shutil.which("uvx"):
         cprint(f"  {RED}BLOCKED: uvx not found on PATH.{NC}")
         cprint(f"  {RED}Install via: brew install uv  or  pip install uv{NC}")
         sys.exit(1)
-    rc = subprocess.run([
-        "uvx", "--from",
-        "git+https://github.com/Emasoft/claude-plugins-validation",
-        "--with", "pyyaml",
-        "cpv-remote-validate", "ci-preflight", ".",
-    ], cwd=str(root)).returncode
+    # Explicit timeout (audit row 3): without one a stalled uvx or a network
+    # hiccup hung the publish forever with the tree already lint/test/
+    # validate-clean. A timeout BLOCKS, as `run()` does — an unfinished preflight
+    # is not a passed preflight.
+    try:
+        rc = subprocess.run([
+            "uvx", "--from",
+            "git+https://github.com/Emasoft/claude-plugins-validation",
+            "--with", "pyyaml",
+            "cpv-remote-validate", "ci-preflight", ".",
+        ], cwd=str(root), timeout=_CPV_TIMEOUT_SEC).returncode
+    except subprocess.TimeoutExpired:
+        cprint(f"  {RED}BLOCKED: CI-parity preflight timed out after "
+               f"{_CPV_TIMEOUT_SEC:g}s — it did not finish, so nothing was checked.{NC}")
+        sys.exit(1)
     if rc != 0:
         cprint(f"  {RED}BLOCKED: CI-parity preflight FAILED.{NC}")
         cprint(f"  {RED}The gates listed above would fail GitHub CI — and without this{NC}")
@@ -3358,6 +3684,14 @@ def _fetch_remote_marketplace_json(owner: str, repo: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+# Aggregate bound for the per-workflow-file receiver probe below (audit row 19).
+# Each `gh api` call was individually bounded at 60s with NO overall ceiling, so
+# a marketplace with many workflow files could spend minutes inside what the
+# pipeline presents as one quick "check".
+_RECEIVER_PROBE_MAX_FILES = 25
+_RECEIVER_PROBE_DEADLINE_S = 90.0
+
+
 def _remote_has_receiver_workflow(owner: str, repo: str) -> bool:
     gh = shutil.which("gh")
     if gh is None:
@@ -3374,12 +3708,20 @@ def _remote_has_receiver_workflow(owner: str, repo: str) -> bool:
         return False
     if not isinstance(entries, list):
         return False
+    deadline = time.monotonic() + _RECEIVER_PROBE_DEADLINE_S
+    checked = 0
     for entry in entries:
         if not isinstance(entry, dict):
             continue
         name = entry.get("name", "")
         if not isinstance(name, str) or not name.endswith((".yml", ".yaml")):
             continue
+        if checked >= _RECEIVER_PROBE_MAX_FILES or time.monotonic() >= deadline:
+            # Out of budget. Returning False is the conservative direction here:
+            # the caller reports "no receiver workflow found", a WARNING that
+            # asks the maintainer to look, rather than claiming one exists.
+            break
+        checked += 1
         f = subprocess.run(
             [gh, "api", f"repos/{owner}/{repo}/contents/.github/workflows/{name}",
              "-H", "Accept: application/vnd.github.raw+json"],
@@ -3430,7 +3772,7 @@ def stage_marketplace_registration(root: Path) -> None:
       - 'none' (no marketplace wiring): emits a WARNING and proceeds — valid
         for first releases or experimental standalone plugins
     """
-    cprint(f"\n{BOLD}[5/11] Marketplace-registration check...{NC}")
+    cprint(f"\n{BOLD}[9/15] Marketplace-registration check...{NC}")
     layout, details = _detect_layout(root)
 
     if layout == "none":
@@ -3518,7 +3860,7 @@ def stage_marketplace_registration(root: Path) -> None:
 
 def stage_consistency(root: Path) -> None:
     """Step 6: Check version consistency."""
-    cprint(f"\n{BOLD}[6/11] Checking version consistency...{NC}")
+    cprint(f"\n{BOLD}[10/15] Checking version consistency...{NC}")
     ok, msg = check_version_consistency(root)
     cprint(f"  {msg}")
     if not ok:
@@ -3670,6 +4012,57 @@ def _dependency_tag_name(root: Path, new_ver: str) -> str | None:
     return f"{name}--v{new_ver}" if name else None
 
 
+def _ensure_tag_at_head(root: Path, tag_name: str, message: str) -> bool:
+    """Guarantee `tag_name` exists AND points at HEAD, or refuse (audit row 7).
+
+    The old behaviour was "if it exists locally, skip". After a publish that died
+    between tagging and the push (a blocking gate, a lost connection), the retry
+    then pushed the PREVIOUS attempt's tag — so every commit made between the
+    attempts, typically the very fix that made the retry pass, landed on the
+    branch but OUTSIDE the released tag, and the release archive differed from
+    the tree the gates had just validated.
+
+    FAIL-CLOSED. The tag is moved ONLY on the remote's POSITIVE answer that it is
+    unpushed. A tag already on origin is immutable here, and an unreachable
+    remote is not consent — an unanswered `ls-remote` must never be read as "the
+    tag is not published".
+
+    Returns True when the tag is correct (created, moved, or already at HEAD),
+    False when the caller must abort.
+    """
+    if not _local_tag_exists(root, tag_name):
+        run(["git", "tag", "-a", tag_name, "-m", message], cwd=root)
+        cprint(f"  {GREEN}Tag {tag_name} created.{NC}")
+        return True
+    tag_sha = run(["git", "rev-list", "-n", "1", tag_name], cwd=root,
+                  check=False, capture=True).stdout.strip()
+    head_sha = run(["git", "rev-parse", "HEAD"], cwd=root,
+                   check=False, capture=True).stdout.strip()
+    if not (tag_sha and head_sha) or tag_sha == head_sha:
+        # Already correct, or the shas are unreadable — the latter is the
+        # historical behaviour and is safe: nothing is moved on a guess.
+        cprint(f"  {GREEN}Tag {tag_name} already present at HEAD.{NC}")
+        return True
+    remote_state = _remote_tag_state(root, tag_name)
+    if remote_state is None:
+        cprint(f"  {RED}Local tag {tag_name} points at {tag_sha[:8]} (HEAD {head_sha[:8]}) "
+               f"and origin's tags cannot be read (ls-remote failed). REFUSING to move "
+               f"the tag — that is only safe when the remote confirms it is unpushed. "
+               f"Re-run once the remote is reachable.{NC}")
+        return False
+    if remote_state is True:
+        cprint(f"  {RED}Local tag {tag_name} points at {tag_sha[:8]} but HEAD is "
+               f"{head_sha[:8]}, and the tag is ALREADY ON ORIGIN. REFUSING to move a "
+               f"published tag. Bump to a new version instead.{NC}")
+        return False
+    cprint(f"  {YELLOW}Local tag {tag_name} points at {tag_sha[:8]}, HEAD is at "
+           f"{head_sha[:8]}. The tag is unpushed; deleting and recreating it at HEAD.{NC}")
+    run(["git", "tag", "-d", tag_name], cwd=root)
+    run(["git", "tag", "-a", tag_name, "-m", message], cwd=root)
+    cprint(f"  {GREEN}Tag {tag_name} re-created at HEAD.{NC}")
+    return True
+
+
 def stage_bump(root: Path, new_ver: str, dry_run: bool) -> None:
     """Step 7: Bump version. Idempotent — skips when local already matches target.
 
@@ -3682,7 +4075,7 @@ def stage_bump(root: Path, new_ver: str, dry_run: bool) -> None:
     local-vs-remote delta, and skip the bump entirely when local already
     matches the target.
     """
-    cprint(f"\n{BOLD}[7/11] Bumping version...{NC}")
+    cprint(f"\n{BOLD}[11/15] Bumping version...{NC}")
     current = get_current_version(root)
     remote = _read_remote_version(root)
     if remote and current and current == new_ver:
@@ -3711,7 +4104,7 @@ def stage_update_badges(root: Path, old_ver: str, new_ver: str, dry_run: bool) -
       3. Emit a WARNING (not silent skip) when no badge is found at all so the
          author notices the README has no shields.io version badge to update.
     """
-    cprint(f"\n{BOLD}[8/11] Updating README badge...{NC}")
+    cprint(f"\n{BOLD}[12/15] Updating README badge...{NC}")
     readme = root / "README.md"
     if not readme.exists():
         cprint(f"  {YELLOW}WARNING: no README.md — skipping badge update.{NC}")
@@ -3876,7 +4269,7 @@ def stage_changelog(root: Path, new_ver: str, dry_run: bool) -> None:
     `--unreleased` means "commits after the last tag": once step 10 has tagged
     HEAD there is nothing unreleased left to render.
     """
-    cprint(f"\n{BOLD}[9/11] Generating changelog (git-cliff)...{NC}")
+    cprint(f"\n{BOLD}[13/15] Generating changelog (git-cliff)...{NC}")
     if not shutil.which("git-cliff"):
         cprint(f"  {YELLOW}git-cliff not installed — skipping changelog.{NC}")
         return
@@ -3908,7 +4301,7 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     user gets an actionable error if their gh CLI is unauthed/lacks push
     perm — instead of an opaque git push failure mid-pipeline.
     """
-    cprint(f"\n{BOLD}[10/11] Committing and pushing...{NC}")
+    cprint(f"\n{BOLD}[14/15] Committing and pushing...{NC}")
     tag = f"v{new_ver}"
     # The DEPENDENCY-RESOLUTION tag. Since Claude Code 2.1.110 a version-constrained
     # dependency ({"name": "<plugin>", "version": ">=1.2"}) is resolved by listing this
@@ -3961,7 +4354,11 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
         # to a public repo AND is the artifact users install, so an accidental
         # inclusion there is unrecoverable in practice.
         run(["git", "add", "-u"], cwd=root)
-        for _gen in (".claude-plugin/plugin.json", ".plugin-self-hashes.json",
+        # `.plugin-self-hashes.json` is deliberately NOT in this list (audit row
+        # 25): nothing in this pipeline generates it, so naming it here promised
+        # a hash-refresh stage that does not exist. Add it back together with
+        # that stage, never before it.
+        for _gen in (".claude-plugin/plugin.json",
                      "CHANGELOG.md", "README.md", "pyproject.toml", "uv.lock"):
             if (root / _gen).exists():
                 run(["git", "add", "--", _gen], cwd=root)
@@ -3989,10 +4386,11 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
             cprint(f"  {YELLOW}plugin.json name unreadable — commit carries no Agent: trailer (G1.1).{NC}")
         run(_commit_cmd, cwd=root)
 
-    if tag_exists:
-        cprint(f"  {YELLOW}Tag {tag} already exists locally — skipping tag step.{NC}")
-    else:
-        run(["git", "tag", "-a", tag, "-m", f"Release {tag}"], cwd=root)
+    # Both tags route through _ensure_tag_at_head (audit row 7). "Exists locally
+    # -> skip" pushed a PREVIOUS attempt's tag after an interrupted publish, so
+    # the released tag no longer pointed at the validated tree.
+    if not _ensure_tag_at_head(root, tag, f"Release {tag}"):
+        sys.exit(1)
 
     if dep_tag is None:
         # Warn loudly rather than silently omitting it: a silent skip is precisely how
@@ -4000,10 +4398,8 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
         cprint(f"  {YELLOW}WARNING: cannot read the plugin name from "
                f".claude-plugin/plugin.json - SKIPPING the dependency tag. Dependent "
                f"plugins will fail to resolve this release with `no-matching-tag`.{NC}")
-    elif dep_tag_exists:
-        cprint(f"  {YELLOW}Tag {dep_tag} already exists locally — skipping.{NC}")
-    else:
-        run(["git", "tag", "-a", dep_tag, "-m", f"{_plugin_name(root)} {new_ver}"], cwd=root)
+    elif not _ensure_tag_at_head(root, dep_tag, f"{_plugin_name(root)} {new_ver}"):
+        sys.exit(1)
 
     # gh-auth precheck — fail fast with actionable error if gh missing/unauthed.
     owner, repo = _resolve_owner_repo(root)
@@ -4024,6 +4420,9 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
         _push_res = git_with_retry(
             ["git", "push", "--atomic", "origin", *push_refs],
             cwd=str(root),
+            # issue #224: the pre-push gate runs inside this call's wall clock.
+            timeout=_PUSH_TIMEOUT_SEC,
+            max_attempts=_PUSH_MAX_ATTEMPTS,
         )
     except subprocess.CalledProcessError as _push_exc:
         if _push_exc.stderr:
@@ -4056,7 +4455,7 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     create` so an auth state change between gates 10 and 11 (token
     revoked, account switched) surfaces as an actionable error.
     """
-    cprint(f"\n{BOLD}[11/11] Creating GitHub release...{NC}")
+    cprint(f"\n{BOLD}[15/15] Creating GitHub release...{NC}")
     tag = f"v{new_ver}"
     if not shutil.which("gh"):
         cprint(f"  {YELLOW}gh CLI not installed — skipping release.{NC}")
@@ -4188,7 +4587,18 @@ def _marketplace_is_registered(claude_bin: str, marketplace: str) -> bool:
     return marketplace in ((listing.stdout or "") + (listing.stderr or ""))
 
 
-_INSTALLED_PLUGINS_REGISTRY = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
+def _claude_config_dir() -> Path:
+    """Claude Code's config dir — `$CLAUDE_CONFIG_DIR`, else `~/.claude`.
+
+    Audit row 21: hardcoding `~/.claude` meant that on any host setting
+    CLAUDE_CONFIG_DIR the registry probe reported "could not read" forever, i.e.
+    permanently UNVERIFIED, while looking like a check.
+    """
+    raw = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    return Path(os.path.expanduser(raw)) if raw else Path.home() / ".claude"
+
+
+_INSTALLED_PLUGINS_REGISTRY = _claude_config_dir() / "plugins" / "installed_plugins.json"
 
 
 def _smoke_records_still_registered(
@@ -4308,7 +4718,8 @@ def stage_install_smoke(root: Path, new_ver: str, dry_run: bool) -> None:
         cprint(f"  {YELLOW}  Not a pass - nothing was installed.{NC}")
         return
     target = f"{plugin_name}@{marketplace}"
-    import tempfile  # noqa: PLC0415 - stdlib, imported only on this path
+    # `tempfile` is imported at module top; the local re-import here carried the
+    # comment "imported only on this path", which was false (audit row 28).
     with tempfile.TemporaryDirectory(prefix="plugin-install-smoke-") as tmp:
         cprint(f"  {BLUE}$ (cd {tmp} && claude plugin install {target} --scope local){NC}")
         try:
@@ -4417,11 +4828,11 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
     "Cannot check" is never reported as green: no gh, no network, no runs found,
     or a timeout are each reported UNVERIFIED with the reason, never as a pass.
     """
-    # Deliberately NOT numbered into the [N/11] sequence: those steps run BEFORE
+    # Deliberately NOT numbered into the [N/M] sequence: those steps run BEFORE
     # anything is public and any of them can abort the publish. This one runs
     # after the release exists and never aborts, so numbering it as a 12th step
     # would misrepresent it as another gate the publish is conditional on.
-    cprint(f"\\n{BOLD}[post-release] Verifying CI on the released commit...{NC}")
+    cprint(f"\n{BOLD}[post-release] Verifying CI on the released commit...{NC}")
     if dry_run:
         cprint(f"  {YELLOW}(dry-run) skipped.{NC}")
         return
@@ -4431,8 +4842,16 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
         cprint(f"  {YELLOW}  The release IS published; verify manually.{NC}")
         return
 
-    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root),
-                          capture_output=True, text=True)
+    # Every subprocess in this stage carries a timeout (audit row 11). The
+    # deadline below is only consulted BETWEEN calls, so a single hung `gh`
+    # blocked past CI_VERIFY_TIMEOUT_S indefinitely. A timed-out call is treated
+    # as UNVERIFIED — never as green.
+    try:
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root),
+                              capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        cprint(f"  {YELLOW}UNVERIFIED - `git rev-parse HEAD` timed out.{NC}")
+        return
     if head.returncode != 0:
         cprint(f"  {YELLOW}UNVERIFIED - could not resolve HEAD.{NC}")
         return
@@ -4440,11 +4859,16 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
 
     deadline = time.monotonic() + CI_VERIFY_TIMEOUT_S
     while True:
-        listed = subprocess.run(
-            ["gh", "run", "list", "--commit", sha, "--limit", "20",
-             "--json", "name,status,conclusion,headBranch"],
-            cwd=str(root), capture_output=True, text=True,
-        )
+        try:
+            listed = subprocess.run(
+                ["gh", "run", "list", "--commit", sha, "--limit", "20",
+                 "--json", "name,status,conclusion,headBranch"],
+                cwd=str(root), capture_output=True, text=True, timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            cprint(f"  {YELLOW}UNVERIFIED - `gh run list` timed out (>120s).{NC}")
+            cprint(f"  {YELLOW}  Verify manually: gh run list --commit {sha}{NC}")
+            return
         if listed.returncode != 0:
             cprint(f"  {YELLOW}UNVERIFIED - `gh run list` exited {listed.returncode}.{NC}")
             return
@@ -4551,11 +4975,18 @@ def _resolve_ci_run_successors(root: Path, sha: str, cancelled_runs: list[dict])
         branch = r.get("headBranch")
         if not branch:
             continue
-        listed = subprocess.run(
-            ["gh", "run", "list", "--workflow", name, "--branch", str(branch),
-             "--limit", "20", "--json", "headSha,conclusion,status,createdAt"],
-            cwd=str(root), capture_output=True, text=True,
-        )
+        # Per-call timeouts here too (audit row 11): a hung `gh` or `git` in this
+        # loop had no bound at all. A timeout leaves the workflow ABSENT from the
+        # returned map, which `classify_ci_runs` reads as "no successor found" —
+        # i.e. UNKNOWN, the conservative direction.
+        try:
+            listed = subprocess.run(
+                ["gh", "run", "list", "--workflow", name, "--branch", str(branch),
+                 "--limit", "20", "--json", "headSha,conclusion,status,createdAt"],
+                cwd=str(root), capture_output=True, text=True, timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            continue
         if listed.returncode != 0:
             continue
         try:
@@ -4566,10 +4997,13 @@ def _resolve_ci_run_successors(root: Path, sha: str, cancelled_runs: list[dict])
             candidate_sha = c.get("headSha")
             if not candidate_sha or candidate_sha == sha:
                 continue
-            ancestry = subprocess.run(
-                ["git", "merge-base", "--is-ancestor", sha, candidate_sha],
-                cwd=str(root), capture_output=True,
-            )
+            try:
+                ancestry = subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", sha, candidate_sha],
+                    cwd=str(root), capture_output=True, timeout=30,
+                )
+            except subprocess.TimeoutExpired:
+                continue
             if ancestry.returncode == 0:
                 result[name] = True
                 break
@@ -4665,6 +5099,8 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Preview only, no changes")
     parser.add_argument("--canon-version", action="store_true",
                         help="Report the installed vs latest CPV publish-canon version and exit")
+    parser.add_argument("--print-gates", action="store_true", dest="print_gates",
+                        help="Print the numbered pipeline stage list and exit (no side effects)")
     # NOTE: --skip-tests was intentionally removed. The cornerstone rule is that
     # every CPV plugin MUST pass validation with 0 issues (WARNING allowed) before
     # any push. Skipping tests would bypass that guarantee — there are no exceptions.
@@ -4676,6 +5112,11 @@ def main() -> int:
     # when it is needed.
     if args.canon_version:
         return print_canon_version()
+
+    # Pure information, answered BEFORE the repo lookup and every gate, with
+    # zero side effects — the same contract as the version report above.
+    if args.print_gates:
+        return print_gates()
 
     root = get_repo_root()
 
@@ -4742,6 +5183,11 @@ def main() -> int:
     stage_lint(root)
     stage_tests(root)  # MANDATORY — no skip flag, no exceptions
     stage_validate(root)
+    # Both of these exist as gate stages too. They are ALSO pipeline stages
+    # because a plugin whose hooks were never installed would otherwise publish
+    # having run neither (audit rows 6 and 14).
+    stage_secret_scan(root)
+    stage_fork_parity(root)
     stage_ci_preflight(root)  # MANDATORY — the gates validate_plugin omits
     stage_marketplace_registration(root)  # Gate 6 parity with CPV's own publish.py
     stage_consistency(root)
@@ -4814,12 +5260,60 @@ if __name__ == "__main__":
     # `submodule-build` the body is returned byte-identical to the historical
     # output above (HARD guarantee — the standard regression test pins it; an
     # unknown profile also takes this path, fail-safe). For `submodule-build`
-    # we APPEND a marker-delimited section carrying the four PSS load-bearing
-    # behaviors; appending (never editing the standard body) is what keeps the
-    # standard path provably unchanged.
+    # we SPLICE a marker-delimited section in BEFORE the `__main__` guard and
+    # wire its stage into `main()`, so the helpers are actually defined and
+    # actually run (audit row 10).
     if profile == PROFILE_SUBMODULE_BUILD:
-        result += _gen_publish_py_submodule_section()
+        result = _splice_submodule_build_section(result)
     return result
+
+
+# The emitted body's entry-point guard. Every profile section is spliced in
+# BEFORE it, so the guard is the LAST thing in the rendered file for every
+# profile — a section appended AFTER it would define its helpers in code the
+# process never reaches (the row-10 defect).
+_PUBLISH_MAIN_GUARD = 'if __name__ == "__main__":\n    sys.exit(main())\n'
+
+
+def _splice_submodule_build_section(body: str) -> str:
+    """Insert the `submodule-build` section before the `__main__` guard.
+
+    Two edits, both scoped to this profile so the standard body is untouched:
+
+    1. the section text goes in ahead of ``if __name__ == "__main__":`` — the
+       guard calls ``main()``, which reaches ``stage_submodule_release``, which
+       needs the four helpers already defined;
+    2. ``stage_submodule_release`` is wired into ``main()`` immediately before
+       ``stage_commit_and_push`` — the submodule must be clean, committed and
+       pushed BEFORE the parent records the moved gitlink (issue #128).
+    """
+    # Both anchors are checked, not assumed. A `.replace(..., 1)` that matches
+    # nothing returns the input unchanged and reports success — which would
+    # re-create the row-10 defect one level up: the section spliced in, the stage
+    # defined, and nothing calling it. Same for the guard: if the section text
+    # ever carried the two-line guard verbatim, `rindex` would splice INSIDE it.
+    if body.count(_PUBLISH_MAIN_GUARD) != 1:
+        raise RuntimeError(
+            f"publish.py template must carry exactly one __main__ guard, "
+            f"found {body.count(_PUBLISH_MAIN_GUARD)}"
+        )
+    call = "    stage_commit_and_push(root, new_ver, args.dry_run)\n"
+    if body.count(call) != 1:
+        raise RuntimeError(
+            f"expected exactly one stage_commit_and_push call site to anchor the "
+            f"submodule stage on, found {body.count(call)}"
+        )
+    idx = body.index(_PUBLISH_MAIN_GUARD)
+    head, tail = body[:idx], body[idx:]
+    head = head.replace(
+        call,
+        "    stage_submodule_release(root, new_ver, args.dry_run)\n" + call,
+        1,
+    )
+    section = _gen_publish_py_submodule_section().lstrip("\n")
+    if _PUBLISH_MAIN_GUARD in section:
+        raise RuntimeError("profile section must not carry the __main__ guard")
+    return head + section + "\n\n" + tail
 
 
 # Markers that delimit the appended submodule-build section. They double as the
@@ -4835,15 +5329,20 @@ _SUBMODULE_BUILD_SECTION_END = (
 
 
 def _gen_publish_py_submodule_section() -> str:
-    r"""Return the additive `submodule-build` publish.py section text.
+    r"""Return the `submodule-build` publish.py section text.
 
-    This is appended verbatim to the standard publish.py body by
-    ``gen_publish_py(p, PROFILE_SUBMODULE_BUILD)``. It is a self-contained
-    block of Python (it imports its own stdlib deps and re-derives ``ROOT``) so
-    it parses and runs even though the standard body owns the actual pipeline
-    entry point. The functions here are HELPERS the maintainer wires into their
-    submodule-aware release flow; the section is deliberately import-safe and
-    side-effect-free at module load (nothing runs at import time).
+    This is spliced verbatim into the standard publish.py body by
+    ``gen_publish_py(p, PROFILE_SUBMODULE_BUILD)``, BEFORE the
+    ``if __name__ == "__main__": sys.exit(main())`` guard. It is a
+    self-contained block of Python (it imports its own stdlib deps and
+    re-derives ``ROOT``) and is import-safe: nothing runs at module load.
+
+    LIVE, not advisory (audit row 10). ``stage_submodule_release`` is wired into
+    ``main()`` just before ``stage_commit_and_push``, and the four helpers are
+    defined ahead of the guard, so they are reached when publish.py runs as a
+    script. Appending the section AFTER the guard — the historical shape — left
+    every definition here in code the process exits before executing, with no
+    caller: four helpers that could never run.
 
     It models, verbatim from PSS's real submodule-aware publish.py
     (``Emasoft/perfect-skill-suggester``), the four load-bearing behaviors the
@@ -4864,18 +5363,20 @@ def _gen_publish_py_submodule_section() -> str:
          release-time change, NOT a "dirty tree" abort.
     """
     # NOTE: this is the TEXT of generated Python, kept as a raw triple-quoted
-    # string. The leading "\n\n\n" separates it from the standard body's
-    # trailing `sys.exit(main())`. Backslashes are literal (raw string).
+    # string. The leading "\n\n\n" separates it from the standard body's last
+    # top-level definition (the splice strips it and re-spaces). Backslashes are
+    # literal (raw string).
     return (
         "\n\n\n"
         + _SUBMODULE_BUILD_SECTION_BEGIN
         + r'''
-# These helpers add submodule-aware behavior the standard canonical publish.py
-# does not carry. A `submodule-build` plugin (build sources in a git submodule
-# + pre-compiled binaries committed to bin/) wires them into its release flow.
-# They are import-safe (nothing runs at module load) and side-effect-free until
-# called. Modeled on Emasoft/perfect-skill-suggester's real publish.py.
-# These imports sit mid-file (the section is appended after the standard body)
+# LIVE submodule-build helpers. This section is spliced in BEFORE the standard
+# body's `if __name__ == "__main__": sys.exit(main())`, so every definition here
+# exists by the time `main()` runs; `stage_submodule_release` (below) is called
+# from `main()` just before the commit stage. They are import-safe (nothing runs
+# at module load) and side-effect-free until called. Modeled on
+# Emasoft/perfect-skill-suggester's real publish.py.
+# These imports sit mid-file (the section follows the standard body)
 # so E402 is expected and silenced — the standard body already imported the same
 # stdlib at the top; the aliased re-imports keep this section self-contained.
 import subprocess as _sub  # noqa: E402
@@ -5046,6 +5547,40 @@ def ensure_submodule_pushed(submodule_path):
             f"submodule push failed: {push.stderr.strip()}\n"
             f"  Run 'git -C {submodule_path} push' manually before retrying."
         )
+
+
+def stage_submodule_release(root, new_ver, dry_run):
+    """Commit and push every build-source submodule BEFORE the gitlink commit.
+
+    Called from `main()` immediately before `stage_commit_and_push` (issue #128):
+    the parent must never record a gitlink pointing at a submodule commit that
+    only exists locally, or a clone fails with "not our ref".
+
+    The helpers run in the order their own docstrings describe: detect a source
+    change, check the tree, commit inside the submodule, push it. The clean-tree
+    check is ADVISORY here and not an abort: by this point the pipeline has
+    legitimately dirtied the parent (version bump, badges, changelog), which is
+    exactly what `submodule_clean_tree_ok` reports as dirty. The real gate is
+    `ensure_submodule_pushed`, which raises when a push fails.
+    """
+    cprint(f"\n{BOLD}[submodule-build] Preparing build-source submodules...{NC}")
+    submodules = _build_source_submodule_paths()
+    if not submodules:
+        cprint(f"  {YELLOW}No build-source submodule declared — nothing to do.{NC}")
+        return
+    for path in submodules:
+        if submodule_source_changed(path):
+            cprint(f"  {YELLOW}{path}: build sources changed since the last tag — "
+                   f"make sure the committed binaries were rebuilt.{NC}")
+        if not submodule_clean_tree_ok():
+            cprint(f"  {DIM}(parent tree carries the release edits — expected at this stage){NC}")
+        if dry_run:
+            cprint(f"  {DIM}(dry-run) would commit {path} and push it before the gitlink.{NC}")
+            continue
+        submodule_commit_before_gitlink(path, new_ver)
+        ensure_submodule_pushed(path)
+    if not dry_run:
+        cprint(f"  {GREEN}Build-source submodules committed and pushed.{NC}")
 '''
         + _SUBMODULE_BUILD_SECTION_END
         + "\n"
@@ -5183,6 +5718,18 @@ def gen_pre_push_hook(p: PluginParams) -> str:
 # named publish.py as the writer, and two sessions built a fix path on that
 # claim instead of grepping for the real write site.)
 set -u
+
+# POSIX-only, LOUDLY (audit row 2). This hook and publish.py's gate both rely on
+# POSIX process ancestry (`ps -p`), which does not exist on Windows. Refusing
+# with an explicit message is the honest outcome; silently failing the ancestry
+# probe would block every push including publish.py's own, with no reason given.
+case "$(uname -s 2>/dev/null || echo unknown)" in
+    Linux|Darwin|*BSD|DragonFly|SunOS|AIX|CYGWIN*|MSYS*|MINGW*) : ;;
+    *)
+        echo "publish.py canon is POSIX-only (macOS/Linux); Windows is unsupported" >&2
+        exit 1
+        ;;
+esac
 
 REPO_ROOT="$(git rev-parse --show-toplevel)" || exit 1
 cd "$REPO_ROOT" || exit 1
@@ -6537,7 +7084,10 @@ name: Notify Marketplace
 
 on:
   push:
-    branches: [main]
+    # [master, main] to match ci.yml and release.yml (audit row 8). With `[main]`
+    # alone, any plugin whose default branch is `master` never notified its
+    # marketplace — and silently, because the workflow simply never ran.
+    branches: [master, main]
     paths:
       - '.claude-plugin/plugin.json'
       - 'hooks/**'
@@ -6731,7 +7281,23 @@ def generate_all_files(
                 (".commitlintrc.json", gen_commitlintrc_json(p), False),
                 (".markdownlint.json", gen_markdownlint_json(p), False),
                 (".github/workflows/ci.yml", gen_ci_yml(p), False),
-                (".github/workflows/release.yml", gen_release_yml(p), False),
+                # Audit row 9: `gen_release_binaries_yml` had NO production
+                # caller — only tests — so a `binary-release` plugin got the
+                # STANDARD release.yml, which cannot satisfy
+                # `is_binary_release_canonical_shape`, and the profile was
+                # incoherent end to end. The two release workflows are mutually
+                # exclusive: emitting both would cut two releases for one tag.
+                # Every other profile (standard, remote-validation,
+                # submodule-build) keeps the historical file list byte-for-byte.
+                (
+                    ".github/workflows/release-binaries.yml"
+                    if profile == PROFILE_BINARY_RELEASE
+                    else ".github/workflows/release.yml",
+                    gen_release_binaries_yml(p)
+                    if profile == PROFILE_BINARY_RELEASE
+                    else gen_release_yml(p),
+                    False,
+                ),
                 ("tests/__init__.py", gen_tests_init(), False),
             ]
         )
