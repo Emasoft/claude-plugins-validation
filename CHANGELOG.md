@@ -2,6 +2,17 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.16.1] - 2026-09-02
+
+### Bug Fixes
+
+- **gitignore-filter:** Honour nested .gitignore files, git-style (TRDD-8LXW133B, v5.16.1)
+
+### Documentation
+
+- Archive TRDD-EZHM759T → complete (published v5.16.0; #223 #224 #225 closed)
+- Add TRDD-8LXW133B — GitignoreFilter must honour nested .gitignore ([#226](https://github.com/Emasoft/claude-plugins-validation/issues/226))
+
 ## [5.16.0] - 2026-09-02
 
 ### Bug Fixes
