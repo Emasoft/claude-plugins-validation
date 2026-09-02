@@ -1,9 +1,10 @@
 ---
 trdd-id: 8LXW133B
 title: GitignoreFilter honours nested .gitignore files so a sub-crate build tree is pruned at descent
-column: testing
+column: complete
 created: 2026-09-02T16:58:59+0200
-updated: 2026-09-02T17:12:00+0200
+updated: 2026-09-02T17:41:00+0200
+implementation-commits: [3e0bc85a, 055c5314]
 current-owner: claude-plugins-validation session
 task-type: bugfix
 min-approval-requirement: none
@@ -16,7 +17,8 @@ external-refs: [https://github.com/Emasoft/claude-plugins-validation/issues/226]
 
 - Issue #226 (reporter: the ai-maestro-janitor session; reproducer verified by them, root cause verified here first-hand): `scripts/gitignore_filter.py::GitignoreFilter.__init__` loads ONLY `root/.gitignore` (line 183); `_match` consults only that spec; `is_ignored` / `is_dir_ignored` early-return False when the root has no patterns. A nested `scripts/memgrep/.gitignore` containing `/target` is therefore invisible, `rglob` descends a 98k-file cargo tree on every call, and `validate` blows its 1800 s budget.
 - DONE (17:12): fix implemented per spec (`_spec_for_dir`, `_is_ignored_rel`, early returns removed) + `tests/test_issue_226_nested_gitignore.py` (6 tests). Verified first-hand: 147 passed across the six gitignore-touching test files, ruff + mypy clean. CLAUDE.md v5.16.1 entry written.
-- NEXT ACTION: `uv run python scripts/publish.py --patch` (v5.16.1); on CI green, fix comment on #226 naming the release, card → `complete` + archive.
+- COMPLETE (17:41): published as **v5.16.1** (release commit `055c5314`); Gate 2 13386 passed / 0 failed, CI green on the released commit, install smoke passed; #226 auto-closed on push and carries a fix comment naming the release. Review found a sibling gitignore-blind walker in the symlink scan → filed as #227 (own card).
+- NEXT ACTION: none — terminal.
 - Decision: implement git semantics (nested `.gitignore` patterns apply relative to their own directory) rather than hardcoding `target`/`node_modules`/`dist` into `_VCS_CACHE_DIR_NAMES` — a tracked `dist/` or `build/` is legitimate plugin content and a name blacklist would hide it.
 
 ## Fix spec
@@ -28,8 +30,8 @@ external-refs: [https://github.com/Emasoft/claude-plugins-validation/issues/226]
 
 ## Acceptance
 
-- [ ] Nested `sub/.gitignore` with `/target` prunes `sub/target/` from `rglob`, `walk`, `iterdir`; `is_dir_ignored(root/sub/target)` is True; `root/target/` (no rule) is NOT ignored (anchoring respected).
-- [ ] Positive control in the same test: a sibling `sub/src/x.py` still yields.
-- [ ] No root `.gitignore` + nested one still prunes.
-- [ ] Root-only behaviour unchanged (existing test files green).
-- [ ] Ruff + mypy clean; published as a patch release with #226 closed by a fix comment naming the release.
+- [x] Nested `sub/.gitignore` with `/target` prunes `sub/target/` from `rglob`, `walk`, `iterdir`; `is_dir_ignored(root/sub/target)` is True; `root/target/` (no rule) is NOT ignored (anchoring respected). (`tests/test_issue_226_nested_gitignore.py` a–d)
+- [x] Positive control in the same test: a sibling `sub/src/x.py` still yields.
+- [x] No root `.gitignore` + nested one still prunes. (test e)
+- [x] Root-only behaviour unchanged (147 passed across the six gitignore-touching files; test f).
+- [x] Ruff + mypy clean; published as v5.16.1 with #226 closed by a fix comment naming the release.
