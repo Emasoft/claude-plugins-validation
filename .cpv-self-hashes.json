@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-09-02T14:41:41+00:00",
+  "computed_at": "2026-09-02T14:57:47+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:b3c9750f80c6b554563b10510762a6124b05bdd181f0b442bd100e1805fedae4",
@@ -145,6 +145,7 @@
     "design/archived/TRDD-20260818_234102+0200-6UW0KZVY-version-gate-fails-open-on-unreadable-remote.md": "sha256:e0e311744f78a2bd13b225d20db0ba4d1ba2091b1a315ef8099acd2f062d205f",
     "design/archived/TRDD-20260825_172545+0200-627GMQLD-streaming-extraction-byte-caps.md": "sha256:16227aef1a2b46057a416616b09c8a10cb98438a0d531d168310784bb132c484",
     "design/archived/TRDD-20260825_172545+0200-WT0FLTMM-gha-expression-injection-rule.md": "sha256:a91a64098b1e90ef6e19c24553a3c00ba1ed6a1f6264c39f55bc0eb2268e8b42",
+    "design/archived/TRDD-20260902_105037+0200-EZHM759T-publish-pipeline-audit-fix-wave.md": "sha256:2dcc22abc4bf729ac5060b1c810487100c40f95c13a85977e84af9c1748c9b41",
     "design/archived/TRDD-26446eed-ea5e-43e7-886c-8512866d92be-semantic-channel-source.md": "sha256:583a68cfe9918c4aa903d009c45b4e4585a1629332df48a874599de0e8ae1ccc",
     "design/archived/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md": "sha256:07032cbe299909e5d6a8b52198e37e7a2e48c12bf0a2402e58d7bf037ce14868",
     "design/archived/TRDD-2be75e88-3c23-4c91-9e4e-5ce315b497dc-scope-validators.md": "sha256:312a8e9f076b638fe5745a7b24c882ef867976596e2651d4303de5cf7fcfe828",
@@ -187,7 +188,6 @@
     "design/specs/agent-closure-and-variants.md": "sha256:81318166d3b835d4a997c6214d3b24e33a329ece957f824d421897726a7973ac",
     "design/specs/verification-before-completion.template.md": "sha256:77e12187809c052341c8e3fe61666e7153fc9868b7184a0bf4a94f3e26ae7a39",
     "design/tasks/TRDD-20260624_012443+0200-ETDWX70R-unambiguous-inplugin-path-determination.md": "sha256:770ab03a0027d3b86e19a2783f3a62d7747076186272689561a40013127040c9",
-    "design/tasks/TRDD-20260902_105037+0200-EZHM759T-publish-pipeline-audit-fix-wave.md": "sha256:2893a05a4c097e90ce820008a357f8fe1b08335109ac317071438bd615b4ba3e",
     "git-hooks/pre-commit": "sha256:47cf32b6b340cd973b6a15466d8b752993a68534429dca2e6df7159ba7240810",
     "git-hooks/pre-push": "sha256:90880138be62d7cd5ec6b451bc8803127ee4a3ce430d0f5d9caa5fa86d57aa12",
     "pyproject.toml": "sha256:e4c85742b8863c85d09f7b1891c549252d62bd46a1cd4ebafbe9c257e041f6b1",
