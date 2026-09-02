@@ -52,6 +52,35 @@ def test_symlinked_dir_under_nested_ignored_dir_is_not_reported(tmp_path: Path) 
     assert "sub/target/ignored_dir" not in labels
 
 
+def test_symlink_scan_prunes_when_root_is_reached_via_symlinked_prefix(tmp_path: Path) -> None:
+    """Root handed in through a symlink alias (macOS /tmp → /private/tmp shape) still prunes."""
+    real = tmp_path / "real"
+    real.mkdir()
+    _tree(real)
+    (real / "sub" / "target" / "ignored_link").symlink_to(real / "outside.txt")
+    (real / "sub" / "src" / "kept_link").symlink_to(real / "outside.txt")
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+    labels = {label for label, _ in vp._iter_declared_component_symlinks(alias, {})}
+    assert "sub/src/kept_link" in labels
+    assert not any(label.startswith("sub/target/") for label in labels)
+
+
+def test_gitignore_filter_public_api_tolerates_unresolved_root(tmp_path: Path) -> None:
+    """is_dir_ignored/is_ignored answer correctly for paths built from an unresolved alias root."""
+    from gitignore_filter import GitignoreFilter
+
+    real = tmp_path / "real"
+    real.mkdir()
+    _tree(real)
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+    gi = GitignoreFilter(alias)
+    assert gi.is_dir_ignored(alias / "sub" / "target") is True
+    assert gi.is_dir_ignored(alias / "sub" / "src") is False
+    assert gi.is_ignored(alias / "outside.txt") is False
+
+
 def _combo_majors(root: Path) -> list[str]:
     report = ValidationReport()
     vp._check_unauthorized_install_combo(root, report)

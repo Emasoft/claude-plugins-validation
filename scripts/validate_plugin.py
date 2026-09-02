@@ -3072,8 +3072,8 @@ def _iter_declared_component_symlinks(
         if default_path.is_symlink():
             _add(f"default {dirname}/ directory", default_path)
 
-    # Gitignore-aware pruning (#227): a gitignored path never reaches the
-    # plugin cache (installs clone the repo), so scanning it is wasted work
+    # Gitignore-aware pruning (#227): a gitignored path never ships from a
+    # git-based install (the marketplace path), so scanning it is wasted work
     # that can also surface false symlink findings from build artefacts — and
     # on a tree with a nested-ignored cargo target/ (98k entries, #226) the
     # name-only prune set lstat()ed every one of them. os.walk is kept rather
