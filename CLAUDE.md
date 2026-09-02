@@ -19,7 +19,7 @@ marketplace. Repo: `github.com/Emasoft/claude-plugins-validation`.
 
 | Thing | Count | Where / how to list |
 |---|---|---|
-| **version** | `5.16.0` | `.claude-plugin/plugin.json` → `version` |
+| **version** | `5.16.2` | `.claude-plugin/plugin.json` → `version` |
 | **commands** | **14** | `ls commands/*.md` — 10×`cpv-batch-*`, `cpv-main-menu`, `cpv-pre-install-scan`, `cpv-the-skills-menu-create`, `cpv-agent` (direct free-form worker `/cpv-agent <request>`) |
 | **agents** | **14** | `ls agents/*.md` |
 | **skills** | **52** | `ls -d skills/*/` |
