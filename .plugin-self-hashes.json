@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-09-02T15:24:43+00:00",
+  "computed_at": "2026-09-02T15:27:09+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:87a8b7318cccc25b35a036b25ecafcb3872f6ac571c9cfb478ac992d8a7c289c",
@@ -27,7 +27,7 @@
     ".trashcan/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".trashcan/README.txt": "sha256:3106acc9af8415d37610ef0b9f138dc9622f25f81ac37a31f24a9ebd2d25f30f",
     "CHANGELOG.md": "sha256:920f47f1e38417677c1d6a53b88484645ff331b650ffeec2ebf54d15ce7a39d7",
-    "CLAUDE.md": "sha256:1b9af7eba396527dfeea25ec7717db21592e50f6568796c87b1958d9bab0cb89",
+    "CLAUDE.md": "sha256:14f5aec09af3f2a5a0be39fdc8f462ddc74bba65a834e29383cea68cd7c7a16a",
     "LICENSE": "sha256:f79aeb8187cb5e63d27261eba76a2d771292c27489645b3410bd5e67edc02f5d",
     "README.md": "sha256:e0e4e902d3b6a0d01d0ef1e870ac10343ae981dcde91763b2373ad48ec5786dc",
     "agents/cpv-agent.md": "sha256:5c6f53d3ee88f85e380f0b49bec2e714bf4d45ca575207eb509ec61903db31cb",
@@ -343,7 +343,7 @@
     "scripts/validate_marketplace.py": "sha256:c3cc2ea953bf9d5bcbec79dbf307c8e85a315236eb695bde6ca787e4faaf70cb",
     "scripts/validate_marketplace_pipeline.py": "sha256:530e7dbfe558fb386a7dba5976869b71ff1777cb39e3ecc126e73f5ac9637c8b",
     "scripts/validate_mcp.py": "sha256:67f4bcbe558758243db6407adf2dd888769baee8de3be71d1c006cb0d74a69cc",
-    "scripts/validate_plugin.py": "sha256:0d386d704bc5c97728a4de484d417925f66df4ee4f1c09b05e58931807165315",
+    "scripts/validate_plugin.py": "sha256:ad3c2cc29ace612bfdccd7b1d45ab17f9addaa661e1151b658c82c2b07fdf6e4",
     "scripts/validate_project_scope.py": "sha256:dcf08912754cb289fb07d1e9857900d879a022ad1a58f20f24b4aa93168c6af8",
     "scripts/validate_rules.py": "sha256:2d8d4ecf266bbde1a5d8f982a0285a5d433d47264a9ed35425725cd989e57185",
     "scripts/validate_scoring.py": "sha256:cf1487d9bbec9e2b010fade13d8037a14190be56725cf6214cd2a964e7e43e52",
