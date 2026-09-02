@@ -1,9 +1,9 @@
 ---
 trdd-id: 8LXW133B
 title: GitignoreFilter honours nested .gitignore files so a sub-crate build tree is pruned at descent
-column: dev
+column: testing
 created: 2026-09-02T16:58:59+0200
-updated: 2026-09-02T16:58:59+0200
+updated: 2026-09-02T17:12:00+0200
 current-owner: claude-plugins-validation session
 task-type: bugfix
 min-approval-requirement: none
@@ -15,7 +15,8 @@ external-refs: [https://github.com/Emasoft/claude-plugins-validation/issues/226]
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02
 
 - Issue #226 (reporter: the ai-maestro-janitor session; reproducer verified by them, root cause verified here first-hand): `scripts/gitignore_filter.py::GitignoreFilter.__init__` loads ONLY `root/.gitignore` (line 183); `_match` consults only that spec; `is_ignored` / `is_dir_ignored` early-return False when the root has no patterns. A nested `scripts/memgrep/.gitignore` containing `/target` is therefore invisible, `rglob` descends a 98k-file cargo tree on every call, and `validate` blows its 1800 s budget.
-- NEXT ACTION: lean-worker implements per-directory nested spec lookup + two-sided tests (spec in the body); orchestrator verifies with `uv run pytest tests/test_gitignore_filter*.py tests/test_issue_67_external_scanner_gitignore.py tests/test_cpv_lint_engine.py`, ruff, mypy, then publishes `--patch`.
+- DONE (17:12): fix implemented per spec (`_spec_for_dir`, `_is_ignored_rel`, early returns removed) + `tests/test_issue_226_nested_gitignore.py` (6 tests). Verified first-hand: 147 passed across the six gitignore-touching test files, ruff + mypy clean. CLAUDE.md v5.16.1 entry written.
+- NEXT ACTION: `uv run python scripts/publish.py --patch` (v5.16.1); on CI green, fix comment on #226 naming the release, card → `complete` + archive.
 - Decision: implement git semantics (nested `.gitignore` patterns apply relative to their own directory) rather than hardcoding `target`/`node_modules`/`dist` into `_VCS_CACHE_DIR_NAMES` — a tracked `dist/` or `build/` is legitimate plugin content and a name blacklist would hide it.
 
 ## Fix spec

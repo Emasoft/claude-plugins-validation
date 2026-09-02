@@ -188,6 +188,23 @@ class GitignoreFilter:
         # PathSpec so per-path `is_ignored` checks don't have to rebuild
         # the matcher every call.
         self.patterns, self._spec = _load_pathspec(gitignore_path)
+        # Per-directory .gitignore cache (issue #226): git honours a NESTED
+        # .gitignore, whose patterns match relative to ITS OWN directory —
+        # not just the root's. Loading only root/.gitignore meant a nested
+        # ignore (e.g. scripts/memgrep/.gitignore's `/target`) was never
+        # consulted, so rglob walked a 98k-file cargo build tree and blew
+        # the 1800s validate budget. Keyed by the directory Path (relative
+        # to self.root); populated lazily via `_spec_for_dir`.
+        self._dir_specs: dict[Path, tuple[list[str], object | None]] = {}
+
+    def _spec_for_dir(self, d: Path) -> tuple[list[str], object | None]:
+        """Return (patterns, spec) for `d`'s own .gitignore, caching per-dir."""
+        cached = self._dir_specs.get(d)
+        if cached is not None:
+            return cached
+        result = _load_pathspec(d / ".gitignore")
+        self._dir_specs[d] = result
+        return result
 
     def _is_unsafe_symlink(self, entry: Path) -> bool:
         """Return True when `entry` is a symlink that must be skipped.
@@ -215,8 +232,9 @@ class GitignoreFilter:
             return True
         return False
 
-    def _match(self, rel: str) -> bool:
-        """Run the cached PathSpec against a rel-path string.
+    @staticmethod
+    def _match_spec(patterns: list[str], spec: object | None, rel: str) -> bool:
+        """Run a (patterns, spec) pair against a rel-path string.
 
         Uses the cached ``pathspec.PathSpec`` when available — this is the
         whole point of the cache (avoiding the ~1.7M
@@ -225,17 +243,59 @@ class GitignoreFilter:
         unavailable the call falls through to ``is_path_gitignored``,
         which uses the pure-Python fallback matcher.
         """
-        if self._spec is not None:
+        if spec is not None:
             # `match_file` returns bool — keep the public contract identical
-            # to `is_path_gitignored` (which returns bool). ``_spec`` is
+            # to `is_path_gitignored` (which returns bool). ``spec`` is
             # typed as ``object | None`` because the import of
             # ``pathspec.PathSpec`` lives inside ``_load_pathspec`` (lazy /
             # optional dependency); the runtime instance is the real
             # ``pathspec.PathSpec`` so ``match_file`` is always present.
-            return bool(self._spec.match_file(rel))  # type: ignore[attr-defined]
+            return bool(spec.match_file(rel))  # type: ignore[attr-defined]
         # Fallback path: pathspec unavailable, defer to common helper which
         # implements its own pathspec-or-fallback chain.
-        return is_path_gitignored(rel, self.patterns)
+        return is_path_gitignored(rel, patterns)
+
+    def _is_ignored_rel(self, path: Path, *, is_dir: bool) -> bool:
+        """Check `path` against the root .gitignore AND every ancestor
+        directory's own nested .gitignore, git-style (issue #226).
+
+        A nested .gitignore's patterns match relative to ITS OWN directory,
+        not the plugin root — e.g. `scripts/memgrep/.gitignore` containing
+        `/target` ignores `scripts/memgrep/target/`, not a top-level
+        `target/`. Loading only `root/.gitignore` (the pre-#226 behaviour)
+        meant a nested-ignored 98k-file cargo `target/` was fully walked by
+        `rglob`, blowing the 1800s validate budget on trees that vendor a
+        Rust/Go/Node build directory behind a nested ignore file.
+        """
+        try:
+            rel_path = path.relative_to(self.root)
+        except ValueError:
+            return False
+        rel = rel_path.as_posix()
+        if is_dir:
+            rel = rel.rstrip("/") + "/"
+        if self._match_spec(self.patterns, self._spec, rel):
+            return True
+        # Walk every ancestor directory strictly below root, shallowest
+        # first, testing the path against THAT directory's own .gitignore
+        # (relative to the ancestor, per git's own resolution order).
+        for anc in reversed(list(rel_path.parents)):
+            if anc == Path("."):
+                continue
+            anc_dir = self.root / anc
+            anc_patterns, anc_spec = self._spec_for_dir(anc_dir)
+            if not anc_patterns:
+                continue
+            try:
+                anc_rel_path = path.relative_to(anc_dir)
+            except ValueError:
+                continue
+            anc_rel = anc_rel_path.as_posix()
+            if is_dir:
+                anc_rel = anc_rel.rstrip("/") + "/"
+            if self._match_spec(anc_patterns, anc_spec, anc_rel):
+                return True
+        return False
 
     def is_ignored(self, path: Path) -> bool:
         """Check if a path should be skipped based on .gitignore patterns.
@@ -245,31 +305,21 @@ class GitignoreFilter:
         (``build/``, ``node_modules/``) match correctly. This mirrors
         git's own behaviour and removes a sharp edge where callers had
         to remember to append ``/`` for directories themselves.
+
+        Consults the root .gitignore AND every ancestor directory's own
+        nested .gitignore (issue #226) — a plugin with no root .gitignore
+        at all still gets pruned by a nested one.
         """
-        if not self.patterns:
-            return False
         try:
-            # Use PurePosixPath-style forward slashes for gitignore matching
-            rel = path.relative_to(self.root).as_posix()
-        except ValueError:
-            return False
-        try:
-            if path.is_dir():
-                rel = rel.rstrip("/") + "/"
+            is_dir = path.is_dir()
         except OSError:
-            pass
-        return self._match(rel)
+            is_dir = False
+        return self._is_ignored_rel(path, is_dir=is_dir)
 
     def is_dir_ignored(self, dirpath: Path) -> bool:
         """Check if a directory should be skipped — appends trailing / for dir-only patterns."""
-        if not self.patterns:
-            return False
-        try:
-            rel = dirpath.relative_to(self.root).as_posix()
-        except ValueError:
-            return False
         # Check both with and without trailing slash (gitignore treats dir/ specially)
-        return self._match(rel) or self._match(rel + "/")
+        return self._is_ignored_rel(dirpath, is_dir=True) or self._is_ignored_rel(dirpath, is_dir=False)
 
     def _walk_pathlib(
         self,
