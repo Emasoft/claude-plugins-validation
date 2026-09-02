@@ -2,6 +2,35 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.15.0] - 2026-09-02
+
+### Bug Fixes
+
+- **test:** Stop the new step-log guard polluting module-global state (TRDD-12f8196d)
+
+### Documentation
+
+- Record the failed in-plugin-write measurement (TRDD-ETDWX70R)
+- **skill:** Complete cpv-validate-plugin-folder for standalone strict validation
+- Correct two overstated claims on the closing entry (TRDD-12f8196d)
+- Measure the symmetric risk — AI triage cannot promote either (TRDD-12f8196d)
+- Retract the "not theoretical" pollution claim — no collision was demonstrable (TRDD-12f8196d)
+- Cite the reset by line, not by its docstring (TRDD-12f8196d)
+
+### Features
+
+- **security:** Opt-in advisory AI triage of SkillAudit residuals (TRDD-12f8196d)
+- CC spec sync v2.1.249–257 + close #212 #220 #221 #222 (v5.15.0)
+
+### Miscellaneous Tasks
+
+- Regenerate the self-hash manifests after this session's edits
+
+### Testing
+
+- **security:** Pin that an invoked AI triage cannot move the verdict (TRDD-12f8196d)
+- **security:** Guard the AI triage through its real caller, mutation-proven (TRDD-12f8196d)
+
 ## [5.14.1] - 2026-08-28
 
 ### Bug Fixes
