@@ -3072,19 +3072,31 @@ def _iter_declared_component_symlinks(
         if default_path.is_symlink():
             _add(f"default {dirname}/ directory", default_path)
 
+    # Gitignore-aware pruning (#227): a gitignored path never reaches the
+    # plugin cache (installs clone the repo), so scanning it is wasted work
+    # that can also surface false symlink findings from build artefacts — and
+    # on a tree with a nested-ignored cargo target/ (98k entries, #226) the
+    # name-only prune set lstat()ed every one of them. os.walk is kept rather
+    # than GitignoreFilter.walk because this scan must SEE symlinks (which the
+    # filter's walker drops) and hidden dirs like .claude/ (which it skips).
+    # A LOCAL filter, not the module global: tests call this directly with
+    # `_gi` unset, and the `if _gi else os.walk` convention would silently
+    # degrade to a blind walk in exactly that case.
+    gi = _gi or GitignoreFilter(plugin_root)
     for dirpath, dirnames, filenames in os.walk(plugin_root, followlinks=False):
         current = Path(dirpath)
         # Prune BEFORE descending — os.walk honours in-place dirnames edits.
         # A symlinked subdirectory must still be REPORTED (checked below) even
         # though we never walk INTO it (followlinks=False already skips that).
         symlinked_subdirs = [d for d in dirnames if (current / d).is_symlink()]
-        dirnames[:] = [d for d in dirnames if not _symlink_walk_prune(d)]
+        dirnames[:] = [d for d in dirnames if not _symlink_walk_prune(d) and not gi.is_dir_ignored(current / d)]
         for d in symlinked_subdirs:
             dpath = current / d
-            _add(dpath.relative_to(plugin_root).as_posix(), dpath)
+            if not gi.is_ignored(dpath):
+                _add(dpath.relative_to(plugin_root).as_posix(), dpath)
         for f in filenames:
             fpath = current / f
-            if fpath.is_symlink():
+            if fpath.is_symlink() and not gi.is_ignored(fpath):
                 _add(fpath.relative_to(plugin_root).as_posix(), fpath)
 
     return found
@@ -4378,14 +4390,25 @@ def _check_unauthorized_install_combo(plugin_root: Path, report: ValidationRepor
     own_name = _own_plugin_name(plugin_root)
     mkt_adds: list[tuple[str, int, str]] = []
     plugin_installs: list[tuple[str, int, str]] = []
+    # Gitignore-aware pruning (#227) on top of the name-based skip set: a
+    # gitignored file never ships, so an install command inside one is not an
+    # autonomous surface. Local filter for the same reason as the symlink
+    # scan — direct callers (tests) have no module-global `_gi`.
+    gi = _gi or GitignoreFilter(plugin_root)
     for dirpath, dirnames, filenames in os.walk(plugin_root):
         dirnames[:] = [
-            d for d in dirnames if d not in _INSTALL_SCAN_SKIP_DIRS and not _is_python_venv(Path(dirpath) / d)
+            d
+            for d in dirnames
+            if d not in _INSTALL_SCAN_SKIP_DIRS
+            and not _is_python_venv(Path(dirpath) / d)
+            and not gi.is_dir_ignored(Path(dirpath) / d)
         ]
         for fn in filenames:
             if Path(fn).suffix.lower() not in _INSTALL_SCAN_EXTS:
                 continue
             p = Path(dirpath) / fn
+            if gi.is_ignored(p):
+                continue
             rel = str(p.relative_to(plugin_root))
             if not _combo_path_is_autonomous(rel):
                 continue
