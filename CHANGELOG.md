@@ -2,6 +2,14 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.16.0] - 2026-09-02
+
+### Bug Fixes
+
+- Publish pipeline audit wave + close #223 #224 (TRDD-EZHM759T, v5.16.0)
+- Publish pipeline audit wave — code, docs, hashes (TRDD-EZHM759T, v5.16.0)
+- **canon:** Renumber stage docstrings to the [N/15] markers; un-vacuate the consistency test (TRDD-EZHM759T, v5.16.0)
+
 ## [5.15.0] - 2026-09-02
 
 ### Bug Fixes
