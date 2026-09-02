@@ -3200,7 +3200,7 @@ def run_gate(root: Path) -> int:
 # -- Pipeline stages -----------------------------------------------------------
 
 def stage_bypass_guard() -> None:
-    """Step 0: Reject any env var that could bypass a check. No exceptions.
+    """Step 1: Reject any env var that could bypass a check. No exceptions.
 
     Issue #22 hardening (v2.86.0): broadened from a fixed allowlist to
     prefix-pattern matching. Any env var matching ``PLUGIN_SKIP_*``,
@@ -3303,7 +3303,7 @@ def stage_check_clean(root: Path) -> None:
     cprint(f"  {GREEN}Clean.{NC}")
 
 def stage_lint(root: Path) -> None:
-    """Step 2: Lint + typecheck (ruff + mypy). MANDATORY — no skip.
+    """Step 3: Lint + typecheck (ruff + mypy). MANDATORY — no skip.
 
     Runs ruff for style/syntax and mypy for static types in the same stage.
     Both must succeed — the cornerstone rule forbids any push with lint or
@@ -3430,7 +3430,7 @@ def _cleanup_browser_orphans(baseline_pids: set, owner_pgid: int | None = None) 
 
 
 def stage_tests(root: Path) -> None:
-    """Step 3: Run pytest. MANDATORY — no skip, no exceptions.
+    """Step 4: Run pytest. MANDATORY — no skip, no exceptions.
 
     Cornerstone rule: failing tests block the push. Missing tests/ directory
     is a scaffolding bug and must be fixed, not bypassed.
@@ -3476,7 +3476,7 @@ def stage_tests(root: Path) -> None:
 
 
 def stage_validate(root: Path) -> None:
-    """Step 4: Validate plugin via REMOTE CPV validator. MANDATORY — no skip.
+    """Step 5: Validate plugin via REMOTE CPV validator. MANDATORY — no skip.
 
     Cornerstone rule: a plugin cannot be pushed unless validation passes
     with 0 issues (WARNING allowed). The validator is ALWAYS fetched from
@@ -3538,7 +3538,7 @@ def stage_fork_parity(root: Path) -> None:
 
 
 def stage_ci_preflight(root: Path) -> None:
-    """Step 4b: CI-parity preflight via REMOTE CPV. MANDATORY — no skip.
+    """Step 8: CI-parity preflight via REMOTE CPV. MANDATORY — no skip.
 
     WHY THIS STAGE EXISTS. `validate_plugin --strict` (stage 4) does NOT run the
     gates this plugin's own GitHub-CI Lint job runs: jscpd copy-paste, actionlint,
@@ -3761,7 +3761,7 @@ def _plugin_in_remote_marketplace(mkt_json: dict, plugin_name: str, expected_rep
 
 
 def stage_marketplace_registration(root: Path) -> None:
-    """Step 5: Verify the plugin is wired to its marketplace for auto-updates.
+    """Step 9: Verify the plugin is wired to its marketplace for auto-updates.
 
     Mirror of CPV's own publish.py Gate 6. Three modes:
       - Layout A (standalone + notify-marketplace.yml): verifies workflow,
@@ -3859,7 +3859,7 @@ def stage_marketplace_registration(root: Path) -> None:
 
 
 def stage_consistency(root: Path) -> None:
-    """Step 6: Check version consistency."""
+    """Step 10: Check version consistency."""
     cprint(f"\n{BOLD}[10/15] Checking version consistency...{NC}")
     ok, msg = check_version_consistency(root)
     cprint(f"  {msg}")
@@ -4064,7 +4064,7 @@ def _ensure_tag_at_head(root: Path, tag_name: str, message: str) -> bool:
 
 
 def stage_bump(root: Path, new_ver: str, dry_run: bool) -> None:
-    """Step 7: Bump version. Idempotent — skips when local already matches target.
+    """Step 11: Bump version. Idempotent — skips when local already matches target.
 
     Recovery semantics: when a previous publish was interrupted between the
     local commit+tag and the push (transient network failure during git push,
@@ -4093,7 +4093,7 @@ def stage_bump(root: Path, new_ver: str, dry_run: bool) -> None:
     cprint(f"  {GREEN}Version bumped to {new_ver}.{NC}")
 
 def stage_update_badges(root: Path, old_ver: str, new_ver: str, dry_run: bool) -> None:
-    """Step 8: Replace version badge in README.md.
+    """Step 12: Replace version badge in README.md.
 
     Strategy:
       1. Try exact-string substitution `version-<old>-blue` → `version-<new>-blue`
@@ -4242,7 +4242,7 @@ def _write_release_notes(root: Path, new_ver: str, tag: str) -> None:
 
 
 def stage_changelog(root: Path, new_ver: str, dry_run: bool) -> None:
-    """Step 9: Generate CHANGELOG.md with git-cliff using the bumped tag.
+    """Step 13: Generate CHANGELOG.md with git-cliff using the bumped tag.
 
         git cliff --bump --tag v<NEXT> -o CHANGELOG.md
 
@@ -4290,7 +4290,7 @@ def stage_changelog(root: Path, new_ver: str, dry_run: bool) -> None:
     _write_release_notes(root, new_ver, tag)
 
 def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
-    """Step 10: Commit, tag, push. Idempotent on commit + tag.
+    """Step 14: Commit, tag, push. Idempotent on commit + tag.
 
     Idempotency: if HEAD's subject is already `chore: bump version to <new_ver>`
     AND the working tree is clean, skip the commit step (interrupted-publish
@@ -4449,7 +4449,7 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
             cprint(f"  {YELLOW}  Check with: git ls-remote --tags origin '*{_verify_tag}'{NC}")
 
 def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
-    """Step 11: Create GitHub release via gh CLI.
+    """Step 15: Create GitHub release via gh CLI.
 
     TRDD-bbff5bc5 §5: re-runs the gh-auth precheck before `gh release
     create` so an auth state change between gates 10 and 11 (token
