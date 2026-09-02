@@ -270,7 +270,18 @@ class GitignoreFilter:
         try:
             rel_path = path.relative_to(self.root)
         except ValueError:
-            return False
+            # `self.root` is RESOLVED but callers walk the tree from whatever
+            # path they were handed — through a symlinked prefix (macOS
+            # `/tmp` -> `/private/tmp`) `relative_to` fails and the old
+            # `return False` silently made every walker blind (#227 review).
+            # Resolve the PARENT only: that canonicalises the prefix while
+            # keeping the entry itself unresolved, so a symlink entry is still
+            # judged by its own path, not its target's.
+            try:
+                path = path.parent.resolve() / path.name
+                rel_path = path.relative_to(self.root)
+            except (ValueError, OSError):
+                return False
         rel = rel_path.as_posix()
         if is_dir:
             rel = rel.rstrip("/") + "/"
