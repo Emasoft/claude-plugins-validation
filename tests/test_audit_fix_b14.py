@@ -22,7 +22,8 @@ generate_plugin_repo.py (gen_publish_py template)
     release as idempotent success. The old version swallowed every non-zero
     gh exit, reporting success even when no release was created.
   - #127: stage_update_badges / stage_gh_release docstrings must carry the
-    correct step numbers (8 and 11), matching their [N/11] terminal markers.
+    correct step numbers, matching their [N/15] terminal markers (12 and 15
+    since the v5.16.0 audit wave renumbered the pre-release stages 1..15).
 
 Refuted in this batch (NOT changed, documented here for traceability):
   - #10: _plugin_in_remote_marketplace returning False for string-format
@@ -237,36 +238,46 @@ def test_generated_publish_py_compiles() -> None:
 
 
 def test_stage_docstrings_match_step_markers() -> None:
-    """Every generated stage_*'s 'Step N' docstring matches its [N/11] marker."""
+    """Every generated stage_*'s 'Step N' docstring matches its [N/15] marker.
+
+    The total is read from the template itself, not hardcoded: with a literal
+    `/11` this test kept passing after the audit wave renumbered to `/15`
+    because the regex matched nothing (vacuous pass, v5.16.0). It now also
+    asserts at least one numbered stage was actually checked.
+    """
     pub = _extract_generated_publish_py()
     tree = ast.parse(pub)
     mismatches = []
+    checked = 0
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name.startswith("stage_"):
             doc = (ast.get_docstring(node) or "").splitlines()
             first = doc[0] if doc else ""
             seg = ast.get_source_segment(pub, node) or ""
-            marker = re.search(r"\[(\d+)/11\]", seg)
+            marker = re.search(r"\[(\d+)/(\d+)\]", seg)
             docnum = re.search(r"Step (\d+)", first)
-            if marker and docnum and marker.group(1) != docnum.group(1):
-                mismatches.append((node.name, docnum.group(1), marker.group(1)))
+            if marker and docnum:
+                checked += 1
+                if marker.group(1) != docnum.group(1):
+                    mismatches.append((node.name, docnum.group(1), marker.group(1)))
+    assert checked >= 10, f"only {checked} numbered stages found — regex drifted?"
     assert not mismatches, f"docstring/marker mismatches: {mismatches}"
 
 
-def test_stage_update_badges_is_step_8() -> None:
+def test_stage_update_badges_is_step_12() -> None:
     """Guard the specific #127 fix for stage_update_badges."""
     src = _extract_func_source(_extract_generated_publish_py(), "stage_update_badges")
-    assert "Step 8:" in src
-    assert "[8/11]" in src
-    assert "Step 7:" not in src
+    assert "Step 12:" in src
+    assert "[12/15]" in src
+    assert "Step 8:" not in src
 
 
-def test_stage_gh_release_is_step_11() -> None:
+def test_stage_gh_release_is_step_15() -> None:
     """Guard the specific #127 fix for stage_gh_release."""
     src = _extract_func_source(_extract_generated_publish_py(), "stage_gh_release")
-    assert "Step 11:" in src
-    assert "[11/11]" in src
-    assert "Step 10:" not in src
+    assert "Step 15:" in src
+    assert "[15/15]" in src
+    assert "Step 11:" not in src
 
 
 def _run_stage_gh_release(returncode: int, stderr: str, tmp_path: Path):

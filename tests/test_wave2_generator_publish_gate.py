@@ -334,10 +334,13 @@ def test_template_preflight_never_hard_requires_a_tool() -> None:
     stage = src[src.index("def stage_ci_preflight") : src.index("# ── Marketplace-registration")]
     # uvx is the one hard requirement, and only because stage_validate already
     # requires it two stages earlier (so this can never be the first blocker).
-    assert stage.count("sys.exit(1)") == 2  # no-uvx, and a real preflight failure
+    # no-uvx, the timeout (audit row 3 — an unfinished preflight is not a passed
+    # one), and a real preflight failure. None of them is a missing-tool exit.
+    assert stage.count("sys.exit(1)") == 3
+    assert "TimeoutExpired" in stage
     # Scoped to the ARGV LIST, not the whole stage: the docstring legitimately
     # mentions `validate_plugin --strict` when explaining what this gate adds.
-    argv = stage[stage.index("rc = subprocess.run([") : stage.index("], cwd=str(root))")]
+    argv = stage[stage.index("rc = subprocess.run([") : stage.index("], cwd=str(root)")]
     assert '"--strict"' not in argv, "ci-preflight takes no --strict; it is a parity gate"
     assert '"ci-preflight"' in argv
 
