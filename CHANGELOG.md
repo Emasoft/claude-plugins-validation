@@ -2,6 +2,17 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.17.0] - 2026-09-04
+
+### Documentation
+
+- Archive TRDD-UW4CQ64E → complete (v5.16.2 shipped, #227 closed)
+- Card the tirith fork-parity flake (TRDD-21ES7XEX) + complete the self-hash manifest
+
+### Features
+
+- RC-164 write-guard fold + CC spec sync 2.1.258-260 (TRDD-ETDWX70R)
+
 ## [5.16.2] - 2026-09-02
 
 ### Bug Fixes
