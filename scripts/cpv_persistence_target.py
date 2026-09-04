@@ -119,6 +119,49 @@ _PWD_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"\$\{?PWD\}?|\$\(pwd\)|`pwd`
 # Any residual ``$VAR`` / ``${VAR}`` after folding → unresolvable → C1 fails.
 _RESIDUAL_VAR_RE: Final[re.Pattern[str]] = re.compile(r"\$\{?[A-Za-z_]\w*\}?|\$\(")
 
+# ── TRDD-ETDWX70R — the SCRIPT'S OWN LOCATION folds too. ────────────────
+# A shell installer routinely anchors a write to its own file (``$0`` /
+# ``${BASH_SOURCE[0]}``), which the residual-var guard above would otherwise
+# reject as unresolvable — so an in-plugin generate anchored to the script
+# itself was invisible. These fold to ``<plugin_root>/<self_path>`` (the
+# ``dirname``/``cd``-wrapper forms fold to ``…/<self_path>/..``, and the ``..``
+# is left for ``Path.resolve()`` at the existing resolve step — hand-normalising
+# here would silently mis-handle a symlinked prefix).
+#
+# Order matters: the longest (``$(cd "$(dirname "$0")" && pwd)``) must be
+# substituted BEFORE the ``$(dirname "$0")`` it contains, and both before the
+# bare ``$0`` token. All re2-safe (no lookaround).
+_SELF_DIR_CD_RE: Final[re.Pattern[str]] = re.compile(
+    r'\$\(\s*cd\s+"?\$\(\s*dirname\s+"?\$\{?(?:0|BASH_SOURCE(?:\[0\])?)\}?"?\s*\)"?'
+    r"\s*&&\s*pwd\s*\)"
+)
+_SELF_REALPATH_RE: Final[re.Pattern[str]] = re.compile(
+    r'\$\(\s*(?:realpath|readlink\s+-f)\s+"?\$\{?(?:0|BASH_SOURCE(?:\[0\])?)\}?"?\s*\)'
+)
+_SELF_DIRNAME_RE: Final[re.Pattern[str]] = re.compile(
+    r'\$\(\s*dirname\s+"?\$\{?(?:0|BASH_SOURCE(?:\[0\])?)\}?"?\s*\)'
+)
+_SELF_TOKEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"\$\{BASH_SOURCE\[0\]\}|\$BASH_SOURCE\[0\]|\$\{BASH_SOURCE\}|\$BASH_SOURCE|\$\{0\}|\$0"
+)
+
+
+def _fold_self_path(s: str, plugin_root: Path, self_path: str) -> str:
+    """Substitute the script's own-location shell tokens in ``s``.
+
+    ``self_path`` is the plugin-root-RELATIVE path of the file being scanned. A
+    non-relative / escaping ``self_path`` is refused (fail-safe: no fold, so the
+    residual-var guard still rejects the destination).
+    """
+    rel = self_path.strip().replace("\\", "/")
+    if not rel or rel.startswith("/") or rel.startswith("~") or ".." in rel.split("/"):
+        return s
+    self_abs = str(plugin_root / rel)
+    s = _SELF_DIR_CD_RE.sub(self_abs + "/..", s)
+    s = _SELF_REALPATH_RE.sub(self_abs, s)
+    s = _SELF_DIRNAME_RE.sub(self_abs + "/..", s)
+    return _SELF_TOKEN_RE.sub(self_abs, s)
+
 # Inline-code flags: a launcher invoking an interpreter with one of these has
 # NO scannable file → C1 fails (it is an inline dynamic-exec at the launch
 # site). Keyed per interpreter family.
@@ -180,7 +223,9 @@ def _interp_script_target(argv: list[str]) -> str | None:
     return argv[0]
 
 
-def _fold_to_plugin_root(raw: str, plugin_root: Path) -> str | None:
+def _fold_to_plugin_root(
+    raw: str, plugin_root: Path, self_path: str | None = None
+) -> str | None:
     """Constant-fold the closed env whitelist in ``raw`` to ``plugin_root``.
 
     Returns a concrete path string, or ``None`` when a residual ``$VAR`` (or a
@@ -188,6 +233,17 @@ def _fold_to_plugin_root(raw: str, plugin_root: Path) -> str | None:
     FAIL. The ONE folded ``$HOME``/``~`` form is the plugin-data sandbox literal
     ``<HOME>/.claude/plugins/data/<slug>/<rest>`` → ``R/<rest>`` (issue #152). A
     bare relative path (``scripts/d.py``) is resolved relative to ``plugin_root``.
+
+    ``self_path`` (TRDD-ETDWX70R) is the plugin-root-relative path of the file
+    being scanned. When given, the script's OWN-location shell tokens (``$0``,
+    ``${BASH_SOURCE[0]}``, ``$(dirname "$0")``, ``$(cd "$(dirname "$0")" &&
+    pwd)``, ``$(realpath "$0")``, ``$(readlink -f "$0")``) fold to
+    ``<plugin_root>/<self_path>`` BEFORE the residual-var guard rejects them.
+    When ``None`` the fold is SKIPPED (fail-safe — existing callers unchanged).
+    There is deliberately NO python-side ``__file__`` token here: the AST
+    renderer substitutes the concrete ``<self_path>`` text ITSELF, because a
+    token nobody folds would become an unresolved var and silently demote every
+    ``__file__`` write.
     """
     s = raw.strip().strip("'\"")
     if not s:
@@ -198,6 +254,10 @@ def _fold_to_plugin_root(raw: str, plugin_root: Path) -> str | None:
         s = s.replace("${" + name + "}", root).replace("$" + name, root)
     # Fold $PWD / $(pwd) / `pwd` → R.
     s = _PWD_TOKEN_RE.sub(root, s)
+    # Fold the script's OWN location (TRDD-ETDWX70R) — BEFORE the residual-var
+    # guard below, which would otherwise reject every ``$0``-anchored write.
+    if self_path is not None:
+        s = _fold_self_path(s, plugin_root, self_path)
     # Fold the plugin-data sandbox literal ``<HOME>/.claude/plugins/data/<slug>/<rest>``
     # → ``R/<rest>`` (issue #152) — the ONE $HOME/~ form that IS in-tree, because
     # that sandbox dir holds the plugin's OWN staged files (the same dir
@@ -219,11 +279,15 @@ def _fold_to_plugin_root(raw: str, plugin_root: Path) -> str | None:
     return s
 
 
-def _resolve_in_tree(raw: str, plugin_root: Path) -> Path | None:
+def _resolve_in_tree(
+    raw: str, plugin_root: Path, self_path: str | None = None
+) -> Path | None:
     """Fold ``raw`` then require it to be an EXISTING REGULAR FILE whose
     realpath is UNDER the plugin root's realpath. Symlink resolution that
-    leaves the tree → ``None``. Any failure → ``None`` (C1 fails)."""
-    folded = _fold_to_plugin_root(raw, plugin_root)
+    leaves the tree → ``None``. Any failure → ``None`` (C1 fails).
+
+    ``self_path`` is threaded to ``_fold_to_plugin_root`` (TRDD-ETDWX70R)."""
+    folded = _fold_to_plugin_root(raw, plugin_root, self_path)
     if folded is None:
         return None
     try:

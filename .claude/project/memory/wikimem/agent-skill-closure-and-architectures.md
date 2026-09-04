@@ -1,8 +1,8 @@
 ---
 name: agent-skill-closure-and-architectures
-description: "my agent's skills: list names a skill that does not exist and nothing complains / an agent preloads a skill but it silently does nothing / does skills: frontmatter control WHICH skills an agent may us"
+description: "my agent's skills: list names a skill that does not exist and nothing complains / an agent preloads a skill but it silently does nothing / does skills: frontmatter control which skills an agent may use / Skill tool listed in disallowedTools blocks every runtime Skill call / context: fork alone does nothing without an agent: field / a forked skill returns nothing inline, the result arrives only as a notification / background: true by default means a pipeline step delivers nothing synchronously / can a skill with disable-model-invocation: true be preloaded / why can't I preload the built-in verify or code-review skills / a missing preload skill only logs a warning to the debug log / the skills command shows a user-only badge for an unpreloadable skill / the context command shows what a subagent actually loaded / ALL-IN-ONE vs ONE-FOR-ALL vs PLUGIN-OMNI agent architecture / where does a skill actually execute, same agent or a separate subagent / CPV AC5 unpreloadable skill finding and AC1 unresolvable skill finding / cpv_agent_closure.py is the skill reachability source of truth"
 ocd: 2026-07-30
-lmd: 2026-07-30
+lmd: 2026-09-04
 metadata:
   node_type: memory
   type: project
@@ -84,6 +84,12 @@ carries `verification-before-completion`. Compared by
 numbers are only a comparison when every preload actually priced. [^4] Scanned
 per-agent by `scripts/cpv_agent_security.py`, which must ARM the same
 suppression state the plugin gate arms. [^5]
+
+## Applies to
+
+- (radiates to every agent definition in this plugin's `agents/` — no per-agent
+  component page exists yet in this scope; wire the reciprocal `## Governed by`
+  on each one as it is written)
 
 ## Governed by
 

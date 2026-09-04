@@ -779,7 +779,10 @@ VALID_EFFORT_VALUES = {"low", "medium", "high", "xhigh", "max"}
 # `claude-gpt-4`, and rejecting that is the whole point of this check — so widen it by
 # adding a real family, never by loosening the alternation. `fable` was added for Claude
 # Fable 5 (`claude-fable-5`, CC v2.1.170); VALID_MODELS already carried the short alias,
-# so only the FULL-ID spelling was being rejected.
+# so only the FULL-ID spelling was being rejected. CC v2.1.257 made `claude-fable-5-1`
+# (Fable 5.1, now the default `fable` alias target) a valid full model ID too — the
+# `\d[\w.-]*` tail already matches the extra `-1` version segment, so no regex change
+# was needed; this comment plus its test just record that the sync was verified.
 _FULL_MODEL_ID_RE = re.compile(r"^claude-(?:opus|sonnet|haiku|fable)-\d[\w.-]*(?:\[1m\])?$")
 
 # Short aliases with optional [1m] suffix: opus, sonnet[1m], haiku, fable, etc.
@@ -1020,6 +1023,9 @@ VALID_PLUGIN_ENV_VARS = {
     "ANTHROPIC_WORKSPACE_ID",  # v2.1.141 — workload identity federation, scopes the minted token to a specific workspace when the federation rule covers more than one
     # CC spec sync v2.1.248 (env-vars.md)
     "CLAUDE_CODE_RESTRICTED",  # v2.1.248 — same as --restricted; strips run/code tools + WebFetch, refuses bypassPermissions, ignores settings files
+    # CC spec sync v2.1.260 (sub-agents.md "Choose a model" / "Run every subagent on one model")
+    "CLAUDE_CODE_SUBAGENT_MODEL",  # default model for subagents/team members/workflow agents not otherwise assigned one
+    "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",  # v2.1.257 — set to "1" to force CLAUDE_CODE_SUBAGENT_MODEL onto every subagent, ignoring per-invocation/definition model overrides
 }
 
 # Env var name pattern matching for dynamic plugin env vars.
@@ -9834,3 +9840,217 @@ class MarketplaceContext:
     plugins: dict = field(default_factory=dict)
     allowlist: set = field(default_factory=set)
     scope: str = "marketplace"
+
+
+# =============================================================================
+# Permission-rule syntax (CC v2.1.260 spec sync, TRDD reports/cc-spec-sync-2260)
+# =============================================================================
+#
+# CPV historically value-checked ONLY `permissions.defaultMode` — the
+# individual rule STRINGS inside `permissions.{allow,ask,deny}` were never
+# parsed. Claude Code v2.1.260 changed 5 permission-rule-syntax behaviors
+# (see the audit report cited above); this section implements the 3
+# actionable ones as a single shared checker so both `validate_project_scope`
+# and `validate_local_scope` get identical detection without duplicating the
+# parsing logic (or the tool-name alternation, imported below).
+
+_PATH_SPECIFIER_TOOLS = frozenset({"Read", "Edit", "Write", "MultiEdit", "Glob"})
+
+# A Windows drive-letter path prefix (`C:\...`). A rule string reaching this
+# point has already had its `<Tool>(` prefix stripped, so the specifier
+# itself starts with the drive letter when present.
+_WINDOWS_DRIVE_SPECIFIER_RE = re.compile(r"^[A-Za-z]:\\")
+
+
+def _permission_rule_tool_names() -> tuple[str, ...]:
+    """The Claude Code tool-name alternation used to recognize a well-formed
+    permission-rule prefix (``<ToolName>(``).
+
+    Imported from ``_skillaudit_json_context._TOOL_NAMES_FOR_GLOB_RE`` — the
+    audit report's explicit instruction is to REUSE that alternation rather
+    than duplicate it, since a second hand-typed tool list drifts stale the
+    moment Claude Code adds a tool (exactly what happened before that list
+    was derived from ``CANONICAL_TOOLS | TOOL_ALIASES``).
+    """
+    from _skillaudit_json_context import _TOOL_NAMES_FOR_GLOB_RE  # type: ignore[import-not-found]
+
+    return _TOOL_NAMES_FOR_GLOB_RE
+
+
+def _match_permission_rule_tool(value: str) -> str | None:
+    """Return the tool name iff ``value`` starts with ``<ToolName>(``."""
+    for name in _permission_rule_tool_names():  # already sorted longest-first
+        if value.startswith(name + "("):
+            return name
+    return None
+
+
+def _extract_permission_rule_specifier(value: str, tool: str) -> tuple[str, str] | None:
+    """Split ``value`` into ``(specifier, trailing)`` after the ``<tool>(``
+    prefix, matching parentheses by DEPTH rather than stopping at the first
+    ``)`` — a naive ``[^)]*``-style match mis-splits a specifier that itself
+    contains balanced parentheses, e.g. ``Edit(./src/(gen)/**)``.
+
+    Returns ``None`` when the parentheses never balance (unparseable — no
+    finding is safer than a fabricated one).
+    """
+    rest = value[len(tool) + 1 :]  # text after the opening "("
+    depth = 1
+    for idx, ch in enumerate(rest):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return rest[:idx], rest[idx + 1 :]
+    return None
+
+
+def _has_unclosed_bracket(specifier: str) -> bool:
+    """True iff ``specifier`` has an opening ``[`` with no matching ``]``.
+
+    Pre-Claude-Code-v2.1.260 an uncompilable glob (e.g. an unclosed ``[``)
+    made EVERY file edit fail with ``Invalid regular expression``; the rule
+    now silently narrows to guarding only its literal path instead — the
+    author never learns their glob doesn't do what they meant.
+    """
+    depth = 0
+    for ch in specifier:
+        if ch == "[":
+            depth += 1
+        elif ch == "]" and depth > 0:
+            depth -= 1
+    return depth > 0
+
+
+def _has_wildcard_before_subcommand(specifier: str) -> bool:
+    """True iff a bare ``*`` token appears before the rest of the command.
+
+    ``Bash(git * main)`` also matches any options inserted at that position
+    and approves them without a prompt (errors.md) — Claude Code emits its
+    own startup warning for this shape. A TRAILING ``*`` (``git commit *``)
+    is the normal "match anything after this point" idiom and is not flagged.
+    """
+    tokens = specifier.split()
+    for idx, token in enumerate(tokens):
+        if token == "*" and idx < len(tokens) - 1:
+            return True
+    return False
+
+
+def _rule_has_windows_escaped_paren(specifier: str) -> bool:
+    """True iff ``specifier`` is a Windows drive path containing a literal
+    ``\\(`` or ``\\)`` — read as an escaped parenthesis rather than a path
+    separator (``Edit(C:\\dir\\(name)\\**)``).
+    """
+    return bool(_WINDOWS_DRIVE_SPECIFIER_RE.match(specifier)) and ("\\(" in specifier or "\\)" in specifier)
+
+
+def check_permission_rule_syntax(value: object) -> list[tuple[str, str]]:
+    """Check one ``permissions.{allow,ask,deny}[]`` rule string against the
+    Claude Code v2.1.260 permission-rule-syntax fixes.
+
+    Returns a list of ``(severity, message)`` pairs — ``severity`` is one of
+    ``"major"`` / ``"warning"`` / ``"info"``, matching a ``ValidationReport``
+    method name so a caller can do ``getattr(report, severity)(message, ...)``.
+    An empty list means no defect detected. Never raises: a non-string or
+    unparseable rule yields no finding — fail-safe, since a missed advisory
+    is far cheaper than a fabricated one.
+
+    Checks implemented (severity discipline: WARNING never blocks
+    ``--strict``; MAJOR is used ONLY where Claude Code itself now REJECTS
+    the rule — never an invented gate):
+
+    1. MAJOR — text after the closing paren (``Bash(ls) x``): CC v2.1.260
+       now reports this as an invalid setting instead of silently ignoring it.
+    2. MAJOR — an unclosed ``[`` in a ``Read``/``Edit``/``Write``/
+       ``MultiEdit``/``Glob`` path pattern: uncompilable, and the rule
+       silently narrows to its literal path instead of erroring.
+    3. WARNING — a ``Bash(...)`` rule with a bare ``*`` before the rest of
+       the command: also matches inserted options and auto-approves them.
+    4. WARNING — a Windows-style path specifier where ``\\(``/``\\)`` reads
+       as an escaped parenthesis rather than a path separator.
+    5. INFO — a ``Read``/``Edit``/``Write``/``MultiEdit``/``Glob`` path
+       specifier containing parentheses: pre-2.1.260 such a rule was
+       silently dropped as invalid; it is now honored correctly. Advisory
+       only — the fix already shipped upstream.
+    """
+    findings: list[tuple[str, str]] = []
+    if not isinstance(value, str):
+        return findings
+
+    tool = _match_permission_rule_tool(value)
+    if tool is None:
+        return findings
+
+    split = _extract_permission_rule_specifier(value, tool)
+    if split is None:
+        return findings
+    specifier, trailing = split
+
+    # Rule 1.
+    trailing_stripped = trailing[1:] if trailing.startswith("*") else trailing
+    trailing_stripped = trailing_stripped.strip()
+    if trailing_stripped:
+        findings.append(
+            (
+                "major",
+                f"Permission rule {value!r} has text after the closing parenthesis "
+                f"({trailing_stripped!r}) — Claude Code v2.1.260+ reports this as an "
+                "invalid setting instead of silently ignoring the extra text. Remove "
+                "the trailing text or fix the rule syntax.",
+            )
+        )
+
+    # Rule 4 (checked before rule 5 so a Windows escaped-paren rule reports
+    # its more specific explanation instead of also drawing the generic
+    # "parens in path" advisory for the same characters).
+    windows_hit = _rule_has_windows_escaped_paren(specifier)
+    if windows_hit:
+        findings.append(
+            (
+                "warning",
+                f"Permission rule {value!r} has a Windows-style path where "
+                "'\\(' or '\\)' reads as an escaped parenthesis rather than a path "
+                "separator. Use forward slashes instead (e.g. "
+                "'C:/dir/(name)/**') for an unambiguous rule.",
+            )
+        )
+
+    if tool in _PATH_SPECIFIER_TOOLS:
+        # Rule 2.
+        if _has_unclosed_bracket(specifier):
+            findings.append(
+                (
+                    "major",
+                    f"Permission rule {value!r} has an unclosed '[' in its path "
+                    "pattern — an uncompilable regular expression. Since Claude "
+                    "Code v2.1.260 such a rule silently narrows to guarding only "
+                    "its literal path instead of the glob you intended; fix the "
+                    "bracket to get the coverage you meant.",
+                )
+            )
+        # Rule 5.
+        if not windows_hit and ("(" in specifier or ")" in specifier):
+            findings.append(
+                (
+                    "info",
+                    f"Permission rule {value!r} has parentheses inside its path "
+                    "pattern. Before Claude Code v2.1.260 such a rule was silently "
+                    "dropped as invalid; it is now honored correctly — informational "
+                    "only, no action needed.",
+                )
+            )
+
+    # Rule 3.
+    if tool == "Bash" and _has_wildcard_before_subcommand(specifier):
+        findings.append(
+            (
+                "warning",
+                f"Permission rule {value!r} has a wildcard before the rest of the "
+                "command, so it also matches any options inserted at that position "
+                "and approves them without a prompt.",
+            )
+        )
+
+    return findings

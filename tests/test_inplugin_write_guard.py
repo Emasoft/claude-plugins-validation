@@ -346,10 +346,17 @@ class TestAllowDynamic:
         assert _flag_lines(c, "gen.py", root) == []
 
     def test_path_join_computed(self, tmp_path: Path) -> None:
-        """A computed `os.path.join(target, name)` destination → NOT flagged."""
+        """A computed `os.path.join(target, name)` destination is NEVER blocking.
+
+        TRDD-ETDWX70R: the prefix is unresolvable but the tail IS a script, so
+        this is now the advisory T3 tier (one INFO per file) rather than
+        silence. It still never blocks — the point of the original assertion.
+        """
         root = _make_plugin(tmp_path)
         c = 'open(os.path.join(target_dir, "x.py"), "w").write(code)\n'
-        assert _flag_lines(c, "gen.py", root) == []
+        findings = guard.inplugin_script_write_findings(c, "gen.py", root)
+        assert [f.tier for f in findings] == ["info"], findings
+        assert not [f for f in findings if f.tier in ("critical", "major")]
 
 
 class TestAllowMisc:

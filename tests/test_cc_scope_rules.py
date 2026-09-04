@@ -190,6 +190,17 @@ class TestTaxonomyConstants:
         assert {"timeFormat", "timeZone"} <= KNOWN_SETTINGS_KEYS
         assert "timeFromat" not in KNOWN_SETTINGS_KEYS  # positive control — near-miss typo stays unknown
 
+    def test_v2_1_259_managed_mcp_servers_known_and_managed_only(self) -> None:
+        """managedMcpServers (v2.1.259 changelog: a managed setting letting
+        orgs provide HTTP/SSE MCP servers to every user, same entry shape as
+        .mcp.json) is a recognized top-level key AND binds only in a managed
+        settings file."""
+        from cc_scope_rules import KNOWN_SETTINGS_KEYS  # noqa: PLC0415
+
+        assert "managedMcpServers" in KNOWN_SETTINGS_KEYS
+        assert "managedMcpServers" in MANAGED_ONLY_KEYS
+        assert "managedMcpServer" not in KNOWN_SETTINGS_KEYS  # positive control — near-miss typo stays unknown
+
     def test_project_local_rejected_env_var_names(self) -> None:
         """PROJECT_LOCAL_REJECTED_ENV_VAR_NAMES covers the v2.1.251 env
         keys settings-reference.md names as dropped from project AND local

@@ -2808,6 +2808,45 @@ def validate_repository_url(
             )
         )
 
+    # CC v2.1.259 fixed the client-side symptom (github.com repo URLs with a
+    # trailing slash, or a dangling "?"/"#" with an empty query/fragment,
+    # produced an unusable ".git" clone URL — e.g. "owner/repo/".git or
+    # "owner/repo?".git). A newer Claude Code tolerates it now, but the URL
+    # is still objectively malformed (breaks any client on 2.1.258 or
+    # earlier, and any other git host/tool that clones it), so CPV keeps
+    # flagging it. Severity is WARNING (the only tier that never blocks
+    # --strict in this repo) — never MAJOR/MINOR — because CC itself no
+    # longer refuses this shape, and CPV must never invent a publish gate
+    # stricter than the spec it validates against.
+    if parsed.scheme in ("http", "https") and "github.com" in parsed.netloc.lower():
+        cleaned = repository
+        reasons: list[str] = []
+        if parsed.path.endswith("/"):
+            reasons.append("trailing slash")
+        if repository.endswith("?") and not parsed.query:
+            reasons.append("dangling '?' with an empty query")
+        if repository.endswith("#") and not parsed.fragment:
+            reasons.append("dangling '#' with an empty fragment")
+        if reasons:
+            # Build the cleaned spelling mechanically: drop a dangling
+            # trailing "?"/"#" first, then strip any trailing slash.
+            cleaned = re.sub(r"[?#]$", "", repository).rstrip("/")
+            results.append(
+                ValidationResult(
+                    level="WARNING",
+                    category="plugin",
+                    message=(
+                        f"Plugin '{plugin_id}' repository URL has "
+                        f"{' and '.join(reasons)}: {repository} — appending "
+                        "'.git' to this yields an unusable clone URL on "
+                        "Claude Code v2.1.258 and earlier (fixed in "
+                        "v2.1.259) and on many other git hosts/tools"
+                    ),
+                    file=json_path,
+                    suggestion=f"Use '{cleaned}' instead",
+                )
+            )
+
     return results
 
 

@@ -2,7 +2,7 @@
 name: claude-plugins-validation-overview
 description: "how does CPV work — what claude-plugins-validation is, how a plugin gets validated / security-scanned / fixed / published, and where the deeper pages are"
 ocd: 2026-07-25
-lmd: 2026-07-25
+lmd: 2026-09-03
 metadata:
   node_type: memory
   type: project
@@ -67,5 +67,6 @@ CPV, and the plugin's own tests before anything is pushed.
 - Git-tracked `CLAUDE.md` at the repo root — the authoritative live inventory (component
   counts, version history, open-issues snapshot). Read it first on resume; this page is
   the *story*, that file is the *state*.
+- [[rc164-inplugin-write-guard-fold-tiers]]
 
 ## Notes and lessons learned

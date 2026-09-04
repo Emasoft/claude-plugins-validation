@@ -375,6 +375,32 @@ def _flag_permissions_default_mode(data: dict[str, Any], report: ValidationRepor
         )
 
 
+def _flag_malformed_permission_rules(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
+    """Check the individual rule STRINGS inside ``permissions.{allow,ask,deny}``
+    against the Claude Code v2.1.260 permission-rule-syntax fixes.
+
+    Unlike ``_flag_permissions_default_mode`` above (which value-checks only
+    ``permissions.defaultMode``), this inspects the CONTENT of every rule
+    string — trailing text after a closing paren, an unclosed ``[``, a
+    wildcard before the subcommand, a Windows escaped-paren path, and
+    parentheses inside a path pattern. See
+    ``cpv_validation_common.check_permission_rule_syntax`` for the full
+    rationale and severity discipline.
+    """
+    from cpv_validation_common import check_permission_rule_syntax  # lazy to avoid cycle
+
+    permissions = data.get("permissions")
+    if not isinstance(permissions, dict):
+        return
+    for bucket in ("allow", "ask", "deny"):
+        rules = permissions.get(bucket)
+        if not isinstance(rules, list):
+            continue
+        for entry in rules:
+            for severity, message in check_permission_rule_syntax(entry):
+                getattr(report, severity)(f"{file_label} permissions.{bucket}: {message}", file_label)
+
+
 def _flag_ignored_env_var_names(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """Flag ``env`` entries Claude Code drops from project/local settings.
 
@@ -666,6 +692,7 @@ def validate_settings_json_project_scope(settings_path: Path, report: Validation
     _flag_global_config_keys(data, report, file_label)
     _flag_plugin_only_keys(data, report, file_label)
     _flag_permissions_default_mode(data, report, file_label)
+    _flag_malformed_permission_rules(data, report, file_label)
     _flag_ignored_env_var_names(data, report, file_label)
     _flag_secrets_in_env(data, report, file_label)
     _flag_machine_specific_command_paths(data, report, file_label)
