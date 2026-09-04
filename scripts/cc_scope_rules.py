@@ -232,6 +232,13 @@ MANAGED_ONLY_KEYS: frozenset[str] = frozenset(
         "parentSettingsBehavior",  # v2.1.133 — admin-tier 'first-wins' | 'merge' for SDK managedSettings
         "allowAllClaudeAiMcps",  # v2.1.149 — enterprise: load claude.ai cloud MCP connectors alongside managed-mcp.json
         "pluginSuggestionMarketplaces",  # v2.1.152 — admin allowlist of org marketplaces whose plugins may be suggested
+        # v2.1.259 changelog: "Added `managedMcpServers` managed setting:
+        # organizations can provide HTTP/SSE MCP servers to every user (same
+        # entry shape as .mcp.json); entries that name a command to run are
+        # skipped." settings-reference.md does not carry it yet (doc lag —
+        # same precedent as timeFormat/timeZone at v2.1.257); changelog-only
+        # is sufficient since the level (managed-only) is stated explicitly.
+        "managedMcpServers",
         # v2.1.229 — settings.md:267 "(Managed settings only)". Blocks the
         # `command` plugin source, which installs a plugin by RUNNING a
         # marketplace-declared command on the user's machine; when unset it
@@ -525,6 +532,11 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         # Update 2.1.257, "September 1, 2026").
         "timeFormat",  # v2.1.257 — 12h | 24h | 24h-utc | a strftime pattern
         "timeZone",  # v2.1.257 — companion to timeFormat
+        # CC v2.1.259 changelog: "Added `managedMcpServers` managed setting"
+        # — same entry shape as .mcp.json; a `command`-type entry is skipped.
+        # Not yet in settings-reference.md's Available-settings table (doc
+        # lag). Also in MANAGED_ONLY_KEYS — it binds only in a managed file.
+        "managedMcpServers",
     }
 )
 

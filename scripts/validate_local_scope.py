@@ -259,6 +259,28 @@ def _flag_permissions_default_mode_local(data: dict[str, Any], report: Validatio
         )
 
 
+def _flag_malformed_permission_rules_local(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
+    """Check the individual rule STRINGS inside ``permissions.{allow,ask,deny}``
+    against the Claude Code v2.1.260 permission-rule-syntax fixes.
+
+    Mirror of ``validate_project_scope._flag_malformed_permission_rules`` —
+    same shared checker, same severity discipline; see
+    ``cpv_validation_common.check_permission_rule_syntax`` for the rationale.
+    """
+    from cpv_validation_common import check_permission_rule_syntax  # lazy to avoid cycle
+
+    permissions = data.get("permissions")
+    if not isinstance(permissions, dict):
+        return
+    for bucket in ("allow", "ask", "deny"):
+        rules = permissions.get(bucket)
+        if not isinstance(rules, list):
+            continue
+        for entry in rules:
+            for severity, message in check_permission_rule_syntax(entry):
+                getattr(report, severity)(f"{file_label} permissions.{bucket}: {message}", file_label)
+
+
 def _flag_ignored_env_var_names_local(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """Flag ``env`` entries Claude Code drops from settings.local.json.
 
@@ -424,6 +446,7 @@ def validate_settings_local_json(settings_path: Path, report: ValidationReport) 
     _flag_global_config_keys_local(data, report, file_label)
     _flag_plugin_only_keys_local(data, report, file_label)
     _flag_permissions_default_mode_local(data, report, file_label)
+    _flag_malformed_permission_rules_local(data, report, file_label)
     _flag_ignored_env_var_names_local(data, report, file_label)
     _flag_auto_mode_ignored_local(data, report, file_label)
     _suggest_typically_shared_keys(data, report, file_label)

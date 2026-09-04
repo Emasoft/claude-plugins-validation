@@ -9450,11 +9450,32 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
         # literals (which live in `*_PATTERNS` collections) are not self-flagged;
         # that skip is gated on the non-spoofable `_CPV_IS_RUNNING_CPV`, so a
         # third-party plugin's real in-plugin script write still flags.
+        #
+        # TRDD-ETDWX70R made the verdict THREE-TIERED (see `WriteFinding.tier`):
+        # critical (folds in-tree + script tail), major `RC-164-UNRESOLVED` (the
+        # PREFIX folds in-tree but the tail is computed — blocking for BOTH the
+        # ROOT and DATA anchor kinds, because a non-blocking DATA tier re-opens
+        # the #152 staged-daemon hole), and info (ONE aggregate per file for
+        # writes anchored to a root the fold cannot place).
         for wf in inplugin_script_write_findings(content, rel_path, plugin_path):
             if cpv_self_scan_skip_line(rel_path, content_lines, wf.line_no):
                 continue
-            level = effective_severity("critical", rel_path)
-            getattr(report, level)(f"RC-164: {wf.message}", rel_path, wf.line_no)
+            tier = getattr(wf, "tier", "critical")
+            message = f"RC-164: {wf.message}"
+            if tier in ("major", "info"):
+                message += " [UNRESOLVED]"
+            if tier == "critical":
+                getattr(report, effective_severity("critical", rel_path))(
+                    message, rel_path, wf.line_no
+                )
+            elif tier == "major":
+                getattr(report, effective_severity("major", rel_path))(
+                    message, rel_path, wf.line_no
+                )
+            elif tier == "warning":
+                report.warning(message, rel_path, wf.line_no)
+            else:
+                report.info(message, rel_path, wf.line_no)
             issues += 1
 
         # RC-70 — Generic obfuscation with proximity-to-exec.

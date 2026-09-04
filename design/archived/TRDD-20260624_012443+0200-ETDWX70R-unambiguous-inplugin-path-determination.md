@@ -1,9 +1,9 @@
 ---
 trdd-id: ETDWX70R
 title: Unambiguous in-plugin vs outside-plugin write-path determination — replace the fail-safe-lenient resolver
-column: backburner
+column: complete
 created: 2026-06-24T01:24:43+0200
-updated: 2026-08-29T15:11:43+0200
+updated: 2026-09-03T17:25:00+0200
 current-owner: cpv-main-session
 assignee: null
 priority: 2
@@ -24,13 +24,81 @@ audit-requirements: [security-scan]
 review-requirements: [code-review]
 runtime-targets: [macos, linux]
 impacts: []
-attempts: 0
-last-test-result: not-run
+attempts: 1
+last-test-result: passed
+last-test-at: 2026-09-03T17:20:00+0200
 implementation-commits: []
 external-refs: ["github.com/Emasoft/claude-plugins-validation/issues/152"]
 ---
 
 # Unambiguous in-plugin vs outside-plugin write-path determination
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03
+
+**DONE — shipped as the v5.17.0 minor (this card is archived by the commit that lands it).**
+The lenient resolver is replaced by a three-tier FOLD (not a taint engine), per the
+final spec `docs_dev/20260903-etdwx70r-rc164-fold-spec.md` (gitignored; the
+implementation report is `reports/trdd-etdwx70r/20260903_151336+0200-implementation.md`):
+
+- **T1 critical** — the destination folds in-tree (ROOT or DATA) AND carries a literal
+  script suffix from ANY source (concat / f-string / `%` / `.format` fragments,
+  `.with_suffix` / `.with_name` / `.with_stem` args, `str.replace` / `re.sub` replacement,
+  Name-bound literals, bytes, a `#!` shebang body to an extensionless in-tree path,
+  `os.chmod` / `.chmod` with exec bits on a foldable path).
+- **T2 major `RC-164-UNRESOLVED`** — in-tree PREFIX, tail NOT literal, for BOTH the ROOT
+  and DATA anchors (a non-blocking DATA tier re-opens the #152 staged-daemon hole);
+  regex path: a residual `$VAR` in the tail of an in-tree-folded prefix.
+- **T3 info** — ONE aggregate per file, only when the tail has a script suffix and the
+  root cannot be placed (parameter / hoisted / computed receiver); else NOTHING.
+- Copy predicate follows read-bound Names through the SAME binding map (`AugAssign`
+  breaks the chain); per-function scopes, params → UNKNOWN, Calls never followed,
+  `sys.argv[0]` UNKNOWN, `Path.home()` → `~`, `__file__` / `$0` / `BASH_SOURCE` fold to
+  the concrete `plugin_root/self_path`.
+- Dispatch: a `.py` that parses → AST sinks PLUS the shell/heredoc/chmod regexes over the
+  lines the AST did not claim (`include_py_patterns=False`); `SyntaxError` / `.md` /
+  `.sh` → the full regex path with a fence-bounded name→literal-tail lookup.
+
+**Components:** `scripts/cpv_write_sink_ast.py` (NEW, the census instrument + scoped
+renderer), `scripts/cpv_inplugin_write_guard.py` (tiers + dispatch),
+`scripts/cpv_persistence_target.py` (`_fold_to_plugin_root(…, self_path)`),
+`scripts/validate_security.py` RC-164 block (emits by `wf.tier`);
+tests `tests/test_cpv_write_sink_ast.py` (27) + `tests/test_rc164_fold_tiers.py` (63 collected).
+
+**Measured (ONE machine's plugin cache, 2026-09-03 — a baseline, not fleet evidence):**
+the strict flip the 2026-08-29 decision feared would have newly rejected 1375 writes
+across 104 deduped plugins; after the fold, T2 (newly-blocking) = 0 and T1 = 11, every
+one a shape the old regex path already blocked. Emission-level A/B over 63 cached
+plugins (third-party rows): HEAD 21 CRITICAL / 48 MAJOR → fold 12 / 39 / 4 MINOR; the
+shell surface lost 0 blocking lines; every Python-primitive delta is an
+`os.chmod(<Name>, mode)` on a tmp / pytest / non-exec target that HEAD flagged blindly
+(advisor-confirmed precision gain, incl. the janitor's `shutil.copyfile` + chmod staging
+→ T3). Positive control: a planted `Path(__file__).parent / "planted_probe.py"`
+write fires CRITICAL at the emitter. Mutation proofs: disabling the shell self-fold
+fails 6 tests, the `__file__` fold 20, the tier logic 9.
+
+**Advisor pre-commit finding fixed before commit:** `.with_name("gen.py")` on a
+slash-less UNKNOWN receiver dropped the `$__UNK_n` marker and rendered a bare literal →
+a CRITICAL FP on plain codegen; now the marker stays the prefix → T3 (two-sided test).
+
+**Found while verifying, NOT fixed here (own cards, queued at `todo`):**
+- TRDD-3T170X2M — plugin mode (`validate_plugin` → `_run_security_execclass_gate`,
+  i.e. `publish.py` Gate 3) merges only Bucket-A ids + `_EXECCLASS_RCE_RULE_IDS`, and
+  RC-164 is in neither, so the publish gate has dropped every RC-164 row since v2.146.0;
+  only `security` mode emits them. Settled in-process (`_extract_rule_id` → `RC-164`,
+  not in either set). Pre-existing at HEAD.
+- TRDD-RU0POO65 — the regex chmod path captures prose tokens (`'(unlike'`, `'for'`,
+  `'it'`, `` 'script.sh`' ``) and emits MAJOR on `.md` / CRITICAL in scripts.
+  Pre-existing at HEAD; must land BEFORE 3T170X2M or the gate newly blocks garbage.
+
+**Out of scope (documented bounds):** cross-version sibling writes, `self.attr`
+bindings, the tmp-file `os.rename` / `shutil.move` launder (labelled a copy idiom —
+evader-only, HEAD had no rename handling), `getattr(p, "write_text")` / aliased `open` /
+`f.writelines` (never matched at HEAD either), the `$(dirname "$(readlink -f "$0")")`
+self-fold residual, a T2 MAJOR has no `fix-validation` recipe yet (census T2 = 0).
+
+**SUPERSEDED — do NOT carry forward:** the 2026-08-29 "constrain-the-input + manifest
+declaration" approach (rejected by the advisor as a self-declared suppression, #63);
+the "T2 DATA-anchor → WARNING" variant; "census ≈ 0 → major" as a severity rule.
 
 ## Goal
 

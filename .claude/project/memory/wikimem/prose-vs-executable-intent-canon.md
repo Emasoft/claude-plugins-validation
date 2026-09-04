@@ -2,7 +2,7 @@
 name: prose-vs-executable-intent-canon
 description: "a CPV security rule fired on documentation prose / a comment in a bash fence was flagged as a filesystem write / a memory note's description was flagged as prompt injection / can I exclude a path from skillaudit to fix a false positive / can I re-tier a rule to WARNING to unblock --strict / how do I narrow a detector without opening a false negative / an FP report says the scanner reads prose as executable intent"
 ocd: 2026-07-25
-lmd: 2026-07-25
+lmd: 2026-09-03
 metadata:
   node_type: memory
   type: project
@@ -53,6 +53,13 @@ three rules (safe to narrow) while `ignore other tools instructions` was caught 
 `MCP_SCHEMA_POISON` **alone** — no backstop, so that probe is the tripwire that must still
 fire. Lock every sole-covered probe in as a regression test. The general form of this
 discipline lives in the USER-scope `debugging-methodology` page.
+
+## Applies to
+
+- (radiates to every per-language skillaudit context classifier under
+  `scripts/rules/**`, `scripts/_skillaudit_*.py`, `scripts/cpv_skillaudit_native.py`
+  — no per-classifier component page exists yet in this scope; wire the
+  reciprocal `## Governed by` on each one as it is written)
 
 ## Governed by
 

@@ -2,7 +2,7 @@
 name: hook-event-registration-is-a-two-half-contract
 description: "I added a Claude Code hook event to CPV and the suite failed on Missing output schema for event / test_hook_output_event_fields_covers_all_events / where else do I have to register a new hook event / VALID_HOOK_EVENTS and HOOK_OUTPUT_EVENT_FIELDS out of sync"
 ocd: 2026-08-04
-lmd: 2026-08-04
+lmd: 2026-09-03
 metadata:
   node_type: memory
   type: project
@@ -42,6 +42,10 @@ Third-party consumers of a NEW event may also need `EVENTS_WITHOUT_MATCHERS` in
 doc's matcher table; most recently-added events are matcher-less, and following that
 pattern blindly is how a matcher-taking event gets wrongly listed there.
 
+^ATOM-A79A-MHZE [desc:"Registering a hook event needs BOTH VALID_HOOK_EVENTS and HOOK_OUTPUT_EVENT_FIELDS; one invariant test is all that couples them", keywords: missing_output_schema_for_event hook_event_registered_in_one_half VALID_HOOK_EVENTS_and_HOOK_OUTPUT_EVENT_FIELDS spec_sync_incomplete_change empty_frozenset_by_accident_not_decision, type: project, ocd: 2026-08-04, lmd: 2026-08-04]
+
+CPV splits hook-event registration across two files with no compile-time coupling: `VALID_HOOK_EVENTS` (cpv_validation_common.py) makes the name legal, and `HOOK_OUTPUT_EVENT_FIELDS` (validate_hook_output.py) declares its allowed hookSpecificOutput keys. Only `test_hook_output_event_fields_covers_all_events` ties them together. An event added to the first alone resolves to an empty output schema by ACCIDENT (the consumer does `.get(event, frozenset())`), which is indistinguishable from a documented no-output event — so declare the schema explicitly, with the doc's reason in a comment. [^1]
+
 ## Governed by
 
 - [[claude-plugins-validation-overview]] — the project hub this component page hangs from.
@@ -50,11 +54,6 @@ pattern blindly is how a matcher-taking event gets wrongly listed there.
 
 - [[claude-code-hook-types-fundamentals]] — the type/event axes themselves (USER scope: the
   Claude Code hook model, independent of CPV's own constant tables).
-
-
-^ATOM-A79A-MHZE [desc:"Registering a hook event needs BOTH VALID_HOOK_EVENTS and HOOK_OUTPUT_EVENT_FIELDS; one invariant test is all that couples them", keywords: missing_output_schema_for_event hook_event_registered_in_one_half VALID_HOOK_EVENTS_and_HOOK_OUTPUT_EVENT_FIELDS spec_sync_incomplete_change empty_frozenset_by_accident_not_decision, type: project, ocd: 2026-08-04, lmd: 2026-08-04]
-
-CPV splits hook-event registration across two files with no compile-time coupling: `VALID_HOOK_EVENTS` (cpv_validation_common.py) makes the name legal, and `HOOK_OUTPUT_EVENT_FIELDS` (validate_hook_output.py) declares its allowed hookSpecificOutput keys. Only `test_hook_output_event_fields_covers_all_events` ties them together. An event added to the first alone resolves to an empty output schema by ACCIDENT (the consumer does `.get(event, frozenset())`), which is indistinguishable from a documented no-output event — so declare the schema explicitly, with the doc's reason in a comment. [^1]
 
 ## Notes and lessons learned
 

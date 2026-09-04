@@ -57,7 +57,10 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
+
+if TYPE_CHECKING:  # pragma: no cover - type-checking only (runtime import cycle)
+    from cpv_write_sink_ast import AstWriteSink
 
 # The destination-resolves-in-tree decision is shared with the #152 fold so the
 # two modules cannot drift. ``_resolve_in_tree`` returns a ``Path`` under
@@ -66,14 +69,38 @@ from typing import Final, NamedTuple
 # unresolvable / out-of-tree path. ``_fold_to_plugin_root`` is the string-level
 # fold used when we want the folded form without requiring the file to exist yet
 # (a generated destination may not exist at scan time).
-from cpv_persistence_target import _fold_to_plugin_root, _resolve_in_tree
+from cpv_persistence_target import (
+    _RESIDUAL_VAR_RE,
+    _fold_to_plugin_root,
+    _resolve_in_tree,
+)
 
 
 class WriteFinding(NamedTuple):
-    """One provable in-plugin script-write occurrence."""
+    """One in-plugin write occurrence, with its severity TIER.
+
+    TRDD-ETDWX70R replaced the single blocking verdict with three tiers:
+
+    * ``critical`` — T1: the destination FOLDS into the plugin tree and its tail
+      carries a script suffix (or a shebang / ``chmod +x`` proves it is a
+      script). Today's severity, unchanged.
+    * ``major`` — T2 ``RC-164-UNRESOLVED``: the destination's PREFIX folds into
+      the plugin tree but its tail is NOT a literal, so the fold cannot decide
+      whether a script lands in-tree. Blocking for BOTH anchor kinds (ROOT and
+      DATA): the #152 daemon fold scans the in-tree source and is sound only if
+      the staged DATA file is a verbatim copy, so a non-blocking DATA tier would
+      re-open that hole.
+    * ``warning`` — reserved, non-blocking.
+    * ``info`` — T3: the prefix is unresolvable (a hoisted / parameter-anchored
+      root the fold cannot place) but the tail IS a script. ONE aggregate per
+      file, never per site — a per-site flood trains readers to discount RC-164.
+
+    ``tier`` carries a default so existing constructors keep working.
+    """
 
     line_no: int  # 1-based
     message: str  # human-readable finding text
+    tier: str = "critical"  # critical | major | warning | info
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -209,6 +236,11 @@ _PY_WRITE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
 _SHELL_WRITE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     # `> DST` / `>> DST` — a redirect to a file path. The char BEFORE `>` is a
     # space, line-start, or `;`/`&`/`|` (NOT a digit → excludes `2>`/`1>`).
+    # A QUOTED destination holding SPACES (`> "$(dirname "$0")/gen.sh"`) is
+    # recovered by `_dest_token` below, which rescans the line from the capture
+    # start with a tiny linear scanner. Doing it in the regex would need an
+    # ambiguous `(?:\$\(…\)|[^"])*` alternation — a backtracking hazard on the
+    # no-re2 path — so the SCANNER, not the pattern, owns nesting.
     re.compile(r"(?:^|[\s;&|])>>?\s*([^\s;&|<>]+)"),
     # `tee DST` / `tee -a DST`
     re.compile(r"(?:^|[\s;&|])tee\s+(?:-[A-Za-z]+\s+)*([^\s;&|<>]+)"),
@@ -217,14 +249,51 @@ _SHELL_WRITE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     re.compile(r"\bsed\s+(?:-[A-Za-z]*\s+)*-i[A-Za-z.]*\s+(?:-e\s+\S+\s+|'[^']*'\s+|\"[^\"]*\"\s+)*([^\s;&|<>]+)"),
 )
 
+
+def _dest_token(line: str, match: re.Match[str]) -> str:
+    """The full destination token for ``match`` group 1.
+
+    A bare `[^\\s…]+` capture stops at the first space, so a QUOTED destination
+    containing a command substitution — `> "$(dirname "$0")/gen.sh"` — is
+    truncated to `"$(dirname`. When the capture opens a quote, rescan the raw
+    line from the capture start for the matching close quote, skipping `$(…)`
+    spans (whose own inner quotes are not delimiters). Linear, no backtracking.
+    """
+    token = match.group(1)
+    if not token or token[0] not in "\"'":
+        return token
+    quote = token[0]
+    start = match.start(1)
+    i = start + 1
+    n = len(line)
+    while i < n:
+        if line.startswith("$(", i):
+            depth = 1
+            i += 2
+            while i < n and depth:
+                if line[i] == "(":
+                    depth += 1
+                elif line[i] == ")":
+                    depth -= 1
+                i += 1
+            continue
+        if line[i] == quote:
+            return line[start : i + 1]
+        i += 1
+    return line[start:]
+
 # A heredoc opener whose redirect targets a file: ``cat > DST <<EOF`` /
 # ``cat >> DST <<'EOF'`` / ``tee DST <<EOF``. Group 1 is the destination. Used
 # to recover the heredoc body (to script-gate it by a written shebang) AND the
 # destination path. re2-safe (the delimiter is irrelevant here; the body walk is
 # done separately).
+# The destination capture spans SPACES (up to the `<<`) so a quoted
+# `"$(dirname "$0")/gen.sh"` is recovered whole — the `[^<]` class keeps the
+# match from crossing the heredoc opener, and the lazy quantifier is anchored by
+# the mandatory `<<`, so there is no backtracking blow-up.
 _HEREDOC_REDIRECT_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
-    re.compile(r"(?:^|[\s;&|])(?:cat|printf|echo)\b[^\n<>]*>>?\s*([^\s;&|<>]+)\s*<<"),
-    re.compile(r"(?:^|[\s;&|])tee\s+(?:-[A-Za-z]+\s+)*([^\s;&|<>]+)\s*<<"),
+    re.compile(r"(?:^|[\s;&|])(?:cat|printf|echo)\b[^\n<>]*>>?\s*([^\s<][^<]*?)\s*<<"),
+    re.compile(r"(?:^|[\s;&|])tee\s+(?:-[A-Za-z]+\s+)*([^\s<][^<]*?)\s*<<"),
 )
 
 # The heredoc-body delimiter opener (to walk to the body's first line for the
@@ -255,7 +324,25 @@ def _heredoc_body_after(lines: list[str], opener_idx: int) -> str | None:
 # ────────────────────────────────────────────────────────────────────────
 
 
-def _destination_in_tree(dst_expr: str, plugin_root: Path) -> bool:
+def _tail_has_script_suffix(tail: str) -> bool:
+    """True iff a destination's trailing literal FRAGMENT carries a script
+    suffix.
+
+    Reuses ``_is_script_destination`` (never a second extension set — it already
+    lowercases, so ``.PY`` is covered). A bare fragment such as ``".py"`` (from
+    ``name + ".py"``) would read as a dot-FILE with no suffix, so a stem is
+    prefixed before the test: the fragment is a SUFFIX of a longer name whose
+    stem the attacker moved into a variable.
+    """
+    frag = tail.strip().strip("'\"").rsplit("/", 1)[-1]
+    if not frag:
+        return False
+    return _is_script_destination("_" + frag)
+
+
+def _destination_in_tree(
+    dst_expr: str, plugin_root: Path, self_path: str | None = None
+) -> bool:
     """True iff ``dst_expr`` PROVABLY resolves inside the plugin tree.
 
     Two-stage, both reusing ``cpv_persistence_target`` so the in-tree decision
@@ -274,11 +361,11 @@ def _destination_in_tree(dst_expr: str, plugin_root: Path) -> bool:
     if not raw:
         return False
     # Stage 1 — an existing in-tree regular file (an in-place edit).
-    if _resolve_in_tree(raw, plugin_root) is not None:
+    if _resolve_in_tree(raw, plugin_root, self_path) is not None:
         return True
     # Stage 2 — a generated destination that may not exist yet. Fold the env /
     # data-dir literal; require the folded path to live under the plugin root.
-    folded = _fold_to_plugin_root(raw, plugin_root)
+    folded = _fold_to_plugin_root(raw, plugin_root, self_path)
     if folded is None:
         return False
     try:
@@ -300,22 +387,166 @@ def _destination_in_tree(dst_expr: str, plugin_root: Path) -> bool:
 # ────────────────────────────────────────────────────────────────────────
 
 
+_PY_SOURCE_SUFFIXES: Final[frozenset[str]] = frozenset({".py", ".pyw"})
+
+_NAME_CAPTURE_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][\w.]*$")
+_QUOTED_LITERAL_RE: Final[re.Pattern[str]] = re.compile(r"'([^']*)'|\"([^\"]*)\"")
+# Wrapper calls that may legitimately precede a literal ROOT without making the
+# prefix unknown; anything else identifier-shaped means an unresolvable root.
+_WRAPPER_CALL_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:Path|PurePath|PosixPath|str|open|os\.fspath|os\.path\.join)\s*\("
+)
+_BARE_IDENTIFIER_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_]\w*")
+_FENCE_MARKER_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?:```|~~~)")
+
+
+def _fence_bounds(lines: list[str], idx: int, rel_path: str) -> tuple[int, int]:
+    """The `[lo, hi)` line range a name lookup may search.
+
+    In markdown the SAME variable can be rebound across fences, so a lookup is
+    bounded to the fence holding the write; every other file type searches whole.
+    """
+    if not rel_path.lower().endswith((".md", ".markdown")):
+        return 0, len(lines)
+    lo = 0
+    open_fence = False
+    for i, line in enumerate(lines):
+        if _FENCE_MARKER_RE.match(line):
+            if open_fence:
+                if lo <= idx < i:
+                    return lo, i
+                open_fence = False
+            else:
+                open_fence = True
+                lo = i + 1
+    return (lo, len(lines)) if open_fence and lo <= idx else (0, len(lines))
+
+
+def _resolve_name_destination(
+    lines: list[str], lo: int, hi: int, before_idx: int, name: str
+) -> str | None:
+    """Reduce ``NAME``'s last assignment before ``before_idx`` to a path candidate.
+
+    This is the fix for the DEAD script-gate: pattern 3 (`VAR.write_text(...)`)
+    captures the VARIABLE NAME, so `_is_script_destination` was testing a bare
+    identifier and could never see a suffix. The candidate is the RHS's quoted
+    string literals joined by `/` — enough for `VAR = "$CLAUDE_PLUGIN_DATA/x.py"`
+    and for `VAR = Path(__file__).parent / "hook.py"`. An RHS with no literal is
+    UNRESOLVABLE and yields ``None`` ⇒ the caller emits NOTHING, because a bare
+    unresolvable name carries no in-tree evidence at all and blocking every
+    `p.write_text(...)` in a doc fence would be a mass over-block.
+    """
+    pattern = re.compile(r"^\s*" + re.escape(name) + r"\s*(?::[^=]+)?=\s*(.+?)\s*$")
+    rhs: str | None = None
+    for i in range(max(lo, 0), min(before_idx, hi)):
+        mo = pattern.match(lines[i])
+        if mo is not None:
+            rhs = mo.group(1)
+    if rhs is None:
+        return None
+    first_quote = min(
+        (i for i in (rhs.find("'"), rhs.find('"')) if i >= 0),
+        default=-1,
+    )
+    if first_quote < 0:
+        return None
+    # An IDENTIFIER before the first literal is an unknown ROOT (`tmp_path /
+    # "x.py"`). Keeping only the literals would manufacture a bare relative
+    # path, which the fold then resolves against the plugin root and reports as
+    # in-tree — an in-tree claim the expression never supports. Same rule the
+    # AST path enforces via `has_unknown_prefix`; only wrapper calls may precede.
+    head = _WRAPPER_CALL_RE.sub("", rhs[:first_quote])
+    if _BARE_IDENTIFIER_RE.search(head):
+        return None
+    parts = [(a or b) for a, b in _QUOTED_LITERAL_RE.findall(rhs) if (a or b)]
+    parts = [p.strip("/") for p in parts if p.strip("/")]
+    if not parts:
+        return None
+    return "/".join(parts)
+
+
+def _regex_tier(
+    dst: str, plugin_root: Path, self_path: str
+) -> str | None:
+    """Tier a REGEX-path destination, or ``None`` for no finding.
+
+    ``critical`` — the whole destination folds in-tree AND is a script.
+    ``major``   — the destination's HEAD folds in-tree but a residual ``$VAR``
+                  remains in its TAIL, so the fold cannot say whether a script
+                  lands in-tree. Without this a bash generator writing
+                  ``"$CLAUDE_PLUGIN_DATA/$name"`` sidesteps the gate entirely
+                  (the whole path fails to fold, so today it is silent).
+    """
+    # The script-ness test runs on the FOLDED path too: `> "$0"` carries no
+    # suffix of its own, but folds to this very script — a self-rewrite, and a
+    # script by definition. Judging only the raw token missed it entirely.
+    folded = _fold_to_plugin_root(dst, plugin_root, self_path)
+    is_script = _is_script_destination(dst) or (
+        folded is not None and _is_script_destination(folded)
+    )
+    if is_script and _destination_in_tree(dst, plugin_root, self_path):
+        return "critical"
+    raw = dst.strip().strip("'\"")
+    if "/" not in raw:
+        return None
+    head, tail = raw.rsplit("/", 1)
+    if not tail or not _RESIDUAL_VAR_RE.search(tail):
+        return None
+    return "major" if _destination_in_tree(head, plugin_root, self_path) else None
+
+
 def inplugin_script_write_findings(
     content: str,
     rel_path: str,
     plugin_root: Path,
 ) -> list[WriteFinding]:
-    """Scan ``content`` for writes that create / modify a SCRIPT file whose
-    destination PROVABLY resolves inside the plugin tree (ROOT or DATA) and are
-    NOT verbatim copies. Returns one ``WriteFinding`` per flagged line.
+    """Scan ``content`` for writes that create / modify a SCRIPT file inside the
+    plugin tree (ROOT or DATA) and are NOT verbatim copies.
 
-    Lenient fail-safe: a destination that does not provably resolve in-tree
-    (``_resolve_in_tree`` / ``_fold_to_plugin_root`` ⇒ ``None``) yields NO
-    finding. A verbatim-copy line yields NO finding. A non-script destination
-    yields NO finding. Only a PROVABLE in-plugin script GENERATE / EDIT flags.
+    Dispatch (TRDD-ETDWX70R): a ``.py`` file that PARSES has its PYTHON write
+    primitives judged by the AST path ONLY — those are the sole overlap between
+    the two paths, so suppressing exactly them is what "no regex double-report"
+    buys. The SHELL surface of the same file (a heredoc, a ``sed -i``, a ``>``
+    redirect, a ``chmod +x`` — all reachable from Python through
+    ``os.system`` / ``subprocess``) is NOT visible to the AST walk, so the regex
+    path still runs over it; dropping it would be a straight false negative
+    against the pre-TRDD behaviour. A ``SyntaxError`` falls back to the full
+    regex path (fail-closed, the RC-70 idiom); ``.md`` / ``.sh`` / anything else
+    uses the full regex path, which now folds the script's own location too.
 
-    ``rel_path`` is the file's plugin-relative path (used only for the finding
-    message). ``plugin_root`` is the plugin tree root.
+    ``rel_path`` is the file's plugin-relative path — the finding message AND
+    the ``self_path`` the ``$0`` / ``__file__`` fold resolves against.
+    """
+    if Path(rel_path).suffix.lower() in _PY_SOURCE_SUFFIXES:
+        from cpv_write_sink_ast import collect_ast_write_sinks  # local: import cycle
+
+        sinks = collect_ast_write_sinks(content, rel_path)
+        if sinks is not None:
+            findings = _ast_path_findings(sinks, rel_path, plugin_root)
+            seen = {f.line_no for f in findings}
+            findings.extend(
+                f
+                for f in _regex_path_findings(
+                    content, rel_path, plugin_root, include_py_patterns=False
+                )
+                if f.line_no not in seen
+            )
+            return findings
+
+    return _regex_path_findings(content, rel_path, plugin_root)
+
+
+def _regex_path_findings(
+    content: str,
+    rel_path: str,
+    plugin_root: Path,
+    include_py_patterns: bool = True,
+) -> list[WriteFinding]:
+    """The line-oriented scan (heredoc, chmod, Python primitives, shell writes).
+
+    ``include_py_patterns=False`` drops ONLY ``_PY_WRITE_PATTERNS`` — used when
+    the AST path already judged this file's Python writes, so the shell surface
+    embedded in it is still scanned without double-reporting.
     """
     findings: list[WriteFinding] = []
     lines = content.split("\n")
@@ -338,7 +569,7 @@ def inplugin_script_write_findings(
             if mo is None:
                 continue
             dst = mo.group(1)
-            if not _destination_in_tree(dst, plugin_root):
+            if not _destination_in_tree(dst, plugin_root, rel_path):
                 continue  # lenient — unresolvable / out-of-tree destination
             body = _heredoc_body_after(lines, idx)
             is_script = _is_script_destination(dst) or (
@@ -361,11 +592,18 @@ def inplugin_script_write_findings(
         # ── chmod +x on an in-plugin path makes that path a runnable script.
         chmod_hit = False
         for pat in _CHMOD_EXEC_PATTERNS:
+            # ``os.chmod`` is a PYTHON primitive — part of the overlap the AST
+            # path already judges (and judges better: it reads the mode bits,
+            # where this pattern flags any mode at all). The shell ``chmod +x``
+            # form stays, because a shell command inside a string is invisible
+            # to the AST walk.
+            if not include_py_patterns and "os\\.chmod" in pat.pattern:
+                continue
             mo = pat.search(line)
             if mo is None:
                 continue
             target = mo.group(1)
-            if _destination_in_tree(target, plugin_root):
+            if _destination_in_tree(target, plugin_root, rel_path):
                 findings.append(
                     WriteFinding(
                         line_no,
@@ -381,21 +619,34 @@ def inplugin_script_write_findings(
 
         # ── Python write primitives.
         py_hit = False
-        for pat in _PY_WRITE_PATTERNS:
+        for pat in _PY_WRITE_PATTERNS if include_py_patterns else ():
             mo = pat.search(line)
             if mo is None:
                 continue
             dst = mo.group(1)
-            if not _is_script_destination(dst):
-                continue  # non-script write into DATA → ALLOW
-            if not _destination_in_tree(dst, plugin_root):
-                continue  # lenient — unresolvable / out-of-tree destination
+            if _NAME_CAPTURE_RE.match(dst.strip()):
+                # Pattern 3 captures a VARIABLE NAME (`VAR.write_text(...)`), so
+                # the script-gate below was reading a bare identifier and could
+                # never fire. Resolve the name to its literal tail first.
+                lo, hi = _fence_bounds(lines, idx, rel_path)
+                resolved = _resolve_name_destination(lines, lo, hi, idx, dst.strip())
+                if resolved is None:
+                    continue  # unresolvable name → no in-tree evidence → PASS
+                dst = resolved
+            tier = _regex_tier(dst, plugin_root, rel_path)
+            if tier is None:
+                continue
             findings.append(
                 WriteFinding(
                     line_no,
                     f"in-plugin script written via Python primitive to '{dst.strip()}' "
                     f"(generate/edit of an unscanned in-plugin script is forbidden; "
-                    f"only a verbatim copy is allowed) [{rel_path}]",
+                    f"only a verbatim copy is allowed) [{rel_path}]"
+                    if tier == "critical"
+                    else f"in-plugin write to '{dst.strip()}' has an UNRESOLVED tail under "
+                    f"an in-plugin prefix — the fold cannot prove whether a script "
+                    f"lands inside the plugin tree [{rel_path}]",
+                    tier,
                 )
             )
             py_hit = True
@@ -408,19 +659,107 @@ def inplugin_script_write_findings(
             mo = pat.search(line)
             if mo is None:
                 continue
-            dst = mo.group(1)
-            if not _is_script_destination(dst):
-                continue  # non-script write into DATA → ALLOW
-            if not _destination_in_tree(dst, plugin_root):
-                continue  # lenient — unresolvable / out-of-tree destination
+            dst = _dest_token(line, mo)
+            tier = _regex_tier(dst, plugin_root, rel_path)
+            if tier is None:
+                continue
             findings.append(
                 WriteFinding(
                     line_no,
                     f"in-plugin script written via shell redirect to '{dst.strip()}' "
                     f"(generate/edit of an unscanned in-plugin script is forbidden; "
-                    f"only a verbatim copy is allowed) [{rel_path}]",
+                    f"only a verbatim copy is allowed) [{rel_path}]"
+                    if tier == "critical"
+                    else f"in-plugin write to '{dst.strip()}' has an UNRESOLVED tail under "
+                    f"an in-plugin prefix — the fold cannot prove whether a script "
+                    f"lands inside the plugin tree [{rel_path}]",
+                    tier,
                 )
             )
             break
+
+    return findings
+
+
+# ────────────────────────────────────────────────────────────────────────
+# AST path — tiering (TRDD-ETDWX70R)
+# ────────────────────────────────────────────────────────────────────────
+
+
+def _ast_path_findings(
+    sinks: list["AstWriteSink"], rel_path: str, plugin_root: Path
+) -> list[WriteFinding]:
+    """Tier every AST write sink; aggregate the T3 sites into ONE info."""
+    findings: list[WriteFinding] = []
+    seen_lines: set[int] = set()
+    unresolved_sites: list[int] = []
+
+    for sink in sinks:
+        if sink.copy_idiom:
+            continue
+        rendered = sink.rendered
+        is_script = sink.script_evidence is not None or (
+            rendered.literal_tail is not None
+            and _tail_has_script_suffix(rendered.literal_tail)
+        )
+        if rendered.has_unknown_prefix:
+            # No placeable root — the destination can be neither proven in-tree
+            # nor proven out of it, so it can only ever be the T3 advisory.
+            if is_script:
+                unresolved_sites.append(sink.line_no)
+            continue
+        foldable = rendered.foldable
+        in_tree = bool(foldable.strip()) and _destination_in_tree(
+            foldable, plugin_root, rel_path
+        )
+        if in_tree:
+            if is_script:
+                tier = "critical"
+                why = (
+                    "shebang body"
+                    if sink.script_evidence == "shebang"
+                    else "chmod +x" if sink.script_evidence == "chmod" else "script suffix"
+                )
+                message = (
+                    f"in-plugin script written via {sink.sink} to "
+                    f"'{sink.dest_text[:120]}' ({why}; generate/edit of an unscanned "
+                    f"in-plugin script is forbidden; only a verbatim copy is allowed) "
+                    f"[{rel_path}]"
+                )
+            elif rendered.literal_tail is None:
+                # T2 — the PREFIX lands in-plugin but the final component is
+                # computed, so the fold cannot say whether a script lands in the
+                # tree. Blocking for BOTH anchor kinds: a non-blocking DATA tier
+                # would re-open the #152 staged-daemon hole.
+                tier = "major"
+                message = (
+                    f"in-plugin write via {sink.sink} to '{sink.dest_text[:120]}' has an "
+                    f"UNRESOLVED final component under an in-plugin prefix — the fold "
+                    f"cannot prove whether a script lands inside the plugin tree "
+                    f"[{rel_path}]"
+                )
+            else:
+                continue  # literal, non-script tail → today's verdict (nothing)
+            if sink.line_no in seen_lines:
+                continue
+            seen_lines.add(sink.line_no)
+            findings.append(WriteFinding(sink.line_no, message, tier))
+
+    if unresolved_sites:
+        ordered = sorted(set(unresolved_sites))
+        shown = ", ".join(str(n) for n in ordered[:3])
+        more = "" if len(ordered) <= 3 else f", … (+{len(ordered) - 3} more)"
+        findings.append(
+            WriteFinding(
+                ordered[0],
+                f"{len(ordered)} script write(s) in this file are anchored to a root "
+                f"the fold cannot place (a hoisted or parameter-anchored path), so "
+                f"CPV cannot decide whether they land inside the plugin tree — "
+                f"line(s) {shown}{more}. Advisory only: re-express the destination "
+                f"through ${{CLAUDE_PLUGIN_DATA}} or a literal path to make it "
+                f"decidable [{rel_path}]",
+                "info",
+            )
+        )
 
     return findings
