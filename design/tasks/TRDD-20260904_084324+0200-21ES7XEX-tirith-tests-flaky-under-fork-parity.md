@@ -1,9 +1,9 @@
 ---
 trdd-id: 21ES7XEX
-title: Two tirith integration tests fail ~1-in-3 under the Gate 3c fork-parity probe and the suite installs a real tirith onto the host
+title: Two tirith integration tests fail intermittently under the Gate 3c fork-parity probe and the suite installs a real tirith onto the host
 column: todo
 created: 2026-09-04T08:43:24+0200
-updated: 2026-09-04T08:43:24+0200
+updated: 2026-09-04T10:41:12+0200
 current-owner: cpv-main-session
 task-type: bugfix
 min-approval-requirement: none
@@ -33,7 +33,7 @@ publish of `9e7d2c1e` with:
 - `tests/test_tirith_integration.py::test_check_tirith_empty_clean_run` (gw10) —
   `assert any("tirith" in m and "no findings" in m for m in passed)` → False
 
-Measured, 1-in-3 reproduction rate:
+Observed once in three fork-parity probe runs (n=3 — a single failure, not a measured rate):
 
 | # | Run | Result |
 |---|---|---|
@@ -86,7 +86,11 @@ want the real installer to fire.
       — which branch of `check_tirith_scanner` runs in the failing case, and why.
 - [ ] A fix lands whose non-vacuity is proven by mutation: reverting the fix
       makes the new/repaired test FAIL.
-- [ ] The Gate 3c probe passes 5 consecutive times on an unchanged tree.
+- [ ] ONLY once defect A's mechanism is identified (the first criterion above) AND a targeted probe
+      exists that reliably FAILS against the unfixed code: the Gate 3c probe then passes 5
+      consecutive times on an unchanged tree. With an unquantified intermittent failure, N green
+      runs cannot distinguish "fixed" from "did not fire this time" — green runs count as evidence
+      only after the mechanism is known and a probe can demonstrate the failure on demand.
 - [ ] Defect B: no test run can install anything onto the host; verified by
       removing `~/.local/bin/tirith` and confirming a full suite run does not
       recreate it.
