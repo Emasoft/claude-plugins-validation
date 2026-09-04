@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-09-04T07:31:28+00:00",
+  "computed_at": "2026-09-04T07:34:44+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:d61d219356c7726bb8f7ade1afa16176cfae09bd6ab415bab8fdf48ef9fdb3cc",
@@ -194,7 +194,7 @@
     "design/tasks/TRDD-20260903_171550+0200-RU0POO65-rc164-regex-chmod-token-capture-fps.md": "sha256:85726bb52e4f0ac8e81a2ee7348b45a3f8089c469b205cd0c9df9404354614ef",
     "design/tasks/TRDD-20260903_171551+0200-3T170X2M-plugin-gate-drops-rc164.md": "sha256:e0c524e95d985369114a9521623fe8641141a3b716bcd282c34301dbff323c32",
     "design/tasks/TRDD-20260904_084324+0200-21ES7XEX-tirith-tests-flaky-under-fork-parity.md": "sha256:9d3b81cf31c164744e14bbc107a3568f4f38da9bf59d136a3d3252ea29676e90",
-    "design/tasks/TRDD-20260904_093047+0200-MHCFOCBV-v5170-ci-red-linux-only-validate-timeout.md": "sha256:0fbab0637686b31313efdd4ff0a720332c7c89b1be9ff5c8387e3b77118971d4",
+    "design/tasks/TRDD-20260904_093047+0200-MHCFOCBV-v5170-ci-red-linux-only-validate-timeout.md": "sha256:0768e45dc5632892ceb8c6df37d5da18808bed57d3e140bcfddfbabf5239f365",
     "git-hooks/pre-commit": "sha256:47cf32b6b340cd973b6a15466d8b752993a68534429dca2e6df7159ba7240810",
     "git-hooks/pre-push": "sha256:90880138be62d7cd5ec6b451bc8803127ee4a3ce430d0f5d9caa5fa86d57aa12",
     "pyproject.toml": "sha256:349e093691886646b70867082ff2a26348b984300634bff00284288ece8fa4fd",
