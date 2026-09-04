@@ -3,7 +3,7 @@ trdd-id: 1VU6Y5MS
 title: A per-linter spawn timeout equal to its caller's timeout makes the linter's own graceful degradation unreachable
 column: todo
 created: 2026-09-04T10:56:49+0200
-updated: 2026-09-04T11:11:24+0200
+updated: 2026-09-04T11:28:59+0200
 current-owner: cpv-main-session
 task-type: bugfix
 min-approval-requirement: none
@@ -52,8 +52,11 @@ hypothesis A** (2026-09-04, this machine):
   `shutil.which` fallback cannot be what satisfied it, and the tool nonetheless
   ran (it emitted a real MD047 finding) — meaning it came through the
   uvx/bunx/npx/docker path.
-- `~/.npm/_npx/` exists with **42** cached entries, **three of which have a
-  `package.json` naming `markdownlint`**.
+- an npx cache (`~/.npm/_npx/`) exists and `markdownlint` appears in it. (An
+  earlier draft said "3 of 42 entries name markdownlint" — that count is doing
+  evidentiary work it cannot support: a `package.json` *naming* markdownlint
+  includes packages that merely depend on it, and no mtime was checked, so the
+  three may be unrelated and months old.)
 
 That is consistent with A but still not proof of WHERE the seconds go: a cached
 `_npx` entry should make resolution cheap, yet cold runs still measured 30–74 s.
@@ -133,9 +136,18 @@ noticed as a side observation.
 > - [ ] **Make the per-linter spawn budget strictly smaller than any plausible
 >       caller's outer timeout**, so `lint_markdown`'s own `TimeoutExpired`
 >       handler can run. Today both are 120 s and the handler is unreachable.
-> - [ ] **Find where the 30–74 s actually goes inside the spawn** — the package
->       fetch, or the lint itself. Resolution is ruled out (it is a `which`
->       probe). Instrument `_run_linter` directly.
+> - [ ] **Find where the 30–74 s actually goes inside the spawn.** Resolution is
+>       ruled out (it is a `which` probe). Three candidates remain and NONE has
+>       been observed — do not assume the first:
+>       (a) a cold npx/bunx package **fetch** (network);
+>       (b) cold **ESM module resolution** by Node against a cold page cache —
+>       entirely local, and `lint_markdown` already runs in a scratch cwd to
+>       control module resolution (`cpv_lint_engine.py:1392-1396`);
+>       (c) npx **cache validation** of already-present entries.
+>       Discriminators, cheapest first: run the slow path with the network
+>       disabled (kills (a) if still slow); diff `~/.npm/_npx` mtimes across a
+>       slow run; snapshot the process table (never `pgrep`/`ps | grep`) for an
+>       `npx` child. Instrument `_run_linter` to split spawn-setup from lint.
 > - [ ] **Decide whether the one-time fetch should be surfaced or pre-warmed**
 >       rather than silently charged to whichever caller happens to go first.
 >       On CI that caller is arbitrary — it is whichever test the shard split

@@ -3,7 +3,7 @@ trdd-id: MHCFOCBV
 title: v5.17.0 shipped with red CI because the REPO LINT phase can outlive the 120s subprocess timeout of the test that spawns it
 column: todo
 created: 2026-09-04T09:30:47+0200
-updated: 2026-09-04T11:11:24+0200
+updated: 2026-09-04T11:28:59+0200
 current-owner: cpv-main-session
 task-type: bugfix
 priority: high
@@ -21,15 +21,124 @@ relevant-rules: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
-**THE COSTLY PHASE IS IDENTIFIED AND THE TEST IS FIXED (2026-09-04, on macOS —
-no Docker needed). The MECHANISM INSIDE that phase is NOT established, and
-`9e7d2c1e` is NEITHER convicted NOR exonerated.** Read the three subsections
-below in that order; an earlier draft of this block over-claimed both and was
-corrected by adversarial review before commit.
+**NEXT ACTION:** land the test fix, then confirm CI is green from the job
+conclusion — never from a publish exit code. Then close.
 
-**NEXT ACTION:** confirm CI goes green on the fix commit — from the job
-conclusion, never from a publish exit code. Then close. The Gate-14 finding at
-the bottom has moved to its own card, TRDD-4VROKH40.
+**VERDICT.** `9e7d2c1e` is **CLEARED** — on entry points, a direct timing, and
+CI shard composition AND order; the one unchecked residual is the transitive
+call graph beyond those entry points (`smart_exec` is itself untouched). The
+entire cost is ONE phase,
+`run_lint_engine` (30.2 s of a 30.5 s cold run; every other phase 0.0–0.2 s).
+The **mechanism inside** that phase is **UNVERIFIED** and belongs to
+TRDD-1VU6Y5MS. The test is fixed by not running that phase in the one test that
+does not assert on it.
+
+**⚠ COMMIT `0ef1a55a` OVER-STATES TWO THINGS** — it is immutable, so this card is
+the correction of record. It says "the cause is an external network fetch"
+(**not established** — nothing observed a fetch) and "the only path by which the
+commit could reach that phase" (**false as written**). Both are corrected under
+*Investigation record → Corrections* below. Do not cite the commit message
+for either.
+
+**SUPERSEDED** (details under *Investigation record*): the frontmatter title and
+this file's NAME still say "Linux-only" — wrong, it reproduced on macOS; the
+body's "reproduce on Linux (Docker)" next action, its "not reproduced outside
+CI" residual, its five-mechanisms warning, its "~1 s on every macOS config"
+claim, and its timestamp-table analysis are all obsolete or superseded.
+
+**⚠ THIS CAN RECUR, and that is expected.** The mechanism is unknown and this
+test no longer runs the phase, so the tripwire that caught it is off. A future
+red here is **most likely TRDD-1VU6Y5MS's unexplained variance** — check that
+first. **Re-open this card only if the failure differs in kind:** a different
+phase, a different test, or a slowdown that reproduces and survives a warm
+re-run. (Deliberately a discriminator, not a prohibition — "do not re-open" would
+route a genuinely new regression into a card that would close it as known.)
+
+**This block was corrected four times under adversarial review**, and the three
+failure shapes are worth recognising because they recur: (1) a null result
+(n=2/arm, high variance) promoted to an exoneration; (2) a mechanism nobody
+observed, promoted to a fact once its competitors were eliminated — twice, the
+second time inside an immutable commit message; (3) a single-entry-point timing
+argument presented as covering a whole commit.
+
+The Gate-14 finding at the bottom moved to its own card, TRDD-4VROKH40.
+
+---
+
+# Investigation record
+
+Everything below is the evidence trail, kept in full. The STATE block above is
+what a resuming session needs.
+
+## Corrections to commit `0ef1a55a`
+
+**1. "The cause is an external network fetch" — RETRACTED.** Nothing observed a
+fetch: no `npx` child process, no `~/.npm` mtime diff across a slow run, no
+offline run. Elimination of competitors promoted the survivor to a fact, which
+is the same error this card retracted two rounds earlier for the same
+hypothesis. What IS established is only that the cost lies between the phase's
+own `START` and `DONE` markers. Candidates, **not narrowed**, and deliberately
+NOT all inside Node:
+
+  - CPV's **own pre-spawn work** inside the measured window — `detect_executors()`
+    probes ~12 executors; a `docker` binary present with no daemon can block for
+    tens of seconds on socket connect;
+  - a cold npx/bunx package **fetch** (network);
+  - **DNS resolution** specifically, distinct from transfer;
+  - cold **ESM module resolution** by Node against a cold page cache — entirely
+    local, and `lint_markdown` already runs in a scratch cwd precisely to control
+    module resolution (`cpv_lint_engine.py:1392-1396`);
+  - npx **cache validation** of already-present entries;
+  - **macOS Gatekeeper/XProtect** scanning a freshly extracted package tree.
+
+  **The discrimination takes TWO steps, not one.** Bracketing
+  `_resolve`/`resolve_tool_command` separately from `_run_linter` answers only
+  *before or after the spawn* — it splits the `detect_executors` docker probe
+  from the other five, which all live inside one subprocess wall-clock and stay
+  tied. Step two, if the cost is inside the spawn: an **offline run** kills fetch
+  and DNS together; a `~/.npm/_npx` **mtime diff** separates fetch from cache
+  validation; a **second run in the same process** isolates first-execution
+  effects such as Gatekeeper. Until step one runs, do not localise the cost to
+  Node/npm at all.
+
+**2. "The only path by which the commit could reach that phase" — FALSE as
+written.** It referred to `detect_languages`, the once-per-run walk. A changed
+helper called once per FILE or once per LANGUAGE would be invisible in a
+whole-walk timing on a 5-file, 2-language fixture, where every per-item shape
+collapses to one iteration. The import-surface check below is what actually
+closes that gap; the timing alone never could.
+
+**3. A note on "cold-vs-warm".** Locally the cost collapses after the first run
+against a given fixture path (30–74 s → ~0.6 s), so a first-run cost demonstrably
+exists. That does **not** explain the CI pair. Be precise about what the ordering
+table can and cannot establish:
+
+- **It CAN establish identical IN-SHARD warming history.** The same seven
+  lint-touching files run before the failing test, in the same order, in both
+  runs. Whatever warming happens *within the job*, both jobs did it identically.
+- **It CANNOT establish the same RUNNER state.** Each job gets a fresh VM with
+  its own disk, page-cache history, and whatever npm cache its image happened to
+  bake in. Nothing here observes that.
+
+So the supported claim is the first one only. (And do NOT say "both were cold"
+unqualified: with seven such files running first, neither run's failing test was
+likely paying a first-ever cost at all.) Two runs with identical in-shard history
+differing 10× therefore need a factor OUTSIDE the shard. Two families fit, and
+conflating them would be a mistake:
+
+- **Runner-side** — disk, page cache. The second bullet's unobserved state.
+- **Remote-side** — registry latency, DNS, transient network. Not a property of
+  the runner at all, and it would not show up in any runner-state comparison.
+- **Straddling both** — the image's baked-in npm cache. It presents as runner
+  state, but its CONTENTS were decided by what the image build fetched from the
+  registry, so a difference there is a remote-side cause materialised as runner
+  state. (Deliberately not filed under either: the earlier draft called the two
+  families "disjoint" and put this item in the first, which is the exact
+  conflation the sentence warns against.)
+
+All three are unmeasured — nothing in this session observed a runner or the
+registry; the timings are local, the import-surface check is static, the shard
+comparison is in-log. The open acceptance box covers all three.
 
 ### SUPERSEDED by this block
 
@@ -50,8 +159,9 @@ Four parts of the body below are stale and must not be acted on:
    arithmetic.
 6. "deterministic across two runs" in "The failure" — still true, but its
    original reading (*"deterministic, therefore not a variance story"*) is
-   **superseded**: both CI runs are cold, so 2-for-2 is what a reproducible
-   cold cost looks like, not proof of a code change.
+   **superseded**: both CI runs executed the same lint-touching files in the
+   same order before the failing test, so 2-for-2 is what a reproducible
+   environmental cost looks like, not proof of a code change.
 
 The Notes section's "do not fix this by raising `timeout=120`" still stands and
 was honoured.
@@ -128,12 +238,14 @@ timeout, or its own timeout handler can never run.** Tracked on TRDD-1VU6Y5MS.
   window, so *something* changed or the underlying cost is wildly variable. The
   commit touches no lint-engine file (`cpv_lint_engine.py`, `smart_exec.py`, and
   the markdownlint configs are all untouched) but does add ~1400 tests to the
-  shard, which changes contention. **The untouched-files list is NOT
-  exculpatory:** `lint_repo`'s banner reads "gitignore-filtered", and that walk
-  routes through `GitignoreFilter` / `is_path_gitignored` in
-  `scripts/cpv_validation_common.py` — which the commit DOES change (+222
-  lines). "Did not touch the lint engine" is fully compatible with "changed the
-  lint engine's behaviour".
+  shard, which changes contention. This paragraph originally went on to warn
+  that the untouched-files list was NOT exculpatory, because the walk supposedly
+  routed through `cpv_validation_common.py` (+222 lines, changed by the commit).
+  **That premise was itself wrong** — `GitignoreFilter` lives in
+  `gitignore_filter.py`, untouched — and the import-surface check below retires
+  the whole question. The caution was correct in form and wrong in fact; it is
+  kept here because a reader who reasons the same way deserves the correction,
+  not a silent deletion.
   **Discriminating measurement, COMPLETE — and it does NOT settle the CI
   question. Read the limitation before citing the numbers.** Paired cold runs, a
   FRESH fixture path each time (so every run is genuinely cold), alternating
@@ -168,10 +280,47 @@ timeout, or its own timeout handler can never run.** Tracked on TRDD-1VU6Y5MS.
 
   **Hypothesis B is dead.** The gitignore-filtered walk is ~13 ms at both
   commits — three orders of magnitude below the 30–74 s phase cost, and
-  indistinguishable between them. `9e7d2c1e` did not slow the walk, so it cannot
-  be the source of the 11.4 s → 120 s move through that path. The remaining cost
-  is downstream of the walk (tool resolution or the linter spawn) and belongs to
-  TRDD-1VU6Y5MS.
+  indistinguishable between them.
+
+  **And a static check retires it more completely than the timing does, while
+  correcting a premise stated earlier on this card.** The claim above that
+  "`lint_repo`'s walk routes through `cpv_validation_common`" is **wrong**:
+
+  - `cpv_lint_engine` imports exactly four names from `cpv_validation_common` —
+    `ValidationReport`, `ValidationResult`, `normalize_level`,
+    `resolve_tool_command` (`:61-66`).
+  - `GitignoreFilter` comes from a **different module**, `gitignore_filter`
+    (`:67`), which `9e7d2c1e` does not touch at all (zero hits in its diffstat).
+  - `9e7d2c1e`'s three hunks in `cpv_validation_common.py` are two constant-set
+    additions (`@779`, `@1023`) and a +217-line APPEND at the end (`@9840`,
+    after `class MarketplaceContext`) adding `check_permission_rule_syntax` and
+    its helpers. None of the four imported names is among them.
+
+  **Verified, not inferred** (an earlier draft asserted this without running the
+  check):
+
+  ```
+  git show 9e7d2c1e -- scripts/cpv_validation_common.py \
+    | grep -E '^[-+].*(class ValidationReport|class ValidationResult|def normalize_level|def resolve_tool_command)'
+  ```
+
+  returns **nothing** — none of the four imported names appears on an added or
+  removed line. The file's whole diff is `221 insertions, 1 deletion`, and that
+  one deletion is a **comment line being extended** (a `claude-fable-5-1` note),
+  not code. So the change is additive to code, redefines no existing top-level
+  symbol (the file has zero duplicate top-level `def`/`class` names), and does
+  not touch this phase's entry points — **no call frequency can matter**, which
+  is what covers the per-file and per-language shapes the 13 ms timing could not
+  see.
+
+  **Honest limit:** this bounds the ENTRY POINTS, not the whole reachable graph.
+  `resolve_tool_command` imports `smart_exec` at call time, and an unchanged
+  function calling a changed helper would still change behaviour. That transitive
+  path was not traced. It is a small residual — `smart_exec.py` is untouched by
+  the commit — but "cannot have changed" is stronger than what was checked;
+  "does not touch any of the four names this phase imports, and `smart_exec` is
+  untouched" is the accurate claim. The remaining cost is downstream of the walk (the linter spawn)
+  and belongs to TRDD-1VU6Y5MS.
 
   **And the whole-shard comparison closes the rest.** Both archived shard-2 logs
   were parsed into per-test wall-clock gaps. They are the same run except for one
@@ -180,7 +329,7 @@ timeout, or its own timeout handler can never run.** Tracked on TRDD-1VU6Y5MS.
   | | green `c441703c` | red `f1882af9` |
   |---|---|---|
   | result lines on the shard | 3207 | 3245 |
-  | position of the failing test | #3195 | #3191 |
+  | position of the failing test *(result-line index)* | #3195 | #3191 |
   | **that test** | **11.4 s** | **120.2 s** |
   | 2nd slowest (`test_killed_run_identifies_the_stuck_phase`) | 8.0 s | 8.0 s |
   | 3rd (`…queue_semaphore_deadlock…`) | 7.1 s | 7.3 s |
@@ -194,16 +343,105 @@ timeout, or its own timeout handler can never run.** Tracked on TRDD-1VU6Y5MS.
   re-partitioning shifting who pays a first-run cost (composition and ordering
   are effectively unchanged, and the test sits at the same index).
 
-  **Conclusion: nothing in the window regressed.** The single varying component
-  is the markdownlint spawn inside that one test, whose cost is dominated by an
-  external, network-dependent package fetch (`markdownlint-cli2` is not on PATH;
-  it resolves through the npx/bunx fallback). A 10× swing in that between two
-  runs two days apart is ordinary for a network fetch and extraordinary for
-  compiled-in behaviour. `9e7d2c1e` is cleared — not by a null result, but by two
-  positive measurements: the walk is 13 ms at both commits, and the other 3200
-  tests are unchanged.
+  **Shard-warming is excluded too — by composition, not by timing.** The
+  competing story is "whoever runs first pays the cold cost, and the 38 extra
+  tests in red moved the partition so a different test went first". Note that a
+  timing argument CANNOT settle this: a test that invoked markdownlint against an
+  already-warm cache costs ~0.5 s and is invisible in any slowest-N list, yet it
+  is exactly the test that would have done the warming. So the check has to be
+  which lint-touching tests were PRESENT, not which were slow.
+
+  All 15 test files that reference `lint_repo` / `lint_markdown` /
+  `detect_languages` were located in both shard-2 logs. Eight landed on this
+  shard, with **identical counts in both runs**:
+
+  | file | green | red |
+  |---|---|---|
+  | `test_detect_language.py` | 34 | 34 |
+  | `test_generate_plugin_multi_language.py` | 64 | 64 |
+  | `test_issue_108_ruff_finding_detail.py` | 6 | 6 |
+  | `test_issue_148_repo_lint_timeout.py` | 13 | 13 |
+  | `test_issue_162_repo_lint_phase_budget.py` | 12 | 12 |
+  | `test_issue_176_strict_scope.py` | 5 | 5 |
+  | `test_issue_200_lint_cwd.py` | 12 | 12 |
+  | `test_issue_37_gitignore_walkers.py` | 11 | 12* |
+
+  \* the extra red line is pytest's `FAILED` summary repeat, not a 12th test.
+
+  The 38-test count difference therefore did NOT move any lint-touching file into
+  or out of this shard.
+
+  **Counts alone would not settle it** — the same files could still run in a
+  different ORDER relative to the failing test, and order is what decides who
+  warms whom. So first-appearance positions were extracted from both logs.
+
+  ⚠ **These indices are in a DIFFERENT space from the table above.** That one
+  counts result lines (`tests/… PASSED|FAILED|SKIPPED`): green 3207, red 3245.
+  This one counts `tests/<file>.py::` occurrences, which also include pytest's
+  `FAILED` summary repeats: green 3336, red 3375. Do not compare a number across
+  the two tables; each is internally consistent because both logs were processed
+  identically.
+
+  | file | green | red |
+  |---|---|---|
+  | `test_detect_language.py` | 1032 | 1028 |
+  | `test_generate_plugin_multi_language.py` | 1489 | 1485 |
+  | `test_issue_108_ruff_finding_detail.py` | 1921 | 1917 |
+  | `test_issue_148_repo_lint_timeout.py` | 2213 | 2209 |
+  | `test_issue_162_repo_lint_phase_budget.py` | 2367 | 2363 |
+  | `test_issue_176_strict_scope.py` | 2553 | 2549 |
+  | `test_issue_200_lint_cwd.py` | 2989 | 2985 |
+  | `test_issue_37_gitignore_walkers.py` (target) | 3316 | 3312 |
+
+  Identical sequence, every file exactly **4 positions earlier** in red — a
+  constant offset, not a reshuffle. All seven lint-touching files run BEFORE the
+  failing test in both runs, in the same order. Whatever they warm, they warmed
+  it identically. **Shard re-partitioning is excluded.**
+
+  **The offset and the +38 total are consistent — here is the reading, since it
+  is not obvious.** Red has 38 MORE result lines overall yet every lint file sits
+  4 positions EARLIER. With *h* removed before the head and *t* added after the
+  tail, `t − h = 38` and the uniform shift gives `h = 4`, so `t = 42`. Note this
+  is the MINIMAL decomposition: the −4 uniformity is established only across
+  1028→3312, so lines could also have left after the tail, making both *h* and
+  *t* larger with the same difference. Read it as "**at least** ~42 arrived past
+  the tail": v5.17.0's new test files (`test_rc164_fold_tiers`,
+  `test_permission_rule_syntax`, `test_marketplace_url_trailing_junk`) sort after
+  `test_issue_37_*`, so pytest-split's count-based partition pushes the surplus
+  past the measured range. Crucially the −4 is **uniform from index 1028
+  onward**, so it cannot be an extraction artifact of the `FAILED`-summary repeat
+  near the tail — an artifact at index ~3312 cannot shift index 1028. The
+  uniformity is evidence for the argument, not a smell.
+
+  One thing this also shows, and it cuts against a claim made elsewhere on this
+  card: with seven lint-touching files (including `test_issue_200_lint_cwd`)
+  running first, the failing test is probably NOT paying a first-ever cold cost
+  in either run. That weakens "both runs were cold" as an explanation — but it
+  weakens it symmetrically, so it changes nothing about the comparison and
+  leaves the 10× gap exactly as unexplained as the acceptance box says.
+
+  **Conclusion: nothing in the window regressed.** `9e7d2c1e` is cleared — not by
+  a null result but by three positive findings: the import surface (below) shows
+  it cannot reach this phase, the walk is 13 ms at both commits, and the other
+  ~3200 tests are unchanged.
+
+  **The mechanism is UNVERIFIED — see *Corrections to commit `0ef1a55a`* at the
+  top of this Investigation record.** A first draft of the retraction lived here
+  and was itself too narrow: it placed the cost "inside the markdownlint spawn"
+  and called it "cold-vs-warm", both of which claim more than the instrument
+  supports. The corrected version lists six candidates spanning CPV's own
+  pre-spawn work as well as the spawn, and notes that two CI runs with identical
+  in-shard warming history differing 10× is not something cold-vs-warm explains.
 
 ### The fix
+
+> **Commit ordering, so this section is not read as a lie at HEAD.** The card
+> corrections landed FIRST, in `0ef1a55a`, deliberately: they carry no test risk
+> and the conclusion above is what justifies the fix. The test change described
+> below lives in the working tree and lands in the NEXT commit, gated on a full
+> suite started after the tree was final. If you are reading this at `0ef1a55a`
+> and `PLUGIN_SKIP_REPO_LINT` is absent from the test file, that is the expected
+> one-commit gap, not a missing fix.
 
 `tests/test_issue_37_gitignore_walkers.py` sets `PLUGIN_SKIP_REPO_LINT=1`
 alongside the `PLUGIN_SKIP_GITHUB_INTEGRITY=1` it already set — at **one** spawn
@@ -354,14 +592,27 @@ worthless — a proxy read standing in for the thing.
       13.624 ms (`9e7d2c1e^`). The walk is ~13 ms at both commits, three orders
       of magnitude below the phase cost. That was the only path by which the
       commit could reach this phase, so it is cleared for THIS mechanism.
-- [x] **What made the same test 11.4 s on one CI run and 120 s on the next?**
-      An external, network-dependent cost in the markdownlint spawn — not a
-      regression. Proven by elimination on positive evidence, not a null result:
-      the walk is 13 ms at both commits (n=50/arm), and a full per-test gap
-      comparison of both shard-2 logs shows every other test on a 3200-test
-      shard unchanged at the same position. **No shipped regression.** The
-      remaining design question (a per-linter budget that can never degrade
-      gracefully, and an unpriced first-run fetch) is TRDD-1VU6Y5MS's.
+- [x] **Was it a regression introduced by `9e7d2c1e`?** **No.** Three positive
+      findings, none a null result: the commit does not touch any of the four
+      names this phase imports (grep over the diff returns nothing; 221
+      insertions, 1 deleted COMMENT line); the walk is 13 ms at both commits
+      (n=50/arm); and the same eight lint-touching test files ran on shard 2 in
+      both CI runs at the same positions, so re-partitioning moved nothing that
+      could warm a cache.
+      **The bound matters:** this clears a specific, bounded diff via every path
+      checked. It does NOT establish that no regression exists anywhere — that
+      would be a claim about an unbounded environment, which is the open box
+      below. A commit can be cleared while the phenomenon stays unexplained.
+- [ ] **What made the same test 11.4 s on one CI run and 120 s on the next?**
+      **STILL OPEN.** Both runs executed the same lint-touching files in the
+      same order before the failing test, so nothing in the TEST SEQUENCE
+      differed in a way that could warm one run and not the other — which means
+      "cold-vs-warm" does not cover it —
+      a third factor (that day's network, registry latency, runner disk) is
+      needed and none was measured. The mechanism, and the design defect it sits
+      behind (a per-linter budget that can never degrade gracefully), are
+      TRDD-1VU6Y5MS's. **Not a blocker for the test fix**, which is justified by
+      the nested-deadline defect read from source.
 - [x] A fix lands whose non-vacuity is mutation-proven: reverting
       `PLUGIN_SKIP_REPO_LINT=1` restores the cost (16.1 s warm / 30–49 s cold,
       vs 0.64 s with it) — measured both ways.
