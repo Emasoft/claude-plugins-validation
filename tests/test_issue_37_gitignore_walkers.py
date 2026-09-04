@@ -23,6 +23,14 @@ The fix is layered:
 
 These tests pin the new behaviour so a future refactor cannot reintroduce
 the regression.
+
+Note on ``PLUGIN_SKIP_REPO_LINT``: exactly ONE test here sets it — the only
+SPAWN SITE whose fixture carries a non-gitignored ``.md``, which is what gives
+the REPO LINT phase real work and let it outlive the 120 s subprocess budget
+on CI (TRDD-MHCFOCBV). The other subprocess tests deliberately keep REPO LINT
+running, because both carry NEGATIVE assertions and silencing a phase only
+shrinks the output such an assertion searches. Do not copy the flag into a
+new test without checking whether your fixture actually triggers a linter.
 """
 
 from __future__ import annotations
@@ -37,6 +45,7 @@ SCRIPTS_DIR = REPO / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+from cpv_lint_engine import detect_languages  # noqa: E402
 from cpv_skillaudit_native import _iter_scannable_files  # noqa: E402
 from cpv_validation_common import is_path_gitignored  # noqa: E402
 
@@ -180,6 +189,68 @@ class TestSkillAuditWalkerHonoursGitignore:
 
 
 # ---------------------------------------------------------------------------
+# `lint_repo`'s walker (`detect_languages`) behaviour
+# ---------------------------------------------------------------------------
+
+
+class TestLintWalkerHonoursGitignore:
+    """The REPO LINT phase advertises a *gitignore-filtered* walk, so it is
+    one of the walkers issue #37 is about — alongside skillaudit's
+    ``_iter_scannable_files``, covered above.
+
+    This coverage used to be incidental: the subprocess test below emitted
+    ``Detected languages: json, markdown`` plus a markdownlint finding against
+    ``unexpected_root/stuff.md`` and none against the gitignored
+    ``INPUT_DEV/.../README.md``, which proved the filtering worked — but only
+    as a side effect nothing asserted, and only while that test paid a 30-50 s
+    cold linter resolution it now skips (see TRDD-MHCFOCBV). Asserting on
+    ``detect_languages`` covers the same property directly, in-process, in
+    milliseconds, and without spawning a linter at all.
+
+    Assumption this coverage rests on: ``lint_repo`` consumes
+    ``detect_languages()``'s output directly (it does today —
+    ``detected = detect_languages(plugin_root)``). If a refactor ever re-walks
+    inside a per-language linter instead, this class silently stops covering the
+    real path."""
+
+    def test_lint_walker_filters_by_gitignore_not_by_extension(self, tmp_path):
+        """One fixture, two observations: the gitignored .md is never detected,
+        and the tracked one always is.
+
+        Deliberately ONE test, not two. The negative half — "markdown is not
+        detected" — passes for many wrong reasons: a wrong root, a swallowed
+        exception, a renamed bucket, a fixture that never wrote the file. The
+        positive half is its control, and a control only controls when it runs
+        on the SAME root in the SAME run; two sibling tests on two `tmp_path`s
+        can both pass under a walker that is simply returning nothing."""
+        plugin = _build_repro_fixture(tmp_path)
+
+        # Only .md in the tree is INPUT_DEV/_extracted/…/README.md — gitignored.
+        detected = detect_languages(plugin)
+        assert detected.get("json"), (
+            "Walker returned nothing at all — the markdown assertion below would "
+            f"be vacuous. Detected: {detected}"
+        )
+        assert not detected.get("markdown"), (
+            "Lint walker picked up markdown from the gitignored subtree: "
+            f"{detected.get('markdown')}"
+        )
+
+        # Same tree, plus one tracked .md. Now markdown MUST appear — and if it
+        # does not, the assertion above was vacuous and this says so.
+        (plugin / "unexpected_root").mkdir()
+        (plugin / "unexpected_root" / "stuff.md").write_text("# Stuff\n")
+        md = [p.as_posix() for p in detect_languages(plugin).get("markdown", [])]
+        assert any(p.endswith("unexpected_root/stuff.md") for p in md), (
+            "Lint walker missed a tracked, non-gitignored .md — which also means "
+            f"the negative assertion above proved nothing. Detected: {md}"
+        )
+        assert not any("INPUT_DEV/" in p for p in md), (
+            f"Lint walker leaked a gitignored path into the markdown set: {md}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # RC-NONSTD-DIR-001 — gitignored dirs are exempt
 # ---------------------------------------------------------------------------
 
@@ -207,6 +278,11 @@ class TestNonstdDirRuleHonoursGitignore:
             text=True,
             env={
                 **__import__("os").environ,
+                # NO PLUGIN_SKIP_REPO_LINT here, deliberately: this test's
+                # assertion is NEGATIVE, and silencing a phase only shrinks the
+                # output a negative assertion searches — it could then pass
+                # vacuously. This fixture's only .md is inside gitignored
+                # INPUT_DEV/, so REPO LINT detects `json` alone and costs ~0.5 s.
                 "PLUGIN_SKIP_GITHUB_INTEGRITY": "1",
             },
             check=False,
@@ -245,6 +321,26 @@ class TestNonstdDirRuleHonoursGitignore:
             env={
                 **__import__("os").environ,
                 "PLUGIN_SKIP_GITHUB_INTEGRITY": "1",
+                # This test asserts on RC-NONSTD-DIR-001, never on lint
+                # findings, and it is the only SPAWN SITE in this file whose
+                # fixture carries a non-gitignored .md — which is what gives the
+                # REPO LINT phase real work here.
+                #
+                # The budgets make that unwinnable: `lint_markdown` spawns
+                # markdownlint with timeout=120 (cpv_lint_engine.py:1402) —
+                # EQUAL to this call's 120 s, not smaller. Since the outer clock
+                # starts first (fixture build, git spawns, interpreter start,
+                # every earlier phase), the inner deadline can never be reached,
+                # so markdownlint's own graceful path — report.warning(
+                # "markdownlint timed out — skipping markdown lint") at :1404 —
+                # is unreachable from here and we get TimeoutExpired instead.
+                # It did: 11.4 s on CI at v5.16.2, 120 s+ at v5.17.0, while
+                # every sibling test here stays at ~0.5 s. Whether that 10x move
+                # is a v5.17.0 regression is UNRESOLVED — see TRDD-MHCFOCBV.
+                # Skipping the phase costs this assertion nothing, but it does
+                # silence the only place that noticed; the class above asserts
+                # the gitignore property directly instead.
+                "PLUGIN_SKIP_REPO_LINT": "1",
             },
             check=False,
             timeout=120,
@@ -288,6 +384,11 @@ class TestIssue37AcceptanceSignature:
             text=True,
             env={
                 **__import__("os").environ,
+                # NO PLUGIN_SKIP_REPO_LINT here, deliberately: this test's
+                # assertion is NEGATIVE, and silencing a phase only shrinks the
+                # output a negative assertion searches — it could then pass
+                # vacuously. This fixture's only .md is inside gitignored
+                # INPUT_DEV/, so REPO LINT detects `json` alone and costs ~0.5 s.
                 "PLUGIN_SKIP_GITHUB_INTEGRITY": "1",
             },
             check=False,
