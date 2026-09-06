@@ -124,9 +124,11 @@ uv run pytest -p no:cacheprovider -o addopts="" -q tests/
 # COMMIT YOUR WORK FIRST. Gate 1 refuses a dirty tree, so run as written from one
 # and it exits 1 at the first gate having done nothing. And do not read that gate as
 # the only guard: the release commit stages EVERY tracked modification (`git add -u`
-# in stage_release_changes, plus named generated files) — so uncommitted work either
-# blocks the publish or, if anything ever loosens Gate 1, rides along inside a
-# release commit unreviewed.
+# in stage_release_changes, plus named generated files) — so an uncommitted EDIT TO A
+# TRACKED FILE either blocks the publish or, if anything ever loosens Gate 1, rides
+# along inside a release commit unreviewed. An UNTRACKED file does not: `git add -u`
+# never sees it and the porcelain scan reports it and leaves it out, which is the
+# asymmetry issue #186 exists for.
 uv run python scripts/publish.py --patch   # | --minor | --major
 ```
 
