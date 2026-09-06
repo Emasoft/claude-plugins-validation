@@ -1,9 +1,9 @@
 ---
 trdd-id: FK9Y6NCL
 title: Align generate_marketplace_repo.py with the generated README plugin-table canon
-column: dev
+column: testing
 created: 2026-09-06T08:37:02+0200
-updated: 2026-09-06T11:52:51+0200
+updated: 2026-09-06T12:12:30+0200
 current-owner: main-session
 task-type: refactor
 scope: project
@@ -105,28 +105,69 @@ drift.
 
 ## Acceptance criteria
 
-- [ ] A marketplace scaffolded by `generate_marketplace_repo.py` and then given
+- [x] A marketplace scaffolded by `generate_marketplace_repo.py` and then given
       one plugin draws **zero** PLUGIN-VERSIONS advisories from
       `validate_marketplace_pipeline.py`.
-- [ ] A freshly scaffolded (empty) marketplace passes its own emitted `--check`
+      (Measured: `SUMMARY: … 0 INFO`. Discriminating — stripping the block from the
+      same tree yields `1 INFO`, the marker advisory. **Scope caveat, stated here so
+      it is not read as broader than it is:** only the DOCUMENTATION advisory is
+      exercised. Check 5b, the workflow-side one, keys on `update-submodules.yml`
+      and its three alternatives, none of which a hub-and-spoke scaffold has — check
+      2 returns early at `validate_marketplace_pipeline.py:989` before 5b is
+      reached. So 5b is structurally unreachable on this scaffold shape, in BOTH
+      states, and `0 INFO` is no evidence about it either way. The criterion holds;
+      half of it holds because the check cannot fire, not because it was fixed.)
+- [x] A freshly scaffolded (empty) marketplace passes its own emitted `--check`
       gate — proven by running the emitted workflow's command, not by reading it.
-- [ ] `actionlint` exits 0 on every emitted workflow.
-- [ ] The renderer emitted by this generator is byte-identical to
+      (Ran `python3 scripts/render_readme_table.py --check` in the scaffold: exit 0.)
+- [x] `actionlint` exits 0 on every emitted workflow.
+      (`actionlint -verbose`: 3 files linted, 0 errors — validate.yml,
+      update-catalog.yml, validate-readme-table.yml.)
+- [x] The renderer emitted by this generator is byte-identical to
       `templates/scripts/render_readme_table.py` (pinned by a test).
+      (`test_emitted_renderer_is_byte_identical_to_the_template`.)
 - [x] Item 6 has a recorded ruling in this card (R2 — KEEP, regions and columns
       are disjoint; R3 enforces the disjointness).
-- [ ] R5: the emitted update workflow skips the renderer invocation and the commit
+- [x] R5: the emitted update workflow skips the renderer invocation and the commit
       ONLY on present-list-empty `plugins`, asserting the README is
       **byte-unchanged** — with an absent key and a non-list key both falling
       through to the renderer and failing the job (four cases, not two).
-- [ ] The legacy warn fires: `setup_marketplace_automation.py` warns on a target
+- [x] The legacy warn fires: `setup_marketplace_automation.py` warns on a target
       carrying an un-hardened `scripts/update_catalog.py`, and is silent on a
       hardened one or none.
-- [ ] The R3 negative control asserts `mutated_source != original_source` before
+- [x] The R3 negative control asserts `mutated_source != original_source` before
       exec (anti-vacuity).
-- [ ] Full serial suite green; `--strict` self-validate 0/0/0/0.
-      (Left for the orchestrator — the implementer cannot prove this without the
-      manifest regen it is instructed not to run.)
+- [x] Full serial suite green; `--strict` self-validate 0/0/0/0.
+      (Suite: 13647 passed, 7 skipped, `SUITE_EXIT=0`, read from the captured file
+      — never from a task notification, whose exit code is the last command in the
+      chain. Self-validate, cache-cold: `CRITICAL=0 MAJOR=0 MINOR=0 NIT=0
+      WARNING=15`, exit 0. The 15 WARNINGs were READ, not counted: the only
+      skipped-check hit is the pre-existing `claude-menu-system` dependency
+      advisory, which matches the prior baseline exactly. A skipped check and a
+      passing check produce the same exit code, so the count alone proves nothing.)
+
+## Verification (orchestrator, against the DIFF — not the implementer's report)
+
+Every gate checked first-hand before the commit:
+
+| Gate | Evidence |
+|---|---|
+| G1 properties 1-3 | The guard is a `python -c` predicate INSIDE an `if`, so its exit status is consumed and never aborts under `bash -e`. `sys.exit(0 if isinstance(p, list) and not p else 1)` sends a missing key, a non-list, and malformed JSON to the `else` branch, which runs the renderer. BOTH branches write `$GITHUB_OUTPUT`, so unwritten-vs-false cannot arise, and the gate is `!= 'true'` — skip is opt-in. Property 3 is only PARTLY met: `2>/dev/null` on the predicate discards a JSON parse error, but the renderer then runs and emits R1's own diagnostic, so the reason still reaches the log. |
+| G2 route | Workflow, matching R5. The "renderer route is better, do not correct it backwards" branch did not apply. |
+| G3 collection | `27 tests collected in 0.05s`, exit 0. Pyright's unresolved imports on that file are a path artifact for an untracked test, not an ImportError — which would have made all 27 silently UNCOLLECTED and read as green. |
+| no dead emitters | `_render_versions_block` → :264, :367; `_renderer_source` → :1366. |
+| legacy warn | Present and WARN-only, and it documents its own known FALSE NEGATIVE: a script merely mentioning the marker in a comment reads as hardened. |
+| R3 anti-vacuity | `assert mutated != original, "mutation was a no-op — this control would pass vacuously"`. |
+| ruff / mypy | Clean on all five changed sources. |
+
+**Using `python -c` rather than the `jq` I specified was better than the spec.** It
+removes the `jq`-absent case and the `jq -e`-exits-1-on-false trap that made the
+snippet in an earlier draft of G1 wrong.
+
+**Manifest ordering, and a trap worth recording:** `_plugin_compute_hashes.py`
+enumerates `git ls-files`, so a NEW file must be `git add`-ed BEFORE the regen or
+it is absent from the skip list. Regenerating in the obvious order left the count
+at 1206; staging first took it to **1207**.
 
 ## Rulings (settled 2026-09-06, from first-hand reads of the two emitters)
 
@@ -438,11 +479,29 @@ manifest shapes, the workflow just branches on an exit code, and G1's entire
 failure class disappears with the shell.
 
 R5's stated rationale for choosing the workflow — keeping the renderer "flag-free"
-— **conflated two different things.** R1 bans a *caller-asserted escape hatch*
-(`--allow-empty`: the caller asserts a fact and the tool obeys). A *read-only
-predicate* is not that: it changes no behaviour and asserts nothing, it reports a
-fact the tool derives itself. The real cost of the renderer route is only that it
-moves three byte-pinned copies — a genuine trade, but not the one recorded.
+— **conflated two different things**, and an earlier draft of this paragraph then
+stated the distinction badly enough that it would not survive reuse. It said a
+read-only predicate "asserts nothing and derives its own answer". Test that
+against `--allow-empty`, which can equally be framed as the caller reporting a
+fact about their own repo: the objection would be "no, the caller *asserts*",
+which merely restates the conclusion.
+
+**The discriminator that holds is WHO SUPPLIES THE VALUE THE DECISION TURNS ON.**
+With `should_skip(path)` the tool reads the manifest and computes the verdict; no
+caller input can change it for a given repo state. With `--allow-empty` the same
+repo state yields a different verdict depending on what the caller passed. That
+caller-controlled divergence from the tool's own reading is the escape hatch — not
+"assertion" as a speech act. The reframing also correctly PERMITS `--check`, which
+changes what the tool does with its verdict rather than the verdict itself.
+
+The real cost of the renderer route is only that it moves three byte-pinned copies
+— a genuine trade, but not the one originally recorded.
+
+**Settled by the implementation:** the workflow route was taken, matching R5 as
+ruled. So R5 stands as written and this section records a road not taken, not a
+supersession. Had the renderer route been taken it would have been acceptable and
+preferred; a future reader must not read R5's "not as a new flag on
+`render_readme_table.py`" as banning a read-only predicate there.
 
 At review: if the implementation put the predicate in the renderer, that is
 **BETTER and the gate is satisfied differently** — do not "correct" it back toward

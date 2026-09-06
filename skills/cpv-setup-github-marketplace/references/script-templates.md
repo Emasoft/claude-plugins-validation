@@ -1490,6 +1490,14 @@ def render(plugins: list[dict]) -> str:
         "| Plugin | Version | Category | Description |",
         "|--------|---------|----------|-------------|",
     ]
+    if not plugins:
+        # A legitimately empty marketplace (a fresh scaffold) gets an explicit
+        # placeholder row: a header with no body reads as a rendering failure, and
+        # the scaffold has to pass its own --check gate on its very first run. FOUR
+        # cells, because this table has four columns — the scaffolded
+        # update_catalog.py uses the same wording on its own THREE-column table, and
+        # copying that row verbatim would emit a malformed one here (MD056).
+        lines.append("| *(no plugins yet)* | | | |")
     for p in sorted(plugins, key=lambda x: x.get("name", "")):
         name = cell(p.get("name", "?"))
         url = repo_url(p)
@@ -1522,14 +1530,31 @@ def main() -> int:
             return 1
 
     try:
-        plugins = json.loads(mj_path.read_text(encoding="utf-8")).get("plugins", [])
+        manifest = json.loads(mj_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as err:
         print(f"error: {mj_path} is not valid JSON: {err}", file=sys.stderr)
         return 1
-    if not plugins:
-        # Refuse to blank the table on an empty or unexpected marketplace file:
-        # a rendering bug must not look like "the marketplace has no plugins".
-        print(f"error: no plugins in {mj_path}", file=sys.stderr)
+
+    # The guard is on the manifest SHAPE, not on emptiness, and it runs first and
+    # unconditionally. The hazard the old emptiness guard named — "a rendering bug
+    # must not look like 'the marketplace has no plugins'" — is a MISSING or
+    # wrongly-typed `plugins` key, and that is what a shape check catches, with the
+    # real reason instead of a misleading one. It also covers a case emptiness never
+    # reached: a TRUTHY non-list (a dict, a non-empty string) skipped the old guard
+    # entirely and died in `sorted(...)` with a raw AttributeError.
+    #
+    # `"plugins": []` is NOT that hazard. A marketplace with no plugins genuinely has
+    # no plugins, and refusing it left every fresh scaffold unable to pass the --check
+    # gate it ships with.
+    if not isinstance(manifest, dict):
+        print(f"error: {mj_path} is a JSON {type(manifest).__name__}, expected an object", file=sys.stderr)
+        return 1
+    if "plugins" not in manifest:
+        print(f'error: {mj_path} has no "plugins" key', file=sys.stderr)
+        return 1
+    plugins = manifest["plugins"]
+    if not isinstance(plugins, list):
+        print(f'error: "plugins" in {mj_path} is a {type(plugins).__name__}, expected a list', file=sys.stderr)
         return 1
 
     text = readme_path.read_text(encoding="utf-8")

@@ -133,11 +133,61 @@ REQUIRED_TEMPLATES: tuple[RequiredTemplate, ...] = (
     RequiredTemplate("scripts/render_readme_table.py", "scripts/render_readme_table.py", True),
 )
 
+# The scan-stop token a HARDENED scripts/update_catalog.py carries. An older
+# generate_marketplace_repo.py emitted a version whose `## Plugins` region scan
+# stopped ONLY at a `## ` heading and dropped every other line in the region — so it
+# DELETED the `<!-- PLUGIN-VERSIONS-START -->` line, which is an HTML comment, not a
+# heading. render_readme_table.py refuses to re-insert markers it cannot find, so the
+# --check gate then stays red with no manifest-side fix.
+#
+# WARN ONLY — never auto-patch. update_catalog.py is deliberately NOT in
+# REQUIRED_TEMPLATES: CPV does not own that file in someone else's marketplace, and a
+# setup command silently rewriting a script the repo owns is a bigger surprise than
+# the bug it fixes. Do not "upgrade" this warning into a rewrite.
+#
+# Detection is a plain substring so a respelling of the stop condition does not
+# produce a FALSE warning. The cost is a known FALSE NEGATIVE in the unsafe
+# direction: a script that merely MENTIONS the marker (a `# TODO: stop at
+# <!-- PLUGIN-VERSIONS-START -->` comment) reads as hardened and gets silence while
+# still destroying the marker. Structural detection would cost an AST walk for a
+# warning; the trade is deliberate, and this is the sentence that says so.
+_UPDATE_CATALOG_MARKER_STOP = "PLUGIN-VERSIONS-START"
+
+
 def get_template_dir() -> Path:
     """Get the templates directory."""
     script_dir = Path(__file__).resolve().parent
     plugin_dir = script_dir.parent
     return plugin_dir / "templates"
+
+
+def warn_if_update_catalog_is_unhardened(marketplace_dir: Path) -> bool:
+    """Warn when a legacy scripts/update_catalog.py would destroy the table markers.
+
+    Returns True when the warning was emitted (the script is present and does not
+    stop its region scan at the marker), False otherwise — no script at all, or one
+    that is already hardened. Read-only; it never edits the file.
+    """
+    script = marketplace_dir / "scripts" / "update_catalog.py"
+    if not script.is_file():
+        return False
+    try:
+        source = script.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    if _UPDATE_CATALOG_MARKER_STOP in source:
+        return False
+    print(
+        "  [WARN] scripts/update_catalog.py predates the PLUGIN-VERSIONS canon: its "
+        "'## Plugins' region scan stops only at a '## ' heading, so it DELETES the "
+        "<!-- PLUGIN-VERSIONS-START --> marker (an HTML comment, not a heading) on the "
+        "next run and leaves 'render_readme_table.py --check' permanently red. "
+        "Fix by hand: make that scan also stop when a line equals "
+        "'<!-- PLUGIN-VERSIONS-START -->', or delete update_catalog.py if "
+        "render_readme_table.py now owns the whole table.",
+        file=sys.stderr,
+    )
+    return True
 
 
 def get_submodule_paths(marketplace_dir: Path) -> list[dict[str, str]]:
@@ -674,6 +724,13 @@ def setup_marketplace_automation(
             "The automation still works; you will have to write that workflow by hand.",
             file=sys.stderr,
         )
+
+    # 5. Legacy-population guard. A marketplace scaffolded by an OLDER
+    # generate_marketplace_repo.py still carries an un-hardened update_catalog.py,
+    # and nothing above replaces it (it is not a REQUIRED_TEMPLATE, by design). The
+    # generator-side fix cannot reach that repo, so saying so is the only remedy
+    # left. Runs even under --dry-run: it reads, it never writes.
+    warn_if_update_catalog_is_unhardened(marketplace_dir)
 
     if not setup_ok:
         # A required template was missing — the marketplace automation is NOT
