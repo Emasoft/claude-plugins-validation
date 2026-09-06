@@ -121,14 +121,8 @@ PLUGIN_SKIP_GITHUB_INTEGRITY=1 CLAUDE_PRIVATE_USERNAMES="$(whoami)" \
 uv run pytest -p no:cacheprovider -o addopts="" -q tests/
 
 # Publish (bumps version, runs every gate, pushes, releases).
-# COMMIT YOUR WORK FIRST. Gate 1 refuses a dirty tree, so run as written from one
-# and it exits 1 at the first gate having done nothing. And do not read that gate as
-# the only guard: the release commit stages EVERY tracked modification (`git add -u`
-# in stage_release_changes, plus named generated files) — so an uncommitted EDIT TO A
-# TRACKED FILE either blocks the publish or, if anything ever loosens Gate 1, rides
-# along inside a release commit unreviewed. An UNTRACKED file does not: `git add -u`
-# never sees it and the porcelain scan reports it and leaves it out, which is the
-# asymmetry issue #186 exists for.
+# COMMIT YOUR WORK FIRST — Gate 1 refuses a dirty tree (gotcha 9 below for what the
+# release commit stages, and why Gate 1 is the only thing keeping stray edits out).
 uv run python scripts/publish.py --patch   # | --minor | --major
 ```
 
@@ -161,6 +155,19 @@ uv run python scripts/publish.py --patch   # | --minor | --major
 7. **re2 compatibility:** `skillaudit_patterns.json` regexes must be
    re2-safe (no lookbehind/lookahead) — CI runs without google-re2.
 8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
+9. **Gate 1's clean-tree refusal is the ONLY thing keeping a stray edit out of a
+   release commit** — `stage_release_changes` is not a second filter. It runs
+   `git add -u` (every TRACKED modification, repo-wide), then stages seven paths BY
+   NAME if they exist — `.claude-plugin/plugin.json`, `.plugin-self-hashes.json`,
+   `.cpv-self-hashes.json`, `CHANGELOG.md`, `README.md`, `pyproject.toml`,
+   `uv.lock` — which `git add -- <path>` does whether or not they are tracked (the
+   designed case is a scaffolded plugin's first-ever `CHANGELOG.md`), and only then
+   reports whatever is left untracked instead of absorbing it (issue #186). So:
+   commit before publishing, and if anyone ever loosens Gate 1, tracked edits ride
+   along and those seven ride along untracked too. This entry took FOUR revisions —
+   it first claimed publish.py commits "only the version bump", then that untracked
+   files are always excluded; both were tidy sentences that got the mechanism wrong
+   in opposite directions. Read the function, not this paragraph's ancestors.
 
 ## Open issues snapshot (update as they close)
 
