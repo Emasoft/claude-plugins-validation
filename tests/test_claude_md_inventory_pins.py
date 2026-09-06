@@ -71,10 +71,21 @@ def test_claude_md_version_row_matches_the_manifest() -> None:
     )
 
 
-# Ordinary lag between "someone added a test" and "someone refreshed the row".
-# Deliberately small: the only drift this repo has actually observed was ~10, so a
-# window at or above that would not have caught the defect this file exists for.
-_STALE_LAG_ALLOWANCE = 3
+# Drift allowed in EITHER direction between a declared count and the tree: ordinary
+# lag between "someone added a component" and "someone refreshed the row", and the
+# mirror case where a deletion leaves the row briefly ahead. Deliberately small —
+# the only drift this repo has actually observed was ~10, so a window at or above
+# that would not have caught the defect this file exists for.
+_COUNT_DRIFT_ALLOWANCE = 3
+
+# The other rows the header calls load-bearing. Each is `| **<label>** | **<n>** |`.
+# Counted the way the row's own documented command counts, so the guard and the
+# instruction to a human cannot disagree.
+_COUNTED_ROWS: dict[str, str] = {
+    "commands": "commands/*.md",
+    "agents": "agents/*.md",
+    "scripts": "scripts/*.py",
+}
 
 
 def test_claude_md_test_file_count_is_not_stale() -> None:
@@ -112,18 +123,50 @@ def test_claude_md_test_file_count_is_not_stale() -> None:
     declared = _declared_test_file_count()
     actual = _actual_test_file_count()
     drift = declared - actual
-    if drift > _STALE_LAG_ALLOWANCE:
+    if drift > _COUNT_DRIFT_ALLOWANCE:
         raise AssertionError(
             f"CLAUDE.md claims {declared} test files but the tree has {actual} — the "
             f"row LEADS the tree by {drift}. If test files were deleted, re-derive the "
             "row from the tree. If they were not, this is a number nobody measured."
         )
-    if -drift > _STALE_LAG_ALLOWANCE:
+    if -drift > _COUNT_DRIFT_ALLOWANCE:
         raise AssertionError(
             f"CLAUDE.md claims {declared} test files, the tree has {actual} "
             f"(stale by {-drift}). RE-DERIVE it with the command in that row — do "
             "not increment the previous entry, which is how the stale 506 survived "
             "a release."
+        )
+
+
+def test_the_other_load_bearing_rows_track_the_tree() -> None:
+    """commands / agents / scripts — unpinned until now, and the header overclaimed.
+
+    CLAUDE.md's header justifies calling these counts load-bearing by asserting that
+    "README, the menu doc, and `test_*_preflight` tests assert against reality".
+    Measured: `test_consolidation_v211.py` pins the command SET (an allowlist of
+    filenames, which is stronger than a count) but NOTHING compared any of these rows
+    to the tree. The claim was partly false — and an unpinned row whose document
+    asserts it is pinned is exactly the condition under which the version row drifted
+    twice unnoticed.
+
+    All four read correctly when this was written, so this pins a currently-true
+    state rather than repairing a defect. `skills` is deliberately absent: its row
+    counts DIRECTORIES (`ls -d skills/*/`), not a glob of files, and folding a
+    different counting rule into this table would trade one guard for a shape that
+    silently counts the wrong thing.
+    """
+    text = _claude_md()
+    for label, pattern in _COUNTED_ROWS.items():
+        row = re.search(rf"^\|\s*\*\*{re.escape(label)}\*\*\s*\|\s*\*\*(\d+)\*\*\s*\|", text, re.MULTILINE)
+        assert row is not None, f"the CLAUDE.md {label!r} row no longer matches its anchor — fix the regex, do not delete the test"
+        declared = int(row.group(1))
+        directory, glob = pattern.split("/", 1)
+        actual = len(list((REPO_ROOT / directory).glob(glob)))
+        drift = declared - actual
+        assert abs(drift) <= _COUNT_DRIFT_ALLOWANCE, (
+            f"CLAUDE.md claims {declared} {label}, the tree has {actual} "
+            f"({'row leads by ' + str(drift) if drift > 0 else 'stale by ' + str(-drift)}). "
+            "RE-DERIVE it from the tree with the command in that row."
         )
 
 
