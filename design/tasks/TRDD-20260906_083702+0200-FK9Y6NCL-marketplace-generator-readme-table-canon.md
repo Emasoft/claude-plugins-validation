@@ -3,7 +3,7 @@ trdd-id: FK9Y6NCL
 title: Align generate_marketplace_repo.py with the generated README plugin-table canon
 column: dev
 created: 2026-09-06T08:37:02+0200
-updated: 2026-09-06T11:40:49+0200
+updated: 2026-09-06T11:45:45+0200
 current-owner: main-session
 task-type: refactor
 scope: project
@@ -115,7 +115,17 @@ drift.
       `templates/scripts/render_readme_table.py` (pinned by a test).
 - [x] Item 6 has a recorded ruling in this card (R2 — KEEP, regions and columns
       are disjoint; R3 enforces the disjointness).
+- [ ] R5: the emitted update workflow SKIPS its write step on a zero-plugin
+      manifest and warns — proven two-sided (empty → skipped + README untouched;
+      populated → runs normally).
+- [ ] The legacy warn fires: `setup_marketplace_automation.py` warns on a target
+      carrying an un-hardened `scripts/update_catalog.py`, and is silent on a
+      hardened one or none.
+- [ ] The R3 negative control asserts `mutated_source != original_source` before
+      exec (anti-vacuity).
 - [ ] Full serial suite green; `--strict` self-validate 0/0/0/0.
+      (Left for the orchestrator — the implementer cannot prove this without the
+      manifest regen it is instructed not to run.)
 
 ## Rulings (settled 2026-09-06, from first-hand reads of the two emitters)
 
@@ -164,8 +174,16 @@ heuristic believing it was never weighed:
 1. An emptied `plugins` array is a glaring, reviewable git diff — the accident is
    visible in exactly the artifact a reviewer reads.
 2. **Under `--check` the empty case still exits 1** against a populated README
-   ("README table is STALE"), so CI cannot flip red→green on its own. Reaching a
-   silently-blanked table requires someone to deliberately run the writer.
+   ("README table is STALE"), so CI cannot flip red→green on its own.
+
+**Reason 2 is TRUE ONLY BECAUSE OF R5, and an earlier draft of this ruling stated
+it unconditionally — which was false.** Scope item 4 puts the renderer in the
+update workflow in WRITE mode, unattended, on every `marketplace.json` push. Left
+like that, an accidentally-emptied manifest has its README blanked and committed
+by CI, and `--check` then **passes**, because the README now matches the empty
+manifest: the gate arrives after the thing it would have caught was already
+committed. R5 is what restores the property, by keeping the unattended writer away
+from the empty case entirely. Reason 1 was never conditional and stands on its own.
 
 `(no plugins yet)` is not invented here: the emitted `update_catalog.py` already
 uses that placeholder for its own empty case, so the two scaffolded tables read
@@ -238,7 +256,9 @@ install table is a marketplace README's primary content and belongs first.
 - **Guard (required):** `update_catalog.py`'s region scan stops at
   `<!-- PLUGIN-VERSIONS-START -->` as well as at a `## ` heading.
 - **Ordering (dropped):** emit the PLUGIN-VERSIONS block **after** `## Plugins`,
-  where it reads best. Safety comes from the guard, not from layout.
+  where it reads best. **For a NEW scaffold** safety comes from the guard, not
+  from layout — see the legacy carve-out below, which is the population the guard
+  cannot reach.
 - **Interaction test (required, and stronger than either guard stated
   abstractly):** scaffold a marketplace, render the versions table into the
   emitted README, then RUN the emitted `update_catalog.py` against it and assert
@@ -249,6 +269,65 @@ claimed: the preservation assertion above, a positive control proving the scan
 still replaces a normal `## Plugins` region, and a **negative control proving the
 PRE-hardening scan destroys the marker**. Without the third, the guard ships with
 a test that would pass under the competing model too.
+
+The negative control is written by **source mutation** — read the EMITTED
+`update_catalog.py`, strip the marker-stop condition with a targeted replacement,
+exec it, assert the marker is destroyed. No vendored copy to rot, no stash, runs
+in CI. It MUST assert `mutated_source != original_source` **before** exec:
+otherwise a later respelling of that condition makes the replacement a silent
+no-op and the control passes while mutating nothing — the same vacuity it exists
+to prevent, one level down.
+
+#### The legacy population the guard cannot reach
+
+Guard 2 lives in the **emitted** `update_catalog.py`, so it only ever reaches a
+repo scaffolded after this card lands. Verified first-hand:
+`setup_marketplace_automation.py`'s `REQUIRED_TEMPLATES` has exactly three entries
+(`update-submodules.yml`, `sync_marketplace_versions.py`,
+`render_readme_table.py`) and `grep -c update_catalog` on that file is **0**.
+
+So the exposed upgrade path is: a marketplace scaffolded by an OLDER
+`generate_marketplace_repo.py` keeps its un-hardened `update_catalog.py`; the new
+`setup_marketplace_automation.py` hands it the renderer but never replaces that
+script; and because the renderer refuses to insert markers itself
+(`if START not in text or END not in text: return 1`) the user hand-adds them —
+after which the old scan destroys them on the next push.
+
+`setup_marketplace_automation.py` therefore emits a **loud, non-fatal warning**
+when the target has a `scripts/update_catalog.py` whose source lacks the
+marker-stop string, naming the hazard and the one-line fix. **Warn, do not
+auto-patch:** CPV does not own that file in that repo, and `REQUIRED_TEMPLATES`
+excludes it deliberately — silently rewriting a script the tool does not provision
+is a larger liberty than the hazard warrants. That reason belongs in a comment at
+the check, so nobody later "upgrades" the warning into a rewrite.
+
+### R5 — the UNATTENDED writer never runs on an empty manifest
+
+Scope item 4 puts the renderer in the update workflow in **write mode**, on every
+`marketplace.json` push, with no human present. R1 permits blanking a table when
+the manifest is legitimately empty — which is right for a human running the
+writer deliberately, and wrong for a bot: an accidentally-emptied manifest would
+be blanked and committed by CI, and `--check` would then pass against its own
+freshly-committed output.
+
+So the emitted update workflow **skips the write step entirely** when the manifest
+yields zero plugins, printing a warning that names the manifest:
+
+| situation | behaviour |
+|---|---|
+| fresh empty scaffold | nothing to write (the generator already emitted the placeholder) — the skip is a no-op and `--check` still passes |
+| populated → emptied manifest | README keeps its rows, `--check` goes **red**, a human investigates |
+
+This is the README-row heuristic R1 rejected, placed where it is actually correct.
+R1 rejected it **in the renderer**, where it would block a deliberate human edit;
+R5 applies the same idea **at the unattended writer**, where the absence of a
+human is exactly what makes silent blanking unacceptable. The discriminator is not
+the README's contents — it is who is running the tool.
+
+Implemented as a cheap manifest read in the workflow (plugin count == 0), **not**
+as a new flag on `render_readme_table.py`: the renderer stays byte-pinned and
+flag-free, and a flag there would be the caller-asserted escape hatch this card
+already ruled out.
 
 ### R4 — the downstream copy is REPORTED, never pushed from here
 
