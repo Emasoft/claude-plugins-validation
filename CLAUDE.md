@@ -3,9 +3,15 @@
 **Authoritative structure + ops reference for this project. KEEP IT CURRENT:**
 whenever you add/remove a command, agent, skill, or script, or change the
 menu/publish/validate flow, update the matching line here in the SAME change.
-The counts below are load-bearing — README, the menu doc, and
-`test_*_preflight` tests assert against reality, so a stale count here means a
-stale count everywhere.
+The counts below are load-bearing, and **`tests/test_claude_md_inventory_pins.py`
+is what actually enforces that** — version exactly against `plugin.json`, and
+test-files / commands / agents / scripts against the tree within a small drift
+allowance. This sentence used to claim the counts were asserted by "README, the
+menu doc, and `test_*_preflight` tests"; measured 2026-09-06, that was only
+partly true (`test_consolidation_v211.py` pins the command SET, not any count),
+and an unpinned row inside a document asserting it was pinned is exactly how the
+version row drifted twice unnoticed. `skills` remains counted by hand — its row
+counts DIRECTORIES, not a file glob.
 
 ## What CPV is
 
