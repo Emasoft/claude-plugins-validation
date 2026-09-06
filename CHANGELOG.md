@@ -2,6 +2,22 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.18.1] - 2026-09-06
+
+### Bug Fixes
+
+- The archived cards were committed still claiming `column: publish`
+- The inventory tolerance made the benign direction loud (TRDD-FK9Y6NCL follow-up)
+- **inventory:** Guard the skills row, count the way each row's command counts, and make the version pin survive its own publish
+
+### Documentation
+
+- Pin CLAUDE.md's inventory, archive both cards, record the GAP-33 migration
+
+### Testing
+
+- Pin the inventory rows the header only CLAIMED were pinned
+
 ## [5.18.0] - 2026-09-06
 
 ### Bug Fixes
