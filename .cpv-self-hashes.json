@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-09-06T15:04:43+00:00",
+  "computed_at": "2026-09-06T15:08:03+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:cb48d528ac6d2a3f444c9d4f4ecd34f12dc43e953303ba6c68fa2286d74e1914",
@@ -28,7 +28,7 @@
     ".trashcan/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".trashcan/README.txt": "sha256:3106acc9af8415d37610ef0b9f138dc9622f25f81ac37a31f24a9ebd2d25f30f",
     "CHANGELOG.md": "sha256:966eb4ccf48b7c756e7908c5321765c1d675be657660beccb57f97a558aa597a",
-    "CLAUDE.md": "sha256:ddf0aed1522de89a6e04beebd9fa315ce7f9700b8b09da8f751a1946636633ed",
+    "CLAUDE.md": "sha256:1b18cede382242fda36775ae83e652a56e0d88575f8af537629a93b063bc7b28",
     "LICENSE": "sha256:f79aeb8187cb5e63d27261eba76a2d771292c27489645b3410bd5e67edc02f5d",
     "README.md": "sha256:60204a59e85fe8db4a52a0a7b77a674e1e7e6350b33936af16b6b16106569a7c",
     "agents/cpv-agent.md": "sha256:5c6f53d3ee88f85e380f0b49bec2e714bf4d45ca575207eb509ec61903db31cb",
