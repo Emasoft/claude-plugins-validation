@@ -3,7 +3,7 @@ trdd-id: FK9Y6NCL
 title: Align generate_marketplace_repo.py with the generated README plugin-table canon
 column: dev
 created: 2026-09-06T08:37:02+0200
-updated: 2026-09-06T11:45:45+0200
+updated: 2026-09-06T11:48:33+0200
 current-owner: main-session
 task-type: refactor
 scope: project
@@ -115,9 +115,10 @@ drift.
       `templates/scripts/render_readme_table.py` (pinned by a test).
 - [x] Item 6 has a recorded ruling in this card (R2 — KEEP, regions and columns
       are disjoint; R3 enforces the disjointness).
-- [ ] R5: the emitted update workflow SKIPS its write step on a zero-plugin
-      manifest and warns — proven two-sided (empty → skipped + README untouched;
-      populated → runs normally).
+- [ ] R5: the emitted update workflow skips the renderer invocation and the commit
+      ONLY on present-list-empty `plugins`, asserting the README is
+      **byte-unchanged** — with an absent key and a non-list key both falling
+      through to the renderer and failing the job (four cases, not two).
 - [ ] The legacy warn fires: `setup_marketplace_automation.py` warns on a target
       carrying an un-hardened `scripts/update_catalog.py`, and is silent on a
       hardened one or none.
@@ -301,6 +302,22 @@ excludes it deliberately — silently rewriting a script the tool does not provi
 is a larger liberty than the hazard warrants. That reason belongs in a comment at
 the check, so nobody later "upgrades" the warning into a rewrite.
 
+**That warning is necessary and NOT sufficient, and the ownership argument above
+does not cover the gap.** Setup runs **once**, at adoption; the destruction
+happens later, on the first `marketplace.json` push after the user hand-adds the
+markers — separated from the warning by an arbitrary interval and by the user's
+own intervening edit. It will not be on screen when it matters. The ownership
+argument is an argument against *patching* the file, not against *detecting* it.
+
+FOLLOW-UP (deliberately NOT in this card's implementation pass, to stop a spec
+from moving under an agent already building it): `render_readme_table.py` already
+reads the README and already fails on missing markers, and that error is the one
+the user actually lands on. It should detect an un-hardened `update_catalog.py`
+sibling and name it as the probable cause, turning an opaque "no markers" error
+into a diagnosis. It runs on every push, not once. It touches the byte-pinned
+renderer, so all three copies move together — done in the tree after the
+implementation lands, not specified at the agent mid-flight.
+
 ### R5 — the UNATTENDED writer never runs on an empty manifest
 
 Scope item 4 puts the renderer in the update workflow in **write mode**, on every
@@ -324,10 +341,42 @@ R5 applies the same idea **at the unattended writer**, where the absence of a
 human is exactly what makes silent blanking unacceptable. The discriminator is not
 the README's contents — it is who is running the tool.
 
-Implemented as a cheap manifest read in the workflow (plugin count == 0), **not**
-as a new flag on `render_readme_table.py`: the renderer stays byte-pinned and
-flag-free, and a flag there would be the caller-asserted escape hatch this card
-already ruled out.
+Implemented as a manifest read in the workflow, **not** as a new flag on
+`render_readme_table.py`: the renderer stays byte-pinned and flag-free, and a flag
+there would be the caller-asserted escape hatch this card already ruled out.
+
+**The skip condition is a THREE-WAY test, not a count — an earlier draft of R5
+said "plugin count == 0" and that was a defect.** A missing `plugins` key and a
+non-list `plugins` both read as zero under any naive count (`.plugins // [] |
+length` is 0 for both), so the two cases R1 had just promoted to loud exit-1
+failures would have become silent workflow skips: R1's own inversion reintroduced
+one layer up, on the only path with no human watching. A renamed or retyped
+`plugins` key would print "no plugins, skipping", exit 0, and leave the README
+carrying a now-unbacked table.
+
+Skip **only** when all three hold — the same discrimination R1 mandates in the
+renderer:
+
+- `plugins` is PRESENT, and
+- it IS a list, and
+- it is EMPTY.
+
+Anything else (absent key, non-list, malformed JSON) falls through and invokes the
+renderer, so R1's shape guard fires and the job goes red.
+
+**What is skipped is the RENDERER INVOCATION AND THE COMMIT — nothing else.** Every
+other step in that workflow runs unchanged; the job is not skipped. Scope item 4's
+"run it before the change-check so a README-only diff still commits" is unaffected,
+because on the empty path there is no diff to commit. The acceptance assertion is
+that **the README is byte-unchanged** — not merely that nothing was committed, since
+an implementation that lets the writer blank the README and only suppresses the
+commit would pass a no-commit assertion while defeating R5 entirely.
+
+**Attribution, stated precisely:** on a populated→emptied manifest it is not the
+skip that turns CI red — the skip is silent by design. It is the `--check` gate
+from scope item 5, running on the unchanged README, that reports drift. The two
+are both required, and neither is implemented yet; this paragraph specifies
+behaviour, it does not describe behaviour that exists.
 
 ### R4 — the downstream copy is REPORTED, never pushed from here
 
