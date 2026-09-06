@@ -1,9 +1,9 @@
 ---
 trdd-id: FK9Y6NCL
 title: Align generate_marketplace_repo.py with the generated README plugin-table canon
-column: testing
+column: publish
 created: 2026-09-06T08:37:02+0200
-updated: 2026-09-06T12:12:30+0200
+updated: 2026-09-06T14:37:15+0200
 current-owner: main-session
 task-type: refactor
 scope: project

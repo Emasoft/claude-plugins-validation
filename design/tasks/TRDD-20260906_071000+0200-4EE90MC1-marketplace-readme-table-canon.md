@@ -1,9 +1,9 @@
 ---
 trdd-id: 4EE90MC1
 title: Adopt the generated marketplace README table into the canon and fix the marketplace-version key
-column: dev
+column: publish
 created: 2026-09-06T07:10:00+0200
-updated: 2026-09-06T11:21:27+0200
+updated: 2026-09-06T14:37:15+0200
 current-owner: main-session
 task-type: feature
 scope: project
