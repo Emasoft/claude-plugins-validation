@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "templates" / "scripts" / "render_readme_table.py"
 
@@ -32,13 +34,18 @@ Footer text.
 """
 
 
-def _write_marketplace(tmp_path: Path, plugins: list[dict]) -> Path:
+def _write_manifest(tmp_path: Path, manifest: object) -> Path:
+    """Write an ARBITRARY manifest object — the shape guard's tests need bad ones."""
     (tmp_path / ".claude-plugin").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".claude-plugin" / "marketplace.json").write_text(
-        json.dumps({"plugins": plugins}), encoding="utf-8"
+        json.dumps(manifest), encoding="utf-8"
     )
     (tmp_path / "README.md").write_text(BASE_README, encoding="utf-8")
     return tmp_path
+
+
+def _write_marketplace(tmp_path: Path, plugins: list[dict]) -> Path:
+    return _write_manifest(tmp_path, {"plugins": plugins})
 
 
 def _run(tmp_path: Path, *extra_args: str) -> subprocess.CompletedProcess:
@@ -96,14 +103,80 @@ def test_check_flag_exits_0_when_current(tmp_path: Path) -> None:
     assert "already current" in second.stdout
 
 
-def test_refuses_to_blank_table_on_empty_plugins(tmp_path: Path) -> None:
-    """An empty/missing plugins list must error, never silently render an empty table."""
-    _write_marketplace(tmp_path, [])
+def test_empty_plugin_list_renders_a_placeholder_row(tmp_path: Path) -> None:
+    """`"plugins": []` is a legitimately empty marketplace, not a rendering bug.
+
+    It used to exit 1 ("no plugins in ..."), which left every freshly scaffolded
+    marketplace unable to pass the --check gate it ships with. The refusal moved to
+    the manifest SHAPE (the tests below); an empty LIST now renders an explicit
+    placeholder row so the block is never a header with no body.
+    """
+    _write_manifest(tmp_path, {"plugins": []})
+    result = _run(tmp_path)
+    assert result.returncode == 0, result.stderr
+    text = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert "old stale content" not in text
+    assert "| *(no plugins yet)* | | | |" in text
+    assert "*0 plugins*" in text
+
+
+def test_empty_plugin_list_is_stable_under_check(tmp_path: Path) -> None:
+    """Once rendered, the empty case reports NO drift — the gate must stay green."""
+    _write_manifest(tmp_path, {"plugins": []})
+    assert _run(tmp_path).returncode == 0
+    second = _run(tmp_path, "--check")
+    assert second.returncode == 0, second.stderr
+    assert "already current (0 plugins)" in second.stdout
+
+
+def test_missing_plugins_key_errors_and_names_the_key(tmp_path: Path) -> None:
+    """A manifest with no `plugins` key is structurally invalid — refuse, and say why.
+
+    This is the hazard the old emptiness guard was reaching for and reported with a
+    misleading reason ("no plugins in ..."), which sent the reader looking at their
+    plugin list instead of at the missing key.
+    """
+    _write_manifest(tmp_path, {"name": "mp", "owner": {"name": "Me"}})
     result = _run(tmp_path)
     assert result.returncode == 1
-    assert "no plugins" in result.stderr
-    # README must be untouched
+    assert '"plugins" key' in result.stderr
     assert "old stale content" in (tmp_path / "README.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("value", "typename"),
+    [
+        ({}, "dict"),  # falsy: the old emptiness guard caught this, with the wrong reason
+        ({"a": 1}, "dict"),  # TRUTHY: skipped the old guard entirely and died in sorted()
+        ("", "str"),
+        ("abc", "str"),  # truthy again
+        (None, "NoneType"),
+        (3, "int"),
+    ],
+)
+def test_non_list_plugins_errors_and_names_the_type(tmp_path: Path, value: object, typename: str) -> None:
+    """`plugins` present but not a list is invalid, whether it is truthy or falsy.
+
+    The truthy rows are the ones the emptiness guard never saw: they fell through to
+    `sorted(plugins, key=lambda x: x.get("name", ""))` and died with a raw
+    AttributeError traceback rather than a diagnosis.
+    """
+    _write_manifest(tmp_path, {"plugins": value})
+    result = _run(tmp_path)
+    assert result.returncode == 1
+    assert typename in result.stderr, result.stderr
+    assert "Traceback" not in result.stderr
+    assert "old stale content" in (tmp_path / "README.md").read_text(encoding="utf-8")
+
+
+def test_non_object_manifest_errors_and_names_the_type(tmp_path: Path) -> None:
+    """A top-level JSON array is not a marketplace manifest — refuse before indexing it."""
+    _write_manifest(tmp_path, [{"name": "foo"}])
+    result = _run(tmp_path)
+    assert result.returncode == 1
+    assert "expected an object" in result.stderr
+    assert "list" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_pipe_and_newline_are_escaped_in_cells(tmp_path: Path) -> None:

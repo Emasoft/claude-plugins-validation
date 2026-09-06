@@ -19,12 +19,14 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import sys
 from pathlib import Path
 
 from generate_plugin_repo import CPV_SUMMARY_MARKER
+from setup_marketplace_automation import get_template_dir
 
 # -- Constants ----------------------------------------------------------------
 
@@ -153,6 +155,49 @@ BOLD = "\033[1m"
 NC = "\033[0m"
 
 
+# -- The canonical README plugin-versions renderer ----------------------------
+#
+# templates/scripts/render_readme_table.py is the ONE renderer: this generator
+# EMITS it verbatim and setup_marketplace_automation.py COPIES the same file, so a
+# marketplace scaffolded either way runs identical code. It is READ here rather
+# than embedded as a string constant — an embedded copy is a second source that
+# drifts silently, and the drift stays invisible until a --check gate reddens in
+# somebody else's CI.
+
+
+def _renderer_path() -> Path:
+    """Absolute path of the canonical README plugin-versions renderer template."""
+    return get_template_dir() / "scripts" / "render_readme_table.py"
+
+
+def _renderer_source() -> str:
+    """The renderer's source, emitted byte-for-byte into the scaffold."""
+    return _renderer_path().read_text(encoding="utf-8")
+
+
+def _render_versions_block(plugins: list[dict]) -> str:
+    """Render the PLUGIN-VERSIONS block exactly as the emitted renderer would.
+
+    The scaffolded README has to pass its own ``--check`` gate on the very first
+    run, so this calls the renderer's own ``render()`` instead of re-deriving the
+    table here. A hand-written approximation that differs by one space red-lights
+    every fresh marketplace's CI, and looks like a renderer bug rather than a
+    scaffold bug.
+
+    LOAD-BEARING: executing the module runs its body, and what keeps that to imports
+    and constants is the template's own ``if __name__ == "__main__":`` guard. Removing
+    that guard from the template would make every scaffold run the renderer's
+    ``main()`` mid-generation, against whatever directory it resolved.
+    """
+    path = _renderer_path()
+    spec = importlib.util.spec_from_file_location("_cpv_render_readme_table", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load the README plugin-versions renderer from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return str(module.render(plugins))
+
+
 # -- Template Generators ------------------------------------------------------
 
 
@@ -212,6 +257,12 @@ def _readme(
 
     plugin_table = "\n".join(rows) if rows else "| (no plugins yet) | | |"
 
+    # The install table comes FIRST — it is the marketplace README's primary job.
+    # The generated versions block sits after it, and survives update_catalog.py's
+    # region scan because that scan now stops at the START marker (see
+    # _update_catalog_script).
+    versions_block = _render_versions_block(plugins)
+
     return f"""# {name}
 
 <!--BADGES-START-->
@@ -224,6 +275,8 @@ def _readme(
 | Plugin | Description | Install |
 |--------|-------------|---------|
 {plugin_table}
+
+{versions_block}
 
 ## Adding Your Plugin
 
@@ -308,6 +361,11 @@ def _readme_local(
 
     plugin_table = "\n".join(rows) if rows else "| (no plugins yet) | | | |"
 
+    # Same ordering as the GitHub README: install table first, generated versions
+    # block after it. A local marketplace has no CI, but it still ships
+    # scripts/render_readme_table.py, so the block must be there to write into.
+    versions_block = _render_versions_block(plugins)
+
     return f"""# {name} (local marketplace)
 
 {description}
@@ -320,6 +378,8 @@ def _readme_local(
 | Plugin | Description | Source | Install |
 |--------|-------------|--------|---------|
 {plugin_table}
+
+{versions_block}
 
 ## Adding this marketplace to Claude Code
 
@@ -677,6 +737,38 @@ jobs:
       - name: Regenerate README catalog
         run: python scripts/update_catalog.py
 
+      - name: Regenerate README plugin-versions table
+        id: versions
+        # BEFORE the change-check, so a README-only diff is still committed. The two
+        # renderers own DISJOINT regions: update_catalog.py owns the `## Plugins`
+        # install table, this owns the block between the PLUGIN-VERSIONS markers.
+        #
+        # SKIPPED on ONE case only: `plugins` is present, IS a list, and is EMPTY.
+        # This step runs UNATTENDED on every marketplace.json push, so an accidentally
+        # emptied manifest would otherwise have its table blanked AND COMMITTED here —
+        # and the --check gate would then PASS, because README and manifest now agree.
+        # The gate would arrive after the damage it exists to catch. Leaving the rows
+        # in place makes --check go RED instead, so a human investigates.
+        #
+        # The discrimination has to be exactly the renderer's own: a MISSING `plugins`
+        # key and a NON-LIST `plugins` both "count zero" under any naive count, so a
+        # count-based skip would silently swallow the two structural failures the
+        # renderer refuses loudly — the same inversion, one layer up. Those fall
+        # through to the renderer, which exits 1 and reddens the job.
+        #
+        # The guard lives here, not in render_readme_table.py: that script is
+        # byte-pinned across three copies and stays flag-free, and a HUMAN running it
+        # by hand must still be able to blank the table deliberately. Unattended-bot
+        # versus human is the whole distinction.
+        run: |
+          if python -c 'import json, sys; d = json.load(open(".claude-plugin/marketplace.json", encoding="utf-8")); p = d.get("plugins") if isinstance(d, dict) else None; sys.exit(0 if isinstance(p, list) and not p else 1)' 2>/dev/null; then
+            echo "manifest_empty=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::.claude-plugin/marketplace.json declares an EMPTY plugin list - SKIPPING the README plugin-versions rewrite, and skipping the commit, so an accidental emptying cannot blank and commit the table. If this is intentional, run 'python scripts/render_readme_table.py' by hand and commit the result."
+          else
+            echo "manifest_empty=false" >> "$GITHUB_OUTPUT"
+            python scripts/render_readme_table.py
+          fi
+
       - name: Check for changes
         id: changes
         # `"$GITHUB_OUTPUT"` is QUOTED — the bare form trips shellcheck SC2086, so
@@ -690,7 +782,11 @@ jobs:
           fi
 
       - name: Commit and push
-        if: steps.changes.outputs.has_changes == 'true'
+        # The second clause is R5's other half: on the empty-manifest path the
+        # renderer was skipped, and the commit is skipped with it. Otherwise
+        # update_catalog.py's own blanked install table would still be committed,
+        # which is the same unattended damage by a different route.
+        if: steps.changes.outputs.has_changes == 'true' && steps.versions.outputs.manifest_empty != 'true'
         run: |
           git add README.md
           git commit -m "docs: regenerate plugin catalog from marketplace.json"
@@ -723,6 +819,53 @@ jobs:
 """
 
 
+def _validate_readme_table_workflow() -> str:
+    """Generate .github/workflows/validate-readme-table.yml — the --check drift gate.
+
+    The README plugin-versions table is DERIVED from marketplace.json. Without a
+    gate, a hand-edit or a skipped Update-Catalog run leaves it stale and nothing
+    says so. `--check` never writes; it exits 1 when a re-render would differ.
+
+    Deliberately its own workflow rather than a step inside validate.yml: this
+    needs no CPV install and no network, so it stays green (and fast) even when a
+    cold `uvx --from git+...` build is failing, which is exactly when a drift
+    report is easiest to misread as an infra flake.
+    """
+    return """name: Validate README Table
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  readme-table:
+    name: README table
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check the README plugin-versions table is current
+        # Exits 1 when re-rendering marketplace.json would change README.md.
+        # Fix locally with: python scripts/render_readme_table.py
+        run: python scripts/render_readme_table.py --check
+"""
+
+
 def _update_catalog_script(name: str) -> str:
     """Generate scripts/update_catalog.py that reads marketplace.json and updates README."""
     return f'''#!/usr/bin/env python3
@@ -748,6 +891,10 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+
+# Opening line of the generated plugin-versions block, which
+# scripts/render_readme_table.py owns. This script must never consume it.
+PLUGIN_VERSIONS_START = "<!-- PLUGIN-VERSIONS-START -->"
 
 
 def main() -> int:
@@ -812,8 +959,14 @@ def main() -> int:
             continue
 
         if in_plugins_section:
-            # Skip old table content until we hit the next heading or end
-            if line.startswith("## ") and line.strip() != "## Plugins":
+            # Stop at the next heading OR at the plugin-versions block. That block
+            # opens with an HTML COMMENT, not a "## " heading, so a heading-only stop
+            # DELETED its START marker: every non-heading line inside the section is
+            # dropped, and render_readme_table.py's --check gate then stays red with
+            # no way to fix it from the manifest.
+            if line.strip() == PLUGIN_VERSIONS_START or (
+                line.startswith("## ") and line.strip() != "## Plugins"
+            ):
                 in_plugins_section = False
                 new_lines.append(line)
             # Skip everything else in the plugins section (old table lines)
@@ -1191,6 +1344,11 @@ def generate_marketplace_repo(
             _update_catalog_workflow(name),
             dry_run,
         )
+        write_file(
+            target_dir / ".github" / "workflows" / "validate-readme-table.yml",
+            _validate_readme_table_workflow(),
+            dry_run,
+        )
 
     # 6. scripts/update_catalog.py
     write_file(
@@ -1198,6 +1356,15 @@ def generate_marketplace_repo(
         _update_catalog_script(name),
         dry_run,
     )
+
+    # 6b. scripts/render_readme_table.py — emitted byte-for-byte from
+    # templates/scripts/render_readme_table.py, the same file
+    # setup_marketplace_automation.py copies. Emitted in LOCAL mode too: a local
+    # marketplace has no CI, but its README carries the same generated block and
+    # must have the script that rewrites it.
+    renderer_path = target_dir / "scripts" / "render_readme_table.py"
+    write_file(renderer_path, _renderer_source(), dry_run)
+    make_executable(renderer_path, dry_run)
 
     # 7. cliff.toml
     write_file(target_dir / "cliff.toml", _cliff_toml(name, github_owner), dry_run)
