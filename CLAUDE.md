@@ -121,9 +121,12 @@ PLUGIN_SKIP_GITHUB_INTEGRITY=1 CLAUDE_PRIVATE_USERNAMES="$(whoami)" \
 uv run pytest -p no:cacheprovider -o addopts="" -q tests/
 
 # Publish (bumps version, runs every gate, pushes, releases).
-# COMMIT YOUR WORK FIRST — Gate 1 refuses a dirty tree, and publish.py commits only
-# the version bump and its own generated files, never your source edits. Run as
-# written from a dirty tree and it exits 1 at the first gate having done nothing.
+# COMMIT YOUR WORK FIRST. Gate 1 refuses a dirty tree, so run as written from one
+# and it exits 1 at the first gate having done nothing. And do not read that gate as
+# the only guard: the release commit stages EVERY tracked modification (`git add -u`
+# in stage_release_changes, plus named generated files) — so uncommitted work either
+# blocks the publish or, if anything ever loosens Gate 1, rides along inside a
+# release commit unreviewed.
 uv run python scripts/publish.py --patch   # | --minor | --major
 ```
 
