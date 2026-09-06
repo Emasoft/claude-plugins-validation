@@ -93,21 +93,38 @@ def test_claude_md_test_file_count_is_not_stale() -> None:
     existed, and a back-calculated `516` written into the row being repaired for
     containing unverified numbers.
 
-    So: declared may trail actual by up to the lag allowance, and may never exceed it.
+    A HARD `declared <= actual` edge was the second wrong shape here, and it is worth
+    naming because it looked like the fix. It fails the moment someone DELETES a test
+    file: the row then leads the tree through no fault of the author, the suite goes
+    red, and the message accuses them of fabricating a number they never touched. The
+    cheapest way back to green is to edit the row to whatever passes — the exact
+    reflexive edit this guard exists to prevent. It also got the costs backwards,
+    making the benign direction (deletion) loud and the other benign direction (lag)
+    silent.
+
+    So the allowance is SYMMETRIC, with the two directions given DIFFERENT messages,
+    because they mean different things and want different fixes. What is given up is
+    catching a fabrication of 1-3 — the region where churn is likeliest and invention
+    least likely. The two real incidents behind this file were both large (a version
+    row committed before its bump existed; a `506` that was stale by ~10), and both
+    are still caught.
     """
     declared = _declared_test_file_count()
     actual = _actual_test_file_count()
-    assert declared <= actual, (
-        f"CLAUDE.md claims {declared} test files but the tree has only {actual}. "
-        "A row AHEAD of reality cannot be lag — it is a number nobody measured. "
-        "Re-derive it from the tree."
-    )
-    assert actual - declared <= _STALE_LAG_ALLOWANCE, (
-        f"CLAUDE.md claims {declared} test files, the tree has {actual} "
-        f"(stale by {actual - declared}). RE-DERIVE it with the command in that "
-        "row — do not increment the previous entry, which is how the stale 506 "
-        "survived a release."
-    )
+    drift = declared - actual
+    if drift > _STALE_LAG_ALLOWANCE:
+        raise AssertionError(
+            f"CLAUDE.md claims {declared} test files but the tree has {actual} — the "
+            f"row LEADS the tree by {drift}. If test files were deleted, re-derive the "
+            "row from the tree. If they were not, this is a number nobody measured."
+        )
+    if -drift > _STALE_LAG_ALLOWANCE:
+        raise AssertionError(
+            f"CLAUDE.md claims {declared} test files, the tree has {actual} "
+            f"(stale by {-drift}). RE-DERIVE it with the command in that row — do "
+            "not increment the previous entry, which is how the stale 506 survived "
+            "a release."
+        )
 
 
 def test_the_anchors_actually_match_something() -> None:
