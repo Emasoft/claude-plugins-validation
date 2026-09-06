@@ -3,7 +3,7 @@ trdd-id: FK9Y6NCL
 title: Align generate_marketplace_repo.py with the generated README plugin-table canon
 column: dev
 created: 2026-09-06T08:37:02+0200
-updated: 2026-09-06T11:50:40+0200
+updated: 2026-09-06T11:52:51+0200
 current-owner: main-session
 task-type: refactor
 scope: project
@@ -405,31 +405,57 @@ mid-flight spec change. They are recorded here so they cannot be lost to a
 compaction, and because a reviewer who does not know to look for them will read
 past both.
 
-**G1 — the R5 guard must be an `if` CONDITION, never a bare `jq -e`.** GitHub's
-default `run:` shell is `bash -e {0}`, and `jq -e` exits 1 when its last output is
-`false` — which is the NORMAL populated-marketplace case. A bare `jq -e '...'`
-statement therefore aborts the step on every push that has plugins. The decision
-rule itself is sound in all three failure modes (false → 1, malformed JSON → 5,
-missing file → 2, and every non-zero correctly means "do not skip"), so what is
-wrong is the shell idiom, not the logic. Require the structural form, where
-"anything other than a clean true runs the renderer" is the default rather than a
-rule the reader has to apply:
+**G1 — the R5 guard must not abort the step, and must not swallow the reason.**
+Stated as PROPERTIES to check, deliberately not as a recipe. An earlier draft of
+this gate carried a concrete `jq -e` snippet, and that snippet was wrong in three
+ways at once — no `id:` on the guard step (so `steps.<id>.outputs.skip` evaluates
+empty, `'' != 'true'`, the renderer always runs and R5 never fires), an undefined
+`$MJ` (jq then reads **stdin** and the step HANGS, burning the job timeout with no
+diagnostic), and a `2>&1` that discards jq's parse error — the exact reason R1
+exists to surface. A gate is read as authoritative, so a defective recipe inside
+one is worse than no recipe: the reader pastes it instead of thinking. The
+properties:
 
-```bash
-if jq -e 'has("plugins") and (.plugins|type=="array") and (.plugins|length==0)' \
-     "$MJ" >/dev/null 2>&1; then echo "skip=true" >> "$GITHUB_OUTPUT"; fi
-```
+1. The guard must not abort the step when its condition is FALSE. GitHub's default
+   `run:` shell is `bash -e {0}` and `jq -e` exits 1 on a false result — which is
+   the NORMAL populated-marketplace case — so a bare `jq -e` statement kills the
+   workflow on every push that has plugins.
+2. The skip decision must DEFAULT TO RUNNING THE RENDERER whenever the guard does
+   not produce a clean true. The decision rule is sound in every failure mode
+   (false → 1, malformed JSON → 5, missing file → 2, jq absent → 127; all
+   correctly mean "do not skip") — what must be structural is that "anything other
+   than a clean true runs the renderer", rather than a rule the reader applies.
+3. The manifest's own error text must SURVIVE to the log. R1's whole purpose is
+   failing loudly with the reason.
 
-with the renderer step gated on `steps.<id>.outputs.skip != 'true'`.
+**G2 — "README byte-unchanged" must not be satisfied by a string match, and there
+are THREE implementations, not the two an earlier draft listed.** A YAML-text
+assertion cannot detect a logic error; extracting the guard's shell and running it
+against a manifest fixture can. But the option most likely to be right is the one
+that earlier draft missed: **put the predicate in the renderer, not the workflow.**
+A `should_skip(manifest_path) -> bool` is directly unit-testable against all four
+manifest shapes, the workflow just branches on an exit code, and G1's entire
+failure class disappears with the shell.
 
-**G2 — "README byte-unchanged" is not assertable against YAML, and the criterion
-must not pass on a string match.** The workflow cannot be run from pytest, so the
-implementer's realistic options are to assert on the emitted YAML text (a string
-assertion that cannot detect a logic error) or to extract the guard's shell and
-exercise it against a manifest fixture. Only the second is behavioural proof. At
-review: if the test asserts on YAML text, either convert it to the extract-and-run
-shape or downgrade the acceptance criterion in this card to say plainly that it is
-a text assertion — never leave a text assertion standing under a criterion phrased
-as behaviour.
+R5's stated rationale for choosing the workflow — keeping the renderer "flag-free"
+— **conflated two different things.** R1 bans a *caller-asserted escape hatch*
+(`--allow-empty`: the caller asserts a fact and the tool obeys). A *read-only
+predicate* is not that: it changes no behaviour and asserts nothing, it reports a
+fact the tool derives itself. The real cost of the renderer route is only that it
+moves three byte-pinned copies — a genuine trade, but not the one recorded.
+
+At review: if the implementation put the predicate in the renderer, that is
+**BETTER and the gate is satisfied differently** — do not "correct" it back toward
+the workflow. If it asserts on YAML text, either convert it to extract-and-run or
+downgrade the acceptance criterion here to say plainly that it is a text
+assertion. Never leave a text assertion standing under a criterion phrased as
+behaviour.
+
+**G3 — confirm the new test file actually imports.** The diagnostics stream shows
+`tests/test_marketplace_generator_readme_table.py` failing to resolve
+`generate_marketplace_repo` and `setup_marketplace_automation`. Probably Pyright's
+path config for an untracked file — but an ImportError makes the whole new suite
+silently **uncollected rather than failed**, which reads as green. Run it and read
+the collected count.
 
 ## Approval log
