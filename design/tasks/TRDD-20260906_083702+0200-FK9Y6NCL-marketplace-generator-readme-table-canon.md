@@ -3,7 +3,7 @@ trdd-id: FK9Y6NCL
 title: Align generate_marketplace_repo.py with the generated README plugin-table canon
 column: dev
 created: 2026-09-06T08:37:02+0200
-updated: 2026-09-06T11:35:06+0200
+updated: 2026-09-06T11:40:49+0200
 current-owner: main-session
 task-type: refactor
 scope: project
@@ -149,15 +149,41 @@ So:
 This is a strict tightening of rows 2/3 (today they exit 1 with a misleading
 reason; they still exit 1, with the real one) and a widening of row 1 only.
 
-**A README-row heuristic is deliberately NOT added on top.** Its one distinct case
-is "the README shows rows and the manifest is now `[]`", i.e. every plugin was
-removed on purpose — where refusing would be *wrong*, and where `git` already
-records the diff and `--check` already reports the drift. A second mechanism whose
-only distinguishable case it decides incorrectly is not belt-and-braces.
+**A README-row heuristic is deliberately NOT added on top — and the case it would
+cover is AMBIGUOUS, not wrong.** An earlier draft of this ruling claimed the
+heuristic's only distinct case ("README shows rows, manifest is now `[]`") is
+deliberate removal, where refusing would be wrong. That overstated it: the same
+state is *also* produced by an accidentally-emptied manifest, and R1 accepts that
+branch silently. The write path really does lose a guard — before R1 an
+accidentally-emptied manifest printed `error: no plugins in ...`; after R1 it
+blanks the table without comment.
+
+It is accepted anyway, for two reasons worth recording so nobody re-derives the
+heuristic believing it was never weighed:
+
+1. An emptied `plugins` array is a glaring, reviewable git diff — the accident is
+   visible in exactly the artifact a reviewer reads.
+2. **Under `--check` the empty case still exits 1** against a populated README
+   ("README table is STALE"), so CI cannot flip red→green on its own. Reaching a
+   silently-blanked table requires someone to deliberately run the writer.
 
 `(no plugins yet)` is not invented here: the emitted `update_catalog.py` already
-uses that exact placeholder for its own empty case, so the two scaffolded tables
-read consistently.
+uses that placeholder for its own empty case, so the two scaffolded tables read
+consistently. **The row is FOUR cells**, matching this table's header — the
+`update_catalog.py` precedent is a three-column table, so copying it verbatim
+emits a malformed row:
+
+```text
+| *(no plugins yet)* | | | |
+```
+
+**The `isinstance` check runs FIRST and unconditionally**, before the emptiness
+branch. A *truthy* non-list (`{"a": {...}}`, `"abc"`) never reaches the current
+emptiness guard at all — it falls into
+`sorted(plugins, key=lambda x: x.get("name", ""))` and dies with a raw
+`AttributeError` traceback. So the shape check fixes more than the table above
+claims, and the tests must cover an empty dict (falsy) AND a non-empty dict
+(truthy) AND a non-empty string.
 
 ### R2 — `update_catalog.py` is KEPT; the two are complementary, not duplicate
 
@@ -182,22 +208,47 @@ So both stay, and this ruling is the recorded reason.
 
 ### R3 — the disjointness must be ENFORCED, because it is one line from breaking
 
-`update_catalog.py` replaces everything from `## Plugins` until the next line
-starting with `## `. The canonical block opens with the **comment** line
-`<!-- PLUGIN-VERSIONS-START -->` and only then `## Plugin Versions`. So if the
-versions block is emitted immediately after `## Plugins`, `update_catalog.py`
-consumes the START marker (a comment is not a `## ` line) and stops at
-`## Plugin Versions` — silently destroying the marker and breaking the renderer's
-`--check` gate on the next run. Two guards, both required:
+**Reproduced in source, not inferred.** An adversarial review challenged this as
+resting on anchor lines rather than the loop body, and offered a competing model
+(only table-looking rows are replaced, comments preserved) under which the guard
+would guard nothing. Reading `generate_marketplace_repo.py:803-819` settles it —
+inside `if in_plugins_section:` the scan appends only a `## ` heading and
+`continue`s on **everything else with no append**:
 
-1. Emit the PLUGIN-VERSIONS block **before** the `## Plugins` section in both
-   `_readme` and `_readme_local`, so the interaction cannot arise by construction.
-2. Harden `update_catalog.py`'s region scan to stop at `<!-- PLUGIN-VERSIONS-START -->`
-   as well as at a `## ` heading, so a human reordering their README later cannot
-   reintroduce it.
+```python
+if in_plugins_section:
+    if line.startswith("## ") and line.strip() != "## Plugins":
+        in_plugins_section = False
+        new_lines.append(line)
+    # Skip everything else in the plugins section (old table lines)
+    continue
+```
 
-Guard 1 alone is fragile to a later edit; guard 2 alone leaves the emitted default
-depending on a scan subtlety. Both, each with its own two-sided test.
+So the replacement really is wholesale. The canonical block opens with the
+**comment** `<!-- PLUGIN-VERSIONS-START -->` and only then `## Plugin Versions`;
+emitted immediately after `## Plugins`, the marker is a non-heading line inside
+the section and is **dropped**, breaking the renderer's `--check` gate on the
+next run.
+
+**The remedy is ONE guard plus one interaction test — an earlier draft mandated
+two guards and the ordering one is now dropped.** With the marker-aware stop in
+place the ordering constraint is redundant, and it costs README quality: the
+install table is a marketplace README's primary content and belongs first.
+
+- **Guard (required):** `update_catalog.py`'s region scan stops at
+  `<!-- PLUGIN-VERSIONS-START -->` as well as at a `## ` heading.
+- **Ordering (dropped):** emit the PLUGIN-VERSIONS block **after** `## Plugins`,
+  where it reads best. Safety comes from the guard, not from layout.
+- **Interaction test (required, and stronger than either guard stated
+  abstractly):** scaffold a marketplace, render the versions table into the
+  emitted README, then RUN the emitted `update_catalog.py` against it and assert
+  both markers and the whole rendered block survive byte-identical.
+
+That test needs THREE cases, because two of them alone cannot fail for the reason
+claimed: the preservation assertion above, a positive control proving the scan
+still replaces a normal `## Plugins` region, and a **negative control proving the
+PRE-hardening scan destroys the marker**. Without the third, the guard ships with
+a test that would pass under the competing model too.
 
 ### R4 — the downstream copy is REPORTED, never pushed from here
 
