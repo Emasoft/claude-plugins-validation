@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-09-06T10:24:27+00:00",
+  "computed_at": "2026-09-06T12:37:41+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:d61d219356c7726bb8f7ade1afa16176cfae09bd6ab415bab8fdf48ef9fdb3cc",
@@ -28,7 +28,7 @@
     ".trashcan/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".trashcan/README.txt": "sha256:3106acc9af8415d37610ef0b9f138dc9622f25f81ac37a31f24a9ebd2d25f30f",
     "CHANGELOG.md": "sha256:39533801e5c2a451ad65cf3a58a52e01586ab9be149649520bf7b33d9f497a50",
-    "CLAUDE.md": "sha256:184d5ce8f91eded7e8d30356323520c7c58da7de67aa2c706b12eb48eebee503",
+    "CLAUDE.md": "sha256:001c453254ad313703756163def9e932e9e4c2e29d79b82468186394057e2a8f",
     "LICENSE": "sha256:f79aeb8187cb5e63d27261eba76a2d771292c27489645b3410bd5e67edc02f5d",
     "README.md": "sha256:163519284c994d4d3c81b8a086a2e4d76093862b56985f135ddbd45d953f1b81",
     "agents/cpv-agent.md": "sha256:5c6f53d3ee88f85e380f0b49bec2e714bf4d45ca575207eb509ec61903db31cb",
@@ -197,8 +197,8 @@
     "design/tasks/TRDD-20260904_093047+0200-MHCFOCBV-v5170-ci-red-linux-only-validate-timeout.md": "sha256:c0e65b5aead788d37321aaa2fffe49c7b1b47369f55092ccf8abdd052eba7d11",
     "design/tasks/TRDD-20260904_104137+0200-4VROKH40-gate-14-prints-ci-red-but-exits-zero.md": "sha256:808f56fee6cda4b06867b566df1135f4a677b9e8712910fb3c2b1a7e9ee9be90",
     "design/tasks/TRDD-20260904_105649+0200-1VU6Y5MS-lint-tool-resolution-may-be-unbounded.md": "sha256:2b799b8ed6b65b6f28708ceb7b4156923d0dde122a8622cb483e1e56f5d5ab6f",
-    "design/tasks/TRDD-20260906_071000+0200-4EE90MC1-marketplace-readme-table-canon.md": "sha256:ada95349755eb2aa4193b940b8b921e5e72cd9aa7922bbdef690c6dfb25e8f29",
-    "design/tasks/TRDD-20260906_083702+0200-FK9Y6NCL-marketplace-generator-readme-table-canon.md": "sha256:b619d79c432ebe8cfd7473772071528dffc1adaff587cc8d5fcfa2aa54a056b3",
+    "design/tasks/TRDD-20260906_071000+0200-4EE90MC1-marketplace-readme-table-canon.md": "sha256:1b7e4a66363864ea9627b2726f62446b320d2f071a71040bf95a3a9e20978cc5",
+    "design/tasks/TRDD-20260906_083702+0200-FK9Y6NCL-marketplace-generator-readme-table-canon.md": "sha256:445fb24968e2c693b3929347b8d93cd07b4e20c36afb9a64466c894187a3c443",
     "git-hooks/pre-commit": "sha256:47cf32b6b340cd973b6a15466d8b752993a68534429dca2e6df7159ba7240810",
     "git-hooks/pre-push": "sha256:90880138be62d7cd5ec6b451bc8803127ee4a3ce430d0f5d9caa5fa86d57aa12",
     "pyproject.toml": "sha256:349e093691886646b70867082ff2a26348b984300634bff00284288ece8fa4fd",
