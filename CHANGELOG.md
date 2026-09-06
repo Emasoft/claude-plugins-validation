@@ -2,6 +2,32 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.18.0] - 2026-09-06
+
+### Bug Fixes
+
+- **tests:** Stop one issue-37 test paying an unbounded REPO LINT phase (TRDD-MHCFOCBV)
+
+### Documentation
+
+- Card the v5.17.0 red-CI regression (TRDD-MHCFOCBV)
+- Correct four overstated claims in TRDD-MHCFOCBV after adversarial review
+- Clear 9e7d2c1e of the v5.17.0 CI-red regression (TRDD-MHCFOCBV)
+- **memory:** Split the oversized RC-164 fold-tiers atom into two
+- Bump TRDD-4EE90MC1 updated: — the revert-granularity section adds assertions
+- Settle the four blocking rulings on TRDD-FK9Y6NCL
+- Correct R1 and R3 on TRDD-FK9Y6NCL after adversarial review
+- Add R5 and the legacy carve-out to TRDD-FK9Y6NCL
+- Fix R5's skip condition, which reintroduced R1's inversion (TRDD-FK9Y6NCL)
+- Record two review-time gates instead of a fourth correction (TRDD-FK9Y6NCL)
+- Replace G1's defective recipe with properties; stop editing this card
+- V5.18.0 release notes, and repair a stale load-bearing inventory
+
+### Features
+
+- **marketplace:** Generated README version table + the version-key inversion (TRDD-4EE90MC1)
+- **marketplace:** Put generate_marketplace_repo.py on the README table canon (TRDD-FK9Y6NCL)
+
 ## [5.17.0] - 2026-09-04
 
 ### Documentation
