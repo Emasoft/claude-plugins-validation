@@ -71,22 +71,42 @@ def test_claude_md_version_row_matches_the_manifest() -> None:
     )
 
 
-def test_claude_md_test_file_count_is_not_wildly_stale() -> None:
-    """Pinned with a tolerance, deliberately — an exact pin here would be a trap.
+# Ordinary lag between "someone added a test" and "someone refreshed the row".
+# Deliberately small: the only drift this repo has actually observed was ~10, so a
+# window at or above that would not have caught the defect this file exists for.
+_STALE_LAG_ALLOWANCE = 3
 
-    Every commit that adds or removes a test file would fail an exact assertion,
-    so the row would be edited reflexively to whatever number makes the suite
-    green — which is precisely the incrementing-without-re-deriving habit that let
-    `506` survive. A tolerance catches the real failure (a count that has stopped
-    tracking reality) while leaving ordinary test churn alone.
+
+def test_claude_md_test_file_count_is_not_stale() -> None:
+    """ASYMMETRIC on purpose: stale-downward is lag, ahead-of-actual is fabrication.
+
+    An exact pin would be a trap — every commit adding a test would fail, so the row
+    would be edited reflexively to whatever number turns the suite green, which is
+    the incrementing-without-re-deriving habit that let `506` survive a release. A
+    guard that trains the behaviour it exists to prevent is worse than none.
+
+    But a SYMMETRIC `abs(declared - actual) <= N` was the wrong correction, and it
+    was the first shape shipped here. It tolerates the row running AHEAD of the
+    tree, a state with no legitimate cause: you cannot lag into a number larger than
+    reality, you can only assert one you did not measure. That is exactly the error
+    this file was written after — a `5.18.0` version row committed before the bump
+    existed, and a back-calculated `516` written into the row being repaired for
+    containing unverified numbers.
+
+    So: declared may trail actual by up to the lag allowance, and may never exceed it.
     """
     declared = _declared_test_file_count()
     actual = _actual_test_file_count()
-    drift = abs(declared - actual)
-    assert drift <= 5, (
+    assert declared <= actual, (
+        f"CLAUDE.md claims {declared} test files but the tree has only {actual}. "
+        "A row AHEAD of reality cannot be lag — it is a number nobody measured. "
+        "Re-derive it from the tree."
+    )
+    assert actual - declared <= _STALE_LAG_ALLOWANCE, (
         f"CLAUDE.md claims {declared} test files, the tree has {actual} "
-        f"(drift {drift}). RE-DERIVE it with the command in that row — do not "
-        "increment the previous entry, which is how the stale 506 survived a release."
+        f"(stale by {actual - declared}). RE-DERIVE it with the command in that "
+        "row — do not increment the previous entry, which is how the stale 506 "
+        "survived a release."
     )
 
 
