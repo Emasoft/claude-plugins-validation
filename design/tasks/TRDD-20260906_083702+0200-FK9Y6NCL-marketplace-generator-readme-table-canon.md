@@ -3,7 +3,7 @@ trdd-id: FK9Y6NCL
 title: Align generate_marketplace_repo.py with the generated README plugin-table canon
 column: dev
 created: 2026-09-06T08:37:02+0200
-updated: 2026-09-06T11:48:33+0200
+updated: 2026-09-06T11:50:40+0200
 current-owner: main-session
 task-type: refactor
 scope: project
@@ -318,6 +318,15 @@ into a diagnosis. It runs on every push, not once. It touches the byte-pinned
 renderer, so all three copies move together — done in the tree after the
 implementation lands, not specified at the agent mid-flight.
 
+**The risk window is smaller than that framing suggests, and stating it correctly
+matters because it is what makes the deferral cheap rather than merely
+convenient.** Exposure does not begin when this card ships; it begins when a
+LEGACY marketplace adopts the renderer, and that requires a human to hand-add the
+markers first. No legacy repo has markers today, so nobody is exposed right now.
+The deferral costs approximately nothing — but it stops costing nothing the day
+the first legacy adoption happens, which is why the follow-up is recorded here
+rather than left to memory.
+
 ### R5 — the UNATTENDED writer never runs on an empty manifest
 
 Scope item 4 puts the renderer in the update workflow in **write mode**, on every
@@ -387,5 +396,40 @@ The third copy lives in another project's PR
 (`Emasoft/ai-maestro-plugins` #18) — per the cross-project rule it is not edited
 from this session; the divergence is reported to the user with the exact diff to
 apply.
+
+## Review-time gates (the orchestrator checks these against the DIFF, not the report)
+
+The correction cycle to the implementer is CLOSED. Two known defects were found
+after closing it, and both are cheaper to fix in the tree than to send as a fourth
+mid-flight spec change. They are recorded here so they cannot be lost to a
+compaction, and because a reviewer who does not know to look for them will read
+past both.
+
+**G1 — the R5 guard must be an `if` CONDITION, never a bare `jq -e`.** GitHub's
+default `run:` shell is `bash -e {0}`, and `jq -e` exits 1 when its last output is
+`false` — which is the NORMAL populated-marketplace case. A bare `jq -e '...'`
+statement therefore aborts the step on every push that has plugins. The decision
+rule itself is sound in all three failure modes (false → 1, malformed JSON → 5,
+missing file → 2, and every non-zero correctly means "do not skip"), so what is
+wrong is the shell idiom, not the logic. Require the structural form, where
+"anything other than a clean true runs the renderer" is the default rather than a
+rule the reader has to apply:
+
+```bash
+if jq -e 'has("plugins") and (.plugins|type=="array") and (.plugins|length==0)' \
+     "$MJ" >/dev/null 2>&1; then echo "skip=true" >> "$GITHUB_OUTPUT"; fi
+```
+
+with the renderer step gated on `steps.<id>.outputs.skip != 'true'`.
+
+**G2 — "README byte-unchanged" is not assertable against YAML, and the criterion
+must not pass on a string match.** The workflow cannot be run from pytest, so the
+implementer's realistic options are to assert on the emitted YAML text (a string
+assertion that cannot detect a logic error) or to extract the guard's shell and
+exercise it against a manifest fixture. Only the second is behavioural proof. At
+review: if the test asserts on YAML text, either convert it to the extract-and-run
+shape or downgrade the acceptance criterion in this card to say plainly that it is
+a text assertion — never leave a text assertion standing under a criterion phrased
+as behaviour.
 
 ## Approval log
