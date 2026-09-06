@@ -77,8 +77,9 @@ aborts the migration cleanly — no partial state.
    ```
 
 5. **Record current marketplace version** from `.claude-plugin/marketplace.json`
-   `metadata.version`. The cleanup commit later will tag the marketplace at
-   the next patch version.
+   `version` (the canonical top-level field; `metadata.version` is accepted only
+   for backward compatibility). The cleanup commit later will tag the
+   marketplace at the next patch version.
 
 ## Per-Plugin Subtree Split
 
@@ -147,6 +148,12 @@ preserves the release history the plugin carried inside the nested marketplace.
 ```bash
 cd "/tmp/$name"
 version=$(jq -r '.version' .claude-plugin/plugin.json)
+# `git add .` is correct HERE and only here: standardize_plugin.py --fix CREATES
+# new files (pyproject.toml, cliff.toml, .github/workflows/, git-hooks/,
+# scripts/publish.py), all untracked, so `git add -u` would stage nothing. The
+# tree is a fresh clone in /tmp holding nothing but the clone and those new
+# files, so there is no scratch to sweep. In a working repo, use `git add -u`
+# or name the paths (issue #186).
 git add .
 git commit -m "chore: add CPV canonical files"
 git tag "v$version" -m "Migrated from $original_marketplace at v$version"

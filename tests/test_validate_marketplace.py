@@ -1913,8 +1913,33 @@ class TestV2223MarketplaceMinorFixes:
             f"expected NIT for top-level description: {[(r.level, r.message) for r in report.results]}"
         )
 
-    def test_gap33_top_level_version_emits_nit(self, tmp_path):
-        """GAP-33: top-level `version` emits NIT favoring metadata.version."""
+    def test_gap33_top_level_version_emits_no_nit(self, tmp_path):
+        """GAP-33 was INVERTED: top-level `version` is the documented field.
+
+        This test asserted the opposite until 2026-09-06 — it demanded a NIT telling
+        authors to prefer `metadata.version`. plugin-marketplaces.md lists `version`
+        in the Optional fields table and calls the nested spelling a
+        backward-compatibility alias, so the NIT sent every author to "fix" a correct
+        manifest into the alias, and a marketplace that followed it stopped picking up
+        new versions. Reported by the emasoft-agents-discipline plugin's Claude.
+
+        Reported in conversation by the emasoft-agents-discipline plugin's Claude —
+        NOT filed as a GitHub issue, so do not go looking for one.
+
+        THE FIXTURE CHANGED TOO, which makes this a re-scoping and not only a sign
+        flip: the original carried `metadata: {description: x}` and no top-level
+        `description`, so the control below could not have fired under it. Primary
+        coverage of the corrected behaviour lives in `test_marketplace_version_key.py`
+        (6 tests, including the `metadata`-present combinations this fixture drops).
+        What survives HERE is the historical record at the name someone greps when
+        they meet `GAP-33` in a code comment — so the old direction cannot be restored
+        from a stale test title.
+
+        The assertion counts NITs rather than matching the deleted message: a
+        re-inversion under ANY new wording adds a second NIT and fails, and the block
+        going silent drops to zero and fails too. Matching the old string would only
+        have caught a re-inversion that reused it verbatim.
+        """
         from validate_marketplace import validate_marketplace
 
         mp = tmp_path / "marketplace.json"
@@ -1924,14 +1949,17 @@ class TestV2223MarketplaceMinorFixes:
                     "name": "test-mp",
                     "owner": {"name": "Lead"},
                     "version": "1.0.0",
+                    "description": "x",
                     "plugins": [],
-                    "metadata": {"description": "x"},
                 }
             )
         )
         report = validate_marketplace(tmp_path)
-        assert any(r.level == "NIT" and "Top-level 'version'" in r.message for r in report.results), (
-            f"expected NIT for top-level version: {[(r.level, r.message) for r in report.results]}"
+        nits = sorted(r.message for r in report.results if r.level == "NIT")
+        assert len(nits) == 1 and "Top-level 'description'" in nits[0], (
+            "expected exactly the GAP-32 description NIT and nothing about version — "
+            "a second NIT means the version check was re-inverted, zero means the "
+            f"optional-field block went silent: {nits}"
         )
 
     def test_gap28_channel_userconfig_unknown_type_is_minor(self, tmp_path):

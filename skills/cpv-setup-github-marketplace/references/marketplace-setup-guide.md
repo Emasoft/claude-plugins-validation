@@ -124,7 +124,7 @@ Reference: [Workflow Templates](workflow-templates.md)
 Copy these scripts into `scripts/`:
 
 - **sync_marketplace_versions.py** -- fetches each plugin's `plugin.json` via `gh api`, decodes base64, updates marketplace.json
-- **generate-readme.py** -- generates README.md with plugin table, architecture diagram, install instructions
+- **render_readme_table.py** -- regenerates the README's plugin-versions table from marketplace.json (`--check` for a CI gate)
 - **setup-hooks.py** -- installs git pre-push hooks that run cpv validation before pushing
 
 ```bash
@@ -134,7 +134,7 @@ chmod +x scripts/*.py
 Reference: [Script Templates](script-templates.md)
   - Placeholder Reference
   - sync_marketplace_versions.py
-  - generate-readme.py
+  - render_readme_table.py
   - setup-hooks.py
   - pre-push-hook.py
   - push-plugins.py
@@ -142,7 +142,7 @@ Reference: [Script Templates](script-templates.md)
 ### Step 3: Generate README, commit infrastructure
 
 ```bash
-uv run python scripts/generate-readme.py
+uv run python scripts/render_readme_table.py
 git add .github scripts && git commit -m "Install CI/CD infrastructure" && git push
 ```
 
@@ -220,7 +220,7 @@ fi
 ```bash
 git add .claude-plugin/marketplace.json README.md && git commit -m "Link ${#PLUGINS[@]} plugins: ${PLUGINS[*]}" && git push
 uv run python scripts/sync_marketplace_versions.py
-uv run python scripts/generate-readme.py
+uv run python scripts/render_readme_table.py
 git add .claude-plugin/marketplace.json README.md && git commit -m "Sync versions and regenerate README" && git push
 ```
 
@@ -251,7 +251,7 @@ for PLUGIN in "${PLUGINS_TO_REMOVE[@]}"; do
   [ -n "$SHA" ] && gh api --method DELETE "repos/$OWNER/$PLUGIN/contents/.github/workflows/notify-marketplace.yml" \
     -f message="Remove marketplace notification" -f sha="$SHA"
 done
-uv run python scripts/generate-readme.py
+uv run python scripts/render_readme_table.py
 git add .claude-plugin/marketplace.json README.md && git commit -m "Remove plugins: ${PLUGINS_TO_REMOVE[*]}" && git push
 ```
 
@@ -281,9 +281,9 @@ gh repo clone "$OWNER/$SOURCE" /tmp/source-mkt && cd /tmp/source-mkt
 for P in "${PLUGINS_TO_MIGRATE[@]}"; do
   jq --arg name "$P" '.plugins = [.plugins[] | select(.name != $name)]' .claude-plugin/marketplace.json > tmp.json && mv tmp.json .claude-plugin/marketplace.json
 done
-uv run python scripts/generate-readme.py && git add .claude-plugin/marketplace.json README.md && git commit -m "Migrate out: ${PLUGINS_TO_MIGRATE[*]}" && git push
+uv run python scripts/render_readme_table.py && git add .claude-plugin/marketplace.json README.md && git commit -m "Migrate out: ${PLUGINS_TO_MIGRATE[*]}" && git push
 # Update target: regenerate, push, validate both
-cd "$TARGET" && uv run python scripts/generate-readme.py
+cd "$TARGET" && uv run python scripts/render_readme_table.py
 git add .claude-plugin/marketplace.json README.md && git commit -m "Migrate in: ${PLUGINS_TO_MIGRATE[*]}" && git push
 uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace /tmp/source-mkt --verbose --report $MAIN_ROOT/reports/validate_marketplace/$(date +%Y%m%d_%H%M%S%z)-source.md
 uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace "$TARGET" --verbose --report $MAIN_ROOT/reports/validate_marketplace/$(date +%Y%m%d_%H%M%S%z)-target.md

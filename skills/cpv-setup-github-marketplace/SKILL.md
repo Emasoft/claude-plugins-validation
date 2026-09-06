@@ -64,7 +64,7 @@ PAT needs `repo`+`workflow`. Dispatch missing: confirm `notify-marketplace.yml` 
 - [Workflow Templates](references/workflow-templates.md)
   > Placeholder Reference · validate.yml (Marketplace CI) · update-submodules.yml (Dispatch Receiver) · notify-marketplace.yml.template (Plugin Side)
 - [Script Templates](references/script-templates.md)
-  > Placeholder Reference · sync_marketplace_versions.py · pre-commit-hook.py · pre-push-hook.py · setup-hooks.py · push-plugins.sh · generate-readme.py
+  > Placeholder Reference · sync_marketplace_versions.py · pre-commit-hook.py · pre-push-hook.py · setup-hooks.py · push-plugins.sh · render_readme_table.py
 - [README Template](references/readme-template.md)
   > Template Content · Placeholder Reference · Auto-Generation · Customization Guide
 - [Troubleshooting Guide](references/troubleshooting.md)
@@ -76,7 +76,7 @@ PAT needs `repo`+`workflow`. Dispatch missing: confirm `notify-marketplace.yml` 
 
 ## Compiling Templates
 
-Replace `<placeholder-for-...>` tokens; verify with grep. README: use generate-readme.py.
+Replace `<placeholder-for-...>` tokens; verify with grep. README plugin table: use render_readme_table.py (`--check` for CI).
 
 ## Token Optimization
 

@@ -245,7 +245,12 @@ git submodule update --remote --merge plugins/<!-- plugin-name -->
 python scripts/sync_marketplace_versions.py
 
 # Commit and push
-git add .
+# Issue #186 — stage TRACKED modifications only; never `git add .`/`-A`.
+# `-u` rather than named paths: `submodule update --remote --merge` leaves a
+# gitlink change at an arbitrary `plugins/<name>` path. It stages those and the
+# sync script's rewrites, and leaves untracked files alone. Adding a NEW plugin
+# is a different recipe (below) — name that path explicitly there.
+git add -u
 git commit -m "chore: update submodules"
 git push
 ```
@@ -281,6 +286,17 @@ git config -f .gitmodules --remove-section submodule.plugins/<!-- plugin-name --
 # Remove the submodule entry from .git/config
 git config -f .git/config --remove-section submodule.plugins/<!-- plugin-name -->
 
+# Stage the .gitmodules edit BEFORE `git rm --cached`, or the next line aborts:
+# `fatal: please stage your changes to .gitmodules or stash them to proceed`
+# (exit 128). Reproduced on a real submodule fixture — the recipe could not run
+# as written, with `git add .` or with `git add -u`.
+# PRECONDITION: this recipe is for a SUBMODULE marketplace. On a marketplace with
+# no submodules there is no `.gitmodules`, and a pasted block runs every line — so
+# you get TWO errors (`no such section` above, then `pathspec .gitmodules did not
+# match any files` here). That means you are in the wrong recipe, not that this
+# step is broken.
+git add .gitmodules
+
 # Remove the submodule directory
 git rm --cached plugins/<!-- plugin-name -->
 rm -rf plugins/<!-- plugin-name -->
@@ -290,7 +306,15 @@ rm -rf .git/modules/plugins/<!-- plugin-name -->
 python scripts/sync_marketplace_versions.py
 
 # Commit
-git add .
+# Issue #186 — `-u` stages tracked changes only. `git rm --cached` already staged
+# the gitlink deletion and `git add .gitmodules` already staged the manifest edit,
+# so what `-u` picks up here is the sync script's marketplace.json rewrite
+# (`rm -rf plugins/<name>` touches an already-untracked worktree path and needs no
+# staging). Never `git add .`/`-A` — it sweeps untracked files into a commit that
+# gets pushed. Verified on a real submodule fixture, including the
+# last-plugin-removed case where `.gitmodules` is left empty: `-u` leaves an
+# untracked scratch file untracked and the commit succeeds.
+git add -u
 git commit -m "chore: remove <!-- plugin-name --> plugin"
 git push
 ```

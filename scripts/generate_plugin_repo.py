@@ -7705,7 +7705,10 @@ Examples:
     if not args.dry_run:
         print(f"\n{BOLD}Next steps:{NC}")
         print(f"  cd {target}")
-        print("  git init && git add . && git commit -m 'Initial scaffold'  # add BY NAME once the tree has scratch")
+        print(
+            "  git init && git add . && git commit -m 'Initial scaffold'"
+            "  # safe right now: the tree holds only the files just generated"
+        )
         print(f"  uv venv --python {params.python_version} && source .venv/bin/activate")
         print("  uv pip install -e .")
         print("  uv run python scripts/setup-hooks.py")

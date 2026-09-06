@@ -95,7 +95,7 @@ uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py"
 
 ```bash
 # Regenerate README to include the new plugin in the plugin table
-uv run python scripts/generate-readme.py
+uv run python scripts/render_readme_table.py
 ```
 
 ### Step 7: Commit and Push
@@ -124,7 +124,7 @@ jq 'del(.plugins[] | select(.name == "PLUGIN-NAME"))' \
 
 ```bash
 # Regenerate the README to remove the plugin from the plugin table
-uv run python scripts/generate-readme.py
+uv run python scripts/render_readme_table.py
 ```
 
 ### Step 3: Delete the Notification Workflow from the Plugin Repo
@@ -449,8 +449,8 @@ The version field should match the version you set in Step 1.
 5. **Regenerate README on both marketplaces:**
 
    ```bash
-   cd /tmp/source-marketplace && uv run python scripts/generate-readme.py
-   cd /tmp/target-marketplace && uv run python scripts/generate-readme.py
+   cd /tmp/source-marketplace && uv run python scripts/render_readme_table.py
+   cd /tmp/target-marketplace && uv run python scripts/render_readme_table.py
    ```
 
 6. **Validate both marketplaces:**
@@ -564,7 +564,7 @@ done
 uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace /path/to/marketplace-repo --verbose
 
 # Regenerate README
-uv run python scripts/generate-readme.py
+uv run python scripts/render_readme_table.py
 
 # Commit marketplace changes
 git add .claude-plugin/marketplace.json README.md

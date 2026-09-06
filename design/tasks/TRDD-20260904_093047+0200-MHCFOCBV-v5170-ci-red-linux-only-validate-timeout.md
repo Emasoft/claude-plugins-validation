@@ -65,7 +65,7 @@ The Gate-14 finding at the bottom moved to its own card, TRDD-4VROKH40.
 
 ---
 
-# Investigation record
+## Investigation record
 
 Everything below is the evidence trail, kept in full. The STATE block above is
 what a resuming session needs.

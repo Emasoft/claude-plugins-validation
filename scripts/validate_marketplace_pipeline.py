@@ -996,7 +996,12 @@ def validate_marketplace_workflows(
         report.major(
             category,
             "Failed to parse update-submodules.yml - invalid YAML",
-            4.0 + 2.0 + 3.0,  # Points for remaining checks
+            # Checks 3 (4.0) + 4 (2.0) + 5 (3.0). Check 5b, the README-table advisory, is
+            # ALSO skipped on this branch but adds nothing to this figure because it is
+            # zero-weight by design — so the arithmetic stays correct as written. Skipping
+            # it here is deliberate: the workflow does not parse, so "add a render step to
+            # it" is not yet actionable, and the MAJOR above is the finding to fix first.
+            4.0 + 2.0 + 3.0,
             str(update_workflow_path),
             "Fix YAML syntax in workflow file",
         )
@@ -1068,6 +1073,40 @@ def validate_marketplace_workflows(
                 3.0,
                 str(update_workflow_path),
                 "Add step to run sync script or git submodule update",
+            )
+
+        # Check 5b: update-submodules.yml regenerates the README plugin table
+        # (MINOR — an old-pipeline repo skips scripts/render_readme_table.py, so
+        # the README plugin-versions table silently goes stale after every sync).
+        # MUST stay inside this else-branch: workflow_content is only bound here
+        # (assigned at Check 5 above). At function level it raised NameError on any
+        # marketplace whose update workflow is missing or has unparseable YAML —
+        # and every fixture in the unit test happened to supply a valid one, so the
+        # crash path was never executed. The missing-workflow case already earns a
+        # MAJOR of its own, so skipping this MINOR there loses no signal.
+        # ZERO-WEIGHT on purpose (0.0 points in BOTH branches). The generated README
+        # table is a CPV canon convention introduced in this release, not a rule of
+        # plugin-marketplaces.md — so it must not cost score or move exit_code(), which
+        # is computed from the weighted score alone (see exit_code, thresholds 90/70/60).
+        # Scoring it would invent a publish gate the spec does not have, and would
+        # retro-penalise every marketplace that was green before the canon existed.
+        # This is the WARN phase of CPV's established warn -> migrate -> block ladder
+        # (cf. RC-SHIP-BINARY-ONLY, v3.7.0 warn -> v3.14.0 opt-in block -> v5.0.0 universal).
+        if not re.search(r"render_readme_table\.py", workflow_content):
+            report.info(
+                category,
+                "update-submodules.yml does not regenerate the README plugin table "
+                "(no call to scripts/render_readme_table.py found) — the README plugin "
+                "table will go stale after every version sync. Add a step invoking "
+                "scripts/render_readme_table.py before the change-check, and stage README.md",
+                str(update_workflow_path),
+            )
+        else:
+            report.passed(
+                category,
+                "update-submodules.yml regenerates the README plugin table",
+                0.0,
+                str(update_workflow_path),
             )
 
     # Check 6: validate.yml exists for CI (3 pts, MINOR)
@@ -1487,6 +1526,38 @@ def validate_documentation(
             "Add Installation section with 'claude plugin marketplace add' commands",
         )
 
+    # Check 4: README.md carries the generated plugin-versions table markers
+    # (MINOR — an old-pipeline repo's README has no place for
+    # render_readme_table.py to write into, so the table can never appear
+    # even if the workflow is later fixed to call it).
+    has_table_markers = (
+        "<!-- PLUGIN-VERSIONS-START -->" in readme_content and "<!-- PLUGIN-VERSIONS-END -->" in readme_content
+    )
+    if has_table_markers:
+        # 0.0 points, matching the INFO branch below and the workflow-side check.
+        # add() sets points_earned = points_possible for PASSED, so a non-zero value here
+        # would ADD 2.0 to both numerator and denominator for a compliant marketplace while
+        # a non-compliant one contributes 0/0 — inflating the compliant score rather than
+        # penalising the non-compliant one. Zero on both branches keeps the check advisory
+        # in both directions, which is the point of the WARN phase.
+        report.passed(
+            category,
+            "README.md carries the PLUGIN-VERSIONS-START/END markers",
+            0.0,
+            str(readme_path),
+        )
+    else:
+        # ZERO-WEIGHT, same reasoning as the workflow-side table check above: this is a
+        # CPV canon convention, not a plugin-marketplaces.md requirement, so it is
+        # reported and never scored. See that comment for the full rationale.
+        report.info(
+            category,
+            "README.md is missing the <!-- PLUGIN-VERSIONS-START/END --> markers — add "
+            "<!-- PLUGIN-VERSIONS-START --> / <!-- PLUGIN-VERSIONS-END --> so "
+            "scripts/render_readme_table.py has a place to write the plugin table",
+            str(readme_path),
+        )
+
 
 # =============================================================================
 # Main Validation
@@ -1572,9 +1643,17 @@ def format_text_report(report: PipelineValidationReport, verbose: bool = False) 
     for name, cat in report.categories.items():
         # Filter results based on verbosity
         issues = [r for r in cat.results if r.level not in ("PASSED", "INFO")]
+        # INFO is a THIRD bucket, not a quieter issue: it carries 0.0/0.0 points, so it can
+        # never move the weighted score or exit_code() — but it MUST still be printed.
+        # Before this split, INFO was dropped here, omitted from the SUMMARY line, and
+        # --verbose only added PASSED, so every advisory (the workflow-hardening set, and
+        # the README-table canon checks) reached --json and nothing a human reads. An
+        # advisory nobody sees is worse than none: the check looks present while reporting
+        # nothing, which is exactly the failure a WARN phase is supposed to avoid.
+        advisories = [r for r in cat.results if r.level == "INFO"]
         passed = [r for r in cat.results if r.level == "PASSED"]
 
-        if not issues and not verbose:
+        if not issues and not advisories and not verbose:
             continue
 
         lines.append("-" * 70)
@@ -1585,6 +1664,14 @@ def format_text_report(report: PipelineValidationReport, verbose: bool = False) 
             for result in issues:
                 icon = {"CRITICAL": "[X]", "MAJOR": "[!]", "MINOR": "[~]"}.get(result.level, "[-]")
                 lines.append(f"  {icon} {result.level}: {result.message}")
+                if result.file_path:
+                    lines.append(f"      File: {result.file_path}")
+                if result.suggestion:
+                    lines.append(f"      Fix: {result.suggestion}")
+
+        if advisories:
+            for result in advisories:
+                lines.append(f"  [i] INFO: {result.message}")
                 if result.file_path:
                     lines.append(f"      File: {result.file_path}")
                 if result.suggestion:
@@ -1601,9 +1688,17 @@ def format_text_report(report: PipelineValidationReport, verbose: bool = False) 
     total_critical = sum(1 for cat in report.categories.values() for r in cat.results if r.level == "CRITICAL")
     total_major = sum(1 for cat in report.categories.values() for r in cat.results if r.level == "MAJOR")
     total_minor = sum(1 for cat in report.categories.values() for r in cat.results if r.level == "MINOR")
+    # Counted and named separately from the three blocking tiers, never folded into them:
+    # an advisory that inflated a severity count would read as a defect the score does not
+    # actually charge for. Omitting it entirely was the other failure — a whole bucket
+    # missing from the one line most readers stop at.
+    total_info = sum(1 for cat in report.categories.values() for r in cat.results if r.level == "INFO")
     total_passed = sum(1 for cat in report.categories.values() for r in cat.results if r.level == "PASSED")
 
-    lines.append(f"SUMMARY: {total_critical} CRITICAL, {total_major} MAJOR, {total_minor} MINOR, {total_passed} PASSED")
+    lines.append(
+        f"SUMMARY: {total_critical} CRITICAL, {total_major} MAJOR, {total_minor} MINOR, "
+        f"{total_info} INFO, {total_passed} PASSED"
+    )
     lines.append("=" * 70)
 
     return "\n".join(lines)

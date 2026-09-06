@@ -5426,8 +5426,12 @@ def validate_pipeline_readiness(plugin_root: Path, report: ValidationReport) -> 
             "No pre-push hook found (.githooks/pre-push or git-hooks/pre-push) — recommended for quality gates"
         )
 
-    # Publish script
-    if (plugin_root / "scripts" / "publish.py").exists():
+    # Publish script — also the gate for the two plugin<->marketplace README
+    # chain checks below: a plugin with no publish pipeline at all has no
+    # release step to wire a dispatch or a badge into, so nagging it about
+    # either would be noise (issue: "half-built chain" gate).
+    has_publish_pipeline = (plugin_root / "scripts" / "publish.py").exists()
+    if has_publish_pipeline:
         report.passed("scripts/publish.py found")
     else:
         report.warning("No scripts/publish.py found — recommended for release automation")
@@ -5445,13 +5449,81 @@ def validate_pipeline_readiness(plugin_root: Path, report: ValidationReport) -> 
     else:
         report.minor("No .github/workflows/*.yml found — recommended for CI/CD automation")
 
-    # Marketplace notification workflow
+    # Marketplace notification workflow (filename-existence — kept as-is,
+    # unchanged from the pre-existing check: a plausibly-named workflow file
+    # is a coarse but useful structural signal on its own).
     if workflows_dir.is_dir():
         notify_names = ["notify-marketplace.yml", "notify.yml", "marketplace-notify.yml"]
         if any((workflows_dir / n).exists() for n in notify_names):
             report.passed("Marketplace notification workflow found")
         else:
             report.warning("No notify-marketplace.yml workflow — plugin updates won't auto-notify marketplaces")
+
+    # Marketplace notification CONTENT verification (extends the check
+    # above): a filename match alone does not prove the workflow actually
+    # DISPATCHES — a stub or half-migrated `notify-marketplace.yml` with no
+    # `repository_dispatch` step is functionally identical to having no
+    # notify workflow at all, and the filename check above would pass it
+    # silently. Scoped to plugins with a publish pipeline (`has_publish_pipeline`):
+    # a plugin with no release automation at all has no release step to wire
+    # a dispatch into, so warning here would be pure noise.
+    #
+    # A plugin repo cannot see its marketplace's own configuration — a
+    # marketplace MAY instead poll plugin versions on a schedule/dispatch
+    # (see `sync_marketplace_versions.py`), in which case a missing notify
+    # dispatch is not necessarily a defect. So this is worded as a
+    # CAPABILITY GAP, never a claim that the marketplace README WILL go stale.
+    if has_publish_pipeline and workflows_dir.is_dir():
+        workflow_files = sorted(workflows_dir.glob("*.yml")) + sorted(workflows_dir.glob("*.yaml"))
+        dispatches_plugin_updated = False
+        for wf in workflow_files:
+            try:
+                text = wf.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if "plugin-updated" in text and re.search(r"repository[-_]dispatch|/dispatches\b", text):
+                dispatches_plugin_updated = True
+                break
+        if dispatches_plugin_updated:
+            report.passed("A workflow dispatches `plugin-updated` to notify the marketplace")
+        else:
+            report.warning(
+                "This plugin does not notify its marketplace on release "
+                "(no workflow performs a `plugin-updated` repository_dispatch) "
+                "— unless the marketplace polls on a schedule, its catalog "
+                "entry and README table will lag behind this plugin's "
+                "version. Add `.github/workflows/notify-marketplace.yml` with "
+                "a `repository_dispatch` step (`event-type: plugin-updated`, "
+                "e.g. via `peter-evans/repository-dispatch`) to close the gap."
+            )
+
+    # README version badge — the sibling half of the chain. publish.py's
+    # canon `stage_update_badges` step rewrites a `version-X.Y.Z-blue`
+    # shields.io badge on every release (see generate_plugin_repo.py's
+    # `gen_publish_py`, step 12); a README with no such badge means that step
+    # has nothing to update, so the plugin's own advertised version silently
+    # drifts from its actual released version. Only checked when the plugin
+    # HAS a publish pipeline, for the same reason as above.
+    if has_publish_pipeline:
+        readme_path = plugin_root / "README.md"
+        has_version_badge = False
+        if readme_path.exists():
+            try:
+                readme_text = readme_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                readme_text = ""
+            has_version_badge = bool(re.search(r"version-\d+\.\d+\.\d+-blue", readme_text))
+        if has_version_badge:
+            report.passed("README.md has a version badge publish.py can update")
+        else:
+            report.warning(
+                "README.md has no `version-X.Y.Z-blue` shields.io badge — "
+                "publish.py's badge-update step (step 12, `stage_update_badges`) "
+                "has nothing to rewrite on release, so the README's advertised "
+                "version will silently drift from the actual released version. "
+                "Add a badge such as "
+                "`![version](https://img.shields.io/badge/version-0.1.0-blue)`."
+            )
 
 
 # Regex matching `scripts/<name>.py` references in workflow / hook / template

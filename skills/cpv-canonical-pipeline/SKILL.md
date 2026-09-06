@@ -36,7 +36,7 @@ The pipeline comes in four PROFILES, auto-detected from repo shape (or set autho
 ### Layout C specifics
 
 Layout C (marketplace-in-plugin) needs a different release pipeline:
-- `publish.py` bumps THREE version slots atomically: `plugin.json::version`, `marketplace.json::metadata.version`, AND the self-entry's `version` in `marketplace.json::plugins[]`.
+- `publish.py` bumps `plugin.json::version` and the canonical self-entry `version` in `marketplace.json::plugins[]` atomically, plus `marketplace.json::metadata.version` when already present (accepted only for backward compatibility, per the live plugin-marketplaces spec — never the field to recommend bumping on its own).
 - `notify-marketplace.yml` is NOT installed (no separate marketplace repo).
 - A single tag `vX.Y.Z` covers both manifest changes.
 - `validate_marketplace.py --strict` runs alongside `validate_plugin.py --strict` in CI.
