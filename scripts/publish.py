@@ -640,6 +640,41 @@ def update_plugin_json(plugin_root: Path, new_version: str) -> tuple[bool, str]:
         return False, f"plugin.json error: {e}"
 
 
+# The CLAUDE.md inventory row that declares this plugin's version. Paired with the
+# anchor in tests/test_claude_md_inventory_pins.py, which asserts the row equals
+# plugin.json. Keeping the two in sync by hand is what drifted TWICE; bumping the row
+# here means the document and the manifest move in the same commit.
+_CLAUDE_MD_VERSION_ROW_RE = re.compile(r"^(\|\s*\*\*version\*\*\s*\|\s*`)([^`]+)(`)", re.MULTILINE)
+
+
+def update_claude_md_version_row(plugin_root: Path, new_version: str) -> tuple[bool, str]:
+    """Bump the CLAUDE.md inventory version row, if this plugin has one.
+
+    Deliberately NON-FATAL when absent: a CLAUDE.md inventory table is a CPV
+    convention, not a canonical-pipeline requirement, so a plugin without one must
+    still bump cleanly. A row that exists but no longer matches its anchor is also a
+    skip here rather than an abort — the inventory test asserts the same anchor and
+    fails LOUDLY with a message aimed at the row, which is the better place to learn
+    it. Only a genuine write failure is an error.
+    """
+    path = plugin_root / "CLAUDE.md"
+    if not path.exists():
+        return True, "CLAUDE.md: absent — skipped"
+    try:
+        content = path.read_text(encoding="utf-8")
+        m = _CLAUDE_MD_VERSION_ROW_RE.search(content)
+        if m is None:
+            return True, "CLAUDE.md: no version row — skipped"
+        old = m.group(2)
+        if old == new_version:
+            return True, f"CLAUDE.md: already {new_version}"
+        updated = content[: m.start()] + m.group(1) + new_version + m.group(3) + content[m.end() :]
+        path.write_text(updated, encoding="utf-8")
+        return True, f"CLAUDE.md: {old} → {new_version}"
+    except Exception as e:
+        return False, f"CLAUDE.md error: {e}"
+
+
 def _project_block(content: str) -> tuple[int, int] | None:
     """Char span of the ``[project]`` table body, or None if absent.
 
@@ -834,6 +869,7 @@ def do_bump(plugin_root: Path, new_version: str, dry_run: bool = False) -> bool:
     all_results: list[tuple[bool, str]] = []
     all_results.append(update_plugin_json(plugin_root, new_version))
     all_results.append(update_pyproject_toml(plugin_root, new_version))
+    all_results.append(update_claude_md_version_row(plugin_root, new_version))
     all_results.extend(update_python_versions(plugin_root, new_version))
 
     errors = 0
