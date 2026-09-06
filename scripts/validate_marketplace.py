@@ -4055,10 +4055,13 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
             report.results.extend(dependency_cascade_results)
 
     # Validate optional fields — description and version can be top-level or
-    # nested under metadata. v2.22.3 — GAP-32/33: top-level `description` and
-    # `version` are NOT documented in plugin-marketplaces.md:172-176 (only
-    # `metadata.description` and `metadata.version` are listed). Accept for
-    # backward compatibility but emit a NIT so authors prefer `metadata.*`.
+    # nested under metadata. v2.22.3 — GAP-32: top-level `description` is NOT
+    # documented in plugin-marketplaces.md (only `metadata.description` is
+    # listed there). Accept for backward compatibility but emit a NIT so
+    # authors prefer `metadata.description`.
+    # NOTE: `version` is the OPPOSITE case — top-level `version` IS the
+    # documented field and `metadata.version` is the backward-compatibility
+    # alias. See the comment above the `version` block below.
     has_description = False
     if "description" in data:
         has_description = True
@@ -4080,6 +4083,14 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
                 file=json_path,
             )
 
+    # Top-level 'version' IS the documented field (plugin-marketplaces.md,
+    # Optional fields table: "version | string | Marketplace manifest
+    # version"). 'metadata.version' is explicitly the backward-compatibility
+    # alias ("description and version are also accepted under metadata for
+    # backward compatibility"). Do NOT re-invert this: a prior revision of
+    # this check told authors to prefer 'metadata.version', which is exactly
+    # backwards per the spec — see the WARNING block below for the correct
+    # direction.
     if "version" in data:
         version = data["version"]
         if not isinstance(version, str):
@@ -4096,17 +4107,10 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
                 message=f"Marketplace version '{version}' should follow semver format",
                 file=json_path,
             )
-        else:
-            report.add_marketplace_result(
-                level="NIT",
-                category="manifest",
-                message=(
-                    "Top-level 'version' is not documented at plugin-marketplaces.md:172-176; prefer 'metadata.version'"
-                ),
-                file=json_path,
-            )
 
     # Validate metadata nested object (spec allows metadata.description, metadata.version, metadata.pluginRoot)
+    metadata_version: Any = None
+    has_metadata_version = False
     if "metadata" in data:
         metadata = data["metadata"]
         if not isinstance(metadata, dict):
@@ -4126,13 +4130,16 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
                         message="metadata.description must be a string",
                         file=json_path,
                     )
-            if "version" in metadata and not isinstance(metadata["version"], str):
-                report.add_marketplace_result(
-                    level="MINOR",
-                    category="manifest",
-                    message="metadata.version must be a string",
-                    file=json_path,
-                )
+            if "version" in metadata:
+                has_metadata_version = True
+                metadata_version = metadata["version"]
+                if not isinstance(metadata_version, str):
+                    report.add_marketplace_result(
+                        level="MINOR",
+                        category="manifest",
+                        message="metadata.version must be a string",
+                        file=json_path,
+                    )
             if "pluginRoot" in metadata and not isinstance(metadata["pluginRoot"], str):
                 report.add_marketplace_result(
                     level="MINOR",
@@ -4140,6 +4147,47 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
                     message="metadata.pluginRoot must be a string",
                     file=json_path,
                 )
+
+    # metadata.version is a backward-compat alias for top-level 'version'
+    # (plugin-marketplaces.md: "description and version are also accepted
+    # under metadata for backward compatibility") — so metadata.version alone
+    # is spec-conformant, NOT an error. It is only NIT-level (a migration
+    # nudge), never a WARNING, precisely because the manifest is valid as-is.
+    # A manifest carrying BOTH that DISAGREE is the real bug (a split source
+    # of truth silently ships the wrong version) and stays WARNING below.
+    has_top_level_version = "version" in data
+    if has_metadata_version and not has_top_level_version:
+        report.add_marketplace_result(
+            level="NIT",
+            category="manifest",
+            message=(
+                "'metadata.version' is set but there is no top-level 'version'. "
+                "'metadata.version' is only a backward-compatibility alias — the "
+                "canonical field is top-level 'version', and that is what "
+                "Claude Code users see updated on a release."
+            ),
+            file=json_path,
+            suggestion=f'Add "version": {metadata_version!r} at the top level of the manifest.',
+        )
+    elif (
+        has_metadata_version
+        and has_top_level_version
+        and isinstance(metadata_version, str)
+        and isinstance(data.get("version"), str)
+        and metadata_version != data["version"]
+    ):
+        report.add_marketplace_result(
+            level="WARNING",
+            category="manifest",
+            message=(
+                f"Top-level 'version' ({data['version']!r}) and "
+                f"'metadata.version' ({metadata_version!r}) disagree — "
+                "'metadata.version' is only a backward-compatibility alias "
+                "and top-level 'version' is canonical."
+            ),
+            file=json_path,
+            suggestion="Remove 'metadata.version' or make it match the top-level 'version'.",
+        )
 
     # Warn if marketplace has no description at all
     if not has_description:

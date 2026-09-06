@@ -7,7 +7,7 @@
 - [pre-push-hook.py](#pre-push-hookpy)
 - [setup-hooks.py](#setup-hookspy)
 - [push-plugins.sh](#push-pluginssh)
-- [generate-readme.py](#generate-readmepy)
+- [render_readme_table.py](#render_readme_tablepy)
 
 Ready-to-use scripts for managing a Claude Code plugin marketplace repository.
 Each script is based on production code from a production marketplace. Replace
@@ -15,7 +15,7 @@ all `<placeholder-for-...>` values with your actual configuration before use.
 
 ## Checklist
 
-- [ ] Pick the scripts you need (sync/pre-commit/pre-push/setup-hooks/push/generate-readme)
+- [ ] Pick the scripts you need (sync/pre-commit/pre-push/setup-hooks/push/render-readme-table)
 - [ ] Copy each into the marketplace repo's `scripts/` directory
 - [ ] Replace every `<placeholder-for-*>` — grep to confirm zero remain
 - [ ] `chmod +x` each script
@@ -1400,272 +1400,160 @@ echo "Done."
 
 ---
 
-## generate-readme.py
+## render_readme_table.py
 
-Generates the marketplace README.md from a template and marketplace.json data. Called by the `update-submodules.yml` workflow after syncing plugin versions.
+Regenerates the README's `## Plugin Versions` table directly from
+`.claude-plugin/marketplace.json`, between the canonical
+`<!-- PLUGIN-VERSIONS-START -->` / `<!-- PLUGIN-VERSIONS-END -->` markers (see
+[readme-template.md](readme-template.md)). marketplace.json is the single
+source of truth for both the versions AND which plugins are listed — the
+Update Versions workflow only ever touches marketplace.json, so nothing else
+would rewrite the README if this script didn't exist.
 
 ### Usage
 
 ```bash
-python scripts/generate-readme.py
-python scripts/generate-readme.py --template templates/README-marketplace.md --output README.md --owner my-org
+python3 scripts/render_readme_table.py            # rewrite README.md
+python3 scripts/render_readme_table.py --check    # exit 1 if it would change
 ```
+
+`--check` is a **CI gate**, not a preview: it makes no changes and exits
+non-zero the moment the rendered table would differ from what's on disk — see
+the "Verify README table is up to date" step in
+[workflow-templates.md](workflow-templates.md). Running it with no flags
+rewrites `README.md` in place.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | README already matches (or was rewritten) |
+| `1` | `--check` found drift, or an input was missing/invalid (no `.claude-plugin/marketplace.json`, no `README.md`, invalid JSON, empty `plugins` array, or the markers are missing from README.md) |
 
 ### Script
 
 ```python
 #!/usr/bin/env python3
-"""generate-readme.py - Generate marketplace README.md from template and marketplace.json.
+"""Regenerate the README plugin table from .claude-plugin/marketplace.json.
 
-Reads marketplace metadata from .claude-plugin/marketplace.json and a README
-template file, replaces all <placeholder-for-...> tokens with real values,
-builds the plugin table, and writes the final README.md.
+The table between the PLUGIN-VERSIONS markers is DERIVED data. Hand-maintaining
+it drifts silently: the Update Submodules workflow only touches marketplace.json,
+so nothing else ever rewrote the README. This script makes marketplace.json the
+single source of truth for both the versions AND which plugins are listed.
 
 Usage:
-    python scripts/generate-readme.py
-    python scripts/generate-readme.py --template templates/README-marketplace.md --output README.md --owner my-org
+    python3 scripts/render_readme_table.py            # rewrite README.md
+    python3 scripts/render_readme_table.py --check    # exit 1 if it would change
+
+Exit codes:
+    0 - README already matches (or was rewritten)
+    1 - --check found drift, or an input was missing/invalid
 """
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
-
-def load_marketplace_json(repo_root: Path) -> dict:
-    """Load and return marketplace.json from the repo root."""
-    mp_path = repo_root / ".claude-plugin" / "marketplace.json"
-    if not mp_path.is_file():
-        print(f"ERROR: marketplace.json not found at {mp_path}", file=sys.stderr)
-        sys.exit(1)
-    with open(mp_path, encoding="utf-8") as f:
-        return json.load(f)
+START = "<!-- PLUGIN-VERSIONS-START -->"
+END = "<!-- PLUGIN-VERSIONS-END -->"
 
 
-def detect_license(repo_root: Path) -> tuple[str, str]:
-    """Detect license type and full text from LICENSE file.
+def cell(text: str) -> str:
+    """Escape a value so it cannot break out of its markdown table cell.
 
-    Returns (license_type, license_text). Falls back to 'MIT' / '' if
-    the LICENSE file is missing.
+    A literal `|` in a description would silently add a column and shift every
+    later cell, so it is escaped rather than trusted. Newlines collapse for the
+    same reason.
     """
-    license_path = repo_root / "LICENSE"
-    if not license_path.is_file():
-        return "MIT", ""
-
-    text = license_path.read_text(encoding="utf-8")
-    first_line = text.strip().splitlines()[0] if text.strip() else ""
-
-    # Simple heuristic: look for common license keywords in the first line
-    first_lower = first_line.lower()
-    if "mit" in first_lower:
-        license_type = "MIT"
-    elif "apache" in first_lower:
-        license_type = "Apache-2.0"
-    elif "gpl" in first_lower:
-        license_type = "GPL"
-    elif "bsd" in first_lower:
-        license_type = "BSD"
-    elif "isc" in first_lower:
-        license_type = "ISC"
-    else:
-        license_type = first_line[:40] if first_line else "Unknown"
-
-    return license_type, text
+    return str(text).replace("|", "\\|").replace("\n", " ").strip()
 
 
-def _plugin_author(plugin: dict) -> str:
-    """Normalize a plugin 'author' (str or {'name': ...} dict) to a display string."""
-    author = plugin.get("author", "")
-    if isinstance(author, dict):
-        return author.get("name", "")
-    return str(author)
+def repo_url(plugin: dict) -> str | None:
+    """Prefer the explicit repository URL; fall back to the github source."""
+    url = plugin.get("repository")
+    if isinstance(url, str) and url.startswith("http"):
+        return url
+    src = plugin.get("source")
+    if isinstance(src, dict) and src.get("source") == "github" and src.get("repo"):
+        return f"https://github.com/{src['repo']}"
+    return None
 
 
-def _plugin_repo_link(plugin: dict) -> str:
-    """Build the Repository cell as a markdown link.
-
-    A plugin's location lives in 'repository' (a URL string) or, more commonly,
-    in 'source' — which is either a path string ('./x'), a GitHub object
-    ({'source': 'github', 'repo': 'owner/name'}), or a URL object
-    ({'source': 'url', 'url': '...'}). Return a '[text](url)' link when a URL
-    is available, otherwise the bare source text, otherwise an empty cell.
-    """
-    repository = plugin.get("repository", "")
-    if isinstance(repository, str) and repository:
-        return f"[Link]({repository})"
-
-    source = plugin.get("source", "")
-    if isinstance(source, dict):
-        repo = source.get("repo", "")
-        if source.get("source") == "github" and repo:
-            return f"[{repo}](https://github.com/{repo})"
-        url = source.get("url", "")
-        if url:
-            return f"[Link]({url})"
-    elif isinstance(source, str) and source:
-        return source
-    return ""
-
-
-def build_plugin_table_rows(plugins: list[dict]) -> str:
-    """Build markdown table rows from the plugins array.
-
-    Each row matches the template header column order:
-    | Name | Description | Version | Author | Repository |
-    """
-    rows: list[str] = []
-    for plugin in plugins:
-        name = plugin.get("name", "unknown")
-        description = plugin.get("description", "")
-        version = plugin.get("version", "0.0.0")
-        author = _plugin_author(plugin)
-        repo_link = _plugin_repo_link(plugin)
-        rows.append(f"| {name} | {description} | {version} | {author} | {repo_link} |")
-    return "\n".join(rows)
-
-
-def replace_placeholders(
-    template: str,
-    marketplace: dict,
-    owner: str,
-    repo_name: str,
-    license_type: str,
-    license_text: str,
-) -> str:
-    """Replace all <placeholder-for-...> tokens in the template."""
-    plugins = marketplace.get("plugins", [])
-
-    replacements = {
-        "<placeholder-for-marketplace-name>": marketplace.get("name", ""),
-        "<placeholder-for-marketplace-description>": marketplace.get("description", ""),
-        "<placeholder-for-marketplace-repo-name>": repo_name,
-        "<placeholder-for-github-repo-owner>": owner,
-        "<placeholder-for-plugin-count>": str(len(plugins)),
-        "<placeholder-for-license-type>": license_type,
-        "<placeholder-for-license-text>": license_text,
-    }
-
-    result = template
-    for placeholder, value in replacements.items():
-        result = result.replace(placeholder, value)
-
-    return result
-
-
-def insert_plugin_table(content: str, plugins: list[dict]) -> str:
-    """Insert plugin table rows between sentinel comments.
-
-    Looks for <!-- PLUGINS_TABLE_START --> and <!-- PLUGINS_TABLE_END -->
-    and replaces everything between them with the generated rows.
-    """
-    start_sentinel = "<!-- PLUGINS_TABLE_START -->"
-    end_sentinel = "<!-- PLUGINS_TABLE_END -->"
-
-    pattern = re.compile(
-        re.escape(start_sentinel) + r".*?" + re.escape(end_sentinel),
-        re.DOTALL,
-    )
-
-    rows = build_plugin_table_rows(plugins)
-    replacement = f"{start_sentinel}\n{rows}\n{end_sentinel}"
-
-    if pattern.search(content):
-        return pattern.sub(replacement, content)
-
-    # If sentinels not found, append the table at the end
-    print("WARNING: Plugin table sentinels not found in template", file=sys.stderr)
-    return content + f"\n\n{replacement}\n"
+def render(plugins: list[dict]) -> str:
+    lines = [
+        START,
+        "## Plugin Versions",
+        "",
+        "<!-- GENERATED by scripts/render_readme_table.py from .claude-plugin/marketplace.json — do not edit by hand. -->",
+        "",
+        "| Plugin | Version | Category | Description |",
+        "|--------|---------|----------|-------------|",
+    ]
+    for p in sorted(plugins, key=lambda x: x.get("name", "")):
+        name = cell(p.get("name", "?"))
+        url = repo_url(p)
+        label = f"[{name}]({url})" if url else name
+        # "developer-tools" is the manifest's slug form; the table shows prose.
+        category = cell(p.get("category", "")).replace("-", " ").replace("_", " ").title()
+        lines.append(
+            f"| {label} | {cell(p.get('version', '?'))} | {category} | {cell(p.get('description', ''))} |"
+        )
+    # No generation DATE in the rendered block. The reference implementation stamped
+    # date.today() here, which makes --check compare a value that changes every midnight:
+    # a repo whose README was rendered yesterday fails the CI gate today on an unchanged
+    # manifest. The count is derived from the manifest and is stable; git already records
+    # when the table last changed.
+    lines += ["", f"*{len(plugins)} plugins*", "", END]
+    return "\n".join(lines)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Generate marketplace README.md from template and marketplace.json",
-    )
-    parser.add_argument(
-        "--template",
-        default="templates/README-marketplace.md",
-        help="Path to the README template (default: templates/README-marketplace.md)",
-    )
-    parser.add_argument(
-        "--output",
-        default="README.md",
-        help="Output file path (default: README.md)",
-    )
-    parser.add_argument(
-        "--owner",
-        default=None,
-        help="GitHub repo owner (default: from marketplace.json author.name)",
-    )
-    parser.add_argument(
-        "--repo-name",
-        default=None,
-        help="GitHub repo name (default: from marketplace.json name, kebab-cased)",
-    )
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
+    ap.add_argument("--check", action="store_true", help="exit 1 on drift instead of rewriting")
+    args = ap.parse_args()
 
-    args = parser.parse_args()
+    mj_path = args.root / ".claude-plugin" / "marketplace.json"
+    readme_path = args.root / "README.md"
+    for p in (mj_path, readme_path):
+        if not p.is_file():
+            print(f"error: missing {p}", file=sys.stderr)
+            return 1
 
-    # Determine repo root (assume script lives in scripts/)
-    script_dir = Path(__file__).resolve().parent
-    repo_root = script_dir.parent
-
-    # Load marketplace.json
-    marketplace = load_marketplace_json(repo_root)
-
-    # Determine owner
-    owner = args.owner
-    if not owner:
-        author = marketplace.get("author", {})
-        if isinstance(author, dict):
-            owner = author.get("name", "")
-        elif isinstance(author, str):
-            owner = author
-        else:
-            owner = ""
-    if not owner:
-        print("ERROR: Could not determine owner. Use --owner flag.", file=sys.stderr)
+    try:
+        plugins = json.loads(mj_path.read_text(encoding="utf-8")).get("plugins", [])
+    except json.JSONDecodeError as err:
+        print(f"error: {mj_path} is not valid JSON: {err}", file=sys.stderr)
+        return 1
+    if not plugins:
+        # Refuse to blank the table on an empty or unexpected marketplace file:
+        # a rendering bug must not look like "the marketplace has no plugins".
+        print(f"error: no plugins in {mj_path}", file=sys.stderr)
         return 1
 
-    # Determine repo name
-    repo_name = args.repo_name
-    if not repo_name:
-        mp_name = marketplace.get("name", "")
-        repo_name = mp_name.lower().replace(" ", "-").replace("_", "-")
-
-    # Detect license
-    license_type, license_text = detect_license(repo_root)
-
-    # Load template
-    template_path = repo_root / args.template
-    if not template_path.is_file():
-        print(f"ERROR: Template not found at {template_path}", file=sys.stderr)
+    text = readme_path.read_text(encoding="utf-8")
+    if START not in text or END not in text:
+        print(f"error: {readme_path} has no {START} / {END} markers", file=sys.stderr)
         return 1
-    template_content = template_path.read_text(encoding="utf-8")
 
-    # Replace placeholders
-    result = replace_placeholders(
-        template_content,
-        marketplace,
-        owner,
-        repo_name,
-        license_type,
-        license_text,
-    )
+    head, rest = text.split(START, 1)
+    _, tail = rest.split(END, 1)
+    updated = head + render(plugins) + tail
 
-    # Insert plugin table
-    plugins = marketplace.get("plugins", [])
-    result = insert_plugin_table(result, plugins)
-
-    # Write output
-    output_path = repo_root / args.output
-    output_path.write_text(result, encoding="utf-8")
-    print(f"Generated {output_path}")
-
+    if updated == text:
+        print(f"README table already current ({len(plugins)} plugins)")
+        return 0
+    if args.check:
+        print("README table is STALE — run scripts/render_readme_table.py", file=sys.stderr)
+        return 1
+    readme_path.write_text(updated, encoding="utf-8")
+    print(f"README table regenerated ({len(plugins)} plugins)")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
 ```
 
 ---

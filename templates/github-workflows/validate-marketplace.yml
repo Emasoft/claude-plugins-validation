@@ -120,3 +120,13 @@ jobs:
           else
             echo "No scripts/ directory to lint"
           fi
+
+      - name: README table matches marketplace.json
+        # Makes --check a real gate rather than an unused flag: if anyone hand-edits
+        # the generated block, or a manifest change lands without a regenerate, CI
+        # fails here instead of the drift going unnoticed for months.
+        run: |
+          python3 scripts/render_readme_table.py --check || {
+            echo "::error::README table is out of date — run: python3 scripts/render_readme_table.py && git add README.md"
+            exit 1
+          }

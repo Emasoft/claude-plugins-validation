@@ -28,7 +28,7 @@ import argparse
 import shutil
 import sys
 from pathlib import Path
-from typing import TypedDict
+from typing import NamedTuple, TypedDict
 
 
 class PluginWorkflowStatus(TypedDict):
@@ -54,16 +54,15 @@ class WorkflowStatusDict(TypedDict):
     path: str
 
 
-class WorkflowsDict(TypedDict):
-    """Type for workflows section in FullStatus."""
-
-    update_submodules: WorkflowStatusDict
-
-
 class ScriptsDict(TypedDict):
-    """Type for scripts section in FullStatus."""
+    """Type for scripts section in FullStatus.
 
-    sync_versions: WorkflowStatusDict
+    Only the REFERENCE template lives here. Every REQUIRED template is reported
+    under `FullStatus["required"]`, keyed by its own destination path, so the
+    readout is derived from REQUIRED_TEMPLATES and there is no second structure
+    to keep in step.
+    """
+
     notify_template: WorkflowStatusDict
 
 
@@ -89,11 +88,50 @@ class FullStatus(TypedDict):
 
     marketplace_dir: str
     is_valid_marketplace: bool
-    workflows: WorkflowsDict
+    # Keyed by each REQUIRED_TEMPLATES destination path. A dict rather than one
+    # named field per template on purpose: a named field needs a matching entry
+    # in the status literal AND a mapping from template to field, and it was
+    # exactly that hand-maintained mapping that let render_readme_table.py become
+    # a required template the --status readout did not know existed.
+    required: dict[str, WorkflowStatusDict]
     scripts: ScriptsDict
     readme: ReadmeDict
     plugins: PluginsDict
 
+
+# The REQUIRED templates, as (source path under templates/, destination path
+# under the marketplace root, make-executable). A missing one leaves the setup
+# INCOMPLETE and `setup_marketplace_automation` returns False.
+#
+# This tuple is the SINGLE SOURCE OF TRUTH: the copy loop reads it, and
+# tests/test_uncovered_scripts.py imports it to build the fixture for the
+# "a missing REFERENCE template must not fail the setup" test. Before it
+# existed, that fixture hardcoded its own list, so adding a third required
+# template (render_readme_table.py) made the test fail for a reason that had
+# nothing to do with its subject. Add a required template HERE and nothing
+# has to be kept in step by hand.
+#
+# notify-marketplace.yml is deliberately NOT here — it is a REFERENCE copy that
+# warns and does not fail the setup.
+class RequiredTemplate(NamedTuple):
+    """One required template: where it comes from, where it lands, is it executable.
+
+    A NamedTuple rather than a bare 3-tuple because `src` and `dst` are IDENTICAL
+    strings for two of the three rows, so transposing those columns is a silent
+    no-op there and only misbehaves on the workflow row — the one a reader skims
+    as obviously-the-same. Names make the transposition impossible to write.
+    """
+
+    src: str
+    dst: str
+    executable: bool
+
+
+REQUIRED_TEMPLATES: tuple[RequiredTemplate, ...] = (
+    RequiredTemplate("github-workflows/update-submodules.yml", ".github/workflows/update-submodules.yml", False),
+    RequiredTemplate("scripts/sync_marketplace_versions.py", "scripts/sync_marketplace_versions.py", True),
+    RequiredTemplate("scripts/render_readme_table.py", "scripts/render_readme_table.py", True),
+)
 
 def get_template_dir() -> Path:
     """Get the templates directory."""
@@ -443,11 +481,8 @@ def get_full_status(
     status: FullStatus = {
         "marketplace_dir": str(marketplace_dir),
         "is_valid_marketplace": False,
-        "workflows": {
-            "update_submodules": {"exists": False, "path": ""},
-        },
+        "required": {},
         "scripts": {
-            "sync_versions": {"exists": False, "path": ""},
             "notify_template": {"exists": False, "path": ""},
         },
         "readme": {
@@ -474,15 +509,11 @@ def get_full_status(
             print(f"Error: Not a valid marketplace directory: {marketplace_dir}")
         return status
 
-    # Check workflows
-    workflow_path = marketplace_dir / ".github" / "workflows" / "update-submodules.yml"
-    status["workflows"]["update_submodules"]["exists"] = workflow_path.exists()
-    status["workflows"]["update_submodules"]["path"] = str(workflow_path)
-
-    # Check scripts
-    sync_script = marketplace_dir / "scripts" / "sync_marketplace_versions.py"
-    status["scripts"]["sync_versions"]["exists"] = sync_script.exists()
-    status["scripts"]["sync_versions"]["path"] = str(sync_script)
+    # Check every REQUIRED template, driven by the same tuple the setup path uses,
+    # so the readout can never report complete while a required file is absent.
+    for template in REQUIRED_TEMPLATES:
+        path = marketplace_dir / template.dst
+        status["required"][template.dst] = {"exists": path.exists(), "path": str(path)}
 
     notify_template = marketplace_dir / "scripts" / "notify-marketplace.yml.template"
     status["scripts"]["notify_template"]["exists"] = notify_template.exists()
@@ -519,11 +550,11 @@ def get_full_status(
         print(f"Valid: {'Yes' if status['is_valid_marketplace'] else 'No'}")
 
         print("\n--- Marketplace Components ---")
-        wf_status = "[OK]" if status["workflows"]["update_submodules"]["exists"] else "[MISSING]"
-        print(f"  {wf_status} .github/workflows/update-submodules.yml")
-
-        sc_status = "[OK]" if status["scripts"]["sync_versions"]["exists"] else "[MISSING]"
-        print(f"  {sc_status} scripts/sync_marketplace_versions.py")
+        for template in REQUIRED_TEMPLATES:
+            rq_status = "[OK]" if status["required"][template.dst]["exists"] else "[MISSING]"
+            # Print the tuple's own string, never str(the Path): a Path renders with
+            # backslashes on Windows and this line would silently change platform.
+            print(f"  {rq_status} {template.dst}")
 
         nt_status = "[OK]" if status["scripts"]["notify_template"]["exists"] else "[MISSING]"
         print(f"  {nt_status} scripts/notify-marketplace.yml.template")
@@ -583,47 +614,43 @@ def setup_marketplace_automation(
     if not dry_run:
         workflows_dir.mkdir(parents=True, exist_ok=True)
 
-    # 2. Copy update-submodules.yml workflow
-    src_workflow = template_dir / "github-workflows" / "update-submodules.yml"
-    dst_workflow = workflows_dir / "update-submodules.yml"
-
-    # Track whether every REQUIRED template was found+copied. A missing required
-    # template means the setup is INCOMPLETE — we must NOT report success.
-    # (audit MAJOR publish #5)
-    setup_ok = True
-
-    if src_workflow.exists():
-        if verbose:
-            status = "[EXISTS]" if dst_workflow.exists() else "[CREATE]"
-            print(f"  {status} .github/workflows/update-submodules.yml")
-        if not dry_run:
-            shutil.copy2(src_workflow, dst_workflow)
-    else:
-        print("  [ERROR] update-submodules.yml template not found — setup incomplete", file=sys.stderr)
-        setup_ok = False
-
-    # 3. Set up scripts directory
+    # 2. Set up scripts directory
     scripts_dir = marketplace_dir / "scripts"
     if not dry_run:
         scripts_dir.mkdir(parents=True, exist_ok=True)
 
-    # 4. Copy sync_marketplace_versions.py script
-    src_script = template_dir / "scripts" / "sync_marketplace_versions.py"
-    dst_script = scripts_dir / "sync_marketplace_versions.py"
+    # 3. Copy every REQUIRED template, driven by the REQUIRED_TEMPLATES SSOT.
+    # Track whether each was found+copied. A missing required template means the
+    # setup is INCOMPLETE — we must NOT report success. (audit MAJOR publish #5)
+    setup_ok = True
 
-    if src_script.exists():
-        if verbose:
-            status = "[EXISTS]" if dst_script.exists() else "[CREATE]"
-            print(f"  {status} scripts/sync_marketplace_versions.py")
-        if not dry_run:
-            shutil.copy2(src_script, dst_script)
-            # Make executable
-            dst_script.chmod(dst_script.stat().st_mode | 0o111)
-    else:
-        print("  [ERROR] sync_marketplace_versions.py template not found — setup incomplete", file=sys.stderr)
-        setup_ok = False
+    for template in REQUIRED_TEMPLATES:
+        src = template_dir / template.src
+        dst = marketplace_dir / template.dst
+        if src.exists():
+            if verbose:
+                status = "[EXISTS]" if dst.exists() else "[CREATE]"
+                # Print the tuple's own string, never str(dst) — a Path renders with
+                # backslashes on Windows and this line would change platform silently.
+                print(f"  {status} {template.dst}")
+            if not dry_run:
+                # Not redundant with the workflows_dir/scripts_dir mkdirs above: those
+                # are flat and unconditional (so a missing template still leaves the
+                # directory behind, as before this refactor), while this one is what
+                # lets a destination NEST — "scripts/lib/helper.py" copies instead of
+                # raising FileNotFoundError. `exist_ok=True` makes the overlap free.
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                if template.executable:
+                    dst.chmod(dst.stat().st_mode | 0o111)
+        else:
+            print(
+                f"  [ERROR] {Path(template.src).name} template not found — setup incomplete",
+                file=sys.stderr,
+            )
+            setup_ok = False
 
-    # 5. Copy notify-marketplace.yml template (for reference)
+    # 4. Copy notify-marketplace.yml template (for reference)
     src_notify = template_dir / "github-workflows" / "notify-marketplace.yml"
     dst_notify = scripts_dir / "notify-marketplace.yml.template"
 

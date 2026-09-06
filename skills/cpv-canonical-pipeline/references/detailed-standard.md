@@ -141,12 +141,37 @@ Marketplaces follow the **hub-only architecture**:
 | File | Required | Purpose |
 |------|----------|---------|
 | `.claude-plugin/marketplace.json` | YES | Plugin registry (GitHub source pointers only) |
-| `README.md` | YES | Auto-generated plugin catalog |
-| `scripts/update_catalog.py` | YES | Regenerate README from marketplace.json |
-| `.github/workflows/validate.yml` | YES | Validate marketplace on push/PR |
-| `.github/workflows/update-catalog.yml` | YES | Auto-update README when marketplace.json changes |
+| `README.md` | YES | Auto-generated plugin catalog, wrapped in `<!-- PLUGIN-VERSIONS-START -->` / `<!-- PLUGIN-VERSIONS-END -->` markers |
+| `scripts/render_readme_table.py` | YES | Regenerate the README plugin table from `marketplace.json`; also runs with `--check` as a validate-time gate |
+| `.github/workflows/validate.yml` | YES | Validate marketplace on push/PR; runs `render_readme_table.py --check` so a stale table fails CI |
+| `.github/workflows/update-versions.yml` | YES | Bumps plugin versions, runs `render_readme_table.py` to regenerate the README table BEFORE the change-check, and stages both files in one commit |
 | `.githooks/pre-push` | YES | Quality gate |
 | `cliff.toml` | YES | Changelog configuration |
+
+### README plugin-table contract
+
+The README's plugin table lives between `<!-- PLUGIN-VERSIONS-START -->` and
+`<!-- PLUGIN-VERSIONS-END -->` HTML-comment markers. `scripts/render_readme_table.py`
+reads `marketplace.json` and rewrites only the content between those markers — it never
+touches the rest of the README. Two call sites keep it from drifting:
+
+1. **Update-Versions workflow** runs the renderer BEFORE its change-check step, then
+   stages `README.md` alongside `marketplace.json` in the same commit — a README-only
+   diff (no manifest change) still triggers a commit.
+2. **Validate workflow** runs `render_readme_table.py --check` (exits non-zero if the
+   rendered table would differ from what's committed) so a hand-edited or stale table
+   fails CI rather than silently drifting.
+
+CPV never shipped the older `PLUGINS_TABLE_*` marker spelling; `PLUGIN-VERSIONS-*` is
+the current canonical form. A marketplace still carrying the older markers needs only a
+marker rename to adopt this contract — the renderer's logic is unchanged either way.
+
+**Manifest version field:** the canonical marketplace-level version slot is the
+top-level `version` field in `marketplace.json` (and, per plugin entry, the top-level
+`plugins[N].version`). `metadata.version` is accepted only for backward compatibility —
+never recommend it as the field to bump or read from; a `metadata.version` present
+without a top-level `version` is a NIT (deprecated-but-valid), and only a
+disagreement between the two is a WARNING.
 
 ## Language-Specific Additions
 

@@ -40,7 +40,8 @@ all `<placeholder-for-...>` values with your actual configuration before committ
 
 CI workflow for marketplace repositories. Runs on every push and pull request
 to the default branch. Validates marketplace structure, plugin entries
-(required fields, valid sources), and lints helper scripts.
+(required fields, valid sources), lints helper scripts, and gates on the
+README plugin table being in sync with `marketplace.json` (`render_readme_table.py --check`).
 
 **Install location:** `.github/workflows/validate.yml`
 
@@ -145,6 +146,11 @@ jobs:
           else
             echo "No scripts/ directory to lint"
           fi
+
+      - name: Verify README table is up to date
+        run: |
+          echo "=== Checking README plugin table against marketplace.json ==="
+          python3 scripts/render_readme_table.py --check
 ```
 
 ---
@@ -164,8 +170,9 @@ multiple plugins update simultaneously.
 1. Receives `repository_dispatch` with `plugin` name (or manual `workflow_dispatch`).
 2. Uses `gh api` to fetch `.claude-plugin/plugin.json` from each plugin repo.
 3. Updates the version in `marketplace.json`.
-4. Commits and pushes via `MARKETPLACE_PAT` (to bypass branch protection).
-5. Retries push with `pull --rebase` on concurrent update conflicts.
+4. Regenerates the README's plugin-versions table via `scripts/render_readme_table.py` (see [readme-template.md](readme-template.md)), so `marketplace.json` and `README.md` never drift apart.
+5. Commits and pushes **both** `marketplace.json` and `README.md` via `MARKETPLACE_PAT` (to bypass branch protection).
+6. Retries push with `pull --rebase` on concurrent update conflicts.
 
 ### Template
 
@@ -317,6 +324,10 @@ jobs:
             fi
           done
 
+      - name: Regenerate README plugin table
+        run: |
+          python3 scripts/render_readme_table.py
+
       - name: Check for changes
         id: changes
         run: |
@@ -332,7 +343,7 @@ jobs:
       - name: Commit and push
         if: steps.changes.outputs.has_changes == 'true'
         run: |
-          git add .claude-plugin/marketplace.json
+          git add .claude-plugin/marketplace.json README.md
 
           # Build commit message
           PLUGIN="${{ github.event.client_payload.plugin || inputs.plugin || 'all' }}"

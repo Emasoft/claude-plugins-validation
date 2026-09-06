@@ -1442,7 +1442,10 @@ jobs:
       - name: Update submodules
         run: |
           git submodule update --remote --merge
-          git add .
+          # `-u` (tracked only), never `git add .`/`-A` — issue #186. It stages the
+          # updated gitlinks at their arbitrary `plugins/<name>` paths without
+          # sweeping untracked files into a commit this job pushes.
+          git add -u
           if git diff --cached --quiet; then
             echo "No changes"
           else
@@ -1802,6 +1805,43 @@ Or use a standalone Python script file instead of inline Python.
 
 ---
 
+### 5.18 Update workflow does not regenerate the README plugin table
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_marketplace_pipeline.py` |
+| **Severity** | INFO — advisory, zero-weight: it never moves the pipeline score, the grade, or the exit code, and never blocks a publish |
+| **Message** | `update-submodules.yml does not regenerate the README plugin table (no call to scripts/render_readme_table.py found)` |
+| **Category** | `marketplace_workflows` |
+| **Suggestion** | Add a `scripts/render_readme_table.py` step to the update-versions workflow, run BEFORE the change-check, and stage `README.md` |
+
+**Root Cause:** the marketplace's Update-Versions workflow bumps `marketplace.json` but never re-renders the README's plugin table, so the table drifts stale (wrong versions, missing/removed plugins) the moment a plugin updates.
+
+**Fix:** ship `scripts/render_readme_table.py` (reads `marketplace.json`, rewrites the block between `<!-- PLUGIN-VERSIONS-START -->` / `<!-- PLUGIN-VERSIONS-END -->` in `README.md`) and call it from the Update-Versions workflow:
+
+```yaml
+- name: Regenerate README plugin table
+  run: python3 scripts/render_readme_table.py
+- name: Check for changes
+  id: changes
+  run: |
+    # `-u` (tracked only), never `git add -A`/`.` — issue #186: a bare add sweeps
+    # untracked files into a commit that gets pushed. `-u` rather than named paths
+    # because an Update-Versions workflow typically also runs
+    # `git submodule update --remote --merge`, which leaves a GITLINK change at an
+    # arbitrary `plugins/<name>` path that naming `marketplace.json README.md` would
+    # silently drop. `-u` stages those gitlinks AND the renderer's rewrites, and
+    # leaves untracked files untracked.
+    # BOUNDARY: `-u` stages only TRACKED paths, so a job that CREATES a file or ADDS
+    # a new submodule must name that path explicitly — never reach back for `git add .`.
+    git add -u
+    git diff --cached --quiet || echo "changed=true" >> "$GITHUB_OUTPUT"
+```
+
+Run the renderer **before** the change-check step so a README-only diff (no `marketplace.json` change) still triggers a commit, and stage `README.md` alongside `marketplace.json`.
+
+---
+
 ## 6. Version Sync Issues
 
 These errors come from `validate_marketplace_structure()` (pipeline) when checking version consistency.
@@ -2122,6 +2162,32 @@ graph LR
 **Root Cause:** The README lacks both an installation heading and any mention of `claude plugin`, `marketplace add`, or `install` keywords.
 
 **Fix:** Add an Installation section with the actual commands users need.
+
+---
+
+### 8.10 README lacks PLUGIN-VERSIONS markers
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_marketplace_pipeline.py` |
+| **Severity** | INFO — advisory, zero-weight: it never moves the pipeline score, the grade, or the exit code, and never blocks a publish |
+| **Message** | `README.md is missing the <!-- PLUGIN-VERSIONS-START/END --> markers` |
+| **Category** | `documentation` |
+| **Suggestion** | Add `<!-- PLUGIN-VERSIONS-START -->` / `<!-- PLUGIN-VERSIONS-END -->` markers around the plugin table so `scripts/render_readme_table.py` can regenerate it |
+
+**Root Cause:** the README carries a plugin table but no `<!-- PLUGIN-VERSIONS-START -->` / `<!-- PLUGIN-VERSIONS-END -->` HTML-comment markers, so `render_readme_table.py --check` (the validate workflow's gate) and the Update-Versions workflow's renderer have no anchor to rewrite — the table can never be kept in sync automatically.
+
+**Fix:** wrap the plugin table with the canonical markers:
+
+```markdown
+<!-- PLUGIN-VERSIONS-START -->
+| Plugin | Version | Description |
+|--------|---------|--------------|
+| ... generated content ... |
+<!-- PLUGIN-VERSIONS-END -->
+```
+
+Then run `python3 scripts/render_readme_table.py` once to populate the block from `marketplace.json`, and see §5.18 to wire the workflow that keeps it current.
 
 ---
 

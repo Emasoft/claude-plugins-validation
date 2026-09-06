@@ -165,11 +165,25 @@ def test_marketplace_guide_has_no_ghost_script_names() -> None:
 
 
 def test_marketplace_guide_references_real_templates() -> None:
-    """Every script the guide names for README/hooks must be defined in script-templates.md."""
+    """Every script the guide names for README/hooks must be defined in script-templates.md.
+
+    The README generator is `render_readme_table.py`. It replaced a doc-only
+    `generate-readme.py` that script-templates.md described but
+    setup_marketplace_automation.py never copied — so the old name this test used to
+    pin was, despite this test's own name, never a real template. The replacement IS
+    shipped, which is why the assertion below now also checks it exists on disk.
+    """
     text = MKPL_GUIDE.read_text(encoding="utf-8")
-    assert "generate-readme.py" in text
+    assert "render_readme_table.py" in text
     assert "setup-hooks.py" in text
     templates = SCRIPT_TEMPLATES.read_text(encoding="utf-8")
-    assert "## generate-readme.py" in templates
+    assert "## render_readme_table.py" in templates
     assert "## setup-hooks.py" in templates
     assert "## sync_marketplace_versions.py" in templates
+    # Scoped to the section HEADING, not a bare substring: the invariant is that the
+    # retired generator is never again DOCUMENTED AS A TEMPLATE, and a blanket
+    # `"generate-readme.py" not in text` would also reject a legitimate migration note
+    # telling a reader what the old name became.
+    assert "## generate-readme.py" not in templates, "the superseded doc-only generator must not return"
+    shipped = REPO_ROOT / "templates" / "scripts" / "render_readme_table.py"
+    assert shipped.is_file(), f"documented generator is not shipped at {shipped}"

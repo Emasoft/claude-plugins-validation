@@ -21,8 +21,8 @@ The title says "tool resolution … unbounded". **Resolution is not where the ti
 goes, and it is not unbounded.** Read first-hand:
 
 - `_resolve` (`cpv_lint_engine.py:272`) → `resolve_tool_command`
-  (`cpv_validation_common.py:184-206`) → `resolve_tool()` + `detect_executors()`
-  + `choose_best()`. That chain **returns an argv prefix** (e.g.
+  (`cpv_validation_common.py:184-206`) → `resolve_tool()` + `detect_executors()` +
+  `choose_best()`. That chain **returns an argv prefix** (e.g.
   `["npx", "markdownlint-cli2"]`). It probes with `shutil.which`. It fetches
   nothing and spawns nothing.
 - The npx/bunx package fetch happens later, when that argv is **spawned** —

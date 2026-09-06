@@ -1835,7 +1835,7 @@ Two slots that MUST agree:
 - `.claude-plugin/plugin.json` → `version`
 - `.claude-plugin/marketplace.json` → `plugins[N].version` (the self-entry, where `name == plugin.json.name`)
 
-> Note: `marketplace.json` → `metadata.version` is NOT part of this specific cross-check (the metadata-version slot is validated elsewhere). Keep it in sync too as good practice, but `validate_layout_c_consistency` only diffs the two slots above.
+> Note: the canonical marketplace-entry version slot is the top-level `plugins[N].version` checked above — `marketplace.json` accepts a top-level `metadata.version` only for backward compatibility (per the live plugin-marketplaces spec) and it is NOT part of this specific cross-check. Never recommend `metadata.version` as the field to bump; if present, keep it in sync as legacy good practice, but `validate_layout_c_consistency` only diffs the two slots above.
 
 For the canonical fix recipe and migration paths, see [layout-c-migration.md](../../cpv-migrate-marketplace-architecture/references/layout-c-migration.md).
 

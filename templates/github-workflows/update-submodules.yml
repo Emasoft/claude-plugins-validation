@@ -121,6 +121,12 @@ jobs:
         run: |
           python scripts/sync_marketplace_versions.py
 
+      - name: Regenerate README plugin table
+        # marketplace.json is the single source of truth for BOTH the version
+        # cells and which plugins are listed. This step runs BEFORE the change
+        # check so a README-only drift still produces a commit.
+        run: python3 scripts/render_readme_table.py
+
       - name: Check for changes
         id: changes
         run: |
@@ -139,7 +145,25 @@ jobs:
           PAYLOAD_PLUGIN: ${{ github.event.client_payload.plugin }}
           INPUT_PLUGIN: ${{ inputs.plugin }}
         run: |
-          git add .
+          # Issue #186 — stage TRACKED modifications only; never `git add .`/`-A`.
+          # `-u` is required rather than naming files: this job runs
+          # `git submodule update --remote --merge`, so each updated plugin leaves a
+          # GITLINK change at an arbitrary path, and naming `marketplace.json README.md`
+          # would silently drop every one of them. Measured on a real submodule repo:
+          # after the update, `git add manifest.json` leaves ` M plugins/foo` unstaged
+          # while `git add -u` stages it AND leaves an untracked file untracked — so
+          # `-u` satisfies the gitlink need without the untracked sweep #186 forbids.
+          #
+          # BOUNDARY, measured not assumed: `-u` stages only TRACKED paths, so it does
+          # NOT stage a NEWLY ADDED submodule — after `git submodule add`, both
+          # `.gitmodules` and the new gitlink are untracked and `git add -u` stages
+          # nothing. That is correct for THIS job, which only ever runs
+          # `git submodule update --remote --merge` (updates existing gitlinks) and
+          # rewrites tracked files (marketplace.json, README.md); adding a plugin is a
+          # separate operation done in a PR. If this job ever gains the ability to ADD a
+          # submodule or create a new file, name that path explicitly here — do not
+          # reach back for `git add .`.
+          git add -u
 
           # Build commit message — quoted env vars (no ${{ }} in the shell).
           PLUGIN="${PAYLOAD_PLUGIN:-${INPUT_PLUGIN:-all}}"

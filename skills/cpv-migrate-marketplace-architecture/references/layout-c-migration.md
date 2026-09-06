@@ -162,10 +162,10 @@ Skip the entire `cpv-setup-marketplace-auto-notification` flow for Layout C migr
 ### publish.py adaptation for Layout C
 
 The Layout C `publish.py` differs from Layout A or B in two ways:
-1. The bump function modifies BOTH `.claude-plugin/plugin.json::version` AND `.claude-plugin/marketplace.json::metadata.version` AND `.claude-plugin/marketplace.json::plugins[N].version` (the self-entry).
+1. The bump function modifies `.claude-plugin/plugin.json::version`, the canonical `.claude-plugin/marketplace.json::plugins[N].version` (the self-entry), AND — for backward compatibility only — `.claude-plugin/marketplace.json::metadata.version` when already present.
 2. There is exactly ONE tag per release (matching the new version), and ONE git push that carries both manifests.
 
-Scaffold the publish.py with `scripts/generate_plugin_repo.py` — its `gen_publish_py()` emits a single unified publish pipeline, and the Layout C three-location version sync is performed by `update_self_marketplace_json()` (bumps both `metadata.version` and the `source: "./"` self-entry's version) alongside `update_python_versions()` (bumps `plugin.json` + `pyproject.toml`). Pass `--self-marketplace` when generating so the Layout C marketplace.json is emitted too.
+Scaffold the publish.py with `scripts/generate_plugin_repo.py` — its `gen_publish_py()` emits a single unified publish pipeline, and the Layout C version sync is performed by `update_self_marketplace_json()` (bumps the canonical `source: "./"` self-entry's version, and `metadata.version` too when already present, for backward compatibility) alongside `update_python_versions()` (bumps `plugin.json` + `pyproject.toml`). Pass `--self-marketplace` when generating so the Layout C marketplace.json is emitted too.
 
 ### Single Atomic Commit
 
@@ -195,10 +195,11 @@ uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_plugin.py" .
 uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_marketplace.py" . --strict
 ```
 
-Both must report zero CRITICAL/MAJOR/MINOR/NIT. Specifically check:
+Both must report zero CRITICAL/MAJOR/MINOR (a residual `metadata.version` drift is at most a NIT — see below). Specifically check:
 - `name` matches between `plugin.json` and `marketplace.json.plugins[N]` (where `source: "./"`)
-- `version` matches in all three locations: `plugin.json.version`, `marketplace.json.metadata.version`, `marketplace.json.plugins[N].version`
+- `version` matches between the two canonical slots: `plugin.json.version` and `marketplace.json.plugins[N].version`
 - The self-entry `source` is exactly `"./"`
+- If `marketplace.json` carries a top-level `metadata.version` (accepted only for backward compatibility), it should also agree — a lone mismatch there is a NIT, not a blocking finding
 
 ### Rollback Recipe
 

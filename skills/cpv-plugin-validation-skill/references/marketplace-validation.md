@@ -651,6 +651,29 @@ my-marketplace/               # Main marketplace git repo
    # Create and push plugin to its own repo
    cd plugin-a
    git init
+   git status --short
+   ```
+
+   **Read that listing before going on.** The next block stages everything and
+   pushes it, so delete or `.gitignore` anything that is not the plugin *now* —
+   "not the plugin" means whatever a fresh clone would not need: `reports/`,
+   `.venv/`, `node_modules/`, scratch output, local config.
+
+   Nothing ENFORCES this review — that is why it is a separate block. The split
+   makes intervention possible where a single block made it impossible; pasting
+   both at once spends your only chance to catch a sweep.
+
+   ```bash
+   # This whole directory IS the plugin and nothing is tracked yet, so `git add -u`
+   # stages nothing and `git add .` is the complete, correct staging here. It is the
+   # documented exception to this project's stage-by-name rule (issue #186) — pinned
+   # in the allowlist of tests/test_no_bare_git_add_in_docs.py, which fails if this
+   # justification or the number of exempt sites changes.
+   #
+   # Naming paths instead was tried and is WORSE in both directions: a named path
+   # the plugin lacks aborts the whole add (exit 128, stages nothing), while any
+   # component NOT named — `hooks/`, `scripts/`, `bin/`, `rules/`, `.mcp.json`,
+   # `LICENSE` — is silently omitted from a repo that is published one line later.
    git add .
    git commit -m "Initial commit"
    gh repo create user/plugin-a --push --source .
@@ -683,9 +706,32 @@ git rm -r --cached plugin-a
 # 2. Move to temp location
 mv plugin-a /tmp/plugin-a-backup
 
-# 3. Create plugin repo and push
+# 3. Create plugin repo and review what it holds
 cd /tmp/plugin-a-backup
 git init
+git status --short
+```
+
+**Read that listing before going on.** This directory was carried out of a
+marketplace, so it is likelier than most to hold scratch. The next block stages
+everything and pushes it: delete or `.gitignore` reports, a venv, or stray output
+*now*. "Not the plugin" means anything a fresh clone would not need.
+
+Nothing ENFORCES this review — that is why it is a separate block. The split makes
+intervention possible where a single block made it impossible; pasting both at once
+spends your only chance to catch a sweep.
+
+```bash
+# This whole directory IS the plugin and nothing is tracked yet, so `git add -u`
+# stages nothing and `git add .` is the complete, correct staging here. It is the
+# documented exception to this project's stage-by-name rule (issue #186) — pinned in
+# the allowlist of tests/test_no_bare_git_add_in_docs.py, which fails if this
+# justification or the number of exempt sites changes.
+#
+# Naming paths instead was tried and is WORSE in both directions: a named path the
+# directory lacks aborts the whole add (exit 128, stages nothing), while any
+# component NOT named — `hooks/`, `scripts/`, `bin/`, `rules/`, `.mcp.json`,
+# `LICENSE` — is silently omitted from a repo that is published one line later.
 git add .
 git commit -m "Initial commit"
 gh repo create user/plugin-a --push --source .

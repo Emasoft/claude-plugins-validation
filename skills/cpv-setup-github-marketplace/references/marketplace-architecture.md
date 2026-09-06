@@ -56,7 +56,7 @@ flowchart TB
         end
         subgraph Scripts["scripts/"]
             SV["sync_marketplace_versions.py"]
-            GR["generate-readme.py"]
+            GR["render_readme_table.py"]
         end
     end
 
@@ -130,7 +130,7 @@ The `sync_marketplace_versions.py` script executes to:
 
 ### Step 7: README Regeneration
 
-The `generate-readme.py` script runs to update the plugin table in the marketplace README with current names, descriptions, versions, and repository links.
+The `render_readme_table.py` script runs to rewrite the plugin table (between the `<!-- PLUGIN-VERSIONS-START -->` / `<!-- PLUGIN-VERSIONS-END -->` markers) in the marketplace README with current names, versions, categories, and repository links, sourced directly from `marketplace.json`.
 
 ### Step 8: Commit and Push
 
@@ -335,7 +335,7 @@ marketplace-repo/
 │       └── validate-marketplace.yml # CI validation on push/PR
 ├── scripts/
 │   ├── sync_marketplace_versions.py # Fetches plugin.json via GitHub API, updates marketplace.json
-│   └── generate-readme.py           # Auto-generates README plugin table
+│   └── render_readme_table.py       # Auto-generates README plugin table
 ├── README.md                        # Auto-generated marketplace documentation
 ├── LICENSE                          # Repository license
 └── .gitignore

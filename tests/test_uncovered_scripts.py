@@ -429,7 +429,7 @@ def test_get_full_status_reports_components_and_plugin_counts(tmp_path: Path) ->
     bad = sma.get_full_status(not_a_marketplace, verbose=False)
     assert bad["is_valid_marketplace"] is False
     assert bad["plugins"]["total"] == 0
-    assert bad["workflows"]["update_submodules"]["exists"] is False
+    assert bad["required"] == {}, "the early return must not populate `required`"
 
     root = _make_marketplace(tmp_path, gitmodules=_GITMODULES)
     (root / ".github" / "workflows").mkdir(parents=True)
@@ -450,8 +450,15 @@ def test_get_full_status_reports_components_and_plugin_counts(tmp_path: Path) ->
 
     assert status["is_valid_marketplace"] is True
     assert status["marketplace_dir"] == str(root)
-    assert status["workflows"]["update_submodules"]["exists"] is True
-    assert status["scripts"]["sync_versions"]["exists"] is True
+    assert set(status["required"]) == {t.dst for t in sma.REQUIRED_TEMPLATES}, (
+        "the --status readout is not derived from REQUIRED_TEMPLATES"
+    )
+    # A KeyError below means a REQUIRED_TEMPLATES dst was renamed; the assertion
+    # above passes on a rename (both sides move together) and will not flag it.
+    assert status["required"][".github/workflows/update-submodules.yml"]["exists"] is True
+    assert status["required"]["scripts/sync_marketplace_versions.py"]["exists"] is True
+    # Never created above, so it must report MISSING rather than be absent.
+    assert status["required"]["scripts/render_readme_table.py"]["exists"] is False
     assert status["scripts"]["notify_template"]["exists"] is False
     assert status["readme"]["exists"] is True
     assert status["readme"]["has_diagram"] is True
@@ -548,9 +555,21 @@ def test_missing_notify_template_is_reported_instead_of_silently_skipped(
     fake = tmp_path / "templates"
     (fake / "github-workflows").mkdir(parents=True)
     (fake / "scripts").mkdir(parents=True)
-    # Everything present EXCEPT the notify template.
-    for rel in ("github-workflows/update-submodules.yml", "scripts/sync_marketplace_versions.py"):
-        (fake / rel).write_text((real_templates / rel).read_text(encoding="utf-8"), encoding="utf-8")
+    # Every REQUIRED template present, so the only thing missing is the REFERENCE
+    # one this test is about. DERIVED from the module's own SSOT rather than
+    # hardcoded: this fixture used to carry its own list, and adding a third
+    # required template made this test fail for a reason unrelated to its subject.
+    # Reading the tuple means a fourth one cannot break it again.
+    assert sma.REQUIRED_TEMPLATES, "the required-template SSOT is empty — fixture proves nothing"
+    for template in sma.REQUIRED_TEMPLATES:
+        real = real_templates / template.src
+        assert real.exists(), (
+            f"REQUIRED_TEMPLATES names {template.src}, which does not exist under "
+            f"{real_templates} — the SSOT points at a template nobody added"
+        )
+        dst = fake / template.src
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(real.read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.setattr(sma, "get_template_dir", lambda: fake)
 
     root = _make_marketplace(tmp_path)

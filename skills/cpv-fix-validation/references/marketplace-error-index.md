@@ -116,6 +116,8 @@ Primary fix guide: [marketplace-fixes.md](marketplace-fixes.md)
 | Plugin submodule README presence | marketplace-fixes §8 |
 | Plugin submodule README installation instructions | marketplace-fixes §8.9 |
 | Plugin submodule README architecture diagram | marketplace-fixes §8 |
+| Update workflow does not regenerate the README plugin table | marketplace-fixes §5.18 |
+| README lacks PLUGIN-VERSIONS markers | marketplace-fixes §8.10 |
 | Cascade failures (parent failure → dependent checks become MAJOR/MINOR) | marketplace-fixes Appendix |
 
 ---

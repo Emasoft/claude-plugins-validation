@@ -51,8 +51,9 @@ audit verdict is READY.
    ```
 
 2. **Record current marketplace version** from
-   `.claude-plugin/marketplace.json::metadata.version`. The final step tags
-   the marketplace at `v<version>`.
+   `.claude-plugin/marketplace.json::version` (the canonical top-level
+   field; `metadata.version` is accepted only for backward compatibility).
+   The final step tags the marketplace at `v<version>`.
 
 3. **Confirm still-nested state** — the pre-migration audit must have marked
    zero `already_migrated` plugins. Layout B is meaningful only when every
@@ -74,7 +75,8 @@ adapted to a marketplace root: the bump loop iterates every
 Required behavior:
 
 - `--patch` / `--minor` / `--major` flags bump every plugin in lockstep.
-- Bumps `metadata.version` in `marketplace.json` to the same value.
+- Bumps the top-level `version` in `marketplace.json` to the same value
+  (bump `metadata.version` too only if already present, for backward compatibility).
 - Runs `git-cliff --tag v<new-version> -o CHANGELOG.md`.
 - Runs the full CPV validation suite against every plugin subdir.
 - Stages `plugins/*/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`,
@@ -181,7 +183,7 @@ Layout B has no repository boundary to cross. The marketplace repo contains
 every plugin as a subfolder under `plugins/<name>/`, and each CPV release:
 
 - bumps every `plugins/*/.claude-plugin/plugin.json::version` in lockstep,
-- bumps `.claude-plugin/marketplace.json::metadata.version`,
+- bumps `.claude-plugin/marketplace.json::version` (the top-level canonical field),
 - writes `CHANGELOG.md`,
 - creates ONE commit,
 - tags the whole repo atomically at `v<new-version>`.
@@ -259,7 +261,7 @@ accidentally catching unrelated untracked files.
 
 ## Tag the Marketplace
 
-Tag the commit at the current `metadata.version` captured in the pre-flight
+Tag the commit at the current top-level `version` captured in the pre-flight
 checks. The tag itself is the release; `git-cliff` has already recorded it in
 CHANGELOG.md.
 
