@@ -2,7 +2,7 @@
 name: prose-vs-executable-intent-canon
 description: "a CPV security rule fired on documentation prose / a comment in a bash fence was flagged as a filesystem write / a memory note's description was flagged as prompt injection / can I exclude a path from skillaudit to fix a false positive / can I re-tier a rule to WARNING to unblock --strict / how do I narrow a detector without opening a false negative / an FP report says the scanner reads prose as executable intent"
 ocd: 2026-07-25
-lmd: 2026-09-03
+lmd: 2026-09-06
 metadata:
   node_type: memory
   type: project
@@ -18,6 +18,7 @@ family all convert a false positive into a false NEGATIVE — which is strictly 
 
 ## The permitted fix, and the three that are banned
 
+^X98BC366 [desc: "The fix for a prose false positive is narrowing the matcher on the text, never excluding paths, re-tiering severity, or judging grammatical voice", keywords: security_rule_fired_on_documentation_prose comment_in_bash_fence_flagged_as_filesystem_write memory_note_description_flagged_as_prompt_injection exclude_path_from_skillaudit_to_fix_false_positive retier_rule_to_WARNING_to_unblock_strict narrow_detector_without_opening_false_negative FP_report_scanner_reads_prose_as_executable_intent permitted_fix_vs_banned_fixes, type: project, ocd: 2026-07-25, lmd: 2026-07-25]
 **PERMITTED — narrow the matcher on a property of the TEXT.** Require the token that makes
 the claim true: a write-intent token (`>`/`>>`/`tee`/`cp`/`mv`/…) for `FS_WRITE`; an object
 noun after a determiner for a "ignore previous/other X" injection shape. The rule still
@@ -38,6 +39,7 @@ third person, no imperative — and it works.
 
 ## Comment-inertness is NOT a safe discriminator in markdown
 
+^2L6SK0RX [desc: "A leading # is not always an inert comment in fenced markdown: console/terminal/tty treat it as a root prompt, bat/cmd treat it as non-comment, and heredocs still execute a #-prefixed line", keywords: comments_are_inert_so_skip_them_execution_class_rules console_fence_hash_is_root_prompt_not_comment bat_cmd_batch_hash_not_a_comment_at_all heredoc_body_line_hash_still_executes port_sh_comment_inertness_to_markdown_fails references_dir_not_doc_only_agents_follow_recipes, type: project, ocd: 2026-07-25, lmd: 2026-07-25]
 "A `#` comment can't execute, so execution-class rules should skip it" holds for `.sh` and
 fails for fenced markdown, because `_EXECUTABLE_LANGS` includes `console`/`terminal`/`tty`
 (a leading `#` is a **root prompt**, not a comment) and `bat`/`cmd`/`batch` (`#` is not a
@@ -47,6 +49,7 @@ executes. `references/` is likewise NOT doc-only: it was deliberately removed fr
 
 ## Before narrowing, MEASURE co-firing coverage
 
+^N0QX0A14 [desc: "Before narrowing a detector, measure which OTHER rules also catch the same probe; a probe covered by only one rule is the tripwire that must keep firing", keywords: measure_co_firing_coverage_before_narrowing_detector overlap_between_detectors_unevenly_distributed probe_caught_by_multiple_rules_safe_to_narrow probe_caught_by_one_rule_alone_is_the_tripwire lock_sole_covered_probe_as_regression_test issue_178_ignore_other_tools_instructions_MCP_SCHEMA_POISON_alone, type: project, ocd: 2026-07-25, lmd: 2026-07-25]
 Overlap between detectors is usually assumed and is unevenly distributed. Enumerate, per
 probe, which rules fire. In the #178 work `ignore all previous instructions` was caught by
 three rules (safe to narrow) while `ignore other tools instructions` was caught by
