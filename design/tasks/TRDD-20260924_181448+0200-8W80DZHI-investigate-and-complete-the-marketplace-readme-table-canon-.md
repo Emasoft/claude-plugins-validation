@@ -1,10 +1,10 @@
 ---
 trdd-id: 8W80DZHI
-title: Investigate and complete the marketplace README-table canon rollout to ai-maestro-plugins and emasoft-plugins
-column: live_auditing
+title: Investigate why the marketplace README-table canon rollout stopped and what blocks it
+column: dev
 status: tasked
 created: 2026-09-24T18:14:48+0200
-updated: 2026-09-24T18:14:48+0200
+updated: 2026-09-24T18:16:12+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: audit
@@ -25,7 +25,7 @@ approval-datetime: 2026-09-24T18:14:48+0200
 
 ## Context
 
-Prior work: TRDD-4EE90MC1 and TRDD-FK9Y6NCL (archived, published in v5.18.0). The only external action taken was PR #18 on Emasoft/ai-maestro-plugins (open, unmerged). emasoft-plugins was never updated (TRDD-4EE90MC1 notes it still carries the date-stamped renderer).
+Prior work: TRDD-4EE90MC1 and TRDD-FK9Y6NCL (archived, published in v5.18.0). The only external action taken was PR #18 on Emasoft/ai-maestro-plugins (open, unmerged). ? INFERRED, not yet checked against the repos: emasoft-plugins was never updated, and TRDD-4EE90MC1 (2026-09-06) noted it still carried the date-stamped renderer. Completing the rollout is NOT in this card's scope: each outward-facing change (per marketplace, per plugin repo) goes in its own card and needs the user's approval.
 
 ## Phase 1 (this card): read-only investigation
 
