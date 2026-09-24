@@ -4,7 +4,7 @@ title: CPVPPC P2 - Config schema, lock, init, pin
 column: backburner
 status: tasked
 created: 2026-09-24T20:00:35+0200
-updated: 2026-09-24T20:03:59+0200
+updated: 2026-09-24T20:04:48+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -53,7 +53,6 @@ distribution through npm, PyPI or Homebrew. Every release ships a CycloneDX SBOM
 
 ## Plan excerpt: section 3.3 (verbatim)
 
-| 7 | `dotnet`, `swift`, `zig`, `java-gradle` | as today's `publish.py` G2e gates | idem | idem | idem |
 ### 3.3 Worked examples (canon 1.0.0 end state)
 Plain Python plugin (written by `cpvppc init`):
 ```yaml
@@ -76,3 +75,57 @@ units:
     toolchain: {version: "1.82.0"}
     build:
       kind: compiled
+      outputs: [{name: pss, kind: bin}, {name: pss-nlp, kind: bin}]
+      targets:
+        - {os: darwin, arch: arm64, runner: macos-14, method: native, c_compiler: clang}
+        - {os: darwin, arch: x86_64, runner: macos-15-intel, method: native, c_compiler: clang}
+        - {os: linux, arch: x86_64, triple: x86_64-unknown-linux-musl, runner: ubuntu-24.04, method: zigbuild, c_compiler: zig}
+        - {os: linux, arch: arm64, triple: aarch64-unknown-linux-musl, runner: ubuntu-24.04-arm, method: zigbuild, c_compiler: zig}
+        - {os: windows, arch: x86_64, runner: windows-2022, method: native, c_compiler: msvc}
+    deps: {lockfile: rust/Cargo.lock, strategy: bundled}
+  - {name: scripts, path: scripts, adapter: python-uv, toolchain: {version: "3.12"}}
+artifacts: {naming: "{name}-{os}-{arch}{ext}", delivery: release-asset-fetch}
+runtime:
+  launchers: [{name: pss, output: pss}, {name: pss-nlp, output: pss-nlp}]
+  arch_aliases: [windows-arm64-to-x86_64]
+external_artifacts:
+  - {name: nlprule-en-model, source: "https://…", version: "0.6.4", sha256: {any: "<sha>"}, provenance: none}
+targets:
+  marketplaces: [{owner: Emasoft, repo: emasoft-plugins, entry_name: perfect-skill-suggester}]
+```
+The build tree never enters the plugin: CI clones the engine at the pinned SHA inside each build job
+(a submodule would ship its source, because Claude Code recurses submodules); `target/` exists only on
+the runner. The model `build.rs` downloads becomes a declared external artifact: the build job
+pre-fetches and hash-checks it and passes its path to `build.rs` (one-time engine change), with the
+build network otherwise denied. Engine development: work in the gitignored local clone, push the
+engine repo, then `cpvppc pin engine` updates `ref` to the new SHA (refusing a SHA not reachable on the
+engine remote).
+TypeScript CLI with a native addon (llm-externalizer-style):
+```yaml
+canon: {version: "1.0.0"}
+repo: {kind: plugin}
+units:
+  - name: cli
+    path: scripts/llm-ext
+    adapter: node-ts
+    adapter_options: {bundler: esbuild, entries: {"src/cli/main.ts": "dist/llm-ext.js"}, externals: [better-sqlite3], test: vitest}
+    toolchain: {version: "20.18"}
+    build:
+      kind: bundle
+      outputs: [{name: llm-ext, kind: bundle}, {name: better-sqlite3, kind: node-addon}]
+      targets:                       # better-sqlite3 is not N-API, so each target carries the Node ABI axis
+        - {os: darwin, arch: arm64, runner: macos-14, method: native, node_abi: [20, 22]}
+        - {os: linux, arch: x86_64, runner: ubuntu-24.04, method: native, node_abi: [20, 22]}
+    deps: {lockfile: scripts/llm-ext/package-lock.json, strategy: bundled}
+artifacts: {naming: "{name}-{os}-{arch}{ext}", delivery: release-asset-fetch}
+runtime:
+  launchers: [{name: llm-ext, output: llm-ext}]
+  path_shim: {dir: "~/.local/bin"}
+writes_outside_data: ["~/.local/bin/llm-ext"]
+targets:
+  marketplaces: [{owner: Emasoft, repo: emasoft-plugins, entry_name: llm-externalizer}]
+```
+`dist/` is produced by the release workflow (if kept committed, G-BUILD rebuilds and diffs it on every
+push); the SQLite addon is built in CI per target and Node ABI (`npm rebuild better-sqlite3
+--build-from-source`), fetched hash-pinned, and loaded through better-sqlite3's `nativeBinding`
+option, so no install script runs on a user's machine.

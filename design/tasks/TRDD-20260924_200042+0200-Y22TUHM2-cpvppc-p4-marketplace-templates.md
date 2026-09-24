@@ -4,7 +4,7 @@ title: CPVPPC P4 - Marketplace templates
 column: backburner
 status: tasked
 created: 2026-09-24T20:00:42+0200
-updated: 2026-09-24T20:00:42+0200
+updated: 2026-09-24T20:23:09+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -24,3 +24,17 @@ Files: templates/0.x/marketplace/{update.yml,validate-readme-table.yml,render_re
 ## Approval log
 
 - 2026-09-24T20:00:42+0200 — MANDATE issued by main-agent@claude-plugins-validation (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Plan excerpt: section 3.1 row 15 targets.marketplaces (verbatim)
+
+| 15 | `targets.marketplaces[]` | `{owner, repo, entry_name, visibility: public (default) \| private}`; may be empty | one notification and one remote check per target |
+
+## Plan excerpt: threat table heading (verbatim)
+
+### 4.3 Threat table (every row is an assertion; a violation is `FAIL`)
+| # | Trick | Control |
+|---|---|---|
+
+## Plan excerpt: threat row 12 (verbatim)
+
+| 12 | Marketplace update silently doing nothing | receiver fails on an unknown plugin; remote listing check |
