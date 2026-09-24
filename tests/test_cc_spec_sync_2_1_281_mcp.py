@@ -92,6 +92,12 @@ class TestUrlWithoutType:
         assert "missing required 'command'" not in blocking[0]
         assert _msgs(report, "CRITICAL") == blocking
 
+    def test_command_url_without_type_is_stdio_not_critical(self) -> None:
+        """command + url + no type is a WORKING stdio server (CC 2.1.281 probe): no CRITICAL, INFO kept."""
+        report = _run({"command": "node", "args": ["server.js"], "url": "https://mcp.example.com/mcp"})
+        assert _msgs(report, "CRITICAL") == []
+        assert any("url will be ignored" in m for m in _msgs(report, "INFO"))
+
     def test_explicit_stdio_without_command_still_critical(self) -> None:
         """Control: a real stdio server missing its command keeps the old CRITICAL."""
         crits = _msgs(_run({"type": "stdio"}), "CRITICAL")

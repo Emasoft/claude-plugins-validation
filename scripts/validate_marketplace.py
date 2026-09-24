@@ -35,6 +35,10 @@ from cpv_validation_common import (
     NAME_PATTERN,
     SEMVER_PATTERN,
     Level,
+    # Segment-aware `..` test: a substring `".." in path` flagged a legitimate
+    # directory named `..tools` as traversal (CC 2.1.265/.268 accept it) and
+    # skipped the existence checks for it. Shared with validate_plugin.
+    path_has_traversal,
     print_compact_summary,
 )
 from cpv_validation_common import (
@@ -195,6 +199,11 @@ OPTIONAL_PLUGIN_FIELDS = {
     # Shape-checked by _validate_headers_helper() below — recognised is not the
     # same as unexamined (the v5.5.0 `command`-source ruling).
     "headersHelper",
+    # v2.1.238 — plugin-marketplaces.md:250: HTTP headers sent with this entry's
+    # archive download. Before this was listed, the strict allowlist emitted a
+    # publish-blocking RC-MKPL-UNKNOWN-FIELD MAJOR on a documented field.
+    # Shape-checked by _validate_entry_headers().
+    "headers",
     # v2.1.222 — plugin-marketplaces.md:217, per-plugin-entry "Optional plugin
     # fields" table: a free-form object for the author's own catalog/entitlement
     # data; Claude Code never reads it. Before v2.1.222 `claude plugin validate`
@@ -212,6 +221,7 @@ OPTIONAL_MARKETPLACE_TOP_LEVEL_FIELDS = {
     "version",  # also accepted under `metadata.version` for back-compat
     "metadata",  # holds pluginRoot + legacy description/version
     "allowCrossMarketplaceDependenciesOn",  # v2.1.121 — cross-marketplace dep allowlist
+    "renames",  # v2.1.193 — old plugin name → new name or null; shape-checked by validate_renames_block()
     "owner",  # already required, kept here for completeness
     "plugins",  # already required
     "name",  # already required
@@ -751,7 +761,14 @@ RESERVED_MARKETPLACE_NAMES = {
     "financial-services-plugins",
     "first-party-plugins",  # v2.1.205 — reserved (plugin-marketplaces.md:163)
     "healthcare",  # v2.1.205 — reserved (plugin-marketplaces.md:163)
+    "claude-tag-plugins",  # reserved (plugin-marketplaces.md:166)
 }
+
+# plugin-marketplaces.md:170 — "You also can't name a marketplace `npm`, `pip`,
+# `uv`, `cargo`, `github`, or `gh`, in any casing" (CC v2.1.275+). CC REFUSES
+# these, so they are CRITICAL like the reserved set — but matched
+# case-insensitively and EXACTLY (`npmx`, `github-tools` stay valid).
+PACKAGE_MANAGER_MARKETPLACE_NAMES = frozenset({"npm", "pip", "uv", "cargo", "github", "gh"})
 
 # Names Claude CODE accepts but Claude DESKTOP's managed marketplace sync
 # rejects, taking the WHOLE marketplace with it (plugin-marketplaces.md:1153,
@@ -953,6 +970,57 @@ def validate_marketplace_file(
     return data, results
 
 
+def validate_renames_block(renames: Any, json_path: str) -> list[ValidationResult]:
+    """Shape-check the top-level ``renames`` map (CC v2.1.193+).
+
+    plugin-marketplaces.md:190 — "Map from a former plugin `name` to its current
+    name, or to `null` if the plugin was removed". Anything else cannot be
+    followed by Claude Code's migration, so a wrong shape is MAJOR.
+    """
+    if not isinstance(renames, dict):
+        return [
+            ValidationResult(
+                level="MAJOR",
+                category="marketplace",
+                message=f"'renames' must be an object mapping old plugin names to new names or null, got {type(renames).__name__}",
+                file=json_path,
+            )
+        ]
+    return [
+        ValidationResult(
+            level="MAJOR",
+            category="marketplace",
+            message=f"'renames.{old}' must be a plugin name string or null, got {type(new).__name__}",
+            file=json_path,
+        )
+        for old, new in renames.items()
+        if not (new is None or (isinstance(new, str) and new))
+    ]
+
+
+def _validate_entry_headers(plugin: dict[str, Any], plugin_id: str, json_path: str) -> list[ValidationResult]:
+    """Shape-check a plugin entry's ``headers`` (CC v2.1.238+, plugin-marketplaces.md:250).
+
+    HTTP headers sent with the entry's archive download: an object of header
+    name → string value. Any other shape cannot be sent, so it is MAJOR.
+    """
+    headers = plugin.get("headers")
+    if headers is None:
+        return []
+    if not isinstance(headers, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in headers.items()
+    ):
+        return [
+            ValidationResult(
+                level="MAJOR",
+                category="marketplace",
+                message=f"{plugin_id}: 'headers' must be an object of header name to string value",
+                file=json_path,
+            )
+        ]
+    return []
+
+
 def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResult]:
     """Validate the marketplace name field."""
     results: list[ValidationResult] = []
@@ -1025,7 +1093,19 @@ def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResul
         )
 
     # Check reserved marketplace names
-    if name in RESERVED_MARKETPLACE_NAMES:
+    if name.lower() in PACKAGE_MANAGER_MARKETPLACE_NAMES:
+        results.append(
+            ValidationResult(
+                level="CRITICAL",
+                category="marketplace",
+                message=(
+                    f"Marketplace name '{name}' is refused by Claude Code (v2.1.275+): "
+                    "npm, pip, uv, cargo, github and gh cannot be marketplace names in any casing"
+                ),
+                file=json_path,
+            )
+        )
+    elif name in RESERVED_MARKETPLACE_NAMES:
         results.append(
             ValidationResult(
                 level="CRITICAL",
@@ -1561,6 +1641,7 @@ def validate_plugin_entry(
     results.extend(_validate_archive_source(plugin, plugin_id, json_path))
     results.extend(_validate_command_source(plugin, plugin_id, json_path))
     results.extend(_validate_headers_helper(plugin, plugin_id, json_path))
+    results.extend(_validate_entry_headers(plugin, plugin_id, json_path))
     results.extend(validate_component_path_traversal(plugin, plugin_id, marketplace_dir, json_path))
 
     # Validate tags if present
@@ -2052,18 +2133,18 @@ def _resolve_local_plugin_root(
     """
     source = plugin.get("source")
     # String shorthand: "./foo" — applies pluginRoot prefix per GAP-34.
-    if isinstance(source, str) and source.startswith("./") and ".." not in source:
+    if isinstance(source, str) and source.startswith("./") and not path_has_traversal(source):
         return _apply_plugin_root(marketplace_dir, source)
     # Dict form with "directory" source type
     if isinstance(source, dict):
         source_type = source.get("source")
         if source_type == "directory":
             path_val = source.get("path")
-            if isinstance(path_val, str) and not path_val.startswith("/") and ".." not in path_val:
+            if isinstance(path_val, str) and not path_val.startswith("/") and not path_has_traversal(path_val):
                 return _apply_plugin_root(marketplace_dir, path_val)
     # Legacy `path` field
     local_path = plugin.get("path")
-    if isinstance(local_path, str) and not local_path.startswith("/") and ".." not in local_path:
+    if isinstance(local_path, str) and not local_path.startswith("/") and not path_has_traversal(local_path):
         return _apply_plugin_root(marketplace_dir, local_path)
     return None
 
@@ -2397,7 +2478,7 @@ def validate_plugin_source(
         # Source can also be a string shorthand
         if isinstance(source, str):
             # Reject path traversal (../ is blocked by Claude Code)
-            if ".." in source:
+            if path_has_traversal(source):
                 results.append(
                     ValidationResult(
                         level="CRITICAL",
@@ -2649,7 +2730,7 @@ def validate_plugin_source(
         # metadata.pluginRoot prefix just like the string-shorthand branch does.
         if source_type == "directory":
             path_val = source.get("path")
-            if isinstance(path_val, str) and not path_val.startswith("/") and ".." not in path_val:
+            if isinstance(path_val, str) and not path_val.startswith("/") and not path_has_traversal(path_val):
                 nested_root = _apply_plugin_root(marketplace_dir, path_val)
                 if nested_root.exists() and nested_root.is_dir():
                     results.extend(_validate_nested_plugin(nested_root, plugin_id, json_path))
@@ -2746,7 +2827,7 @@ def validate_local_path(
                 )
 
     # Check for path traversal
-    if ".." in local_path:
+    if path_has_traversal(local_path):
         results.append(
             ValidationResult(
                 level="CRITICAL",
@@ -4018,6 +4099,9 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
     if name is not None:
         report.marketplace_name = name if isinstance(name, str) else None
         report.results.extend(validate_marketplace_name(name, json_path))
+
+    if "renames" in data:
+        report.results.extend(validate_renames_block(data["renames"], json_path))
 
     # Validate plugins
     plugins = data.get("plugins")
