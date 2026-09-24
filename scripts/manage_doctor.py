@@ -61,47 +61,59 @@ __all__ = [
 # ── Claude CLI validate helper ───────────────────────────────────────
 
 
-def _run_claude_validate(target_path: Path) -> Tuple[List[str], List[str]]:
-    """Run `claude plugin validate <path>` and parse findings. Returns (errors, warnings).
-    Silently returns empty lists if the claude CLI is not available."""
-    errors: List[str] = []
-    warnings: List[str] = []
+def _run_claude_validate(target_path: Path) -> Tuple[List[str], List[str], str | None]:
+    """Run `claude plugin validate --json <path>`. Returns (errors, warnings, unknown).
+
+    ``unknown`` is None when the CLI ran and its JSON was read; otherwise it is the
+    reason the check could NOT run (CLI absent, timeout, unparseable output, or a
+    CLI too old for ``--json``). WHY: the old text scraper returned two empty lists
+    in all of those cases, so a check that never ran read exactly like a clean pass
+    — and any rewording of CC's human output silently yielded zero findings.
+    ``--json`` (CC >= 2.1.259) has a stable schema:
+    {success, strict, target, manifest, contents[]}, each block carrying
+    errors[]/warnings[] of {path, message, code}.
+    """
     claude_bin = shutil.which("claude")
     if not claude_bin:
-        return errors, warnings
+        return [], [], "claude CLI not found on PATH"
     # Strip env vars that prevent claude from running inside another claude instance
     env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")}
     try:
         result = subprocess.run(
-            [claude_bin, "plugin", "validate", str(target_path)],
+            [claude_bin, "plugin", "validate", "--json", str(target_path)],
             capture_output=True,
             text=True,
             env=env,
             timeout=120,
         )
-    except (subprocess.TimeoutExpired, OSError):
-        warnings.append("claude plugin validate: timed out or failed to run")
-        return errors, warnings
-    # Parse output: lines starting with "  ❯ " are findings
-    # in_errors tracks whether we're in the errors section vs warnings section
-    in_errors = False
-    for line in (result.stdout + result.stderr).splitlines():
-        stripped = line.strip()
-        if "Found" in stripped and "error" in stripped:
-            in_errors = True
-        elif "Found" in stripped and "warning" in stripped:
-            in_errors = False
-        elif stripped.startswith("❯"):
-            finding = stripped.lstrip("❯").strip()
-            prefixed = f"claude validate: {finding}"
-            if in_errors:
-                errors.append(prefixed)
-            else:
-                warnings.append(prefixed)
-    # If exit code non-zero but we found no parsed errors, add a generic one
-    if result.returncode != 0 and not errors:
-        errors.append(f"claude plugin validate exited with code {result.returncode}")
-    return errors, warnings
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return [], [], f"claude plugin validate timed out or failed to run ({type(exc).__name__})"
+    try:
+        data = json.loads(result.stdout)
+    except ValueError:
+        # Exit code alone cannot tell "invalid plugin" from "older CLI rejected
+        # --json" or a crash — without the JSON body we know nothing.
+        first = (result.stderr or result.stdout).strip().splitlines()[:1]
+        detail = f": {first[0]}" if first else ""
+        return [], [], f"claude plugin validate exited {result.returncode} without JSON output{detail}"
+    if not isinstance(data, dict):
+        return [], [], "claude plugin validate returned JSON that is not an object"
+
+    errors: List[str] = []
+    warnings: List[str] = []
+    blocks = [data.get("manifest")] + list(data.get("contents") or [])
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        fname = Path(str(block.get("file") or "")).name
+        for key, sink in (("errors", errors), ("warnings", warnings)):
+            for f in block.get(key) or []:
+                if isinstance(f, dict):
+                    where = f"{fname}:{f['path']}" if f.get("path") else fname
+                    sink.append(f"claude validate: {where}: {f.get('message', '')}")
+    if not data.get("success", True) and not errors:
+        errors.append(f"claude plugin validate reported failure (exit {result.returncode}) with no error detail")
+    return errors, warnings, None
 
 
 def _check_orphaned_settings(settings: dict, fix: bool = False, settings_path: Path | None = None) -> int:
@@ -513,14 +525,17 @@ def do_doctor(verbose: bool = False, fix: bool = False, quick: bool = False):
             info("  Not in extraKnownMarketplaces (may be loaded via '/plugin marketplace add')")
 
         # Run Claude CLI built-in marketplace validation
-        cv_errors, cv_warnings = _run_claude_validate(mp_dir)
+        cv_errors, cv_warnings, cv_unknown = _run_claude_validate(mp_dir)
         for cv_e in cv_errors:
             err(f"  {cv_e}")
             issues += 1
         for cv_w in cv_warnings:
             warn(f"  {cv_w}")
             issues += 1
-        if not cv_errors and not cv_warnings and shutil.which("claude"):
+        if cv_unknown:
+            # Cannot check is not clean: say so instead of printing "passed".
+            warn(f"  claude plugin validate: UNKNOWN (not checked) — {cv_unknown}")
+        elif not cv_errors and not cv_warnings:
             ok("  claude plugin validate: passed")
 
         # Determine where plugins live based on marketplace.json source paths

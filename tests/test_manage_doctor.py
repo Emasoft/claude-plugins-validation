@@ -190,65 +190,67 @@ class TestPortablePath:
 class TestRunClaudeValidate:
     """Tests for _run_claude_validate() — runs claude plugin validate subprocess."""
 
+    # Contract since the CC 2.1.281 sync: (errors, warnings, unknown). A check
+    # that could not run returns a reason in `unknown`, never two empty lists
+    # that read as a clean pass (lesson-cannot-check-is-not-clean).
+
     @patch("manage_doctor.shutil.which", return_value=None)
-    def test_no_claude_binary_returns_empty(self, mock_which):
-        """When claude CLI is not found on PATH, returns empty error and warning lists."""
-        errors, warnings = _run_claude_validate(Path("/fake/path"))
-        assert errors == []
-        assert warnings == []
+    def test_no_claude_binary_is_unknown(self, mock_which):
+        """When claude CLI is not found on PATH, the result is UNKNOWN, not clean."""
+        errors, warnings, unknown = _run_claude_validate(Path("/fake/path"))
+        assert errors == [] and warnings == []
+        assert unknown and "not found" in unknown
 
     @patch("manage_doctor.subprocess.run")
     @patch("manage_doctor.shutil.which", return_value="/usr/local/bin/claude")
     def test_clean_validation_returns_empty(self, mock_which, mock_run):
-        """When claude plugin validate passes cleanly, returns no errors or warnings."""
+        """A clean --json result gives no findings and no UNKNOWN."""
         mock_run.return_value = subprocess.CompletedProcess(
-            args=["claude", "plugin", "validate", "/path"],
+            args=["claude", "plugin", "validate", "--json", "/path"],
             returncode=0,
-            stdout="Plugin validation passed.\n",
+            stdout='{"success": true, "manifest": {"file": "m.json", "errors": [], "warnings": []}, "contents": []}',
             stderr="",
         )
-        errors, warnings = _run_claude_validate(Path("/path"))
-        assert errors == []
-        assert warnings == []
+        assert _run_claude_validate(Path("/path")) == ([], [], None)
+        assert "--json" in mock_run.call_args.args[0]
 
     @patch("manage_doctor.subprocess.run")
     @patch("manage_doctor.shutil.which", return_value="/usr/local/bin/claude")
-    def test_errors_parsed_from_output(self, mock_which, mock_run):
-        """Error findings prefixed with the arrow character are captured as errors."""
+    def test_errors_parsed_from_json(self, mock_which, mock_run):
+        """errors[] and warnings[] from every JSON block map to errors and warnings."""
+        payload = {
+            "success": False,
+            "manifest": {"file": "/p/plugin.json", "errors": [{"path": "name", "message": "Missing name field"}],
+                         "warnings": [{"path": "", "message": "No description"}]},
+            "contents": [{"file": "/p/.mcp.json", "errors": [{"path": "mcpServers.x.type", "message": "bad type"}],
+                          "warnings": []}],
+        }
         mock_run.return_value = subprocess.CompletedProcess(
-            args=["claude", "plugin", "validate", "/path"],
-            returncode=1,
-            stdout="Found 2 errors:\n  \u276f Missing name field\n  \u276f Invalid version\nFound 1 warning:\n  \u276f No description\n",
-            stderr="",
+            args=[], returncode=1, stdout=json.dumps(payload), stderr=""
         )
-        errors, warnings = _run_claude_validate(Path("/path"))
-        assert len(errors) == 2
-        assert "Missing name field" in errors[0]
-        assert len(warnings) == 1
-        assert "No description" in warnings[0]
+        errors, warnings, unknown = _run_claude_validate(Path("/path"))
+        assert unknown is None
+        assert len(errors) == 2 and "Missing name field" in errors[0] and "mcpServers.x.type" in errors[1]
+        assert len(warnings) == 1 and "No description" in warnings[0]
 
     @patch("manage_doctor.subprocess.run")
     @patch("manage_doctor.shutil.which", return_value="/usr/local/bin/claude")
-    def test_nonzero_exit_no_parsed_errors_adds_generic(self, mock_which, mock_run):
-        """When exit code is non-zero but no errors are parsed, a generic error is added."""
+    def test_nonzero_exit_without_json_is_unknown(self, mock_which, mock_run):
+        """A non-zero exit with no JSON (crash, or an older CLI rejecting --json) is UNKNOWN."""
         mock_run.return_value = subprocess.CompletedProcess(
-            args=["claude", "plugin", "validate", "/path"],
-            returncode=1,
-            stdout="Something went wrong\n",
-            stderr="",
+            args=[], returncode=1, stdout="", stderr="error: unknown option '--json'\n"
         )
-        errors, warnings = _run_claude_validate(Path("/path"))
-        assert len(errors) == 1
-        assert "exited with code 1" in errors[0]
+        errors, warnings, unknown = _run_claude_validate(Path("/path"))
+        assert errors == [] and warnings == []
+        assert unknown and "unknown option" in unknown
 
     @patch("manage_doctor.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=120))
     @patch("manage_doctor.shutil.which", return_value="/usr/local/bin/claude")
-    def test_timeout_returns_warning(self, mock_which, mock_run):
-        """When subprocess times out, a warning is returned instead of crashing."""
-        errors, warnings = _run_claude_validate(Path("/path"))
-        assert errors == []
-        assert len(warnings) == 1
-        assert "timed out" in warnings[0]
+    def test_timeout_is_unknown(self, mock_which, mock_run):
+        """A timeout is UNKNOWN, not a warning that reads like a finding."""
+        errors, warnings, unknown = _run_claude_validate(Path("/path"))
+        assert errors == [] and warnings == []
+        assert unknown and "timed out" in unknown
 
 
 # ═══════════════════════════════════════════════════════════════════

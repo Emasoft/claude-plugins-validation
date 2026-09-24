@@ -1,9 +1,9 @@
 ---
 trdd-id: 2ZIX9O9J
 title: Adopt new CC features in CPV itself
-column: backburner
+column: superseded
 created: 2026-09-24T13:02:58+0200
-updated: 2026-09-24T13:03:17+0200
+updated: 2026-09-24T13:23:12+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -15,6 +15,7 @@ approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-24T13:02:58+0200
 blocked-by: 
+superseded-by: [Q3CPZL0X]
 ---
 
 # Adopt new CC features in CPV itself
@@ -37,3 +38,8 @@ exist before this card can turn it on).
 ## Approval log
 
 - 2026-09-24T13:02:58+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-24T13:23:12+0200 — SUPERSEDED by emanuelesabetta. Doctor/pricing scope absorbed into TRDD-Q3CPZL0X WP9; omitClaudeMd+effort:low proposal refused per verified-facts decision recorded in STATE (2026-09-24)..
+
+## STATE
+
+DECISIONS 2026-09-24 (user directive verbatim: 'decide yourself. base your decisions on verified facts and tests.'): doctor --json and pricing moved INTO the spec-sync work (WP9, card Q3CPZL0X). omitClaudeMd and effort:low on CPV's own launcher agents (cpv-plugin-validator-agent, cpv-skill-validation-agent) REFUSED -- both agents run Bash and would lose the user's global CLAUDE.md safety rules (RULE 0/RULE 1) with no test able to prove that safe, and their bodies carry only 3 of the 5 mandatory output items (measured); effort:low has no measured benefit. Card superseded by TRDD-Q3CPZL0X (WP9) for the doctor/pricing scope; the omitClaudeMd/effort:low proposal is refused outright.
