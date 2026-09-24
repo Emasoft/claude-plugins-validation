@@ -96,3 +96,54 @@ class TestFormatCostLineDisclosesEstimates:
         """A specifically-priced model's cost line carries no disclosure suffix."""
         line = ctc.format_cost_line(self._usage(), model="claude-opus-5-5")
         assert "(estimated: unlisted model)" not in line
+
+    def test_empty_model_gets_the_unknown_marker(self) -> None:
+        """An empty model id gets '(estimated: model unknown)', not 'unlisted model'."""
+        line = ctc.format_cost_line(self._usage(), model="")
+        assert line.endswith("(estimated: model unknown)")
+
+    def test_literal_unknown_model_gets_the_unknown_marker(self) -> None:
+        """The literal id 'unknown' also gets '(estimated: model unknown)'."""
+        line = ctc.format_cost_line(self._usage(), model="unknown")
+        assert line.endswith("(estimated: model unknown)")
+
+
+class TestSpecificMatchRequiresRealBoundary:
+    """A row key must be followed by a real boundary, not any digit/character, to count as specific."""
+
+    def test_exact_id_is_specific(self) -> None:
+        """The bare row key is an exact, non-estimate match."""
+        assert ctc.pricing_is_estimate("claude-opus-5-5") is False
+        assert ctc.get_pricing("claude-opus-5-5") is ctc.MODEL_PRICING["claude-opus-5-5"]
+
+    def test_dated_suffix_is_specific(self) -> None:
+        """A row key plus a '-' and an 8-digit date suffix is a specific match."""
+        assert ctc.pricing_is_estimate("claude-opus-5-5-20260901") is False
+        assert ctc.get_pricing("claude-opus-5-5-20260901") is ctc.MODEL_PRICING["claude-opus-5-5"]
+
+    def test_bracketed_context_window_tag_is_specific(self) -> None:
+        """A row key plus a bracketed context-window tag ('[1m]') is a specific match."""
+        assert ctc.pricing_is_estimate("claude-sonnet-5[1m]") is False
+        assert ctc.get_pricing("claude-sonnet-5[1m]") is ctc.MODEL_PRICING["claude-sonnet-5"]
+
+    def test_at_versioned_tag_is_specific(self) -> None:
+        """A row key plus an '@'-versioned tag is a specific match."""
+        assert ctc.pricing_is_estimate("claude-opus-5-5@20260901") is False
+        assert ctc.get_pricing("claude-opus-5-5@20260901") is ctc.MODEL_PRICING["claude-opus-5-5"]
+
+    def test_bedrock_provider_prefix_and_version_suffix_is_specific(self) -> None:
+        """A leading provider prefix plus a Bedrock '-v1:0' suffix around a row key is specific."""
+        model_id = "us.anthropic.claude-opus-5-5-v1:0"
+        assert ctc.pricing_is_estimate(model_id) is False
+        assert ctc.get_pricing(model_id) is ctc.MODEL_PRICING["claude-opus-5-5"]
+
+    def test_extra_digit_after_row_key_is_not_specific(self) -> None:
+        """claude-opus-4-10 is a DIFFERENT model than claude-opus-4-1 and must not inherit its price."""
+        assert ctc.pricing_is_estimate("claude-opus-4-10") is True
+        # Falls back to the newest Opus row (family fallback), not the 4.1 row it contains.
+        assert ctc.get_pricing("claude-opus-4-10") is ctc.MODEL_PRICING["claude-opus-5-5"]
+
+    def test_extra_digit_after_shorter_row_key_is_not_specific(self) -> None:
+        """claude-sonnet-5-1 is a DIFFERENT model than claude-sonnet-5 and must not inherit its price."""
+        assert ctc.pricing_is_estimate("claude-sonnet-5-1") is True
+        assert ctc.get_pricing("claude-sonnet-5-1") is ctc.MODEL_PRICING["claude-sonnet-5"]
