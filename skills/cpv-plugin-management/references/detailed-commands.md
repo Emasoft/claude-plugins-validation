@@ -151,7 +151,7 @@ Interactive entry point: `/cpv-main-menu` → **Create** (scaffold plugin / mark
 
 ## Notes
 
-- Run `/reload-plugins` after install/update/uninstall/enable/disable
+- Run `/reload-plugins` after install/update/uninstall/enable/disable done from the command line; an install, enable or disable made in the interactive `/plugin` menu takes effect when the menu closes (Claude Code v2.1.268+)
 - Backups: `~/.claude/backups/`
 - Plugin persistent data: `${CLAUDE_PLUGIN_DATA}` survives updates; deleted on uninstall (use `--keep-data` to preserve)
 - Settings: `~/.claude/settings.json` (user), `<project>/.claude/settings.local.json` (local)

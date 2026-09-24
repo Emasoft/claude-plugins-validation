@@ -225,13 +225,36 @@ Comprehensive remediation guide for all issues detected by `validate_mcp.py`.
 
 **Error message**: `Invalid transport type '{transport}' for server {server_name}`
 **Severity**: MAJOR
-**Root cause**: The `type` field contains a value other than `stdio`, `sse`, or `http`.
+**Root cause**: The `type` field contains a value other than `stdio`, `sse`, `http`, or `ws` (or the `streamable-http` alias), or it is not a string.
 **Fix**:
-1. Set `type` to one of the three valid values:
+1. Set `type` to one of the valid values:
    - `"stdio"` — local process with stdin/stdout communication (default if `type` is omitted).
-   - `"http"` — streamable HTTP transport (recommended for remote servers).
+   - `"http"` — streamable HTTP transport (recommended for remote servers). `"streamable-http"` is accepted as an alias for `http`, so configs copied from MCP server docs work unchanged.
+   - `"ws"` — WebSocket transport for a remote server; takes the same `url` / `headers` / `headersHelper` / `timeout` / `alwaysLoad` fields as `http`, with a `ws://` or `wss://` url.
    - `"sse"` — Server-Sent Events transport (deprecated, prefer `http`).
 2. Example:
+```json
+{
+  "my-server": {
+    "type": "http",
+    "url": "https://example.com/mcp"
+  }
+}
+```
+
+### MAJOR: `type: "sdk"` is skipped
+
+**Error message**: `Server {server_name}: type 'sdk' is skipped — only an SDK host application can register in-process servers (Claude Code v2.1.274). Ship a stdio, http or ws server instead.`
+**Severity**: MAJOR
+**Root cause**: Since Claude Code v2.1.274, `"type": "sdk"` entries in `.mcp.json`, plugins, settings and agent files are skipped with a warning. Only an application built on the Agent SDK can register an in-process server; a plugin cannot.
+**Fix**: Replace the entry with a real server — a `stdio` server whose `command` launches it, or an `http` / `ws` server with a `url`.
+
+### CRITICAL: Server has a url but no type
+
+**Error message**: `Server {server_name} has a "url" but no "type" — Claude Code reads it as a stdio server and skips it. Add "type": "http" (or "sse" / "ws") to match the endpoint.`
+**Severity**: CRITICAL
+**Root cause**: An entry with no `type` is read as a stdio server. When it has a `url` and no `command`, it fails for lacking a command and Claude Code drops it at load (mcp.md; `claude plugin validate` reports it). An entry that has a `command` and also a `url` is a stdio server with an ignored url and draws only the INFO in §4.
+**Fix**: Add the transport type that matches the endpoint:
 ```json
 {
   "my-server": {
@@ -288,6 +311,13 @@ Comprehensive remediation guide for all issues detected by `validate_mcp.py`.
 }
 ```
 2. Common commands: `node`, `python3`, `npx`, `uvx`, `bunx`, or a path to a binary.
+
+### CRITICAL: Empty command
+
+**Error message**: `Server {server_name} 'command' is empty`
+**Severity**: CRITICAL
+**Root cause**: `command` is an empty or whitespace-only string, so the server launches nothing and never starts.
+**Fix**: Set `command` to the executable that starts the server (see the missing-command fix above), or, for a remote server, remove `command` and set `type` + `url`.
 
 ### MAJOR: Command not executable
 
@@ -355,7 +385,7 @@ or
 
 **Error message**: `Server {server_name} has 'url' but transport is stdio - url will be ignored`
 **Severity**: INFO
-**Root cause**: The server has `type: "stdio"` (or defaults to it) but also includes a `url` field. The `url` is only used for `http` or `sse` transports and will be silently ignored.
+**Root cause**: The server has `type: "stdio"` (or defaults to it) but also includes a `url` field. The `url` is only used for `http`, `sse` or `ws` transports and will be silently ignored. (A `url` with no `type` and no `command` is a different, blocking case — see §3.)
 **Fix**:
 1. If you intended a remote server, set the correct transport type:
 ```json
@@ -405,11 +435,11 @@ or
 }
 ```
 
-### MAJOR: URL must use http(s) scheme
+### MAJOR: URL scheme does not match the transport
 
-**Error message**: `Server {server_name} url should be http(s):// : {url}`
+**Error message**: `Server {server_name} url should be http(s):// : {url}` (for `http` / `sse`) or `Server {server_name} url should be ws(s):// : {url}` (for `ws`)
 **Severity**: MAJOR
-**Root cause**: The `url` value does not start with `http://` or `https://` and is not an environment variable reference (`${...}`). It may use an unsupported scheme like `ws://` or `ftp://`, or be a bare hostname.
+**Root cause**: The `url` value's scheme does not match the transport and is not an environment variable reference (`${...}`). `http` and `sse` servers take `http://` / `https://`; a `ws` server takes `ws://` / `wss://`. A `ws://` url on an `http` server, an `ftp://` url, or a bare hostname all fail.
 **Fix**:
 1. Prefix the URL with the correct scheme:
 ```json
@@ -426,11 +456,11 @@ or
 
 ### MAJOR: Unencrypted HTTP for remote server
 
-**Error message**: `Server {server_name} uses unencrypted HTTP for remote server — use HTTPS to protect data in transit.`
+**Error message**: `Server {server_name} uses unencrypted HTTP/WebSocket (http:// or ws://) for a remote server — use https:// or wss:// to protect data in transit.`
 **Severity**: MAJOR
-**Root cause**: The `url` starts with `http://` and points to a non-localhost address. Data (including tool results and conversation content) will be transmitted in cleartext.
+**Root cause**: The `url` starts with `http://` (or `ws://` for a WebSocket server) and points to a non-localhost address. Data (including tool results and conversation content) will be transmitted in cleartext.
 **Fix**:
-1. Switch to HTTPS:
+1. Switch to HTTPS (or `wss://` for a WebSocket server):
 ```json
 {
   "url": "https://example.com/mcp"

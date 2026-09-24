@@ -56,6 +56,9 @@ from validate_marketplace import (  # noqa: E402
     DESKTOP_SYNC_REJECTED_MARKETPLACE_NAMES as _SPEC_DESKTOP_NAMES,
 )
 from validate_marketplace import (  # noqa: E402
+    PACKAGE_MANAGER_MARKETPLACE_NAMES as _SPEC_PACKAGE_MANAGER_NAMES,
+)
+from validate_marketplace import (  # noqa: E402
     RESERVED_MARKETPLACE_NAMES as _SPEC_RESERVED_NAMES,
 )
 
@@ -70,8 +73,14 @@ _SCAFFOLDING_DISCOURAGED_NAMES = frozenset(
     }
 )
 
+# CC 2.1.275 refuses npm/pip/uv/cargo/github/gh as marketplace names; that set
+# lives apart from RESERVED_MARKETPLACE_NAMES upstream, so it is unioned here
+# explicitly — omitting it let standardize accept a name the validator CRITICALs.
 RESERVED_MARKETPLACE_NAMES = frozenset(
-    set(_SPEC_RESERVED_NAMES) | set(_SPEC_DESKTOP_NAMES) | _SCAFFOLDING_DISCOURAGED_NAMES
+    set(_SPEC_RESERVED_NAMES)
+    | set(_SPEC_PACKAGE_MANAGER_NAMES)
+    | set(_SPEC_DESKTOP_NAMES)
+    | _SCAFFOLDING_DISCOURAGED_NAMES
 )
 
 # Impersonation keywords -- marketplace names containing BOTH a brand word AND

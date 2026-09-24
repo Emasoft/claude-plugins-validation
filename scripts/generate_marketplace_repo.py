@@ -28,10 +28,14 @@ from pathlib import Path
 from generate_plugin_repo import CPV_SUMMARY_MARKER
 from setup_marketplace_automation import get_template_dir
 
-# -- Constants ----------------------------------------------------------------
+# Reserved marketplace names. Imported, never copied: this used to be a private
+# 6-name list that had drifted from EVERY spec-reserved name (claude-code-plugins,
+# claude-tag-plugins, npm, gh, …), so the scaffolder would create a marketplace
+# the validator then rejects as CRITICAL. standardize_marketplace owns the union
+# of the spec sets (validate_marketplace) and the scaffolding-advice names.
+from standardize_marketplace import RESERVED_MARKETPLACE_NAMES as RESERVED_NAMES
 
-# Reserved marketplace names that will be rejected by the validator
-RESERVED_NAMES = frozenset({"official", "anthropic", "claude", "test", "example", "demo"})
+# -- Constants ----------------------------------------------------------------
 
 # ── RC-8: the "the validator ACTUALLY RAN" proof markers ─────────────────────
 #
@@ -1225,7 +1229,7 @@ def validate_name(name: str) -> str | None:
     """Validate marketplace name. Returns error message or None if valid."""
     if not name:
         return "Marketplace name cannot be empty"
-    if name in RESERVED_NAMES:
+    if name.lower() in RESERVED_NAMES:  # CC refuses these in any casing
         return f"'{name}' is a reserved marketplace name"
     if not KEBAB_RE.match(name):
         return f"'{name}' is not valid kebab-case (lowercase letters, digits, hyphens)"

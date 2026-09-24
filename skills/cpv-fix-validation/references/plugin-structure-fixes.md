@@ -16,6 +16,7 @@
 - [12. Path and Private Info Issues](#12-path-and-private-info-issues)
 - [13. .gitignore Issues](#13-gitignore-issues)
 - [14. Workflow Inline Python Issues](#14-workflow-inline-python-issues)
+- [20. CC v2.1.258–v2.1.281 manifest and agent rules](#20-cc-v21258v21281-manifest-and-agent-rules)
 
 ## Checklist
 
@@ -757,17 +758,17 @@ allowed-tools:
   - Monitor(npm:run:*)
 ```
 
-### WARNING: TaskOutput tool is deprecated
+### WARNING: TaskOutput tool was removed
 
-**Error message**: `Tool 'TaskOutput' is deprecated — prefer Read on the task's output file path`
+**Error message**: `Tool 'TaskOutput' was removed in Claude Code v2.1.277 — listing it grants nothing; read the task's output file with Read`
 **Severity**: WARNING
 **File**: `agents/<filename>.md` or `skills/*/SKILL.md`
 **Source**: `validate_agent.py` and `validate_skill_comprehensive.py`
-**Root cause**: `TaskOutput` was introduced in v2.1.71 but has since been deprecated. Agents and skills should read the task's output file path directly with `Read` instead.
+**Root cause**: `TaskOutput` was introduced in v2.1.71 and removed in Claude Code v2.1.277 (the `taskOutputMaxChars` setting and `TASK_MAX_OUTPUT_LENGTH` no longer have any effect). Listing it grants nothing, and any body text that calls it breaks. Read the task's output file with `Read` instead. The finding stays a WARNING because tools-reference.md still lists the tool as "Deprecated", so the docs and the changelog disagree.
 
 **Fix**:
 ```yaml
-# WRONG — uses deprecated TaskOutput
+# WRONG — lists the removed TaskOutput tool
 tools: [Read, TaskOutput]
 
 # RIGHT — use Read on the output file path
@@ -2007,3 +2008,60 @@ or ship it as managed settings.
 This is a WARNING rather than an error because a checked-in project settings file may
 legitimately carry the values for a *different* Claude Code version, or for humans to copy —
 CPV tells you they are inert, it does not decide for you.
+
+---
+
+## 20. CC v2.1.258–v2.1.281 manifest and agent rules
+
+### MAJOR: `userConfig.<key>.options` breaks a documented rule
+
+**Error messages** (each MAJOR, each ends with `(plugin fails to load)`):
+`'userConfig.<key>.options' must be a non-empty array of strings`, `requires type 'string'`,
+`cannot be combined with multiple: true` / `sensitive: true`, `'…options[<i>]' must be a string of 1 to 64 characters`,
+`starts or ends with a space`, `contains a control, invisible, bidi or non-regular-space character`,
+`duplicates an earlier option (case-insensitive…)`, `'userConfig.<key>.default' must be one of its options`,
+`'…options' without a default requires required: true`.
+**Severity**: MAJOR — plugins-reference.md: "If you break any of these rules, the plugin fails to load."
+Plus a WARNING: `'…options' requires Claude Code v2.1.271+ — older versions can't load this plugin`.
+**Fix**: Follow every rule of "Limit a field to fixed options": `type: "string"`; no `multiple` / `sensitive` set to `true`;
+`default` equal to one of the options, or `required: true` when there is no default; each option 1–64 characters, no
+leading or trailing space, no control / invisible / text-direction characters or non-regular spaces; no duplicate in any
+letter case.
+
+```json
+"userConfig": {
+  "region": {
+    "type": "string", "title": "Region", "description": "Deployment region",
+    "options": ["eu-west", "us-east"], "default": "eu-west"
+  }
+}
+```
+
+### WARNING: `${user_config.X}` references an undeclared option
+
+**Error message**: `'${user_config.<X>}' references user option '<X>', which is not declared in plugin.json 'userConfig' (CC v2.1.281 \`claude plugin validate\` reports this)`
+**Severity**: WARNING — only config surfaces are checked (`.mcp.json`, `.lsp.json`, `hooks/hooks.json`, monitors, inline manifest configs); markdown is never scanned.
+**Fix**: Declare `<X>` under `userConfig` (with `type`, `title`, `description`), or correct the reference's spelling.
+
+### WARNING: Shipped files stored in Git LFS
+
+**Error message**: `<n> shipped file(s) are stored in Git LFS — plugin clones leave LFS files as pointers (CC v2.1.274), so users get a pointer, not the file. This matters only if the plugin reads these files at runtime — keep those out of LFS. Files: …`
+**Severity**: WARNING
+**Fix**: For every listed file the plugin needs at runtime, remove its `filter=lfs` rule from `.gitattributes` and commit the real file (`git lfs untrack '<pattern>'`, then `git add --renormalize <path>`). Files the plugin never loads (large test data, design assets) can stay in LFS.
+
+### WARNING: `${CLAUDE_PLUGIN_ROOT}` unquoted in a monitor command
+
+Same rule and fix as hook-fixes §15: quote the token, e.g. `"\"${CLAUDE_PLUGIN_ROOT}\"/scripts/poll.sh"`.
+
+### Manifest fields that are now known
+
+`metadata` (a free-form object — a non-object value draws a WARNING because Claude Code ignores it), `workflows`
+(a component path that replaces the default `workflows/` directory), `privacyPolicyUrl`, `supportUrl`, and
+`experimental.evals` (a directory path string or array of them — a non-path value or a `..` segment is MAJOR).
+
+### Agent frontmatter
+
+- **MAJOR** `'omitClaudeMd' must be a boolean (true/false/yes/no/on/off/1/0), got <type>` — `omitClaudeMd` (v2.1.271)
+  runs the agent without user, project and local CLAUDE.md files (managed policy still loads). Give it a boolean.
+- Plugin-shipped agents now accept `color`, `experimental` and `omitClaudeMd` in addition to the earlier fields
+  (plugins-reference.md "Plugin agent frontmatter"); `hooks`, `mcpServers` and `permissionMode` stay forbidden.

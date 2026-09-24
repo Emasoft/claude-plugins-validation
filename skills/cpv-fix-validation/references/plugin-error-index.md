@@ -22,6 +22,7 @@
 - [18. validate_telemetry.py — plugin-shipped env-var hazards](#18-validate_telemetrypy--plugin-shipped-env-var-hazards)
 - [19. Semantic pillar — Channel MCP Server Source-Code Security](#19-semantic-pillar--channel-mcp-server-source-code-security)
 - [20. validate_marketplace cross-validation rules](#20-validate_marketplace-cross-validation-rules)
+- [21. validate_project_scope.py / validate_local_scope.py — settings notes (CC v2.1.258–v2.1.281)](#21-validate_project_scopepy--validate_local_scopepy--settings-notes-cc-v21258v21281)
 
 ## Checklist
 
@@ -86,6 +87,11 @@ Primary fix guide: [plugin-structure-fixes.md](plugin-structure-fixes.md)
 | `RC-SHIP-BINARY-ONLY-STRICT` — manifest opted into `cpv.canon: ship-only-binary` but a submodule/in-tree source ships (MAJOR, publish-blocking, issue #175) **[NEW v3.14.0]** | [ship-binary-only-fixes.md](ship-binary-only-fixes.md) "RC-SHIP-BINARY-ONLY-STRICT" — migrate to bin/-only + clone-by-URL source (remove every `.gitmodules` entry), OR drop the `cpv.canon` opt-in until migrated. A path rename does NOT clear it. |
 | `RC-MIXED-COMPILED` — script-primary plugin (profile `standard`) also ships a compiled component (INFO, non-blocking, issue #175) **[NEW v3.13.0]** | [ship-binary-only-fixes.md](ship-binary-only-fixes.md) "RC-MIXED-COMPILED" — informational, no action; the compiled build is already covered by RC-SHIP-BINARY-ONLY + the publish.py G2e gate. |
 | `RC-TEST-COVERAGE` — N of M testable components have no discoverable test (WARNING, non-blocking, issue #155) **[NEW v5.1.1]** | plugin-structure-fixes §19 — **do NOT "fix" this by writing a stub test per named file.** It is an advisory about DISCOVERABILITY, and the honest resolutions are: (a) the component genuinely lacks a test → write a real one; (b) it IS tested through a dispatcher → name the module in the test (a docstring/import mention is enough, and a test that names its subject is better anyway); (c) it is not meant to be unit-tested (a bench harness, a one-shot generator) → leave it listed. NEVER blocks a publish. |
+| `'userConfig.<key>.options' …(plugin fails to load)` (MAJOR ×8 rules) / `requires Claude Code v2.1.271+` (WARNING) | plugin-structure-fixes §20 |
+| `references user option '<X>', which is not declared in plugin.json 'userConfig'` (WARNING, CC v2.1.281) | plugin-structure-fixes §20 — declare the option or fix the spelling |
+| `shipped file(s) are stored in Git LFS` (WARNING, CC v2.1.274) | plugin-structure-fixes §20 |
+| `monitors[<i>].command uses ${CLAUDE_PLUGIN_ROOT} unquoted` (WARNING) | plugin-structure-fixes §20 / hook-fixes §15 |
+| `'metadata' must be an object` (WARNING) / `'experimental.evals' must …` (MAJOR) | plugin-structure-fixes §20 |
 
 Common crash-category CRITICALs (from `validate_scoring.py`) land here too when the plugin validator raises an exception.
 
@@ -129,7 +135,7 @@ Primary fix guide: [skill-fixes.md](skill-fixes.md)
 | `hooks` / `mcpServers` shape validation | skill-fixes §2 |
 | Metadata / tags / author / license / argument-hint | skill-fixes §2 (optional fields) |
 | Monitor tool strict-mode restriction (unscoped `Monitor` forbidden in strict mode, same rule as unscoped `Bash`) **[NEW]** | skill-fixes §3 (allowed-tools strict-mode subsection) |
-| TaskOutput deprecation WARNING **[NEW]** | skill-fixes §3 — migrate to `Read` on the task's output file path |
+| TaskOutput removed in Claude Code v2.1.277 (WARNING — listing it grants nothing) | skill-fixes §3 — read the task's output file with `Read` |
 | Task → Agent rename WARNING (alias still accepted) **[NEW]** | skill-fixes §3 |
 | TodoRead / Notebook / MultiEdit legacy WARNING **[NEW]** | skill-fixes §3 — verify existence before shipping |
 | `CLAUDE_PLUGIN_OPTION_*` env var recognition (accepted) **[NEW]** | skill-fixes "Environment variables" — accepted alongside `VALID_PLUGIN_ENV_VARS` |
@@ -174,6 +180,9 @@ Primary fix guide: [hook-fixes.md](hook-fixes.md)
 | `unset VIRTUAL_ENV` + plain `python3` antipattern **[NEW]** (TRDD-0028dd34) | hook-fixes §13.7 — switch to `uv run --script`; the `unset` becomes unnecessary |
 | HTTP hook on latency-sensitive event with long timeout **[NEW]** (TRDD-0028dd34) | hook-fixes §13.8 — add `"async": true` for fire-and-forget OR cap timeout at 5s |
 | Path-traversal in hook command (`..` segments escape plugin root) **[NEW]** (TRDD-0028dd34) | hook-fixes §13.11 — rewrite path to anchor at `${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PROJECT_DIR}` without `..`, or declare cross-plugin dependency in plugin.json |
+| `Event 'PermissionRequest' does not support 'agent' hooks` (MAJOR, CC v2.1.280) | hook-fixes §15 — use a `command` / `http` hook (they can allow or deny) |
+| `command hook uses ${CLAUDE_PLUGIN_ROOT} unquoted in a shell-form command` (WARNING, CC v2.1.281) | hook-fixes §15 — quote the token or use exec form (`args`) |
+| `setMode` `auto` / `manual`, `StopFailure` `account_on_hold` / `cloud_credential_error` now accepted | hook-fixes §15 |
 | `[RC-USERCFG-SHELL-INJECT] hooks.json <Event> hook interpolates ${user_config.<key>} into a SHELL-FORM command` (CRITICAL, CC v2.1.207) **[NEW v2.158.0]** | hook-fixes §14 — exec form (move the value into the `args` array) OR read `$CLAUDE_PLUGIN_OPTION_<KEY>` inside the script. **Exec form is LEGAL** and is never flagged; do not "fix" it. Quoting/escaping is NOT a fix. |
 
 ---
@@ -197,7 +206,8 @@ Primary fix guide: [plugin-structure-fixes.md](plugin-structure-fixes.md) §4 (A
 | Security: agent prompt injection / abuse patterns | [security-fixes.md](security-fixes.md) §2 |
 | `effort` field validation **[NEW]** | plugin-structure-fixes §4 (effort subsection) |
 | Plugin-shipped agent restrictions: `hooks`/`mcpServers`/`permissionMode` forbidden **[NEW]** | plugin-structure-fixes §4 (plugin-shipped restrictions subsection) |
-| TaskOutput deprecation WARNING **[NEW]** | plugin-structure-fixes §4 (tools subsection) — migrate to `Read` on the task's output file path |
+| `'omitClaudeMd' must be a boolean` (MAJOR, CC v2.1.271); plugin agents now accept `color` / `experimental` / `omitClaudeMd` | plugin-structure-fixes §20 |
+| TaskOutput removed in Claude Code v2.1.277 (WARNING — listing it grants nothing) | plugin-structure-fixes §4 (tools subsection) — read the task's output file with `Read` |
 | Task → Agent rename WARNING (alias still accepted) **[NEW]** | plugin-structure-fixes §4 (tools subsection) |
 | Legacy-field warnings: `capabilities` / `context` / `agent` / `user-invocable` / `system-prompt` **[NEW]** | plugin-structure-fixes §4 — verify these fields are still intended |
 | TodoRead / Notebook / MultiEdit legacy tool WARNING **[NEW]** | plugin-structure-fixes §4 (tools subsection) |
@@ -230,7 +240,11 @@ Primary fix guide: [mcp-fixes.md](mcp-fixes.md)
 |---|---|
 | .mcp.json structure (or inline `mcpServers` in plugin.json) | mcp-fixes §1 |
 | Server config (type, required fields by transport) | mcp-fixes §2 |
-| Transport (stdio, sse, http, remote) | mcp-fixes §3–5 |
+| Transport (stdio, sse, http + `streamable-http` alias, ws, remote) | mcp-fixes §3–5 |
+| `type 'sdk' is skipped` (MAJOR, CC v2.1.274) | mcp-fixes §3 — ship a stdio, http or ws server instead |
+| `has a "url" but no "type"` (CRITICAL — url-only entry is dropped at load) | mcp-fixes §3 — add `"type": "http"` / `"sse"` / `"ws"` |
+| `'command' is empty` (CRITICAL) | mcp-fixes §4 |
+| `uses unencrypted HTTP/WebSocket (http:// or ws://)` (MAJOR) / `url should be ws(s)://` (MAJOR) | mcp-fixes §5 |
 | `command` / `args` validation | mcp-fixes §2 |
 | Env vars (`${...}` syntax, defaults, absolute paths, `${CLAUDE_PLUGIN_ROOT}`) | mcp-fixes §6 |
 | `headers` / hardcoded credentials | mcp-fixes §6 |
@@ -485,3 +499,15 @@ manifests should consult this section.
 | B | `RC-MKPL-VERSION-DRIFT` | MINOR | marketplace-upstream-drift.md §2 |
 | B | `RC-MKPL-METADATA-DRIFT` | NIT | marketplace-upstream-drift.md §6 |
 | B | `RC-MKPL-UPSTREAM-UNREACHABLE` | WARNING | marketplace-upstream-drift.md §5 |
+
+---
+
+## 21. validate_project_scope.py / validate_local_scope.py — settings notes (CC v2.1.258–v2.1.281)
+
+These scope validators have no separate fix guide; the fix is inline.
+
+| Finding | Severity | Fix |
+|---|---|---|
+| `settings.json sets "attribution": false — valid since Claude Code v2.1.281, but older CLI versions skip a settings file that holds it …` (project `.claude/settings.json` only) | WARNING | In a file shared across CLI versions use the object form: `"attribution": {"commit": "", "pr": "", "sessionUrl": false}`. User-scope files are not flagged. |
+| `'<key>' has no effect since Claude Code <version> — it is still accepted, but you can remove it.` (`keybindingFlavor` since v2.1.261, `taskOutputMaxChars` since v2.1.277) | INFO | Remove the key; nothing breaks either way. |
+| `gatewayInternalNetworks` in a project or local settings file | as the other managed-only keys | It is read only from managed settings (managed-settings.json, the macOS plist, the Windows HKLM registry, or a policy helper); move it there. |

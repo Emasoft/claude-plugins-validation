@@ -234,9 +234,35 @@ For the pipeline validator, the `version` field is also required:
 | **Message** | `Marketplace name '<name>' is reserved and cannot be used` |
 | **Category** | `marketplace` |
 
-**Root Cause:** The name matches one of the reserved names (per `validate_marketplace.py::RESERVED_MARKETPLACE_NAMES`): `claude-code-marketplace`, `claude-code-plugins`, `claude-plugins-official`, `anthropic-marketplace`, `anthropic-plugins`, `agent-skills`, `knowledge-work-plugins`, `life-sciences`.
+**Root Cause:** The name matches one of the reserved names in `validate_marketplace.py::RESERVED_MARKETPLACE_NAMES` (read the set for the current list — it includes `claude-code-marketplace`, `claude-code-plugins`, `claude-plugins-official`, `anthropic-marketplace`, `anthropic-plugins`, `agent-skills`, `knowledge-work-plugins`, `life-sciences`, `first-party-plugins`, `healthcare` and `claude-tag-plugins`, among others).
 
 **Fix:** Choose a different, non-reserved marketplace name.
+
+### 1.10a Marketplace name is a package-manager name
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_marketplace.py` |
+| **Severity** | CRITICAL |
+| **Message** | `Marketplace name '<name>' is refused by Claude Code (v2.1.275+): npm, pip, uv, cargo, github and gh cannot be marketplace names in any casing` |
+| **Category** | `marketplace` |
+
+**Root Cause:** Claude Code refuses these names in any letter case (plugin-marketplaces.md). The match is exact: `npmx`, `github-tools` or `my-gh` are fine.
+
+**Fix:** Choose a different marketplace name.
+
+### 1.10b `renames` block or entry `headers` has the wrong shape
+
+| Field | Value |
+|-------|-------|
+| **Script** | `validate_marketplace.py` |
+| **Severity** | MAJOR |
+| **Message** | `'renames' must be an object mapping old plugin names to new names or null, got <type>` / `'renames.<old>' must be a plugin name string or null, got <type>` / `<plugin>: 'headers' must be an object of header name to string value` |
+| **Category** | `marketplace` |
+
+**Root Cause:** `renames` (top level) maps a former plugin `name` to its current name, or to `null` if the plugin was removed. A plugin entry's `headers` is an object of HTTP header name to string value used when fetching that plugin. Any other shape cannot be applied.
+
+**Fix:** `"renames": {"old-name": "new-name", "retired-plugin": null}` and `"headers": {"Authorization": "Bearer ${TOKEN}"}`.
 
 ---
 
