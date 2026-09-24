@@ -215,12 +215,17 @@ class TestCurrentGenerationPricing:
         """An unlisted Opus 5.x id is priced as Opus 5, not retired Opus 4.1."""
         assert ctc.get_pricing("anthropic.claude-opus-5-9-v1")["input"] == 5.0
 
-    def test_unknown_future_opus_still_legacy_bucket(self) -> None:
-        """claude-opus-9 matches no 5.x rule, so it keeps the pre-existing generic-opus bucket (Opus 4.1).
+    def test_unknown_future_opus_uses_newest_opus_row(self) -> None:
+        """claude-opus-9 matches no 5.x rule, so it now resolves to the family's NEWEST row (Opus 5.5).
 
-        Deliberate: guessing a future tier's price is worse than the documented legacy fallback.
+        SUPERSEDES the prior "keeps the legacy Opus 4.1 bucket" ruling (WP12,
+        2026-09-24): billing an unlisted future opus id at today's Opus rate
+        is a closer estimate than billing it at Opus 4.1's retired $15/$75.
+        `pricing_is_estimate` reports this as a fallback, and
+        `format_cost_line` appends "(estimated: unlisted model)" for it.
         """
-        assert ctc.get_pricing("claude-opus-9") is ctc.MODEL_PRICING["claude-opus-4-1"]
+        assert ctc.get_pricing("claude-opus-9") is ctc.MODEL_PRICING["claude-opus-5-5"]
+        assert ctc.pricing_is_estimate("claude-opus-9") is True
 
     def test_empty_model_returns_default(self) -> None:
         """Empty model name returns the default pricing."""

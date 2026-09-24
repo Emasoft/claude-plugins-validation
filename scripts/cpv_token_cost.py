@@ -47,12 +47,17 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
 DEFAULT_PRICING: dict[str, float] = {"input": 3.0, "output": 15.0, "cache_write": 3.75, "cache_read": 0.30}
 
 
-def get_pricing(model_name: str) -> dict[str, float]:
-    """Look up pricing for a model name, with fuzzy matching."""
+def _resolve_pricing(model_name: str) -> tuple[dict[str, float], bool]:
+    """Resolve pricing for a model id, returning ``(pricing, is_estimate)``.
+
+    ``is_estimate=True`` means the id did not exactly (or via a dated-suffix
+    substring) identify a listed ``MODEL_PRICING`` row, so the caller is
+    getting a family/default fallback rather than a specific quoted price.
+    """
     if not model_name:
-        return DEFAULT_PRICING
+        return DEFAULT_PRICING, True
     if model_name in MODEL_PRICING:
-        return MODEL_PRICING[model_name]
+        return MODEL_PRICING[model_name], False
     # Try prefix/substring match, longest key first. A short key like
     # ``claude-opus-4`` is a substring of every ``claude-opus-4-X`` id, so
     # iterating in dict-insertion order would let the base key shadow the more
@@ -63,7 +68,7 @@ def get_pricing(model_name: str) -> dict[str, float]:
     # (audit MINOR token #3)
     for key in sorted(MODEL_PRICING, key=len, reverse=True):
         if key in model_name or model_name.startswith(key):
-            return MODEL_PRICING[key]
+            return MODEL_PRICING[key], False
     # Fuzzy family match. The 5.x branches come FIRST: before they existed an
     # unlisted 5.x id (e.g. "opus-5.5") fell through to the generic "opus"
     # branch and was billed at retired Opus 4.1 rates ($15/$75, ~4x too high),
@@ -72,24 +77,45 @@ def get_pricing(model_name: str) -> dict[str, float]:
     if "fable" in ml or "mythos" in ml:
         # ponytail: Mythos priced as Fable 5.1 (same $10/$50; its cache-read
         # rate is unannounced) — split it out once the skill publishes one.
-        return MODEL_PRICING["claude-fable-5-1"]
+        return MODEL_PRICING["claude-fable-5-1"], True
     if "opus" in ml and ("5-5" in ml or "5.5" in ml):
-        return MODEL_PRICING["claude-opus-5-5"]
+        return MODEL_PRICING["claude-opus-5-5"], True
     if "opus" in ml and re.search(r"(?:opus-5|5-opus|opus 5)", ml):
-        return MODEL_PRICING["claude-opus-5"]
+        return MODEL_PRICING["claude-opus-5"], True
     if "sonnet" in ml and re.search(r"(?:sonnet-5|5-sonnet|sonnet 5)", ml):
-        return MODEL_PRICING["claude-sonnet-5"]
+        return MODEL_PRICING["claude-sonnet-5"], True
     if "opus" in ml and ("4-6" in ml or "4.6" in ml):
-        return MODEL_PRICING["claude-opus-4-6"]
+        return MODEL_PRICING["claude-opus-4-6"], True
     if "opus" in ml and ("4-5" in ml or "4.5" in ml):
-        return MODEL_PRICING["claude-opus-4-5"]
+        return MODEL_PRICING["claude-opus-4-5"], True
+    # An id in a KNOWN family that matched none of the specific rules above
+    # resolves to that family's NEWEST listed row, never a retired legacy
+    # bucket. Billing an unlisted `claude-opus-9` at today's Opus rate is a
+    # closer estimate than billing it at Opus 4.1's retired $15/$75 — this is
+    # why the old "generic opus -> opus-4-1" fallback was replaced.
     if "opus" in ml:
-        return MODEL_PRICING["claude-opus-4-1"]
+        return MODEL_PRICING["claude-opus-5-5"], True
     if "sonnet" in ml:
-        return MODEL_PRICING["claude-sonnet-4-6"]
+        return MODEL_PRICING["claude-sonnet-5"], True
     if "haiku" in ml:
-        return MODEL_PRICING["claude-haiku-4-5"]
-    return DEFAULT_PRICING
+        return MODEL_PRICING["claude-haiku-4-5"], True
+    return DEFAULT_PRICING, True
+
+
+def get_pricing(model_name: str) -> dict[str, float]:
+    """Look up pricing for a model name, with fuzzy matching."""
+    pricing, _ = _resolve_pricing(model_name)
+    return pricing
+
+
+def pricing_is_estimate(model_name: str) -> bool:
+    """True when ``get_pricing(model_name)`` is a family/default fallback.
+
+    False means the id exactly (or via a dated-suffix substring) matched a
+    specific ``MODEL_PRICING`` row and the price is quoted, not guessed.
+    """
+    _, is_estimate = _resolve_pricing(model_name)
+    return is_estimate
 
 
 class TokenUsage:
@@ -222,11 +248,15 @@ def format_cost_line(usage: TokenUsage, model: str = "") -> str:
     m = model or usage.model
     # Shorten model name for display
     short_model = m.replace("claude-", "").split("-2")[0]
+    # Append an estimate marker when the price came from a family/default
+    # fallback rather than a specific quoted MODEL_PRICING row, so a report
+    # reader knows the dollar figure is a guess, not a billed rate.
+    estimate_note = " (estimated: unlisted model)" if pricing_is_estimate(m) else ""
     return (
         f"Tokens: {fmt_tok(usage.total_tokens())} "
         f"(in:{fmt_tok(usage.input_tokens)} out:{fmt_tok(usage.output_tokens)} "
         f"cw:{fmt_tok(usage.cache_creation_input_tokens)} cr:{fmt_tok(usage.cache_read_input_tokens)}) "
-        f"| Cost: ${cost:.4f} | Model: {short_model}"
+        f"| Cost: ${cost:.4f} | Model: {short_model}{estimate_note}"
     )
 
 
