@@ -1,10 +1,10 @@
 ---
 trdd-id: 8W80DZHI
 title: Investigate why the marketplace README-table canon rollout stopped and what blocks it
-column: human_review
-status: tasked
+column: complete
+status: archived
 created: 2026-09-24T18:14:48+0200
-updated: 2026-09-24T18:42:37+0200
+updated: 2026-09-24T20:08:51+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: audit
@@ -41,8 +41,15 @@ Measure both marketplaces and their plugins against the current canon, find why 
 ## Approval log
 
 - 2026-09-24T18:14:48+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-24T20:08:51+0200 — COMPLETE by user. Superseded by CPVPPC epic TRDD-1T862D4B.
 
 ## Findings (2026-09-24)
 
 Report (gitignored): reports/rollout-investigation/20260924_182730+0200-marketplace-canon-rollout.md. Neither marketplace is at the current canon: ai-maestro-plugins main has none of it; PR #18 has all of it but is 10 commits behind and its own --check gate would go red on merge; emasoft-plugins still runs the date-stamped renderer. Only ai-maestro-plugins PR #18 was ever in scope (TRDD-4EE90MC1 item 7); emasoft-plugins and the per-plugin rollout were never planned. cpv-agent cannot do this migration today: 14 defects D1-D14, incl. the fixer's gate never sees the canon (D1), validate_marketplace_pipeline is Layout-B-only and requires top-level version (D2, D3), setup_marketplace_automation overwrites existing workflows with a Layout-B one (D5, spot-verified), the canon notify payload sends the repo name not the plugin name (D9, spot-verified; web-scenario-tester stuck at 0.1.3 vs 0.1.7, spot-verified). One plugin can notify only one marketplace.
 User, verbatim (2026-09-24): "claude-plugins-management was an old plugin, now merged into the Emasoft/ai-maestro-plugin". So the emasoft-plugins entry is obsolete (superseded by ai-maestro-plugin, listed in ai-maestro-plugins), not a broken link to a live plugin; the fix is to remove the entry.
+Superseded by the CPVPPC epic TRDD-1T862D4B; investigation complete.
+
+## Acceptance
+
+- [x] Investigation complete: 14 defects (D1-D14) named, report written to reports/rollout-investigation/.
+- [x] Follow-up work superseded by the CPVPPC epic TRDD-1T862D4B (P0-P15).
