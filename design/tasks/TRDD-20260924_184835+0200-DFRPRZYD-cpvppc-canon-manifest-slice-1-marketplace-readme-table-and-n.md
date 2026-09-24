@@ -1,10 +1,10 @@
 ---
 trdd-id: DFRPRZYD
-title: CPVPPC canon manifest slice 1 - marketplace README table and notify payload
+title: CPVPPC P1 - framework and marketplace README-table assertions
 column: dev
 status: tasked
 created: 2026-09-24T18:48:35+0200
-updated: 2026-09-24T18:48:35+0200
+updated: 2026-09-24T20:01:40+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -36,6 +36,7 @@ approval-datetime: 2026-09-24T18:48:35+0200
 - Every feature has a fixture test: a canon-complete fixture passes the feature's check, and a copy with only that feature removed fails it (no vacuous name-exists pins).
 - Detection must work on uninstalled source trees and on marketplaces, including Layout A (url/github sources, no .gitmodules).
 - Spec from INTENT, then fix emitters/validators until the tests pass — do not record today's defects (D2-D9) as canon.
+Approval (2026-09-24): the user approved the full plan design/specs/cpvppc-plan.md; this card is its phase P1. The earlier note that 'yes go on' approved the slice is superseded: it approved the direction only.
 
 ## Slice 1 scope
 
