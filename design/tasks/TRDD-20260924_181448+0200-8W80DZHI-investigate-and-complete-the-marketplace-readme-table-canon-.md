@@ -4,7 +4,7 @@ title: Investigate why the marketplace README-table canon rollout stopped and wh
 column: dev
 status: tasked
 created: 2026-09-24T18:14:48+0200
-updated: 2026-09-24T18:16:12+0200
+updated: 2026-09-24T18:30:30+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: audit
@@ -34,3 +34,7 @@ Measure both marketplaces and their plugins against the current canon, find why 
 ## Approval log
 
 - 2026-09-24T18:14:48+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Findings (2026-09-24)
+
+Report (gitignored): reports/rollout-investigation/20260924_182730+0200-marketplace-canon-rollout.md. Neither marketplace is at the current canon: ai-maestro-plugins main has none of it; PR #18 has all of it but is 10 commits behind and its own --check gate would go red on merge; emasoft-plugins still runs the date-stamped renderer. Only ai-maestro-plugins PR #18 was ever in scope (TRDD-4EE90MC1 item 7); emasoft-plugins and the per-plugin rollout were never planned. cpv-agent cannot do this migration today: 14 defects D1-D14, incl. the fixer's gate never sees the canon (D1), validate_marketplace_pipeline is Layout-B-only and requires top-level version (D2, D3), setup_marketplace_automation overwrites existing workflows with a Layout-B one (D5, spot-verified), the canon notify payload sends the repo name not the plugin name (D9, spot-verified; web-scenario-tester stuck at 0.1.3 vs 0.1.7, spot-verified). One plugin can notify only one marketplace.
