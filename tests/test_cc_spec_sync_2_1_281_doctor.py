@@ -78,6 +78,15 @@ class TestDoctorJson:
         assert (errors, warnings) == ([], [])
         assert unknown and "without JSON" in unknown
 
+    def test_banner_before_json_is_tolerated(self, tmp_path, monkeypatch):
+        """An update notice printed before the JSON must not turn a working CLI into UNKNOWN."""
+        payload = {"success": True, "manifest": {"file": "/p/plugin.json", "errors": [], "warnings": [
+            {"path": "author", "message": "No author", "code": None}]}, "contents": []}
+        _fake_claude(tmp_path, monkeypatch, "Update available: 2.1.282\n" + json.dumps(payload, indent=2))
+        errors, warnings, unknown = _run_claude_validate(tmp_path)
+        assert unknown is None
+        assert errors == [] and warnings == ["claude validate: plugin.json:author: No author"]
+
     def test_old_cli_rejecting_json_is_unknown(self, tmp_path, monkeypatch):
         """An older CLI that rejects --json (stderr + exit 1) → UNKNOWN naming the reason."""
         _fake_claude(tmp_path, monkeypatch, "", stderr="error: unknown option '--json'", code=1)

@@ -15,11 +15,25 @@ Dual-mode:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
-# ── Per-model pricing (USD per million tokens, as of 2025-12) ──
+# ── Per-model pricing (USD per million tokens, as of 2026-09) ──
+# 5.x / 4.7 / 4.8 rows: input/output from the bundled claude-api skill's
+# "Current Models" table (CC 2.1.281); cache_write = 1.25x input and
+# cache_read = ~0.1x input per its prompt-caching.md ("Cache writes cost 1.25x
+# for 5-minute TTL"), EXCEPT the two cache reads the skill states outright:
+# Opus 5.5 $0.20 and Fable 5.1 $0.25. Mythos 5.1 is left out on purpose — the
+# skill says its cache-read rate is "open at launch".
 MODEL_PRICING: dict[str, dict[str, float]] = {
+    "claude-opus-5-5": {"input": 4.0, "output": 20.0, "cache_write": 5.0, "cache_read": 0.20},
+    "claude-opus-5": {"input": 5.0, "output": 25.0, "cache_write": 6.25, "cache_read": 0.50},
+    "claude-fable-5-1": {"input": 10.0, "output": 50.0, "cache_write": 12.5, "cache_read": 0.25},
+    "claude-fable-5": {"input": 10.0, "output": 50.0, "cache_write": 12.5, "cache_read": 1.00},
+    "claude-sonnet-5": {"input": 2.0, "output": 10.0, "cache_write": 2.5, "cache_read": 0.20},
+    "claude-opus-4-8": {"input": 5.0, "output": 25.0, "cache_write": 6.25, "cache_read": 0.50},
+    "claude-opus-4-7": {"input": 5.0, "output": 25.0, "cache_write": 6.25, "cache_read": 0.50},
     "claude-opus-4-6": {"input": 5.0, "output": 25.0, "cache_write": 6.25, "cache_read": 0.50},
     "claude-opus-4-5": {"input": 5.0, "output": 25.0, "cache_write": 6.25, "cache_read": 0.50},
     "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_write": 3.75, "cache_read": 0.30},
@@ -50,8 +64,21 @@ def get_pricing(model_name: str) -> dict[str, float]:
     for key in sorted(MODEL_PRICING, key=len, reverse=True):
         if key in model_name or model_name.startswith(key):
             return MODEL_PRICING[key]
-    # Fuzzy family match
+    # Fuzzy family match. The 5.x branches come FIRST: before they existed an
+    # unlisted 5.x id (e.g. "opus-5.5") fell through to the generic "opus"
+    # branch and was billed at retired Opus 4.1 rates ($15/$75, ~4x too high),
+    # and any Fable id fell to DEFAULT (Sonnet 4 rates, 5x too low).
     ml = model_name.lower()
+    if "fable" in ml or "mythos" in ml:
+        # ponytail: Mythos priced as Fable 5.1 (same $10/$50; its cache-read
+        # rate is unannounced) — split it out once the skill publishes one.
+        return MODEL_PRICING["claude-fable-5-1"]
+    if "opus" in ml and ("5-5" in ml or "5.5" in ml):
+        return MODEL_PRICING["claude-opus-5-5"]
+    if "opus" in ml and re.search(r"(?:opus-5|5-opus|opus 5)", ml):
+        return MODEL_PRICING["claude-opus-5"]
+    if "sonnet" in ml and re.search(r"(?:sonnet-5|5-sonnet|sonnet 5)", ml):
+        return MODEL_PRICING["claude-sonnet-5"]
     if "opus" in ml and ("4-6" in ml or "4.6" in ml):
         return MODEL_PRICING["claude-opus-4-6"]
     if "opus" in ml and ("4-5" in ml or "4.5" in ml):
