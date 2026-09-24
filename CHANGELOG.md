@@ -2,6 +2,32 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.19.0] - 2026-09-24
+
+### Bug Fixes
+
+- **hashes:** Regen self-hash manifests after 965d54e7
+- **spec-sync:** PermissionRequest agent hooks + narrow MCP url-without-type (TRDD-Q3CPZL0X)
+- **doctor:** Read `claude plugin validate --json`, report UNKNOWN when it cannot run (TRDD-Q3CPZL0X)
+- **doctor,cost:** No "healthy" verdict when a check could not run; price the 5.x models (TRDD-Q3CPZL0X)
+- **cost:** Pin 5.x prices, price unlisted ids from the newest family row and say so (TRDD-Q3CPZL0X)
+- **cost:** A price row matches only at a model-id boundary (TRDD-Q3CPZL0X)
+
+### Documentation
+
+- The publish recipe's commit-first note named a false mechanism
+- The commit-first note overstated the risk for UNTRACKED files
+- Move the staging mechanism out of the command fence, and stop getting it wrong
+- Point at the staging gotcha by name, and move its revision history to the version note
+- **memory:** Atomize anchors on 2 PROJECT wikimem pages
+- **release:** V5.19.0 note, inventory, TOC fix, exec bit (TRDD-Q3CPZL0X)
+
+### Features
+
+- **spec-sync:** CC 2.1.258-2.1.281 wave 1 — MCP, hooks, agents, settings (TRDD-Q3CPZL0X)
+- **spec-sync:** Plugin.json + marketplace.json for CC 2.1.258-2.1.281 (TRDD-Q3CPZL0X)
+- **spec-sync:** Validate inline plugin.json hooks like hooks.json; docs + fix recipes (TRDD-Q3CPZL0X)
+
 ## [5.18.1] - 2026-09-06
 
 ### Bug Fixes
