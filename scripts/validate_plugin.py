@@ -48,6 +48,7 @@ import shlex
 import subprocess
 import sys
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, cast
 
@@ -63,6 +64,9 @@ from cpv_validation_common import (
     gitignored_unshipped_paths,
     is_vendored_path,
     load_cpv_config,
+    # Segment-aware `..` check shared with validate_marketplace (CC 2.1.265/.268
+    # accept a directory named `..tools`); one rule, no drifting local copy.
+    path_has_traversal,
     path_is_unshipped,
     publish_py_creates_dependency_tag,
     removed_cpv_size_keys_present,
@@ -85,6 +89,7 @@ from validate_encoding import validate_encoding as validate_encoding_full
 from validate_hook import (
     find_user_config_interpolations,
     hook_is_exec_form,
+    unquoted_plugin_root_in_shell,
     user_config_shell_finding,
 )
 from validate_hook import (
@@ -131,20 +136,6 @@ _PLUGIN_VERSION_RE = re.compile(
     r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
     r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
 )
-
-
-def _path_has_traversal(path: object) -> bool:
-    """Return True when ``path`` contains a `..` path segment.
-
-    Accepts ``object`` (not just ``str``) because callers pass values parsed
-    from untrusted ``marketplace.json`` where the field is not guaranteed to
-    be a string. Non-str inputs are treated as "no traversal". Splits on both
-    ``/`` and ``\\`` so Windows-style paths are caught too.
-    """
-    if not isinstance(path, str):
-        return False
-    parts = re.split(r"[\\/]+", path)
-    return any(p == ".." for p in parts)
 
 
 def _safe_load_marketplace_json(path: Path) -> dict[str, Any] | None:
@@ -379,6 +370,73 @@ USER_CONFIG_TYPE_TO_PYTHON: dict[str, tuple[type, ...]] = {
 }
 
 
+def _option_has_forbidden_char(option: str) -> bool:
+    """True when ``option`` holds a character the options rules forbid.
+
+    plugins-reference.md: "Don't use control characters, invisible characters,
+    characters that change text direction, or spaces other than a regular space".
+    Cc = control, Cf = format (zero-width + bidi controls), Zl/Zp = line/paragraph
+    separators, Zs other than U+0020 = non-regular spaces.
+    """
+    for ch in option:
+        cat = unicodedata.category(ch)
+        if cat in ("Cc", "Cf", "Zl", "Zp") or (cat == "Zs" and ch != " "):
+            return True
+    return False
+
+
+def _validate_user_config_options(key: str, entry: dict[str, Any], report: ValidationReport) -> None:
+    """Check ``userConfig.<key>.options`` against the documented rules (CC v2.1.271).
+
+    plugins-reference.md "Limit a field to fixed options" lists eight rules and
+    ends: "If you break any of these rules, the plugin fails to load." A plugin
+    that cannot load is broken, so every rule is MAJOR. It also says "If you
+    declare `options` on any field, users on Claude Code versions before
+    v2.1.271 can't load the plugin" — a compatibility note, not a defect, so
+    that one is a non-blocking WARNING.
+    """
+    where = ".claude-plugin/plugin.json"
+    field = f"userConfig.{key}.options"
+    report.warning(f"'{field}' requires Claude Code v2.1.271+ — older versions can't load this plugin", where)
+    options = entry["options"]
+    # "List at least one option, each 1 to 64 characters long"
+    if not isinstance(options, list) or not options:
+        report.major(f"'{field}' must be a non-empty array of strings (plugin fails to load)", where)
+        return
+    # "Set `type` to `string`"
+    if entry.get("type") != "string":
+        report.major(f"'{field}' requires type 'string', got {entry.get('type')!r} (plugin fails to load)", where)
+    # "Don't set `multiple` or `sensitive` to `true`"
+    for flag in ("multiple", "sensitive"):
+        if entry.get(flag) is True:
+            report.major(f"'{field}' cannot be combined with {flag}: true (plugin fails to load)", where)
+    seen: set[str] = set()
+    for i, opt in enumerate(options):
+        if not isinstance(opt, str) or not 1 <= len(opt) <= 64:
+            report.major(f"'{field}[{i}]' must be a string of 1 to 64 characters (plugin fails to load)", where)
+            continue
+        # "Don't start or end an option with a space"
+        if opt != opt.strip(" "):
+            report.major(f"'{field}[{i}]' = {opt!r} starts or ends with a space (plugin fails to load)", where)
+        if _option_has_forbidden_char(opt):
+            report.major(
+                f"'{field}[{i}]' = {opt!r} contains a control, invisible, bidi or non-regular-space character "
+                "(plugin fails to load)",
+                where,
+            )
+        # "Don't list the same option twice, even in a different letter case"
+        folded = opt.casefold()
+        if folded in seen:
+            report.major(f"'{field}[{i}]' = {opt!r} duplicates an earlier option (case-insensitive; plugin fails to load)", where)
+        seen.add(folded)
+    # "Set `default` to one of the options" / "If you leave `default` unset, set `required` to `true`"
+    if "default" in entry:
+        if entry["default"] not in options:
+            report.major(f"'userConfig.{key}.default' must be one of its options (plugin fails to load)", where)
+    elif entry.get("required") is not True:
+        report.major(f"'{field}' without a default requires required: true (plugin fails to load)", where)
+
+
 def validate_user_config_structure(manifest: dict[str, Any], report: ValidationReport) -> None:
     """Validate the ``userConfig`` root per plugins-reference.md (v2.1.121).
 
@@ -414,6 +472,9 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
             "multiple",
             "min",
             "max",
+            # v2.1.271 — fixed-choice picker (plugins-reference.md "Limit a field
+            # to fixed options"); rules checked by _validate_user_config_options.
+            "options",
         }
     )
     required_sub = frozenset({"type", "title", "description"})
@@ -524,6 +585,9 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
                     f"does not match declared type ({declared})",
                     ".claude-plugin/plugin.json",
                 )
+
+        if "options" in entry:
+            _validate_user_config_options(key, entry, report)
 
         # Unknown sub-fields — MINOR so authors notice typos.
         for extra in set(entry.keys()) - known_sub:
@@ -871,6 +935,17 @@ def _validate_monitors_array(
                 user_config_shell_finding("monitor", monitor_tokens, f"monitors[{i}].command"),
                 source_label,
             )
+        # CC v2.1.281 warns when a shell-form command leaves ${CLAUDE_PLUGIN_ROOT}
+        # unquoted: the substituted path is word-split, so the monitor breaks on a
+        # plugin path with a space. A monitor command is always shell form (no
+        # exec-form companion). WARNING — CC itself only warns.
+        if unquoted_plugin_root_in_shell(entry.get("command")):
+            report.warning(
+                f"monitors[{i}].command uses ${{CLAUDE_PLUGIN_ROOT}} unquoted — it breaks on plugin "
+                "paths with spaces (CC v2.1.281 `claude plugin validate` warns on this). Quote it: "
+                '"${CLAUDE_PLUGIN_ROOT}/script.sh".',
+                source_label,
+            )
         # description — required
         if not isinstance(entry.get("description"), str) or not entry.get("description"):
             report.major(
@@ -963,6 +1038,74 @@ def validate_inline_hooks_user_config(manifest: dict[str, Any], report: Validati
                 user_config_shell_finding("hook", tokens, "plugin.json inline hook command"),
                 ".claude-plugin/plugin.json",
             )
+
+
+def _collect_strings(node: Any) -> list[str]:
+    """Every string value (dict values and list items, recursively) under ``node``."""
+    if isinstance(node, str):
+        return [node]
+    if isinstance(node, dict):
+        return [s for v in node.values() for s in _collect_strings(v)]
+    if isinstance(node, list):
+        return [s for v in node for s in _collect_strings(v)]
+    return []
+
+
+# Config surfaces whose values Claude Code substitutes ${user_config.*} into.
+# Markdown is deliberately NOT scanned: skill/agent prose legitimately SHOWS the
+# syntax (CPV's own references do), so reading it would flag documentation.
+_USER_CONFIG_REF_SURFACES = ("mcpServers", "lspServers", "hooks", "monitors")
+_USER_CONFIG_DEFAULT_FILES = (".mcp.json", ".lsp.json", "hooks/hooks.json", "monitors/monitors.json")
+
+
+def validate_undeclared_user_config_refs(manifest: dict[str, Any], plugin_root: Path, report: ValidationReport) -> None:
+    """WARN on a ``${user_config.X}`` whose ``X`` is not declared in ``userConfig``.
+
+    CC v2.1.281's `claude plugin validate` reports undeclared references. No doc
+    sentence says the plugin or server fails to load because of one, so this is
+    a WARNING, not a publish gate (the v2.154.1 ruling: never invent a gate CC
+    does not have). Declared keys include every channel's own ``userConfig``.
+    """
+    declared: set[str] = set()
+    uc = manifest.get("userConfig")
+    if isinstance(uc, dict):
+        declared.update(k for k in uc if isinstance(k, str))
+    channels = manifest.get("channels")
+    if isinstance(channels, list):
+        for ch in channels:
+            if isinstance(ch, dict) and isinstance(ch.get("userConfig"), dict):
+                declared.update(k for k in ch["userConfig"] if isinstance(k, str))
+
+    # (source label, parsed JSON) for every config surface.
+    sources: list[tuple[str, Any]] = []
+    files: set[str] = set(_USER_CONFIG_DEFAULT_FILES)
+    for key in _USER_CONFIG_REF_SURFACES:
+        value = manifest.get(key)
+        if isinstance(value, (dict, list)) and not (isinstance(value, list) and all(isinstance(v, str) for v in value)):
+            sources.append((f".claude-plugin/plugin.json:{key}", value))
+        # String / string-array values are PATHS to config files.
+        for path in [value] if isinstance(value, str) else value if isinstance(value, list) else []:
+            if isinstance(path, str) and path.endswith(".json") and not path_has_traversal(path):
+                files.add(path[2:] if path.startswith("./") else path)
+    for rel in sorted(files):
+        fp = plugin_root / rel
+        if fp.is_file():
+            try:
+                sources.append((rel, json.loads(fp.read_text(encoding="utf-8"))))
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+                continue  # parse errors are reported by the surface's own validator
+
+    for label, data in sources:
+        for text in _collect_strings(data):
+            for token in find_user_config_interpolations(text):
+                # `${user_config.KEY}` → KEY (drop any `:-default` style suffix).
+                name = token[len("${user_config.") : -1].split(":", 1)[0].strip()
+                if name and name not in declared:
+                    report.warning(
+                        f"'{token}' references user option '{name}', which is not declared in "
+                        "plugin.json 'userConfig' (CC v2.1.281 `claude plugin validate` reports this)",
+                        label,
+                    )
 
 
 def validate_monitors_entries(manifest: dict[str, Any], plugin_root: Path, report: ValidationReport) -> None:
@@ -1287,6 +1430,17 @@ def validate_manifest(
         # `themes` and `monitors` should now be declared under `experimental: { ... }`;
         # top-level placement still works but `claude plugin validate` warns.
         "experimental",
+        # plugins-reference.md:552 — free-form object for the author's own data;
+        # Claude Code never reads it (drew an unknown-field WARNING before).
+        "metadata",
+        # plugins-reference.md:573 — custom workflows/ path, replaces the default dir.
+        "workflows",
+        # CC v2.1.281: `claude plugin validate` stopped reporting these listing
+        # metadata keys as unknown. Changelog-named only (no doc table lists
+        # them) — the v5.8.0 precedent for changelog-only fields whose omission
+        # emits a finding on input CC accepts.
+        "privacyPolicyUrl",
+        "supportUrl",
     }
     for key in manifest.keys():
         if key not in known_fields:
@@ -1342,7 +1496,23 @@ def validate_manifest(
                 ".claude-plugin/plugin.json",
             )
         else:
-            known_experimental_keys = {"themes", "monitors"}
+            # `evals` (CC v2.1.269, plugins-reference.md:580): "Directory below the
+            # plugin root that holds the plugin's eval cases" — string|array. It
+            # drew an unknown-key WARNING before; shape-check it instead.
+            known_experimental_keys = {"themes", "monitors", "evals"}
+            if "evals" in experimental:
+                evals = experimental["evals"]
+                evals_list = [evals] if isinstance(evals, str) else evals
+                if not isinstance(evals_list, list) or not all(isinstance(e, str) for e in evals_list):
+                    report.major(
+                        "'experimental.evals' must be a directory path string or an array of them",
+                        ".claude-plugin/plugin.json",
+                    )
+                elif any(path_has_traversal(e) for e in evals_list):
+                    report.major(
+                        "'experimental.evals' must stay below the plugin root (contains a '..' segment)",
+                        ".claude-plugin/plugin.json",
+                    )
             for exp_key in experimental.keys():
                 if exp_key not in known_experimental_keys:
                     report.warning(
@@ -1351,6 +1521,14 @@ def validate_manifest(
                         f"Known keys: {sorted(known_experimental_keys)}.",
                         ".claude-plugin/plugin.json",
                     )
+
+    # plugins-reference.md:529 — "`experimental` and `metadata`: Claude Code
+    # ignores a non-object value, and `claude plugin validate` reports a warning."
+    if "metadata" in manifest and not isinstance(manifest["metadata"], dict):
+        report.warning(
+            f"'metadata' must be an object — Claude Code ignores a {type(manifest['metadata']).__name__} value",
+            ".claude-plugin/plugin.json",
+        )
 
     # Validate repository field type — Claude Code requires a string URL, not an object
     if "repository" in manifest:
@@ -1435,6 +1613,7 @@ def validate_manifest(
         "outputStyles",
         "lspServers",
         "monitors",
+        "workflows",  # plugins-reference.md:573 — replaces the default workflows/ dir
     ]
     for key in path_fields:
         if key in manifest:
@@ -1452,7 +1631,7 @@ def validate_manifest(
                     f"Field '{key}' path must start with './': {value}",
                     ".claude-plugin/plugin.json",
                 )
-            if isinstance(value, str) and _path_has_traversal(value):
+            if isinstance(value, str) and path_has_traversal(value):
                 report.major(
                     f"Field '{key}' contains path-traversal segment '..': {value} — "
                     "paths escaping the plugin root do not resolve post-install "
@@ -1484,7 +1663,7 @@ def validate_manifest(
                             f"Field '{key}[{i}]' path must start with './': {path}",
                             ".claude-plugin/plugin.json",
                         )
-                    elif _path_has_traversal(path):
+                    elif path_has_traversal(path):
                         report.major(
                             f"Field '{key}[{i}]' contains path-traversal segment '..': {path} — "
                             "paths escaping the plugin root do not resolve post-install "
@@ -1821,6 +2000,7 @@ def validate_manifest(
     # CC v2.1.207 shell-injection rule for hooks declared INLINE in plugin.json
     # (the sidecar hooks/hooks.json is covered by validate_hook itself).
     validate_inline_hooks_user_config(manifest, report)
+    validate_undeclared_user_config_refs(manifest, plugin_root, report)
 
     return cast(dict[str, Any], manifest)
 
@@ -2216,6 +2396,43 @@ def check_tracked_gitignored_files(plugin_root: Path, report: ValidationReport) 
         "untrack while keeping the working-tree file), or remove them from "
         f".gitignore if they must ship. Files: {listing}",
         ".gitignore",
+    )
+
+
+def check_lfs_shipped_files(plugin_root: Path, report: ValidationReport) -> None:
+    """WARN when a tracked (shipped) file is stored in Git LFS.
+
+    plugin-marketplaces.md (CC v2.1.274): plugin and marketplace clones leave Git
+    LFS files as POINTERS instead of downloading them — "keep the files your
+    plugins need out of LFS". A tracked file ships even when gitignored, so every
+    tracked `filter=lfs` path is a file users receive as a pointer. WARNING: the
+    plugin may not need that file at runtime, which CPV cannot know.
+    Not a git repo / git unavailable → no finding (tracked-ness is unknowable).
+    """
+    try:
+        tracked = subprocess.run(
+            ["git", "-C", str(plugin_root), "ls-files", "-z"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.split("\0")
+        tracked = [p for p in tracked if p]
+        if not tracked:
+            return
+        attrs = subprocess.run(
+            ["git", "-C", str(plugin_root), "check-attr", "-z", "--stdin", "filter"],
+            input="\0".join(tracked), capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.split("\0")
+    except (OSError, subprocess.SubprocessError):
+        return
+    # -z output is a flat path, attribute, value triplet stream.
+    lfs = [attrs[i] for i in range(0, len(attrs) - 2, 3) if attrs[i + 2] == "lfs"]
+    if not lfs:
+        return
+    shown = ", ".join(lfs[:15]) + (f", … (+{len(lfs) - 15} more)" if len(lfs) > 15 else "")
+    report.warning(
+        f"{len(lfs)} shipped file(s) are stored in Git LFS — plugin clones leave LFS files as "
+        "pointers (CC v2.1.274), so users get a pointer, not the file. Keep files the plugin "
+        f"needs out of LFS. Files: {shown}",
+        ".gitattributes",
     )
 
 
@@ -9315,6 +9532,7 @@ def main() -> int:
     # .gitignore ships but is marked ignored (a scan-evasion vector); flag the
     # plugin INVALID and route the user to the fix agent to untrack them.
     _serial_phase("check_tracked_gitignored_files", check_tracked_gitignored_files, plugin_root, report)
+    _serial_phase("check_lfs_shipped_files", check_lfs_shipped_files, plugin_root, report)
     # v2.32.0 — Layout C cross-validation (marketplace-in-plugin)
     _serial_phase("validate_layout_c_consistency", validate_layout_c_consistency, plugin_root, report)
     # v2.99.1 — skillaudit native (50 rules / 489 patterns) — MANDATORY,
