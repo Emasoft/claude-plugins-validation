@@ -87,10 +87,11 @@ from validate_command import validate_command as validate_command_full
 from validate_documentation import validate_documentation as validate_documentation_full
 from validate_encoding import validate_encoding as validate_encoding_full
 from validate_hook import (
+    HookValidationReport,
     find_user_config_interpolations,
-    hook_is_exec_form,
     unquoted_plugin_root_in_shell,
     user_config_shell_finding,
+    validate_hooks_data,
 )
 from validate_hook import (
     validate_hooks as validate_hook_file,
@@ -984,60 +985,34 @@ def _validate_monitors_array(
                 )
 
 
-def _collect_command_hook_dicts(node: Any) -> list[dict[str, Any]]:
-    """Every dict carrying a ``command`` key anywhere under ``node``.
+def validate_inline_hooks(
+    manifest: dict[str, Any], report: ValidationReport, plugin_root: Path | None = None
+) -> None:
+    """Hooks declared INLINE in plugin.json get the same checks as hooks/hooks.json.
 
-    The inline ``hooks`` object in plugin.json nests the actual hook dicts a few
-    levels down (event name -> matcher groups -> a ``hooks`` array), and the
-    wrapper shape varies (a bare event->list map, or a ``{"hooks": {...}}``
-    wrapper). Walking for the SHAPE we care about — a dict with a ``command`` —
-    instead of hard-coding one nesting means a hook can never hide from the
-    v2.1.207 rule behind a wrapper variant. Missing a hook here would be a false
-    negative on a SECURITY rule, so the walk is deliberately shape-driven.
-    """
-    found: list[dict[str, Any]] = []
-    if isinstance(node, dict):
-        if "command" in node:
-            found.append(node)
-        for value in node.values():
-            found.extend(_collect_command_hook_dicts(value))
-    elif isinstance(node, list):
-        for item in node:
-            found.extend(_collect_command_hook_dicts(item))
-    return found
-
-
-def validate_inline_hooks_user_config(manifest: dict[str, Any], report: ValidationReport) -> None:
-    """CC v2.1.207: ``${user_config.*}`` in a SHELL-FORM inline hook command.
-
-    Covers the hooks declared INLINE in plugin.json (``"hooks": {...}``). Hooks
-    declared in ``hooks/hooks.json`` are covered by validate_hook's own
-    ``validate_command_hook`` — the inline object never reaches that validator,
-    so without this the rule would have a hole exactly where an author put their
-    hooks in the manifest instead of the sidecar file.
-
-    THE DISCRIMINATOR IS THE FORM. ``hook_is_exec_form`` (imported from the
-    validate_hook SSOT — never re-derived) is what decides: exec form spawns the
-    program with an argv vector so no shell parses the value, and moving the token
-    into ``args`` is exactly the fix the changelog prescribes. Flagging it would
-    flag the remedy. Shell form hands one string to a shell, where a config value
-    carrying `; rm -rf ~` becomes code — Claude Code now rejects it outright, so
-    the hook is broken as well as unsafe. CRITICAL.
+    Claude Code loads an inline ``"hooks": {...}`` object exactly like the sidecar
+    file (plugins-reference.md: "hooks/hooks.json in plugin root, or inline in
+    plugin.json"). Before CC 2.1.281 sync, CPV ran ONLY the v2.1.207
+    ``${user_config.*}`` shell-injection rule on the inline form, so every other
+    per-hook check — event tiers, the CC 2.1.280 PermissionRequest agent-hook
+    MAJOR, the unquoted ${CLAUDE_PLUGIN_ROOT} WARNING, script checks — silently
+    skipped it (reproduced through the real validator). Routing the object through
+    ``validate_hooks_data`` (the validate_hook SSOT) closes that hole without
+    copying a single check, and still covers the v2.1.207 rule, which lives in
+    ``validate_command_hook``. A malformed inline shape now fails the same
+    top-level structure checks hooks.json does instead of going unexamined.
     """
     hooks_value = manifest.get("hooks")
     if not isinstance(hooks_value, dict):
-        # A string / array value is a PATH to a hooks file, whose contents are
-        # validated by validate_hook. Only the inline object form lands here.
+        # A string / array value is a PATH to a hooks file, not inline config.
         return
-    for hook in _collect_command_hook_dicts(hooks_value):
-        if hook_is_exec_form(hook):
-            continue
-        tokens = find_user_config_interpolations(hook.get("command"))
-        if tokens:
-            report.critical(
-                user_config_shell_finding("hook", tokens, "plugin.json inline hook command"),
-                ".claude-plugin/plugin.json",
-            )
+    # Accept both the full hooks.json document shape ({"hooks": {...}}) and the
+    # bare event map the manifest usually carries ({"PreToolUse": [...]}).
+    data = hooks_value if isinstance(hooks_value.get("hooks"), dict) else {"hooks": hooks_value}
+    manifest_label = ".claude-plugin/plugin.json"
+    hook_report = validate_hooks_data(data, plugin_root, HookValidationReport(hook_path=manifest_label))
+    for result in hook_report.results:
+        report.add(result.level, f"(inline hooks) {result.message}", manifest_label, result.line)
 
 
 def _collect_strings(node: Any) -> list[str]:
@@ -1997,9 +1972,9 @@ def validate_manifest(
     validate_user_config_structure(manifest, report)
     validate_channels_structure(manifest, plugin_root, report)
     validate_monitors_entries(manifest, plugin_root, report)
-    # CC v2.1.207 shell-injection rule for hooks declared INLINE in plugin.json
-    # (the sidecar hooks/hooks.json is covered by validate_hook itself).
-    validate_inline_hooks_user_config(manifest, report)
+    # Hooks declared INLINE in plugin.json run through the same validate_hook
+    # checks as the sidecar hooks/hooks.json (incl. the v2.1.207 shell rule).
+    validate_inline_hooks(manifest, report, plugin_root)
     validate_undeclared_user_config_refs(manifest, plugin_root, report)
 
     return cast(dict[str, Any], manifest)
@@ -2430,8 +2405,9 @@ def check_lfs_shipped_files(plugin_root: Path, report: ValidationReport) -> None
     shown = ", ".join(lfs[:15]) + (f", … (+{len(lfs) - 15} more)" if len(lfs) > 15 else "")
     report.warning(
         f"{len(lfs)} shipped file(s) are stored in Git LFS — plugin clones leave LFS files as "
-        "pointers (CC v2.1.274), so users get a pointer, not the file. Keep files the plugin "
-        f"needs out of LFS. Files: {shown}",
+        "pointers (CC v2.1.274), so users get a pointer, not the file. This matters only if the "
+        "plugin reads these files at runtime — keep those out of LFS. "
+        f"Files: {shown}",
         ".gitattributes",
     )
 

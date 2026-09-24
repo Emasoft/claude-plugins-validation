@@ -106,7 +106,7 @@ There are **30 valid hook events**:
 | PostCompact | Yes | After conversation compaction completes (v2.1.76, command-only). Matchers: manual, auto |
 | Elicitation | Yes | When MCP server requests structured input (v2.1.76, command-only). Matcher: MCP server name |
 | ElicitationResult | Yes | When user responds to MCP elicitation (v2.1.76, command-only). Matcher: MCP server name |
-| StopFailure | Yes | When turn ends due to API error (v2.1.78). Matchers: rate_limit, authentication_failed, billing_error, invalid_request, server_error, max_output_tokens, unknown |
+| StopFailure | Yes | When turn ends due to API error (v2.1.78). Matchers: rate_limit, overloaded, authentication_failed, oauth_org_not_allowed, account_on_hold, billing_error, invalid_request, model_not_found, server_error, max_output_tokens, cloud_credential_error, unknown |
 | CwdChanged | No | When working directory changes — e.g. direnv (v2.1.83, command-only) |
 | FileChanged | Yes | When watched files change (v2.1.83, command-only). Matcher: filename/basename pattern |
 | TaskCreated | No | When a task is created via TaskCreate tool (v2.1.84, command-only) |
@@ -129,7 +129,7 @@ These events support tool-specific or context-specific matchers:
 - SessionEnd (clear, resume, logout, prompt_input_exit, other)
 - SubagentStart, SubagentStop (agent name)
 - ConfigChange (user_settings, project_settings, local_settings, policy_settings, skills)
-- StopFailure (rate_limit, authentication_failed, billing_error, invalid_request, server_error, max_output_tokens, unknown)
+- StopFailure (rate_limit, overloaded, authentication_failed, oauth_org_not_allowed, account_on_hold, billing_error, invalid_request, model_not_found, server_error, max_output_tokens, cloud_credential_error, unknown)
 - InstructionsLoaded (session_start, nested_traversal, path_glob_match, include, compact)
 - Elicitation, ElicitationResult (MCP server name)
 - FileChanged (filename/basename pattern)

@@ -43,7 +43,7 @@ from validate_hook import (  # noqa: E402
 from validate_mcp import validate_mcp_server  # noqa: E402
 from validate_plugin import (  # noqa: E402
     check_project_settings_plugin_configs,
-    validate_inline_hooks_user_config,
+    validate_inline_hooks,
     validate_monitors_entries,
 )
 
@@ -260,7 +260,8 @@ class TestMonitorShellForm:
 
 
 class TestInlinePluginJsonHooks:
-    """The inline `hooks` object never reaches validate_hook — cover it here."""
+    """The inline `hooks` object is routed through validate_hook (CC 2.1.281 sync);
+    the v2.1.207 rule must still fire exactly once on it."""
 
     def test_inline_shell_form_token_is_critical(self) -> None:
         """POSITIVE: a shell-form inline hook command carrying the token → CRITICAL."""
@@ -275,7 +276,7 @@ class TestInlinePluginJsonHooks:
                 ]
             }
         }
-        validate_inline_hooks_user_config(manifest, report)
+        validate_inline_hooks(manifest, report)
         hits = _messages(report, SHELL_INJECT_CODE, "CRITICAL")
         assert len(hits) == 1, f"inline shell-form hook must fire one CRITICAL; got {hits}"
 
@@ -298,7 +299,7 @@ class TestInlinePluginJsonHooks:
                 ]
             }
         }
-        validate_inline_hooks_user_config(manifest, report)
+        validate_inline_hooks(manifest, report)
         assert _messages(report, SHELL_INJECT_CODE) == []
 
     def test_inline_plugin_option_env_var_is_not_flagged(self) -> None:
@@ -309,7 +310,7 @@ class TestInlinePluginJsonHooks:
                 "Stop": [{"hooks": [{"type": "command", "command": "x $CLAUDE_PLUGIN_OPTION_KEY"}]}]
             }
         }
-        validate_inline_hooks_user_config(manifest, report)
+        validate_inline_hooks(manifest, report)
         assert _messages(report, SHELL_INJECT_CODE) == []
 
     def test_inline_empty_args_still_fires(self) -> None:
@@ -323,20 +324,25 @@ class TestInlinePluginJsonHooks:
                 ]
             }
         }
-        validate_inline_hooks_user_config(manifest, report)
-        assert len(_messages(report, SHELL_INJECT_CODE, "CRITICAL")) == 1
+        validate_inline_hooks(manifest, report)
+        # Since the inline object is routed through validate_hook (CC 2.1.281 sync),
+        # it gets hooks.json's own verdict: an empty `args` is a CRITICAL of its own
+        # and stops that hook's validation. The guarantee this test exists for —
+        # the malformed hook is still BLOCKED, never exempted — holds either way.
+        blocking = [r for r in report.results if r.level == "CRITICAL"]
+        assert blocking and any("'args' cannot be an empty list" in r.message for r in blocking)
 
     def test_hooks_as_path_string_is_ignored(self) -> None:
         """NEGATIVE: the path form points at a hooks file that validate_hook owns —
         no double-report, no crash."""
         report = ValidationReport()
-        validate_inline_hooks_user_config({"hooks": "./hooks/extra.json"}, report)
+        validate_inline_hooks({"hooks": "./hooks/extra.json"}, report)
         assert report.results == []
 
     def test_no_hooks_field_is_a_no_op(self) -> None:
         """NEGATIVE: a manifest with no hooks field costs nothing and reports nothing."""
         report = ValidationReport()
-        validate_inline_hooks_user_config({"name": "p"}, report)
+        validate_inline_hooks({"name": "p"}, report)
         assert report.results == []
 
 

@@ -31,7 +31,7 @@ Scripts at `${CLAUDE_PLUGIN_ROOT}/scripts/` for the full plugin lifecycle.
 
 Smart plugin name resolution — accepts: `plugin-name`, `plugin-name@marketplace`, `plugin-name@owner/marketplace`.
 
-Run `/reload-plugins` after install/update/uninstall/enable/disable.
+Run `/reload-plugins` after install/update/uninstall/enable/disable done from the command line (the scripts or `claude plugin …`). An install, enable or disable made in the interactive `/plugin` menu takes effect when the menu closes and needs no reload (Claude Code v2.1.268+).
 
 Copy this checklist and track your progress:
 - [ ] Plugin installed/updated

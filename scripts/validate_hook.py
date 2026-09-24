@@ -3819,6 +3819,21 @@ def validate_hooks(
     if data is None:
         return report
 
+    return validate_hooks_data(data, plugin_root, report)
+
+
+def validate_hooks_data(
+    data: Any,
+    plugin_root: Path | None,
+    report: HookValidationReport,
+) -> HookValidationReport:
+    """Validate an already-parsed hooks config (the ``{"hooks": {...}}`` document).
+
+    Split out of ``validate_hooks`` so hooks declared INLINE in plugin.json run
+    through exactly the same per-hook checks as ``hooks/hooks.json`` — before
+    this, the inline object skipped every tier / PermissionRequest / quoting
+    check (CC loads both forms identically, so CPV must judge them identically).
+    """
     # Validate top-level structure
     if not validate_top_level_structure(data, report):
         return report

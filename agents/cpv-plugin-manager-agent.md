@@ -36,7 +36,7 @@ check cpv-the-skills-menu to hand it to the skill that actually owns it.
 2. Use `--dry-run` before destructive operations unless the user explicitly says to proceed
 3. Validate before installing to catch issues early:
    - `uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin <path> --strict`
-4. After install/update/uninstall/enable/disable, remind the user to run `/reload-plugins`
+4. After install/update/uninstall/enable/disable (done from the command line, as this agent does), remind the user to run `/reload-plugins`. Changes made in the interactive `/plugin` menu apply when the menu closes (Claude Code v2.1.268+) and need no reload.
 5. Report results concisely — summarize errors and warnings separately
 6. If a command fails, show the full error output and suggest corrective action
 

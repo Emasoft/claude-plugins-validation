@@ -15,6 +15,7 @@
 - [11. Field Validation Issues](#11-field-validation-issues)
 - [12. Informational Notices](#12-informational-notices)
 - [13. Runtime-Dep, Invocation & Path-Traversal Issues (TRDD-0028dd34)](#13-runtime-dep--invocation-issues-trdd-0028dd34)
+- [15. CC v2.1.258–v2.1.281 hook rules](#15-cc-v21258v21281-hook-rules)
 
 ## Checklist
 
@@ -2157,5 +2158,39 @@ curl -sS -H "Authorization: Bearer $CLAUDE_PLUGIN_OPTION_API_TOKEN" "$ENDPOINT"
 - [ ] Never "fix" by quoting, escaping, or `printf %q` — the shape is rejected, not the value.
 - [ ] Leave existing **exec-form** interpolations alone; they are correct.
 - [ ] Re-validate: `cpv hook <plugin>` must report zero `RC-USERCFG-SHELL-INJECT`.
+
+---
+
+## 15. CC v2.1.258–v2.1.281 hook rules
+
+### MAJOR: `agent` hook on an event that does not support it
+
+**Error message**: `Event 'PermissionRequest' does not support 'agent' hooks — Claude Code skips them and shows an error (v2.1.280). Use a 'command', 'http', 'mcp_tool' or 'prompt' hook instead.`
+**Severity**: MAJOR
+**Root cause**: Since Claude Code v2.1.280 an agent-type hook no longer runs on `PermissionRequest`: its answer could never allow or deny the request. The plugin still loads, but the hook is dead config.
+**Fix**: Rewrite the hook as a `command` or `http` hook (the two that can return an allow/deny decision), or as `mcp_tool` / `prompt` if a decision is not needed. Keep the same matcher.
+
+### WARNING: `${CLAUDE_PLUGIN_ROOT}` unquoted in a shell-form command
+
+**Error message**: `<Event> command hook uses ${CLAUDE_PLUGIN_ROOT} unquoted in a shell-form command — it breaks on plugin paths with spaces (CC v2.1.281 \`claude plugin validate\` warns on this). Quote it: "${CLAUDE_PLUGIN_ROOT}/script.sh", or use exec form (\`args\`).`
+The same WARNING is emitted for `monitors[<i>].command`.
+**Severity**: WARNING (never blocks)
+**Root cause**: In a shell-form `command` the substituted plugin path is word-split by the shell, so the hook breaks for anyone whose plugin cache path contains a space (common with iCloud Drive or Google Drive on macOS). Claude Code's own validator warns on this since v2.1.281.
+**Fix** (either):
+
+```jsonc
+// A — quote the token (double or single quotes both protect it)
+{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/check.sh" }
+
+// B — exec form: no shell parses args, so nothing is word-split
+{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/check.sh", "args": ["--fast"] }
+```
+
+Only the braced `${CLAUDE_PLUGIN_ROOT}` form is checked, because that is the form Claude Code's check names.
+
+### Accepted values added in this range
+
+- `setMode` in a `PermissionRequest` hook's `updatedPermissions`: `default`, `auto`, `acceptEdits`, `dontAsk`, `bypassPermissions`, `plan`, and `manual` (an alias for `default`, v2.1.200+). CPV used to flag `auto` and `manual` as MAJOR.
+- `StopFailure` matchers: `rate_limit`, `overloaded`, `authentication_failed`, `oauth_org_not_allowed`, `account_on_hold`, `billing_error`, `invalid_request`, `model_not_found`, `server_error`, `max_output_tokens`, `cloud_credential_error`, `unknown`.
 
 ---

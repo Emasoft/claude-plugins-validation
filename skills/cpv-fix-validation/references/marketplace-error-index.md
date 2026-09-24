@@ -31,6 +31,8 @@ Primary fix guide: [marketplace-fixes.md](marketplace-fixes.md)
 |---|---|
 | marketplace.json not found / JSON parse error / not an object | marketplace-fixes §1 |
 | Marketplace `name` (type, length, pattern, reserved, trailing hyphen) | marketplace-fixes §1 |
+| Marketplace `name` is `npm` / `pip` / `uv` / `cargo` / `github` / `gh` in any casing (CRITICAL, CC v2.1.275) | marketplace-fixes §1.10a |
+| `renames` block or entry `headers` wrong shape (MAJOR) | marketplace-fixes §1.10b |
 | Marketplace `owner` (object with `name`, optional `email`) | marketplace-fixes §1 |
 | Marketplace `metadata` (description, version, pluginRoot) | marketplace-fixes §1 |
 | Marketplace impersonation of official Anthropic marketplaces | marketplace-fixes §1 |
