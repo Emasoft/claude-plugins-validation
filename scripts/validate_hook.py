@@ -37,6 +37,7 @@ from typing import Any, cast
 from cpv_parallel_runner import parallel_scan
 from cpv_validation_common import (
     COLORS,
+    HOOK_EVENTS_NO_AGENT,
     VALID_HOOK_EVENTS,
     ValidationReport,
     ValidationResult,
@@ -3297,6 +3298,17 @@ def validate_single_hook(
             "Claude Code rejects a prompt/agent hook on this event at load time (v2.1.142): "
             "use a 'command'-type hook instead.",
             hook_path_str,
+        )
+    elif hook_type == "agent" and event_name in HOOK_EVENTS_NO_AGENT:
+        # Tier 1b — CC v2.1.280, hooks.md: PermissionRequest supports command,
+        # http, mcp_tool and prompt but NOT agent hooks; Claude Code skips an
+        # agent hook there and shows an error. The plugin still loads, but the
+        # hook is dead config that never runs → MAJOR (not CRITICAL: no load
+        # failure). The shared matrix lives in cpv_validation_common.
+        report.major(
+            f"Event '{event_name}' does not support 'agent' hooks — Claude Code skips them and shows an "
+            "error (v2.1.280). Use a 'command', 'http', 'mcp_tool' or 'prompt' hook instead.",
+            report.hook_path,
         )
 
     # Validate async / asyncRewake — both are COMMAND-hook-only fields per the
