@@ -1,10 +1,10 @@
 ---
 trdd-id: 8W80DZHI
 title: Investigate why the marketplace README-table canon rollout stopped and what blocks it
-column: dev
+column: human_review
 status: tasked
 created: 2026-09-24T18:14:48+0200
-updated: 2026-09-24T18:30:30+0200
+updated: 2026-09-24T18:32:00+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: audit
@@ -17,7 +17,14 @@ approval-judge: emanuelesabetta
 approval-datetime: 2026-09-24T18:14:48+0200
 ---
 
-# Investigate and complete the marketplace README-table canon rollout to ai-maestro-plugins and emasoft-plugins
+# Investigate why the marketplace README-table canon rollout stopped and what blocks it
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-24
+
+- Investigation DONE. Report (gitignored): reports/rollout-investigation/20260924_182730+0200-marketplace-canon-rollout.md.
+- Verified by the orchestrator (✓): D1 (marketplace fixer's completion gate is validate_marketplace --strict only), D3 (pipeline validator requires top-level version), D5 (setup_marketplace_automation overwrites existing files), D7 (standardize_marketplace emits update-catalog.yml that calls a renderer it does not ship), D9 (notify payload = repo name), web-scenario-tester stale 0.1.3 vs 0.1.7, emasoft-plugins renderer stamps date.today(), claude-plugins-management repo 404 even for the authenticated owner. The other defects (D2, D4, D6, D8, D10-D14), the PR #18 merge-red simulation, and the per-plugin table rest on the agent's report (? INFERRED).
+- NEXT ACTION: the user decides — CPV fix order and card split, PR #18 (rebase now vs redo through the fixed agent), multi-marketplace scope, the three quick fixes. Every outward push needs the user's approval.
+- Rollout work belongs in NEW cards, one per atomic task; this card closes once they exist.
 
 ## User directive (verbatim, 2026-09-24)
 
