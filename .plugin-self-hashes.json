@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-09-24T18:31:57+00:00",
+  "computed_at": "2026-09-24T18:32:41+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:d4e242bfb38329665eeb50dffbb2460fd06268d2917683288eea733954f7778c",
@@ -214,7 +214,7 @@
     "design/tasks/TRDD-20260924_200100+0200-0DWMU7BV-cpvppc-p6-ci-template.md": "sha256:11405db52f9d7467b6e7a887f41fdc7c15e09ded1ee3203375c30ed697d98aa9",
     "design/tasks/TRDD-20260924_200103+0200-18KIWEWC-cpvppc-p7-release-template.md": "sha256:f0a5df666d8714d6454eda6ce6b3f5ee9d2d7a51573e0a960de4bb5bc5caebe4",
     "design/tasks/TRDD-20260924_200105+0200-TINOOW8V-cpvppc-p8-publish-py.md": "sha256:b730fc63bb535941e2e8ca9960e5820d2cf2dc5477aa927d8fb8b6b8d1a51a9e",
-    "design/tasks/TRDD-20260924_200108+0200-QAFKLBYX-cpvppc-p9-runtime-templates.md": "sha256:d0811797062c771cf9479f1cfdc84083ea852f58f8af8093c68428dda6515338",
+    "design/tasks/TRDD-20260924_200108+0200-QAFKLBYX-cpvppc-p9-runtime-templates.md": "sha256:93bd3905e704ff2c2e349663dcb7fdf8a8d66905860cf721344a73aa97a6ef7f",
     "design/tasks/TRDD-20260924_200110+0200-2O73MIAL-cpvppc-p10-readme-sections.md": "sha256:cd24a011b854cc2dfc831be6bf0b9a0e1543d2121cbab98d6014f53fe0fb52a4",
     "design/tasks/TRDD-20260924_200122+0200-8QWLECUZ-cpvppc-p11-privacy-gate.md": "sha256:512bbcecd462b9b2d71ff596236e9575a0f6bc3ae417eea40fdf3dd624df953f",
     "design/tasks/TRDD-20260924_200123+0200-I3TZG9LN-cpvppc-p12-strictness-audit.md": "sha256:e2f212506cc497e881e072c10c61db5b5967b5def80514c6304b9823ca216698",
