@@ -50,7 +50,7 @@ DEFAULT_PRICING: dict[str, float] = {"input": 3.0, "output": 15.0, "cache_write"
 def _resolve_pricing(model_name: str) -> tuple[dict[str, float], bool]:
     """Resolve pricing for a model id, returning ``(pricing, is_estimate)``.
 
-    ``is_estimate=True`` means the id did not exactly (or via a dated-suffix
+    ``is_estimate=True`` means the id did not exactly (or via a boundary-safe
     substring) identify a listed ``MODEL_PRICING`` row, so the caller is
     getting a family/default fallback rather than a specific quoted price.
     """
@@ -66,8 +66,22 @@ def _resolve_pricing(model_name: str) -> tuple[dict[str, float], bool]:
     # makes the most specific key win regardless of dict order, so a future
     # point-release with different pricing is not silently mispriced.
     # (audit MINOR token #3)
+    #
+    # A raw substring match is too loose: "claude-opus-4-10" contains
+    # "claude-opus-4-1" and "claude-sonnet-5-1" contains "claude-sonnet-5" —
+    # both are DIFFERENT, unlisted models that would silently price as the
+    # shorter row with is_estimate=False (a billed rate, not a guess). Only
+    # count a key as a specific match when what follows it in the id is a
+    # real boundary: end of string, a `-` + 8-digit date suffix, a bracketed
+    # context-window tag (`[1m]`), an `@`-versioned tag, or a Bedrock/Vertex
+    # `-v` suffix (`-v1:0`). A leading provider prefix (`us.anthropic.`) is
+    # still allowed since it precedes the key, not the boundary being checked.
     for key in sorted(MODEL_PRICING, key=len, reverse=True):
-        if key in model_name or model_name.startswith(key):
+        idx = model_name.find(key)
+        if idx == -1:
+            continue
+        suffix = model_name[idx + len(key) :]
+        if suffix == "" or suffix[0] in "[@:" or suffix.startswith("-v") or re.fullmatch(r"-\d{8}", suffix):
             return MODEL_PRICING[key], False
     # Fuzzy family match. The 5.x branches come FIRST: before they existed an
     # unlisted 5.x id (e.g. "opus-5.5") fell through to the generic "opus"
@@ -250,8 +264,16 @@ def format_cost_line(usage: TokenUsage, model: str = "") -> str:
     short_model = m.replace("claude-", "").split("-2")[0]
     # Append an estimate marker when the price came from a family/default
     # fallback rather than a specific quoted MODEL_PRICING row, so a report
-    # reader knows the dollar figure is a guess, not a billed rate.
-    estimate_note = " (estimated: unlisted model)" if pricing_is_estimate(m) else ""
+    # reader knows the dollar figure is a guess, not a billed rate. An
+    # empty/"unknown" id has no family to guess FROM (pure DEFAULT_PRICING),
+    # which is a different situation than "unlisted model" (a real, just
+    # unrecognized, id) — say so distinctly.
+    if not m or m == "unknown":
+        estimate_note = " (estimated: model unknown)"
+    elif pricing_is_estimate(m):
+        estimate_note = " (estimated: unlisted model)"
+    else:
+        estimate_note = ""
     return (
         f"Tokens: {fmt_tok(usage.total_tokens())} "
         f"(in:{fmt_tok(usage.input_tokens)} out:{fmt_tok(usage.output_tokens)} "
