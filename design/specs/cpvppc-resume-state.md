@@ -26,9 +26,9 @@ the user on 2026-09-24, then refined by adversarial reviews; this copy includes 
 
 ## Next actions
 
-1. Verify the P0 worker's output: every P2-P15 card body is self-contained (copied plan sections), the
-   epic lists the phase ids, DFRPRZYD retitled as P1 with the approval note, 8W80DZHI closed.
-   Worker report: `docs_dev/cpvppc-p0-report.md`.
+1. DONE (commits 893d44c1, 8b139e9b): P0 cards self-contained, titles and columns verified, 8W80DZHI
+   archived, plan copy byte-identical; a spot-check of 9 plan rows against the cards found only the P9
+   card stale (fixed). Five cards carry extra blank lines (cosmetic; fix on next edit).
 2. Split any phase card holding more than one atomic task (e.g. P1: framework vs marketplace
    assertions) into separate cards, each self-contained.
 3. `trddgrep lint`, regenerate self-hash manifests, commit by file name.
