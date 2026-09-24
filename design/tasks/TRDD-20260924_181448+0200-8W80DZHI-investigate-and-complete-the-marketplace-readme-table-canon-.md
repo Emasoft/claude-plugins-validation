@@ -27,7 +27,7 @@ approval-datetime: 2026-09-24T18:14:48+0200
 
 Prior work: TRDD-4EE90MC1 and TRDD-FK9Y6NCL (archived, published in v5.18.0). The only external action taken was PR #18 on Emasoft/ai-maestro-plugins (open, unmerged). ? INFERRED, not yet checked against the repos: emasoft-plugins was never updated, and TRDD-4EE90MC1 (2026-09-06) noted it still carried the date-stamped renderer. Completing the rollout is NOT in this card's scope: each outward-facing change (per marketplace, per plugin repo) goes in its own card and needs the user's approval.
 
-## Phase 1 (this card): read-only investigation
+## Scope: read-only investigation
 
 Measure both marketplaces and their plugins against the current canon, find why the rollout stopped halfway, and name concrete defects in the CPV skills/agents/scripts that drive a marketplace + plugin migration. Report path goes in the STATE block when done.
 
