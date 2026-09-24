@@ -228,13 +228,17 @@ def validate_mcp_server(
         )
         return
 
-    # mcp.md: an entry with a `url` but no `type` is read as a stdio server, so
-    # Claude Code SKIPS it and reports `has a "url" but no "type"`. The server
-    # never loads → keep it blocking (CRITICAL, as before), but with CC's own
-    # remediation text instead of the misleading generic missing-'command'
-    # finding the stdio branch would emit. Branch-specific checks are skipped;
-    # the shared field checks below still run.
-    url_without_type = "type" not in config and "url" in config
+    # mcp.md:85: an entry with no `type` is read as a stdio server. A probe of CC
+    # 2.1.281's own `claude plugin validate --json` errored ONLY when the entry
+    # also has no `command` ("server has a \"url\" but no \"type\" ... fails for
+    # lacking \"command\", and is silently dropped at load") → blocking CRITICAL
+    # with CC's remediation text instead of the generic missing-'command' finding.
+    # command + url + no type falls through to the stdio branch and keeps its
+    # "url will be ignored" INFO — ? INFERRED (validator-level: `claude plugin
+    # validate --json` on CC 2.1.281 errors only on the url-only entry; loader
+    # behaviour not probed). An empty or non-string command still blocks there.
+    # The shared field checks below still run.
+    url_without_type = "type" not in config and "url" in config and "command" not in config
     if url_without_type:
         report.critical(
             f'Server {server_name} has a "url" but no "type" — Claude Code reads it as a stdio server '
@@ -263,6 +267,11 @@ def validate_mcp_server(
             report.critical(
                 f"Server {server_name} 'command' must be a string, got {type(config['command']).__name__}"
             )
+        elif not config["command"].strip():
+            # An empty command launches nothing — the server never starts. Since the
+            # url-without-type branch now requires `command` to be ABSENT, a
+            # `"command": ""` + url entry lands here and must still block.
+            report.critical(f"Server {server_name} 'command' is empty")
         else:
             command = config["command"]
             validate_path_value(command, report, f"{ctx}:command", plugin_root)

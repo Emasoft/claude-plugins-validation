@@ -214,7 +214,12 @@ class TestMcpReservedNameFileColumn:
 # ---------------------------------------------------------------------------
 class TestMcpStdioUrlIgnoredInfo:
     def test_stdio_with_url_still_emits_info(self):
-        """Removing the dead `and transport == 'stdio'` conjunct preserves the INFO."""
+        """Removing the dead `and transport == 'stdio'` conjunct preserves the INFO.
+
+        No `type` here is deliberate: a probe of CC 2.1.281's own validator showed an
+        entry WITH a `command` is a working stdio server (the url is ignored), so it
+        must keep this INFO — only a url-only entry is CC's url-without-type error.
+        """
         report = ValidationReport()
         validate_mcp_server("srv", {"command": "node", "url": "https://x"}, report)
         assert any(r.level == "INFO" and "url will be ignored" in r.message for r in report.results)
