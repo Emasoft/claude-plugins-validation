@@ -301,12 +301,51 @@ class TestDoDoctor:
             plugins={"test-plugin": VALID_PLUGIN_JSON},
         )
 
-        # Mock external dependencies: shutil.which, subprocess.run
-        with patch("manage_doctor.shutil.which", return_value=None), patch("manage_doctor.subprocess.run"):
+        # Mock external dependencies. `claude plugin validate` is stubbed as a
+        # clean run: since the CC 2.1.281 sync a MISSING CLI is an UNKNOWN check,
+        # which (correctly) stops the summary from saying "healthy" — see
+        # test_missing_claude_cli_is_not_reported_healthy below.
+        with (
+            patch("manage_doctor.shutil.which", return_value=None),
+            patch("manage_doctor.subprocess.run"),
+            patch("manage_doctor._run_claude_validate", return_value=([], [], None)),
+        ):
             do_doctor()
 
         out = capsys.readouterr().out
         assert "All checks passed" in out
+
+    def test_missing_claude_cli_is_not_reported_healthy(self, tmp_path, monkeypatch, capsys):
+        """Same healthy tree, but `claude plugin validate` cannot run → summary says so, never "healthy"."""
+        claude_dir = _make_claude_dir(tmp_path)
+        _patch_paths(monkeypatch, claude_dir)
+        _make_settings(
+            claude_dir,
+            {
+                "extraKnownMarketplaces": {
+                    "my-test-marketplace": {
+                        "source": {
+                            "source": "directory",
+                            "path": _portable_path(claude_dir / "plugins" / "marketplaces" / "my-test-marketplace"),
+                        }
+                    },
+                },
+                "enabledPlugins": {"test-plugin@my-test-marketplace": True},
+            },
+        )
+        _make_marketplace(
+            claude_dir / "plugins" / "marketplaces",
+            "my-test-marketplace",
+            VALID_MARKETPLACE_JSON,
+            plugins={"test-plugin": VALID_PLUGIN_JSON},
+        )
+        with patch("manage_doctor.shutil.which", return_value=None), patch("manage_doctor.subprocess.run"):
+            do_doctor()
+
+        out = capsys.readouterr().out
+        assert "UNKNOWN (not checked)" in out
+        assert "could not run" in out
+        assert "installation is healthy" not in out
 
     def test_corrupt_settings_json_reports_error(self, tmp_path, monkeypatch, capsys):
         """Corrupt settings.json is detected and reported as an error."""

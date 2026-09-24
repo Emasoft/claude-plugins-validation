@@ -88,8 +88,15 @@ def _run_claude_validate(target_path: Path) -> Tuple[List[str], List[str], str |
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         return [], [], f"claude plugin validate timed out or failed to run ({type(exc).__name__})"
+    # Tolerate a banner (update notice, login hint) printed before the JSON:
+    # parse from the first line that opens an object. A stdout with no such
+    # line stays UNKNOWN below — never "clean".
+    lines = result.stdout.splitlines()
+    start = next((i for i, ln in enumerate(lines) if ln.lstrip().startswith("{")), None)
     try:
-        data = json.loads(result.stdout)
+        if start is None:
+            raise ValueError("no JSON object in stdout")
+        data = json.loads("\n".join(lines[start:]))
     except ValueError:
         # Exit code alone cannot tell "invalid plugin" from "older CLI rejected
         # --json" or a crash — without the JSON body we know nothing.
@@ -237,6 +244,10 @@ def do_doctor(verbose: bool = False, fix: bool = False, quick: bool = False):
     print()
 
     issues = 0
+    # Checks that could not run (e.g. `claude plugin validate` unavailable).
+    # Kept apart from `issues`: "not checked" is neither a defect nor a pass,
+    # so it must stop the summary from claiming the installation is healthy.
+    unchecked = 0
 
     # 1. Check Claude directory exists
     if not CLAUDE_DIR.exists():
@@ -535,6 +546,7 @@ def do_doctor(verbose: bool = False, fix: bool = False, quick: bool = False):
         if cv_unknown:
             # Cannot check is not clean: say so instead of printing "passed".
             warn(f"  claude plugin validate: UNKNOWN (not checked) — {cv_unknown}")
+            unchecked += 1
         elif not cv_errors and not cv_warnings:
             ok("  claude plugin validate: passed")
 
@@ -651,10 +663,15 @@ def do_doctor(verbose: bool = False, fix: bool = False, quick: bool = False):
 
     # Summary
     print()
-    if issues == 0:
+    if issues == 0 and unchecked == 0:
         ok("All checks passed — installation is healthy")
+    elif issues == 0:
+        # Never say "healthy" when a check did not run (cannot-check ≠ clean).
+        warn(f"No issues found, but {unchecked} check(s) could not run — health is UNKNOWN, not confirmed")
     else:
         warn(f"{issues} issue(s) found")
+        if unchecked:
+            warn(f"{unchecked} check(s) could not run (see UNKNOWN lines above)")
     scripts_dir = Path(__file__).resolve().parent
     print()
     print(f"  {BOLD}Next steps:{NC}")

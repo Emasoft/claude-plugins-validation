@@ -187,6 +187,41 @@ class TestFinding3PricingLongestKeyFirst:
         """An unrelated id still hits the documented default pricing."""
         assert ctc.get_pricing("gpt-4o-mini") == ctc.DEFAULT_PRICING
 
+
+class TestCurrentGenerationPricing:
+    """CC 2.1.281 sync — 5.x ids no longer fall through to 4.x / Sonnet-4 prices.
+
+    Before: claude-opus-5-5 hit the generic "opus" fuzzy branch → Opus 4.1
+    ($15/$75), and every Fable id hit DEFAULT (Sonnet 4, $3/$15).
+    """
+
+    def test_opus_5_5_exact_and_1m(self) -> None:
+        """Opus 5.5 is $4/$20 with $0.20 cache reads, including the [1m] spelling."""
+        for mid in ("claude-opus-5-5", "claude-opus-5-5[1m]"):
+            p = ctc.get_pricing(mid)
+            assert (p["input"], p["output"], p["cache_read"]) == (4.0, 20.0, 0.20), mid
+
+    def test_fable_5_1_dated_id(self) -> None:
+        """A dated Fable 5.1 id resolves to Fable 5.1 ($10/$50, $0.25 cache reads), not Fable 5."""
+        p = ctc.get_pricing("claude-fable-5-1-20260901")
+        assert p is ctc.MODEL_PRICING["claude-fable-5-1"]
+        assert (p["input"], p["output"], p["cache_read"]) == (10.0, 50.0, 0.25)
+
+    def test_opus_5_not_shadowed_by_opus_5_5(self) -> None:
+        """Control: plain Opus 5 keeps its own $5/$25 row."""
+        assert ctc.get_pricing("claude-opus-5") is ctc.MODEL_PRICING["claude-opus-5"]
+
+    def test_unlisted_opus_5_x_uses_opus_5_family(self) -> None:
+        """An unlisted Opus 5.x id is priced as Opus 5, not retired Opus 4.1."""
+        assert ctc.get_pricing("anthropic.claude-opus-5-9-v1")["input"] == 5.0
+
+    def test_unknown_future_opus_still_legacy_bucket(self) -> None:
+        """claude-opus-9 matches no 5.x rule, so it keeps the pre-existing generic-opus bucket (Opus 4.1).
+
+        Deliberate: guessing a future tier's price is worse than the documented legacy fallback.
+        """
+        assert ctc.get_pricing("claude-opus-9") is ctc.MODEL_PRICING["claude-opus-4-1"]
+
     def test_empty_model_returns_default(self) -> None:
         """Empty model name returns the default pricing."""
         assert ctc.get_pricing("") == ctc.DEFAULT_PRICING
