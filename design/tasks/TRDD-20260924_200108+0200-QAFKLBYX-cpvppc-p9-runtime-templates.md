@@ -4,7 +4,7 @@ title: CPVPPC P9 - Runtime templates
 column: backburner
 status: tasked
 created: 2026-09-24T20:01:08+0200
-updated: 2026-09-24T20:07:35+0200
+updated: 2026-09-24T20:32:35+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -36,3 +36,7 @@ Files: templates/0.x/plugin/{launcher.sh,launcher.cmd,fetch.py,install_first_use
 - **First-use installer**: `${CLAUDE_PLUGIN_DATA}` only (plus declared `writes_outside_data`); lockfile;
   hash-verified; install scripts disabled; reinstall on lockfile-hash or runtime-ABI change;
   cross-process lock.
+
+## Key tests added after card creation (2026-09-24)
+
+From the final approved plan (design/specs/cpvppc-plan.md, row P9): node addon chosen by `process.versions.modules`, unknown ABI fails closed.
