@@ -57,7 +57,7 @@ Output: plugin-structure-fixes §1
 ## Resources
 
 - [Plugin Error Index](references/plugin-error-index.md)
-  > validate_plugin.py · validate_skill.py · validate_skill_comprehensive.py · validate_hook.py · validate_agent.py · validate_command.py · validate_mcp.py · validate_lsp.py · validate_security.py · validate_rules.py · validate_xref.py · validate_settings_marketplace.py · validate_documentation.py · validate_encoding.py · validate_enterprise.py · validate_scoring.py · validate_cache.py · validate_telemetry.py — plugin-shipped env-var hazards · Semantic pillar — Channel MCP Server Source-Code Security · validate_marketplace cross-validation rules
+  > validate_plugin.py · validate_skill.py · validate_skill_comprehensive.py · validate_hook.py · validate_agent.py · validate_command.py · validate_mcp.py · validate_lsp.py · validate_security.py · validate_rules.py · validate_xref.py · validate_settings_marketplace.py · validate_documentation.py · validate_encoding.py · validate_enterprise.py · validate_scoring.py · validate_cache.py · validate_telemetry.py — plugin-shipped env-var hazards · Semantic pillar — Channel MCP Server Source-Code Security · validate_marketplace cross-validation rules · validate_project_scope.py / validate_local_scope.py — settings notes (CC v2.1.258–v2.1.281)
 - [Marketplace Error Index](references/marketplace-error-index.md)
   > validate_marketplace.py · 1 RC-MKPL-* upstream cross-validation codes (v2.81.0+) · validate_marketplace_pipeline.py · Architecture / Layout Migration Warnings (7 signals)
 - [Schema-Parity Contract](references/schema-parity-contract.md)
