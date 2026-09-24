@@ -78,6 +78,7 @@ KNOWN_FRONTMATTER_FIELDS = {
     "isolation",
     "initialPrompt",  # v2.1.83 — auto-submit prompt when agent starts
     "experimental",  # v2.1.248 — carries 'cacheTtl' (per-agent prompt cache TTL)
+    "omitClaudeMd",  # v2.1.271 — boolean; run without user/project/local CLAUDE.md (managed policy still loads)
     # Claude Code-specific fields (legacy/extended — all emit WARNING when present)
     "context",  # [legacy — emits WARNING] not in current sub-agents spec (v2.1.98)
     "agent",  # [legacy — emits WARNING] not in current sub-agents spec (v2.1.98)
@@ -85,14 +86,24 @@ KNOWN_FRONTMATTER_FIELDS = {
     "system-prompt",  # [legacy — emits WARNING] not in current sub-agents spec (v2.1.98)
 }
 
-# GAP-79 (v2.22.3): Plugin-shipped agent allowed frontmatter fields. Per
-# plugins-reference.md:70 the set of fields accepted for PLUGIN-shipped
-# agents is intentionally narrower than the full project/user agent
-# superset. Keys present on a plugin-shipped agent but OUTSIDE this set
-# trigger a MINOR so authors notice CPV-legacy / non-plugin drift.
-# ``hooks``/``mcpServers``/``permissionMode`` already produce MAJORs via
-# ``PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS`` — we do NOT double-count them
-# here.
+# GAP-79 (v2.22.3): Plugin-shipped agent allowed frontmatter fields. The set
+# of fields accepted for PLUGIN-shipped agents is intentionally narrower than
+# the full project/user agent superset. Keys present on a plugin-shipped
+# agent but OUTSIDE this set trigger a MINOR so authors notice CPV-legacy /
+# non-plugin drift. ``hooks``/``mcpServers``/``permissionMode`` already
+# produce MAJORs via ``PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS`` — we do NOT
+# double-count them here.
+#
+# plugins-reference.md L72 (re-fetched for the v2.1.258–281 sync) lists 14
+# "Supported" fields: name, description, model, effort, maxTurns, tools,
+# disallowedTools, skills, memory, background, omitClaudeMd, isolation,
+# color, experimental. ``color``/``experimental``/``omitClaudeMd`` were added
+# here because the doc now names them — v5.12.0 had deliberately held
+# ``experimental`` OUT because no doc listed it then; that reason expired.
+# ``system-prompt``/``context``/``initialPrompt``/``agent`` are NOT in the doc
+# list; they stay for the reason v5.12.0 recorded (they entered with the
+# v2.1.79–86 alignment and nothing shows CC stopped loading them, so dropping
+# them would MINOR agents that load fine).
 PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS: frozenset[str] = frozenset(
     {
         "name",
@@ -110,6 +121,9 @@ PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS: frozenset[str] = frozenset(
         "background",
         "initialPrompt",
         "agent",
+        "color",  # plugins-reference.md L72
+        "experimental",  # plugins-reference.md L72
+        "omitClaudeMd",  # plugins-reference.md L72 (CC v2.1.271)
     }
 )
 
@@ -459,15 +473,20 @@ def validate_tools_field(frontmatter: dict[str, Any], filename: str, report: Age
             filename,
         )
 
-    # Deprecation warnings for renamed/soft-deprecated tools
-    # (kept in VALID_TOOLS — these are still accepted as aliases).
+    # Warnings for renamed / removed / model-gated tools. They stay in
+    # VALID_TOOLS so they get these targeted messages instead of a generic
+    # "unknown tool" finding.
     for tool in tool_list:
         base_tool, _, error = _parse_tool_reference(tool)
         if error is not None:
             continue
         if base_tool == "TaskOutput":
+            # CC v2.1.277 removed TaskOutput. WARNING, not MINOR: tools-reference
+            # still calls it "Deprecated", and a MINOR would newly block every
+            # agent that lists it while the docs and the changelog disagree.
             report.warning(
-                "Tool 'TaskOutput' is deprecated — prefer Read on the task's output file path",
+                "Tool 'TaskOutput' was removed in Claude Code v2.1.277 — listing it grants nothing; "
+                "read the task's output file with Read",
                 filename,
             )
         elif base_tool == "Task":
@@ -481,20 +500,22 @@ def validate_tools_field(frontmatter: dict[str, Any], filename: str, report: Age
                 filename,
             )
         elif base_tool == "TodoWrite":
-            # tools-reference: disabled by default in favor of the Task tools,
-            # and (v2.1.233) not provided at all on Opus 4.8 / Sonnet 5 /
-            # Fable 5 / Mythos 5+ without CLAUDE_CODE_ENABLE_TODO_TOOLS=1.
+            # tools-reference: disabled by default in favor of the Task tools.
+            # CC v2.1.268 states the gate as a POSITIVE list (offered only on
+            # Claude 3.x, Opus 4.0–4.7, Sonnet 4.0–4.6, Haiku 4.5), which also
+            # covers models released after this message was written.
             report.warning(
                 "Tool 'TodoWrite' is disabled by default in favor of TaskCreate/TaskGet/TaskList/TaskUpdate, "
-                "and absent on Opus 4.8 / Sonnet 5 / Fable 5+ unless the user opts in (CLAUDE_CODE_ENABLE_TODO_TOOLS=1)",
+                "and is offered only on Claude 3.x, Opus 4.0–4.7, Sonnet 4.0–4.6 and Haiku 4.5 unless the user "
+                "opts in (CLAUDE_CODE_ENABLE_TODO_TOOLS=1)",
                 filename,
             )
         elif base_tool in ("TaskCreate", "TaskGet", "TaskList", "TaskUpdate"):
-            # INFO, not WARNING: still provided by default on pre-2.1.233-gated
-            # models (e.g. Opus 4.7), so listing it is only conditionally moot.
+            # INFO, not WARNING: still provided by default on the listed models,
+            # so listing it is only conditionally moot.
             report.info(
-                f"Tool '{base_tool}' is not provided on Opus 4.8 / Sonnet 5 / Fable 5+ (CC v2.1.233) "
-                "unless the user opts in (CLAUDE_CODE_ENABLE_TODO_TOOLS=1 or --allowedTools)",
+                f"Tool '{base_tool}' is offered only on Claude 3.x, Opus 4.0–4.7, Sonnet 4.0–4.6 and Haiku 4.5 "
+                "(CC v2.1.268) unless the user opts in (CLAUDE_CODE_ENABLE_TODO_TOOLS=1 or --allowedTools)",
                 filename,
             )
 
@@ -906,19 +927,27 @@ def validate_max_turns_field(frontmatter: dict[str, Any], filename: str, report:
         report.passed(f"Valid maxTurns: {max_turns}", rel_path)
 
 
+def _validate_bool_frontmatter_field(
+    field: str, frontmatter: dict[str, Any], filename: str, report: AgentValidationReport
+) -> None:
+    """MAJOR when a boolean frontmatter field carries a non-boolean value."""
+    if field not in frontmatter:
+        return
+    val = frontmatter[field]
+    if not is_accepted_frontmatter_bool(val):
+        report.major(f"'{field}' must be a boolean (true/false/yes/no/on/off/1/0), got {type(val).__name__}", filename)
+    else:
+        report.passed(f"Valid {field}: {val}", filename)
+
+
 def validate_background_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
     """Validate the 'background' frontmatter field."""
-    if "background" not in frontmatter:
-        return
+    _validate_bool_frontmatter_field("background", frontmatter, filename, report)
 
-    rel_path = filename
-    bg_val = frontmatter["background"]
-    if not is_accepted_frontmatter_bool(bg_val):
-        report.major(
-            f"'background' must be a boolean (true/false/yes/no/on/off/1/0), got {type(bg_val).__name__}", rel_path
-        )
-    else:
-        report.passed(f"Valid background: {bg_val}", rel_path)
+
+def validate_omit_claude_md_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
+    """Validate 'omitClaudeMd' (CC v2.1.271): a boolean, or CC cannot honour it."""
+    _validate_bool_frontmatter_field("omitClaudeMd", frontmatter, filename, report)
 
 
 def validate_effort_field(frontmatter: dict[str, Any], filename: str, report: AgentValidationReport) -> None:
@@ -1601,32 +1630,24 @@ def validate_plugin_shipped_allowed_fields(
 ) -> None:
     """GAP-79 (v2.22.3): Enforce the narrower plugin-shipped agent field list.
 
-    CPV allows these 15 fields for a plugin-shipped agent: ``name, description,
-    tools, disallowedTools, model, effort, skills, system-prompt, context,
-    memory, isolation, maxTurns, background, initialPrompt, agent``. Fields
-    OUTSIDE this set (but inside the broader KNOWN_FRONTMATTER_FIELDS superset
-    accepted for project/user agents) emit a MINOR so authors notice the drift.
+    CPV allows these 18 fields for a plugin-shipped agent: the 14 that
+    plugins-reference.md L72 lists as "Supported" (``name, description, model,
+    effort, maxTurns, tools, disallowedTools, skills, memory, background,
+    omitClaudeMd, isolation, color, experimental``) plus 4 CPV keeps on
+    purpose (``system-prompt, context, initialPrompt, agent``). Fields OUTSIDE
+    this set (but inside the broader KNOWN_FRONTMATTER_FIELDS superset accepted
+    for project/user agents) emit a MINOR so authors notice the drift.
 
-    This set is deliberately WIDER than the docs sentence, and the gap is
-    recorded rather than closed. plugins-reference.md (the "Plugin agents
-    support ..." sentence) enumerates only 11: it omits ``system-prompt``,
-    ``context``, ``initialPrompt`` and ``agent``. Measured 2026-08-28 against
-    the live raw docs: ``system-prompt`` and ``context`` appear in NEITHER
-    plugins-reference.md nor sub-agents.md; ``initialPrompt`` appears only in
-    sub-agents.md. They entered CPV in the v2.1.79-86 alignment and no evidence
-    says CC stopped loading them -- so narrowing to 11 would emit a MINOR on
-    agents that load fine, i.e. a false positive, which costs more than the
-    silence it buys. Narrow only on evidence that CC rejects them.
+    The 4 extra fields are the recorded gap, not an oversight: they entered CPV
+    in the v2.1.79-86 alignment, the doc list omits them, and no evidence says
+    CC stopped loading them -- so dropping them would emit a MINOR on agents
+    that load fine, i.e. a false positive. Narrow only on evidence that CC
+    rejects them.
 
-    (A prior revision of this docstring cited "plugins-reference.md:70" for the
-    15-field list. The doc says 11, at line 68. The citation was false and is
-    removed rather than re-pointed -- do not restore it.)
-
-    ``experimental`` is deliberately NOT here (CC v2.1.248). The changelog adds
-    ``experimental.cacheTtl`` to "agent frontmatter", but the plugin-shipped
-    field list in plugins-reference.md still does not sanction it -- so a
-    plugin agent declaring it gets the MINOR drift nudge, not silence. The
-    changelog leads the reference table here; when the table catches up, add it.
+    ``experimental`` (v2.1.248) was held OUT by v5.12.0 because no doc then
+    listed it for plugin agents. The CC v2.1.258–281 re-fetch shows L72 now
+    lists it, along with ``color`` and ``omitClaudeMd`` (v2.1.271) -- so all
+    three are in. Re-verify the line number on the next sync; it moves.
 
     ``hooks``/``mcpServers``/``permissionMode`` are NOT double-reported here:
     those already trigger MAJORs via PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS
@@ -1650,7 +1671,8 @@ def validate_plugin_shipped_allowed_fields(
             continue
         report.minor(
             f"Field '{key}' is not in the plugin-shipped agent allowed set "
-            f"({sorted(PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS)}) — plugins-reference.md:70. "
+            f"({sorted(PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS)}) — see plugins-reference.md "
+            "'Plugin agent frontmatter'. "
             "It may be a CPV-legacy / non-plugin agent field and could be ignored "
             "by plugin-shipped agent runtimes.",
             filename,
@@ -1996,6 +2018,7 @@ def validate_agent(
         validate_isolation_field(frontmatter, filename, report)
         validate_max_turns_field(frontmatter, filename, report)
         validate_background_field(frontmatter, filename, report)
+        validate_omit_claude_md_field(frontmatter, filename, report)
         validate_effort_field(frontmatter, filename, report)
         validate_experimental_field(frontmatter, filename, report)
 

@@ -222,6 +222,44 @@ def hook_is_exec_form(hook: object) -> bool:
     args = hook.get("args")
     return isinstance(args, list) and bool(args)
 
+
+_PLUGIN_ROOT_TOKEN = "${CLAUDE_PLUGIN_ROOT}"
+
+
+def unquoted_plugin_root_in_shell(command: object) -> bool:
+    """True iff a SHELL-FORM ``command`` has ``${CLAUDE_PLUGIN_ROOT}`` outside quotes.
+
+    CC v2.1.281's `claude plugin validate` warns on this: the substituted plugin
+    path is word-split by the shell, so the command breaks on a path with a space.
+    Double AND single quotes both protect it — CC substitutes the text before the
+    shell runs, so `'${CLAUDE_PLUGIN_ROOT}/x'` is a quoted literal path.
+
+    Same quote semantics as ``_split_compound_command`` (single quotes are
+    literal to the closing quote; a backslash inside double quotes or outside
+    quotes escapes the next char). Scope is the BRACED form only — CC's check
+    names ``${CLAUDE_PLUGIN_ROOT}``; bare ``$CLAUDE_PLUGIN_ROOT`` is deliberately
+    out of scope. Public so monitor validation in validate_plugin.py can reuse it.
+    """
+    if not isinstance(command, str) or _PLUGIN_ROOT_TOKEN not in command:
+        return False
+    in_single = in_double = False
+    i, n = 0, len(command)
+    while i < n:
+        c = command[i]
+        if in_single:
+            in_single = c != "'"
+        elif c == "\\" and i + 1 < n:
+            i += 2
+            continue
+        elif c == '"':
+            in_double = not in_double
+        elif c == "'" and not in_double:
+            in_single = True
+        elif not in_double and command.startswith(_PLUGIN_ROOT_TOKEN, i):
+            return True
+        i += 1
+    return False
+
 # NOTE: COMMAND_ONLY_EVENTS (tier 2 — no prompt/agent) and COMMAND_STRICT_EVENTS
 # (tier 3 — command/mcp_tool only) are imported at the top of this module from
 # cpv_validation_common, the single source of truth for the per-event hook-type
@@ -312,6 +350,11 @@ STOPFAILURE_ERRORS = {
     "model_not_found",
     "server_error",
     "max_output_tokens",
+    # account_on_hold + cloud_credential_error: listed in hooks.md's StopFailure
+    # matcher table (CC ≤v2.1.281); absent here they drew a spurious "unknown
+    # matcher value" INFO on a correct hook.
+    "account_on_hold",
+    "cloud_credential_error",
     "unknown",
 }
 
@@ -2667,6 +2710,18 @@ def validate_command_hook(
                 user_config_shell_finding(
                     "hook", shell_form_tokens, f"{event_name} command hook"
                 )
+            )
+        # CC v2.1.281: `claude plugin validate` warns when a shell-form hook leaves
+        # ${CLAUDE_PLUGIN_ROOT} unquoted — the substituted path is word-split by the
+        # shell, so the hook breaks on any plugin path containing a space (iCloud /
+        # Google Drive installs on macOS). WARNING, never blocking: CC itself only
+        # warns. Exec form is exempt (checked above): no shell parses `args`.
+        if unquoted_plugin_root_in_shell(hook["command"]):
+            report.warning(
+                f"{event_name} command hook uses ${{CLAUDE_PLUGIN_ROOT}} unquoted in a "
+                "shell-form command — it breaks on plugin paths with spaces "
+                '(CC v2.1.281 `claude plugin validate` warns on this). Quote it: '
+                '"${CLAUDE_PLUGIN_ROOT}/script.sh", or use exec form (`args`).'
             )
 
     # Check for hardcoded absolute paths — plugins must use env vars for portability

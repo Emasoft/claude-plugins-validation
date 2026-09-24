@@ -203,12 +203,12 @@ class TestAllowedToolsValidation:
         assert not report.has_critical
 
     def test_task_output_emits_deprecation_warning(self):
-        """A skill requesting the deprecated TaskOutput tool gets a WARNING."""
+        """A skill requesting TaskOutput (removed in CC v2.1.277) gets a WARNING."""
         report = ValidationReport(skill_path="test")
         frontmatter = {"allowed-tools": "Read, TaskOutput"}
         validate_allowed_tools_field(frontmatter, report)
         warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
-        assert any("TaskOutput" in m and "deprecated" in m for m in warning_msgs)
+        assert any("TaskOutput" in m and "removed" in m for m in warning_msgs)
 
     def test_task_tool_emits_rename_warning_in_skill(self):
         """A skill still using the legacy Task tool name gets a rename WARNING."""

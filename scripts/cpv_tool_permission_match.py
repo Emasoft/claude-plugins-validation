@@ -90,10 +90,11 @@ CANONICAL_TOOLS: frozenset[str] = frozenset(
         "ShareOnboardingGuide",
         "Skill",
         "SlashCommand",  # legacy — dropped from tools-reference by v2.1.235; retained here (see docstring)
+        "SubagentHandback",  # v2.1.271 — auto-mode subagent hand-back call (tools-reference L53)
         "TaskCreate",
         "TaskGet",
         "TaskList",
-        "TaskOutput",
+        "TaskOutput",  # REMOVED in CC v2.1.277 — retained here so a stale TaskOutput(...) glob still parses (see docstring)
         "TaskStop",
         "TaskUpdate",
         "TeamCreate",

@@ -1017,11 +1017,15 @@ def validate_allowed_tools_field(
                 "SKILL.md",
                 category="Frontmatter",
             )
-        # Deprecation warnings for renamed/soft-deprecated tools
-        # (kept in VALID_TOOLS — these are still accepted as aliases).
+        # Warnings for renamed / removed tools, kept in VALID_TOOLS so they get
+        # these targeted messages instead of a generic "unknown tool" finding.
+        # Same wording + WARNING severity as validate_agent (keep in lock-step):
+        # CC v2.1.277 removed TaskOutput, but tools-reference still says
+        # "Deprecated", so a blocking tier would over-reach.
         if base_tool == "TaskOutput":
             report.warning(
-                "Tool 'TaskOutput' is deprecated — prefer Read on the task's output file path",
+                "Tool 'TaskOutput' was removed in Claude Code v2.1.277 — listing it grants nothing; "
+                "read the task's output file with Read",
                 "SKILL.md",
                 category="Frontmatter",
             )

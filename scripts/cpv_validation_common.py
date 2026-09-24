@@ -395,6 +395,12 @@ HOOK_EVENTS_NO_PROMPT_OR_AGENT: frozenset[str] = frozenset(
     }
 )
 
+# Events that support prompt but NOT agent hooks. hooks.md L3507 (CC v2.1.280):
+# "`PermissionRequest` supports `command`, `http`, `mcp_tool`, and `prompt` hooks
+# but not `agent` hooks. If you configure an agent hook on this event, Claude
+# Code skips it". The agent hook is dead config, so it is reported, not ignored.
+HOOK_EVENTS_NO_AGENT: frozenset[str] = frozenset({"PermissionRequest"})
+
 
 def hook_types_allowed_for_event(event: str) -> frozenset[str]:
     """Return the allowed hook types for the given event name.
@@ -404,6 +410,7 @@ def hook_types_allowed_for_event(event: str) -> frozenset[str]:
     - SessionStart / Setup: only `command` and `mcp_tool` (servers not yet connected).
     - Tier-2 lifecycle events (CwdChanged, ConfigChange, Notification, etc.):
       command/http/mcp_tool but NOT prompt/agent.
+    - PermissionRequest (CC v2.1.280, hooks.md L3507): everything but `agent`.
     - Everything else — tool events, UserPromptSubmit/Expansion, and the Stop
       family (Stop/SubagentStop/PermissionDenied/TeammateIdle/TaskCreated):
       the full 5-type set, prompt/agent included.
@@ -412,6 +419,8 @@ def hook_types_allowed_for_event(event: str) -> frozenset[str]:
         return frozenset({"command", "mcp_tool"})
     if event in HOOK_EVENTS_NO_PROMPT_OR_AGENT:
         return frozenset({"command", "http", "mcp_tool"})
+    if event in HOOK_EVENTS_NO_AGENT:
+        return VALID_HOOK_TYPES - {"agent"}
     return VALID_HOOK_TYPES
 
 
@@ -603,6 +612,14 @@ BUILTIN_SLASH_COMMANDS: frozenset[str] = frozenset(
         # read only column 1 — an alias a user types is not a typo, so leaving
         # it out would warn on a working command.
         "rate-limit-options",
+        # CC spec sync v2.1.258–281: the five names commands.md's "All commands"
+        # table carries that this set lacked (mechanical set-diff over column 1).
+        # A plugin shipping commands/<one of these>.md collides with the built-in.
+        "output-style",  # v2.1.269 — list/switch output styles
+        "skill-doctor",  # v2.1.261 — unused-skill context report
+        "update-config",  # bundled skill exposed as a command
+        "workflow-authoring",  # v2.1.248 — bundled Workflow-script reference skill
+        "design",
         "adddir",  # alias of /add-dir
         "allowed-tools",  # alias of /permissions
         "android",  # alias of /mobile
@@ -712,10 +729,10 @@ VALID_TOOLS = {
     "ExitPlanMode",
     "EnterWorktree",
     "ExitWorktree",  # v2.1.72
-    # v2.1.233: TaskCreate/TaskUpdate/TaskList/TaskGet (and TodoWrite below) are
-    # NOT provided on Opus 4.8 / Sonnet 5 / Fable 5 / Mythos 5 or later members
-    # of those families unless the user opts in (CLAUDE_CODE_ENABLE_TODO_TOOLS=1
-    # or an --allowedTools naming one). They stay VALID here — availability is a
+    # v2.1.268: TaskCreate/TaskUpdate/TaskList/TaskGet (and TodoWrite below) are
+    # offered ONLY on Claude 3.x, Opus 4.0–4.7, Sonnet 4.0–4.6 and Haiku 4.5;
+    # every other model needs an opt-in (CLAUDE_CODE_ENABLE_TODO_TOOLS=1 or an
+    # --allowedTools naming one). They stay VALID here — availability is a
     # runtime/model property CPV cannot know — but validate_agent emits an INFO
     # so authors targeting new models learn the tool may be absent.
     "TaskCreate",
@@ -723,7 +740,10 @@ VALID_TOOLS = {
     "TaskList",
     "TaskGet",
     "TaskStop",
-    "TaskOutput",  # v2.1.71 — deprecated (use Read on output file path instead)
+    # CC v2.1.277 REMOVED TaskOutput (tools-reference still lists it as "Deprecated",
+    # so docs and changelog disagree). Kept VALID so validate_agent/skill emit the
+    # targeted "removed" WARNING instead of a generic unknown-tool finding.
+    "TaskOutput",  # removed v2.1.277 — read the task's output file with Read instead
     "ToolSearch",
     "MultiEdit",  # [legacy — emits WARNING] not in current tools-reference spec
     "Notebook",  # [legacy — emits WARNING] not in current tools-reference spec
@@ -760,6 +780,7 @@ VALID_TOOLS = {
     "SlashCommand",  # [legacy — emits WARNING] dropped from the tools-reference table by v2.1.235
     "MCPSearch",  # [legacy — emits WARNING] dropped from the tools-reference table by v2.1.235
     "EndConversation",  # v2.1.214 — end a session with an abusive user / jailbreak attempt (tools-reference)
+    "SubagentHandback",  # v2.1.271 — auto-mode subagent reports back via a classifier-reviewed call (tools-reference L53)
     # NOTE: "Workflow" is defined once above (after "Monitor"); a second entry here
     # was a redundant duplicate with a conflicting version annotation (audit b07).
 }
@@ -802,6 +823,22 @@ def is_valid_model(value: str) -> bool:
     - Full model IDs: claude-opus-4-6, claude-sonnet-4-5-20251001
     """
     return bool(_SHORT_MODEL_RE.match(value)) or bool(_FULL_MODEL_ID_RE.match(value))
+
+
+def path_has_traversal(path: object) -> bool:
+    """Return True when ``path`` contains a `..` path SEGMENT.
+
+    Segment-aware on purpose: a directory named ``..tools`` is a valid name
+    (CC v2.1.265/.268 fixed the loader and ``claude plugin validate`` to accept
+    it), so a substring test ``".." in path`` is a false positive. Splits on
+    both ``/`` and ``\\`` so Windows-style traversal (``a\\..\\b``) is caught.
+    Accepts ``object`` because callers pass untrusted JSON values; a non-str
+    is "no traversal". Shared so validate_plugin and validate_marketplace use
+    one rule instead of two copies that can drift.
+    """
+    if not isinstance(path, str):
+        return False
+    return any(p == ".." for p in re.split(r"[\\/]+", path))
 
 
 # Environment variables provided by Claude Code at plugin load time.
@@ -1026,6 +1063,17 @@ VALID_PLUGIN_ENV_VARS = {
     # CC spec sync v2.1.260 (sub-agents.md "Choose a model" / "Run every subagent on one model")
     "CLAUDE_CODE_SUBAGENT_MODEL",  # default model for subagents/team members/workflow agents not otherwise assigned one
     "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",  # v2.1.257 — set to "1" to force CLAUDE_CODE_SUBAGENT_MODEL onto every subagent, ignoring per-invocation/definition model overrides
+    # CC spec sync v2.1.258–281. This set is a CURATED plugin-authoring allowlist,
+    # not an env-vars.md catalog (v5.8.0/v5.11.0 ruling): only vars a plugin
+    # plausibly references are added. Skipped on purpose — host/gateway/runtime
+    # toggles no plugin sets: CLAUDE_CODE_AUTO_MODE_SERVER, CLAUDE_CODE_GATEWAY_HINT_HEADERS,
+    # CLAUDE_CODE_BG_TASKS_REPORT_RUNNING, CLAUDE_CODE_GATEWAY_MODEL_DISCOVERY_TIMEOUT_MS,
+    # CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK, CLAUDE_CODE_DISABLE_SUBSTITUTION_RM_PROMPT,
+    # CLAUDE_CODE_DISABLE_DANGEROUS_RM_TIMEOUT, and the OTEL_* additions.
+    "CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH",  # v2.1.280 — cap on MCP tool descriptions / server instructions (default 2048)
+    "CLAUDE_CODE_MCP_STARTUP_WAIT_MS",  # v2.1.274 — how long the first non-interactive turn waits for MCP servers (0 = don't wait)
+    "CLAUDE_CODE_WEBFETCH_DEADLINE_MS",  # v2.1.268 — WebFetch deadline (default 300000; 0 turns it off)
+    "CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS",  # v2.1.269 — per-run concurrent agent limit for the Workflow tool (1–256)
 }
 
 # Env var name pattern matching for dynamic plugin env vars.

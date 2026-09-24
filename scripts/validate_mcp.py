@@ -59,8 +59,25 @@ from validate_hook import find_user_config_interpolations, user_config_shell_fin
 # LSP copies (audit DRY-DRIFT #3); importing them makes drift impossible.
 # validate_path_value stays local — the MCP and LSP variants differ on purpose.
 
-# Valid transport types
-VALID_TRANSPORTS = {"stdio", "sse", "http"}
+# Valid transport types. `ws` (WebSocket) is a documented remote transport
+# (mcp.md "Option 4: Add a remote WebSocket server") that takes the same
+# url/headers/headersHelper/timeout/alwaysLoad fields as `http`; rejecting it
+# made every plugin shipping a WebSocket server fail validation (MAJOR + a
+# spurious missing-'command' CRITICAL from the stdio fallback).
+VALID_TRANSPORTS = {"stdio", "sse", "http", "ws"}
+
+# `type` aliases Claude Code accepts in JSON configs (mcp.md: "the `type` field
+# accepts `streamable-http` as an alias for `http`" — the MCP spec's own name,
+# so configs copied from server docs work unmodified). Normalised before the
+# transport checks so the alias is never reported as an invalid transport.
+TRANSPORT_ALIASES = {"streamable-http": "http"}
+
+# Remote (url-based) transports and the URL schemes each one accepts.
+URL_TRANSPORT_SCHEMES = {
+    "http": ("http://", "https://"),
+    "sse": ("http://", "https://"),
+    "ws": ("ws://", "wss://"),
+}
 
 # Reserved MCP server names — CC silently skips servers with these names and
 # logs a warning. Plugins shipping a server under a reserved name will look
@@ -81,7 +98,7 @@ KNOWN_SERVER_FIELDS = {
     "args",  # Command-line arguments
     "env",  # Environment variables
     "cwd",  # Working directory
-    "type",  # Transport type: stdio, sse, http
+    "type",  # Transport type: stdio, sse, http (alias streamable-http), ws
     "url",  # Required for http/sse servers
     "headers",  # HTTP headers for authentication
     "headersHelper",  # v2.1.85 — script that emits headers (CLAUDE_CODE_MCP_SERVER_NAME/_URL)
@@ -191,12 +208,46 @@ def validate_mcp_server(
 
     # Determine transport type
     transport = config.get("type", "stdio")
-    if transport not in VALID_TRANSPORTS:
+    # A non-string `type` (list/dict) is unhashable — `in VALID_TRANSPORTS`
+    # would raise TypeError and the parallel worker would swallow it into a
+    # vague warning. Report it as the invalid transport it is.
+    if not isinstance(transport, str):
+        report.major(f"Invalid transport type {transport!r} for server {server_name}")
+        transport = "stdio"
+    transport = TRANSPORT_ALIASES.get(transport, transport)
+
+    # CC v2.1.274: `"type": "sdk"` entries in .mcp.json / plugins / agent files
+    # are skipped with a warning — only an SDK host application can register an
+    # in-process server. The server never loads, so this stays blocking, but as
+    # ONE precise finding: falling through to the stdio branch used to add a
+    # misleading "missing required 'command'" CRITICAL on top.
+    if transport == "sdk":
+        report.major(
+            f"Server {server_name}: type 'sdk' is skipped — only an SDK host application can "
+            "register in-process servers (Claude Code v2.1.274). Ship a stdio, http or ws server instead."
+        )
+        return
+
+    # mcp.md: an entry with a `url` but no `type` is read as a stdio server, so
+    # Claude Code SKIPS it and reports `has a "url" but no "type"`. The server
+    # never loads → keep it blocking (CRITICAL, as before), but with CC's own
+    # remediation text instead of the misleading generic missing-'command'
+    # finding the stdio branch would emit. Branch-specific checks are skipped;
+    # the shared field checks below still run.
+    url_without_type = "type" not in config and "url" in config
+    if url_without_type:
+        report.critical(
+            f'Server {server_name} has a "url" but no "type" — Claude Code reads it as a stdio server '
+            'and skips it. Add "type": "http" (or "sse" / "ws") to match the endpoint.'
+        )
+    elif transport not in VALID_TRANSPORTS:
         report.major(f"Invalid transport type '{transport}' for server {server_name}")
         transport = "stdio"  # Assume stdio for further validation
 
     # Validate based on transport type
-    if transport == "stdio":
+    if url_without_type:
+        pass
+    elif transport == "stdio":
         # stdio servers require 'command'
         if "command" not in config:
             report.critical(f"Server {server_name} missing required 'command' field")
@@ -248,40 +299,39 @@ def validate_mcp_server(
         if "url" in config:
             report.info(f"Server {server_name} has 'url' but transport is stdio - url will be ignored")
 
-    elif transport in ("http", "sse"):
-        # HTTP/SSE servers require 'url'
+    elif transport in URL_TRANSPORT_SCHEMES:
+        # Remote servers (http/sse/ws) require 'url'
+        schemes = URL_TRANSPORT_SCHEMES[transport]
         if "url" not in config:
             report.critical(f"Server {server_name} (type={transport}) missing 'url'")
+        elif not isinstance(config["url"], str):
+            report.critical(f"Server {server_name} 'url' must be a string, got {type(config['url']).__name__}")
         else:
             url = config["url"]
             validate_env_var_syntax(url, report, f"{ctx}:url")
 
-            # Basic URL validation
-            if not url.startswith("${") and not url.startswith(("http://", "https://")):
-                report.major(f"Server {server_name} url should be http(s):// : {url}")
+            # Basic URL validation — scheme must match the transport
+            # (http/sse take http(s)://, ws takes ws(s)://).
+            if not url.startswith("${") and not url.startswith(schemes):
+                scheme_label = "ws(s)://" if transport == "ws" else "http(s)://"
+                report.major(f"Server {server_name} url should be {scheme_label} : {url}")
 
             # Security warning for remote MCP servers
             if not url.startswith("${"):
                 is_localhost = any(
-                    url.startswith(prefix)
-                    for prefix in (
-                        "http://localhost",
-                        "https://localhost",
-                        "http://127.0.0.1",
-                        "https://127.0.0.1",
-                        "http://[::1]",
-                        "https://[::1]",
-                        "http://0.0.0.0",
-                        "https://0.0.0.0",
-                    )
+                    url.startswith(f"{scheme}{host}")
+                    for scheme in schemes
+                    for host in ("localhost", "127.0.0.1", "[::1]", "0.0.0.0")
                 )
                 if not is_localhost:
                     report.warning(
-                        f"Server {server_name} connects to remote URL '{url}' — remote MCP servers can access tool results and conversation data. Ensure the server is trusted and uses HTTPS."
+                        f"Server {server_name} connects to remote URL '{url}' — remote MCP servers can access tool results and conversation data. Ensure the server is trusted and uses an encrypted scheme."
                     )
-                    if url.startswith("http://") and not is_localhost:
+                    # ws:// is the WebSocket twin of http:// — same plaintext
+                    # exposure, so it gets the same MAJOR (wss:// is clean).
+                    if url.startswith(("http://", "ws://")):
                         report.major(
-                            f"Server {server_name} uses unencrypted HTTP for remote server — use HTTPS to protect data in transit."
+                            f"Server {server_name} uses unencrypted HTTP/WebSocket (http:// or ws://) for a remote server — use https:// or wss:// to protect data in transit."
                         )
 
         # SSE is deprecated

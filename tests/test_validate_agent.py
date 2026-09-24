@@ -1198,11 +1198,11 @@ class TestDeprecatedToolWarnings:
     """Tests for deprecation warnings on renamed/deprecated tool names."""
 
     def test_task_output_emits_warning(self):
-        """validate_tools_field emits WARNING for the deprecated TaskOutput tool."""
+        """validate_tools_field emits WARNING for the TaskOutput tool, removed in CC v2.1.277."""
         report = AgentValidationReport()
         validate_tools_field({"tools": ["Read", "TaskOutput"]}, "agent.md", report)
         warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
-        assert any("TaskOutput" in m and "deprecated" in m for m in warning_msgs)
+        assert any("TaskOutput" in m and "removed" in m for m in warning_msgs)
 
     def test_task_emits_rename_warning(self):
         """validate_tools_field emits WARNING when the renamed Task tool is still used."""
@@ -1328,18 +1328,25 @@ class TestValidatePluginShippedRestrictionsUnit:
         for field in PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS:
             assert any(f"'{field}' is not supported for plugin-shipped agents" in m for m in major_msgs)
 
-    def test_experimental_is_not_in_the_plugin_shipped_allowed_set(self):
-        """'experimental' stays OUT of the plugin-shipped list until the docs sanction it.
+    def test_experimental_is_in_the_plugin_shipped_allowed_set(self):
+        """'experimental' is now IN the plugin-shipped list, because the docs sanction it.
 
-        CC v2.1.248's changelog adds ``experimental.cacheTtl`` to agent
-        frontmatter, but plugins-reference.md's plugin-shipped field list does
-        not carry it. Keeping it out preserves the MINOR drift nudge; this test
-        exists so a later spec sync does not re-add it by reflex.
+        INVERTED in the CC v2.1.258–281 sync. v5.12.0 held it out because
+        plugins-reference.md's plugin-agent field list did not carry it; the
+        re-fetched doc (L72, "Plugin agent frontmatter") now lists
+        ``experimental``, ``color`` and ``omitClaudeMd`` as Supported. The old
+        reason expired, so keeping the MINOR would be a false positive. The
+        negative control (a still-unlisted known field keeps its MINOR) lives
+        in test_cc_spec_sync_2_1_281_common.py.
         """
         from validate_agent import KNOWN_FRONTMATTER_FIELDS, PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS
 
-        assert "experimental" in KNOWN_FRONTMATTER_FIELDS
-        assert "experimental" not in PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS
+        for field in ("experimental", "color", "omitClaudeMd"):
+            assert field in KNOWN_FRONTMATTER_FIELDS, field
+            assert field in PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS, field
+        # Control: a known-but-unlisted field stays out of the plugin set.
+        assert "capabilities" in KNOWN_FRONTMATTER_FIELDS
+        assert "capabilities" not in PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS
 
 
 # ---------------------------------------------------------------------------
@@ -1692,28 +1699,34 @@ def _make_plugin_agent(tmp_path: Path, agent_frontmatter: str, agent_name: str =
 
 
 class TestV223Gap79PluginShippedAllowedFields:
-    """GAP-79 (v2.22.3): plugin-shipped agents accept exactly 11 fields.
+    """GAP-79 (v2.22.3): plugin-shipped agents accept a narrower field set.
 
-    Per plugins-reference.md:70 plugin-shipped agents may use only
-    {name, description, tools, model, effort, system-prompt, context,
-    memory, isolation, initialPrompt, agent}. CPV-legacy fields
-    (color, capabilities, user-invocable, etc.) and non-plugin spec
-    fields (skills, maxTurns, background, disallowedTools) emit MINOR
-    when seen on a plugin-shipped agent.
+    plugins-reference.md "Plugin agent frontmatter" (L72 at the v2.1.281
+    re-fetch) lists the Supported fields; CPV keeps 4 extra legacy fields on
+    purpose (see validate_plugin_shipped_allowed_fields). Known fields outside
+    the set (e.g. capabilities, user-invocable) emit MINOR on a plugin agent.
     """
 
-    def test_plugin_agent_with_color_emits_minor(self, tmp_path):
-        """Plugin-shipped agent with `color` → MINOR (not in plugin allow-list)."""
+    def test_plugin_agent_with_color_no_minor(self, tmp_path):
+        """Plugin-shipped agent with `color` → no MINOR: L72 now lists it as Supported."""
         content = "---\nname: a\ndescription: An agent.\ncolor: blue\n---\n\n# A\n\nBody.\n"
+        agent_path = _make_plugin_agent(tmp_path, content, "a")
+        report = validate_agent(agent_path)
+        minors = [r.message for r in report.results if r.level == "MINOR" and "'color'" in r.message]
+        assert not minors, f"`color` is now allowed for plugin agents; unexpected MINORs: {minors}"
+
+    def test_plugin_agent_with_capabilities_emits_minor(self, tmp_path):
+        """Control: a known field the doc does NOT list (`capabilities`) still MINORs."""
+        content = "---\nname: a\ndescription: An agent.\ncapabilities: [x]\n---\n\n# A\n\nBody.\n"
         agent_path = _make_plugin_agent(tmp_path, content, "a")
         report = validate_agent(agent_path)
         minors = [
             r.message
             for r in report.results
-            if r.level == "MINOR" and "color" in r.message and "plugin-shipped" in r.message
+            if r.level == "MINOR" and "'capabilities'" in r.message and "plugin-shipped" in r.message
         ]
         assert minors, (
-            "Expected MINOR for `color` on plugin-shipped agent; got MINORs: "
+            "Expected MINOR for `capabilities` on plugin-shipped agent; got MINORs: "
             f"{[r.message for r in report.results if r.level == 'MINOR']}"
         )
 

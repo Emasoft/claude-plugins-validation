@@ -96,6 +96,7 @@ from cc_scope_rules import (
     MAX_MARKDOWN_BYTES,
     MAX_MCP_JSON_BYTES,
     MAX_SETTINGS_JSON_BYTES,
+    NO_EFFECT_SETTINGS_KEYS,
     PLUGIN_ONLY_KEYS,
     PROJECT_LOCAL_REJECTED_ENV_VAR_NAMES,
     PROJECT_REJECTED_KEYS,
@@ -651,6 +652,44 @@ def _flag_claude_md_excludes(data: dict[str, Any], report: ValidationReport, fil
             _flag_absolute_home_paths_in_scalar(f"claudeMdExcludes[{idx}]", entry, report, file_label)
 
 
+def _flag_no_effect_keys(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
+    """INFO for keys Claude Code still accepts but that no longer do anything.
+
+    INFO, never NIT: the file loads fine, so this must not gate ``--strict``.
+    """
+    for key, since in sorted(NO_EFFECT_SETTINGS_KEYS.items()):
+        if key in data:
+            report.info(
+                f"settings.json: '{key}' has no effect since Claude Code {since} — "
+                "it is still accepted, but you can remove it.",
+                file_label,
+            )
+
+
+def _flag_attribution_boolean(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
+    """WARN on ``"attribution": false`` in the SHARED project settings file.
+
+    CC v2.1.281 accepts the boolean form (hide all attribution), but its own
+    changelog says older CLI versions SKIP a settings file that holds it — so
+    in ``.claude/settings.json``, which every collaborator's CLI reads, one
+    teammate on an older version silently loses every project setting. The
+    boolean itself is valid (no type finding anywhere); only this shared-file
+    portability hazard is reported, and only as a WARNING (never blocks).
+    ``True`` is not a documented value, so only ``False`` is recognised here.
+    """
+    if data.get("attribution") is False:
+        report.warning(
+            (
+                "settings.json sets \"attribution\": false — valid since Claude Code "
+                "v2.1.281, but older CLI versions skip a settings file that holds it, "
+                "so a collaborator on an older version loses EVERY setting in this "
+                "shared file. Use the object form instead: "
+                '{"attribution": {"commit": "", "pr": "", "sessionUrl": false}}.'
+            ),
+            file_label,
+        )
+
+
 def _flag_missing_schema(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """NIT: settings.json should declare ``$schema`` for editor autocomplete."""
     if "$schema" not in data:
@@ -699,6 +738,8 @@ def validate_settings_json_project_scope(settings_path: Path, report: Validation
     _flag_hook_command_paths(data, report, file_label)
     _flag_additional_directories(data, report, file_label)
     _flag_claude_md_excludes(data, report, file_label)
+    _flag_no_effect_keys(data, report, file_label)
+    _flag_attribution_boolean(data, report, file_label)
     _flag_missing_schema(data, report, file_label)
 
     own_levels = {r.level for r in report.results[start_idx:]}

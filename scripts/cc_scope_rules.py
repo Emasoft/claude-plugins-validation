@@ -58,6 +58,7 @@ __all__ = [
     "GLOBAL_CONFIG_KEYS",
     "PLUGIN_ONLY_KEYS",
     "KNOWN_SETTINGS_KEYS",
+    "NO_EFFECT_SETTINGS_KEYS",
     "SECRET_VALUE_PATTERNS",
     "SECRET_KEY_NAME_PATTERN",
     "SECRET_ENV_VAR_NAMES",
@@ -245,6 +246,11 @@ MANAGED_ONLY_KEYS: frozenset[str] = frozenset(
         # follows allowManagedHooksOnly. An org kill-switch for arbitrary
         # code execution has to be managed-scoped or it is not a kill-switch.
         "disableCommandPluginSources",
+        # v2.1.268 — settings-reference.md "Scope: Managed. Read only from a
+        # source on the machine: managed-settings.json, the macOS plist or
+        # Windows HKLM registry, or a policy helper." A project value is
+        # silently ignored, so it belongs with the other managed-only keys.
+        "gatewayInternalNetworks",
     }
 )
 
@@ -498,7 +504,11 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         "diffTool",
         "enableWorkflows",
         "externalEditorContext",
-        "keybindingFlavor",  # v2.1.238 — "classic" (default) | "readline" Ctrl+W behaviour
+        # v2.1.238 key; deprecated with NO effect since v2.1.261 (word-editing keys
+        # always follow readline). Kept: settings-reference.md says Claude Code
+        # still accepts it, so a file that sets it stays valid — not a typo.
+        # The "no effect" note is emitted via NO_EFFECT_SETTINGS_KEYS below.
+        "keybindingFlavor",
         "permissionExplainerEnabled",
         "skipAutoPermissionPrompt",
         "skipDangerousModePermissionPrompt",
@@ -537,8 +547,30 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         # Not yet in settings-reference.md's Available-settings table (doc
         # lag). Also in MANAGED_ONLY_KEYS — it binds only in a managed file.
         "managedMcpServers",
+        # CC v2.1.258–v2.1.281 sync — each a verified row of settings-reference.md's
+        # "Settings index" table (mechanical set-diff against the RAW doc).
+        "bashEditDiffEnabled",  # v2.1.269 — record files a Bash command changed (user or managed)
+        "bashOutputMaxChars",  # v2.1.261 — inline Bash output budget (any file)
+        "copyOnSelect",  # global-config row; listed so a typo check never flags it
+        "gatewayInternalNetworks",  # v2.1.268 — managed-only (semantics enforced via MANAGED_ONLY_KEYS)
+        "maxEffortLevel",  # v2.1.267 — cap effort on every provider (any file)
+        "syncClaudeAiPlugins",  # v2.1.275 — opt out of claude.ai plugin sync (user, local, or managed)
+        # Removed in v2.1.277 with the TaskOutput tool. Still a real setting NAME
+        # (settings-reference.md keeps its row), so it is known — and the
+        # "no effect" note comes from NO_EFFECT_SETTINGS_KEYS, not an unknown-key hint.
+        "taskOutputMaxChars",
     }
 )
+
+# Settings keys Claude Code still ACCEPTS but that no longer do anything.
+# Value = the version that neutered the key, used verbatim in a non-blocking
+# INFO. Deliberately INFO, not WARNING/NIT: the file loads fine and nothing
+# the author relied on breaks at load time — the setting simply stopped
+# mattering, and an author should learn that without their gate going red.
+NO_EFFECT_SETTINGS_KEYS: dict[str, str] = {
+    "keybindingFlavor": "v2.1.261",  # settings-reference.md: "Deprecated since v2.1.261 and has no effect"
+    "taskOutputMaxChars": "v2.1.277",  # settings-reference.md: "Removed in v2.1.277, together with the TaskOutput tool"
+}
 
 
 # =============================================================================
