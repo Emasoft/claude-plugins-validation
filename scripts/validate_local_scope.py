@@ -79,6 +79,7 @@ from cc_scope_rules import (
     MAX_HOME_CLAUDE_JSON_BYTES,
     MAX_MARKDOWN_BYTES,
     MAX_SETTINGS_JSON_BYTES,
+    NO_EFFECT_SETTINGS_KEYS,
     PLUGIN_ONLY_KEYS,
     PROJECT_LOCAL_REJECTED_ENV_VAR_NAMES,
     OversizedFileError,
@@ -407,6 +408,15 @@ def _flag_deprecated_keys(data: dict[str, Any], report: ValidationReport, file_l
             ),
             file_label,
         )
+    # Keys Claude Code still accepts but that no longer do anything. INFO, not
+    # NIT: nothing breaks at load time, so this must never gate --strict.
+    for key, since in sorted(NO_EFFECT_SETTINGS_KEYS.items()):
+        if key in data:
+            report.info(
+                f"{file_label}: '{key}' has no effect since Claude Code {since} — "
+                "it is still accepted, but you can remove it.",
+                file_label,
+            )
 
 
 def _flag_missing_schema_local(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:

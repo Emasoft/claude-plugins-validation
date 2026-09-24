@@ -105,8 +105,10 @@ class TestConstants:
         assert PERMISSION_DESTINATIONS == frozenset({"session", "localSettings", "projectSettings", "userSettings"})
 
     def test_permission_modes_exhaustive(self):
-        """PERMISSION_MODES has the 5 values from hooks.md L1124."""
-        assert PERMISSION_MODES == frozenset({"default", "acceptEdits", "dontAsk", "bypassPermissions", "plan"})
+        """PERMISSION_MODES has the 7 setMode values from hooks.md (auto + manual alias since CC v2.1.200)."""
+        assert PERMISSION_MODES == frozenset(
+            {"default", "auto", "acceptEdits", "dontAsk", "bypassPermissions", "plan", "manual"}
+        )
 
     def test_universal_output_fields_exhaustive(self):
         """UNIVERSAL_OUTPUT_FIELDS covers hooks.md L601-606 + decision/reason + v2.1.141 terminalSequence."""

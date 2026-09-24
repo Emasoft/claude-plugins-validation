@@ -86,13 +86,15 @@ class TestTodoToolModelGating:
     def test_taskcreate_emits_info_not_warning(self) -> None:
         """TaskCreate is still default-on for older models → INFO, not WARNING."""
         report = _agent_report_for_tools("Read, TaskCreate")
-        assert any("TaskCreate" in m and "v2.1.233" in m for m in _messages(report, "INFO"))
+        # Keyed on the opt-in env var, not a version string: v2.1.268 restated the
+        # gate as a positive model list and the message now cites that release.
+        assert any("TaskCreate" in m and "CLAUDE_CODE_ENABLE_TODO_TOOLS" in m for m in _messages(report, "INFO"))
         assert not any("TaskCreate" in m for m in _messages(report, "WARNING"))
 
     def test_control_ungated_tool_draws_no_gating_note(self) -> None:
-        """Control: TaskStop/TaskOutput are NOT in the 2.1.233 gated set."""
+        """Control: TaskStop/TaskOutput are NOT in the gated set."""
         report = _agent_report_for_tools("Read, TaskStop")
-        assert not any("TaskStop" in m and "v2.1.233" in m for m in _messages(report, "INFO"))
+        assert not any("TaskStop" in m and "CLAUDE_CODE_ENABLE_TODO_TOOLS" in m for m in _messages(report, "INFO"))
 
 
 class TestSlashCommandMcpSearchLegacy:

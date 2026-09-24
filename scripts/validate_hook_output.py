@@ -115,7 +115,12 @@ PERMISSION_UPDATE_TYPES: frozenset[str] = frozenset(
 PERMISSION_BEHAVIORS: frozenset[str] = frozenset({"allow", "deny", "ask"})
 
 # ``mode`` enum on setMode (hooks.md L1124).
-PERMISSION_MODES: frozenset[str] = frozenset({"default", "acceptEdits", "dontAsk", "bypassPermissions", "plan"})
+# hooks.md `setMode` row: "Valid modes are default, auto, acceptEdits, dontAsk,
+# bypassPermissions, plan, and manual as an alias for default" (manual: CC
+# v2.1.200+). Without auto/manual a legitimate setMode drew a MAJOR.
+PERMISSION_MODES: frozenset[str] = frozenset(
+    {"default", "auto", "acceptEdits", "dontAsk", "bypassPermissions", "plan", "manual"}
+)
 
 # ``destination`` enum on every permission update type (hooks.md L1134-1139).
 PERMISSION_DESTINATIONS: frozenset[str] = frozenset({"session", "localSettings", "projectSettings", "userSettings"})
