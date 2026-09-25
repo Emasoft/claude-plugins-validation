@@ -1469,6 +1469,43 @@ def cell(text: str) -> str:
     return str(text).replace("|", "\\|").replace("\n", " ").strip()
 
 
+def _link_dest(url: str) -> str:
+    """Percent-encode a URL so it cannot break out of a `[text](dest)` link OR
+    the table cell that link sits in.
+
+    GFM splits a table row into cells on `|` BEFORE it parses inline markdown,
+    so a literal `|` in the URL would add a spurious column even though it is
+    inside `(...)`; a `)` would close the link destination early, truncating
+    it; a raw newline/CR would split the row across lines the same way `cell()`
+    already guards against for plain text (it collapses newlines to a space).
+    Every one of these must be *encoded*, not backslash-escaped like `cell()`
+    does for plain text — a backslash has no meaning inside a link destination
+    and would end up as a literal character in the rendered URL. `<`/`>` are
+    additionally encoded because a bare `<...>` is CommonMark autolink syntax;
+    encoding them keeps the destination from ever being reinterpreted as one.
+    Percent-encoding these characters is a no-op for every ordinary
+    https://github.com/... URL (none of them appear), which is what keeps
+    render() byte-identical for the common case and satisfies every
+    marketplace's `--check` drift gate on upgrade.
+
+    `%` is deliberately left unescaped: this function never re-scans its own
+    output, so there is no double-encoding risk to guard against, and encoding
+    it would corrupt any URL that already carries a valid percent-escape
+    (e.g. `%20` in a pre-encoded path) into a different URL.
+    """
+    return (
+        str(url)
+        .replace("(", "%28")
+        .replace(")", "%29")
+        .replace("|", "%7C")
+        .replace(" ", "%20")
+        .replace("<", "%3C")
+        .replace(">", "%3E")
+        .replace("\r", "%0D")
+        .replace("\n", "%0A")
+    )
+
+
 def repo_url(plugin: dict) -> str | None:
     """Prefer the explicit repository URL; fall back to the github source."""
     url = plugin.get("repository")
@@ -1501,7 +1538,7 @@ def render(plugins: list[dict]) -> str:
     for p in sorted(plugins, key=lambda x: x.get("name", "")):
         name = cell(p.get("name", "?"))
         url = repo_url(p)
-        label = f"[{name}]({url})" if url else name
+        label = f"[{name}]({_link_dest(url)})" if url else name
         # "developer-tools" is the manifest's slug form; the table shows prose.
         category = cell(p.get("category", "")).replace("-", " ").replace("_", " ").title()
         lines.append(
