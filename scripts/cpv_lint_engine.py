@@ -1347,6 +1347,21 @@ def lint_markdown(
     if not files:
         return True
 
+    # Issue #229: markdownlint-cli2 never reads `.markdownlintignore` — it
+    # reads `ignores` from `.markdownlint-cli2.jsonc`/`.yaml`/`.cjs` instead
+    # (a different config file, a different key). A repo carrying only the
+    # legacy `.markdownlintignore` silently gets NO exclusions applied by the
+    # tool CPV invokes, and nothing told the author. This is a CONFIG gap,
+    # not a tool-availability gap — it must fire even when markdownlint-cli2
+    # itself is missing (checked below), so it is placed before the `_resolve`
+    # early-return rather than after it. Non-blocking: WARNING only.
+    if (repo_root / ".markdownlintignore").is_file():
+        report.warning(
+            "markdownlint-cli2 does not read .markdownlintignore — it reads "
+            "the `ignores` array in .markdownlint-cli2.jsonc (or .yaml/.cjs). "
+            "Move your exclusions there or they are not being applied."
+        )
+
     cmd = _resolve("markdownlint-cli2")
     if not cmd:
         _tool_missing(
