@@ -68,6 +68,19 @@ def _write_mega_linter(root: Path, linters: list[str]) -> None:
     (root / ".mega-linter.yml").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _wire_megalinter_workflow(root: Path) -> None:
+    """w9-followups #3a: `.mega-linter.yml` enabling cspell is not proof CI
+    enforces it (#228) — `_gate_cspell`'s blocking FAIL additionally requires a
+    workflow that actually RUNS Mega-Linter."""
+    wf = root / ".github" / "workflows" / "ci.yml"
+    wf.parent.mkdir(parents=True, exist_ok=True)
+    wf.write_text(
+        "name: CI\non: [push]\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n"
+        "      - uses: oxsecurity/megalinter@e08c2b05e3dbc40af4c23f41172ef1e068a7d651 # v8\n",
+        encoding="utf-8",
+    )
+
+
 class _FakeProc:
     """Stand-in for subprocess.CompletedProcess with the fields the gates read."""
 
@@ -697,11 +710,14 @@ def test_generated_plugin_cspell_defect_is_closed_by_the_provisioner(tmp_path: P
 
 
 def test_cspell_no_config_fails_never_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """cspell enabled but NO plugin cspell config → FAIL (the RC-3 parity hole),
-    and the tool is STILL never invoked — a bare local cspell would false-block on
-    tech terms CI's Mega-Linter passes, so the defect is reported statically."""
+    """cspell enabled + a workflow that RUNS Mega-Linter, but NO plugin cspell
+    config → FAIL (the RC-3 parity hole), and the tool is STILL never invoked —
+    a bare local cspell would false-block on tech terms CI's Mega-Linter passes,
+    so the defect is reported statically. w9-followups #3a / #228 follow-up: the
+    workflow is required, since `.mega-linter.yml` alone is not proof CI runs it."""
     root = _make_plugin(tmp_path)
     _write_mega_linter(root, ["SPELL_CSPELL"])  # NO .cspell.json shipped
+    _wire_megalinter_workflow(root)
     monkeypatch.setattr(cpv_ci_preflight.shutil, "which", lambda name: f"/usr/bin/{name}")
 
     def fail_run(argv: list[str], **_kw: object) -> _FakeProc:
@@ -713,6 +729,27 @@ def test_cspell_no_config_fails_never_runs(tmp_path: Path, monkeypatch: pytest.M
     f = _finding(result, "cspell")
     assert f.severity == "FAIL"
     assert "standardize --fix" in f.message
+
+
+def test_cspell_no_config_and_no_megalinter_workflow_warns_never_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """w9-followups #3a — same missing config, but NO workflow runs Mega-Linter
+    → non-blocking WARNING, not FAIL. The CI hard-error the FAIL message names
+    cannot happen when nothing invokes Mega-Linter."""
+    root = _make_plugin(tmp_path)
+    _write_mega_linter(root, ["SPELL_CSPELL"])  # NO .cspell.json shipped; no workflow either
+    monkeypatch.setattr(cpv_ci_preflight.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def fail_run(argv: list[str], **_kw: object) -> _FakeProc:
+        raise AssertionError("cspell must NOT run without a plugin cspell config")
+
+    monkeypatch.setattr(cpv_ci_preflight.subprocess, "run", fail_run)
+    result = PreflightResult(plugin_path=root)
+    cpv_ci_preflight._gate_cspell(result, {cpv_ci_preflight._CSPELL_LINTER_ID})
+    f = _finding(result, "cspell")
+    assert f.severity == "WARNING"
+    assert "NOT run" in f.message
 
 
 def test_plugin_has_cspell_config_detects_dictionary(tmp_path: Path) -> None:

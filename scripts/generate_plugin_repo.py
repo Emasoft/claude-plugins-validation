@@ -32,11 +32,15 @@ from pathlib import Path
 # scripts/ (pure stdlib) — its dir is sys.path[0] when this file runs as a
 # script and is already inserted by validate_plugin.py / the tests when imported.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-# #228: the generated publish.py cannot import CPV, so it carries the Mega-Linter
-# workflow-detection regex as a literal — rendered from MEGALINTER_WORKFLOW_PATTERN
-# (the constant the ci-preflight uses) so the two can never drift. A parity test
-# pins them equal.
-from cpv_ci_preflight import MEGALINTER_WORKFLOW_PATTERN  # noqa: E402
+# #228 (+ its w9-followups #3 follow-up): the generated publish.py cannot import
+# CPV, so it carries the Mega-Linter / actionlint / mypy workflow-detection
+# regexes as literals — rendered from the SAME constants the ci-preflight uses,
+# so the two can never drift. Parity tests pin them equal.
+from cpv_ci_preflight import (  # noqa: E402
+    ACTIONLINT_WORKFLOW_PATTERN,
+    MEGALINTER_WORKFLOW_PATTERN,
+    MYPY_WORKFLOW_RUN_PATTERN,
+)
 from cpv_pipeline_profile import (  # noqa: E402 — sibling import after the path insert above
     KNOWN_PROFILES,
     PROFILE_BINARY_RELEASE,
@@ -1481,11 +1485,10 @@ All entries above are invoked as
 
 ## Resources
 
-- [cpv-the-skills-menu-create](../cpv-the-skills-menu-create/SKILL.md) —
-  the migrator skill in the CPV plugin that can regenerate this
-  catalog from the plugin's current skill inventory at any time
-  (not bundled in this plugin; install
-  `claude-plugins-validation` to access it).
+The `cpv-the-skills-menu-create` skill, bundled in the separate
+`claude-plugins-validation` plugin (not this one — install it to access
+it), can regenerate this catalog from this plugin's current skill
+inventory at any time.
 """
 
 
@@ -2620,7 +2623,14 @@ _MEGALINTER_NOT_WIRED = ("This check was NOT run, and no .github/workflows/ file
 
 
 def _megalinter_workflow_wired(root: Path) -> bool:
-    """True when any .github/workflows/*.yml|*.yaml invokes Mega-Linter."""
+    """True when any .github/workflows/*.yml|*.yaml invokes Mega-Linter.
+
+    An unreadable workflow is skipped, never counted as a match — this
+    function decides whether a CI backstop claim is TRUE, and a file that
+    could not be read is not evidence a backstop exists (fail toward "not
+    wired" rather than toward over-claiming a CI enforcement that may not
+    be there).
+    """
     wf_dir = root / ".github" / "workflows"
     if not wf_dir.is_dir():
         return False
@@ -2632,6 +2642,63 @@ def _megalinter_workflow_wired(root: Path) -> bool:
                 return True
         except (OSError, UnicodeDecodeError):
             continue
+    return False
+
+
+# w9-followups #3 (#228 follow-up): the same unconditional-backstop shape
+# remained in the G2c/G2d skip lines below — rendered from the SAME constants
+# cpv_ci_preflight uses, so the local gate and the preflight can never drift.
+_ACTIONLINT_WORKFLOW_RE = re.compile(__CPV_ACTIONLINT_WORKFLOW_PATTERN__)
+_ACTIONLINT_NOT_WIRED = ("This check was NOT run, and no .github/workflows/ file runs"
+                         " actionlint — it cannot be a CI backstop for a repo whose CI"
+                         " never invokes it.")
+
+
+def _actionlint_workflow_wired(root: Path) -> bool:
+    """True when a workflow itself runs actionlint (a dedicated step, or the
+    rhysd/actionlint action) — Mega-Linter's own YAML sub-linter is a
+    DIFFERENT tool and does not count."""
+    wf_dir = root / ".github" / "workflows"
+    if not wf_dir.is_dir():
+        return False
+    for wf in sorted(wf_dir.iterdir()):
+        if not (wf.is_file() and wf.suffix in (".yml", ".yaml")):
+            continue
+        try:
+            if _ACTIONLINT_WORKFLOW_RE.search(wf.read_text(encoding="utf-8")):
+                return True
+        except (OSError, UnicodeDecodeError):
+            continue
+    return False
+
+
+_MYPY_WORKFLOW_RUN_RE = re.compile(__CPV_MYPY_WORKFLOW_RUN_PATTERN__)
+_MYPY_NOT_WIRED = ("This check was NOT run, and CI does not run mypy — no workflow runs"
+                   " it directly and Mega-Linter is either not wired or does not enable"
+                   " PYTHON_MYPY.")
+
+
+def _mypy_workflow_wired(root: Path) -> bool:
+    """True when CI actually runs mypy: Mega-Linter is wired and its config
+    enables PYTHON_MYPY, OR a workflow directly invokes the mypy CLI."""
+    if _megalinter_workflow_wired(root):
+        cfg = root / ".mega-linter.yml"
+        if cfg.is_file():
+            try:
+                if "PYTHON_MYPY" in cfg.read_text(encoding="utf-8"):
+                    return True
+            except (OSError, UnicodeDecodeError):
+                pass
+    wf_dir = root / ".github" / "workflows"
+    if wf_dir.is_dir():
+        for wf in sorted(wf_dir.iterdir()):
+            if not (wf.is_file() and wf.suffix in (".yml", ".yaml")):
+                continue
+            try:
+                if _MYPY_WORKFLOW_RUN_RE.search(wf.read_text(encoding="utf-8")):
+                    return True
+            except (OSError, UnicodeDecodeError):
+                continue
     return False
 
 
@@ -2669,8 +2736,15 @@ def _secret_scan(root: Path) -> int:
                 # a PATH mutation is ENV_INJECTION to CPV's own scanner, so the
                 # generated file failed the very --strict gate it runs (CPV
                 # #231), and it would leak into every later subprocess too.
-                _gobin = os.environ.get("GOBIN") or str(
-                    Path(os.environ.get("GOPATH") or (Path.home() / "go")) / "bin")
+                # GOPATH may be an os.pathsep-separated LIST (`first:second`);
+                # `go install` writes to the FIRST entry's bin, so a naive
+                # str(Path(GOPATH)/"bin") on the whole list resolved a bin dir
+                # that never held the binary (w9-followups #5).
+                _gopath_raw = os.environ.get("GOPATH") or str(Path.home() / "go")
+                _gopath_first = next(
+                    (p for p in _gopath_raw.split(os.pathsep) if p), str(Path.home() / "go")
+                )
+                _gobin = os.environ.get("GOBIN") or str(Path(_gopath_first) / "bin")
                 _trufflehog = shutil.which("trufflehog", path=_gobin)
         except subprocess.TimeoutExpired:
             cprint(f"  {YELLOW}The trufflehog installer timed out (>900s).{NC}")
@@ -3004,12 +3078,18 @@ def run_gate(root: Path) -> int:
     wf_dir = root / ".github" / "workflows"
     has_workflows = wf_dir.is_dir() and (any(wf_dir.glob("*.yml")) or any(wf_dir.glob("*.yaml")))
     actionlint_bin = shutil.which("actionlint")
+    # w9-followups #3b (#228 follow-up): claim the CI backstop only when a
+    # workflow actually runs actionlint.
+    _al_wired = _actionlint_workflow_wired(root)
     if not has_workflows:
         cprint(f"  {GREEN}No workflows to lint — skipped.{NC}")
     elif actionlint_bin is None:
         cprint(f"  {YELLOW}WARNING: actionlint not found — workflow lint SKIPPED locally.{NC}")
-        cprint(f"  {YELLOW}CI's Lint job WILL enforce it. A green gate does NOT guarantee green CI")
-        cprint(f"  {YELLOW}for the workflow-syntax dimension. Install actionlint for full parity.{NC}")
+        if _al_wired:
+            cprint(f"  {YELLOW}CI's Lint job WILL enforce it. A green gate does NOT guarantee green CI")
+            cprint(f"  {YELLOW}for the workflow-syntax dimension. Install actionlint for full parity.{NC}")
+        else:
+            cprint(f"  {YELLOW}{_ACTIONLINT_NOT_WIRED}{NC}")
     else:
         al = subprocess.run([actionlint_bin], cwd=str(root), timeout=120).returncode
         if al != 0:
@@ -3025,23 +3105,25 @@ def run_gate(root: Path) -> int:
     cprint(f"\n{BLUE}[G2d] Type-check (mypy, parity with CI)...{NC}")
     mypy_bin = shutil.which("mypy")
     mypy_cmd = [mypy_bin] if mypy_bin else (["uv", "run", "mypy"] if shutil.which("uv") else None)
+    # w9-followups #3b (#228 follow-up): claim the CI backstop only when CI
+    # actually runs mypy — Mega-Linter being wired for SOME linter is not proof
+    # it enables PYTHON_MYPY specifically.
+    _mypy_wired = _mypy_workflow_wired(root)
     if mypy_cmd is None:
         cprint(f"  {YELLOW}WARNING: mypy/uv not found — type-check SKIPPED locally.{NC}")
-        # The generated Lint job runs mypy only through Mega-Linter (PYTHON_MYPY),
-        # so the same #228 condition applies.
-        if _ml_wired:
+        if _mypy_wired:
             cprint(f"  {YELLOW}CI's Lint job WILL enforce it; a green gate does NOT guarantee green CI for types.{NC}")
         else:
-            cprint(f"  {YELLOW}{_MEGALINTER_NOT_WIRED}{NC}")
+            cprint(f"  {YELLOW}{_MYPY_NOT_WIRED}{NC}")
     else:
         probe = subprocess.run(mypy_cmd + ["--version"], cwd=str(root),
                                capture_output=True, text=True, timeout=120)
         if probe.returncode != 0:
             cprint(f"  {YELLOW}WARNING: mypy could not run — type-check SKIPPED locally.{NC}")
-            if _ml_wired:
+            if _mypy_wired:
                 cprint(f"  {YELLOW}CI's Lint job WILL enforce it; green gate != green CI for types.{NC}")
             else:
-                cprint(f"  {YELLOW}{_MEGALINTER_NOT_WIRED}{NC}")
+                cprint(f"  {YELLOW}{_MYPY_NOT_WIRED}{NC}")
         else:
             mt = subprocess.run(mypy_cmd + ["scripts/", "--ignore-missing-imports"],
                                 cwd=str(root), timeout=300).returncode
@@ -5297,6 +5379,14 @@ if __name__ == "__main__":
     # exact pattern string.
     result = result.replace(
         "__CPV_MEGALINTER_WORKFLOW_PATTERN__", repr(MEGALINTER_WORKFLOW_PATTERN)
+    )
+    # w9-followups #3b (#228 follow-up): same single-source rendering for the
+    # actionlint / mypy CI-backstop detection regexes.
+    result = result.replace(
+        "__CPV_ACTIONLINT_WORKFLOW_PATTERN__", repr(ACTIONLINT_WORKFLOW_PATTERN)
+    )
+    result = result.replace(
+        "__CPV_MYPY_WORKFLOW_RUN_PATTERN__", repr(MYPY_WORKFLOW_RUN_PATTERN)
     )
     # Issue #137: the published `pypi` wheel declares pyyaml as a runtime
     # dependency, so drop the `--with pyyaml` shim from every inline argv list in

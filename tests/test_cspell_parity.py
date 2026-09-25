@@ -90,6 +90,20 @@ def _write_mega_linter(root: Path, linters: list[str]) -> None:
     (root / ".mega-linter.yml").write_text(body, encoding="utf-8")
 
 
+def _wire_megalinter_workflow(root: Path) -> None:
+    """w9-followups #3a: a `.mega-linter.yml` enabling cspell is not proof CI
+    enforces it (#228) — the FAIL branch of ``_gate_cspell`` additionally
+    requires a workflow that actually RUNS Mega-Linter. Tests that assert the
+    blocking FAIL must set this up explicitly."""
+    wf = root / ".github" / "workflows" / "ci.yml"
+    wf.parent.mkdir(parents=True, exist_ok=True)
+    wf.write_text(
+        "name: CI\non: [push]\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n"
+        "      - uses: oxsecurity/megalinter@e08c2b05e3dbc40af4c23f41172ef1e068a7d651 # v8\n",
+        encoding="utf-8",
+    )
+
+
 class _FakeProc:
     def __init__(self, returncode: int, stdout: str = "", stderr: str = "") -> None:
         self.returncode = returncode
@@ -176,18 +190,44 @@ def test_dictionary_present_but_real_misspelling_still_fails(
 def test_spell_enabled_but_no_dictionary_is_a_reported_defect(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """SPELL enabled + NO dictionary → FAIL naming the remediation. THE parity hole.
+    """SPELL enabled + NO dictionary + a workflow that RUNS Mega-Linter → FAIL
+    naming the remediation. THE parity hole.
 
     It must no longer be a silent skip. The tool is still never invoked (a bare
-    cspell would false-block on tech terms) — the defect is reported statically."""
+    cspell would false-block on tech terms) — the defect is reported statically.
+    A workflow that actually runs Mega-Linter is required (w9-followups #3a,
+    #228 follow-up): `.mega-linter.yml` alone is not proof CI enforces it."""
     root = _make_plugin(tmp_path)
     _write_mega_linter(root, ["SPELL_CSPELL"])  # no .cspell.json provisioned
+    _wire_megalinter_workflow(root)
     calls = _patch_cspell(monkeypatch, present=True, proc=_FakeProc(0))
 
     f = _finding(_gate(root))
 
     assert f.severity == "FAIL"
     assert "standardize --fix" in f.message
+    assert calls == [], "a bare cspell (no dictionary) must never be invoked"
+
+
+def test_spell_enabled_but_no_workflow_runs_megalinter_degrades_to_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """w9-followups #3a — SPELL enabled + NO dictionary but NO workflow runs
+    Mega-Linter → non-blocking WARNING, not FAIL.
+
+    `.mega-linter.yml` enabling SPELL_CSPELL is not proof CI enforces it: a repo
+    can keep the config after dropping the workflow step (the #228 shape one
+    layer up from jscpd). The CI hard-error the FAIL message warns about cannot
+    actually happen here, so it must not block `--strict`-equivalent exit."""
+    root = _make_plugin(tmp_path)
+    _write_mega_linter(root, ["SPELL_CSPELL"])  # no .cspell.json; no workflow either
+    calls = _patch_cspell(monkeypatch, present=True, proc=_FakeProc(0))
+
+    f = _finding(_gate(root))
+
+    assert f.severity == "WARNING"
+    assert "NOT run" in f.message
+    assert "no .github/workflows" in f.message or "Mega-Linter" in f.message
     assert calls == [], "a bare cspell (no dictionary) must never be invoked"
 
 

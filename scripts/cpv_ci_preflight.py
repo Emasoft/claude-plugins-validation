@@ -334,13 +334,88 @@ _MEGALINTER_NOT_WIRED = (
 
 
 def _megalinter_workflow_wired(root: Path) -> bool:
-    """True when any ``.github/workflows/*.yml|*.yaml`` invokes Mega-Linter."""
+    """True when any ``.github/workflows/*.yml|*.yaml`` invokes Mega-Linter.
+
+    An unreadable workflow file is silently skipped rather than treated as a
+    match — deliberately: this function's whole job is deciding whether a CI
+    backstop claim is TRUE, and a file we could not read is not evidence a
+    backstop exists. Failing toward "not wired" costs an occasional over-
+    cautious "this check was NOT run" message; failing the other way would
+    claim a CI enforcement that may not be there.
+    """
     for wf in _workflow_yml_paths(root):
         try:
             text = wf.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         if _MEGALINTER_WORKFLOW_RE.search(text):
+            return True
+    return False
+
+
+# Same shape as MEGALINTER_WORKFLOW_PATTERN, for the two other "CI still
+# enforces it" backstop claims the #228 fix did not reach (issue #228 follow-up,
+# w9-followups #3): a workflow line naming rhysd/actionlint's own action, its
+# docker form, or literally invoking the `actionlint` binary. `^[^#\n]*` keeps a
+# match off a comment (`# see actionlint docs`). re2-safe: no lookarounds, no
+# backreferences.
+ACTIONLINT_WORKFLOW_PATTERN = r"(?im)^[^#\n]*(?:rhysd/actionlint|\bactionlint\b)"
+_ACTIONLINT_WORKFLOW_RE = re.compile(ACTIONLINT_WORKFLOW_PATTERN)
+_ACTIONLINT_NOT_WIRED = (
+    "This check was NOT run, and no .github/workflows/ file runs actionlint — "
+    "the check cannot be a CI backstop for a repo whose CI never invokes it."
+)
+
+
+def _actionlint_workflow_wired(root: Path) -> bool:
+    """True when a workflow itself runs actionlint (a dedicated step, or the
+    rhysd/actionlint action — Mega-Linter's own YAML sub-linter is a DIFFERENT
+    tool and is deliberately NOT treated as covering this).
+
+    Same fail-toward-"not wired" posture as ``_megalinter_workflow_wired`` — an
+    unreadable file is skipped, never counted as a match.
+    """
+    for wf in _workflow_yml_paths(root):
+        try:
+            text = wf.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if _ACTIONLINT_WORKFLOW_RE.search(text):
+            return True
+    return False
+
+
+# The mypy "CI still enforces it" backstop claim (issue #228 follow-up,
+# w9-followups #3b) is TRUE in two disjoint shapes: (1) Mega-Linter is wired AND
+# its config enables PYTHON_MYPY — the G2d/`_gate_mypy` degrade text — or (2) a
+# workflow directly `run:`s the mypy CLI outside Mega-Linter entirely. Shape (2)
+# is a broad "does the token `mypy` appear as a bare word on a non-comment
+# line" probe rather than a `run:`-scoped parse — the same breadth
+# MEGALINTER_WORKFLOW_PATTERN already accepts for its own claim, and erring
+# toward "wired" here only widens when the backstop claim is printed, never
+# whether the local mypy gate itself runs.
+MYPY_WORKFLOW_RUN_PATTERN = r"(?im)^[^#\n]*\bmypy\b"
+_MYPY_WORKFLOW_RUN_RE = re.compile(MYPY_WORKFLOW_RUN_PATTERN)
+_MYPY_NOT_WIRED = (
+    "This check was NOT run, and CI does not run mypy — no workflow runs it "
+    "directly and Mega-Linter is either not wired or does not enable "
+    "PYTHON_MYPY (#228 follow-up)."
+)
+
+
+def _mypy_workflow_wired(root: Path) -> bool:
+    """True when CI actually runs mypy: Mega-Linter is wired and its config
+    enables PYTHON_MYPY, OR a workflow directly invokes the mypy CLI."""
+    if _megalinter_workflow_wired(root):
+        enabled = _megalinter_enabled_linters(root)
+        if enabled is not None and "PYTHON_MYPY" in enabled:
+            return True
+    for wf in _workflow_yml_paths(root):
+        try:
+            text = wf.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if _MYPY_WORKFLOW_RUN_RE.search(text):
             return True
     return False
 
@@ -353,14 +428,22 @@ def _gate_actionlint(result: PreflightResult) -> None:
         # tool-absence — just a clean no-op.
         result.add("actionlint", _SEV_PASS, "No .github/workflows/*.yml — actionlint not needed.")
         return
+    # #228 follow-up (w9-followups #3b): claim the CI backstop only when a
+    # workflow actually runs actionlint — Mega-Linter's own presence proves
+    # nothing about this specific tool.
+    wired = _actionlint_workflow_wired(root)
     actionlint_bin = shutil.which("actionlint")
     if actionlint_bin is None:
         result.add(
             "actionlint",
             _SEV_WARNING,
-            "actionlint not found on PATH — workflow-syntax check SKIPPED locally. CI's Lint "
-            "job runs actionlint; install it (https://github.com/rhysd/actionlint) for full "
-            "local parity.",
+            "actionlint not found on PATH — workflow-syntax check SKIPPED locally. "
+            + (
+                "CI's Lint job runs actionlint; install it "
+                "(https://github.com/rhysd/actionlint) for full local parity."
+                if wired
+                else _ACTIONLINT_NOT_WIRED + " Install it to run this check locally."
+            ),
         )
         return
     try:
@@ -375,8 +458,8 @@ def _gate_actionlint(result: PreflightResult) -> None:
         result.add(
             "actionlint",
             _SEV_WARNING,
-            f"actionlint could not run ({type(exc).__name__}) — SKIPPED locally. CI still "
-            f"enforces it.",
+            f"actionlint could not run ({type(exc).__name__}) — SKIPPED locally. "
+            + ("CI still enforces it." if wired else _ACTIONLINT_NOT_WIRED),
         )
         return
     if proc.returncode != 0:
@@ -409,13 +492,22 @@ def _gate_mypy(result: PreflightResult) -> None:
     if not any(scripts_dir.rglob("*.py")):
         result.add("mypy", _SEV_PASS, "scripts/ has no .py files — mypy not needed.")
         return
+    # #228 follow-up (w9-followups #3b): claim the CI backstop only when CI
+    # actually runs mypy (Mega-Linter wired + PYTHON_MYPY enabled, or a
+    # workflow directly invokes the mypy CLI) — Mega-Linter being wired for
+    # SOME linter proves nothing about mypy specifically.
+    wired = _mypy_workflow_wired(root)
     mypy_bin = shutil.which("mypy")
     if mypy_bin is None:
         result.add(
             "mypy",
             _SEV_WARNING,
-            "mypy not found on PATH — type check SKIPPED locally. CI's Lint job runs mypy; "
-            "install it for full local parity.",
+            "mypy not found on PATH — type check SKIPPED locally. "
+            + (
+                "CI's Lint job runs mypy; install it for full local parity."
+                if wired
+                else _MYPY_NOT_WIRED + " Install it to run this check locally."
+            ),
         )
         return
     # Mirror CPV's own real mypy gate: `mypy scripts/ --ignore-missing-imports`
@@ -433,8 +525,8 @@ def _gate_mypy(result: PreflightResult) -> None:
         result.add(
             "mypy",
             _SEV_WARNING,
-            f"mypy could not run ({type(exc).__name__}) — SKIPPED locally. CI still "
-            f"enforces it.",
+            f"mypy could not run ({type(exc).__name__}) — SKIPPED locally. "
+            + ("CI still enforces it." if wired else _MYPY_NOT_WIRED),
         )
         return
     if proc.returncode != 0:
@@ -823,11 +915,12 @@ def _gate_cspell(result: PreflightResult, enabled: set[str] | None) -> None:
     hole: the author's local preflight said GREEN and GitHub CI then said RED on
     every plugin-specific proper noun, with no way to see it beforehand.
 
-    The three cases, and why each severity is what it is:
+    The four cases, and why each severity is what it is:
 
     * SPELL_CSPELL not enabled (or no `.mega-linter.yml`) → clean PASS "skipped".
       CI does not run cspell, so there is nothing to reproduce.
-    * enabled, but the plugin ships NO cspell config → **FAIL**. This is a real,
+    * enabled, ships NO cspell config, AND a workflow actually runs Mega-Linter
+      (#228 follow-up, w9-followups #3a) → **FAIL**. This is a real,
       static, offline-detectable CI-parity DEFECT of exactly the CIP-3 kind
       ("the canonical CI enables a gate whose config the plugin never shipped"):
       CI's cspell has no dictionary for the plugin's own name / agents / skills /
@@ -835,6 +928,12 @@ def _gate_cspell(result: PreflightResult, enabled: set[str] | None) -> None:
       deliberately never invoked here, because a bare local cspell on its default
       dictionary would false-block on ordinary tech terms. The remediation is one
       mechanical command (`standardize --fix`), which provisions `.cspell.json`.
+    * enabled, ships NO cspell config, but NO workflow runs Mega-Linter →
+      **WARNING**, not FAIL. `.mega-linter.yml` enabling SPELL_CSPELL is not
+      proof CI enforces it — a repo can keep the config after dropping the
+      workflow step (the exact #228 shape one layer up from jscpd) — so the CI
+      hard-error this FAIL would warn about cannot actually happen. Visible,
+      never blocking.
     * enabled + a config present → RUN cspell for real. cspell auto-discovers the
       config and CI's Mega-Linter cspell reads that SAME file, so the local run
       now faithfully reproduces CI: a word the dictionary accepts passes on both
@@ -852,6 +951,19 @@ def _gate_cspell(result: PreflightResult, enabled: set[str] | None) -> None:
         )
         return
     if not _plugin_has_cspell_config(result.plugin_path):
+        wired = _megalinter_workflow_wired(result.plugin_path)
+        if not wired:
+            result.add(
+                "cspell",
+                _SEV_WARNING,
+                "This check was NOT run: .mega-linter.yml enables cspell (SPELL_CSPELL) but "
+                "the plugin ships no cspell dictionary, AND no .github/workflows/ file runs "
+                "Mega-Linter — so the CI hard-error this would warn about cannot happen "
+                "(#228 follow-up). If a Mega-Linter workflow is added later, this becomes a "
+                "blocking FAIL; run `standardize --fix` to provision the canonical "
+                ".cspell.json ahead of time.",
+            )
+            return
         result.add(
             "cspell",
             _SEV_FAIL,
