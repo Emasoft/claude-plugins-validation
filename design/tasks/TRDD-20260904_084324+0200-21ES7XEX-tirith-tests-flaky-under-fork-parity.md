@@ -3,7 +3,7 @@ trdd-id: 21ES7XEX
 title: Two tirith integration tests fail intermittently under the Gate 3c fork-parity probe and the suite installs a real tirith onto the host
 column: todo
 created: 2026-09-04T08:43:24+0200
-updated: 2026-09-25T16:11:25+0200
+updated: 2026-09-25T18:23:28+0200
 current-owner: cpv-main-session
 task-type: bugfix
 min-approval-requirement: none
@@ -103,3 +103,4 @@ Do not "fix" defect A by widening the assertion or adding a retry. Both make
 the test pass without establishing why it failed, and the whole point of Gate
 3c is to catch what the serial suite cannot see.
 2026-09-25 progress: defect B LANDED in commit 875b6623 (repo-wide conftest.py autouse fixture forces CPV_NO_TIRITH_INSTALL=1 for every test — reachable from ~28 other test files per the commit's own analysis; +2 tests: guard works under the fixture, control proves the same setup WOULD install without it). Tirith suite now 14 passed in 7.5s. NOTE: ~/.local/bin/tirith on this host is a 2026-05-01 pipx symlink, NOT a test-installed artifact — its removal (card box 5) is moot as written (it predates the suite) but needs USER confirmation either way; flagged to the user. Defect A investigation dispatched (instrumented repro + branch map); measurement worker running.
+2026-09-25 defect-A investigation (report: workspace reports/21es7xex-defect-a/20260925_181959+0200-defect-a-mechanism.md): NOT REPRODUCED — 20/20 green under exact Gate-3c fork parity at HEAD (tirith code byte-identical to the failing commit). Mechanism narrowed to dominant branch B6: JSON-parse failure caused by the BROKEN REAL HOST tirith at ~/.local/bin/tirith (identified as a WAMP monitor — rc=1, non-JSON stdout, not a scanner) answering whenever the shim's PATH prepend is not seen by a subprocess. H2 (timeout), H3 (empty output), H4 (gitignore filter) rule-outs verified first-hand. This ELEVATES the host-tirith question: the ~/.local/bin/tirith symlink is not merely a leftover — it is the most plausible trigger of the original flake, because it makes the PATH-lost scenario produce a JSON-parse failure instead of a clean miss. USER DECISION NOW LOAD-BEARING: remove/replace ~/.local/bin/tirith (or make check_tirith_scanner fail-closed on non-JSON output), then re-run the parity probe to close box 3. Note: removal needs USER approval (outside the project tree).
