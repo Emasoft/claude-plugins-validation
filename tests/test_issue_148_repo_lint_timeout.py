@@ -199,6 +199,14 @@ class TestHangingLinterIsSkippedNotHung:
             "a timed-out linter must record a WARNING ('timed out'), not hang. "
             f"Got levels: {[r.level for r in report.results]}"
         )
+        # TRDD-8Z7QGYHU R5: the message carries the RESOLVED timeout, not the
+        # constant — under the env override the two differ, and a message
+        # printed from the constant would lie in exactly that case.
+        # e.timeout is a float, so the rendered form is "1.0s", not "1s".
+        assert "after 1.0s" in warnings[0].message, (
+            "the timeout WARNING must carry the resolved duration "
+            f"(PLUGIN_REPO_LINT_TIMEOUT=1 was set), got: {warnings[0].message!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
