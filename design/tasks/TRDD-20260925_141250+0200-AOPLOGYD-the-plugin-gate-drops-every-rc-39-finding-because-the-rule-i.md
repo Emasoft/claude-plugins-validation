@@ -4,7 +4,7 @@ title: The plugin gate drops every RC-39 finding because the rule id is in no ex
 column: todo
 status: tasked
 created: 2026-09-25T14:12:50+0200
-updated: 2026-09-25T17:34:08+0200
+updated: 2026-09-25T19:56:48+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: security
@@ -33,3 +33,4 @@ MEASURE FIRST, never assume: census the RC-39 emission population over the plugi
 2026-09-25 SPOT-CHECK (verify-first-hand, review finding closed): re-ran perfect-skill-suggester/3.16.0 through the canonical launcher — RC-164 rows 2 observed (MAJOR docs/DEVELOPMENT.md:244 + CRITICAL scripts/pss_build_all.py:163) match the report's rows #2+#3 exactly; the plugin fails --strict anyway on other CRITICALs (STRIP-G013, exit 1 without RC-164). Census headline confirmed first-hand for one of 3 plugins. Note: docs_dev/review-followups-20260925.md.
 2026-09-25 PRODUCTION-OBSERVATION (review finding, recorded here after 3 deferrals): the Gate-14 advisory label ('[advisory] CI RED', commit 0dc3623d) has NO production observation yet — its first live exercise will be the NEXT release's Gate 14. Test-level proof is complete (behavioural + mutation); unproven-in-production until the next publish runs it. Note to the release author: observe the advisory line prints when CI is red, exit still 0.
 2026-09-25 PROVENANCE MARKER — the census paragraph earlier in this log cites the census report at 'reports/rc164-fleet-census/…' as if repo-relative: that path is superseded by the later paragraph naming the WORKSPACE root (CLAUDE-PLUGIN-VALIDATION/reports/…, one level ABOVE the plugin repo). Read the corrected location; the earlier path fragment is wrong-by-one-parent.
+2026-09-25: RC-39 census DISPATCHED to a background worker (same method as the RC-164 census: 236 cached plugins, security mode, CPV_SCAN_CACHE=0) — the measure-first prerequisite. Flip lands only after its report confirms no prose-wave blocker.
