@@ -4,12 +4,16 @@
   "hooks": {
     "SessionStart": [
       {
-        "type": "mcp_tool",
-        "server": "demo-server",
-        "tool": "noop",
-        "input": {
-          "arg": "value"
-        }
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "demo-server",
+            "tool": "noop",
+            "input": {
+              "arg": "value"
+            }
+          }
+        ]
       }
     ]
   },

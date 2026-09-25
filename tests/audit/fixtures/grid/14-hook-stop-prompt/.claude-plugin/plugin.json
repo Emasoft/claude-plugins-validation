@@ -4,8 +4,12 @@
   "hooks": {
     "Stop": [
       {
-        "type": "prompt",
-        "prompt": "Wrap up the session and summarize."
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Wrap up the session and summarize."
+          }
+        ]
       }
     ]
   }

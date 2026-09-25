@@ -4,9 +4,13 @@
   "hooks": {
     "PreToolUse": [
       {
-        "type": "command",
-        "command": "./hooks/pre.sh",
-        "matcher": "Bash"
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./hooks/pre.sh"
+          }
+        ]
       }
     ]
   }
