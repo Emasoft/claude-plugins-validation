@@ -70,6 +70,10 @@ def _mega_linter(root: Path, linters: list[str]) -> None:
     (root / ".mega-linter.yml").write_text(body, encoding="utf-8")
 
 
+def _mega_linter_raw(root: Path, body: str) -> None:
+    (root / ".mega-linter.yml").write_text(body, encoding="utf-8")
+
+
 # ── the preflight functions directly ────────────────────────────────────────
 
 
@@ -107,6 +111,78 @@ def test_mypy_not_wired_via_megalinter_without_python_mypy(tmp_path: Path) -> No
     _workflow(tmp_path, "      - uses: oxsecurity/megalinter@e08c2b05e3dbc40af4c23f41172ef1e068a7d651 # v8\n")
     _mega_linter(tmp_path, ["PYTHON_RUFF"])
     assert pf._mypy_workflow_wired(tmp_path) is False
+
+
+# ── Mega-Linter's own default-runs-everything semantics (no ENABLE key) ──────
+# Mega-Linter's documented default with NO ENABLE_LINTERS/ENABLE key at all is
+# to run every linter it supports, PYTHON_MYPY included — so "PYTHON_MYPY not
+# explicitly listed" must NOT read as "not wired" when there is no list to
+# begin with. DISABLE_LINTERS/DISABLE still wins over that default.
+
+_MEGALINTER_STEP = (
+    "      - uses: oxsecurity/megalinter@e08c2b05e3dbc40af4c23f41172ef1e068a7d651 # v8\n"
+)
+
+
+def test_mypy_wired_via_megalinter_no_enable_key_at_all(tmp_path: Path) -> None:
+    _workflow(tmp_path, _MEGALINTER_STEP)
+    _mega_linter_raw(tmp_path, "APPLY_FIXES: none\n")
+    assert pf._mypy_workflow_wired(tmp_path) is True
+
+
+def test_mypy_wired_when_no_mega_linter_yml_but_workflow_invokes(tmp_path: Path) -> None:
+    # No .mega-linter.yml file at all: Mega-Linter is wired but its config is
+    # absent, which is the same "no explicit ENABLE list" default-run case.
+    _workflow(tmp_path, _MEGALINTER_STEP)
+    assert pf._mypy_workflow_wired(tmp_path) is True
+
+
+def test_mypy_not_wired_via_megalinter_disable_linters_python_mypy(tmp_path: Path) -> None:
+    _workflow(tmp_path, _MEGALINTER_STEP)
+    _mega_linter_raw(
+        tmp_path,
+        "APPLY_FIXES: none\nDISABLE_LINTERS:\n  - PYTHON_MYPY\n",
+    )
+    assert pf._mypy_workflow_wired(tmp_path) is False
+
+
+def test_mypy_not_wired_via_megalinter_disable_whole_python_language(tmp_path: Path) -> None:
+    _workflow(tmp_path, _MEGALINTER_STEP)
+    _mega_linter_raw(
+        tmp_path,
+        "APPLY_FIXES: none\nDISABLE_LINTERS:\n  - PYTHON\n",
+    )
+    assert pf._mypy_workflow_wired(tmp_path) is False
+
+
+def test_mypy_still_wired_with_explicit_enable_and_no_matching_disable(tmp_path: Path) -> None:
+    _workflow(tmp_path, _MEGALINTER_STEP)
+    _mega_linter_raw(
+        tmp_path,
+        "APPLY_FIXES: none\nENABLE_LINTERS:\n  - PYTHON_MYPY\nDISABLE_LINTERS:\n  - JAVASCRIPT_ES\n",
+    )
+    assert pf._mypy_workflow_wired(tmp_path) is True
+
+
+NO_ENABLE_KEY_FORMS = {
+    "no-enable-key-at-all": "APPLY_FIXES: none\n",
+    "disable-python-mypy": "APPLY_FIXES: none\nDISABLE_LINTERS:\n  - PYTHON_MYPY\n",
+    "disable-python-language": "APPLY_FIXES: none\nDISABLE_LINTERS:\n  - PYTHON\n",
+    "enable-and-non-matching-disable": (
+        "APPLY_FIXES: none\nENABLE_LINTERS:\n  - PYTHON_MYPY\n"
+        "DISABLE_LINTERS:\n  - JAVASCRIPT_ES\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("form", sorted(NO_ENABLE_KEY_FORMS))
+def test_emitted_mypy_helper_agrees_with_preflight_for_megalinter_forms(
+    tmp_path: Path, form: str
+) -> None:
+    _workflow(tmp_path, _MEGALINTER_STEP)
+    _mega_linter_raw(tmp_path, NO_ENABLE_KEY_FORMS[form])
+    emitted = _emitted_helper("_mypy_workflow_wired")
+    assert emitted(tmp_path) is pf._mypy_workflow_wired(tmp_path)  # type: ignore[operator]
 
 
 # ── the GENERATED publish.py ─────────────────────────────────────────────────

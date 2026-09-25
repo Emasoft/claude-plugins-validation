@@ -2679,16 +2679,71 @@ _MYPY_NOT_WIRED = ("This check was NOT run, and CI does not run mypy — no work
 
 
 def _mypy_workflow_wired(root: Path) -> bool:
-    """True when CI actually runs mypy: Mega-Linter is wired and its config
-    enables PYTHON_MYPY, OR a workflow directly invokes the mypy CLI."""
+    """True when CI actually runs mypy: Mega-Linter is wired and would run
+    PYTHON_MYPY (explicitly enabled, OR no explicit ENABLE/ENABLE_LINTERS list
+    at all -- Mega-Linter's own default is to run every linter it supports --
+    and not explicitly disabled), OR a workflow directly invokes the mypy CLI.
+
+    Mirrors cpv_ci_preflight._mypy_workflow_wired's enable/disable precedence
+    (issue #228 follow-up); kept self-contained (no new top-level name) so the
+    parity test's fixed 6-node extraction still holds.
+    """
     if _megalinter_workflow_wired(root):
         cfg = root / ".mega-linter.yml"
+        cfg_text: str | None = None
         if cfg.is_file():
             try:
-                if "PYTHON_MYPY" in cfg.read_text(encoding="utf-8"):
-                    return True
+                cfg_text = cfg.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
-                pass
+                cfg_text = None
+        if cfg_text is not None:
+            enable_key_re = re.compile(r"^(ENABLE_LINTERS|ENABLE)\s*:(.*)$")
+            disable_key_re = re.compile(r"^(DISABLE_LINTERS|DISABLE)\s*:(.*)$")
+            item_re = re.compile(r"^\s*-\s*([A-Za-z0-9_]+)\s*$")
+            lines = cfg_text.splitlines()
+
+            def _ids(key_re: "re.Pattern[str]") -> set[str]:
+                ids: set[str] = set()
+                i, n = 0, len(lines)
+                while i < n:
+                    m = key_re.match(lines[i])
+                    if not m:
+                        i += 1
+                        continue
+                    inline = m.group(2).strip()
+                    if inline.startswith("[") and inline.endswith("]"):
+                        for tok in inline[1:-1].split(","):
+                            tok = tok.strip().strip("'\"")
+                            if tok:
+                                ids.add(tok)
+                        i += 1
+                        continue
+                    if inline and not inline.startswith("#"):
+                        ids.add(inline.strip("'\""))
+                        i += 1
+                        continue
+                    i += 1
+                    while i < n:
+                        line = lines[i]
+                        stripped = line.strip()
+                        if not stripped or stripped.startswith("#"):
+                            i += 1
+                            continue
+                        item = item_re.match(line)
+                        if item:
+                            ids.add(item.group(1))
+                            i += 1
+                            continue
+                        break
+                return ids
+
+            enabled = _ids(enable_key_re)
+            explicit_enable = any(enable_key_re.match(x) for x in lines)
+            would_run = "PYTHON_MYPY" in enabled or not explicit_enable
+            if would_run:
+                disabled = _ids(disable_key_re)
+                if "PYTHON_MYPY" not in disabled and "PYTHON" not in disabled:
+                    return True
     wf_dir = root / ".github" / "workflows"
     if wf_dir.is_dir():
         for wf in sorted(wf_dir.iterdir()):

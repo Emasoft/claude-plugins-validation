@@ -2728,6 +2728,16 @@ _EXECCLASS_RCE_RULE_IDS: frozenset[str] = frozenset(
         "RC-141",  # npm install from a non-npm-registry source (unsigned)
         "RC-142",  # curl -o … && chmod/sh/bash/python/node (download-then-exec)
         "RC-143",  # wget -O … && chmod/sh/bash/python/node (download-then-exec)
+        # RC-164 — a plugin script that GENERATES / EDITS a script inside the
+        # plugin tree (ROOT or DATA): the result is an unscanned script that then
+        # RUNS, so it is RCE-shaped. It was in neither this set nor Bucket A, so
+        # the plugin gate (publish Gate 3) silently dropped every RC-164 row
+        # since v2.146.0 — only the `security` subcommand ever showed it
+        # (TRDD-3T170X2M). The T2 `RC-164-UNRESOLVED` rows extract to the same
+        # id and are admitted with it; T3 is INFO, which the level gate below
+        # never merges. Landed only after TRDD-RU0POO65 stopped the regex chmod
+        # path folding prose words ("chmod +x it") into CRITICAL findings.
+        "RC-164",
     }
 )
 

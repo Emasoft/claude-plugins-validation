@@ -511,8 +511,8 @@ class TestChmodTargetPathShape:
             ("ref.md", "| Hooks not firing | Not executable | Run `chmod +x script.sh` |\n"),
             # CPV's own CHANGELOG.md
             ("CHANGELOG.md", "- **validators:** embed full TOCs; chmod +x 12 scripts\n"),
-            # an unbound os.chmod NAME carries no in-tree evidence
-            ("doc.md", "```python\nos.chmod(dest, 0o755)\n```\n"),
+            # (an unbound os.chmod NAME is no longer silent: it is the T3 INFO
+            # advisory — see tests/test_rc164_fp_classes.py::TestOsChmodUnplaceableIsT3)
             # an f-string placeholder in a validator suggestion message
             ("v.md", "has a shebang but is not executable - run: chmod +x scripts/{py_file.name}\n"),
         ],
