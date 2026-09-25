@@ -32,6 +32,11 @@ from pathlib import Path
 # scripts/ (pure stdlib) — its dir is sys.path[0] when this file runs as a
 # script and is already inserted by validate_plugin.py / the tests when imported.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# #228: the generated publish.py cannot import CPV, so it carries the Mega-Linter
+# workflow-detection regex as a literal — rendered from MEGALINTER_WORKFLOW_PATTERN
+# (the constant the ci-preflight uses) so the two can never drift. A parity test
+# pins them equal.
+from cpv_ci_preflight import MEGALINTER_WORKFLOW_PATTERN  # noqa: E402
 from cpv_pipeline_profile import (  # noqa: E402 — sibling import after the path insert above
     KNOWN_PROFILES,
     PROFILE_BINARY_RELEASE,
@@ -2605,6 +2610,31 @@ _SCAN_SKIP_DIRS = {"target", ".git", "node_modules", ".venv", "vendor",
                    "dist", "build", "obj", "zig-out", "zig-cache", ".zig-cache"}
 
 
+# A workflow line that INVOKES Mega-Linter (CPV issue #228). `.mega-linter.yml`
+# alone is not proof: a repo can keep the config after dropping the workflow step,
+# and then "CI's Mega-Linter WILL enforce it" names a backstop that does not
+# exist. Rendered from the same constant CPV's ci-preflight uses.
+_MEGALINTER_WORKFLOW_RE = re.compile(__CPV_MEGALINTER_WORKFLOW_PATTERN__)
+_MEGALINTER_NOT_WIRED = ("This check was NOT run, and no .github/workflows/ file runs"
+                         " Mega-Linter — it enforces it only in repos that run one.")
+
+
+def _megalinter_workflow_wired(root: Path) -> bool:
+    """True when any .github/workflows/*.yml|*.yaml invokes Mega-Linter."""
+    wf_dir = root / ".github" / "workflows"
+    if not wf_dir.is_dir():
+        return False
+    for wf in sorted(wf_dir.iterdir()):
+        if not (wf.is_file() and wf.suffix in (".yml", ".yaml")):
+            continue
+        try:
+            if _MEGALINTER_WORKFLOW_RE.search(wf.read_text(encoding="utf-8")):
+                return True
+        except (OSError, UnicodeDecodeError):
+            continue
+    return False
+
+
 def _secret_scan(root: Path) -> int:
     """Secret-scan the working tree with trufflehog. 0 = clean, 1 = BLOCK.
 
@@ -2621,7 +2651,8 @@ def _secret_scan(root: Path) -> int:
     blocks — and it must block, because "we never looked" and "we looked and
     found nothing" are not the same answer.
     """
-    if not shutil.which("trufflehog"):
+    _trufflehog = shutil.which("trufflehog")
+    if not _trufflehog:
         cprint(f"  {YELLOW}trufflehog missing — installing it as a pipeline dependency...{NC}")
         # A stalled installer must land on the styled BLOCKED path below, not
         # die with a raw TimeoutExpired traceback (audit row 16).
@@ -2633,15 +2664,21 @@ def _secret_scan(root: Path) -> int:
                     ["go", "install", "github.com/trufflesecurity/trufflehog/v3@latest"],
                     timeout=900)
                 # `go install` drops the binary in GOBIN/GOPATH/bin, which is
-                # often not yet on PATH in this process.
+                # often not yet on PATH in this process. Resolve it THERE and
+                # call it by absolute path. Do NOT prepend GOBIN to PATH instead:
+                # a PATH mutation is ENV_INJECTION to CPV's own scanner, so the
+                # generated file failed the very --strict gate it runs (CPV
+                # #231), and it would leak into every later subprocess too.
                 _gobin = os.environ.get("GOBIN") or str(
                     Path(os.environ.get("GOPATH") or (Path.home() / "go")) / "bin")
-                os.environ["PATH"] = _gobin + os.pathsep + os.environ.get("PATH", "")
+                _trufflehog = shutil.which("trufflehog", path=_gobin)
         except subprocess.TimeoutExpired:
             cprint(f"  {YELLOW}The trufflehog installer timed out (>900s).{NC}")
         except (OSError, subprocess.SubprocessError) as _exc:
             cprint(f"  {YELLOW}The trufflehog installer failed to run: {_exc}{NC}")
-    if not shutil.which("trufflehog"):
+        # brew, or an installer that finished despite the timeout, lands it on PATH.
+        _trufflehog = _trufflehog or shutil.which("trufflehog")
+    if not _trufflehog:
         cprint(f"  {RED}BLOCKED: trufflehog is not installed and could not be installed.{NC}")
         cprint(f"  {RED}The release was NOT secret-scanned — UNKNOWN is not clean.{NC}")
         cprint(f"  {RED}Install it and re-run:  brew install trufflehog{NC}")
@@ -2666,7 +2703,7 @@ def _secret_scan(root: Path) -> int:
             _excl_fh.write("^" + re.escape(_sec_root + "/" + _rel.rstrip("/")) + "\n")
         _excl_fh.close()
         _th = subprocess.run(
-            ["trufflehog", "filesystem", _sec_root, "--json", "--no-update", "--fail",
+            [_trufflehog, "filesystem", _sec_root, "--json", "--no-update", "--fail",
              # Without the widened set trufflehog OMITS `filtered_unverified`,
              # the bucket an expired / revoked / unreachable credential lands
              # in — a committed secret is a leak whether or not a runner can
@@ -2921,6 +2958,9 @@ def run_gate(root: Path) -> int:
     # non-blocking WARNING (CI still enforces it) — a green gate then does NOT guarantee green CI
     # for the copy-paste dimension (issue #143). NEVER false-block a push on a tool-install failure.
     cprint(f"\n{BLUE}[G2b] Copy-paste check (jscpd, parity with CI)...{NC}")
+    # CPV #228: the skip lines of the Mega-Linter-backed gates (jscpd, mypy,
+    # shellcheck) name a CI backstop only when a workflow actually runs Mega-Linter.
+    _ml_wired = _megalinter_workflow_wired(root)
     jscpd_bin = shutil.which("jscpd")
     # Resolve npx ONCE into a variable so mypy narrows it (a second
     # shutil.which("npx") call INSIDE the list keeps the element typed
@@ -2930,16 +2970,22 @@ def run_gate(root: Path) -> int:
     base_cmd = [jscpd_bin] if jscpd_bin else ([npx_bin, "--yes", "jscpd"] if npx_bin else None)
     if base_cmd is None:
         cprint(f"  {YELLOW}WARNING: jscpd/npx not found — copy-paste check SKIPPED locally.{NC}")
-        cprint(f"  {YELLOW}CI's Mega-Linter WILL enforce it (.jscpd.json threshold). A green gate does")
-        cprint(f"  {YELLOW}NOT guarantee green CI for the copy-paste dimension (issue #143). Install")
-        cprint(f"  {YELLOW}Node/npx for full local parity.{NC}")
+        if _ml_wired:
+            cprint(f"  {YELLOW}CI's Mega-Linter WILL enforce it (.jscpd.json threshold). A green gate does")
+            cprint(f"  {YELLOW}NOT guarantee green CI for the copy-paste dimension (issue #143). Install")
+            cprint(f"  {YELLOW}Node/npx for full local parity.{NC}")
+        else:
+            cprint(f"  {YELLOW}{_MEGALINTER_NOT_WIRED}{NC}")
     else:
         # Probe distinguishes 'jscpd unavailable/uninstallable' (WARN) from 'jscpd ran, found dupes' (BLOCK).
         probe = subprocess.run(base_cmd + ["--version"], cwd=str(root),
                                capture_output=True, text=True, timeout=180)
         if probe.returncode != 0:
             cprint(f"  {YELLOW}WARNING: jscpd could not run (npx fetch/install failed) — SKIPPED locally.{NC}")
-            cprint(f"  {YELLOW}CI's Mega-Linter WILL enforce it; green gate != green CI for copy-paste (issue #143).{NC}")
+            if _ml_wired:
+                cprint(f"  {YELLOW}CI's Mega-Linter WILL enforce it; green gate != green CI for copy-paste (issue #143).{NC}")
+            else:
+                cprint(f"  {YELLOW}{_MEGALINTER_NOT_WIRED}{NC}")
         else:
             cp = subprocess.run(base_cmd + ["."], cwd=str(root), timeout=300).returncode
             if cp != 0:
@@ -2981,13 +3027,21 @@ def run_gate(root: Path) -> int:
     mypy_cmd = [mypy_bin] if mypy_bin else (["uv", "run", "mypy"] if shutil.which("uv") else None)
     if mypy_cmd is None:
         cprint(f"  {YELLOW}WARNING: mypy/uv not found — type-check SKIPPED locally.{NC}")
-        cprint(f"  {YELLOW}CI's Lint job WILL enforce it; a green gate does NOT guarantee green CI for types.{NC}")
+        # The generated Lint job runs mypy only through Mega-Linter (PYTHON_MYPY),
+        # so the same #228 condition applies.
+        if _ml_wired:
+            cprint(f"  {YELLOW}CI's Lint job WILL enforce it; a green gate does NOT guarantee green CI for types.{NC}")
+        else:
+            cprint(f"  {YELLOW}{_MEGALINTER_NOT_WIRED}{NC}")
     else:
         probe = subprocess.run(mypy_cmd + ["--version"], cwd=str(root),
                                capture_output=True, text=True, timeout=120)
         if probe.returncode != 0:
             cprint(f"  {YELLOW}WARNING: mypy could not run — type-check SKIPPED locally.{NC}")
-            cprint(f"  {YELLOW}CI's Lint job WILL enforce it; green gate != green CI for types.{NC}")
+            if _ml_wired:
+                cprint(f"  {YELLOW}CI's Lint job WILL enforce it; green gate != green CI for types.{NC}")
+            else:
+                cprint(f"  {YELLOW}{_MEGALINTER_NOT_WIRED}{NC}")
         else:
             mt = subprocess.run(mypy_cmd + ["scripts/", "--ignore-missing-imports"],
                                 cwd=str(root), timeout=300).returncode
@@ -3099,7 +3153,10 @@ def run_gate(root: Path) -> int:
         cprint(f"  {GREEN}No shell scripts -- skipped.{NC}")
     elif shutil.which("shellcheck") is None:
         cprint(f"  {YELLOW}WARNING: shell scripts present but `shellcheck` not found -- shell lint SKIPPED locally.{NC}")
-        cprint(f"  {YELLOW}CI's Mega-Linter (BASH_SHELLCHECK) WILL enforce it; green gate != green CI for shell.{NC}")
+        if _ml_wired:
+            cprint(f"  {YELLOW}CI's Mega-Linter (BASH_SHELLCHECK) WILL enforce it; green gate != green CI for shell.{NC}")
+        else:
+            cprint(f"  {YELLOW}{_MEGALINTER_NOT_WIRED}{NC}")
     else:
         sc = subprocess.run(
             ["shellcheck", *[str(s) for s in sorted(_shell_scripts)]],
@@ -5234,6 +5291,12 @@ if __name__ == "__main__":
     result = result.replace(
         'CANON_VERSION = "0.0.0-unpinned"',
         f'CANON_VERSION = "{_default_cpv_ref().lstrip("v")}"',
+    )
+    # #228: emit the Mega-Linter workflow regex from the ci-preflight's own
+    # constant (single source). repr() yields a valid Python literal of the
+    # exact pattern string.
+    result = result.replace(
+        "__CPV_MEGALINTER_WORKFLOW_PATTERN__", repr(MEGALINTER_WORKFLOW_PATTERN)
     )
     # Issue #137: the published `pypi` wheel declares pyyaml as a runtime
     # dependency, so drop the `--with pyyaml` shim from every inline argv list in

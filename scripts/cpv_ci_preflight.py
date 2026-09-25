@@ -210,14 +210,21 @@ def _resolve_jscpd_cmd() -> list[str] | None:
 
 def _gate_jscpd(result: PreflightResult) -> None:
     root = result.plugin_path
+    # #228: claim the CI backstop only when a workflow actually runs Mega-Linter.
+    wired = _megalinter_workflow_wired(root)
     base_cmd = _resolve_jscpd_cmd()
     if base_cmd is None:
         result.add(
             "jscpd",
             _SEV_WARNING,
-            "jscpd/npx not found — copy-paste check SKIPPED locally. CI's Mega-Linter WILL "
-            "enforce it (.jscpd.json threshold); install Node/npx for full local parity. A "
-            "clean preflight does NOT guarantee green CI for the copy-paste dimension (#143).",
+            "jscpd/npx not found — copy-paste check SKIPPED locally. "
+            + (
+                "CI's Mega-Linter WILL enforce it (.jscpd.json threshold); install Node/npx "
+                "for full local parity. A clean preflight does NOT guarantee green CI for the "
+                "copy-paste dimension (#143)."
+                if wired
+                else _MEGALINTER_NOT_WIRED + " Install Node/npx to run it locally."
+            ),
         )
         return
     # Probe distinguishes 'jscpd unavailable/uninstallable' (WARN) from
@@ -234,16 +241,21 @@ def _gate_jscpd(result: PreflightResult) -> None:
         result.add(
             "jscpd",
             _SEV_WARNING,
-            f"jscpd could not be probed ({type(exc).__name__}) — SKIPPED locally. CI's "
-            f"Mega-Linter WILL enforce it (#143).",
+            f"jscpd could not be probed ({type(exc).__name__}) — SKIPPED locally. "
+            + ("CI's Mega-Linter WILL enforce it (#143)." if wired else _MEGALINTER_NOT_WIRED),
         )
         return
     if probe.returncode != 0:
         result.add(
             "jscpd",
             _SEV_WARNING,
-            "jscpd could not run (npx fetch/install failed) — SKIPPED locally. CI's "
-            "Mega-Linter WILL enforce it; clean preflight != green CI for copy-paste (#143).",
+            "jscpd could not run (npx fetch/install failed) — SKIPPED locally. "
+            + (
+                "CI's Mega-Linter WILL enforce it; clean preflight != green CI for copy-paste "
+                "(#143)."
+                if wired
+                else _MEGALINTER_NOT_WIRED
+            ),
         )
         return
     try:
@@ -263,8 +275,8 @@ def _gate_jscpd(result: PreflightResult) -> None:
         result.add(
             "jscpd",
             _SEV_WARNING,
-            f"jscpd run could not complete ({type(exc).__name__}) — SKIPPED locally. CI "
-            f"still enforces it (#143).",
+            f"jscpd run could not complete ({type(exc).__name__}) — SKIPPED locally. "
+            + ("CI still enforces it (#143)." if wired else _MEGALINTER_NOT_WIRED),
         )
         return
     if cp.returncode != 0:
@@ -291,6 +303,46 @@ def _workflow_yml_paths(root: Path) -> list[Path]:
     return sorted(
         p for p in wf_dir.iterdir() if p.is_file() and p.suffix in (".yml", ".yaml")
     )
+
+
+# Issue #228 — a workflow line that INVOKES Mega-Linter. `.mega-linter.yml` alone
+# proves nothing: a repo can keep the config after dropping the workflow step, and
+# then "CI's Mega-Linter WILL enforce it" tells the operator a backstop exists that
+# does not. Covered shapes: `uses: oxsecurity/megalinter@…` and its
+# `…/flavors/<x>@…` actions, legacy `megalinter/megalinter` / `nvuillam/mega-linter`,
+# `uses: docker://…megalinter…`, a `docker run` / `image:` of
+# `ghcr.io/oxsecurity/megalinter…`, `mega-linter-runner`, and a reusable-workflow
+# `uses:` whose path contains megalinter. `^[^#\n]*` keeps a match off comment text
+# (a `# see Mega-Linter docs` line or a trailing comment is not an invocation).
+# re2-safe: no lookarounds, no backreferences.
+#
+# SINGLE SOURCE: generate_plugin_repo EMITS this exact pattern into every generated
+# publish.py (which cannot import CPV); a parity test pins the two equal.
+MEGALINTER_WORKFLOW_PATTERN = (
+    r"(?im)^[^#\n]*(?:\buses:[ \t]*['\"]?[^\s'\"#]*mega-?linter"
+    r"|mega-linter-runner"
+    r"|(?:oxsecurity|megalinter|nvuillam)/mega-?linter)"
+)
+_MEGALINTER_WORKFLOW_RE = re.compile(MEGALINTER_WORKFLOW_PATTERN)
+
+# What a skipped Mega-Linter-backed check says when no workflow runs Mega-Linter.
+# It names what was NOT verified instead of predicting another system's behaviour.
+_MEGALINTER_NOT_WIRED = (
+    "This check was NOT run, and no .github/workflows/ file runs Mega-Linter — "
+    "Mega-Linter enforces it only in repos that run a Mega-Linter workflow (#228)."
+)
+
+
+def _megalinter_workflow_wired(root: Path) -> bool:
+    """True when any ``.github/workflows/*.yml|*.yaml`` invokes Mega-Linter."""
+    for wf in _workflow_yml_paths(root):
+        try:
+            text = wf.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if _MEGALINTER_WORKFLOW_RE.search(text):
+            return True
+    return False
 
 
 def _gate_actionlint(result: PreflightResult) -> None:
@@ -660,13 +712,20 @@ def _gate_megalinter_tool(
         )
         return
     tool_bin = shutil.which(tool_name)
+    # #228: `.mega-linter.yml` enabling the linter is not proof CI runs it.
+    wired = _megalinter_workflow_wired(result.plugin_path)
     if tool_bin is None:
         result.add(
             gate,
             _SEV_WARNING,
             f"{tool_name} not found on PATH — Mega-Linter {linter_id} check SKIPPED "
-            f"locally. CI's Mega-Linter WILL enforce it; install {tool_name} "
-            f"({install_hint}) for full local parity.",
+            f"locally. "
+            + (
+                f"CI's Mega-Linter WILL enforce it; install {tool_name} "
+                f"({install_hint}) for full local parity."
+                if wired
+                else f"{_MEGALINTER_NOT_WIRED} Install {tool_name} ({install_hint}) to run it."
+            ),
         )
         return
     try:
@@ -682,7 +741,7 @@ def _gate_megalinter_tool(
             gate,
             _SEV_WARNING,
             f"{tool_name} could not run ({type(exc).__name__}) — SKIPPED locally. "
-            f"CI's Mega-Linter still enforces {linter_id}.",
+            + (f"CI's Mega-Linter still enforces {linter_id}." if wired else _MEGALINTER_NOT_WIRED),
         )
         return
     if proc.returncode != 0:
@@ -1106,8 +1165,11 @@ def _print_report(result: PreflightResult) -> None:
     print(f"VERDICT: {verdict}  (FAIL={n_fail}  WARNING={n_warn}  PASS={n_pass})")
     if result.exit_code == 0 and result.warnings:
         print(
-            "Note: WARNINGs mean a local tool was absent — CI still enforces those gates. "
-            "Install the tools for full local parity."
+            # #228: no blanket "CI still enforces those gates" — whether a CI
+            # backstop exists depends on the repo's workflows, and each WARNING
+            # line above already says which applies.
+            "Note: WARNINGs mean a check was SKIPPED locally — each line says whether "
+            "this repo's CI enforces it. Install the tools for full local parity."
         )
     print("-" * 72)
 
