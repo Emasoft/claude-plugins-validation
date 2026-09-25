@@ -79,7 +79,15 @@ def test_genuinely_unknown_key_still_draws_the_finding(tmp_path: Path) -> None:
     # Augment the env (never replace it) so the child inherits HOME/uv state —
     # a replaced env can make the child die before the validator runs, which
     # the absence assertion would read as clean.
-    env = {**os.environ, "PLUGIN_SKIP_GITHUB_INTEGRITY": "1", "CPV_SCAN_CACHE": "0"}
+    # Curated env (review round 10): inherit the base environment but STRIP
+    # every CPV_* variable first, so a developer's/CI's stray overrides
+    # (CPV_VALIDATE_BUDGET_S, CPV_ORCHESTRATOR_PARALLEL, ...) cannot change
+    # validator behavior per-machine, then apply only the two intended
+    # overrides. Neither under-provisioned (child keeps HOME/uv state) nor
+    # over-permeable.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("CPV_")}
+    env["PLUGIN_SKIP_GITHUB_INTEGRITY"] = "1"
+    env["CPV_SCAN_CACHE"] = "0"
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
     output = result.stdout + result.stderr
     assert "Unknown manifest field" in output and "bogusKey123" in output, (
@@ -109,7 +117,15 @@ def test_top_level_cpv_block_emits_no_unknown_key_finding(tmp_path: Path) -> Non
         str(plugin),
         "--strict",
     ]
-    env = {**os.environ, "PLUGIN_SKIP_GITHUB_INTEGRITY": "1", "CPV_SCAN_CACHE": "0"}
+    # Curated env (review round 10): inherit the base environment but STRIP
+    # every CPV_* variable first, so a developer's/CI's stray overrides
+    # (CPV_VALIDATE_BUDGET_S, CPV_ORCHESTRATOR_PARALLEL, ...) cannot change
+    # validator behavior per-machine, then apply only the two intended
+    # overrides. Neither under-provisioned (child keeps HOME/uv state) nor
+    # over-permeable.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("CPV_")}
+    env["PLUGIN_SKIP_GITHUB_INTEGRITY"] = "1"
+    env["CPV_SCAN_CACHE"] = "0"
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
     output = result.stdout + result.stderr
     assert "Unknown manifest field" not in output, (
