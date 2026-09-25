@@ -184,7 +184,10 @@ def _fake_run_factory(runs_payload, gh_present):
         # Fail loudly on anything unrecognized: a silent empty-success stub is
         # a latent vacuity vector — a third subprocess call added to the stage
         # later would be satisfied with fabricated clean output instead of
-        # failing this test.
+        # failing this test. KNOWN LEGITIMATE SHAPE a future test must teach
+        # this factory: `git merge-base --is-ancestor …` from
+        # _resolve_ci_run_successors, reached only with cancelled runs in the
+        # payload (neither test here carries one).
         raise AssertionError(f"unexpected subprocess call in the stage: {argv!r}")
 
     return fake_run
@@ -214,7 +217,9 @@ def test_green_ci_prints_green_with_exit_zero(monkeypatch, tmp_path, capsys):
     rc = _drive_stage(monkeypatch, tmp_path, runs)
     captured = capsys.readouterr()
     assert rc == 0
-    assert "✓ CI green" in captured.out, captured.out[:400]
+    # Either stream: the success line prints to stdout today (flush=True), but
+    # a stream-move regression must still be caught, with both streams shown.
+    assert "✓ CI green" in captured.out + captured.err, (captured.out + captured.err)[:400]
 
 
 # ---------------------------------------------------------------------------
