@@ -157,7 +157,7 @@ noticed as a side observation.
 
 - [x] Verification step 1 (`command -v markdownlint-cli2`) run and result recorded
       as a fact, not inferred. **DONE — not on PATH; see the STATE block.**
-- [~] STRUCK — UNMEASURABLE-HERE (2026-09-25): measured cold=0.8s/warm=0.0s, cold-fetch probes ≤3.8s (report: reports/1vu6y5ms-cold-lint-timing/20260925_163503+0200-cold-lint-timing.md at the WORKSPACE root, one level above the plugin repo); host package-layer warm with untraced provenance; both-layers-cold not re-enterable without HOME-level isolation. (Original: "If local resolution: re-profile `run_lint_engine` directly to find where the
+- [~] STRUCK — NOT-REPRODUCED-THIS-SESSION (2026-09-25; wording corrected from UNMEASURABLE-HERE, which overstated permanence): measured cold=0.8s/warm=0.0s, cold-fetch probes ≤3.8s (report at the WORKSPACE root reports/, one level above the plugin repo); host package-layer warm with untraced provenance. RE-ENTRY PATH EXISTS for a future run: a tmp-HOME validator run (HOME-isolated whole run) — feasible read-only, not attempted this session because BUN_INSTALL_CACHE_DIR does not propagate through `uv run` and mutating the real bun cache was out of read-only scope. (Original: "If local resolution: re-profile `run_lint_engine` directly to find where the
       30-49 s actually goes; update this card's "What is NOT established" section
       with the real answer before any fix is designed.
 - [ ] If cold-fetch confirmed: decide whether tool resolution needs its own bounded
