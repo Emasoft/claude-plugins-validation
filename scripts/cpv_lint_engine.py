@@ -861,8 +861,8 @@ def lint_python(
             cwd=repo_root,
             timeout=_LINTER_TIMEOUT_DEFAULT,
         )
-    except subprocess.TimeoutExpired:
-        report.warning("ruff timed out — skipping Python lint")
+    except subprocess.TimeoutExpired as _te:
+        report.warning(f"ruff timed out after {_te.timeout}s — skipping Python lint")
         return True
 
     if result.returncode == 0:
@@ -971,8 +971,8 @@ def lint_python(
                 cwd=repo_root,
                 timeout=_LINTER_TIMEOUT_DEFAULT,
             )
-        except subprocess.TimeoutExpired:
-            report.warning("pyright timed out — skipping type check")
+        except subprocess.TimeoutExpired as _te:
+            report.warning(f"pyright timed out after {_te.timeout}s — skipping type check")
             return ok
         try:
             payload = json.loads(pr.stdout) if (pr.stdout or "").strip() else {}
@@ -1014,8 +1014,8 @@ def lint_python(
                 cwd=repo_root,
                 timeout=_LINTER_TIMEOUT_DEFAULT,
             )
-        except subprocess.TimeoutExpired:
-            report.warning("mypy timed out — skipping type check")
+        except subprocess.TimeoutExpired as _te:
+            report.warning(f"mypy timed out after {_te.timeout}s — skipping type check")
             return ok
 
         if mypy_result.returncode == 0:
@@ -1086,8 +1086,8 @@ def lint_javascript(
             cwd=repo_root,
             timeout=_LINTER_TIMEOUT_DEFAULT,
         )
-    except subprocess.TimeoutExpired:
-        report.warning("eslint timed out — skipping JS/TS lint")
+    except subprocess.TimeoutExpired as _te:
+        report.warning(f"eslint timed out after {_te.timeout}s — skipping JS/TS lint")
         return True
 
     if result.returncode == 0:

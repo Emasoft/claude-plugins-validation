@@ -107,6 +107,11 @@ PLUGIN_SKIP_GITHUB_INTEGRITY=1 CLAUDE_PRIVATE_USERNAMES="$(whoami)" \
 #   (content, catalog, __version__, ext) + a sha256 of cpv_lint_engine.py
 #   (_LINT_ENGINE_CODE_REV), reads NO env var — its only bypasses are deleting
 #   that dir or PLUGIN_SKIP_REPO_LINT=1. Cold lint timing requires one of those.
+#   NOTE (TRDD-8Z7QGYHU R3): PLUGIN_REPO_LINT_TIMEOUT can RAISE per-linter spawn
+#   budgets — setting it ABOVE the caller's own outer timeout recreates the
+#   nested-deadline defect (the linter's graceful handler becomes unreachable).
+#   The nesting invariant (_LINTER_TIMEOUT_DEFAULT=110 < 120s harness bound)
+#   holds for DEFAULTS only; an override must stay below the outer bound.
 
 # Self-validate CPV (after editing CPV's own files, regen the manifest FIRST):
 uv run python scripts/_plugin_compute_hashes.py
