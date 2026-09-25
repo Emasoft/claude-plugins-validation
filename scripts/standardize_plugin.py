@@ -2768,6 +2768,92 @@ def migrate_publish_py_test_suite_timeout(plugin_path: Path, dry_run: bool = Fal
     return [note]
 
 
+# --- #231: the trufflehog install fallback prepended GOBIN to PATH -----------
+# CPV's own ENV_INJECTION rule flags a PATH mutation MAJOR (correctly — every
+# later subprocess resolves through it), so every plugin standardized with that
+# template failed its own `--strict` gate. Canon now resolves the binary in GOBIN
+# and calls it by absolute path. Both replacements are LIFTED from freshly
+# rendered canon, never re-typed here (the duplicate-source defect these
+# migrators exist to repair).
+# Split across two literals on purpose: the whole statement on one source line is
+# exactly what ENV_INJECTION matches, and this is the NEEDLE, not the mutation.
+_GOBIN_PATH_PREPEND = (
+    'os.environ["PATH"]'
+    ' = _gobin + os.pathsep + os.environ.get("PATH", "")'
+)
+_TRUFFLEHOG_OLD_START = '    if not shutil.which("trufflehog"):\n'
+_TRUFFLEHOG_NEW_START = '    _trufflehog = shutil.which("trufflehog")\n'
+# The end anchor is the install-failure message, present in both shapes; the
+# `return 1` after it is shared text and stays outside the replaced span.
+_TRUFFLEHOG_BLOCK_END = '        cprint(f"  {RED}BLOCKED: trufflehog is not installed'
+_TRUFFLEHOG_OLD_ARGV = '["trufflehog", "filesystem", _sec_root,'
+_TRUFFLEHOG_NEW_ARGV = '[_trufflehog, "filesystem", _sec_root,'
+
+
+def _inject_trufflehog_resolved_path(text: str) -> tuple[str | None, str]:
+    """Return (rewritten_text, note). ``None`` text means nothing was written.
+
+    ALL-OR-NOTHING: the resolver block defines ``_trufflehog`` and the scan
+    argv uses it, so rewriting one without the other is a NameError (or a scan
+    that still depends on the PATH the block no longer sets). Any anchor that
+    does not match exactly once leaves the file byte-identical and is reported.
+    """
+    if _GOBIN_PATH_PREPEND not in text:
+        return None, ""  # never had the prepend, or already migrated
+
+    unrecognised = (
+        "publish.py: the trufflehog GOBIN->PATH prepend (#231, ENV_INJECTION MAJOR) is in an "
+        "unrecognised shape — NOT migrated (left byte-identical). Resolve the binary with "
+        '`shutil.which("trufflehog", path=_gobin)` and call it by that path instead of '
+        "mutating PATH, or re-run with --force-templates."
+    )
+    canon = _canonical_publish_py()
+    if canon is None:
+        return None, "publish.py: could not render canon to migrate the trufflehog PATH prepend — skipped"
+    canon_block = _slice_between(canon, _TRUFFLEHOG_NEW_START, _TRUFFLEHOG_BLOCK_END)
+    old_block = _slice_between(text, _TRUFFLEHOG_OLD_START, _TRUFFLEHOG_BLOCK_END)
+    if (
+        canon_block is None
+        or _TRUFFLEHOG_NEW_ARGV not in canon
+        or old_block is None
+        or _GOBIN_PATH_PREPEND not in old_block
+        or text.count(_GOBIN_PATH_PREPEND) != 1
+        or text.count(_TRUFFLEHOG_OLD_ARGV) != 1
+    ):
+        return None, unrecognised
+
+    new_text = text.replace(old_block, canon_block, 1)
+    new_text = new_text.replace(_TRUFFLEHOG_OLD_ARGV, _TRUFFLEHOG_NEW_ARGV, 1)
+    return new_text, (
+        "migrate publish.py for #231 — trufflehog is called by its resolved path; the GOBIN "
+        "PATH prepend (an ENV_INJECTION MAJOR under --strict) is gone"
+    )
+
+
+def migrate_publish_py_trufflehog_path(plugin_path: Path, dry_run: bool = False) -> list[str]:
+    """Remove the #231 GOBIN->PATH prepend from an EXISTING ``scripts/publish.py``.
+
+    Runs on ANY ``--fix`` for the same reason as its siblings: a plain ``--fix``
+    never overwrites publish.py. Idempotent: a file without the prepend comes
+    back byte-identical and reports nothing.
+    """
+    publish = plugin_path / "scripts" / "publish.py"
+    if not publish.is_file():
+        return []
+    try:
+        text = publish.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    new_text, note = _inject_trufflehog_resolved_path(text)
+    if new_text is None:
+        return [note] if note else []
+    if dry_run:
+        return [f"[dry-run] would {note}"]
+    publish.write_text(new_text, encoding="utf-8")
+    return [note]
+
+
 # =============================================================================
 # Issue #165 — MERGE (never clobber) the canon config files under --force-templates
 # =============================================================================
@@ -4729,6 +4815,12 @@ def fix_missing_files(
     # wholesale overwrite.
     for note in migrate_publish_py_ci_verify(plugin_path, dry_run=dry_run):
         print(f"  {YELLOW}[ci-verify]{NC} {note}")
+
+    # #231: the generated trufflehog fallback prepended GOBIN to PATH, which CPV's
+    # own ENV_INJECTION rule flags MAJOR — a standardized plugin failed its own
+    # --strict gate. Same delivery reasoning as the migrators above.
+    for note in migrate_publish_py_trufflehog_path(plugin_path, dry_run=dry_run):
+        print(f"  {YELLOW}[trufflehog-path]{NC} {note}")
 
     # CIP-1 (#140): drop the INVERTED `CLAUDE_PRIVATE_USERNAMES: ${{ github.
     # repository_owner }}` env from every workflow. It tells CPV that the PUBLIC
