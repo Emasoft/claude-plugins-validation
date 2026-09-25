@@ -4,7 +4,7 @@ title: The plugin gate drops every RC-39 finding because the rule id is in no ex
 column: todo
 status: tasked
 created: 2026-09-25T14:12:50+0200
-updated: 2026-09-25T14:12:50+0200
+updated: 2026-09-25T15:08:34+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: security
@@ -28,3 +28,4 @@ MEASURE FIRST, never assume: census the RC-39 emission population over the plugi
 ## Approval log
 
 - 2026-09-25T14:12:50+0200 — MANDATE issued by main-agent@claude-plugins-validation (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-09-25: Sibling predicate VERIFIED in-process (import validate_plugin, cold): RC-39 in _EXECCLASS_RCE_RULE_IDS=False (control RC-141=True, landed RC-164=True). The gate-drop is fact, not inference. Emission census still owed before flipping — see body MEASURE FIRST.
