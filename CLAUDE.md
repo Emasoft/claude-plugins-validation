@@ -102,6 +102,11 @@ PLUGIN_SKIP_GITHUB_INTEGRITY=1 CLAUDE_PRIVATE_USERNAMES="$(whoami)" \
 #   CPV_SCAN_CACHE=0 → bypass the skillaudit result cache (MANDATORY when
 #   testing a classifier change at the same version — the cache is keyed on
 #   (content, catalog, __version__, ext), NOT classifier code).
+#   WARNING (TRDD-YWLWUCGL): CPV_SCAN_CACHE=0 does NOT make LINT testing cold.
+#   The lint-result cache at ~/.cache/cpv/scanner-results/ keys on
+#   (content, catalog, __version__, ext) + a sha256 of cpv_lint_engine.py
+#   (_LINT_ENGINE_CODE_REV), reads NO env var — its only bypasses are deleting
+#   that dir or PLUGIN_SKIP_REPO_LINT=1. Cold lint timing requires one of those.
 
 # Self-validate CPV (after editing CPV's own files, regen the manifest FIRST):
 uv run python scripts/_plugin_compute_hashes.py
@@ -125,6 +130,8 @@ uv run pytest -p no:cacheprovider -o addopts="" -q tests/
 # gotcha below for what the release commit stages and why Gate 1 is the only thing
 # keeping stray edits out. (Named, not numbered: the gotchas are a hand-numbered
 # list, so a pointer by number breaks silently the first time anyone inserts one.)
+# NOTE: the NEXT release's Gate 14 is the first live exercise of the advisory
+# CI-RED relabel (6842f58b) — watch that gate's output on this publish.
 uv run python scripts/publish.py --patch   # | --minor | --major
 ```
 
