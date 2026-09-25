@@ -123,6 +123,38 @@ def _trdd_fa70f9b8_reset_global_state():
         pass
 
 
+# ----------------------------------------------------------------------------
+# TRDD-21ES7XEX defect B — repo-wide guard against a real tirith host install.
+#
+# scripts/validate_security.py::_resolve_tirith_runner falls back to a real
+# brew/npm/cargo install of the `tirith` scanner whenever CPV_NO_TIRITH_INSTALL
+# is unset. tests/test_tirith_integration.py has its own local autouse fixture
+# for that file, but `check_tirith_scanner`/`_resolve_tirith_runner` are also
+# reachable indirectly through `validate_security()` (the top-level security
+# orchestrator many other test files call directly, e.g.
+# tests/test_validate_security.py) and through subprocess invocations of
+# validate_plugin.py / remote_validation.py, none of which set the env var.
+# A test suite must never mutate the developer's machine, so the guard is set
+# HERE, repo-wide, rather than re-added to every one of those call sites —
+# this is the narrowest scope that still covers every caller. Setting the
+# env var is idempotent with the per-file fixture in test_tirith_integration.py
+# (monkeypatch.setenv to the same value twice is a no-op), and any test that
+# genuinely needs the opposite can still monkeypatch.delenv it locally within
+# its own test body (fixtures run before the test body, so a later delenv in
+# the test always wins for that test).
+# ----------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _trdd_21es7xex_no_real_tirith_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force CPV_NO_TIRITH_INSTALL=1 for every test in the suite.
+
+    See the module comment above for why this must be repo-wide rather than
+    scoped to tests/test_tirith_integration.py alone.
+    """
+    monkeypatch.setenv("CPV_NO_TIRITH_INSTALL", "1")
+
+
 @pytest.fixture
 def temp_dir():
     """Create a temporary directory for test files.
