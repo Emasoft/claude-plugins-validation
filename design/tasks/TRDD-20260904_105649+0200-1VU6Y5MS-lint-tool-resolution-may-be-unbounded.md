@@ -3,7 +3,7 @@ trdd-id: 1VU6Y5MS
 title: A per-linter spawn timeout equal to its caller's timeout makes the linter's own graceful degradation unreachable
 column: todo
 created: 2026-09-04T10:56:49+0200
-updated: 2026-09-25T17:50:57+0200
+updated: 2026-09-25T19:46:48+0200
 current-owner: cpv-main-session
 task-type: bugfix
 min-approval-requirement: none
@@ -89,6 +89,7 @@ MEASURED 2026-09-25 (worker report reports/1vu6y5ms-cold-lint-timing/20260925_16
 CORRECTIONS from adversarial review (2026-09-25): the report file HAS NOW been read in full by the main session (finding c closed). Two findings refined: (1) the resolve chain on THIS machine goes to bunx, not npx (smart_exec PRIORITY: bunx first) — the card's npx framing was wrong for this host; (2) TWO cache layers, neither named in the card: CPV's own lint-result cache (~/.cache/cpv/scanner-results/, 33k entries; CPV_SCAN_CACHE=0 does NOT bypass it — it bypasses only the skillaudit cache) and bun's package cache. 'Permanently warm' SOFTENED per review: today's state is warm at the package layer for reasons not fully traced; a both-layers-cold run was NOT achievable without HOME-level isolation; the 30-74s window most plausibly was the one-time first fetch+resolution of markdownlint-cli2 through bunx (hypothesis, not measurement). Nested-deadline citations added: test timeout=120 (tests/test_issue_37_gitignore_walkers.py:347) == lint_markdown spawn timeout=120 (scripts/cpv_lint_engine.py:1425 region, _effective_timeout default at :402); outer clock starts first so the inner graceful handler is unreachable — arithmetic identity, source-read.
 PROVENANCE REPAIR (review finding): the box-3 strike's '(Original:' marker covers only the first fragment of the preserved original text — the continuation ('30-49 s actually goes; update this card's What-is-NOT-established section with the real answer before any fix is designed.') is also original box text, unlabeled. No text was destroyed (the --expect/-replace edit guarantees that); only the label boundary is misleading. Source-verification also landed for the two-cache-layers fact: CPV_SCAN_CACHE=0 does NOT bypass the lint-result cache (it only disables the skillaudit cache, cpv_scan_cache.py:134); the lint cache reads NO env var (cpv_scanner_cache.py:170-211) and is self-invalidating on engine change via _LINT_ENGINE_CODE_REV folded into its key (cpv_lint_engine.py:99, :2350) — the card's recorded claim is CORRECT per source, and the CLAUDE.md guidance gap (CPV_SCAN_CACHE=0 gives a false sense of cold for lint testing) is now a candidate card.
 ROUTING (review round 6): the CLAUDE.md guidance-gap 'candidate card' named in the provenance-repair paragraph above is TRDD-YWLWUCGL (todo) — it owns the subject, carries the full source evidence, and records a RECOMMENDED DEFAULT (option 2, the CLAUDE.md caveat). This card carries no open work on that subject.
+2026-09-25 BOX 1 LANDED (commit 6b3d5141): every _run_linter call site (17 total) now draws from _LINTER_TIMEOUT_DEFAULT=110.0 (run-once) / _LINTER_PER_FILE_TIMEOUT_DEFAULT=60.0 (per-file), both strictly below the 120s outer harness bound — the graceful TimeoutExpired handlers are reachable again. Two new tests pin the invariant (strict inequality + >=5s margin; no literal timeout at any site). Stale after-120s/180s message wording cleaned. Suite: 15/15 #148, 104 sibling lint tests green, ruff clean. Remaining: consolidate this STATE block on next touch (archaeology threshold); card ready for review/complete once boxes verified.
 
 ## The problem
 
@@ -137,10 +138,10 @@ noticed as a side observation.
 > **NOTE — the criteria below were written under the card's original (wrong)
 > framing and are kept for provenance. The three that actually govern are these:**
 >
-> - [ ] **Make the per-linter spawn budget strictly smaller than any plausible
+> - [~] STRUCK 2026-09-25 — DONE at commit 6b3d5141: all 17 _run_linter sites now draw from _LINTER_TIMEOUT_DEFAULT=110 / _LINTER_PER_FILE_TIMEOUT_DEFAULT=60, strictly below the 120s outer bound, pinned by two new tests. **(was: Make the per-linter spawn budget strictly smaller than any plausible
 >       caller's outer timeout**, so `lint_markdown`'s own `TimeoutExpired`
 >       handler can run. Today both are 120 s and the handler is unreachable.
-> - [ ] **Find where the 30–74 s actually goes inside the spawn.** Resolution is
+> - [~] STRUCK 2026-09-25 — ANSWERED by measurement: NOT-REPRODUCED as a steady state; cold-fetch probes ≤3.8s, warm 0.0-0.8s; the 30-74s window matches a one-time first-fetch cold state (see report + [~] box below). **(was: Find where the 30–74 s actually goes inside the spawn. Resolution is
 >       ruled out (it is a `which` probe). Three candidates remain and NONE has
 >       been observed — do not assume the first:
 >       (a) a cold npx/bunx package **fetch** (network);
@@ -152,7 +153,7 @@ noticed as a side observation.
 >       disabled (kills (a) if still slow); diff `~/.npm/_npx` mtimes across a
 >       slow run; snapshot the process table (never `pgrep`/`ps | grep`) for an
 >       `npx` child. Instrument `_run_linter` to split spawn-setup from lint.
-> - [ ] **Decide whether the one-time fetch should be surfaced or pre-warmed**
+> - [~] STRUCK 2026-09-25 — MOOT: measurement showed no recurring cold-fetch cost to surface (one-time first-fetch window, ≤3.8s even fully cold on bunx). **(was: Decide whether the one-time fetch should be surfaced or pre-warmed**
 >       rather than silently charged to whichever caller happens to go first.
 >       On CI that caller is arbitrary — it is whichever test the shard split
 >       happens to schedule first.
@@ -162,13 +163,13 @@ noticed as a side observation.
 - [~] STRUCK — NOT-REPRODUCED-THIS-SESSION (2026-09-25; wording corrected from UNMEASURABLE-HERE, which overstated permanence): measured cold=0.8s/warm=0.0s, cold-fetch probes ≤3.8s (report at the WORKSPACE root reports/, one level above the plugin repo); host package-layer warm with untraced provenance. RE-ENTRY PATH EXISTS for a future run: a tmp-HOME validator run (HOME-isolated whole run) — feasible read-only, not attempted this session because BUN_INSTALL_CACHE_DIR does not propagate through `uv run` and mutating the real bun cache was out of read-only scope. (Original: "If local resolution: re-profile `run_lint_engine` directly to find where the
       30-49 s actually goes; update this card's "What is NOT established" section
       with the real answer before any fix is designed.
-- [ ] If cold-fetch confirmed: decide whether tool resolution needs its own bounded
+- [~] STRUCK 2026-09-25 — MOOT: premise false (cold-fetch was NOT confirmed as a recurring cost; ≤3.8s cold). **(was: If cold-fetch confirmed: decide whether tool resolution needs its own bounded
       timeout distinct from the linter-spawn and phase-aggregate timeouts, and
       whether a warm/cold difference should be surfaced to the user (progress
       message, or a documented one-time-cost note) rather than silently eaten by
       the phase budget.
 - [x] A warm-vs-cold repeat-run comparison is recorded (same fixture, same
       machine, back-to-back) to test whether this is purely a first-run cost.
-- [ ] Whatever fix (if any) is decided lands with a test that reproduces the
+- [x] Whatever fix (if any) is decided lands with a test that reproduces the
       slow path deterministically (e.g. by clearing the relevant cache dir) and
       demonstrates the chosen bound actually triggers.
