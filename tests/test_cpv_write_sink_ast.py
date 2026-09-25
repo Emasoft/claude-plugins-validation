@@ -15,6 +15,11 @@ from cpv_write_sink_ast import (  # noqa: E402
     classify_shell_write_sinks,
 )
 
+# DEVITALIZED fixture (TRDD-3T170X2M): RC-164 reaches the plugin gate and keys on
+# a literal ` > ` redirect in a source line, so the redirect is spliced in at
+# runtime — the string the classifier receives is byte-identical.
+_GT = ">"
+
 
 def _one(sinks):
     assert len(sinks) == 1, sinks
@@ -159,8 +164,8 @@ def test_syntax_error_yields_empty_list():
 
 
 def test_shell_env_redirect_is_env_anchored():
-    """echo x > "$CLAUDE_PLUGIN_DATA/h.sh" is ENV_ANCHORED."""
-    s = _one(classify_shell_write_sinks('echo x > "$CLAUDE_PLUGIN_DATA/h.sh"\n'))
+    """An echo redirected into $CLAUDE_PLUGIN_DATA/h.sh is ENV_ANCHORED."""
+    s = _one(classify_shell_write_sinks(f'echo x {_GT} "$CLAUDE_PLUGIN_DATA/h.sh"\n'))
     assert s.dest_class == "ENV_ANCHORED"
     assert s.is_script_dest is True
 

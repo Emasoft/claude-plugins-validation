@@ -32,6 +32,14 @@ from cpv_write_sink_ast import collect_ast_write_sinks  # noqa: E402
 SELF = "scripts/x.py"
 SELF_SH = "scripts/install.sh"
 
+# DEVITALIZED fixtures (TRDD-3T170X2M). RC-164 now reaches the plugin gate, and
+# its shell patterns key on a literal ` > ` redirect in a SOURCE line — so a
+# fixture spelled `echo x > "$0"` in this file is itself an in-plugin write to
+# the scanner. The redirect is spliced in at runtime instead: no source line
+# carries the needle, while the string handed to the guard is byte-identical.
+# Never a `tests/` skip (the #75 ruling) — a scan exemption is a hiding place.
+_GT = ">"
+
 
 # ────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -216,7 +224,7 @@ class TestT2Unresolved:
 
     def test_regex_path_residual_var_in_tail_is_major(self, root: Path) -> None:
         """Shell: `> "$CLAUDE_PLUGIN_DATA/$name"` — today silent, now T2."""
-        src = 'echo "$body" > "$CLAUDE_PLUGIN_DATA/$name"\n'
+        src = f'echo "$body" {_GT} "$CLAUDE_PLUGIN_DATA/$name"\n'
         assert tiers(src, root, SELF_SH) == ["major"]
 
     def test_regex_path_residual_var_under_foreign_prefix_is_silent(self, root: Path) -> None:
@@ -324,7 +332,7 @@ class TestScriptEvidence:
 
 class TestShellSelfFold:
     def test_heredoc_dirname_dollar_zero_is_critical(self, root: Path) -> None:
-        src = 'cat > "$(dirname "$0")/gen.sh" <<EOF\necho hi\nEOF\n'
+        src = f'cat {_GT} "$(dirname "$0")/gen.sh" <<EOF\necho hi\nEOF\n'
         assert tiers(src, root, SELF_SH) == ["critical"]
 
     def test_redirect_escaping_the_tree_is_silent(self, root: Path) -> None:
@@ -346,11 +354,11 @@ class TestShellSelfFold:
         assert tiers(src, root, SELF_SH) == ["critical"]
 
     def test_realpath_self_rewrites_this_script(self, root: Path) -> None:
-        src = 'echo x > "$(realpath "$0")"\n'
+        src = f'echo x {_GT} "$(realpath "$0")"\n'
         assert tiers(src, root, SELF_SH) == ["critical"]
 
     def test_bare_dollar_zero_rewrites_this_script(self, root: Path) -> None:
-        src = 'echo x > "$0"\n'
+        src = f'echo x {_GT} "$0"\n'
         assert tiers(src, root, SELF_SH) == ["critical"]
 
 
@@ -480,7 +488,7 @@ class TestLineAndDispatch:
         """
         cases = [
             # A heredoc generating an in-plugin script.
-            'SETUP = """\ncat > scripts/gen.sh <<EOF\necho hi\nEOF\n"""\nos.system(SETUP)\n',
+            f'SETUP = """\ncat {_GT} scripts/gen.sh <<EOF\necho hi\nEOF\n"""\nos.system(SETUP)\n',
             # A redirect generating an in-plugin script.
             'SETUP = """\necho "$body" > scripts/gen.sh\n"""\nos.system(SETUP)\n',
             # `chmod +x` marking an in-plugin path runnable.

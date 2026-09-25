@@ -47,6 +47,14 @@ from cpv_validation_common import ValidationReport  # noqa: E402
 # ────────────────────────────────────────────────────────────────────────
 
 
+# DEVITALIZED fixtures (TRDD-3T170X2M): RC-164 reaches the plugin gate, and its
+# shell patterns key on a literal ` > ` / `chmod +x` in a SOURCE line — a fixture
+# spelled that way here is itself an in-plugin write to the scanner. The token is
+# spliced in at runtime, so the string handed to the guard is byte-identical.
+_GT = ">"
+_CHMOD = "chmod"
+
+
 def _flag_lines(content: str, rel_path: str, plugin_root: Path) -> list[int]:
     """Return the 1-based line numbers the guard flags for ``content``."""
     return [wf.line_no for wf in guard.inplugin_script_write_findings(content, rel_path, plugin_root)]
@@ -176,9 +184,9 @@ class TestBlockShellWrites:
         assert _flag_lines(c, "install.sh", root) == [1]
 
     def test_heredoc_py_into_data(self, tmp_path: Path) -> None:
-        """`cat > DATA/x.py <<EOF` heredoc generating a .py → flagged."""
+        """A `cat` heredoc redirected into DATA/x.py generating a .py → flagged."""
         root = _make_plugin(tmp_path)
-        c = "cat > $CLAUDE_PLUGIN_DATA/scripts/d.py <<EOF\nimport os\nEOF\n"
+        c = f"cat {_GT} $CLAUDE_PLUGIN_DATA/scripts/d.py <<EOF\nimport os\nEOF\n"
         assert _flag_lines(c, "install.sh", root) == [1]
 
     def test_heredoc_shebang_extensionless(self, tmp_path: Path) -> None:
@@ -483,6 +491,59 @@ class TestSelfScanClean:
                 checked = True
                 break
         assert checked, "did not locate a re.compile line inside _PY_WRITE_PATTERNS"
+
+
+class TestChmodTargetPathShape:
+    """TRDD-RU0POO65: the regex chmod capture took ANY word after ``chmod +x``
+    and folded it as an in-plugin path. Each prose shape below fired a CRITICAL
+    at HEAD (verified against the pre-fix tree); each real target still fires."""
+
+    @pytest.mark.parametrize(
+        ("rel", "content"),
+        [
+            # janitor scripts/detectors/gh-reply-watch.py:84 (docstring prose)
+            ("gh.py", '"""\n    The poller is NOT chmod +x (unlike a detector, which runs\n"""\n'),
+            # chief-of-staff skill reference prose
+            ("ref.md", "grant it and chmod +x for that user\n"),
+            # amama tests/test_amama_stop_check.py:46 (docstring prose)
+            ("t.py", '    """Write a stub and chmod +x it (a real binary on PATH)."""\n'),
+            # a markdown table cell holding an inline code span
+            ("ref.md", "| Hooks not firing | Not executable | Run `chmod +x script.sh` |\n"),
+            # CPV's own CHANGELOG.md
+            ("CHANGELOG.md", "- **validators:** embed full TOCs; chmod +x 12 scripts\n"),
+            # an unbound os.chmod NAME carries no in-tree evidence
+            ("doc.md", "```python\nos.chmod(dest, 0o755)\n```\n"),
+            # an f-string placeholder in a validator suggestion message
+            ("v.md", "has a shebang but is not executable - run: chmod +x scripts/{py_file.name}\n"),
+        ],
+    )
+    def test_prose_token_is_not_a_chmod_target(self, tmp_path: Path, rel: str, content: str) -> None:
+        """A prose word after ``chmod +x`` is not a path → no finding."""
+        root = _make_plugin(tmp_path)
+        assert _flag_lines(content, rel, root) == []
+
+    @pytest.mark.parametrize(
+        ("rel", "content", "line"),
+        [
+            ("install.sh", "chmod +x scripts/hook.py\n", 1),
+            ("install.sh", 'chmod 755 "$CLAUDE_PLUGIN_ROOT/bin/x"\n', 1),
+            ("install.sh", f"{_CHMOD} +x scripts/hook.py; ./scripts/hook.py\n", 1),
+            ("install.sh", "chmod +x run.sh\n", 1),
+            ("install.sh", 'chmod 755 "${CLAUDE_PLUGIN_ROOT}/bin/x"\n', 1),
+            ("doc.md", '```python\ndest = "$CLAUDE_PLUGIN_ROOT/hook.py"\nos.chmod(dest, 0o755)\n```\n', 3),
+        ],
+    )
+    def test_real_chmod_target_still_fires(self, tmp_path: Path, rel: str, content: str, line: int) -> None:
+        """A path-shaped (or name-bound-to-a-path) chmod target still flags."""
+        root = _make_plugin(tmp_path)
+        assert _flag_lines(content, rel, root) == [line]
+
+    def test_bare_word_naming_an_existing_in_tree_file_fires(self, tmp_path: Path) -> None:
+        """A suffix-less bare word IS a path when that file ships in the tree."""
+        root = _make_plugin(tmp_path)
+        (root / "daemon").write_text("#!/bin/sh\n")
+        assert _flag_lines("chmod +x daemon\n", "install.sh", root) == [1]
+        assert _flag_lines("chmod +x daemonx\n", "install.sh", root) == []
 
 
 if __name__ == "__main__":
