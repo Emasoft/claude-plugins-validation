@@ -2737,7 +2737,22 @@ _EXECCLASS_RCE_RULE_IDS: frozenset[str] = frozenset(
         # id and are admitted with it; T3 is INFO, which the level gate below
         # never merges. Landed only after TRDD-RU0POO65 stopped the regex chmod
         # path folding prose words ("chmod +x it") into CRITICAL findings.
+        # RC-39 — persistence install (cron/launchd/systemd/rc/Run). Same
+        # gate-drop defect as RC-164 (TRDD-AOPLOGYD): the rule id sat in no
+        # execution-class set, so the plugin gate silently dropped every
+        # RC-39 row — only the `security` subcommand ever showed it. The
+        # issue-#63 intrinsic daemon-source discriminator still clears a
+        # provably-clean in-tree launcher. Doc-file rows are demoted one
+        # tier at the EMITTER (effective_severity in validate_security,
+        # before this set is consulted) and this set is level-agnostic, so
+        # a demoted doc row is still admitted at MINOR and still blocks
+        # --strict — the census (147 plugins, 2026-09-25) measured that FP
+        # surface: 4 plugins × prose tokens, every one already failing on
+        # other findings, zero verdict flips. Sequencing deviation from the
+        # RC-164 precedent recorded on the card: the blockquoted-fence
+        # detector gap that let those prose tokens fire is NOT fixed first.
         "RC-164",
+        "RC-39",
     }
 )
 
