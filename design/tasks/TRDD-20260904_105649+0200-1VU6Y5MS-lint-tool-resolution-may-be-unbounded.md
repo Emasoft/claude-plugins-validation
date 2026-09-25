@@ -3,7 +3,7 @@ trdd-id: 1VU6Y5MS
 title: A per-linter spawn timeout equal to its caller's timeout makes the linter's own graceful degradation unreachable
 column: todo
 created: 2026-09-04T10:56:49+0200
-updated: 2026-09-04T11:28:59+0200
+updated: 2026-09-25T16:36:23+0200
 current-owner: cpv-main-session
 task-type: bugfix
 min-approval-requirement: none
@@ -85,6 +85,7 @@ do not end it. The remaining steps stand:
    `PLUGIN_REPO_LINT_TIMEOUT`/`_effective_timeout`) and the aggregate phase
    budget (`_DEFAULT_PHASE_TIMEOUT = 600.0 s`,
    `PLUGIN_REPO_LINT_PHASE_TIMEOUT`).
+MEASURED 2026-09-25 (worker report reports/1vu6y5ms-cold-lint-timing/20260925_163503+0200-cold-lint-timing.md): warm-vs-cold comparison recorded (cold=0.8s CPV-lint-cache-cold/bun-warm, warm=0.0s); isolated cold-fetch probes bunx 0.9s, npx 3.8s; NONE of hypotheses (a)/(b)/(c) reproduces 30-74s on this machine today — the original stall's mechanism remains UNDETERMINED, and the host is now permanently warm (bun dep-tree entries written this morning before the probes), so the 30-74s state is not reproducible here. The nested-deadline defect (equal 120s budgets) is still REAL and read from source — that half needs its fix regardless of the unexplained variance; see acceptance boxes.
 
 ## The problem
 
