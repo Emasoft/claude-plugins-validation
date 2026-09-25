@@ -321,7 +321,12 @@ def _build_grid() -> tuple[FixtureSpec, ...]:
                 "version": "1.0.0",
                 "hooks": {
                     "PreToolUse": [
-                        {"type": "command", "command": "./hooks/pre.sh", "matcher": "Bash"},
+                        {
+                            "matcher": "Bash",
+                            "hooks": [
+                                {"type": "command", "command": "./hooks/pre.sh"},
+                            ],
+                        },
                     ],
                 },
             },
@@ -339,7 +344,14 @@ def _build_grid() -> tuple[FixtureSpec, ...]:
                 "version": "1.0.0",
                 "hooks": {
                     "Stop": [
-                        {"type": "prompt", "prompt": "Wrap up the session and summarize."},
+                        {
+                            "hooks": [
+                                {
+                                    "type": "prompt",
+                                    "prompt": "Wrap up the session and summarize.",
+                                },
+                            ],
+                        },
                     ],
                 },
             },
@@ -357,10 +369,14 @@ def _build_grid() -> tuple[FixtureSpec, ...]:
                 "hooks": {
                     "SessionStart": [
                         {
-                            "type": "mcp_tool",
-                            "server": "demo-server",
-                            "tool": "noop",
-                            "input": {"arg": "value"},
+                            "hooks": [
+                                {
+                                    "type": "mcp_tool",
+                                    "server": "demo-server",
+                                    "tool": "noop",
+                                    "input": {"arg": "value"},
+                                },
+                            ],
                         },
                     ],
                 },
@@ -383,7 +399,15 @@ def _build_grid() -> tuple[FixtureSpec, ...]:
                 "version": "1.0.0",
                 "hooks": {
                     "UserPromptSubmit": [
-                        {"type": "http", "url": "https://example.com/hook", "method": "POST"},
+                        {
+                            "hooks": [
+                                {
+                                    "type": "http",
+                                    "url": "https://example.com/hook",
+                                    "method": "POST",
+                                },
+                            ],
+                        },
                     ],
                 },
             },
@@ -394,13 +418,27 @@ def _build_grid() -> tuple[FixtureSpec, ...]:
     grid.append(
         FixtureSpec(
             nn="17",
-            descriptor="hook-precompact-agent",
+            descriptor="hook-subagentstop-agent",
             plugin_json={
                 "name": "fixture-17",
                 "version": "1.0.0",
                 "hooks": {
-                    "PreCompact": [
-                        {"type": "agent", "agent": "summary-agent"},
+                    # PreCompact is in HOOK_EVENTS_NO_PROMPT_OR_AGENT (only
+                    # command/http/mcp_tool are valid there) — SubagentStop
+                    # is the nearest lifecycle event that DOES accept an
+                    # 'agent' hook, so this keeps testing the agent hook
+                    # type without triggering a genuine spec violation.
+                    "SubagentStop": [
+                        {
+                            "matcher": "*",
+                            "hooks": [
+                                {
+                                    "type": "agent",
+                                    "agent": "summary-agent",
+                                    "prompt": "Summarize what the subagent just did.",
+                                },
+                            ],
+                        },
                     ],
                 },
                 "agents": ["./agents/summary-agent.md"],
@@ -411,7 +449,7 @@ def _build_grid() -> tuple[FixtureSpec, ...]:
                     content=_VALID_AGENT_BODY.replace("example-agent", "summary-agent"),
                 ),
             ),
-            notes="PreCompact with agent hook type — cross-references an agent target.",
+            notes="SubagentStop with agent hook type — cross-references an agent target.",
         )
     )
 
