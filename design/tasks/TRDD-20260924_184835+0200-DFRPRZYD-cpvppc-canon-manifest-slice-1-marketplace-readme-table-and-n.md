@@ -22,7 +22,7 @@ approval-datetime: 2026-09-24T18:48:35+0200
 ## User directive (verbatim, 2026-09-24)
 
 > for the remaining things, i explained to you that everything is based on the functionality of the cpv plugin to publish plugins and marketplaces. their structure and workflow is defined as cpv publishing pipeline canon (cpvppc) and includes many automations like automatic update of the marketplace readme with the list/table of plugins with each respective version and link. but there are much more functions. if you  need to formalize the CPVPPC canon i suggest to create a specs file or a manifest schema of some sort, to version and maintain with the list of features detailed.
-
+>
 > yes go on
 
 (The second message approved continuing with the proposal as revised after its adversarial review.)
