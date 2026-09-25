@@ -3,7 +3,7 @@ trdd-id: 1VU6Y5MS
 title: A per-linter spawn timeout equal to its caller's timeout makes the linter's own graceful degradation unreachable
 column: todo
 created: 2026-09-04T10:56:49+0200
-updated: 2026-09-25T16:36:23+0200
+updated: 2026-09-25T16:50:26+0200
 current-owner: cpv-main-session
 task-type: bugfix
 min-approval-requirement: none
@@ -86,6 +86,7 @@ do not end it. The remaining steps stand:
    budget (`_DEFAULT_PHASE_TIMEOUT = 600.0 s`,
    `PLUGIN_REPO_LINT_PHASE_TIMEOUT`).
 MEASURED 2026-09-25 (worker report reports/1vu6y5ms-cold-lint-timing/20260925_163503+0200-cold-lint-timing.md): warm-vs-cold comparison recorded (cold=0.8s CPV-lint-cache-cold/bun-warm, warm=0.0s); isolated cold-fetch probes bunx 0.9s, npx 3.8s; NONE of hypotheses (a)/(b)/(c) reproduces 30-74s on this machine today — the original stall's mechanism remains UNDETERMINED, and the host is now permanently warm (bun dep-tree entries written this morning before the probes), so the 30-74s state is not reproducible here. The nested-deadline defect (equal 120s budgets) is still REAL and read from source — that half needs its fix regardless of the unexplained variance; see acceptance boxes.
+CORRECTIONS from adversarial review (2026-09-25): the report file HAS NOW been read in full by the main session (finding c closed). Two findings refined: (1) the resolve chain on THIS machine goes to bunx, not npx (smart_exec PRIORITY: bunx first) — the card's npx framing was wrong for this host; (2) TWO cache layers, neither named in the card: CPV's own lint-result cache (~/.cache/cpv/scanner-results/, 33k entries; CPV_SCAN_CACHE=0 does NOT bypass it — it bypasses only the skillaudit cache) and bun's package cache. 'Permanently warm' SOFTENED per review: today's state is warm at the package layer for reasons not fully traced; a both-layers-cold run was NOT achievable without HOME-level isolation; the 30-74s window most plausibly was the one-time first fetch+resolution of markdownlint-cli2 through bunx (hypothesis, not measurement). Nested-deadline citations added: test timeout=120 (tests/test_issue_37_gitignore_walkers.py:347) == lint_markdown spawn timeout=120 (scripts/cpv_lint_engine.py:1425 region, _effective_timeout default at :402); outer clock starts first so the inner graceful handler is unreachable — arithmetic identity, source-read.
 
 ## The problem
 
@@ -156,7 +157,7 @@ noticed as a side observation.
 
 - [x] Verification step 1 (`command -v markdownlint-cli2`) run and result recorded
       as a fact, not inferred. **DONE — not on PATH; see the STATE block.**
-- [ ] If local resolution: re-profile `run_lint_engine` directly to find where the
+- [~] STRUCK — UNMEASURABLE-HERE (2026-09-25): measured cold=0.8s/warm=0.0s, cold-fetch probes ≤3.8s (report: reports/1vu6y5ms-cold-lint-timing/20260925_163503+0200-cold-lint-timing.md at the WORKSPACE root, one level above the plugin repo); host package-layer warm with untraced provenance; both-layers-cold not re-enterable without HOME-level isolation. (Original: "If local resolution: re-profile `run_lint_engine` directly to find where the
       30-49 s actually goes; update this card's "What is NOT established" section
       with the real answer before any fix is designed.
 - [ ] If cold-fetch confirmed: decide whether tool resolution needs its own bounded
@@ -164,7 +165,7 @@ noticed as a side observation.
       whether a warm/cold difference should be surfaced to the user (progress
       message, or a documented one-time-cost note) rather than silently eaten by
       the phase budget.
-- [ ] A warm-vs-cold repeat-run comparison is recorded (same fixture, same
+- [x] A warm-vs-cold repeat-run comparison is recorded (same fixture, same
       machine, back-to-back) to test whether this is purely a first-run cost.
 - [ ] Whatever fix (if any) is decided lands with a test that reproduces the
       slow path deterministically (e.g. by clearing the relevant cache dir) and
