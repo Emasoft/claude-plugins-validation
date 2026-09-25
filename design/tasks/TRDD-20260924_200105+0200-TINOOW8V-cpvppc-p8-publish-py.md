@@ -39,8 +39,6 @@ release depend on the newest rules: a retry of the same release may need fixes i
 "green run" for a release commit is the release workflow run that produced it, and marketplace
 notification is a job inside the release workflow (cross-repo dispatch uses `MARKETPLACE_PAT`).
 
-
-
 ## Plan excerpt: threat table heading (verbatim)
 
 ### 4.3 Threat table (every row is an assertion; a violation is `FAIL`)

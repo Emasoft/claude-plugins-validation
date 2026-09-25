@@ -28,7 +28,6 @@ Files: cpv-the-skills-menu routes; cpv-plugin-creator-agent, cpv-plugin-fixer-ag
 ## Plan excerpt: section 5 verdicts (verbatim)
 
 
-
 - Verdicts: `COMPLIANT <v>` (exit 0; `(static)` without `--remote`, rejected by agent gates;
   qualifiers `unattested: N`, `locally built: N`, `unsigned`, `no provenance: private repo`, always
   printed when they apply), `NON-COMPLIANT <v>` (1), `UNKNOWN` (5), `NOT-DECLARED` (6, plus the highest

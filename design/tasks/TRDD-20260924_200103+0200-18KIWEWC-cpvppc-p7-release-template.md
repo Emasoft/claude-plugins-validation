@@ -52,12 +52,11 @@ notification is a job inside the release workflow (cross-repo dispatch uses `MAR
 | 10 | G-ATTEST (release) | `SHA256SUMS`, scan manifest, SBOM; build provenance for every artifact and for those three files | failure |
 | 11 | G-RELEASE (release) | the workflow commits the version bump + `bin/` (if `committed-bin`) + manifest + README sections as ONE release commit whose tree equals the scanned artifact, creates both tags, creates the GitHub release, uploads assets, sends notifications; idempotent on re-run | any error |
 | 12 | G-POST (release) | remote verify: tags, assets hash-match, provenance, install smoke from each target marketplace, listing matches manifest | any failure (job red) |
+
 Writers per repo kind: plugin repo → the release workflow (the only job with `contents: write`);
 marketplace repo → the update workflow. Rulesets: CPV's ratified `baseline-*` trio on the default
 branch plus tag protection (`v*`, `*--v*`: no update, no deletion), with the GitHub Actions app as the
 only bypass actor.
-
-
 
 ## Staging draft for local_release binaries (plan 3.1 row 6 and threat row 6, verbatim)
 

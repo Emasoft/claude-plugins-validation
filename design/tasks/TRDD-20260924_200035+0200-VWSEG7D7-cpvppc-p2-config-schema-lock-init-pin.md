@@ -48,6 +48,7 @@ Files: config_schema.json, init.py, pin.py, lock read/write in verify.py. Key te
 | 16 | `release` | `changelog` (`git-cliff`), `prerelease_channel` (`bool`) | tags are canon: `v{v}` and `{name}--v{v}` |
 | 17 | `docs` | README sections (`install`, `platforms`, `components`, `badges`, `network`, `unattested`) | |
 | 18 | `writes_outside_data[]` | runtime writes outside `${CLAUDE_PLUGIN_DATA}` (e.g. the PATH shim target) | undeclared writes fail the static scan; each is listed in the README section |
+
 Out of scope for canon 1.0 (rejected by the schema, not silently ignored): container images, and
 distribution through npm, PyPI or Homebrew. Every release ships a CycloneDX SBOM.
 
