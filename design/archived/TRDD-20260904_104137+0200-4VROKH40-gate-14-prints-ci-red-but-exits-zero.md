@@ -1,13 +1,14 @@
 ---
 trdd-id: 4VROKH40
 title: Gate 14 prints CI IS RED but publish.py still exits 0
-column: todo
+column: complete
 created: 2026-09-04T10:41:37+0200
-updated: 2026-09-04T11:11:24+0200
+updated: 2026-09-25T15:55:04+0200
 current-owner: cpv-main-session
 task-type: bugfix
 min-approval-requirement: none
 relevant-rules: []
+status: archived
 ---
 
 # Gate 14 prints CI IS RED but publish.py exits 0
@@ -55,18 +56,22 @@ gate logic is CPV's to fix, not deflected as a downstream plugin's test problem.
 
 ## Acceptance criteria
 
-- [ ] The Gate 14 code path in `scripts/publish.py` is read and the current
+- [x] The Gate 14 code path in `scripts/publish.py` is read and the current
       exit-code behavior (fatal vs advisory vs silently-ignored) is stated as a
       verified fact, not inferred from release-log prose.
-- [ ] A decision is made and recorded: Gate 14 becomes fatal, OR Gate 14's output is
+- [x] A decision is made and recorded: Gate 14 becomes fatal, OR Gate 14's output is
       relabeled so it cannot be misread as a failed gate that was ignored.
-- [ ] A test exists that asserts the process exit code matches the printed CI
+- [x] A test exists that asserts the process exit code matches the printed CI
       verdict for both a red-CI and a green-CI case; the test fails against the
       pre-fix code and passes after the fix (mutation-proven, not just green).
-- [ ] The existing `f1882af9` red CI is either fixed or explicitly triaged as a
+- [x] The existing `f1882af9` red CI is either fixed or explicitly triaged as a
       separate, already-tracked issue (see `TRDD-MHCFOCBV` in the same
       `design/tasks/` directory, which tracks the underlying timeout — the REPO
       LINT phase outliving the 120 s subprocess budget of the test that spawns
       it; it is NOT Linux-only, it was reproduced on macOS) — this card is about
       the gate's exit-status honesty, not about diagnosing that specific CI
       failure.
+
+## Approval log
+
+- 2026-09-25T15:55:04+0200 — COMPLETE by main-agent@claude-plugins-validation. Advisory relabel landed in 0dc3623d with behavioural + mutation-proven tests; all 4 boxes ticked with evidence; review corrections applied.
