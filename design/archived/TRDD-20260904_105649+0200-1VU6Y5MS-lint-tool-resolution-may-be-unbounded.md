@@ -1,13 +1,14 @@
 ---
 trdd-id: 1VU6Y5MS
 title: A per-linter spawn timeout equal to its caller's timeout makes the linter's own graceful degradation unreachable
-column: todo
+column: complete
 created: 2026-09-04T10:56:49+0200
-updated: 2026-09-25T19:46:48+0200
+updated: 2026-09-25T19:47:07+0200
 current-owner: cpv-main-session
 task-type: bugfix
 min-approval-requirement: none
 relevant-rules: []
+status: archived
 ---
 
 # Lint tool resolution in run_lint_engine may be an unbounded cold-run stall
@@ -173,3 +174,7 @@ noticed as a side observation.
 - [x] Whatever fix (if any) is decided lands with a test that reproduces the
       slow path deterministically (e.g. by clearing the relevant cache dir) and
       demonstrates the chosen bound actually triggers.
+
+## Approval log
+
+- 2026-09-25T19:47:07+0200 — COMPLETE by main-agent@claude-plugins-validation. budget fix landed 6b3d5141, measurement answered the remaining conditionals.
