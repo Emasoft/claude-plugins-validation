@@ -55,9 +55,12 @@ the two modules cannot drift.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, NamedTuple
+
+from cpv_surface_class import is_documentation_only_path
 
 if TYPE_CHECKING:  # pragma: no cover - type-checking only (runtime import cycle)
     from cpv_write_sink_ast import AstWriteSink
@@ -70,7 +73,6 @@ if TYPE_CHECKING:  # pragma: no cover - type-checking only (runtime import cycle
 # fold used when we want the folded form without requiring the file to exist yet
 # (a generated destination may not exist at scan time).
 from cpv_persistence_target import (
-    _RESIDUAL_VAR_RE,
     _fold_to_plugin_root,
     _resolve_in_tree,
 )
@@ -266,32 +268,58 @@ _SHELL_WRITE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
 )
 
 
-def _dest_token(line: str, match: re.Match[str]) -> str:
-    """The full destination token for ``match`` group 1.
+def _skip_cmdsub(line: str, i: int) -> int:
+    """Index just past the balanced ``$( … )`` span that opens at ``line[i]``."""
+    depth = 1
+    i += 2
+    n = len(line)
+    while i < n and depth:
+        if line[i] == "(":
+            depth += 1
+        elif line[i] == ")":
+            depth -= 1
+        i += 1
+    return i
+
+
+def _dest_token(line: str, match: re.Match[str], group: int = 1) -> str:
+    """The full destination token for ``match`` group ``group``.
 
     A bare `[^\\s…]+` capture stops at the first space, so a QUOTED destination
     containing a command substitution — `> "$(dirname "$0")/gen.sh"` — is
     truncated to `"$(dirname`. When the capture opens a quote, rescan the raw
     line from the capture start for the matching close quote, skipping `$(…)`
     spans (whose own inner quotes are not delimiters). Linear, no backtracking.
+
+    An UNQUOTED word holding a command substitution with a space inside —
+    `> public/p/$(cat .token)/feed.xml` — was truncated the same way, to
+    `public/p/$(cat`, which invented a residual-var TAIL and fired a T2
+    "unresolved" finding on a write whose real file name is the literal
+    non-script `feed.xml` (census, eins78 README). The word is therefore
+    extended across balanced `$( … )` spans up to the first unquoted separator.
     """
-    token = match.group(1)
-    if not token or token[0] not in "\"'":
-        return token
-    quote = token[0]
-    start = match.start(1)
-    i = start + 1
+    token = match.group(group)
+    start = match.start(group)
     n = len(line)
+    if not token:
+        return token
+    if token[0] not in "\"'":
+        if "$(" not in token:
+            return token
+        i = start
+        while i < n:
+            if line.startswith("$(", i):
+                i = _skip_cmdsub(line, i)
+                continue
+            if line[i] in " \t;&|<>)":
+                break
+            i += 1
+        return line[start:i]
+    quote = token[0]
+    i = start + 1
     while i < n:
         if line.startswith("$(", i):
-            depth = 1
-            i += 2
-            while i < n and depth:
-                if line[i] == "(":
-                    depth += 1
-                elif line[i] == ")":
-                    depth -= 1
-                i += 1
+            i = _skip_cmdsub(line, i)
             continue
         if line[i] == quote:
             return line[start : i + 1]
@@ -340,6 +368,39 @@ def _heredoc_body_after(lines: list[str], opener_idx: int) -> str | None:
 # ────────────────────────────────────────────────────────────────────────
 
 
+# Shell positional / special parameters: `$1`…`$9`, `${10}`, `$@`, `$*`, `$#`,
+# `$?`, `$$`, `$!`, `$-` (class D). The shared `_RESIDUAL_VAR_RE` recognises only
+# NAMED variables, so `> "$1/review.md"` survived the fold as the literal
+# relative path `$1/review.md` and was reported as landing in the plugin root.
+# A positional is a caller-supplied value — exactly as unknown as any `$VAR`.
+# Kept guard-local on purpose: the persistence fold owns its own residual set.
+# The brace form also covers `${1:-default}` / `${1#prefix}` / `${#}`: any
+# expansion whose parameter is positional or special is caller-supplied.
+_POSITIONAL_PARAM_RE: Final[re.Pattern[str]] = re.compile(r"\$\{?[1-9@*#?!$-]")
+# `$0` / `$BASH_SOURCE` name the RUNNING SHELL SCRIPT. `_fold_self_path` folds
+# them to the scanned file — correct only when the scanned file IS that shell
+# script. In a `.md` shell fence, a Python/JS source, or a JS comment
+# (`cost > $0`, census: llm-externalizer security_scan.test.ts) the token does
+# not name the scanned file at all, so there it is as unknown as `$1`.
+_SELF_PARAM_RE: Final[re.Pattern[str]] = re.compile(r"\$\{?(?:0\b|BASH_SOURCE)")
+_SHELL_SCRIPT_SUFFIXES: Final[frozenset[str]] = frozenset({".sh", ".bash", ".zsh", ".ksh"})
+
+
+def _has_unplaceable_param(raw: str, self_path: str | None) -> bool:
+    """True iff ``raw`` holds a shell parameter the fold cannot place."""
+    if _POSITIONAL_PARAM_RE.search(raw):
+        return True
+    return self_path is None and _SELF_PARAM_RE.search(raw) is not None
+
+
+def _is_shell_script(rel_path: str, lines: list[str]) -> bool:
+    """True iff the scanned file is itself a shell script (so `$0` is its path)."""
+    suffix = Path(rel_path).suffix.lower()
+    if suffix in _SHELL_SCRIPT_SUFFIXES:
+        return True
+    return suffix == "" and bool(lines) and _SHEBANG_BODY_PATTERNS[0].search(lines[0].strip()) is not None
+
+
 def _tail_has_script_suffix(tail: str) -> bool:
     """True iff a destination's trailing literal FRAGMENT carries a script
     suffix.
@@ -374,7 +435,7 @@ def _destination_in_tree(
     path outside the tree) yields FALSE ⇒ the caller PASSES (lenient fail-safe).
     """
     raw = dst_expr.strip().strip("'\"")
-    if not raw:
+    if not raw or _has_unplaceable_param(raw, self_path):
         return False
     # Stage 1 — an existing in-tree regular file (an in-place edit).
     if _resolve_in_tree(raw, plugin_root, self_path) is not None:
@@ -460,6 +521,15 @@ def _resolve_name_destination(
             rhs = mo.group(1)
     if rhs is None:
         return None
+    return _literal_path_candidate(rhs)
+
+
+def _literal_path_candidate(rhs: str) -> str | None:
+    """Reduce a Python path EXPRESSION to its quoted literals joined by `/`.
+
+    ``None`` when the expression has no literal, or an identifier precedes its
+    first literal (an unknown ROOT) — see ``_resolve_name_destination``.
+    """
     first_quote = min(
         (i for i in (rhs.find("'"), rhs.find('"')) if i >= 0),
         default=-1,
@@ -488,20 +558,30 @@ def _chmod_target(
     idx: int,
     rel_path: str,
     plugin_root: Path,
+    self_path: str | None,
+    written: set[str],
 ) -> str | None:
     """The chmod target as a path candidate, or ``None`` when it is not one.
 
     ``os.chmod(NAME, …)`` captures a Python VARIABLE: resolve it to the literal
-    it was bound to, exactly as the ``VAR.write_text`` path does — an unbound
-    name carries no in-tree evidence (TRDD-RU0POO65: it used to fold as the
-    relative path ``NAME`` and fire). Any other ``os.chmod`` argument keeps its
-    pre-existing handling. A SHELL chmod word must pass the path-shape gate
-    above; a bare word is a path only if that file already exists in the tree.
+    it was bound to, exactly as the ``VAR.write_text`` path does. Any other
+    ``os.chmod`` argument is reduced to its quoted literals the same way; an
+    unbound name, a ``sys.argv[1]`` subscript, or a ``build_path()`` call has
+    no placeable root and yields ``None`` — the caller records it for the T3
+    advisory (the v5.17.0 tier contract), never a blocking verdict. Before, a
+    non-name argument was folded as if its SOURCE TEXT were a relative path, so
+    ``build_path()`` "landed in-tree" and fired CRITICAL.
+
+    A SHELL chmod word must pass the path-shape gate above. A bare word is a
+    path when that file already exists in the tree OR when this script already
+    WROTE it (``written``): ``printf '…' > hook`` then ``chmod +x hook`` is the
+    classic generate-then-mark-runnable pair, and 9795a4c0's bare-word gate had
+    silenced the chmod half of it. Prose (``chmod +x it``) has no prior write.
     """
     if is_os_chmod:
         tok = raw.strip()
         if not _NAME_CAPTURE_RE.match(tok):
-            return raw
+            return _literal_path_candidate(tok)
         lo, hi = _fence_bounds(lines, idx, rel_path)
         return _resolve_name_destination(lines, lo, hi, idx, tok)
     # Trailing shell separators glued to the word (`chmod +x a.sh;`) are not
@@ -509,39 +589,289 @@ def _chmod_target(
     tok = raw.strip().rstrip(";&|,").strip("'\"")
     if not tok or not _CHMOD_PATH_TOKEN_RE.match(tok) or _BARE_BRACE_RE.search(tok):
         return None
-    if "/" in tok or tok[0] in "$~" or _DOTTED_SUFFIX_RE.search(tok):
+    if "/" in tok or tok[0] in "$~" or _DOTTED_SUFFIX_RE.search(tok) or tok in written:
         return tok
-    return tok if _resolve_in_tree(tok, plugin_root, rel_path) is not None else None
+    return tok if _resolve_in_tree(tok, plugin_root, self_path) is not None else None
+
+
+def _unresolved(text: str, plugin_root: Path, self_path: str | None) -> bool:
+    """True iff the fold cannot turn ``text`` into a concrete path."""
+    return _has_unplaceable_param(text, self_path) or (
+        _fold_to_plugin_root(text, plugin_root, self_path) is None
+    )
 
 
 def _regex_tier(
-    dst: str, plugin_root: Path, self_path: str
+    dst: str, plugin_root: Path, self_path: str | None
 ) -> str | None:
     """Tier a REGEX-path destination, or ``None`` for no finding.
 
     ``critical`` — the whole destination folds in-tree AND is a script.
-    ``major``   — the destination's HEAD folds in-tree but a residual ``$VAR``
-                  remains in its TAIL, so the fold cannot say whether a script
-                  lands in-tree. Without this a bash generator writing
+    ``major``   — the longest resolvable PREFIX folds in-tree but a later
+                  component is unresolved, so the fold cannot say whether a
+                  script lands in-tree. Without this a bash generator writing
                   ``"$CLAUDE_PLUGIN_DATA/$name"`` sidesteps the gate entirely
-                  (the whole path fails to fold, so today it is silent).
+                  (the whole path fails to fold, so it would be silent).
+                  When the FINAL component is a literal non-script name
+                  (``…/$(cat .token)/feed.xml``) the written file is provably
+                  not a script whatever the middle resolves to → no finding.
     """
     # The script-ness test runs on the FOLDED path too: `> "$0"` carries no
     # suffix of its own, but folds to this very script — a self-rewrite, and a
     # script by definition. Judging only the raw token missed it entirely.
     folded = _fold_to_plugin_root(dst, plugin_root, self_path)
     is_script = _is_script_destination(dst) or (
-        folded is not None and _is_script_destination(folded)
+        folded is not None
+        and (
+            _is_script_destination(folded)
+            # An extension-less shell script (`hooks/run`) rewriting itself via
+            # `$0` is a script by definition too — only a SHELL script reaches
+            # here with a non-None ``self_path``.
+            or (self_path is not None and Path(folded) == plugin_root / self_path)
+        )
     )
     if is_script and _destination_in_tree(dst, plugin_root, self_path):
         return "critical"
     raw = dst.strip().strip("'\"")
-    if "/" not in raw:
+    if "/" not in raw or not _unresolved(raw, plugin_root, self_path):
         return None
-    head, tail = raw.rsplit("/", 1)
-    if not tail or not _RESIDUAL_VAR_RE.search(tail):
+    parts = raw.split("/")
+    last = parts[-1]
+    if not last or (
+        not _unresolved(last, plugin_root, self_path) and not _tail_has_script_suffix(last)
+    ):
+        return None
+    head = ""
+    for k in range(1, len(parts)):
+        candidate = "/".join(parts[:k]) or "/"  # a leading "" is the fs root
+        if _unresolved(candidate, plugin_root, self_path):
+            break
+        head = candidate
+    if not head:
         return None
     return "major" if _destination_in_tree(head, plugin_root, self_path) else None
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Per-line context: markdown scopes (classes A / C) and shell cwd (class B)
+# ────────────────────────────────────────────────────────────────────────
+
+_DATA_ONLY_SUFFIXES: Final[frozenset[str]] = frozenset({".jsonl", ".ndjson"})
+_BLOCKQUOTE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?:>[ \t]?)+")
+_FENCE_OPEN_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?:```|~~~)\s*([^\s`{]*)")
+# Fence info strings whose body is SHELL — the only fences where a `cd` moves
+# the working directory the next line writes into.
+_SHELL_FENCE_LANGS: Final[frozenset[str]] = frozenset(
+    {"bash", "sh", "shell", "zsh", "ksh", "console", "shell-session", "shellsession", "terminal"}
+)
+
+
+class _LineCtx(NamedTuple):
+    scope: int  # changes at every fence boundary — per-scope state resets
+    marker: bool  # the fence line itself
+    prose: bool  # markdown text OUTSIDE any fence
+    shell: bool  # shell semantics apply (a shell script / a shell-tagged fence)
+
+
+def _line_contexts(lines: list[str], rel_path: str, shell_file: bool) -> list[_LineCtx]:
+    """Classify every line; a non-markdown file is one code scope."""
+    if not rel_path.lower().endswith((".md", ".markdown")):
+        return [_LineCtx(0, False, False, shell_file)] * len(lines)
+    out: list[_LineCtx] = []
+    scope = 0
+    lang: str | None = None  # None = outside a fence; "" = an untagged fence
+    for line in lines:
+        mo = _FENCE_OPEN_RE.match(line)
+        if mo is not None:
+            scope += 1
+            lang = mo.group(1).lower() if lang is None else None
+            out.append(_LineCtx(scope, True, False, False))
+        elif lang is None:
+            out.append(_LineCtx(scope, False, True, False))
+        else:
+            out.append(_LineCtx(scope, False, False, lang in _SHELL_FENCE_LANGS))
+    return out
+
+
+def _heredoc_delimiters(line: str) -> list[str]:
+    """Delimiters of the heredocs a shell line opens (``<<<`` herestrings excluded)."""
+    delims: list[str] = []
+    for mo in _HEREDOC_OPEN_RE.finditer(line):
+        start = mo.start()
+        if line[start + 2 : start + 3] == "<" or (start and line[start - 1] == "<"):
+            continue
+        delims.append(mo.group(1) or mo.group(2) or mo.group(3))
+    return delims
+
+
+def _bare(dst: str) -> str:
+    return dst.strip().strip("'\"")
+
+
+def _rebase(dst: str, cwd: Path | None, root_n: Path) -> str | None:
+    """Re-anchor a RELATIVE destination on the shell's current directory.
+
+    Class B: a relative path is relative to the cwd, and the fold resolves every
+    relative path against the plugin root — right only while the cwd IS the
+    root. After ``cd "$WORK"`` / ``cd "$(mktemp -d)"`` / ``cd "$1"`` the cwd is
+    unknown (``None``) and a relative write cannot be placed → ``None`` (no
+    finding, the lenient rule). An anchored destination (``/…``, ``$VAR``,
+    ``$0``, ``~``) does not depend on the cwd and is returned unchanged.
+    """
+    raw = _bare(dst)
+    if not raw or raw[0] in "/$~`":
+        return dst
+    if cwd is None:
+        return None
+    return dst if cwd == root_n else str(cwd / raw)
+
+
+# `cd` / `pushd` / `popd` in COMMAND position: line start, or after `;`, `&`,
+# `|`, `(`, `{`, or a `then` / `do` / `else` keyword. Group 2 is the target.
+_CD_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[;&|({]|\b(?:then|do|else)\b)\s*(cd|pushd|popd)\b"
+    r"(?:[ \t]+(?:-[LPe@]+[ \t]+|--[ \t]+)*([^\s;&|)]+))?"
+)
+
+
+_ASSIGN_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\s*(?:(?:export|local|readonly|declare(?:\s+-\w+)*)\s+)?([A-Za-z_]\w*)=([^\s;&|]+)"
+)
+_VAR_REF_RE: Final[re.Pattern[str]] = re.compile(r"\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)")
+_ENV_DEFAULT_RE: Final[re.Pattern[str]] = re.compile(
+    r"\$\{(CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA):?[-=][^}]*\}"
+)
+_CD_PWD_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\$\(\s*cd\s+(.+?)\s*(?:&&|;)\s*pwd(?:\s+-P)?\s*\)$"
+)
+
+
+def _quoted_at(line: str, pos: int) -> bool:
+    """Line-local quote state before ``pos``. Used only to IGNORE a quoted `cd`
+    (``echo "then cd /tmp"``): a misread can only keep the cwd at the plugin
+    root, i.e. judge MORE writes — never fewer."""
+    quote = ""
+    i = 0
+    while i < pos:
+        ch = line[i]
+        if ch == "\\" and quote != "'":
+            i += 2
+            continue
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        i += 1
+    return bool(quote)
+
+
+class _ShellCwd:
+    """The working directory of a shell scope, line by line (class B).
+
+    Block scoping is by INDENTATION: a `cd` on an indented line (a function
+    body, a subshell block, an `if` arm) holds only until a line indented LESS
+    than it. For a function body that is exactly right; for an `if` arm it
+    reverts the cwd to the outer value early — which judges MORE writes, never
+    fewer. A `(cd …)` / `$(cd …)` subshell on one line moves the cwd for the
+    rest of THAT line only.
+    """
+
+    def __init__(self, root_n: Path) -> None:
+        self.root_n = root_n
+        self.frames: list[tuple[int, Path | None]] = [(-1, root_n)]
+        self.dirstack: list[Path | None] = []
+        # `NAME=value` assignments seen so far. A `cd "$SCRIPT_DIR"` whose
+        # variable was set to `$(cd "$(dirname "$0")" && pwd)` is a cd INTO the
+        # plugin — without this every such script would lose its cwd and every
+        # later relative in-plugin write would go silent (a false negative).
+        self.vars: dict[str, str] = {}
+
+    def current(self) -> Path | None:
+        return self.frames[-1][1]
+
+    def _expand(self, raw: str) -> str:
+        """Substitute known `$NAME` / `${NAME}` values (bounded depth)."""
+        for _ in range(4):
+            new = _VAR_REF_RE.sub(lambda m: self.vars.get(m.group(1) or m.group(2), m.group(0)), raw)
+            if new == raw:
+                break
+            raw = new
+        # `$(cd DIR && pwd)` IS `DIR` (the idiom that canonicalises a path);
+        # unwrapping it lets `$(dirname "$0")/..` reach the self-path fold.
+        wrapped = _CD_PWD_RE.match(raw)
+        if wrapped is not None:
+            raw = _bare(wrapped.group(1))
+        # `${CLAUDE_PLUGIN_ROOT:-fallback}` is the plugin root whenever it runs
+        # under Claude Code — fold it like the bare variable.
+        return _ENV_DEFAULT_RE.sub(r"${\1}", raw)
+
+    def _target(
+        self, target: str | None, cur: Path | None, plugin_root: Path, self_path: str | None
+    ) -> Path | None:
+        raw = self._expand(_bare(target or ""))
+        if not raw or raw == "-":
+            return None  # bare `cd` → $HOME; `cd -` → the previous dir
+        if raw[0] in "/$~`":
+            if _has_unplaceable_param(raw, self_path):
+                return None
+            folded = _fold_to_plugin_root(raw, plugin_root, self_path)
+            if folded is None:
+                return None
+            p = Path(folded)
+            return Path(os.path.normpath(p if p.is_absolute() else self.root_n / p))
+        return None if cur is None else Path(os.path.normpath(cur / raw))
+
+    def advance(
+        self, line: str, plugin_root: Path, self_path: str | None
+    ) -> tuple[Path | None, list[tuple[int, Path | None]]]:
+        """(cwd at the start of ``line``, [(column, cwd after each cd)])."""
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            return self.current(), []
+        indent = len(line) - len(line.lstrip())
+        while len(self.frames) > 1 and self.frames[-1][0] > indent:
+            self.frames.pop()
+        assign = _ASSIGN_RE.match(line)
+        if assign is not None:
+            self.vars[assign.group(1)] = _bare(_dest_token(line, assign, 2))
+        before = cur = self.current()
+        persist: Path | None = before
+        changed = False
+        events: list[tuple[int, Path | None]] = []
+        for mo in _CD_RE.finditer(line):
+            pos = mo.start(1)
+            if _quoted_at(line, pos):
+                continue
+            verb = mo.group(1)
+            if verb == "popd":
+                new = self.dirstack.pop() if self.dirstack else None
+            else:
+                target = _dest_token(line, mo, 2) if mo.group(2) else None
+                new = self._target(target, cur, plugin_root, self_path)
+                if verb == "pushd":
+                    self.dirstack.append(cur)
+            cur = new
+            events.append((pos, cur))
+            if not line[:pos].rstrip().endswith("("):
+                persist, changed = cur, True
+        if changed:
+            if self.frames[-1][0] == indent:
+                self.frames[-1] = (indent, persist)
+            else:
+                self.frames.append((indent, persist))
+        return before, events
+
+
+def _cwd_at(
+    before: Path | None, events: list[tuple[int, Path | None]], pos: int
+) -> Path | None:
+    """The shell's cwd at column ``pos``: the last `cd` left of it, else ``before``."""
+    here = before
+    for cd_pos, after in events:
+        if cd_pos < pos:
+            here = after
+    return here
 
 
 def inplugin_script_write_findings(
@@ -564,7 +894,8 @@ def inplugin_script_write_findings(
     uses the full regex path, which now folds the script's own location too.
 
     ``rel_path`` is the file's plugin-relative path — the finding message AND
-    the ``self_path`` the ``$0`` / ``__file__`` fold resolves against.
+    the ``self_path`` the ``__file__`` fold (AST) and, for a shell script only,
+    the ``$0`` fold (regex) resolve against.
     """
     if Path(rel_path).suffix.lower() in _PY_SOURCE_SUFFIXES:
         from cpv_write_sink_ast import collect_ast_write_sinks  # local: import cycle
@@ -596,12 +927,67 @@ def _regex_path_findings(
     ``include_py_patterns=False`` drops ONLY ``_PY_WRITE_PATTERNS`` — used when
     the AST path already judged this file's Python writes, so the shell surface
     embedded in it is still scanned without double-reporting.
+
+    Markdown (see ``_line_contexts``): each fence is its own scope, prose outside
+    fences is judged by the class A / C rules, and a documentation-only file's
+    prose is not scanned at all. Shell scopes (a shell script, a shell-tagged
+    fence) additionally track the working directory (class B, ``_ShellCwd``).
     """
+    # A JSON Lines file is a stream of DATA records: no Claude Code surface
+    # executes it or loads it as instructions, so there is no program whose
+    # write RC-164 could be judging. Census: a detector-bench corpus record
+    # quoting `chmod +x evil.sh` as test input fired a blocking RC-164.
+    if Path(rel_path).suffix.lower() in _DATA_ONLY_SUFFIXES:
+        return []
     findings: list[WriteFinding] = []
     lines = content.split("\n")
+    self_path = rel_path if _is_shell_script(rel_path, lines) else None
+    doc_only = is_documentation_only_path(rel_path)
+    contexts = _line_contexts(lines, rel_path, self_path is not None)
+    root_n = Path(os.path.normpath(plugin_root))
+    unresolved_chmod: list[int] = []
+    scope = -1
+    cwd = _ShellCwd(root_n)
+    written: set[str] = set()
+    heredoc_delims: list[str] = []
 
     for idx, line in enumerate(lines):
         line_no = idx + 1
+        ctx = contexts[idx]
+        if ctx.scope != scope:
+            # A new fence is a new program: its cwd and its written files are
+            # its own, never inherited from the fence before it.
+            scope = ctx.scope
+            cwd = _ShellCwd(root_n)
+            written = set()
+            heredoc_delims = []
+        if ctx.marker:
+            continue
+        if ctx.prose:
+            # Class C (part 1): a documentation-only surface (CHANGELOG,
+            # README, docs/) is prose for a HUMAN reader — it is not a program
+            # and no agent loads it as instructions, so no sentence in it can
+            # perform the write RC-164 judges.
+            if doc_only:
+                continue
+            # Class A: a line-leading `>` in markdown prose is a BLOCKQUOTE
+            # marker (`  > resolve_pillar_scripts.sh — …`), never a redirect.
+            # Inside a fence the same `>` IS a redirect and is left alone.
+            line = _BLOCKQUOTE_RE.sub("", line, count=1)
+
+        # Heredoc bodies are file CONTENT, not commands: a `cd` written into a
+        # generated script must not move this script's cwd.
+        if heredoc_delims:
+            if line.strip() == heredoc_delims[0]:
+                heredoc_delims.pop(0)
+            cwd_events: list[tuple[int, Path | None]] = []
+            cwd_before = cwd.current()
+        elif ctx.shell:
+            cwd_before, cwd_events = cwd.advance(line, plugin_root, self_path)
+            heredoc_delims.extend(_heredoc_delimiters(line))
+        else:
+            cwd_before, cwd_events = root_n, []
+
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -618,7 +1004,9 @@ def _regex_path_findings(
             if mo is None:
                 continue
             dst = mo.group(1)
-            if not _destination_in_tree(dst, plugin_root, rel_path):
+            written.add(_bare(dst))
+            judged = _rebase(dst, _cwd_at(cwd_before, cwd_events, mo.start(1)), root_n)
+            if judged is None or not _destination_in_tree(judged, plugin_root, self_path):
                 continue  # lenient — unresolvable / out-of-tree destination
             body = _heredoc_body_after(lines, idx)
             is_script = _is_script_destination(dst) or (
@@ -639,20 +1027,47 @@ def _regex_path_findings(
             continue
 
         # ── chmod +x on an in-plugin path makes that path a runnable script.
+        # Class C (part 2): a chmod in markdown PROSE never counts, on any
+        # surface. chmod creates no content, so on its own it cannot put an
+        # unscanned script in the tree; RC-164 uses it only as script EVIDENCE
+        # for a write in the same program — and prose has no program flow. A
+        # prose instruction that really generates a script carries the WRITE,
+        # which is still judged on an instruction-loadable surface. Inside a
+        # fence (and in every non-markdown file) chmod keeps firing.
         chmod_hit = False
-        for pat in _CHMOD_EXEC_PATTERNS:
+        for pat in () if ctx.prose else _CHMOD_EXEC_PATTERNS:
+            is_os_chmod = "os\\.chmod" in pat.pattern
             # ``os.chmod`` is a PYTHON primitive — part of the overlap the AST
             # path already judges (and judges better: it reads the mode bits,
             # where this pattern flags any mode at all). The shell ``chmod +x``
             # form stays, because a shell command inside a string is invisible
             # to the AST walk.
-            if not include_py_patterns and "os\\.chmod" in pat.pattern:
+            if not include_py_patterns and is_os_chmod:
                 continue
             mo = pat.search(line)
             if mo is None:
                 continue
-            target = _chmod_target(mo.group(1), "os\\.chmod" in pat.pattern, lines, idx, rel_path, plugin_root)
-            if target is not None and _destination_in_tree(target, plugin_root, rel_path):
+            # The generate-then-chmod pairing is trusted only in a SHELL scope:
+            # elsewhere (a Python docstring, a JS comment) "> on" and "chmod +x
+            # on" are two sentences, not a program writing then marking `on`.
+            target = _chmod_target(
+                mo.group(1),
+                is_os_chmod,
+                lines,
+                idx,
+                rel_path,
+                plugin_root,
+                self_path,
+                written if ctx.shell else set(),
+            )
+            if target is None:
+                if is_os_chmod:
+                    unresolved_chmod.append(line_no)  # unplaceable root → T3
+                break
+            target_judged = _rebase(target, _cwd_at(cwd_before, cwd_events, mo.start()), root_n)
+            if target_judged is not None and _destination_in_tree(
+                target_judged, plugin_root, self_path
+            ):
                 findings.append(
                     WriteFinding(
                         line_no,
@@ -682,7 +1097,8 @@ def _regex_path_findings(
                 if resolved is None:
                     continue  # unresolvable name → no in-tree evidence → PASS
                 dst = resolved
-            tier = _regex_tier(dst, plugin_root, rel_path)
+            judged = _rebase(dst, _cwd_at(cwd_before, cwd_events, mo.start(1)), root_n)
+            tier = None if judged is None else _regex_tier(judged, plugin_root, self_path)
             if tier is None:
                 continue
             findings.append(
@@ -709,7 +1125,9 @@ def _regex_path_findings(
             if mo is None:
                 continue
             dst = _dest_token(line, mo)
-            tier = _regex_tier(dst, plugin_root, rel_path)
+            written.add(_bare(dst))
+            judged = _rebase(dst, _cwd_at(cwd_before, cwd_events, mo.start(1)), root_n)
+            tier = None if judged is None else _regex_tier(judged, plugin_root, self_path)
             if tier is None:
                 continue
             findings.append(
@@ -727,7 +1145,26 @@ def _regex_path_findings(
             )
             break
 
+    if unresolved_chmod:
+        findings.append(_t3_aggregate(unresolved_chmod, rel_path))
     return findings
+
+
+def _t3_aggregate(sites: list[int], rel_path: str) -> WriteFinding:
+    """ONE non-blocking T3 advisory for every unplaceable script write in a file."""
+    ordered = sorted(set(sites))
+    shown = ", ".join(str(n) for n in ordered[:3])
+    more = "" if len(ordered) <= 3 else f", … (+{len(ordered) - 3} more)"
+    return WriteFinding(
+        ordered[0],
+        f"{len(ordered)} script write(s) in this file are anchored to a root "
+        f"the fold cannot place (a hoisted or parameter-anchored path), so "
+        f"CPV cannot decide whether they land inside the plugin tree — "
+        f"line(s) {shown}{more}. Advisory only: re-express the destination "
+        f"through ${{CLAUDE_PLUGIN_DATA}} or a literal path to make it "
+        f"decidable [{rel_path}]",
+        "info",
+    )
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -795,20 +1232,6 @@ def _ast_path_findings(
             findings.append(WriteFinding(sink.line_no, message, tier))
 
     if unresolved_sites:
-        ordered = sorted(set(unresolved_sites))
-        shown = ", ".join(str(n) for n in ordered[:3])
-        more = "" if len(ordered) <= 3 else f", … (+{len(ordered) - 3} more)"
-        findings.append(
-            WriteFinding(
-                ordered[0],
-                f"{len(ordered)} script write(s) in this file are anchored to a root "
-                f"the fold cannot place (a hoisted or parameter-anchored path), so "
-                f"CPV cannot decide whether they land inside the plugin tree — "
-                f"line(s) {shown}{more}. Advisory only: re-express the destination "
-                f"through ${{CLAUDE_PLUGIN_DATA}} or a literal path to make it "
-                f"decidable [{rel_path}]",
-                "info",
-            )
-        )
+        findings.append(_t3_aggregate(unresolved_sites, rel_path))
 
     return findings

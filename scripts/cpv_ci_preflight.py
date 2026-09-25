@@ -387,13 +387,24 @@ def _actionlint_workflow_wired(root: Path) -> bool:
 
 # The mypy "CI still enforces it" backstop claim (issue #228 follow-up,
 # w9-followups #3b) is TRUE in two disjoint shapes: (1) Mega-Linter is wired AND
-# its config enables PYTHON_MYPY — the G2d/`_gate_mypy` degrade text — or (2) a
+# would actually run PYTHON_MYPY — the G2d/`_gate_mypy` degrade text — or (2) a
 # workflow directly `run:`s the mypy CLI outside Mega-Linter entirely. Shape (2)
 # is a broad "does the token `mypy` appear as a bare word on a non-comment
 # line" probe rather than a `run:`-scoped parse — the same breadth
 # MEGALINTER_WORKFLOW_PATTERN already accepts for its own claim, and erring
 # toward "wired" here only widens when the backstop claim is printed, never
 # whether the local mypy gate itself runs.
+#
+# Shape (1) itself has to mirror Mega-Linter's OWN enable/disable precedence
+# (this was the #228-follow-up bug the sync fixed): with no ENABLE_LINTERS/
+# ENABLE key at all, Mega-Linter's default is to run EVERY linter it supports
+# — PYTHON_MYPY included — so "PYTHON_MYPY not explicitly listed" must NOT
+# read as "mypy is not wired" when there is no explicit list to begin with.
+# The prior version required an explicit PYTHON_MYPY entry unconditionally,
+# which under-reported the CI backstop on the (very common) no-ENABLE-key
+# config. DISABLE_LINTERS/DISABLE is checked last and wins over either: an
+# explicit disable of PYTHON_MYPY, or of the whole PYTHON language, means
+# Mega-Linter will not run it regardless of what ENABLE says (or omits).
 MYPY_WORKFLOW_RUN_PATTERN = r"(?im)^[^#\n]*\bmypy\b"
 _MYPY_WORKFLOW_RUN_RE = re.compile(MYPY_WORKFLOW_RUN_PATTERN)
 _MYPY_NOT_WIRED = (
@@ -404,12 +415,23 @@ _MYPY_NOT_WIRED = (
 
 
 def _mypy_workflow_wired(root: Path) -> bool:
-    """True when CI actually runs mypy: Mega-Linter is wired and its config
-    enables PYTHON_MYPY, OR a workflow directly invokes the mypy CLI."""
+    """True when CI actually runs mypy: Mega-Linter is wired and would run
+    PYTHON_MYPY (explicitly enabled, OR no explicit ENABLE/ENABLE_LINTERS list
+    at all — Mega-Linter's own default is to run every linter — and not
+    explicitly disabled), OR a workflow directly invokes the mypy CLI."""
     if _megalinter_workflow_wired(root):
-        enabled = _megalinter_enabled_linters(root)
-        if enabled is not None and "PYTHON_MYPY" in enabled:
-            return True
+        # A workflow can invoke Mega-Linter with no `.mega-linter.yml` at all
+        # (its container ships its own defaults) — that is the SAME "no
+        # explicit ENABLE list" case as a present-but-key-less config, so
+        # `enabled is None` (file absent) is treated as an empty set here
+        # rather than short-circuiting `would_run` to False.
+        enabled = _megalinter_enabled_linters(root) or set()
+        explicit_enable = _megalinter_enable_list_is_explicit(root)
+        would_run = "PYTHON_MYPY" in enabled or not explicit_enable
+        if would_run:
+            disabled = _megalinter_disabled_linters(root)
+            if "PYTHON_MYPY" not in disabled and "PYTHON" not in disabled:
+                return True
     for wf in _workflow_yml_paths(root):
         try:
             text = wf.read_text(encoding="utf-8")
@@ -689,31 +711,38 @@ _TRIVY_LINTER_ID = "REPOSITORY_TRIVY"
 # a pyyaml dependency); an inline-flow list (`ENABLE_LINTERS: [A, B]`) is also
 # recognized by _parse_enabled_linters's flow branch.
 _ENABLE_KEY_RE = re.compile(r"^(ENABLE_LINTERS|ENABLE)\s*:(.*)$")
+# The DISABLE-side mirror of _ENABLE_KEY_RE (issue #228 follow-up, w9-followups
+# #3b): Mega-Linter's own precedence is ENABLE narrows the default-all set,
+# then DISABLE removes from whatever set is active — so a mypy "CI enforces
+# it" claim must also check DISABLE_LINTERS/DISABLE before it is true.
+_DISABLE_KEY_RE = re.compile(r"^(DISABLE_LINTERS|DISABLE)\s*:(.*)$")
 _BLOCK_ITEM_RE = re.compile(r"^\s*-\s*([A-Za-z0-9_]+)\s*$")
 
 
-def _parse_enabled_linters(text: str) -> set[str]:
-    """Extract the set of enabled linter ids from `.mega-linter.yml` text.
+def _parse_linter_id_list(text: str, key_re: re.Pattern[str]) -> set[str]:
+    """Extract the set of linter/language ids under a `key_re`-matched key.
 
-    Recognizes BOTH the YAML block-sequence form CPV emits::
+    Shared textual parser (no pyyaml) behind both `_parse_enabled_linters`
+    (``ENABLE_LINTERS``/``ENABLE``) and the DISABLE-side reader
+    (``DISABLE_LINTERS``/``DISABLE``). Recognizes BOTH the YAML block-sequence
+    form CPV emits::
 
         ENABLE_LINTERS:
           - PYTHON_BANDIT
           - REPOSITORY_CHECKOV
 
-    AND the inline-flow form ``ENABLE_LINTERS: [PYTHON_BANDIT, REPOSITORY_CHECKOV]``,
-    under either the ``ENABLE_LINTERS`` or the ``ENABLE`` key. Pure textual
-    parse (no pyyaml) — lines are walked, and the block list ends at the first
-    new top-level key or a non-item line. Comment lines (``# …``) and blanks
-    inside the block are skipped, so a commented-out linter is NOT counted as
-    enabled. Returns an empty set when no enable key is present.
+    AND the inline-flow form ``ENABLE_LINTERS: [PYTHON_BANDIT, REPOSITORY_CHECKOV]``.
+    Lines are walked, and the block list ends at the first new top-level key or
+    a non-item line. Comment lines (``# …``) and blanks inside the block are
+    skipped, so a commented-out entry is NOT counted. Returns an empty set when
+    no matching key is present.
     """
-    enabled: set[str] = set()
+    ids: set[str] = set()
     lines = text.splitlines()
     i = 0
     n = len(lines)
     while i < n:
-        m = _ENABLE_KEY_RE.match(lines[i])
+        m = key_re.match(lines[i])
         if not m:
             i += 1
             continue
@@ -723,13 +752,13 @@ def _parse_enabled_linters(text: str) -> set[str]:
             for tok in inline[1:-1].split(","):
                 tok = tok.strip().strip("'\"")
                 if tok:
-                    enabled.add(tok)
+                    ids.add(tok)
             i += 1
             continue
         if inline and not inline.startswith("#"):
             # `ENABLE_LINTERS: SOMETHING` on one line (single scalar) — rare,
-            # but treat the bare token as one enabled linter.
-            enabled.add(inline.strip("'\""))
+            # but treat the bare token as one entry.
+            ids.add(inline.strip("'\""))
             i += 1
             continue
         # Block-sequence form — consume the indented `- ITEM` lines that follow.
@@ -742,13 +771,47 @@ def _parse_enabled_linters(text: str) -> set[str]:
                 continue
             item = _BLOCK_ITEM_RE.match(line)
             if item:
-                enabled.add(item.group(1))
+                ids.add(item.group(1))
                 i += 1
                 continue
             # A non-item, non-comment line. If it is a new top-level key the
             # block ended; otherwise stop scanning this block conservatively.
             break
-    return enabled
+    return ids
+
+
+def _parse_enabled_linters(text: str) -> set[str]:
+    """Extract the set of enabled linter ids from `.mega-linter.yml` text.
+
+    See `_parse_linter_id_list` for the shared parsing rules. Returns an empty
+    set when no ``ENABLE_LINTERS``/``ENABLE`` key is present — callers that need
+    to distinguish "no key at all" (Mega-Linter's default is to run every
+    linter) from "key present but empty" use `_megalinter_has_explicit_enable`.
+    """
+    return _parse_linter_id_list(text, _ENABLE_KEY_RE)
+
+
+def _parse_disabled_linters(text: str) -> set[str]:
+    """Extract the set of DISABLE_LINTERS/DISABLE ids from `.mega-linter.yml`.
+
+    Mega-Linter's DISABLE(_LINTERS) list removes entries from whatever set is
+    otherwise active (the full default set, or a narrower ENABLE_LINTERS set),
+    so a "linter X is wired" claim is false if X (or its whole language, e.g.
+    ``PYTHON``) appears here.
+    """
+    return _parse_linter_id_list(text, _DISABLE_KEY_RE)
+
+
+def _megalinter_has_explicit_enable(text: str) -> bool:
+    """True when `.mega-linter.yml` text carries an ``ENABLE_LINTERS``/``ENABLE``
+    key at all (regardless of its contents).
+
+    Mega-Linter's own default — with NO such key present — is to run every
+    linter it supports, PYTHON_MYPY included. So the absence of this key is
+    itself positive evidence a linter is wired, not neutral; only a PRESENT key
+    narrows the active set to what it lists.
+    """
+    return any(_ENABLE_KEY_RE.match(line) for line in text.splitlines())
 
 
 def _megalinter_enabled_linters(root: Path) -> set[str] | None:
@@ -766,6 +829,41 @@ def _megalinter_enabled_linters(root: Path) -> set[str] | None:
         text = cfg.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return set()
+    return _parse_enabled_linters(text)
+
+
+def _megalinter_disabled_linters(root: Path) -> set[str]:
+    """Return the DISABLE_LINTERS/DISABLE id set from ``<root>/.mega-linter.yml``.
+
+    Absent file, unreadable file, or a file with no DISABLE key all yield an
+    empty set — nothing is disabled, the conservative "linter still wired"
+    direction for the mypy CI-backstop claim.
+    """
+    cfg = root / ".mega-linter.yml"
+    if not cfg.is_file():
+        return set()
+    try:
+        text = cfg.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return set()
+    return _parse_disabled_linters(text)
+
+
+def _megalinter_enable_list_is_explicit(root: Path) -> bool:
+    """True when ``<root>/.mega-linter.yml`` exists and carries an explicit
+    ``ENABLE_LINTERS``/``ENABLE`` key (narrowing Mega-Linter's default
+    run-everything set). Absent file, unreadable file, or a present file with
+    no such key → False (Mega-Linter's default applies: every linter runs,
+    PYTHON_MYPY included, absent a DISABLE entry).
+    """
+    cfg = root / ".mega-linter.yml"
+    if not cfg.is_file():
+        return False
+    try:
+        text = cfg.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return _megalinter_has_explicit_enable(text)
     return _parse_enabled_linters(text)
 
 
