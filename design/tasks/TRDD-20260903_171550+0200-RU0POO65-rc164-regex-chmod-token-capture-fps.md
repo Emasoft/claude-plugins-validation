@@ -1,9 +1,9 @@
 ---
 trdd-id: RU0POO65
 title: RC-164 regex chmod path captures prose tokens as in-plugin paths
-column: todo
+column: complete
 created: 2026-09-03T17:15:50+0200
-updated: 2026-09-03T17:15:50+0200
+updated: 2026-09-25T14:11:52+0200
 current-owner: cpv-main-session
 assignee: null
 priority: 2
@@ -22,6 +22,7 @@ audit-requirements: [security-scan]
 review-requirements: [code-review]
 created-by: TRDD-ETDWX70R
 implementation-commits: []
+status: tasked
 ---
 
 # RC-164 regex chmod path captures prose tokens as in-plugin paths
@@ -68,3 +69,5 @@ Must land BEFORE TRDD-3T170X2M: admitting RC-164 to the plugin gate with these
 captures live would newly block third-party plugins on garbage tokens.
 
 ## Approval log
+- 2026-09-25T14:11:03+0200 — column → complete. All four FP classes fixed + positive/negative controls; committed 60f43ca4
+2026-09-25: Landed in commit 60f43ca4 — blockquote/-shift/prose-chmod/positional-param FP classes fixed; JSONL-as-data; cmd-subst dest tokens extended; unplaceable chmod target folds to T3. Tests: tests/test_rc164_fp_classes.py + gate-level positive/negative controls in tests/test_rc164_plugin_gate.py. 451 tests green across six touched suites. implementation-commits: 60f43ca4
