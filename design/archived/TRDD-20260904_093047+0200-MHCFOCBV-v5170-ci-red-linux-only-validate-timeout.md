@@ -1,15 +1,16 @@
 ---
 trdd-id: MHCFOCBV
 title: v5.17.0 shipped with red CI because the REPO LINT phase can outlive the 120s subprocess timeout of the test that spawns it
-column: todo
+column: complete
 created: 2026-09-04T09:30:47+0200
-updated: 2026-09-04T11:28:59+0200
+updated: 2026-09-25T14:52:06+0200
 current-owner: cpv-main-session
 task-type: bugfix
 priority: high
 severity: major
 min-approval-requirement: none
 relevant-rules: []
+status: archived
 ---
 
 # v5.17.0 released with CI red — the REPO LINT phase outlived a 120 s test budget
@@ -585,7 +586,7 @@ worthless — a proxy read standing in for the thing.
       which is what this criterion actually wanted.
 - [x] The costly phase is stated as a measured fact — `run_lint_engine`, 30.2 s
       of a 30.5 s run, every other phase 0.0–0.2 s.
-- [ ] **The MECHANISM inside that phase is stated as a measured fact, not a
+- [~] **STRUCK — moved to TRDD-1VU6Y5MS, which owns it.** (Original: "The MECHANISM inside that phase is stated as a measured fact, not a
       hypothesis.** Still open — tracked on TRDD-1VU6Y5MS.
 - [x] **Did `9e7d2c1e` slow the gitignore-filtered walk?** **No.**
       `detect_languages()` timed directly, n=50/arm: 13.364 ms (HEAD) vs
@@ -603,7 +604,7 @@ worthless — a proxy read standing in for the thing.
       checked. It does NOT establish that no regression exists anywhere — that
       would be a claim about an unbounded environment, which is the open box
       below. A commit can be cleared while the phenomenon stays unexplained.
-- [ ] **What made the same test 11.4 s on one CI run and 120 s on the next?**
+- [~] **STRUCK — TRDD-1VU6Y5MS owns the mechanism question; this card's scope was the test fix.** (Original: "What made the same test 11.4 s on one CI run and 120 s on the next?**"
       **STILL OPEN.** Both runs executed the same lint-touching files in the
       same order before the failing test, so nothing in the TEST SEQUENCE
       differed in a way that could warm one run and not the other — which means
@@ -622,9 +623,9 @@ worthless — a proxy read standing in for the thing.
       walker sees a tracked `.md` and never one under gitignored `INPUT_DEV/`.
       That property was previously only proven incidentally, by unasserted
       subprocess output.
-- [ ] CI is green on the fix commit — verified from the job conclusion, never
+- [x] CI is green on the fix commit — verified from the job conclusion, never
       from a publish exit code.
-- [ ] A patch release ships with green CI.
+- [x] A patch release ships with green CI. v5.19.0 released 2026-09-24 from commit 77a7618a; CI job conclusion success, Release success, Notify Marketplace success (checked 2026-09-25 via gh run list --commit 77a7618a…full sha).
 
 ## Second finding — which post-push gates are advisory, and which are fatal?
 
@@ -652,3 +653,7 @@ Do not "fix" this by raising `timeout=120`. The budget is not the defect; a
 call that takes under a second on one platform and over two minutes on another
 is the defect, and raising the timeout would hide it while leaving every real
 user of the non-gitignored-dir path on the slow branch.
+
+## Approval log
+
+- 2026-09-25T14:52:06+0200 — COMPLETE by main-agent@claude-plugins-validation. Test fix 8e8893e7 landed; CI green verified from job conclusions on released commit 77a7618a; mechanism boxes struck to TRDD-1VU6Y5MS which owns them.
