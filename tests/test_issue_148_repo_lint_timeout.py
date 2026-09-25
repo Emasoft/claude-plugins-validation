@@ -80,6 +80,57 @@ class TestEveryLinterSpawnIsBounded:
         assert not missing, f"_run_linter calls missing a timeout= at lines: {missing}"
 
 
+class TestLinterBudgetIsStrictlyNested:
+    """The per-linter budget must be strictly smaller than any plausible outer
+    timeout around a whole validate run (TRDD-1VU6Y5MS box 1).
+
+    Why: harnesses spawn ``validate_plugin`` with a 120s wall clock (the
+    smallest outer bound in this repo). If a linter spawn's inner deadline
+    equals or exceeds that, the OUTER clock — started first — always expires
+    first, the outer caller kills the whole run, and every linter's own
+    graceful ``TimeoutExpired`` handler (the "timed out — skipping" WARNING)
+    is unreachable dead code: exactly the unreachable-handler defect the card
+    records. Equality is the failure, so the test pins strict inequality with
+    margin, not a magic value: someone raising the constant re-runs this
+    arithmetic against the real outer bound instead of silently re-creating
+    the deadlock."""
+
+    def test_linter_timeout_default_is_strictly_below_the_smallest_outer_bound(self) -> None:
+        """_LINTER_TIMEOUT_DEFAULT < 120 (the smallest plausible outer timeout),
+        with enough margin for the outer caller's own teardown to still run."""
+        smallest_outer_bound = 120.0
+        assert cpv_lint_engine._LINTER_TIMEOUT_DEFAULT < smallest_outer_bound, (
+            f"_LINTER_TIMEOUT_DEFAULT={cpv_lint_engine._LINTER_TIMEOUT_DEFAULT} is not "
+            f"strictly below the smallest plausible outer timeout ({smallest_outer_bound}s) — "
+            "the inner graceful handler is unreachable again (TRDD-1VU6Y5MS)"
+        )
+        # A bare strict-< allows 119.999, which leaves ~0 for the outer
+        # caller's own bookkeeping; require a real margin, not a technicality.
+        assert smallest_outer_bound - cpv_lint_engine._LINTER_TIMEOUT_DEFAULT >= 5.0, (
+            "the margin below the outer bound must be at least 5s so the outer "
+            "caller's own teardown can run after the inner handler fires"
+        )
+
+    def test_no_hardcoded_120s_remains_at_linter_spawn_sites(self) -> None:
+        """Every former literal ``timeout=120`` at a _run_linter site is gone;
+        a re-introduced literal would bypass the constant and the invariant."""
+        tree = ast.parse(LINT_ENGINE_SRC.read_text(encoding="utf-8"))
+        literals: list[int] = []
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "_run_linter"
+            ):
+                for kw in node.keywords:
+                    if kw.arg == "timeout" and isinstance(kw.value, ast.Constant):
+                        literals.append(node.lineno)
+        assert not literals, (
+            f"_run_linter call sites passing a LITERAL timeout at lines {literals} — "
+            "use _LINTER_TIMEOUT_DEFAULT so the nesting invariant stays checkable"
+        )
+
+
 class TestTimeoutOverride:
     """``PLUGIN_REPO_LINT_TIMEOUT`` caps every linter spawn uniformly."""
 
