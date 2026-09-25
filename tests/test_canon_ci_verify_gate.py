@@ -181,7 +181,11 @@ def _fake_run_factory(runs_payload, gh_present):
             return _subprocess.CompletedProcess(argv, 0, stdout="a" * 40 + "\n", stderr="")
         if argv[:2] == [str(_publish.shutil.which("gh") or "gh"), "run", "list"] or argv[1:3] == ["run", "list"]:
             return _subprocess.CompletedProcess(argv, 0, stdout=_json.dumps(runs_payload), stderr="")
-        return _subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        # Fail loudly on anything unrecognized: a silent empty-success stub is
+        # a latent vacuity vector — a third subprocess call added to the stage
+        # later would be satisfied with fabricated clean output instead of
+        # failing this test.
+        raise AssertionError(f"unexpected subprocess call in the stage: {argv!r}")
 
     return fake_run
 
@@ -201,13 +205,16 @@ def test_red_ci_advisory_marker_printed_with_exit_zero(monkeypatch, tmp_path, ca
 
 def test_green_ci_prints_green_with_exit_zero(monkeypatch, tmp_path, capsys):
     """Green control: exit 0 and the ✓ line — the label change must not have
-    broken the happy path."""
+    broken the happy path. One readouterr() call: a second call would see
+    drained buffers (the double-drain defect the review caught — the original
+    `out, err = readouterr().out, readouterr().err` discarded err before
+    reading it)."""
     monkeypatch.setattr(_publish.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
     runs = [{"name": "CI", "status": "completed", "conclusion": "success", "headBranch": "master"}]
     rc = _drive_stage(monkeypatch, tmp_path, runs)
-    out, err = capsys.readouterr().out, capsys.readouterr().err
+    captured = capsys.readouterr()
     assert rc == 0
-    assert "✓ CI green" in out + err
+    assert "✓ CI green" in captured.out, captured.out[:400]
 
 
 # ---------------------------------------------------------------------------
