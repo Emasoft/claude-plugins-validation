@@ -321,7 +321,36 @@ def _extract_json_object(stdout: str) -> str | None:
 
 
 def _run_validate_plugin(root: Path, *, marketplace_only: bool = False) -> tuple[int, dict[str, Any]]:
-    cmd = ["uv", "run", "python", str(SCRIPTS_DIR / "validate_plugin.py"), str(root), "--strict", "--json"]
+    # WHY (#230): a bare `uv run python validate_plugin.py` builds its venv from
+    # whatever pyproject.toml `uv` discovers by walking UP from the current working
+    # directory — and a pre-install scan is routinely invoked from an arbitrary cwd
+    # with no CPV pyproject in reach (that is the whole point of a sandboxed
+    # pre-install scan). Such a venv has no pyyaml, so the child died with
+    # `ModuleNotFoundError: yaml` before emitting any JSON, and this function's
+    # own "no stdout ⇒ usage/internal error" branch below turned that into a
+    # silent exit-2/no-verdict instead of a real scan result.
+    #
+    # Routed through `remote_validation.py` (CPV's isolating launcher — the same
+    # entry point `cpv_validate_plugin_folder.py` uses for its own sub-invocation)
+    # via `uv run --with pyyaml`, matching CLAUDE.md's canonical command. This is
+    # deliberately NOT the `[sys.executable, launcher, ...]` shape
+    # `cpv_validate_plugin_folder.py` uses: that shape only carries pyyaml when the
+    # PARENT process was itself launched with it, which is not guaranteed for
+    # `cpv-pre-install-scan` (a user-facing entry point invokable via a bare
+    # `python3`). `--with pyyaml` makes the child self-contained regardless of cwd,
+    # of `sys.executable`, or of whether a pyproject.toml exists anywhere nearby.
+    cmd = [
+        "uv",
+        "run",
+        "--with",
+        "pyyaml",
+        "python",
+        str(SCRIPTS_DIR / "remote_validation.py"),
+        "plugin",
+        str(root),
+        "--strict",
+        "--json",
+    ]
     if marketplace_only:
         cmd.append("--marketplace-only")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, check=False)
