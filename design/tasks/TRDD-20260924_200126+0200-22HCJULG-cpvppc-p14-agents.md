@@ -41,4 +41,3 @@ Files: cpv-the-skills-menu routes; cpv-plugin-creator-agent, cpv-plugin-fixer-ag
 - Never executes target code; static checks work on uninstalled checkouts.
 - `validate_plugin` / `validate_marketplace`: repo with a lock → failing assertions as MAJOR; without
   a lock → one INFO line.
-
