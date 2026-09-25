@@ -323,8 +323,8 @@ def test_row16_trufflehog_installer_timeout_is_caught() -> None:
     src = _src()
     block = src[src.index("def _secret_scan("):src.index("def _fork_parity_probe(")]
     # The install attempt sits between the first probe and the block-if-still-missing.
-    first = block.index('if not shutil.which("trufflehog"):')
-    second = block.index('if not shutil.which("trufflehog"):', first + 10)
+    first = block.index("if not _trufflehog:")
+    second = block.index("if not _trufflehog:", first + 10)
     install = block[first:second]
     assert "except subprocess.TimeoutExpired:" in install
     assert "The trufflehog installer timed out" in install

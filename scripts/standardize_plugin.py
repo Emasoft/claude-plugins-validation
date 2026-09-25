@@ -4481,235 +4481,248 @@ def fix_missing_files(
         # Drop any missing-files duplicates so we don't process them twice.
         force_overwrite -= missing_files
 
-    if not missing_files and not force_overwrite:
+    # Whether there is any missing/force-overwrite FILE-GENERATION work to do.
+    # This used to gate the whole function with an early `return []` — which
+    # meant the migrator block below (dep-tag, test-suite-timeout, changelog,
+    # canon-version, ci-verify, trufflehog-path, ci-env, jscpd, cspell,
+    # commitlint, cpv-ref repin, dev-extra, validate.yml removal) never ran on
+    # a plugin that already has every standard file, even though every one of
+    # those migrators documents itself as running "on ANY --fix". Restructured
+    # so a plain --fix on a fully-scaffolded-but-stale plugin still migrates
+    # it; the file-generation half (which needs the manifest) is now scoped to
+    # `has_missing_work` instead of gating the whole function.
+    has_missing_work = bool(missing_files or force_overwrite)
+    created: list[str] = []
+
+    if not has_missing_work:
         print(f"  {GREEN}No fixable missing files.{NC}")
-        return []
 
     # Add scripts/ to sys.path BEFORE importing generator modules
     scripts_dir = str(Path(__file__).resolve().parent)
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
 
-    # Read plugin.json to populate template params
-    manifest = _read_plugin_json(plugin_path)
-    if not manifest:
-        print(f"  {RED}Cannot fix: .claude-plugin/plugin.json not found.{NC}")
-        print(f"  {DIM}The manifest is needed to populate template parameters.{NC}")
-        return []
+    manifest = None
+    if has_missing_work:
+        # Read plugin.json to populate template params
+        manifest = _read_plugin_json(plugin_path)
+        if not manifest:
+            print(f"  {RED}Cannot fix: .claude-plugin/plugin.json not found.{NC}")
+            print(f"  {DIM}The manifest is needed to populate template parameters.{NC}")
+            return []
 
-    params = _params_from_manifest(manifest)
+    if manifest is not None:
+        params = _params_from_manifest(manifest)
 
-    # Issue #23 (v2.85.0): before generating notify-marketplace.yml, detect
-    # values from the pre-existing file (if any) and let them override the
-    # PluginParams defaults. Without this, --force-templates silently
-    # clobbers a real MARKETPLACE_REPO with the literal placeholder and
-    # rewrites the secret name to MARKETPLACE_PAT even when the repo's
-    # configured secret is e.g. MARKETPLACE_DISPATCH_TOKEN.
-    notify_changes: dict[str, tuple[str | None, str | None]] = {}
-    will_emit_notify = _NOTIFY_MARKETPLACE_REL in missing_files or _NOTIFY_MARKETPLACE_REL in force_overwrite
-    if will_emit_notify:
-        notify_changes = _apply_notify_marketplace_overrides(params, plugin_path, marketplace)
-        # Refuse-to-emit-placeholder guard: when --force-templates is on AND
-        # an existing notify-marketplace.yml is being overwritten AND we
-        # still have no real marketplace name (no CLI flag, nothing
-        # detectable in the pre-existing YAML), refuse to ship the literal
-        # placeholder. The caller's working YAML may have used a different
-        # template version that doesn't match our regex; making them
-        # supply --marketplace=owner/repo explicitly is safer than
-        # silently breaking their notification chain.
-        existing_yml = plugin_path / _NOTIFY_MARKETPLACE_REL
-        if _NOTIFY_MARKETPLACE_REL in force_overwrite and existing_yml.is_file() and not params.marketplace:
-            print(
-                f"  {RED}REFUSED:{NC} cannot regenerate {_NOTIFY_MARKETPLACE_REL} — no marketplace "
-                f"name detected in the existing file and no --marketplace=owner/repo flag was "
-                f"passed. Emitting the placeholder '{_NOTIFY_PLACEHOLDER_REPO}' would silently "
-                f"break the plugin's marketplace dispatch chain (issue #23). Re-run with "
-                f"--marketplace=<owner>/<repo> to override, or check the existing file's "
-                f"MARKETPLACE_REPO line is parseable."
-            )
-            # Drop notify-marketplace.yml from the work-set so the rest of
-            # the migration proceeds. Other files still regenerate.
-            force_overwrite.discard(_NOTIFY_MARKETPLACE_REL)
-            missing_files.discard(_NOTIFY_MARKETPLACE_REL)
-        elif notify_changes:
-            # Surface the changes so the user notices when --force-templates
-            # would alter a real value (e.g. owner override) AND emit a loud
-            # [ACTION REQUIRED] block when a secret-name deviation is found.
-            print(f"  {CYAN}[migration]{NC} notify-marketplace.yml derived from existing file:")
-            deviation_key = "marketplace_secret_name__DEVIATION"
-            for field_name, (old, new) in notify_changes.items():
-                if field_name == deviation_key:
-                    continue  # surfaced separately below with the action-required block
-                if old != new:
-                    print(f"    {DIM}{field_name}:{NC} {old!r} → {new!r}")
-
-            if deviation_key in notify_changes:
-                old_secret, _ = notify_changes[deviation_key]
-                owner_for_gh = params.marketplace_owner or params.github_owner or "<owner>"
-                repo_for_gh = params.repo_name or "<repo>"
-                print()
-                print(f"  {YELLOW}{BOLD}[ACTION REQUIRED]{NC} secret-name deviation detected")
-                print(f"  The previous notify-marketplace.yml referenced {BOLD}secrets.{old_secret}{NC}.")
+        # Issue #23 (v2.85.0): before generating notify-marketplace.yml, detect
+        # values from the pre-existing file (if any) and let them override the
+        # PluginParams defaults. Without this, --force-templates silently
+        # clobbers a real MARKETPLACE_REPO with the literal placeholder and
+        # rewrites the secret name to MARKETPLACE_PAT even when the repo's
+        # configured secret is e.g. MARKETPLACE_DISPATCH_TOKEN.
+        notify_changes: dict[str, tuple[str | None, str | None]] = {}
+        will_emit_notify = _NOTIFY_MARKETPLACE_REL in missing_files or _NOTIFY_MARKETPLACE_REL in force_overwrite
+        if will_emit_notify:
+            notify_changes = _apply_notify_marketplace_overrides(params, plugin_path, marketplace)
+            # Refuse-to-emit-placeholder guard: when --force-templates is on AND
+            # an existing notify-marketplace.yml is being overwritten AND we
+            # still have no real marketplace name (no CLI flag, nothing
+            # detectable in the pre-existing YAML), refuse to ship the literal
+            # placeholder. The caller's working YAML may have used a different
+            # template version that doesn't match our regex; making them
+            # supply --marketplace=owner/repo explicitly is safer than
+            # silently breaking their notification chain.
+            existing_yml = plugin_path / _NOTIFY_MARKETPLACE_REL
+            if _NOTIFY_MARKETPLACE_REL in force_overwrite and existing_yml.is_file() and not params.marketplace:
                 print(
-                    f"  CPV v2.86.0+ enforces the canonical secret name {BOLD}MARKETPLACE_PAT{NC} across all plugins —"
+                    f"  {RED}REFUSED:{NC} cannot regenerate {_NOTIFY_MARKETPLACE_REL} — no marketplace "
+                    f"name detected in the existing file and no --marketplace=owner/repo flag was "
+                    f"passed. Emitting the placeholder '{_NOTIFY_PLACEHOLDER_REPO}' would silently "
+                    f"break the plugin's marketplace dispatch chain (issue #23). Re-run with "
+                    f"--marketplace=<owner>/<repo> to override, or check the existing file's "
+                    f"MARKETPLACE_REPO line is parseable."
                 )
-                print(f"  the regenerated YAML now references {BOLD}secrets.MARKETPLACE_PAT{NC}.")
-                print()
-                print(f"  {GREEN}Run (assumes $MARKETPLACE_PAT is exported):{NC}")
-                print(
-                    f'    gh secret set MARKETPLACE_PAT --repo {owner_for_gh}/{repo_for_gh} --body "$MARKETPLACE_PAT"'
+                # Drop notify-marketplace.yml from the work-set so the rest of
+                # the migration proceeds. Other files still regenerate.
+                force_overwrite.discard(_NOTIFY_MARKETPLACE_REL)
+                missing_files.discard(_NOTIFY_MARKETPLACE_REL)
+            elif notify_changes:
+                # Surface the changes so the user notices when --force-templates
+                # would alter a real value (e.g. owner override) AND emit a loud
+                # [ACTION REQUIRED] block when a secret-name deviation is found.
+                print(f"  {CYAN}[migration]{NC} notify-marketplace.yml derived from existing file:")
+                deviation_key = "marketplace_secret_name__DEVIATION"
+                for field_name, (old, new) in notify_changes.items():
+                    if field_name == deviation_key:
+                        continue  # surfaced separately below with the action-required block
+                    if old != new:
+                        print(f"    {DIM}{field_name}:{NC} {old!r} → {new!r}")
+
+                if deviation_key in notify_changes:
+                    old_secret, _ = notify_changes[deviation_key]
+                    owner_for_gh = params.marketplace_owner or params.github_owner or "<owner>"
+                    repo_for_gh = params.repo_name or "<repo>"
+                    print()
+                    print(f"  {YELLOW}{BOLD}[ACTION REQUIRED]{NC} secret-name deviation detected")
+                    print(f"  The previous notify-marketplace.yml referenced {BOLD}secrets.{old_secret}{NC}.")
+                    print(
+                        f"  CPV v2.86.0+ enforces the canonical secret name {BOLD}MARKETPLACE_PAT{NC} across all plugins —"
+                    )
+                    print(f"  the regenerated YAML now references {BOLD}secrets.MARKETPLACE_PAT{NC}.")
+                    print()
+                    print(f"  {GREEN}Run (assumes $MARKETPLACE_PAT is exported):{NC}")
+                    print(
+                        f'    gh secret set MARKETPLACE_PAT --repo {owner_for_gh}/{repo_for_gh} --body "$MARKETPLACE_PAT"'
+                    )
+                    print()
+                    print(f"  {DIM}After the next push triggers a marketplace dispatch successfully:{NC}")
+                    print(f"    gh secret delete {old_secret} --repo {owner_for_gh}/{repo_for_gh}")
+                    print()
+
+        # Import generator functions from generate_plugin_repo
+        gen_module = importlib.import_module("generate_plugin_repo")
+
+        # Profile-aware regeneration (TRDD-e9f13df1, #128-A / Piece D): resolve the
+        # plugin's pipeline profile so a profile-parameterized gen_* (currently
+        # gen_publish_py) regenerates the PROFILE-APPROPRIATE variant. Without this,
+        # `--force-templates` would clobber a submodule-build plugin's submodule-aware
+        # publish.py with the standard one and break its releases — the exact #128
+        # breakage PSS reported. Best-effort: resolve_pipeline_profile falls back to
+        # "standard" on any error, so a standard plugin is byte-identically unaffected.
+        from cpv_pipeline_profile import (
+            resolve_pipeline_profile,  # noqa: E402 — sibling import after the scripts/ path insert above
+        )
+
+        profile = resolve_pipeline_profile(plugin_path)
+
+        # Issue #145b / #144Bb — paths the plugin deliberately diverges on (read
+        # once from the already-parsed manifest). A force-overwrite of any of these
+        # is skipped regardless of drift direction.
+        divergence = _manifest_intentional_divergence(manifest)
+
+        # Process missing-then-force so the [create] / [overwrite] markers in the
+        # output reflect the actual operation.
+        process_set: list[tuple[str, str]] = [(p, "create") for p in sorted(missing_files)] + [
+            (p, "overwrite") for p in sorted(force_overwrite)
+        ]
+
+        for rel_path, op_kind in process_set:
+            gen_func_name = _FILE_TO_GENERATOR[rel_path]
+            gen_func = getattr(gen_module, gen_func_name)
+
+            # Some gen_* functions take no params (e.g. gen_cliff_toml)
+            import inspect
+
+            sig = inspect.signature(gen_func)
+            if len(sig.parameters) == 0:
+                content = gen_func()
+            elif "profile" in sig.parameters:
+                # Profile-aware (TRDD-e9f13df1, #128-A): pass the resolved profile so a
+                # submodule-build plugin regenerates its submodule-aware publish.py,
+                # never the standard one. SELECTOR not suppressor — a standard plugin
+                # resolves to "standard" and gets the byte-identical standard output.
+                content = gen_func(params, profile=profile)
+            else:
+                content = gen_func(params)
+
+            file_path = plugin_path / rel_path
+            is_executable = rel_path in _EXECUTABLE_FILES
+
+            # Issue #145b / #144Bb — profile-AWARE force-overwrite. Before clobbering
+            # an existing shared-canon file, check whether the plugin's copy is
+            # already at/AHEAD of canon (force-overwriting would DOWNGRADE it — the
+            # exact case the validator flags) or is explicitly marked as an
+            # intentional divergence. Either way, SKIP the overwrite and leave the
+            # plugin's file untouched. Only applies to the force-overwrite branch; a
+            # genuinely MISSING file (op_kind == "create") is always written.
+            if op_kind == "overwrite":
+                skip_line = _force_template_skip_reason(
+                    file_path, rel_path, content, divergence, plugin_path, profile
                 )
-                print()
-                print(f"  {DIM}After the next push triggers a marketplace dispatch successfully:{NC}")
-                print(f"    gh secret delete {old_secret} --repo {owner_for_gh}/{repo_for_gh}")
-                print()
+                if skip_line is not None:
+                    print(f"  {YELLOW}{skip_line}{NC}")
+                    continue
 
-    # Import generator functions from generate_plugin_repo
-    gen_module = importlib.import_module("generate_plugin_repo")
+                # Issue #165 — MERGE, don't clobber, a canon JSON config. A plugin's own
+                # keys (e.g. `"MD010": {"code_blocks": false}`, load-bearing for a skill
+                # that documents tab-indented Makefile recipes) are carried over; canon
+                # wins only on the keys canon itself declares. JSON has no comments, so
+                # this merge loses nothing.
+                if rel_path.endswith(".json") and file_path.is_file():
+                    merged, preserved = _merge_canon_json(file_path.read_text(encoding="utf-8"), content)
+                    if merged is not None and preserved:
+                        content = merged
+                        print(f"  {GREEN}[merge]{NC} {rel_path} — preserved custom key(s): {', '.join(preserved)}")
 
-    # Profile-aware regeneration (TRDD-e9f13df1, #128-A / Piece D): resolve the
-    # plugin's pipeline profile so a profile-parameterized gen_* (currently
-    # gen_publish_py) regenerates the PROFILE-APPROPRIATE variant. Without this,
-    # `--force-templates` would clobber a submodule-build plugin's submodule-aware
-    # publish.py with the standard one and break its releases — the exact #128
-    # breakage PSS reported. Best-effort: resolve_pipeline_profile falls back to
-    # "standard" on any error, so a standard plugin is byte-identically unaffected.
-    from cpv_pipeline_profile import (
-        resolve_pipeline_profile,  # noqa: E402 — sibling import after the scripts/ path insert above
-    )
+                # Issue #165 — same for a canon YAML config, but the plugin's file is the
+                # BASE (see _merge_canon_yaml): we only APPEND the canon keys it lacks, so
+                # its values AND the comment paragraphs justifying them survive verbatim.
+                # This is what saves the real `.mega-linter.yml` case — the author extended
+                # canon's `REPOSITORY_CHECKOV_ARGUMENTS` with `,CKV_DOCKER_2` (a HEALTHCHECK
+                # skip, load-bearing because every Dockerfile they ship is an ephemeral
+                # run-once container) and a blind overwrite deleted it plus its 8-line
+                # rationale. A custom KEY detector cannot see this: the divergence is a
+                # custom VALUE inside a key canon also declares.
+                if rel_path in _CANON_YAML_MERGE_FILES and file_path.is_file():
+                    merged_yaml, kept, added = _merge_canon_yaml(file_path.read_text(encoding="utf-8"), content)
+                    content = merged_yaml
+                    if added:
+                        print(f"  {GREEN}[merge]{NC} {rel_path} — added canon key(s): {', '.join(added)}")
+                    if kept:
+                        print(
+                            f"  {YELLOW}[merge]{NC} {rel_path} — kept YOUR value for {', '.join(kept)} "
+                            f"(canon differs; reconcile by hand if you did not customize it)"
+                        )
+                    if not added and not kept:
+                        print(f"  {GREEN}[merge]{NC} {rel_path} — already at canon")
 
-    profile = resolve_pipeline_profile(plugin_path)
-
-    # Issue #145b / #144Bb — paths the plugin deliberately diverges on (read
-    # once from the already-parsed manifest). A force-overwrite of any of these
-    # is skipped regardless of drift direction.
-    divergence = _manifest_intentional_divergence(manifest)
-
-    created: list[str] = []
-
-    # Process missing-then-force so the [create] / [overwrite] markers in the
-    # output reflect the actual operation.
-    process_set: list[tuple[str, str]] = [(p, "create") for p in sorted(missing_files)] + [
-        (p, "overwrite") for p in sorted(force_overwrite)
-    ]
-
-    for rel_path, op_kind in process_set:
-        gen_func_name = _FILE_TO_GENERATOR[rel_path]
-        gen_func = getattr(gen_module, gen_func_name)
-
-        # Some gen_* functions take no params (e.g. gen_cliff_toml)
-        import inspect
-
-        sig = inspect.signature(gen_func)
-        if len(sig.parameters) == 0:
-            content = gen_func()
-        elif "profile" in sig.parameters:
-            # Profile-aware (TRDD-e9f13df1, #128-A): pass the resolved profile so a
-            # submodule-build plugin regenerates its submodule-aware publish.py,
-            # never the standard one. SELECTOR not suppressor — a standard plugin
-            # resolves to "standard" and gets the byte-identical standard output.
-            content = gen_func(params, profile=profile)
-        else:
-            content = gen_func(params)
-
-        file_path = plugin_path / rel_path
-        is_executable = rel_path in _EXECUTABLE_FILES
-
-        # Issue #145b / #144Bb — profile-AWARE force-overwrite. Before clobbering
-        # an existing shared-canon file, check whether the plugin's copy is
-        # already at/AHEAD of canon (force-overwriting would DOWNGRADE it — the
-        # exact case the validator flags) or is explicitly marked as an
-        # intentional divergence. Either way, SKIP the overwrite and leave the
-        # plugin's file untouched. Only applies to the force-overwrite branch; a
-        # genuinely MISSING file (op_kind == "create") is always written.
-        if op_kind == "overwrite":
-            skip_line = _force_template_skip_reason(
-                file_path, rel_path, content, divergence, plugin_path, profile
-            )
-            if skip_line is not None:
-                print(f"  {YELLOW}{skip_line}{NC}")
+            if dry_run:
+                tag = f"[dry-run] Would {op_kind}"
+                print(f"  {BLUE}{tag}{NC} {file_path} ({len(content)} bytes){' [exec]' if is_executable else ''}")
+                created.append(str(file_path))
                 continue
 
-            # Issue #165 — MERGE, don't clobber, a canon JSON config. A plugin's own
-            # keys (e.g. `"MD010": {"code_blocks": false}`, load-bearing for a skill
-            # that documents tab-indented Makefile recipes) are carried over; canon
-            # wins only on the keys canon itself declares. JSON has no comments, so
-            # this merge loses nothing.
-            if rel_path.endswith(".json") and file_path.is_file():
-                merged, preserved = _merge_canon_json(file_path.read_text(encoding="utf-8"), content)
-                if merged is not None and preserved:
-                    content = merged
-                    print(f"  {GREEN}[merge]{NC} {rel_path} — preserved custom key(s): {', '.join(preserved)}")
+            # Create parent directories
+            file_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Issue #165 — same for a canon YAML config, but the plugin's file is the
-            # BASE (see _merge_canon_yaml): we only APPEND the canon keys it lacks, so
-            # its values AND the comment paragraphs justifying them survive verbatim.
-            # This is what saves the real `.mega-linter.yml` case — the author extended
-            # canon's `REPOSITORY_CHECKOV_ARGUMENTS` with `,CKV_DOCKER_2` (a HEALTHCHECK
-            # skip, load-bearing because every Dockerfile they ship is an ephemeral
-            # run-once container) and a blind overwrite deleted it plus its 8-line
-            # rationale. A custom KEY detector cannot see this: the divergence is a
-            # custom VALUE inside a key canon also declares.
-            if rel_path in _CANON_YAML_MERGE_FILES and file_path.is_file():
-                merged_yaml, kept, added = _merge_canon_yaml(file_path.read_text(encoding="utf-8"), content)
-                content = merged_yaml
-                if added:
-                    print(f"  {GREEN}[merge]{NC} {rel_path} — added canon key(s): {', '.join(added)}")
-                if kept:
-                    print(
-                        f"  {YELLOW}[merge]{NC} {rel_path} — kept YOUR value for {', '.join(kept)} "
-                        f"(canon differs; reconcile by hand if you did not customize it)"
-                    )
-                if not added and not kept:
-                    print(f"  {GREEN}[merge]{NC} {rel_path} — already at canon")
+            # On overwrite, save a .bak alongside the original so the user can
+            # diff / restore if the new template breaks something specific to
+            # their plugin. Backup is silent — listed in the output line below.
+            backup_str = ""
+            if op_kind == "overwrite" and file_path.is_file():
+                bak = file_path.with_suffix(file_path.suffix + ".bak")
+                bak.write_bytes(file_path.read_bytes())
+                backup_str = f" (backup: {bak.name})"
 
-        if dry_run:
-            tag = f"[dry-run] Would {op_kind}"
-            print(f"  {BLUE}{tag}{NC} {file_path} ({len(content)} bytes){' [exec]' if is_executable else ''}")
+            # Write the file
+            file_path.write_text(content, encoding="utf-8")
+
+            # Set executable bit if needed
+            if is_executable:
+                file_path.chmod(file_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+            # Patch notify-marketplace.yml with marketplace owner/repo if provided
+            if rel_path == ".github/workflows/notify-marketplace.yml" and marketplace:
+                owner, repo = marketplace.split("/", 1)
+                patched = file_path.read_text(encoding="utf-8")
+                patched = patched.replace("MARKETPLACE_OWNER: ''", f"MARKETPLACE_OWNER: '{owner}'")
+                patched = patched.replace("MARKETPLACE_REPO: 'my-plugins-marketplace'", f"MARKETPLACE_REPO: '{repo}'")
+                file_path.write_text(patched, encoding="utf-8")
+
+            verb = "Overwrote" if op_kind == "overwrite" else "Created"
+            print(f"  {GREEN}{verb}:{NC} {file_path}{' [exec]' if is_executable else ''}{backup_str}")
             created.append(str(file_path))
-            continue
 
-        # Create parent directories
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # On overwrite, save a .bak alongside the original so the user can
-        # diff / restore if the new template breaks something specific to
-        # their plugin. Backup is silent — listed in the output line below.
-        backup_str = ""
-        if op_kind == "overwrite" and file_path.is_file():
-            bak = file_path.with_suffix(file_path.suffix + ".bak")
-            bak.write_bytes(file_path.read_bytes())
-            backup_str = f" (backup: {bak.name})"
-
-        # Write the file
-        file_path.write_text(content, encoding="utf-8")
-
-        # Set executable bit if needed
-        if is_executable:
-            file_path.chmod(file_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-
-        # Patch notify-marketplace.yml with marketplace owner/repo if provided
-        if rel_path == ".github/workflows/notify-marketplace.yml" and marketplace:
-            owner, repo = marketplace.split("/", 1)
-            patched = file_path.read_text(encoding="utf-8")
-            patched = patched.replace("MARKETPLACE_OWNER: ''", f"MARKETPLACE_OWNER: '{owner}'")
-            patched = patched.replace("MARKETPLACE_REPO: 'my-plugins-marketplace'", f"MARKETPLACE_REPO: '{repo}'")
-            file_path.write_text(patched, encoding="utf-8")
-
-        verb = "Overwrote" if op_kind == "overwrite" else "Created"
-        print(f"  {GREEN}{verb}:{NC} {file_path}{' [exec]' if is_executable else ''}{backup_str}")
-        created.append(str(file_path))
-
-    # Also create missing component directories
-    for item in results:
-        if item.category == "dirs" and item.status == "MISSING":
-            dir_path = plugin_path / item.name
-            if dry_run:
-                print(f"  {BLUE}[dry-run]{NC} Would create directory {dir_path}/")
-            else:
-                dir_path.mkdir(parents=True, exist_ok=True)
-                print(f"  {GREEN}Created dir:{NC} {dir_path}/")
-            created.append(str(dir_path) + "/")
+        # Also create missing component directories
+        for item in results:
+            if item.category == "dirs" and item.status == "MISSING":
+                dir_path = plugin_path / item.name
+                if dry_run:
+                    print(f"  {BLUE}[dry-run]{NC} Would create directory {dir_path}/")
+                else:
+                    dir_path.mkdir(parents=True, exist_ok=True)
+                    print(f"  {GREEN}Created dir:{NC} {dir_path}/")
+                created.append(str(dir_path) + "/")
 
     # Auto-add missing .gitignore entries when an existing .gitignore is present.
     # Use the SAME coverage logic as audit_gitignore so the two never disagree.

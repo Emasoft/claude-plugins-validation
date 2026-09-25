@@ -240,8 +240,15 @@ def test_emitted_helper_agrees_with_preflight(tmp_path: Path, form: str) -> None
     assert emitted(tmp_path) is pf._megalinter_workflow_wired(tmp_path)  # type: ignore[operator]
 
 
+_WIRED_GUARD_NAMES = {
+    "_ml_wired",  # Mega-Linter-backed gates (jscpd, cspell/checkov/etc — #228)
+    "_al_wired",  # actionlint (w9-followups #3b, #228 follow-up)
+    "_mypy_wired",  # mypy (w9-followups #3b, #228 follow-up)
+}
+
+
 def _will_enforce_calls_outside_wired_guard(tree: ast.Module) -> list[str]:
-    """Every Mega-Linter-backed "WILL enforce" cprint not under `if _ml_wired:`."""
+    """Every "WILL enforce" cprint not under `if <one of _WIRED_GUARD_NAMES>:`."""
     parents: dict[ast.AST, ast.AST] = {}
     for node in ast.walk(tree):
         for child in ast.iter_child_nodes(node):
@@ -251,14 +258,17 @@ def _will_enforce_calls_outside_wired_guard(tree: ast.Module) -> list[str]:
         if not (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "cprint"):
             continue
         text = ast.unparse(node)
-        # actionlint is enforced by a dedicated actionlint step, not Mega-Linter.
-        if "WILL enforce" not in text or "Lint job WILL enforce it. A green gate" in text:
+        if "WILL enforce" not in text:
             continue
         cur: ast.AST | None = node
         guarded = False
         while cur is not None:
             parent = parents.get(cur)
-            if isinstance(parent, ast.If) and ast.unparse(parent.test) == "_ml_wired" and cur in parent.body:
+            if (
+                isinstance(parent, ast.If)
+                and ast.unparse(parent.test) in _WIRED_GUARD_NAMES
+                and cur in parent.body
+            ):
                 guarded = True
                 break
             cur = parent
