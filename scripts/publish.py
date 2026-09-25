@@ -4650,6 +4650,11 @@ def stage_verify_ci_green(
         # --commit flag (that flag belongs to `gh run list`), and `gh run list
         # --commit` with an abbreviated sha silently matches nothing — so the
         # hint is a two-step with the FULL sha, then the run id.
+        # NOTE (TRDD-4VROKH40, 2026-09-25): this advisory label has NO
+        # production observation yet — its first live exercise is the NEXT
+        # release's Gate 14 (test-level proof is complete; unproven-in-
+        # production until a real publish prints it). Release author: observe
+        # the advisory line prints when CI is red and the exit is still 0.
         print(
             f"{RED}[advisory] CI RED on the released commit {sha[:8]}: {detail}{NC}\n"
             f"{RED}  (advisory — this gate never changes the exit code; the release{NC}\n"
