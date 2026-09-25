@@ -54,6 +54,24 @@ def minimal_plugin_fixture(tmp_path: Path) -> Path:
     return plugin_dir
 
 
+@pytest.fixture
+def blocking_plugin_fixture(tmp_path: Path) -> Path:
+    """A plugin whose manifest is missing the required ``name`` field.
+
+    ``validate_plugin --strict`` reports this as a CRITICAL finding — used to
+    prove a genuinely-BLOCKED verdict (not just "clean") survives the
+    ``remote_validation.py`` sub-invocation hop end to end.
+    """
+    plugin_dir = tmp_path / "blocking-fixture-plugin"
+    manifest_dir = plugin_dir / ".claude-plugin"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "plugin.json").write_text(
+        json.dumps({"version": "0.1.0", "description": "manifest missing the required name field"}),
+        encoding="utf-8",
+    )
+    return plugin_dir
+
+
 def test_no_pyproject_toml_precondition(tmp_path: Path) -> None:
     """Precondition: tmp_path's ancestor chain carries no CPV pyproject.toml.
 
@@ -139,3 +157,47 @@ def test_pre_install_scan_reaches_a_real_verdict_from_pyproject_less_cwd(
     counts = scan_result["summary"]
     assert "critical" in counts
     assert counts["critical"] == 0
+
+
+def test_pre_install_scan_blocked_verdict_survives_the_remote_validation_hop(
+    blocking_plugin_fixture: Path, tmp_path: Path
+) -> None:
+    """A plugin with a real CRITICAL finding still reports it, from a
+    pyproject-less cwd, after the #230 fix routed the sub-invocation through
+    ``remote_validation.py``.
+
+    #230 only fixed the "reach a verdict at all" case (a clean plugin used to
+    silently collapse to exit 2). It is a DIFFERENT, unverified claim that a
+    genuinely non-zero verdict (real findings) still parses through the same
+    hop correctly — a bug that swallowed findings while still exiting non-zero
+    would pass a bare `exit != 2` check. This pins the actual counts.
+    """
+    assert _no_pyproject_in_ancestors(tmp_path)
+
+    run_cwd = tmp_path / "run-here-blocked"
+    run_cwd.mkdir()
+
+    result = subprocess.run(
+        [sys.executable, str(_CLI), str(blocking_plugin_fixture), "--json"],
+        cwd=run_cwd,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+
+    assert "ModuleNotFoundError" not in (result.stdout + result.stderr)
+    assert result.returncode not in (0, 2), (
+        f"expected a BLOCKED (non-zero, non-usage-error) verdict — "
+        f"exit={result.returncode}\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+
+    payload = json.loads(result.stdout)
+    scan_result = payload["result"]
+    counts = scan_result["summary"]
+    assert counts["critical"] > 0, f"expected a CRITICAL finding on a name-less manifest — got: {counts}"
+
+    findings = scan_result.get("findings") or []
+    assert any(f.get("severity") == "critical" for f in findings), (
+        f"expected at least one critical finding recorded — got: {findings}"
+    )

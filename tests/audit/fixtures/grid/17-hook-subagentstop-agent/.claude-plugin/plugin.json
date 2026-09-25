@@ -1,0 +1,21 @@
+{
+  "name": "fixture-17",
+  "version": "1.0.0",
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "agent",
+            "agent": "summary-agent",
+            "prompt": "Summarize what the subagent just did."
+          }
+        ]
+      }
+    ]
+  },
+  "agents": [
+    "./agents/summary-agent.md"
+  ]
+}

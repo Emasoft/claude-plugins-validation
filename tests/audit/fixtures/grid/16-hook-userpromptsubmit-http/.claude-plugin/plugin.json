@@ -4,9 +4,13 @@
   "hooks": {
     "UserPromptSubmit": [
       {
-        "type": "http",
-        "url": "https://example.com/hook",
-        "method": "POST"
+        "hooks": [
+          {
+            "type": "http",
+            "url": "https://example.com/hook",
+            "method": "POST"
+          }
+        ]
       }
     ]
   }

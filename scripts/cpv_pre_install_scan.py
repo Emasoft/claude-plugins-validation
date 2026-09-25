@@ -67,6 +67,12 @@ from pathlib import Path
 from typing import Any
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
+
+# #230 follow-up: how many lines from EACH END of a failed sub-invocation's
+# stderr to show in the human-readable report (head+tail, never tail-only —
+# the real error can be at either end depending on the failing tool).
+_STDERR_HEAD_TAIL_LINES = 10
+
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
@@ -465,9 +471,33 @@ def _print_report(label: str, kind: str, summary: dict[str, Any]) -> None:
         print(f"  Kind:             {kind}")
         print("  VERDICT:          ERROR — could not complete scan")
         print(f"  Reason:           {summary['error']}")
+        # #230 follow-up: the child (remote_validation.py) can die BEFORE
+        # emitting any JSON for reasons this function has no other visibility
+        # into — a `uv` dependency-resolution failure, a network timeout on a
+        # cold cache, an unrelated crash. Its stderr is the only diagnostic
+        # trail, so it must reach the human, not just the "error" summary
+        # sentence. A multi-line stderr smashed onto one "Details:" line is
+        # unreadable and effectively hides the useful part; print the HEAD and
+        # TAIL (never tail-only) with each line on its own indented row — the
+        # actual error is not reliably at either end: `uv`/network tooling
+        # often logs the real cause FIRST (e.g. a resolution failure) and then
+        # retries/progress noise, while other tools log it LAST. A middle
+        # ellipsis marker is printed when both windows don't cover the whole
+        # stream, so the omission itself is never silent.
         stderr = summary.get("raw_stderr")
         if stderr:
-            print(f"  Details:          {stderr}")
+            lines = stderr.splitlines()
+            print("  Details (child stderr):")
+            if len(lines) <= 2 * _STDERR_HEAD_TAIL_LINES:
+                for line in lines:
+                    print(f"    {line}")
+            else:
+                for line in lines[:_STDERR_HEAD_TAIL_LINES]:
+                    print(f"    {line}")
+                omitted = len(lines) - 2 * _STDERR_HEAD_TAIL_LINES
+                print(f"    ... ({omitted} line(s) omitted) ...")
+                for line in lines[-_STDERR_HEAD_TAIL_LINES:]:
+                    print(f"    {line}")
         print()
         print("  DO NOT INSTALL — the scan did not finish; treat as unsafe until it does.")
         print()

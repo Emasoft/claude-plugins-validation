@@ -1355,11 +1355,19 @@ def lint_markdown(
     # not a tool-availability gap — it must fire even when markdownlint-cli2
     # itself is missing (checked below), so it is placed before the `_resolve`
     # early-return rather than after it. Non-blocking: WARNING only.
+    #
+    # The wording states only the VERIFIED fact (markdownlint-cli2 does not
+    # read this file; exclusions belong in the `ignores` array) — it must
+    # NOT claim the repo's exclusions "are not being applied", because a repo
+    # may already carry a `.markdownlint-cli2.{jsonc,yaml,cjs}` with a working
+    # `ignores` array and just have a stale/leftover `.markdownlintignore`
+    # sitting alongside it; in that case the exclusions ARE applied, via the
+    # file this tool actually reads.
     if (repo_root / ".markdownlintignore").is_file():
         report.warning(
-            "markdownlint-cli2 does not read .markdownlintignore — it reads "
-            "the `ignores` array in .markdownlint-cli2.jsonc (or .yaml/.cjs). "
-            "Move your exclusions there or they are not being applied."
+            "markdownlint-cli2 does not read .markdownlintignore — "
+            "exclusions must be in the `ignores` array of "
+            ".markdownlint-cli2.jsonc (or .yaml/.cjs)."
         )
 
     cmd = _resolve("markdownlint-cli2")
