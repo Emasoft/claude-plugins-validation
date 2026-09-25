@@ -159,6 +159,22 @@ _CHMOD_EXEC_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
 )
 
 
+# Path-shape gate for the SHELL ``chmod`` capture (TRDD-RU0POO65). The capture is
+# "the next whitespace-delimited token", and the fold resolves any relative bare
+# word against the plugin root — so prose ("NOT chmod +x (unlike …", "chmod +x
+# it", "chmod +x 12 scripts", "`chmod +x script.sh`") folded "in-tree" and fired
+# a blocking RC-164. A shell word only counts as a chmod TARGET when it can be a
+# path: every char is a path char (a backtick / paren / comma means prose or a
+# command substitution — unresolvable either way), AND it carries path evidence:
+# a `/`, a `$`/`~` anchor the fold decides on, a dotted suffix, or it names a
+# file that already exists in the plugin tree. re2-safe.
+_CHMOD_PATH_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"^[\w.@+~${}/-]+$")
+# A `{` NOT opening a `${VAR}` is a template placeholder (a Python f-string in a
+# message such as "run: chmod +x scripts/{name}"), never one literal path.
+_BARE_BRACE_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|[^$])\{")
+_DOTTED_SUFFIX_RE: Final[re.Pattern[str]] = re.compile(r"[^./]\.[A-Za-z0-9]{1,8}$")
+
+
 def _is_script_destination(dst: str) -> bool:
     """True iff ``dst`` has a recognised script / source-file suffix."""
     suffix = Path(dst.strip().strip("'\"")).suffix.lower()
@@ -465,6 +481,39 @@ def _resolve_name_destination(
     return "/".join(parts)
 
 
+def _chmod_target(
+    raw: str,
+    is_os_chmod: bool,
+    lines: list[str],
+    idx: int,
+    rel_path: str,
+    plugin_root: Path,
+) -> str | None:
+    """The chmod target as a path candidate, or ``None`` when it is not one.
+
+    ``os.chmod(NAME, …)`` captures a Python VARIABLE: resolve it to the literal
+    it was bound to, exactly as the ``VAR.write_text`` path does — an unbound
+    name carries no in-tree evidence (TRDD-RU0POO65: it used to fold as the
+    relative path ``NAME`` and fire). Any other ``os.chmod`` argument keeps its
+    pre-existing handling. A SHELL chmod word must pass the path-shape gate
+    above; a bare word is a path only if that file already exists in the tree.
+    """
+    if is_os_chmod:
+        tok = raw.strip()
+        if not _NAME_CAPTURE_RE.match(tok):
+            return raw
+        lo, hi = _fence_bounds(lines, idx, rel_path)
+        return _resolve_name_destination(lines, lo, hi, idx, tok)
+    # Trailing shell separators glued to the word (`chmod +x a.sh;`) are not
+    # part of the path.
+    tok = raw.strip().rstrip(";&|,").strip("'\"")
+    if not tok or not _CHMOD_PATH_TOKEN_RE.match(tok) or _BARE_BRACE_RE.search(tok):
+        return None
+    if "/" in tok or tok[0] in "$~" or _DOTTED_SUFFIX_RE.search(tok):
+        return tok
+    return tok if _resolve_in_tree(tok, plugin_root, rel_path) is not None else None
+
+
 def _regex_tier(
     dst: str, plugin_root: Path, self_path: str
 ) -> str | None:
@@ -602,8 +651,8 @@ def _regex_path_findings(
             mo = pat.search(line)
             if mo is None:
                 continue
-            target = mo.group(1)
-            if _destination_in_tree(target, plugin_root, rel_path):
+            target = _chmod_target(mo.group(1), "os\\.chmod" in pat.pattern, lines, idx, rel_path, plugin_root)
+            if target is not None and _destination_in_tree(target, plugin_root, rel_path):
                 findings.append(
                     WriteFinding(
                         line_no,
