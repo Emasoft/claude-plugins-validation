@@ -398,6 +398,18 @@ _NONINTERACTIVE_ENV: dict[str, str] = {
 # real linter needs and silently skip everything.
 _REPO_LINT_TIMEOUT_ENV = "PLUGIN_REPO_LINT_TIMEOUT"
 
+# Default per-linter spawn ceiling. MUST stay strictly below the smallest
+# plausible outer timeout around a whole validate run (harnesses wrap
+# validate_plugin in 120s; publish gates are larger) — if the two are equal,
+# the outer clock, started first, always expires before this inner deadline
+# and every linter's own TimeoutExpired handler (the graceful
+# "timed out — skipping" WARNING) is unreachable dead code (TRDD-1VU6Y5MS).
+_LINTER_TIMEOUT_DEFAULT = 110.0
+# Per-FILE linters (shellcheck/hadolint/xmllint/PSScriptAnalyzer) get a smaller
+# ceiling: one file's hang should not eat the whole per-linter budget. Same
+# nesting invariant applies — also strictly below the outer bound.
+_LINTER_PER_FILE_TIMEOUT_DEFAULT = 60.0
+
 
 def _effective_timeout(call_site_default: float) -> float:
     """Resolve the timeout for one linter spawn.
@@ -847,10 +859,10 @@ def lint_python(
                 *targets,
             ],
             cwd=repo_root,
-            timeout=120,
+            timeout=_LINTER_TIMEOUT_DEFAULT,
         )
     except subprocess.TimeoutExpired:
-        report.warning("ruff timed out after 120s — skipping Python lint")
+        report.warning("ruff timed out — skipping Python lint")
         return True
 
     if result.returncode == 0:
@@ -957,10 +969,10 @@ def lint_python(
                 # whereas anchoring the cwd covers both and matches how every
                 # sibling linter here is invoked.
                 cwd=repo_root,
-                timeout=180,
+                timeout=_LINTER_TIMEOUT_DEFAULT,
             )
         except subprocess.TimeoutExpired:
-            report.warning("pyright timed out after 180s — skipping type check")
+            report.warning("pyright timed out — skipping type check")
             return ok
         try:
             payload = json.loads(pr.stdout) if (pr.stdout or "").strip() else {}
@@ -1000,10 +1012,10 @@ def lint_python(
                 # without this the config that selected the checker was not
                 # the config the checker ran under.
                 cwd=repo_root,
-                timeout=180,
+                timeout=_LINTER_TIMEOUT_DEFAULT,
             )
         except subprocess.TimeoutExpired:
-            report.warning("mypy timed out after 180s — skipping type check")
+            report.warning("mypy timed out — skipping type check")
             return ok
 
         if mypy_result.returncode == 0:
@@ -1072,10 +1084,10 @@ def lint_javascript(
         result = _run_linter(
             eslint_cmd + ["--format=json", *targets],
             cwd=repo_root,
-            timeout=120,
+            timeout=_LINTER_TIMEOUT_DEFAULT,
         )
     except subprocess.TimeoutExpired:
-        report.warning("eslint timed out after 120s — skipping JS/TS lint")
+        report.warning("eslint timed out — skipping JS/TS lint")
         return True
 
     if result.returncode == 0:
@@ -1167,7 +1179,7 @@ def lint_shell(
                 # foreign cwd every `source ./lib.sh` becomes an unresolved
                 # SC1091 (issue #200).
                 cwd=repo_root,
-                timeout=60,
+                timeout=_LINTER_PER_FILE_TIMEOUT_DEFAULT,
             )
         except subprocess.TimeoutExpired:
             report.warning(f"shellcheck timed out on {rel}")
@@ -1222,7 +1234,7 @@ def lint_go(
         result = _run_linter(
             gofmt_cmd + ["-l", *targets],
             cwd=repo_root,
-            timeout=120,
+            timeout=_LINTER_TIMEOUT_DEFAULT,
         )
     except subprocess.TimeoutExpired:
         report.warning("gofmt timed out — skipping Go lint")
@@ -1249,7 +1261,7 @@ def lint_go(
         vet_result = _run_linter(
             go_cmd + ["vet", "./..."],
             cwd=repo_root,
-            timeout=120,
+            timeout=_LINTER_TIMEOUT_DEFAULT,
         )
     except subprocess.TimeoutExpired:
         report.warning("go vet timed out")
@@ -1299,7 +1311,7 @@ def lint_rust(
         fmt_result = _run_linter(
             cargo_cmd + ["fmt", "--check"],
             cwd=repo_root,
-            timeout=120,
+            timeout=_LINTER_TIMEOUT_DEFAULT,
         )
     except subprocess.TimeoutExpired:
         report.warning("cargo fmt --check timed out")
@@ -1313,7 +1325,7 @@ def lint_rust(
         clippy_result = _run_linter(
             cargo_cmd + ["clippy"],
             cwd=repo_root,
-            timeout=180,
+            timeout=_LINTER_TIMEOUT_DEFAULT,
         )
     except subprocess.TimeoutExpired:
         report.warning("cargo clippy timed out")
@@ -1422,7 +1434,7 @@ def lint_markdown(
             result = _run_linter(
                 invocation + file_paths,
                 cwd=Path(_isolated_cwd),
-                timeout=120,
+                timeout=_LINTER_TIMEOUT_DEFAULT,
             )
     except subprocess.TimeoutExpired:
         report.warning("markdownlint timed out — skipping markdown lint")
@@ -1660,7 +1672,7 @@ def lint_yaml(
         result = _run_linter(
             cmd + ["-d", "relaxed", "--format", "parsable", *file_paths],
             cwd=repo_root,
-            timeout=120,
+            timeout=_LINTER_TIMEOUT_DEFAULT,
         )
     except subprocess.TimeoutExpired:
         report.warning("yamllint timed out — skipping YAML lint")
@@ -1715,7 +1727,7 @@ def lint_dockerfile(
                 # (then `$HOME/.config`) — from a foreign cwd the target's own
                 # rule-ignore config is never applied (issue #200).
                 cwd=repo_root,
-                timeout=60,
+                timeout=_LINTER_PER_FILE_TIMEOUT_DEFAULT,
             )
         except subprocess.TimeoutExpired:
             report.warning(f"hadolint timed out on {rel}")
@@ -1788,7 +1800,7 @@ def lint_xml(
                 # tree it validates (issue #200) — instead of a per-tool list a
                 # future contributor has to re-derive.
                 cwd=repo_root,
-                timeout=60,
+                timeout=_LINTER_PER_FILE_TIMEOUT_DEFAULT,
             )
         except subprocess.TimeoutExpired:
             report.warning(f"xmllint timed out on {rel}")
@@ -1860,7 +1872,7 @@ def lint_css(
         result = _run_linter(
             cmd + file_paths,
             cwd=repo_root,
-            timeout=120,
+            timeout=_LINTER_TIMEOUT_DEFAULT,
         )
     except subprocess.TimeoutExpired:
         report.warning("stylelint timed out — skipping CSS lint")
@@ -1908,7 +1920,7 @@ def lint_html(
         result = _run_linter(
             cmd + file_paths,
             cwd=repo_root,
-            timeout=120,
+            timeout=_LINTER_TIMEOUT_DEFAULT,
         )
     except subprocess.TimeoutExpired:
         report.warning("htmlhint timed out — skipping HTML lint")
@@ -1973,7 +1985,7 @@ def lint_sql(
         result = _run_linter(
             cmd + ["lint", "--dialect", "ansi", *file_paths],
             cwd=repo_root,
-            timeout=180,
+            timeout=_LINTER_TIMEOUT_DEFAULT,
         )
     except subprocess.TimeoutExpired:
         report.warning("sqlfluff timed out — skipping SQL lint")
@@ -2061,7 +2073,7 @@ def lint_powershell(
                 # (issue #200); PSScriptAnalyzer takes its settings via
                 # `-Settings`, so no cwd-discovered config is at stake here.
                 cwd=repo_root,
-                timeout=60,
+                timeout=_LINTER_PER_FILE_TIMEOUT_DEFAULT,
             )
         except subprocess.TimeoutExpired:
             report.warning(f"PSScriptAnalyzer timed out on {rel}")
