@@ -130,6 +130,46 @@ class TestLinterBudgetIsStrictlyNested:
             "use _LINTER_TIMEOUT_DEFAULT so the nesting invariant stays checkable"
         )
 
+    def test_every_timeout_warning_carries_the_resolved_duration(self) -> None:
+        """Every 'timed out' WARNING in the engine is an f-string carrying the
+        TimeoutExpired exception's own .timeout (TRDD-8Z7QGYHU R5, review
+        round 4): a bare-string message would omit the resolved duration, and
+        a constant-based f-string would LIE under the env override. The
+        uniform form is one message class, not two."""
+        tree = ast.parse(LINT_ENGINE_SRC.read_text(encoding="utf-8"))
+        bare: list[int] = []
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "warning"
+                and node.args
+            ):
+                arg = node.args[0]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and "timed out" in arg.value:
+                    bare.append(node.lineno)
+                elif isinstance(arg, ast.JoinedStr) and any(
+                    isinstance(v, ast.Constant) and isinstance(v.value, str) and "timed out" in v.value
+                    for v in arg.values
+                ):
+                    # A per-file message like "timed out on {rel}" IS an
+                    # f-string with the resolved duration requirement too,
+                    # but its exception variable is the same _te; flag only
+                    # when .timeout is absent.
+                    has_timeout = any(
+                        isinstance(v, ast.FormattedValue)
+                        and isinstance(v.value, ast.Attribute)
+                        and v.value.attr == "timeout"
+                        for v in arg.values
+                    )
+                    if not has_timeout:
+                        bare.append(node.lineno)
+        assert not bare, (
+            f"timeout WARNINGs at lines {bare} are bare strings or f-strings "
+            "without the resolved .timeout — every 'timed out' message must "
+            f"render the exception's own {{_te.timeout}} (TRDD-8Z7QGYHU R5)"
+        )
+
 
 class TestTimeoutOverride:
     """``PLUGIN_REPO_LINT_TIMEOUT`` caps every linter spawn uniformly."""

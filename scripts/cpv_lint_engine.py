@@ -1181,8 +1181,8 @@ def lint_shell(
                 cwd=repo_root,
                 timeout=_LINTER_PER_FILE_TIMEOUT_DEFAULT,
             )
-        except subprocess.TimeoutExpired:
-            report.warning(f"shellcheck timed out on {rel}")
+        except subprocess.TimeoutExpired as _te:
+            report.warning(f"shellcheck timed out on {rel} after {_te.timeout}s")
             continue
         if result.returncode == 0:
             report.passed(f"shellcheck: {rel} OK")
@@ -1236,8 +1236,8 @@ def lint_go(
             cwd=repo_root,
             timeout=_LINTER_TIMEOUT_DEFAULT,
         )
-    except subprocess.TimeoutExpired:
-        report.warning("gofmt timed out — skipping Go lint")
+    except subprocess.TimeoutExpired as _te:
+        report.warning(f"gofmt timed out after {_te.timeout}s — skipping Go lint")
         return True
 
     if (result.stdout or "").strip():
@@ -1263,8 +1263,8 @@ def lint_go(
             cwd=repo_root,
             timeout=_LINTER_TIMEOUT_DEFAULT,
         )
-    except subprocess.TimeoutExpired:
-        report.warning("go vet timed out")
+    except subprocess.TimeoutExpired as _te:
+        report.warning(f"go vet timed out after {_te.timeout}s")
         return ok
 
     if vet_result.returncode != 0:
@@ -1313,8 +1313,8 @@ def lint_rust(
             cwd=repo_root,
             timeout=_LINTER_TIMEOUT_DEFAULT,
         )
-    except subprocess.TimeoutExpired:
-        report.warning("cargo fmt --check timed out")
+    except subprocess.TimeoutExpired as _te:
+        report.warning(f"cargo fmt --check timed out after {_te.timeout}s")
         return True
 
     if fmt_result.returncode != 0:
@@ -1327,8 +1327,8 @@ def lint_rust(
             cwd=repo_root,
             timeout=_LINTER_TIMEOUT_DEFAULT,
         )
-    except subprocess.TimeoutExpired:
-        report.warning("cargo clippy timed out")
+    except subprocess.TimeoutExpired as _te:
+        report.warning(f"cargo clippy timed out after {_te.timeout}s")
         return ok
 
     if clippy_result.returncode != 0:
@@ -1436,8 +1436,8 @@ def lint_markdown(
                 cwd=Path(_isolated_cwd),
                 timeout=_LINTER_TIMEOUT_DEFAULT,
             )
-    except subprocess.TimeoutExpired:
-        report.warning("markdownlint timed out — skipping markdown lint")
+    except subprocess.TimeoutExpired as _te:
+        report.warning(f"markdownlint timed out after {_te.timeout}s — skipping markdown lint")
         return True
 
     if result.returncode == 0:
@@ -1674,8 +1674,8 @@ def lint_yaml(
             cwd=repo_root,
             timeout=_LINTER_TIMEOUT_DEFAULT,
         )
-    except subprocess.TimeoutExpired:
-        report.warning("yamllint timed out — skipping YAML lint")
+    except subprocess.TimeoutExpired as _te:
+        report.warning(f"yamllint timed out after {_te.timeout}s — skipping YAML lint")
         return True
 
     if result.returncode == 0:
@@ -1729,8 +1729,8 @@ def lint_dockerfile(
                 cwd=repo_root,
                 timeout=_LINTER_PER_FILE_TIMEOUT_DEFAULT,
             )
-        except subprocess.TimeoutExpired:
-            report.warning(f"hadolint timed out on {rel}")
+        except subprocess.TimeoutExpired as _te:
+            report.warning(f"hadolint timed out on {rel} after {_te.timeout}s")
             continue
         if result.returncode == 0:
             report.passed(f"hadolint: {rel} OK")
@@ -1802,8 +1802,8 @@ def lint_xml(
                 cwd=repo_root,
                 timeout=_LINTER_PER_FILE_TIMEOUT_DEFAULT,
             )
-        except subprocess.TimeoutExpired:
-            report.warning(f"xmllint timed out on {rel}")
+        except subprocess.TimeoutExpired as _te:
+            report.warning(f"xmllint timed out on {rel} after {_te.timeout}s")
             continue
         if result.returncode == 0:
             report.passed(f"xmllint: {rel} OK")
@@ -1874,8 +1874,8 @@ def lint_css(
             cwd=repo_root,
             timeout=_LINTER_TIMEOUT_DEFAULT,
         )
-    except subprocess.TimeoutExpired:
-        report.warning("stylelint timed out — skipping CSS lint")
+    except subprocess.TimeoutExpired as _te:
+        report.warning(f"stylelint timed out after {_te.timeout}s — skipping CSS lint")
         return True
 
     if result.returncode == 0:
@@ -1922,8 +1922,8 @@ def lint_html(
             cwd=repo_root,
             timeout=_LINTER_TIMEOUT_DEFAULT,
         )
-    except subprocess.TimeoutExpired:
-        report.warning("htmlhint timed out — skipping HTML lint")
+    except subprocess.TimeoutExpired as _te:
+        report.warning(f"htmlhint timed out after {_te.timeout}s — skipping HTML lint")
         return True
 
     if result.returncode == 0:
@@ -1987,8 +1987,8 @@ def lint_sql(
             cwd=repo_root,
             timeout=_LINTER_TIMEOUT_DEFAULT,
         )
-    except subprocess.TimeoutExpired:
-        report.warning("sqlfluff timed out — skipping SQL lint")
+    except subprocess.TimeoutExpired as _te:
+        report.warning(f"sqlfluff timed out after {_te.timeout}s — skipping SQL lint")
         return True
 
     if result.returncode == 0:
@@ -2075,8 +2075,8 @@ def lint_powershell(
                 cwd=repo_root,
                 timeout=_LINTER_PER_FILE_TIMEOUT_DEFAULT,
             )
-        except subprocess.TimeoutExpired:
-            report.warning(f"PSScriptAnalyzer timed out on {rel}")
+        except subprocess.TimeoutExpired as _te:
+            report.warning(f"PSScriptAnalyzer timed out on {rel} after {_te.timeout}s")
             continue
         if result.returncode == 0 and not (result.stdout or "").strip():
             report.passed(f"PSScriptAnalyzer: {rel} OK")
