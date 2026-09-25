@@ -4651,7 +4651,9 @@ def stage_verify_ci_green(
         # --commit` with an abbreviated sha silently matches nothing — so the
         # hint is a two-step with the FULL sha, then the run id.
         print(
-            f"{RED}✗ CI IS RED on the released commit {sha[:8]}: {detail}{NC}\n"
+            f"{RED}[advisory] CI RED on the released commit {sha[:8]}: {detail}{NC}\n"
+            f"{RED}  (advisory — this gate never changes the exit code; the release{NC}\n"
+            f"{RED}  is already shipped){NC}\n"
             f"{RED}  The release v-tag and GitHub release are ALREADY PUBLISHED — the{NC}\n"
             f"{RED}  ruleset bypass meant no required check gated them. Fix the cause and{NC}\n"
             f"{RED}  publish a follow-up patch; do NOT mute the check.{NC}\n"

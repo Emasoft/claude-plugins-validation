@@ -5101,7 +5101,9 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
     failed, unknown = classify_ci_runs(runs, successors)
     if failed:
         detail = ", ".join(f"{r.get('name', '?')}={r.get('conclusion')}" for r in failed)
-        cprint(f"  {RED}CI IS RED on the released commit {sha[:8]}: {detail}{NC}")
+        cprint(f"  {RED}[advisory] CI RED on the released commit {sha[:8]}: {detail}{NC}")
+        cprint(f"  {RED}  (advisory - this gate never changes the exit code; the release{NC}")
+        cprint(f"  {RED}  is already shipped){NC}")
         cprint(f"  {RED}  The tag and GitHub release are ALREADY PUBLISHED - the ruleset{NC}")
         cprint(f"  {RED}  bypass meant no required check gated them. Fix the cause and{NC}")
         cprint(f"  {RED}  publish a follow-up patch; do NOT mute the check.{NC}")

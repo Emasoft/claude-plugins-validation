@@ -127,8 +127,14 @@ class TestCanonEmitsTheGate:
     def test_red_ci_is_reported_loudly(self) -> None:
         canon = _canon()
         body = canon[canon.index("def stage_verify_ci_green") :]
-        assert "CI IS RED" in body
+        # TRDD-4VROKH40: the RED branch must read as ADVISORY, never as a
+        # failed gate followed by exit 0. The old "✗ CI IS RED" verdict glyph
+        # is retired — a reader shown ✗ and handed 0 in the same breath was
+        # the defect.
+        assert "[advisory] CI RED" in body
+        assert "does not block the exit code" in body or "never changes the exit code" in body
         assert "gh run view --log-failed" in body, "must name the follow-up command"
+        assert "CI IS RED" not in body, "the failure-shaped verdict label must be gone"
 
     def test_cannot_check_is_never_reported_as_green(self) -> None:
         """No gh / no runs / timeout must read UNVERIFIED, never as a pass."""
@@ -143,6 +149,65 @@ class TestCanonEmitsTheGate:
         canon = _canon()
         body = canon[canon.index("def stage_verify_ci_green") :]
         assert '"skipped"' in body and '"neutral"' in body
+
+
+# ---------------------------------------------------------------------------
+# Behavioural proof (TRDD-4VROKH40): the printed verdict and the exit code
+# must agree. The stage always returns 0 BY DESIGN (the release is already
+# public when it runs), so the RED label is the thing that had to change —
+# these tests pin label-and-exit agreement through the REAL stage function,
+# not the source text.
+# The string revert is the only available mutation here: under the advisory
+# design the fix IS the label, so reverting the string to the pre-fix
+# "✗ CI IS RED" is what makes the red-case assertion fail.
+# ---------------------------------------------------------------------------
+import json as _json  # noqa: E402
+import subprocess as _subprocess  # noqa: E402
+
+import publish as _publish  # noqa: E402
+
+
+def _drive_stage(monkeypatch, tmp_path, runs_payload, gh_present=True):
+    """Drive the real `stage_verify_ci_green` with `gh run list` stubbed."""
+    (tmp_path / ".git").mkdir(exist_ok=True)
+    monkeypatch.setattr(_subprocess, "run", _fake_run_factory(runs_payload, gh_present))
+    monkeypatch.setattr(_publish, "subprocess", _subprocess)
+    return _publish.stage_verify_ci_green(tmp_path, timeout_s=10)
+
+
+def _fake_run_factory(runs_payload, gh_present):
+    def fake_run(argv, **kwargs):
+        if argv[:2] == ["git", "rev-parse"]:
+            return _subprocess.CompletedProcess(argv, 0, stdout="a" * 40 + "\n", stderr="")
+        if argv[:2] == [str(_publish.shutil.which("gh") or "gh"), "run", "list"] or argv[1:3] == ["run", "list"]:
+            return _subprocess.CompletedProcess(argv, 0, stdout=_json.dumps(runs_payload), stderr="")
+        return _subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    return fake_run
+
+
+def test_red_ci_advisory_marker_printed_with_exit_zero(monkeypatch, tmp_path, capsys):
+    """RED: exit 0 AND the advisory marker on stderr — the printed verdict may
+    no longer read as a failed gate (TRDD-4VROKH40's defect)."""
+    monkeypatch.setattr(_publish.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
+    runs = [{"name": "CI", "status": "completed", "conclusion": "failure", "headBranch": "master"}]
+    rc = _drive_stage(monkeypatch, tmp_path, runs)
+    err = capsys.readouterr().err
+    assert rc == 0, "the stage never aborts the publish by design"
+    assert "[advisory] CI RED" in err, err[:400]
+    assert "✗ CI IS RED" not in err
+    assert "does not block the exit code" in err or "never changes the exit code" in err
+
+
+def test_green_ci_prints_green_with_exit_zero(monkeypatch, tmp_path, capsys):
+    """Green control: exit 0 and the ✓ line — the label change must not have
+    broken the happy path."""
+    monkeypatch.setattr(_publish.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
+    runs = [{"name": "CI", "status": "completed", "conclusion": "success", "headBranch": "master"}]
+    rc = _drive_stage(monkeypatch, tmp_path, runs)
+    out, err = capsys.readouterr().out, capsys.readouterr().err
+    assert rc == 0
+    assert "✓ CI green" in out + err
 
 
 # ---------------------------------------------------------------------------
