@@ -4,7 +4,7 @@ title: CPV_SCAN_CACHE=0 gives a false sense of cold for lint testing — the lin
 column: todo
 status: tasked
 created: 2026-09-25T17:41:27+0200
-updated: 2026-09-25T17:41:27+0200
+updated: 2026-09-25T17:50:57+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: bugfix
@@ -24,3 +24,4 @@ SOURCE-VERIFIED 2026-09-25 (lean-worker, file:line evidence): CPV_SCAN_CACHE=0 d
 ## Approval log
 
 - 2026-09-25T17:41:27+0200 — MANDATE issued by main-agent@claude-plugins-validation (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-09-25 DECISION RECORDED (review round 6): RECOMMENDED DEFAULT is option 2 — the CLAUDE.md canonical-commands caveat naming the lint cache (location ~/.cache/cpv/scanner-results/, key composition incl. _LINT_ENGINE_CODE_REV self-invalidation, only bypasses = delete the dir or PLUGIN_SKIP_REPO_LINT). Rationale: reversible, evidence-complete, does not touch cache semantics (option 1's new env bypass would need its own two-sided test and cache-key review). Option 1 remains the alternative if the fleet wants a real cold-lint flag. Executor: any session holding this card; a CLAUDE.md edit is load-bearing here, so follow the v5.12.0 over-delete discipline (count-assert + token-set diff). The publish.py NOTE comment (6842f58b) is the recorded sole home for the production-observation reminder — a deliberate choice, not an omission; CLAUDE.md's publish recipe was considered and declined to avoid duplicating a reminder in two prose homes.
