@@ -19,6 +19,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -27,6 +28,22 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import validate_security  # noqa: E402
 from cpv_validation_common import ValidationReport  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_real_tirith_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never let this test file install a real ``tirith`` onto the host.
+
+    ``check_tirith_scanner`` / ``_resolve_tirith_runner`` (validate_security.py)
+    fall back to a real ``brew``/``npm``/``cargo`` install of tirith whenever
+    ``CPV_NO_TIRITH_INSTALL`` is unset — a test suite must never mutate the
+    developer's machine. This autouse fixture forces the opt-out for every
+    test in this module, including the subprocess-invoked ones (monkeypatch's
+    ``setenv`` mutates ``os.environ`` in place, which subprocess.run's default
+    ``env=None`` inherits). Individual tests that already set the var
+    explicitly are unaffected — setting it twice to the same value is a no-op.
+    """
+    monkeypatch.setenv("CPV_NO_TIRITH_INSTALL", "1")
 
 # -----------------------------------------------------------------------------
 # _resolve_tirith_runner — pure resolution logic
@@ -253,3 +270,64 @@ def test_legacy_no_tirith_flag_is_rejected(tmp_path: Path) -> None:
     )
     assert result.returncode != 0
     assert "unrecognized arguments" in result.stderr or "--no-tirith" in result.stderr
+
+
+# -----------------------------------------------------------------------------
+# TRDD-21ES7XEX defect B — proof that this file's autouse fixture actually
+# stops _resolve_tirith_runner from installing a real binary onto the host.
+# -----------------------------------------------------------------------------
+
+
+def test_no_real_install_attempted_under_the_autouse_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the module's autouse ``CPV_NO_TIRITH_INSTALL`` fixture in effect,
+    forcing the "tirith not found" branch (no tirith/docker/nix on PATH) must
+    never invoke brew/npm/cargo — verified by recording every subprocess.run
+    call ``_resolve_tirith_runner`` makes, not by trusting its return value.
+    """
+    # Only the three installer probe binaries resolve; tirith/docker/nix don't.
+    monkeypatch.setattr(
+        validate_security.shutil,
+        "which",
+        lambda name: f"/usr/bin/{name}" if name in {"brew", "npm", "cargo"} else None,
+    )
+    install_calls: list[list[str]] = []
+    real_run = validate_security.subprocess.run
+
+    def _recording_run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        install_calls.append(argv)
+        kwargs.pop("timeout", None)
+        return real_run(["true"], **kwargs)  # type: ignore[no-any-return]
+
+    monkeypatch.setattr(validate_security.subprocess, "run", _recording_run)
+
+    runner = validate_security._resolve_tirith_runner()
+
+    assert runner is None, "opted out — no install fallback should ever resolve to a runner"
+    assert install_calls == [], f"CPV_NO_TIRITH_INSTALL=1 must block every install attempt; got {install_calls}"
+
+
+def test_control_without_the_opt_out_the_same_setup_would_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Negative control: with the SAME setup as the test above but
+    ``CPV_NO_TIRITH_INSTALL`` explicitly cleared, ``_resolve_tirith_runner``
+    DOES attempt an install — proving the assertion above can actually fail
+    (i.e. it is not vacuously true regardless of the guard)."""
+    monkeypatch.delenv("CPV_NO_TIRITH_INSTALL", raising=False)
+    monkeypatch.setattr(
+        validate_security.shutil,
+        "which",
+        lambda name: f"/usr/bin/{name}" if name in {"brew", "npm", "cargo"} else None,
+    )
+    install_calls: list[list[str]] = []
+    real_run = validate_security.subprocess.run
+
+    def _recording_run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        install_calls.append(argv)
+        kwargs.pop("timeout", None)
+        return real_run(["true"], **kwargs)  # type: ignore[no-any-return]
+
+    monkeypatch.setattr(validate_security.subprocess, "run", _recording_run)
+
+    validate_security._resolve_tirith_runner()
+
+    assert install_calls, "control setup should attempt an install when the opt-out is cleared"
+    assert install_calls[0] == ["brew", "install", "sheeki03/tap/tirith"]
