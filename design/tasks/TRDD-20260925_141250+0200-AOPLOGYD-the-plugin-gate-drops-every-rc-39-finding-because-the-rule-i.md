@@ -4,7 +4,7 @@ title: The plugin gate drops every RC-39 finding because the rule id is in no ex
 column: todo
 status: tasked
 created: 2026-09-25T14:12:50+0200
-updated: 2026-09-25T16:27:10+0200
+updated: 2026-09-25T17:16:21+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: security
@@ -30,3 +30,5 @@ MEASURE FIRST, never assume: census the RC-39 emission population over the plugi
 - 2026-09-25T14:12:50+0200 — MANDATE issued by main-agent@claude-plugins-validation (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-09-25: Sibling predicate VERIFIED in-process (import validate_plugin, cold): RC-39 in _EXECCLASS_RCE_RULE_IDS=False (control RC-141=True, landed RC-164=True). The gate-drop is fact, not inference. Emission census still owed before flipping — see body MEASURE FIRST.
 2026-09-25: The RU0POO65+3T170X2M fleet census is DONE (its review debt): 236 plugins measured in plugin --strict mode through the canonical launcher, CPV_SCAN_CACHE=0; 0 of 236 would NEWLY fail on RC-164 rows (3 plugins carry 5 blocking RC-164 rows — 1 CRITICAL, 4 MAJOR — but all 3 already fail on other CRITICALs; counterfactual recompute: 0 verdict flips). Report: workspace-root reports/ (CLAUDE-PLUGIN-VALIDATION/reports/rc164-fleet-census/20260925_161707+0200-rc164-fleet-census.md — one level ABOVE the plugin repo; verified in place by the MEASURE agent). This de-risks the RC-39 flip: the same census method applies.
+2026-09-25 SPOT-CHECK (verify-first-hand, review finding closed): re-ran perfect-skill-suggester/3.16.0 through the canonical launcher — RC-164 rows 2 observed (MAJOR docs/DEVELOPMENT.md:244 + CRITICAL scripts/pss_build_all.py:163) match the report's rows #2+#3 exactly; the plugin fails --strict anyway on other CRITICALs (STRIP-G013, exit 1 without RC-164). Census headline confirmed first-hand for one of 3 plugins. Note: docs_dev/review-followups-20260925.md.
+2026-09-25 PRODUCTION-OBSERVATION (review finding, recorded here after 3 deferrals): the Gate-14 advisory label ('[advisory] CI RED', commit 0dc3623d) has NO production observation yet — its first live exercise will be the NEXT release's Gate 14. Test-level proof is complete (behavioural + mutation); unproven-in-production until the next publish runs it. Note to the release author: observe the advisory line prints when CI is red, exit still 0.
