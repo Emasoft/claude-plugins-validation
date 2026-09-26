@@ -181,8 +181,8 @@ def test_check_tirith_nested_files_shape_trdd_dlmx817h(monkeypatch: pytest.Monke
     payload = (
         '{"total_findings": 2, "schema_version": 5, "files": ['
         '{"path": "/abs/plugin/install.sh", "findings": ['
-        '{"severity": "HIGH", "rule_id": "workflow_dangerous_trigger", "description": "pull_request_target with rw token", "line": 3},'
-        '{"severity": "MEDIUM", "rule_id": "workflow_unpinned_action", "description": "unpinned action", "line": 6}'
+        '{"severity": "HIGH", "rule_id": "workflow_dangerous_trigger", "description": "pull_request_target with rw token"},'
+        '{"severity": "MEDIUM", "rule_id": "workflow_unpinned_action", "description": "unpinned action"}'
         ']}]}'
     )
     report = _run_with_shim(monkeypatch, tmp_path, payload)
@@ -211,6 +211,33 @@ def test_check_tirith_nested_files_with_empty_file_list_is_clean(monkeypatch: py
     blocking = [r for r in report.results if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT")]
     assert any("tirith" in m and "no findings" in m for m in passed)
     assert blocking == []
+
+
+def test_check_tirith_nested_and_legacy_shapes_coexist(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Both-shapes coexistence: files[].findings[] AND a top-level findings
+    key must BOTH survive the parse.
+
+    The legacy key loop originally ASSIGNED the top-level list, silently
+    discarding whatever _flatten_nested_files had already appended — the
+    next schema-drift FN (review round 8). This test pins the extend
+    semantics: 2 nested + 1 top-level = 3 findings."""
+    payload = (
+        '{"total_findings": 3, "files": ['
+        '{"path": "/abs/plugin/one.sh", "findings": ['
+        '{"severity": "HIGH", "rule_id": "rule_nested_one", "description": "nested finding one"}'
+        "]},"
+        '{"path": "/abs/plugin/two.sh", "findings": ['
+        '{"severity": "HIGH", "rule_id": "rule_nested_two", "description": "nested finding two"}'
+        "]}],"
+        '"findings": ['
+        '{"severity": "medium", "rule": "rule_top_level", "message": "top level finding", "file": "three.sh"}'
+        "]}"
+    )
+    report = _run_with_shim(monkeypatch, tmp_path, payload)
+    msgs = [r.message for r in report.results]
+    assert any("tirith rule_nested_one" in m for m in msgs)
+    assert any("tirith rule_nested_two" in m for m in msgs)
+    assert any("tirith rule_top_level" in m for m in msgs)
 
 
 def test_check_tirith_unavailable_emits_one_warning(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
