@@ -2,6 +2,85 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.20.0] - 2026-09-26
+
+### Bug Fixes
+
+- **pre-install-scan:** Run the validator through remote_validation with pyyaml ([#230](https://github.com/Emasoft/claude-plugins-validation/issues/230))
+- **lint:** Warn that markdownlint-cli2 ignores .markdownlintignore ([#229](https://github.com/Emasoft/claude-plugins-validation/issues/229))
+- **audit:** Fixture grid emits inline hooks in the nested matcher-block shape (TRDD-NS1XJNPH)
+- **template:** Encode link-breaking characters in README table URLs
+- Review follow-ups for #229, #230 and the regenerated fixture grid
+- **canon:** Stop the generated publish.py failing its own --strict gate (#231, #228)
+- **rc164:** A chmod target must look like a path before it folds (TRDD-RU0POO65)
+- **standardize,preflight:** Migrators run on any --fix; CI-backstop claims need a real workflow
+- **rc164:** Stop the four FP classes and admit RC-164 to the plugin gate (TRDD-RU0POO65, TRDD-3T170X2M)
+- **publish:** Gate 14's RED output reads as advisory, not a failed gate (TRDD-4VROKH40)
+- **publish:** Production-observation note moves to the label's own site + card provenance repairs
+- **lint:** Per-linter spawn budgets strictly below the smallest outer timeout (TRDD-1VU6Y5MS box 1)
+- **lint:** Uniform timeout durations across all 10 messages + source-level uniformity test (TRDD-8Z7QGYHU round 4)
+- **gate:** Admit RC-39 to the plugin execution-class merge (TRDD-AOPLOGYD)
+- **test:** Split the remaining launchctl-load fragment in the RC-39 fixture (TRDD-AOPLOGYD)
+
+### Documentation
+
+- Add TRDD-8W80DZHI — marketplace README-table canon rollout investigation
+- Narrow TRDD-8W80DZHI to the investigation (review finding)
+- Record TRDD-8W80DZHI investigation findings
+- Add TRDD-8W80DZHI findings section
+- TRDD-8W80DZHI STATE block, verified-vs-inferred split, human_review
+- TRDD-8W80DZHI record claude-plugins-management as merged
+- TRDD-8W80DZHI STATE no longer lists the retired entry as a defect
+- Add TRDD-DFRPRZYD — CPVPPC canon manifest, slice 1
+- Add the approved CPVPPC plan and its phase cards (TRDD-1T862D4B)
+- Self-contained CPVPPC phase cards; close TRDD-8W80DZHI (TRDD-1T862D4B)
+- P9 card gains the Node-ABI loader test from the final plan (TRDD-1T862D4B)
+- CPVPPC resume note — P0 verified, next is the card split (TRDD-1T862D4B)
+- CPVPPC P7/P8 cards gain the local_release staging-draft excerpt (TRDD-1T862D4B)
+- **trdd:** Add TRDD-AOPLOGYD — the plugin gate drops every RC-39 finding
+- **trdd:** Record closing evidence on RU0POO65 and 3T170X2M
+- **trdd:** Archive TRDD-MHCFOCBV — v5.17.0 CI red, cause isolated, fix verified green
+- **trdd:** Record review-driven evidence on AOPLOGYD and 3T170X2M
+- **trdd:** Archive TRDD-4VROKH40 — Gate 14 RED output is advisory, defect closed
+- **trdd:** Record 21ES7XEX defect-B progress on the card
+- **trdd:** Record the RC-164 fleet census result (review debt cleared)
+- **trdd:** Archive TRDD-Q3CPZL0X — CC spec sync 2.1.258-2.1.281 complete
+- **trdd:** Record the 1VU6Y5MS timing measurement — stall mechanism undetermined, host now warm
+- **trdd:** Apply review corrections to 1VU6Y5MS and fix the AOPLOGYD report path
+- **trdd:** Close the verify-first-hand and deferral findings from the review round
+- **trdd:** Add TRDD-YWLWUCGL — CPV_SCAN_CACHE=0 is not cold for lint testing
+- **trdd:** Apply review round 6 — route the cache-gap card, record the default
+- **trdd:** Record defect-A investigation result on 21ES7XEX
+- **claude-md:** Lint-cache caveat (TRDD-YWLWUCGL option 2) + Gate 14 advisory note
+- **trdd:** Close YWLWUCGL — option 2 shipped, card archived as complete
+- **trdd:** 1VU6Y5MS boxes resolved — budget fix landed, moot conditionals struck
+- **trdd:** Archive 1VU6Y5MS as complete (TRDD-1VU6Y5MS)
+- **trdd:** AOPLOGYD — census dispatched (measure-first prerequisite)
+- Open 8Z7QGYHU — the four lint-nesting residuals from the 1VU6Y5MS adversarial review (TRDD-8Z7QGYHU)
+- Write the four lint-nesting residuals on 8Z7QGYHU (TRDD-8Z7QGYHU)
+- **trdd:** Apply review round 2 on 8Z7QGYHU — rescope R1 evidence, add R5/R6, todo + docs (TRDD-8Z7QGYHU)
+- **trdd:** Apply review round 3 on 8Z7QGYHU — e.timeout mechanism, verified pyright dispatch, unmeasured tag, disposition split (TRDD-8Z7QGYHU)
+- AOPLOGYD flip-landed + review-round log + closure checklist (TRDD-AOPLOGYD)
+- Fix 20 pre-existing markdownlint NITs in 7 backburner CPVPPC cards (TRDD-AOPLOGYD gate follow-up)
+- Remove the two double-blank lines 22HCJULG kept after the first pass (TRDD-AOPLOGYD gate follow-up)
+- Strip the trailing blank line MD012 flagged at EOF of 22HCJULG (TRDD-AOPLOGYD gate follow-up)
+- Archive TRDD-AOPLOGYD — RC-39 gate flip landed, final gate green 0/0/0/0
+- Re-derive the CLAUDE.md test-file inventory pin — 527 stale, true count 541 (trdd-AOPLOGYD pre-publish sweep)
+
+### Miscellaneous Tasks
+
+- Regen self-hash manifests for TRDD-8W80DZHI
+- Regenerate .plugin-self-hashes.json manifest (computed_at refresh, CLAUDE.md hash matches committed content)
+
+### Testing
+
+- The suite never installs tirith on the host (TRDD-21ES7XEX, defect B)
+- **publish:** Fix the GREEN control's double readouterr drain + fail loud stub
+- **publish:** Widen the GREEN assertion to both streams; note the merge-base trap
+- Pin the #232 cpv-key admission so it cannot regress silently (TRDD-AOPLOGYD-adjacent, review round 8)
+- Harden the #232 pin — structural assertion, positive control, augmented env (review round 9)
+- Curate the #232 pin env — strip CPV_* interference, keep child state (review round 10, TRDD-AOPLOGYD-adjacent)
+
 ## [5.19.0] - 2026-09-24
 
 ### Bug Fixes
