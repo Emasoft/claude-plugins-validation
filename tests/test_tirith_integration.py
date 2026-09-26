@@ -169,6 +169,50 @@ def test_check_tirith_empty_clean_run(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert any("tirith" in m and "no findings" in m for m in passed)
 
 
+def test_check_tirith_nested_files_shape_trdd_dlmx817h(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Tirith 0.4.x shape #4: findings NESTED under ``files[].findings[]``.
+
+    The 0.4.x scan JSON carries per-file objects (path on the parent,
+    findings dicts with ``rule_id`` + uppercase severity, no file key of
+    their own). Before the parser gained this branch, a REAL findings-present
+    scan parsed as zero findings and read "external scan clean" — a silent
+    FN confirmed first-hand 2026-09-26 (TRDD-DLMX817H).
+    """
+    payload = (
+        '{"total_findings": 2, "schema_version": 5, "files": ['
+        '{"path": "/abs/plugin/install.sh", "findings": ['
+        '{"severity": "HIGH", "rule_id": "workflow_dangerous_trigger", "description": "pull_request_target with rw token", "line": 3},'
+        '{"severity": "MEDIUM", "rule_id": "workflow_unpinned_action", "description": "unpinned action", "line": 6}'
+        ']}]}'
+    )
+    report = _run_with_shim(monkeypatch, tmp_path, payload)
+    msgs = [r.message for r in report.results]
+    # Both findings survive the parse — the FN was 0.
+    assert any("tirith workflow_dangerous_trigger" in m for m in msgs)
+    assert any("tirith workflow_unpinned_action" in m for m in msgs)
+    # Severity map works unchanged on 0.4.x casing/keys: HIGH → major, MEDIUM → minor.
+    assert any(r.level == "MAJOR" for r in report.results)
+    assert any(r.level == "MINOR" for r in report.results)
+    # The parent files[].path is threaded so gitignore/self-scan filters can
+    # see the path (file must not be empty).
+    file_refs = [str(r.file or "") for r in report.results if "tirith" in r.message]
+    assert all(refs for refs in file_refs), f"file lost on nested findings: {file_refs!r}"
+    assert any("install.sh" in ref for ref in file_refs)
+
+
+def test_check_tirith_nested_files_with_empty_file_list_is_clean(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Control: 0.4.x schema with files but NO findings still reads clean.
+
+    Without this sibling, a fix that counts files[] entries could mislabel
+    a genuinely clean scan as findings-present."""
+    payload = '{"total_findings": 0, "files": [{"path": "/abs/plugin/x.sh", "findings": []}]}'
+    report = _run_with_shim(monkeypatch, tmp_path, payload)
+    passed = [r.message for r in report.results if r.level == "PASSED"]
+    blocking = [r for r in report.results if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT")]
+    assert any("tirith" in m and "no findings" in m for m in passed)
+    assert blocking == []
+
+
 def test_check_tirith_unavailable_emits_one_warning(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """When no runner is reachable + install is disabled, one WARNING is added."""
     monkeypatch.setattr(validate_security.shutil, "which", lambda _name: None)
