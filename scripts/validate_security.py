@@ -7532,7 +7532,12 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
         for key in ("findings", "results", "verdicts", "issues"):
             v = data.get(key)
             if isinstance(v, list):
-                findings = v
+                # EXTEND, never assign: _flatten_nested_files may already
+                # have appended nested files[].findings[] entries, and an
+                # assignment here would silently discard them (a payload
+                # carrying both shapes is unobserved today but is exactly
+                # the next schema-drift FN — review round 8).
+                findings.extend(v)
                 break
         if not findings and isinstance(data.get("runs"), list):
             for run in data["runs"]:
