@@ -7506,10 +7506,29 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
     # * top-level list of findings
     # * {"findings": [...]} or {"results": [...]} or {"verdicts": [...]}
     # * SARIF-shape {"runs": [{"results": [...]}]}
+    # * tirith 0.4.x: findings NESTED under files[].findings[] (per-file
+    #   objects carry path; the finding dicts themselves carry rule_id and
+    #   no file key). Without this branch a real 0.4.x findings-present scan
+    #   parses as zero findings and reads "external scan clean" — a silent
+    #   FN (TRDD-DLMX817H, confirmed first-hand on 2026-09-26).
+    def _flatten_nested_files(obj: dict[str, Any]) -> None:
+        files = obj.get("files")
+        if not isinstance(files, list):
+            return
+        for fobj in files:
+            if not isinstance(fobj, dict) or not isinstance(fobj.get("findings"), list):
+                continue
+            fpath = str(fobj.get("path") or "")
+            for sub in fobj["findings"]:
+                if isinstance(sub, dict):
+                    sub.setdefault("_tirith_parent_path", fpath)
+                    findings.append(sub)
+
     findings: list = []
     if isinstance(data, list):
         findings = data
     elif isinstance(data, dict):
+        _flatten_nested_files(data)
         for key in ("findings", "results", "verdicts", "issues"):
             v = data.get(key)
             if isinstance(v, list):
@@ -7567,7 +7586,12 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
         )
         loc_raw = finding.get("location")
         loc: dict[str, Any] = loc_raw if isinstance(loc_raw, dict) else {}
-        file_ref = finding.get("file") or loc.get("file") or finding.get("path") or ""
+        # tirith 0.4.x nested shape: the finding dict has no file key; the
+        # path lives on the parent files[] object (stashed at parse time).
+        parent_path = finding.get("_tirith_parent_path") or ""
+        file_ref = (
+            finding.get("file") or loc.get("file") or finding.get("path") or parent_path or ""
+        )
         line = finding.get("line") or loc.get("line") or 0
         if not isinstance(line, int):
             try:
