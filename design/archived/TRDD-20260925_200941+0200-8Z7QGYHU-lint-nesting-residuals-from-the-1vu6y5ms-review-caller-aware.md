@@ -1,10 +1,10 @@
 ---
 trdd-id: 8Z7QGYHU
 title: Lint nesting residuals from the 1VU6Y5MS review — caller-aware budget, phase offset, env-override re-entry, phase-level reachability
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-09-25T20:09:41+0200
-updated: 2026-09-25T20:59:38+0200
+updated: 2026-09-27T17:28:10+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: docs
@@ -27,6 +27,8 @@ approval-datetime: 2026-09-25T20:09:41+0200
 2026-09-25 REVIEW ROUND 3 (fork on the round-2 amendments): three amendments demanded, ALL APPLIED — (1) R5's guard mechanism corrected (e.timeout, true under env override; the 'via the constant' form would print 110 even when the override resolved differently — a lying message in exactly R3's case); (2) R1's escalated claim VERIFIED against source rather than softened: pyrightconfig.json present + _canonical_python_typechecker('.') == 'pyright' (issue #58 precedence), so CPV's own validate DOES run pyright — the review's likely-false challenge is refuted with source evidence; (3) '2-4x warm' tagged UNMEASURED folklore. Round-2's 3c-fold wording corrected to partial; disposition split (do-now vs recorded-limits) added. REVIEW LOOP CLOSED per turn-protocol regress rule: this round's amendments fixed exactly what round 2 found; a round 4 demands NEW text as its cause.
 2026-09-25 DO-NOW WORK EXECUTED: R5 — the four stripped durations restored via except TimeoutExpired as _te / {_te.timeout}s (the true resolved value, correct under the PLUGIN_REPO_LINT_TIMEOUT override — the round-3 review's trap avoided); pinned by a new assertion in test_slow_linter_times_out_to_warning (message must carry 'after 1.0s' under override=1 — float form, first run caught the 1s-vs-1.0s mismatch). R3 — CLAUDE.md canonical-commands block gained the override-reentry NOTE (override above the outer bound recreates the deadlock; invariant holds for defaults only). R6 — settled by measurement (teardown ~0.01s; margin ~500x). Suite 15/15, ruff clean. Self-hashes regenerated LAST before commit.
 2026-09-25 REVIEW ROUND 4 + uniform extension: the fork found (a) R5 was partial — 6 messages ratified duration-less by contrast, (b) the test pinned only ruff's rendering, (c) the None-timeout render edge, (d) the default-config float render is a user-facing change recorded nowhere. ALL FOUR ADDRESSED: all 10 'timed out' messages now uniform (the 4 original + go vet, cargo fmt --check, cargo clippy, and the 4 per-file shellcheck/hadolint/xmllint/PSScriptAnalyzer 'timed out on {rel} after N s'); the None edge recorded UNREACHABLE (the TimeoutExpired is raised by proc.communicate(timeout=<resolved float>) and re-raised as-is at :587 — never constructed manually, so .timeout is always the float — and the source-level uniformity test now sweeps EVERY 'timed out' WARNING for the _te.timeout render, which is what caught the 3 bare + 4 per-file stragglers on its first run: real non-vacuity); float render (110.0s) accepted as the honest resolution of the resolved value. Suites: 16/16 + 89 sibling, ruff clean. REVIEW LOOP RECLOSED — no open findings.
+2026-09-27 CLOSURE: per the round-2 disposition split, DO-NOW items are all done and verified: R3 (env-override re-entry NOTE in CLAUDE.md canonical-commands block — landed with round-2 amendments), R5 (all 10 'timed out' messages carry the true resolved {e.timeout}s value, uniform, per-file stragglers caught by the sweeping test on its first run), R6 (5s margin settled by measurement, ~500x teardown). R1/R2 remain RECORDED-LIMITS by design (caller-aware budget and phase-offset need outer-budget plumbing first — principled shape already on the card; do not re-derive). R4 is an honesty note, no action. Review round 4 closed with no open findings; suite 16/16 + 89 sibling, ruff clean.
+- 2026-09-27T17:28:10+0200 — COMPLETE by main-agent@claude-plugins-validation. DO-NOW items R3/R5/R6 done and verified; R1/R2 recorded-limits by design; round 4 closed with no open findings.
 
 ## The residuals
 
@@ -37,3 +39,20 @@ approval-datetime: 2026-09-25T20:09:41+0200
 - R4 PHASE-LEVEL REACHABILITY: the fix makes per-SPAWN handlers reachable; the per-FILE 60s x N aggregate is bounded by the 600s phase budget (#162), which itself exceeds a 120s harness caller — so phase-level graceful handlers remain unreachable under the smallest harness caller. Out of 1VU6Y5MS's per-spawn scope; recorded so nobody believes the phase budget was fixed.
 - R5 (review 3b) MESSAGE DURATION STRIPPED: 'after 120s' / 'after 180s' was dropped from four timeout WARNING messages (ruff, eslint, pyright, mypy) in 6b3d5141 — a diagnosability loss with no compensating mechanism recorded. Cheap guard, CORRECTED (review round 3: 'via the constant' was a trap — the resolved value can differ from the constant under PLUGIN_REPO_LINT_TIMEOUT): catch TimeoutExpired AS e and print {e.timeout}s — subprocess carries the TRUE resolved value, true under the override too.
 - R6 (review 5d) 5s MARGIN — SETTLED BY MEASUREMENT 2026-09-25: harness teardown after a TimeoutExpired (kill + collect) measured ~0.01s; the 5s margin is ~500x teardown, so it is not arbitrary — it absorbs process-spawn overhead and scheduler jitter with three orders of magnitude to spare. Documented as measured-then-conventional.
+
+## Acceptance checklist
+
+- [x] R3 env-override re-entry NOTE present in CLAUDE.md canonical-commands block (landed with round-2 amendments)
+- [x] R5 all 10 'timed out' WARNING messages carry the true resolved {e.timeout}s value, uniformity pinned by a sweeping source-level test (caught 3 bare + 4 per-file stragglers on first run)
+- [x] R6 5s margin settled by measurement (teardown ~0.01s, ~500x margin) and documented as measured-then-conventional
+- [~] R1 caller-aware budget — RECORDED-LIMIT (needs outer-budget plumbing first; principled shape on card)
+- [~] R2 phase-start offset — RECORDED-LIMIT (offset-deriving test or budget-relative design parked with R1)
+STALE-UNBULLETED DUPES REMOVED (the bulleted block above is the checklist; these no-dash lines were its originals left in place by an edit that spliced rather than replaced)
+
+
+
+
+- [x] R4 phase-level reachability honesty note recorded (per-FILE aggregate still unreachable under 120s harness caller — no action)
+- [x] Review round 4 closed with no open findings; suite 16/16 + 89 sibling green, ruff clean
+- [x] placeholder-probe line retired (was a tool probe, not a criterion)
+
