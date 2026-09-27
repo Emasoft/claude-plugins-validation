@@ -2,6 +2,65 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.21.0] - 2026-09-27
+
+### Bug Fixes
+
+- **security:** Parse tirith 0.4.x nested files[].findings[] JSON (TRDD-DLMX817H)
+- **security:** Extend instead of assign in the tirith shape dispatch (TRDD-DLMX817H)
+- **security:** Tirith canary wording + bool-guard control (TRDD-DLMX817H)
+- Regen self-hash manifest — CLAUDE.md + archive moves left it stale (TRDD-DLMX817H)
+
+### Documentation
+
+- **trdd:** Open DLMX817H — harden tirith runner against a same-named non-scanner
+- **trdd:** DLMX817H records review round 2 — three-case guard spec, supersession pointer
+- **trdd:** DLMX817H round-3 additions — fourth runner case + epistemic chain note
+- **trdd:** DLMX817H in todo — e2e probe confirmed a real tirith-schema FN
+- **trdd:** DLMX817H records the landed tirith 0.4.x parser fix
+- Add TRDD-3L0E93ST CC spec sync v2.1.282-283 + DLMX817H round-9 records (TRDD-3L0E93ST, TRDD-DLMX817H)
+- DLMX817H audit disposition + 3L0E93ST scope refinement + CLAUDE.md board snapshot (TRDD-DLMX817H, TRDD-3L0E93ST)
+- DLMX817H out-of-gate write superseded + re-appended via verb; standing keep-policy; 21ES7XEX typo fix (TRDD-DLMX817H, TRDD-3L0E93ST)
+- DLMX817H records the GH-issues snapshot re-measurement (0 open, CLAUDE.md line stale) (TRDD-DLMX817H)
+- CLAUDE.md issues snapshot ZERO-open (measured, per-issue verified) + DLMX817H corrections round (TRDD-DLMX817H)
+- DLMX817H timing correction + per-issue closure proof (TRDD-DLMX817H)
+- DLMX817H fix-outcome proven (all five COMPLETED) + attribution precision (TRDD-DLMX817H)
+- DLMX817H consolidated chain summary + evidence-tier rescoping (TRDD-DLMX817H)
+- DLMX817H round-9 closures - header fix in place, consolidation scope, rescoped marks, staleness hedges (TRDD-DLMX817H)
+- DLMX817H zero-growth closure - CLOSURE-QUALITY finality language fixed in place (TRDD-DLMX817H)
+- DLMX817H round-11 in-place wording cures - single stop-point, hedged finality, pre-freeze checklist item (TRDD-DLMX817H)
+- DLMX817H splice fix in ROUND-10 paragraph open-items sentence (TRDD-DLMX817H)
+- DLMX817H round-12 - two review-prescribed phrase downgrades applied in place (TRDD-DLMX817H)
+- 3L0E93ST completion record — grep result, gate results, parity confirmation (TRDD-3L0E93ST)
+- Retitle v5.20.1 unreleased paragraph to v5.21.0 + add tirith hardening sentence (TRDD-3L0E93ST, TRDD-DLMX817H)
+- **memory:** Land janitor memory-repair chore output on 2 PROJECT pages
+- Close TRDD-8Z7QGYHU — DO-NOW residuals R3/R5/R6 done, R1/R2 recorded-limits, checklist + archive (TRDD-8Z7QGYHU)
+- Archive TRDD-3L0E93ST — implementation verified, acceptance checklist, close-out note (TRDD-3L0E93ST)
+- Record DLMX817H class ruling in Notes + cross-card manifest caveat, supersede the misfiled copy (TRDD-DLMX817H)
+- Archive TRDD-DLMX817H — all items landed and verified, acceptance checklist (TRDD-DLMX817H)
+- Collapse consecutive blank lines in archived 8Z7QGYHU card (markdownlint MD012)
+- Regen self-hash manifest after MD012 whitespace fix
+
+### Features
+
+- **spec:** Sync CC v2.1.282-283 settings keys + path-field existence check (TRDD-3L0E93ST)
+- **security:** Tirith identity probe — refuse a same-named non-scanner on PATH (TRDD-DLMX817H)
+
+### Miscellaneous Tasks
+
+- **trdd:** Close 21ES7XEX — tirith flake was the wrong PyPI package on the host
+- Regenerate .plugin-self-hashes.json manifest (DLMX817H card added)
+- Regenerate self-hash manifest after DLMX817H round-2 append
+- Regen self-hash manifest after DLMX817H round-3 append
+- Regen self-hash manifest after DLMX817H FN record
+- Regen self-hash manifest after tirith 0.4.x parser fix
+- Regen self-hash manifest after DLMX817H fix record
+- Regen self-hash manifest after tirith extend fix
+
+### Testing
+
+- **security:** Tirith count pin + empty-shadow control + total_findings canary (TRDD-DLMX817H)
+
 ## [5.20.0] - 2026-09-26
 
 ### Bug Fixes
