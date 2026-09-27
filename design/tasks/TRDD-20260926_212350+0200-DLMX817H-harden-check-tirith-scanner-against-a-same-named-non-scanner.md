@@ -4,7 +4,7 @@ title: Harden check_tirith_scanner against a same-named non-scanner on PATH
 column: todo
 status: tasked
 created: 2026-09-26T21:23:50+0200
-updated: 2026-09-27T04:34:27+0200
+updated: 2026-09-27T17:31:23+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: security
@@ -23,6 +23,7 @@ approval-datetime: 2026-09-26T21:23:50+0200
 
 - 2026-09-26T21:23:50+0200 — MANDATE issued by main-agent@claude-plugins-validation (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-26T22:05:02+0200 — column → todo by main-agent@claude-plugins-validation.
+2026-09-27 CLASS-LEVEL RULING (the second open item from FIX LANDED): schema drift of ANY version-coupled external scanner (cc-audit, trufflehog, semgrep share the exposure — no version pin, no schema check) is dispositioned as follows: the guarded total_findings canary (round 9) IS the general guard — it is scanner-agnostic (presence+type-gated self-report count vs parsed count) and catches exactly the silent-parse-FN class this card fixed, so the class-level defense-in-depth ships as the canary pattern, not as per-scanner plumbing. Identity probes (version string + schema_version sanity) are built per-scanner ONLY when a real FN instance appears on that scanner — speculative probes for scanners with no observed drift would be YAGNI (and trufflehog's JSON surface is stable across the version range CPV supports). No code change owed by this ruling; the identity probe for tirith itself is the remaining concrete item and is dispatched separately.
 
 ## Notes
 
