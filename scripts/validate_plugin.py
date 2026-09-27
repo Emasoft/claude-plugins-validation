@@ -1658,6 +1658,44 @@ def validate_manifest(
                         ".claude-plugin/plugin.json",
                     )
 
+    # Existence check on the four fields CC 2.1.283's `claude plugin validate`
+    # now hard-fails on when their manifest path is missing or points outside
+    # the plugin directory (changelog v2.1.283). Parity with CC's own validator
+    # is the documented sync rule, so a missing target is a MAJOR here too.
+    # Scoped to exactly those four fields — commands/skills list entries are
+    # validated separately (validate_manifest_skill_paths for skills) and the
+    # ../-traversal branch above already covers out-of-plugin paths for every
+    # field, so this adds only the missing-on-disk half for the CC-named set.
+    # The `experimental.themes` / `experimental.monitors` / `experimental.evals`
+    # forms are checked in the experimental block above; the top-level
+    # `themes`/`monitors` spellings share the same handler as the other
+    # path_fields, so they are handled here.
+    _cc_283_existence_fields = ("outputStyles", "themes", "monitors", "lspServers")
+    for key in _cc_283_existence_fields:
+        if key not in manifest:
+            continue
+        value = manifest[key]
+        targets: list[str] = []
+        if isinstance(value, str):
+            targets.append(value)
+        elif isinstance(value, list):
+            targets.extend(t for t in value if isinstance(t, str))
+        for target in targets:
+            if path_has_traversal(target):
+                continue  # already MAJOR'd by the traversal branch above
+            resolved = (plugin_root / target).resolve()
+            try:
+                resolved.relative_to(plugin_root.resolve())
+            except ValueError:
+                continue  # out-of-plugin is the traversal branch's finding
+            if not resolved.exists():
+                report.major(
+                    f"Field '{key}' path does not exist: {target} — CC v2.1.283 "
+                    "`claude plugin validate` rejects a manifest path whose "
+                    "target directory is missing (plugins-reference.md:568-571)",
+                    ".claude-plugin/plugin.json",
+                )
+
     # Inline `userConfig` validation was removed here (v2.106): it duplicated
     # `validate_user_config_structure()` (called below at the end of this
     # function), so every userConfig defect was counted TWICE — inflating the
