@@ -7367,6 +7367,15 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
 # Official container image (any platform with Docker available)
 TIRITH_IMAGE = "ghcr.io/sheeki03/tirith"
 
+# Identity probe (TRDD-DLMX817H): the name "tirith" is shared by an unrelated
+# PyPI package (a WAMP connection monitor). This banner regex accepts the real
+# scanner's version output — "tirith 0." at line start or after whitespace,
+# case-insensitive, with an optional leading "v" (covers `tirith v0.4.2`).
+_TIRITH_VERSION_RE = re.compile(r"(?im)(?:^|\s)tirith\s+v?0\.")
+# Probe budget: a --version call must answer in seconds; a slower (or failing)
+# probe is cannot-identify, so the scan is skipped with an UNVERIFIED warning.
+_TIRITH_PROBE_TIMEOUT = 10
+
 # Auto-install order: brew on macOS, then npm/cargo as cross-platform fallbacks.
 # Each entry is a (probe-binary, install-command) pair. The probe must be on
 # PATH; the install command runs only if the probe succeeds and the user has
@@ -7457,6 +7466,48 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
         return 0
 
     prefix, mode = runner
+
+    # Identity probe BEFORE trusting the scan output (TRDD-DLMX817H, defense in
+    # depth). The name is shared with an unrelated PyPI "tirith" package (a WAMP
+    # connection monitor), so a wrong binary on PATH would answer non-JSON and
+    # turn a clean scanner-miss into a parse-finding — or a clean parse into a
+    # silent FN. Run one cheap version invocation against the SAME resolved
+    # binary; if it does not answer like the scanner, the scan result would be
+    # unverifiable, so we do not run the scan at all. Fail-safe: a probe that
+    # cannot run is a WARNING ("cannot check is never clean"), never a pass and
+    # never a suppression of the scanner-unavailable advisory above.
+    if mode == "docker":
+        # Drop -i: a version probe needs no stdin (a tty-less one-shot run).
+        probe_cmd = ["docker", "run", "--rm", TIRITH_IMAGE, "--version"]
+    else:
+        probe_cmd = prefix + ["--version"]
+    try:
+        probe = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=_TIRITH_PROBE_TIMEOUT, check=False)
+        probe_output = (probe.stdout or "") + "\n" + (probe.stderr or "")
+        if _TIRITH_VERSION_RE.search(probe_output):
+            # Identity plausible — proceed to the scan exactly as before.
+            pass
+        else:
+            report.warning(
+                f"tirith ({mode}): resolved binary did not answer a tirith version probe "
+                "(expected 'tirith 0.x'); the name is shared by an unrelated PyPI package "
+                "— scan result UNVERIFIED, not clean"
+            )
+            return 0
+    except subprocess.TimeoutExpired:
+        report.warning(
+            f"tirith ({mode}): version probe timed out — cannot confirm the resolved binary "
+            "is the tirith scanner (the name is shared by an unrelated PyPI package); "
+            "scan result UNVERIFIED, not clean"
+        )
+        return 0
+    except OSError:
+        report.warning(
+            f"tirith ({mode}): version probe could not run — cannot confirm the resolved binary "
+            "is the tirith scanner (the name is shared by an unrelated PyPI package); "
+            "scan result UNVERIFIED, not clean"
+        )
+        return 0
 
     # Build the scan command. Docker mode bind-mounts the plugin path to /scan
     # inside the container — same convention as the cc-audit integration uses
