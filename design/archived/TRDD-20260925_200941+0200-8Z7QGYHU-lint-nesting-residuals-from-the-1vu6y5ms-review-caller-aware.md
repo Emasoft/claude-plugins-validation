@@ -49,10 +49,6 @@ approval-datetime: 2026-09-25T20:09:41+0200
 - [~] R2 phase-start offset — RECORDED-LIMIT (offset-deriving test or budget-relative design parked with R1)
 STALE-UNBULLETED DUPES REMOVED (the bulleted block above is the checklist; these no-dash lines were its originals left in place by an edit that spliced rather than replaced)
 
-
-
-
 - [x] R4 phase-level reachability honesty note recorded (per-FILE aggregate still unreachable under 120s harness caller — no action)
 - [x] Review round 4 closed with no open findings; suite 16/16 + 89 sibling green, ruff clean
 - [x] placeholder-probe line retired (was a tool probe, not a criterion)
-
