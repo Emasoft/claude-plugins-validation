@@ -251,6 +251,18 @@ MANAGED_ONLY_KEYS: frozenset[str] = frozenset(
         # Windows HKLM registry, or a policy helper." A project value is
         # silently ignored, so it belongs with the other managed-only keys.
         "gatewayInternalNetworks",
+        # v2.1.282 changelog: "Added allowClaudeInChromeWithManagedMcp managed
+        # setting" — permit Claude-in-Chrome alongside managed MCP. Changelog
+        # states the managed-only level explicitly (v2.1.259 precedent for
+        # changelog-only keys).
+        "allowClaudeInChromeWithManagedMcp",
+        # v2.1.283 changelog: "Added availableModelsMatch managed setting" —
+        # with "exact", an availableModels entry allows only the named model
+        # version. Sibling of the already-known availableModels.
+        "availableModelsMatch",
+        # v2.1.283 changelog: "Added deniedModels managed setting" — the
+        # deny-list counterpart of availableModels.
+        "deniedModels",
     }
 )
 
@@ -555,10 +567,21 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         "gatewayInternalNetworks",  # v2.1.268 — managed-only (semantics enforced via MANAGED_ONLY_KEYS)
         "maxEffortLevel",  # v2.1.267 — cap effort on every provider (any file)
         "syncClaudeAiPlugins",  # v2.1.275 — opt out of claude.ai plugin sync (user, local, or managed)
+        # v2.1.277 "Added maxProseWidth setting" (changelog-only; cosmetic UI
+        # width cap for the prompt input — a settings file using it must not
+        # draw an unknown-key hint). Exact spelling only: this set is a typo
+        # detector.
+        "maxProseWidth",  # v2.1.282 — cap prose width in the UI
         # Removed in v2.1.277 with the TaskOutput tool. Still a real setting NAME
         # (settings-reference.md keeps its row), so it is known — and the
         # "no effect" note comes from NO_EFFECT_SETTINGS_KEYS, not an unknown-key hint.
         "taskOutputMaxChars",
+        # CC v2.1.282–283 sync — changelog-only (settings-reference.md lag);
+        # each level is stated explicitly in the changelog, the v2.1.259
+        # managedMcpServers precedent.
+        "allowClaudeInChromeWithManagedMcp",  # v2.1.282 — managed-only; permit Claude-in-Chrome alongside managed MCP
+        "availableModelsMatch",  # v2.1.283 — managed-only; "exact" pins an availableModels entry to the named version
+        "deniedModels",  # v2.1.283 — managed-only; deny-list counterpart of availableModels
     }
 )
 

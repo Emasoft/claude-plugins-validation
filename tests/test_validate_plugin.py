@@ -2324,6 +2324,93 @@ class TestV222PluginSchema:
             f"{[r.message for r in report.results if r.level == 'MAJOR']}"
         )
 
+    def test_cc_283_missing_path_field_dir_is_major(self, tmp_path):
+        """CC v2.1.283: outputStyles/themes/monitors/lspServers path must exist on disk.
+
+        The plugin.json declaring a path whose target directory is missing is
+        exactly what CC's own validator now hard-fails; CPV mirrors with MAJOR.
+        """
+        manifest = {
+            "name": "cc283-missing",
+            "version": "1.0.0",
+            "description": "x",
+            "outputStyles": "./styles/",
+            "lspServers": "./.lsp.json",
+        }
+        plugin_dir = _write_plugin(tmp_path, "cc283-missing", manifest)
+        # Deliberately do NOT create styles/ — the target is missing.
+        (plugin_dir / ".lsp.json").write_text(json.dumps({}))  # present
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        missing = [
+            r.message
+            for r in report.results
+            if r.level == "MAJOR" and "does not exist" in r.message and "outputStyles" in r.message
+        ]
+        assert missing, (
+            "Expected MAJOR for missing outputStyles path; got MAJORs: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+        # Control: the lspServers path that DOES exist stays clean.
+        assert not [
+            r.message
+            for r in report.results
+            if r.level == "MAJOR" and "does not exist" in r.message and "lspServers" in r.message
+        ]
+
+    def test_cc_283_present_path_field_dir_stays_clean(self, tmp_path):
+        """A present ./-prefixed path draws no existence finding (no FP)."""
+        manifest = {
+            "name": "cc283-present",
+            "version": "1.0.0",
+            "description": "x",
+            "outputStyles": "./styles/",
+            "themes": "./themes/",
+        }
+        plugin_dir = _write_plugin(tmp_path, "cc283-present", manifest)
+        (plugin_dir / "styles").mkdir()
+        (plugin_dir / "themes").mkdir()
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        exist_findings = [r.message for r in report.results if r.level == "MAJOR" and "does not exist" in r.message]
+        assert not exist_findings, exist_findings
+
+    def test_cc_283_absent_path_field_stays_clean(self, tmp_path):
+        """A plugin not using the field draws no existence finding (no FP)."""
+        manifest = {
+            "name": "cc283-absent",
+            "version": "1.0.0",
+            "description": "x",
+        }
+        plugin_dir = _write_plugin(tmp_path, "cc283-absent", manifest)
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        exist_findings = [r.message for r in report.results if r.level == "MAJOR" and "does not exist" in r.message]
+        assert not exist_findings, exist_findings
+
+    def test_cc_283_outside_plugin_path_still_fails_via_traversal(self, tmp_path):
+        """A path escaping the plugin dir still fails — the ./-prefix + traversal checks keep firing."""
+        manifest = {
+            "name": "cc283-escape",
+            "version": "1.0.0",
+            "description": "x",
+            "outputStyles": "./../outside-styles/",
+        }
+        plugin_dir = _write_plugin(tmp_path, "cc283-escape", manifest)
+        outside = tmp_path / "outside-styles"
+        outside.mkdir(exist_ok=True)  # target exists — only the traversal makes this a finding
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        trav = [
+            r.message
+            for r in report.results
+            if r.level == "MAJOR" and "path-traversal" in r.message and "outputStyles" in r.message
+        ]
+        assert trav, (
+            "Expected MAJOR for .. traversal in outputStyles; got MAJORs: "
+            f"{[r.message for r in report.results if r.level == 'MAJOR']}"
+        )
+
     def test_subagent_statusline_plugin_settings_accepted(self, tmp_path):
         """subagentStatusLine in plugin-root settings.json must not emit unrecognized-key MINOR."""
         manifest = {
