@@ -110,7 +110,6 @@ _KNOWN_SOURCE_FIELDS_BY_TYPE: dict[str, frozenset[str]] = {
     "relative-path": frozenset({"source", "path"}),
 }
 
-
 def _validate_known_fields(entry: dict, report: ValidationReport, entry_label: str) -> None:
     extra = set(entry.keys()) - _KNOWN_MARKETPLACE_ENTRY_FIELDS
     for field in sorted(extra):
