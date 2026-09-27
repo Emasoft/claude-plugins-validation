@@ -328,6 +328,25 @@ def test_check_tirith_total_findings_mismatch_warns(monkeypatch: pytest.MonkeyPa
     assert any("tirith rule_a" in m for m in msgs3)
 
 
+def test_check_tirith_bool_total_findings_never_warns(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Bool guard control (review round 9): a JSON bool `total_findings` (e.g.
+    a schema that repurposed the key as a flag) must NEVER fire the canary —
+    `isinstance(True, int)` is True in Python, so without the explicit
+    `not isinstance(total_raw, bool)` gate a truthy mismatch would false-WARN."""
+    payload = (
+        '{"total_findings": true, "files": ['
+        '{"path": "/abs/plugin/x.sh", "findings": ['
+        '{"severity": "HIGH", "rule_id": "rule_a", "description": "one"}'
+        "]}]}"
+    )
+    report = _run_with_shim(monkeypatch, tmp_path / "boolfield", payload)
+    msgs = [r.message for r in report.results]
+    # Counts "mismatch" (1 parsed vs bool True), but the bool guard keeps the
+    # canary silent — the field is not a count.
+    assert not any("UNVERIFIED" in m for m in msgs), f"canary fired on a bool total_findings: {msgs!r}"
+    assert any("tirith rule_a" in m for m in msgs)
+
+
 def test_check_tirith_unavailable_emits_one_warning(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """When no runner is reachable + install is disabled, one WARNING is added."""
     monkeypatch.setattr(validate_security.shutil, "which", lambda _name: None)
