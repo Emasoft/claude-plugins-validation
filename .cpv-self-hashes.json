@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-09-27T16:07:05+00:00",
+  "computed_at": "2026-09-27T16:44:29+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:595ae43d84d7e0432fce3bb54668abe86a114bff6955109c12d24832552a555d",
@@ -28,7 +28,7 @@
     ".trashcan/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".trashcan/README.txt": "sha256:3106acc9af8415d37610ef0b9f138dc9622f25f81ac37a31f24a9ebd2d25f30f",
     "CHANGELOG.md": "sha256:a77f3df53d0a1172fb28e68df1fe23fac5e4bd8c9ee4532f9fedea3d58858ef5",
-    "CLAUDE.md": "sha256:37938214c3327a356e916e529dc6c525cf7ef5845a9510f5ad563e37d46fe738",
+    "CLAUDE.md": "sha256:4f187762e1b8a8cedd75654201cd407e42f3c022203b8e410efc6de7ee7172f0",
     "LICENSE": "sha256:f79aeb8187cb5e63d27261eba76a2d771292c27489645b3410bd5e67edc02f5d",
     "README.md": "sha256:a0ea7640ed2991bd96a3df74879f26bd342d2c6bc66e07667fd59056f58aa533",
     "agents/cpv-agent.md": "sha256:5c6f53d3ee88f85e380f0b49bec2e714bf4d45ca575207eb509ec61903db31cb",
@@ -162,6 +162,7 @@
     "design/archived/TRDD-20260925_141250+0200-AOPLOGYD-the-plugin-gate-drops-every-rc-39-finding-because-the-rule-i.md": "sha256:88510d96e52c1890d35b67929d4625ff833365cf40133d69653426da03eb481a",
     "design/archived/TRDD-20260925_174127+0200-YWLWUCGL-cpv-scan-cache-0-gives-a-false-sense-of-cold-for-lint-testin.md": "sha256:9b787836d1bd90830726f8632ac4c8c43e394dab195f3b270b9db3aaa0e05703",
     "design/archived/TRDD-20260925_200941+0200-8Z7QGYHU-lint-nesting-residuals-from-the-1vu6y5ms-review-caller-aware.md": "sha256:0ce9e06cb508ca686c6d5bdabb70e9629bb550a73f7dca943c5239882eadac97",
+    "design/archived/TRDD-20260926_212350+0200-DLMX817H-harden-check-tirith-scanner-against-a-same-named-non-scanner.md": "sha256:d90598d9ba1075a643716d7c91a6b5dfc2b5a78119dcb6157125740954f26632",
     "design/archived/TRDD-20260927_034714+0200-3L0E93ST-cc-spec-sync-v2-1-282-283-four-settings-keys-and-manifest-pa.md": "sha256:f6df468785db69ca2138c6187fb7006c5be87e594baa733b0b6f0d48607a1f5a",
     "design/archived/TRDD-26446eed-ea5e-43e7-886c-8512866d92be-semantic-channel-source.md": "sha256:583a68cfe9918c4aa903d009c45b4e4585a1629332df48a874599de0e8ae1ccc",
     "design/archived/TRDD-26f7fbfc-8472-47ca-8a00-e4be0b29bb67-v2-1-80-plugin-features-docs.md": "sha256:07032cbe299909e5d6a8b52198e37e7a2e48c12bf0a2402e58d7bf037ce14868",
@@ -225,7 +226,6 @@
     "design/tasks/TRDD-20260924_200125+0200-057QUK84-cpvppc-p13-remote-facts-rulesets-checklist-fold.md": "sha256:7523b691035de8f5be6289300d7dea646c46164fd3c24cabac100a2e563a05a1",
     "design/tasks/TRDD-20260924_200126+0200-22HCJULG-cpvppc-p14-agents.md": "sha256:bf204fd641b9c8424e9085ef64cb2dd71db4194174b84bf096f508f4ce46b6ed",
     "design/tasks/TRDD-20260924_200127+0200-1RB0TZC1-cpvppc-p15-canon-1-0-0-and-rollout.md": "sha256:cfde73819c371ff2109185c00b047ab2af0a05a193cfe206669a1e88a6d01936",
-    "design/tasks/TRDD-20260926_212350+0200-DLMX817H-harden-check-tirith-scanner-against-a-same-named-non-scanner.md": "sha256:789243f9fa5da920630e94a7cca56e1cde107fd6b97c331e06f59da1d67b5abe",
     "git-hooks/pre-commit": "sha256:47cf32b6b340cd973b6a15466d8b752993a68534429dca2e6df7159ba7240810",
     "git-hooks/pre-push": "sha256:90880138be62d7cd5ec6b451bc8803127ee4a3ce430d0f5d9caa5fa86d57aa12",
     "pyproject.toml": "sha256:fc79b6fb8f12101f2e5f49bac1cbe4bfce26915c6d3aa7af26c224f66e78dc5f",
