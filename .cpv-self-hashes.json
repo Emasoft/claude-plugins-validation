@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-09-27T17:22:36+00:00",
+  "computed_at": "2026-09-27T17:28:05+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:825c256427f17058efe84494fd60d49b6c25ccb3df7d502021fe2590eecc101e",
@@ -187,7 +187,7 @@
     "design/archived/TRDD-b934f65c-8978-41e5-a08f-82ce19d073b1-local-marketplace-devlink.md": "sha256:5920054cae3503cf720da917eaeeef371cf881ac3f8752195409eaec43cc45b5",
     "design/archived/TRDD-bbff5bc5-d52f-4318-85c1-d6d37f629d85-publish-auth-standard.md": "sha256:d5d61ebd6ff4700fbb984b869aede23472a23494e72d34d6502251bf8cfc0580",
     "design/archived/TRDD-bcbceeed-6199-48f4-87a4-7597f29201d8-menu-orchestrator-haiku-main-session.md": "sha256:c0bbf83d67e0cbc880fcb882f5641c12d1bfe8b62dbebb12974b254d816a169f",
-    "design/archived/TRDD-c0ee9543-6104-48f4-bb00-420af6d57c4b-marketplace-upstream-cross-validation.md": "sha256:1b576c57baa6c0fa9f39b0cae1e54552105bd1c40c077923a7b82fc1d7cfad4f",
+    "design/archived/TRDD-c0ee9543-6104-48f4-bb00-420af6d57c4b-marketplace-upstream-cross-validation.md": "sha256:9f66d9b1405c820ac74f62713689d77277a7b45d93ccdfe0fabb558fb3b1d9d4",
     "design/archived/TRDD-c50531c2-menu-unification.md": "sha256:95e5c32ab333c6a84f37408008e3140553e06a686b3332b6ea5815c066eb3841",
     "design/archived/TRDD-cf57bf86-641b-4ef5-a450-ec361ec9ece2-hook-output-validation.md": "sha256:8a04427c45f6ad95fca1043c1f4d5d6b415a827784e3f86961ba3d18e60cca86",
     "design/archived/TRDD-d47f5101-e7a1-4e49-a85a-3b89e5e1fb6f-canon-pipeline-hardening.md": "sha256:8f0f3bf1f2651896c168698178c5d0c60d75dc112cb518f7446e75cb2864b1d6",
