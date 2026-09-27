@@ -7546,15 +7546,17 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
 
     # Schema-drift canary (TRDD-DLMX817H review round 9): tirith 0.4.x
     # self-reports total_findings. A parse that misses a shape (the nesting
-    # FN this card fixed) leaves len(findings) short of the count the
-    # scanner itself claims. Guarded on presence + int type: a version that
-    # omits the field, or emits it non-numeric, can never false-WARN here.
+    # FN this card fixed) leaves len(findings) out of step with the count the
+    # scanner itself claims — in EITHER direction: a mirror-shaped payload
+    # double-counts (over), a missed shape under-counts (drop). Guarded on
+    # presence + int type: a version that omits the field, or emits it
+    # non-numeric, can never false-WARN here.
     total_raw = data.get("total_findings") if isinstance(data, dict) else None
     if isinstance(total_raw, int) and not isinstance(total_raw, bool) and len(findings) != total_raw:
         report.warning(
             f"tirith ({mode}): parsed {len(findings)} finding(s) but the scan JSON self-reports "
             f"total_findings={total_raw} — the parser may not recognise this schema version; "
-            f"some findings may have been dropped (UNVERIFIED, not clean)"
+            f"parsed count differs from the scanner's self-report (UNVERIFIED, not clean)"
         )
 
     if not findings:
