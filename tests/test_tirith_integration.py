@@ -120,9 +120,12 @@ def _write_shim(tmp_path: Path, name: str, json_payload: str, exit_code: int = 0
 def _run_with_shim(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, payload: str, exit_code: int = 0
 ) -> ValidationReport:
-    """Place a fake ``tirith`` on PATH, run the check, return the populated report."""
+    """Place a fake ``tirith`` on PATH, run the check, return the populated report.
+
+    ``tmp_path`` may name a subdirectory that does not exist yet (callers
+    that run several shims in one test pass distinct names)."""
     bin_dir = tmp_path / "fake-bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(parents=True, exist_ok=True)
     _write_shim(bin_dir, "tirith", payload, exit_code)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     plugin = tmp_path / "plugin"
@@ -220,7 +223,17 @@ def test_check_tirith_nested_and_legacy_shapes_coexist(monkeypatch: pytest.Monke
     The legacy key loop originally ASSIGNED the top-level list, silently
     discarding whatever _flatten_nested_files had already appended — the
     next schema-drift FN (review round 8). This test pins the extend
-    semantics: 2 nested + 1 top-level = 3 findings."""
+    semantics: 2 nested + 1 top-level = EXACTLY 3 findings.
+
+    The count pin is load-bearing, not cosmetic: presence-only assertions
+    (any(...)) cannot catch a cardinality regression — if a future parser
+    change re-flattens or double-appends, all three rule-id messages still
+    appear but the counts are wrong. A dual-shape payload as a COMPATIBILITY
+    MIRROR (same findings under both shapes) would then double-count; this
+    test can't distinguish coexist-from-mirror, but it guarantees the
+    count is whatever the shapes literally add up to, so a mirroring
+    regression at least changes a pinned number instead of passing
+    silently."""
     payload = (
         '{"total_findings": 3, "files": ['
         '{"path": "/abs/plugin/one.sh", "findings": ['
@@ -238,6 +251,81 @@ def test_check_tirith_nested_and_legacy_shapes_coexist(monkeypatch: pytest.Monke
     assert any("tirith rule_nested_one" in m for m in msgs)
     assert any("tirith rule_nested_two" in m for m in msgs)
     assert any("tirith rule_top_level" in m for m in msgs)
+    # Cardinality pin: exactly the three findings the payload carries, no
+    # double-emission and no drop.
+    tirith_msgs = [m for m in msgs if "tirith rule_" in m]
+    assert len(tirith_msgs) == 3, f"expected exactly 3 tirith findings, got {len(tirith_msgs)}: {tirith_msgs!r}"
+
+
+def test_check_tirith_nested_files_with_empty_top_level_findings_survive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The empty-shadow case the extend fix closed silently (review finding 3a):
+    populated files[].findings[] PLUS an empty top-level ``findings: []``.
+
+    Under the round-7 code the assign discarded the nested findings and the
+    ``if not findings`` check then read the payload as CLEAN — a second FN
+    sibling of the same root cause. Under extend they survive."""
+    payload = (
+        '{"total_findings": 2, "files": ['
+        '{"path": "/abs/plugin/evil.sh", "findings": ['
+        '{"severity": "HIGH", "rule_id": "rule_shadow_a", "description": "shadowed by empty top-level"},'
+        '{"severity": "HIGH", "rule_id": "rule_shadow_b", "description": "also shadowed"}'
+        "]}],"
+        '"findings": []}'
+    )
+    report = _run_with_shim(monkeypatch, tmp_path, payload)
+    msgs = [r.message for r in report.results]
+    assert any("tirith rule_shadow_a" in m for m in msgs)
+    assert any("tirith rule_shadow_b" in m for m in msgs)
+    blocking = [r for r in report.results if r.level in ("CRITICAL", "MAJOR", "MINOR", "NIT")]
+    assert len(blocking) == 2, f"expected 2 blocking findings, got {len(blocking)}"
+
+
+def test_check_tirith_total_findings_mismatch_warns(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Schema-drift canary (review round 9): a parse that misses a shape
+    leaves len(findings) short of the scanner's own total_findings count —
+    the exact FN the 0.4.x nesting fix closed, now caught loudly.
+
+    A parser regression that drops findings must NOT read clean again."""
+    payload = (
+        '{"total_findings": 2, "files": ['
+        '{"path": "/abs/plugin/x.sh", "findings": ['
+        '{"severity": "HIGH", "rule_id": "rule_a", "description": "one"},'
+        '{"severity": "HIGH", "rule_id": "rule_b", "description": "two"}'
+        "]}],"
+        '"other_findings_key": []}'
+    )
+    report = _run_with_shim(monkeypatch, tmp_path, payload)
+    msgs = [r.message for r in report.results]
+    # Neither legacy key matches, so the nested findings are the only ones —
+    # count matches and NO canary warning fires.
+    assert not any("total_findings" in m for m in msgs)
+    assert any("tirith rule_a" in m for m in msgs)
+
+    # Mismatch: the payload claims 5 but the parser can only see 2.
+    payload_mismatch = (
+        '{"total_findings": 5, "files": ['
+        '{"path": "/abs/plugin/x.sh", "findings": ['
+        '{"severity": "HIGH", "rule_id": "rule_a", "description": "one"},'
+        '{"severity": "HIGH", "rule_id": "rule_b", "description": "two"}'
+        "]}]}"
+    )
+    report2 = _run_with_shim(monkeypatch, tmp_path / "mismatch", payload_mismatch)
+    msgs2 = [r.message for r in report2.results]
+    assert any("total_findings" in m and "UNVERIFIED" in m for m in msgs2), (
+        f"canary did not fire on a count mismatch: {msgs2!r}"
+    )
+
+    # Control: a version that OMITS the field never warns (guarded canary —
+    # presence-gated, so an older schema cannot false-WARN).
+    payload_no_field = (
+        '{"files": [{"path": "/abs/plugin/x.sh", "findings": ['
+        '{"severity": "HIGH", "rule_id": "rule_a", "description": "one"}'
+        "]}]}"
+    )
+    report3 = _run_with_shim(monkeypatch, tmp_path / "nofield", payload_no_field)
+    msgs3 = [r.message for r in report3.results]
+    assert not any("total_findings" in m for m in msgs3)
+    assert any("tirith rule_a" in m for m in msgs3)
 
 
 def test_check_tirith_unavailable_emits_one_warning(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

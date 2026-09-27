@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-09-26T20:24:57+00:00",
+  "computed_at": "2026-09-27T01:18:56+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:595ae43d84d7e0432fce3bb54668abe86a114bff6955109c12d24832552a555d",
@@ -384,7 +384,7 @@
     "scripts/validate_project_scope.py": "sha256:993d04258fb16fd0a7509ac0d6f82324265736a346e9bf050830308943ae7df6",
     "scripts/validate_rules.py": "sha256:2d8d4ecf266bbde1a5d8f982a0285a5d433d47264a9ed35425725cd989e57185",
     "scripts/validate_scoring.py": "sha256:cf1487d9bbec9e2b010fade13d8037a14190be56725cf6214cd2a964e7e43e52",
-    "scripts/validate_security.py": "sha256:9ca152e55fad347ad9fa6d931e63f4c6e1d5139fdde0f4614ee89eb3b39070e7",
+    "scripts/validate_security.py": "sha256:3abaa3b58b6c4770abdb04b4c88db6888589aa3acae86f79f36d735a1e25e283",
     "scripts/validate_settings_marketplace.py": "sha256:897848156cb0ae50929997aae67a6924485b391733e62719d42a2c9980ba9d0a",
     "scripts/validate_skill.py": "sha256:4ee07ad72e5d2122f842da5f913c9927ee54b3fa56ad6906b249d208c11d9bab",
     "scripts/validate_skill_comprehensive.py": "sha256:1e5233cd3ed6c51314a0db2adc10eba3c93b7424e0a667d875a2c356c60066ac",
@@ -1182,7 +1182,7 @@
     "tests/test_subagent_type_case_insensitive.py": "sha256:861012d78333703b549c8a4b09f82ce95872e4c096f52d4a9f6c37fbe98aa7c1",
     "tests/test_submodule_build_profile.py": "sha256:d94d6e09d0ad1c0068d6275cc6da340221ee8a8120e4f29bc06c4a2f2a134332",
     "tests/test_theme_a_markdown_fps.py": "sha256:260511c1df13557e9223e76f3f41f491540969d4282ec20a96ff63325e082872",
-    "tests/test_tirith_integration.py": "sha256:4f2231e6ab0946459093e93b17f4608d956f45c435a28fd2e2ef840b2333b2ae",
+    "tests/test_tirith_integration.py": "sha256:a5961c0d82f58f269d2abe84bac2dbe5fb55525c87ab8405be1f892e5ebbfea4",
     "tests/test_toc_embedding.py": "sha256:545b950bc77dcd2ea418d99cdf2945b919e35d0954235aeee62423f9c110c7d7",
     "tests/test_trdd_0f1f7889_missing_rules.py": "sha256:1acdcdaf10f4314ac275637cce588a417ae2e9638efd1f465fa4cb37e3ee7129",
     "tests/test_trdd_1yny73nt_agent_trailer.py": "sha256:6f6c008b006143bb8164619057bc9b2a0671a4bc9aa649f4d4cb2edab54a9bcd",
