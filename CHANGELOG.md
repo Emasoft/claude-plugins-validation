@@ -2,6 +2,13 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.21.1] - 2026-09-27
+
+### Documentation
+
+- Collapse blank run in archived c0ee9543 card (MD012 sweep) + manifest
+- Strip (unreleased) from the v5.21.0 CLAUDE.md header post-publish
+
 ## [5.21.0] - 2026-09-27
 
 ### Bug Fixes
