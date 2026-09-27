@@ -10,6 +10,9 @@ itself is AGPL-3.0). Tests exercise:
   SARIF ``{"runs": [{"results": [...]}]}``)
 * end-to-end ``--no-tirith`` opt-out via subprocess
 * end-to-end runner via a fake ``tirith`` shim placed on PATH
+* the identity probe (TRDD-DLMX817H): the resolved binary must answer a
+  ``--version`` invocation with a tirith banner before its scan output is
+  trusted — the name is shared by an unrelated PyPI package
 """
 
 from __future__ import annotations
@@ -102,31 +105,52 @@ def test_resolver_returns_none_when_nothing_available(monkeypatch: pytest.Monkey
 # -----------------------------------------------------------------------------
 
 
-def _write_shim(tmp_path: Path, name: str, json_payload: str, exit_code: int = 0) -> Path:
-    """Write a tiny POSIX shell shim that emits ``json_payload`` on stdout.
+def _write_shim(
+    tmp_path: Path,
+    name: str,
+    json_payload: str,
+    exit_code: int = 0,
+    version_output: str = "tirith 0.4.2\n",
+) -> Path:
+    """Write a tiny POSIX shell shim that dispatches on argv[1].
 
-    The shim ignores all arguments. This lets us drop a fake ``tirith``
-    binary onto PATH and exercise ``check_tirith_scanner`` end-to-end
-    without ever touching docker, nix, or a real install.
+    ``tirith --version`` answers ``version_output`` (the identity probe must
+    see a tirith banner); any other invocation (the real scan) emits
+    ``json_payload`` on stdout. This lets us drop a fake ``tirith`` binary
+    onto PATH and exercise ``check_tirith_scanner`` end-to-end without ever
+    touching docker, nix, or a real install.
     """
     shim = tmp_path / name
     # printf %s preserves the literal JSON without injecting trailing newlines
     # that would change downstream parsing semantics.
-    shim.write_text(f"#!/bin/sh\nprintf '%s' {json_payload!r}\nexit {exit_code}\n")
+    shim.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then\n"
+        f"    printf '%s\\n' {version_output!r}\n"
+        "    exit 0\n"
+        "fi\n"
+        f"printf '%s' {json_payload!r}\n"
+        f"exit {exit_code}\n"
+    )
     shim.chmod(shim.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return shim
 
 
 def _run_with_shim(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, payload: str, exit_code: int = 0
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    payload: str,
+    exit_code: int = 0,
+    version_output: str = "tirith 0.4.2\n",
 ) -> ValidationReport:
     """Place a fake ``tirith`` on PATH, run the check, return the populated report.
 
     ``tmp_path`` may name a subdirectory that does not exist yet (callers
-    that run several shims in one test pass distinct names)."""
+    that run several shims in one test pass distinct names). ``version_output``
+    is what the shim answers on ``--version`` (the identity probe)."""
     bin_dir = tmp_path / "fake-bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    _write_shim(bin_dir, "tirith", payload, exit_code)
+    _write_shim(bin_dir, "tirith", payload, exit_code, version_output)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     plugin = tmp_path / "plugin"
     plugin.mkdir()
@@ -357,6 +381,72 @@ def test_check_tirith_unavailable_emits_one_warning(monkeypatch: pytest.MonkeyPa
     validate_security.check_tirith_scanner(plugin, report)
     warnings = [r.message for r in report.results if r.level == "WARNING"]
     assert any("tirith" in m for m in warnings)
+
+
+# -----------------------------------------------------------------------------
+# Identity probe (TRDD-DLMX817H) — the resolved binary must answer a tirith
+# version banner before its scan output is trusted.
+# -----------------------------------------------------------------------------
+
+
+def test_identity_probe_passes_version_banner_scan_proceeds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Probe answers 'tirith 0.4.2' → identity plausible → scan proceeds and
+    findings parse exactly as before the probe existed."""
+    payload = '[{"severity": "high", "rule": "pipe_to_interpreter", "message": "curl | bash detected", "file": "install.sh", "line": 42}]'
+    report = _run_with_shim(monkeypatch, tmp_path, payload, version_output="tirith 0.4.2\n")
+    msgs = [r.message for r in report.results]
+    assert any("tirith pipe_to_interpreter" in m for m in msgs), f"scan did not proceed: {msgs!r}"
+    assert not any("UNVERIFIED" in m for m in msgs), f"probe warned on a correct banner: {msgs!r}"
+
+
+def test_identity_probe_rejects_wrong_binary(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Probe answers 'wamp-monitor 1.0' (the same-named PyPI package) →
+    UNVERIFIED WARNING, scan NOT run, no findings reported."""
+    payload = '[{"severity": "high", "rule": "would_have_been_a_finding", "message": "x", "file": "y.sh", "line": 1}]'
+    report = _run_with_shim(monkeypatch, tmp_path, payload, version_output="wamp-monitor 1.0\n")
+    msgs = [r.message for r in report.results]
+    assert any("UNVERIFIED" in m and "version probe" in m for m in msgs), f"no UNVERIFIED warning: {msgs!r}"
+    assert not any("would_have_been_a_finding" in m for m in msgs), "scan RAN against the wrong binary"
+    assert any("shared by an unrelated PyPI package" in m for m in msgs)
+    # The scanner-unavailable advisory is a different finding; only the probe
+    # warning may appear here.
+    assert not any("scanner not available" in m for m in msgs)
+
+
+def test_identity_probe_timeout_is_unverified_not_clean(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Probe hangs past its timeout (a real TimeoutExpired) → cannot identify →
+    UNVERIFIED WARNING, scan NOT run — 'cannot check is never clean'.
+
+    The probe budget is monkeypatched to 1s and the shim sleeps 5s, so the
+    test exercises the actual timeout branch in ~1s instead of burning the
+    production 10s budget."""
+    payload = '[{"severity": "high", "rule": "never_seen", "message": "x", "file": "y.sh", "line": 1}]'
+    bin_dir = tmp_path / "fake-bin"
+    bin_dir.mkdir(parents=True)
+    shim = bin_dir / "tirith"
+    shim.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then\n"
+        "    sleep 5\n"
+        "    exit 0\n"
+        "fi\n"
+        f"printf '%s' {payload!r}\n"
+        "exit 0\n"
+    )
+    shim.chmod(shim.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(validate_security, "_TIRITH_PROBE_TIMEOUT", 1)
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    report = ValidationReport()
+    validate_security.check_tirith_scanner(plugin, report)
+    msgs = [r.message for r in report.results]
+    assert any("UNVERIFIED" in m and "probe" in m for m in msgs), f"no UNVERIFIED warning: {msgs!r}"
+    assert not any("never_seen" in m for m in msgs), "scan RAN after a failed probe"
+    assert any("could not" in m or "timed out" in m for m in msgs), (
+        f"warning must name the probe failure mode: {msgs!r}"
+    )
+
 
 
 # -----------------------------------------------------------------------------
