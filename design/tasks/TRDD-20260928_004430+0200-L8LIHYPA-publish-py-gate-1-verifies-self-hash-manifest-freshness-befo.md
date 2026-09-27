@@ -4,7 +4,7 @@ title: publish.py Gate 1 verifies self-hash manifest freshness before the self-s
 column: backburner
 status: tasked
 created: 2026-09-28T00:44:30+0200
-updated: 2026-09-28T00:45:26+0200
+updated: 2026-09-28T00:52:20+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -30,3 +30,9 @@ publish.py Gate 3's self-scan exempted files listed in .cpv-self-hashes.json onl
 ## Proposed fix
 
 In publish.py Gate 1 (working-tree check), after confirming the tree is clean, re-hash the files listed in .cpv-self-hashes.json against the manifest; on mismatch, fail Gate 1 with the regen command instead of letting the stale manifest silently disarm the Gate 3 self-scan exemption and surface as unrelated CRITICAL findings.
+
+## Review scope notes (2026-09-28 adversarial review)
+
+1. The fix message MUST include the commit step — 'regen, commit the manifest, re-publish' — or a publisher obeying 'fail with the regen command' literally hits Gate 1's dirty-tree refusal on the next run (regen dirties the manifest, a tracked file).
+2. Decide staleness-only vs staleness+completeness and say which: _plugin_compute_hashes.py enumerates git ls-files, so a NEW tracked file absent from the manifest passes every listed-SHA check — a staleness-only check misses the same FP-noise symptom by a different mechanism. If the check is built, assert manifest-membership == tracked-file-set in the same pass, or record the completeness half as out of scope.
+3. Consider the belt-and-braces shape: the exemption actually disarms inside the Gate 3 self-scan arming path (_set_cpv_self_scan / cpv_self_scan_skip), where a per-file SHA mismatch could emit a WARNING naming the exact files — cheap, and it covers non-publish entry points (agent-security had its own missed-arming defect in v4.0.0). Gate 1 catches earlier but only on the publish path; warn at arming, fail at Gate 1.
