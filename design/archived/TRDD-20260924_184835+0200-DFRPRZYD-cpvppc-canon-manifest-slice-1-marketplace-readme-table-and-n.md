@@ -1,10 +1,10 @@
 ---
 trdd-id: DFRPRZYD
 title: CPVPPC P1 - framework and marketplace README-table assertions
-column: dev
-status: tasked
+column: complete
+status: archived
 created: 2026-09-24T18:48:35+0200
-updated: 2026-09-28T13:36:04+0200
+updated: 2026-09-28T13:41:04+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-24T18:48:35+0200
+implementation-commits: [1e79599d, 804b9451, b4341ba9, aecbd765, 44c6a474, 7b28b8bf, 01ffdbd0]
 ---
 
 # CPVPPC canon manifest slice 1 - marketplace README table and notify payload
@@ -52,3 +53,16 @@ Any push or PR to another repo. The one-line data fixes (web-scenario-tester 0.1
 - 2026-09-28T12:30:00+0200 — P1 slice 1 complete (commit 1e79599d): framework+canon.json+spec+remote_validation cpvppc mode, D9 notify fix (generator+template+guide), marketplace README fixture tests; 93 new tests, 175-test slice green, strict self-validate 0/0/0/0. Central-verified first-hand.
 - 2026-09-28T13:05:00+0200 — P1 adversarial review (fork) returned no blocker; 3 accepted findings fixed and committed in the same session: (b) D9 non-string 'name' hole closed (type check in the emitted step + test — 'name': 123 previously passed -z and notified as "123"); (a) exec-line filter hardened (compound echo-&&-invocation now credited, heredoc bodies excluded) + 2 pinning tests; (c) cpvppc's ignored -o documented in launcher help + branch comment; (d) entry-level workflows shape coverage VERIFIED already-present (validate_plugin path-field block includes workflows since v5.21.0) — no change. Also: remote_validation alias test extended with an in-process exemption + guard test.
 - 2026-09-28T14:10:00+0200 — Reviews rounds 3-4 (commits 44c6a474, 7b28b8bf): F1 newline rejection landed with test; template propagated. CORRECTION recorded per review round 4: the round-4 commit message overclaimed — its negative tests (non-string/ws-only/newline) bind the GENERATOR fixture only and never executed against the template; the P1-era template passed every test on the books. Closed by: byte-identity pin test (template step == emitted step), guide's stale P1-era block updated (third surface), template verified reference-only (not in REQUIRED_TEMPLATES; standardize routes through gen_notify_marketplace_yml) — no second live emission path. Recorded-not-taken: middle-\r/\t names pass every check (isprintable hardening available); F2 closing-tag whitespace comparison optional.
+- 2026-09-28T14:45:00+0200 — Review round 5 of commit 01ffdbd0: no blocker. Accepted and closed: (1) guide-side alignment pin added (needle-based — the guide's comment block deliberately differs from the emitted one, so full identity is wrong for prose; test_doc_step_carries_the_hardened_assert fails if the guide reverts to the P1-era shape); (2) implementation-commits backfilled with all seven commits. Process: card leaves dev (work complete, five review rounds survived). Recorded-not-taken: the byte-identity pin is deliberately over-tight (comment tweaks in the generator force a template re-copy — the intended one-SSOT discipline, cost stated).
+- 2026-09-28T13:41:04+0200 — COMPLETE by main-agent@claude-plugins-validation. P1 complete + 5 adversarial review rounds, all findings dispositioned; commits recorded.
+
+## Acceptance checklist
+
+- [x] scripts/cpvppc/ framework: canon.json 0.1.0 with MKT-001..007, verify.py verdict API (0/1/5/6, UNKNOWN-never-0, never-execute-repo-code), deterministic render_spec.py
+- [x] cpvppc mode in remote_validation.py with verdict passthrough
+- [x] D9 notify fix on all three surfaces (generator, template, guide), aligned by byte-identity + needle pins
+- [x] Marketplace README fixture tests: canon-complete scaffold passes 001-006, only 007 fails (positive control)
+- [x] Exec-line filter: compound invocations credited, heredoc bodies excluded, both pinned
+- [x] Every canon check WARNING (never blocking) per card decision
+- [x] 93+ tests green, ruff+mypy clean, hashes regen last, cache-cold strict self-validate 0/0/0/0
+- [x] 5 adversarial review rounds, every finding dispositioned with a stated reason
