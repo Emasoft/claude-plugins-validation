@@ -345,6 +345,29 @@ class TestWorkflowStep:
         r = _result(run_assertions(repo, "0.1.0"), "CPVPPC-MKT-005")
         assert not r.passed
 
+    def test_compound_echo_and_invocation_is_credited(self, tmp_path):
+        # P1 review finding (a): a compound `echo "…" && <real invocation>` line
+        # must satisfy MKT-005 — dropping the line whole read a compliant repo
+        # as NON-COMPLIANT. Pin the fixed behavior so it cannot regress.
+        wf = UPDATE_WF.replace(
+            "run: python3 scripts/render_readme_table.py",
+            'run: echo "checking" && python3 scripts/render_readme_table.py',
+        )
+        assert wf != UPDATE_WF, "anchor line missing from UPDATE_WF"
+        repo = _mk_repo(tmp_path, workflows={"update.yml": wf})
+        assert _result(run_assertions(repo, "0.1.0"), "CPVPPC-MKT-005").passed
+
+    def test_heredoc_body_mention_does_not_count(self, tmp_path):
+        # P1 review finding (a), other direction: a documentation heredoc that
+        # NAMES the renderer is not an invocation — MKT-005 must stay failed.
+        wf = UPDATE_WF.replace(
+            "run: python3 scripts/render_readme_table.py",
+            "run: |\n          cat <<EOF\n          python3 scripts/render_readme_table.py\n          EOF",
+        )
+        assert wf != UPDATE_WF, "anchor line missing from UPDATE_WF"
+        repo = _mk_repo(tmp_path, workflows={"update.yml": wf})
+        assert not _result(run_assertions(repo, "0.1.0"), "CPVPPC-MKT-005").passed
+
 
 class TestJsonPathEquals:
     def test_top_level_version_passes(self, tmp_path):

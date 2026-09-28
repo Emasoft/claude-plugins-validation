@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -127,6 +128,50 @@ def _steps_of(doc: dict) -> list[dict]:
             if isinstance(step, dict):
                 steps.append(step)
     return steps
+
+
+_HEREDOC_OPEN = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+
+
+def _exec_lines_of(shell: str) -> list[str]:
+    """Lines (or compound segments) of a run: block that could execute code.
+
+    Not a full shell parser — bounded heuristics tuned to the two shapes this
+    matcher must NOT misjudge (P1 adversarial review):
+    - A compound `echo "msg" && <real command>` line is split on `&&`/`;`/`|`
+      so the real invocation segment survives (dropping the line whole made a
+      compliant repo read NON-COMPLIANT).
+    - Heredoc body lines are excluded: a `cat <<EOF` documentation block that
+      merely NAMES the renderer must not satisfy the invocation assertion
+      (only `#`/`echo`/`printf` prefixes were excluded before, so heredoc
+      bodies and `env:`-style values inside run: could pass a mention off as
+      an execution).
+    The fail direction of any residual miss is fail-safe: the gate reads
+    NON-COMPLIANT (an advisory WARNING by canon, never blocking a publish).
+    """
+    exec_lines: list[str] = []
+    heredoc_tag: str | None = None
+    for raw in shell.splitlines():
+        line = raw.strip()
+        if heredoc_tag is not None:
+            if line == heredoc_tag:
+                heredoc_tag = None
+            continue
+        if not line or line.startswith("#"):
+            continue
+        open_m = _HEREDOC_OPEN.search(line)
+        if open_m:
+            heredoc_tag = open_m.group(2)
+            continue
+        head = line
+        for segment in re.split(r"&&|\|\||[;|]", head):
+            segment = segment.strip()
+            if not segment:
+                continue
+            if segment.startswith(("echo ", "printf ", "cat <<", "cat <<-", "cat >&")):
+                continue
+            exec_lines.append(segment)
+    return exec_lines
 
 
 def _step_shell_text(step: dict) -> str:
@@ -256,13 +301,7 @@ def _workflow_step_facts(repo: Path, args: dict) -> tuple[bool, str]:
             # the `env:`-mapping text carry no execution. The command lines
             # decide. The `client_payload.plugin` needle lives in `env:`, so
             # the full-step JSON below still covers mapping-only needles.
-            _exec_lines = [
-                line
-                for line in shell.splitlines()
-                if line.strip()
-                and not line.strip().startswith("#")
-                and not line.strip().startswith(("echo ", "printf "))
-            ]
+            _exec_lines = _exec_lines_of(shell)
             flat_exec = " ".join(" ".join(_exec_lines).split())
             # The step JSON must NOT include `run` again: the dict's run value
             # is the unfiltered shell text, so dumping it whole would
