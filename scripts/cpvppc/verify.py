@@ -130,7 +130,7 @@ def _steps_of(doc: dict) -> list[dict]:
     return steps
 
 
-_HEREDOC_OPEN = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+_HEREDOC_OPEN = re.compile(r"<<-?\s*(?:(['\"])([^'\"]+)\1|([\w-]+))")
 
 
 def _exec_lines_of(shell: str) -> list[str]:
@@ -145,7 +145,11 @@ def _exec_lines_of(shell: str) -> list[str]:
       merely NAMES the renderer must not satisfy the invocation assertion
       (only `#`/`echo`/`printf` prefixes were excluded before, so heredoc
       bodies and `env:`-style values inside run: could pass a mention off as
-      an execution).
+      an execution). Tags match unquoted, single/double-quoted, and
+      space-containing quoted forms; the tag is consumed by the opener line,
+      so a body is excluded until its closing tag appears. An unterminated
+      heredoc swallows the rest of the block — fail safe (advisory
+      NON-COMPLIANT).
     The fail direction of any residual miss is fail-safe: the gate reads
     NON-COMPLIANT (an advisory WARNING by canon, never blocking a publish).
     """
@@ -161,7 +165,7 @@ def _exec_lines_of(shell: str) -> list[str]:
             continue
         open_m = _HEREDOC_OPEN.search(line)
         if open_m:
-            heredoc_tag = open_m.group(2)
+            heredoc_tag = open_m.group(2) or open_m.group(3)
             continue
         head = line
         for segment in re.split(r"&&|\|\||[;|]", head):

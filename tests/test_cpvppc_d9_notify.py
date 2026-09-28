@@ -199,6 +199,16 @@ class TestEmittedWorkflowBehavior:
         assert rc != 0
         assert outputs.get("name") is None
 
+    def test_whitespace_only_name_fails_loud(self, run_script: str, tmp_path: Path) -> None:
+        """Negative: whitespace-only 'name' → exit non-zero.
+
+        A truthy string of spaces passes the emptiness assert and would notify
+        the marketplace with an all-whitespace entry name (review round 2).
+        """
+        rc, outputs = _run_get_plugin_info(run_script, tmp_path, json.dumps({"name": "   "}))
+        assert rc != 0
+        assert outputs.get("name") is None
+
 
 class TestEmittedWorkflowStatic:
     """Static pins on the rendered generator output."""

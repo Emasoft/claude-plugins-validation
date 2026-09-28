@@ -368,6 +368,18 @@ class TestWorkflowStep:
         repo = _mk_repo(tmp_path, workflows={"update.yml": wf})
         assert not _result(run_assertions(repo, "0.1.0"), "CPVPPC-MKT-005").passed
 
+    def test_hyphen_quoted_heredoc_tag_body_excluded(self, tmp_path):
+        # Review round 2, finding 1: tags are not always \w+ — <<'PKG-README'
+        # (hyphen, quoted) must also open a heredoc, or the body naming the
+        # renderer falls through to exec treatment (fail-open).
+        wf = UPDATE_WF.replace(
+            "run: python3 scripts/render_readme_table.py",
+            "run: |\n          cat <<'PKG-README'\n          python3 scripts/render_readme_table.py\n          PKG-README",
+        )
+        assert wf != UPDATE_WF, "anchor line missing from UPDATE_WF"
+        repo = _mk_repo(tmp_path, workflows={"update.yml": wf})
+        assert not _result(run_assertions(repo, "0.1.0"), "CPVPPC-MKT-005").passed
+
 
 class TestJsonPathEquals:
     def test_top_level_version_passes(self, tmp_path):
