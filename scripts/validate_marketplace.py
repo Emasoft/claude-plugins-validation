@@ -210,6 +210,13 @@ OPTIONAL_PLUGIN_FIELDS = {
     # itself reported it as an unrecognized field — the doc names that history
     # explicitly, so this is a real, current spec field, not a typo to catch.
     "metadata",
+    # 2026-09-28 docs-drift sync — manifest-reference.md "Fields" table:
+    # "Workflow .js files or directories. Replaces the default `workflows/`
+    # scan." Path-or-array-of-paths (shape already path-checked in
+    # validate_plugin.py's manifest path-field block since v5.21.0); at
+    # marketplace-entry level the strict allowlist drew a false
+    # RC-MKPL-UNKNOWN-FIELD MAJOR on a documented field.
+    "workflows",
 }
 
 # Marketplace top-level fields per plugin-marketplaces.md (v2.1.121).
@@ -225,6 +232,12 @@ OPTIONAL_MARKETPLACE_TOP_LEVEL_FIELDS = {
     "owner",  # already required, kept here for completeness
     "plugins",  # already required
     "name",  # already required
+    # 2026-09-28 docs-drift sync — marketplace-reference.md "Top-level fields"
+    # table: boolean, "When true, a plugin you remove from `plugins` is
+    # uninstalled on users' machines." A documented field; without it the
+    # "unknown top-level field" INFO fired (its text claims the spec does not
+    # define the field — false).
+    "forceRemoveDeletedPlugins",  # v2.1.280-era docs — boolean
 }
 
 # Source-specific required fields
@@ -762,6 +775,13 @@ RESERVED_MARKETPLACE_NAMES = {
     "first-party-plugins",  # v2.1.205 — reserved (plugin-marketplaces.md:163)
     "healthcare",  # v2.1.205 — reserved (plugin-marketplaces.md:163)
     "claude-tag-plugins",  # reserved (plugin-marketplaces.md:166)
+    # 2026-09-28 docs-drift sync — marketplace-reference.md "Reserved names":
+    # "Plugin directory names ... Reserved under the same rule as the official
+    # names." Note `anthropic-plugin-directory` was already caught by the
+    # `^anthropic-` impersonation pattern at MAJOR; it is listed here for
+    # exactness so it reports CRITICAL as a canonical reserved name.
+    "anthropic-plugin-directory",
+    "claude-plugin-directory",
 }
 
 # plugin-marketplaces.md:170 — "You also can't name a marketplace `npm`, `pip`,

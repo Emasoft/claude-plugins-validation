@@ -300,20 +300,28 @@ COMMON_TOOL_NAMES = {
     "ReadMcpResourceTool",
 }
 
-# Common notification types (hooks.md Notification matcher table = 8 values).
+# Common notification types (hooks.md Notification matcher table = 12 values).
 # ``agent_needs_input`` / ``agent_completed`` are the agent-lifecycle triggers
 # added in Claude Code v2.1.198. ``elicitation_complete`` / ``elicitation_response``
 # are documented Notification matcher values (hooks.md); without them a legit
 # value drew a spurious INFO "unknown type".
+# ``elicitation_url_dialog`` and the three ``quota_auto_resume_*`` values
+# (v2.1.234+) are documented matcher values (hooks.md Notification table,
+# ~L2255-2270) added by the 2026-09-28 docs-drift sync — same FP class: a
+# legit matcher drew a spurious "unknown type" INFO.
 COMMON_NOTIFICATION_TYPES = {
     "permission_prompt",
     "idle_prompt",
     "auth_success",
     "elicitation_dialog",
+    "elicitation_url_dialog",
     "elicitation_complete",
     "elicitation_response",
     "agent_needs_input",
     "agent_completed",
+    "quota_auto_resume_fired",
+    "quota_auto_resume_stale",
+    "quota_auto_resume_disabled",
 }
 
 # Compact trigger types

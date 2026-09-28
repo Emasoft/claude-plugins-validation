@@ -1,0 +1,113 @@
+{
+  "canon_version": "0.1.0",
+  "spec": "CPVPPC: the CPV publishing-pipeline canon. design/specs/cpvppc.md is generated from this file; a test asserts the committed spec equals the rendered output.",
+  "fact_types": [
+    "file_present",
+    "file_matches_render",
+    "json_path_equals",
+    "workflow_step",
+    "readme_section_current"
+  ],
+  "fact_type_registry": "Closed for 0.1.0. Later phases extend this list (config_valid, lock_consistent, actions_pinned, ... per the plan); an assertion naming a type absent from this registry is a canon-authoring error and verify.py refuses it rather than passing it silently.",
+  "assertions": [
+    {
+      "id": "CPVPPC-MKT-001",
+      "since": "0.1.0",
+      "scope": "marketplace-repo",
+      "applies_when": "README.md exists",
+      "fact": {
+        "type": "file_present",
+        "args": {
+          "path": "README.md",
+          "contains": ["<!-- PLUGIN-VERSIONS-START -->", "<!-- PLUGIN-VERSIONS-END -->"]
+        }
+      },
+      "fix": "Insert both marker lines into README.md — START above END, in order — with the plugin-versions table between them."
+    },
+    {
+      "id": "CPVPPC-MKT-002",
+      "since": "0.1.0",
+      "scope": "marketplace-repo",
+      "applies_when": "scripts/render_readme_table.py exists in the repo",
+      "fact": {
+        "type": "file_matches_render",
+        "args": {
+          "path": "scripts/render_readme_table.py",
+          "rendered_from": "template:scripts/render_readme_table.py"
+        }
+      },
+      "fix": "Replace the repo's renderer with a byte-identical copy of the CPV template templates/scripts/render_readme_table.py, or delete it and let the canon scaffolder install one."
+    },
+    {
+      "id": "CPVPPC-MKT-003",
+      "since": "0.1.0",
+      "scope": "marketplace-repo",
+      "applies_when": "README.md and .claude-plugin/marketplace.json exist and MKT-002 passed",
+      "fact": {
+        "type": "readme_section_current",
+        "args": {
+          "manifest": ".claude-plugin/marketplace.json",
+          "readme": "README.md"
+        }
+      },
+      "fix": "Run the renderer in write mode (python3 scripts/render_readme_table.py) to regenerate the table from the manifest."
+    },
+    {
+      "id": "CPVPPC-MKT-004",
+      "since": "0.1.0",
+      "scope": "marketplace-repo",
+      "applies_when": ".github/workflows/ exists",
+      "fact": {
+        "type": "workflow_step",
+        "args": {
+          "step_matches": "render_readme_table.py --check",
+          "gate": true
+        }
+      },
+      "fix": "Add a CI workflow that runs python3 scripts/render_readme_table.py --check so README-table drift fails the build."
+    },
+    {
+      "id": "CPVPPC-MKT-005",
+      "since": "0.1.0",
+      "scope": "marketplace-repo",
+      "applies_when": ".github/workflows/ exists",
+      "fact": {
+        "type": "workflow_step",
+        "args": {
+          "step_matches": "render_readme_table.py",
+          "gate": false,
+          "not_matches": "--check"
+        }
+      },
+      "fix": "Add an update workflow step that runs the renderer in write mode (no --check) and commits the regenerated README."
+    },
+    {
+      "id": "CPVPPC-MKT-006",
+      "since": "0.1.0",
+      "scope": "marketplace-repo",
+      "applies_when": ".claude-plugin/marketplace.json exists",
+      "fact": {
+        "type": "json_path_equals",
+        "args": {
+          "path": ".claude-plugin/marketplace.json",
+          "json_path": "version"
+        }
+      },
+      "fix": "Move the marketplace version to the top-level \"version\" key of .claude-plugin/marketplace.json — metadata.version is only a legacy alias and is not what the resolver reads."
+    },
+    {
+      "id": "CPVPPC-MKT-007",
+      "since": "0.1.0",
+      "scope": "marketplace-repo",
+      "applies_when": "always",
+      "fact": {
+        "type": "workflow_step",
+        "args": {
+          "step_matches": "client_payload.plugin",
+          "resolves_against_manifest": true
+        }
+      },
+      "fix": "P5: the update workflow must resolve the notified plugin identity against .claude-plugin/marketplace.json entries and fail loudly on an unknown one, so a repository_dispatch naming a plugin that is not listed never updates silently."
+    }
+  ]
+}

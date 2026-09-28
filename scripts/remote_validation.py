@@ -133,6 +133,13 @@ _ALIASES: dict[str, str] = {
     # plugin's GitHub-CI ci.yml Lint job runs (the #137-143 parity gap, TRDD-8eee537a).
     "ci-preflight": "cpv_ci_preflight",
     "cpv_ci_preflight": "cpv_ci_preflight",
+    # CPVPPC canon verifier (TRDD-DFRPRZYD P1) — in-process, NOT a subprocess:
+    # verify.py is a cpvppc package module, not a scripts/-root script, so the
+    # module-import path below cannot resolve it. Verdict exit codes pass
+    # through verbatim (0/1/5/6): 5 UNKNOWN and 6 NOT-DECLARED are verdict
+    # categories, NOT the 0-4 validator vocabulary, and remapping them would
+    # turn "could not check" and "no canon declared" into validator severities.
+    "cpvppc": "cpvppc_mode",
     # Linux fork-parity probe — re-runs a command with the multiprocessing
     # default forced to fork, so a macOS dev (default spawn) exercises the path
     # Linux CI takes. v3.23.0 shipped a fork deadlock no local gate could see.
@@ -201,6 +208,7 @@ _COMMANDS: dict[str, str] = {
     "xref": "Cross-reference validation",
     "doctor": "Health-check installed plugins and settings",
     "ci-preflight": "Local CI-parity preflight (jscpd/actionlint/mypy/dev-extra + Mega-Linter probes + CIP-1..8)",
+    "cpvppc": "CPVPPC publishing-canon verdict (COMPLIANT/NON-COMPLIANT/UNKNOWN/NOT-DECLARED; exit 0/1/5/6)",
     "fork-parity": "Linux fork-parity probe (re-run the suite with multiprocessing forced to fork, as Linux does)",
     "standardize": "Audit and fix plugin repo to match standards",
     "local-scope": "Local scope validation (non-git-tracked .claude/ elements)",
@@ -257,6 +265,16 @@ def main() -> int:
         parser.error(f"Unknown command: '{script_name}'\nAvailable: {', '.join(sorted(_COMMANDS))}")
 
     module_name = _ALIASES[script_name]
+
+    # cpvppc is a verdict mode, not a script dispatch: run the package module
+    # in-process (its main() takes argv and returns the verdict exit code) and
+    # let 0/1/5/6 through untouched.
+    if script_name == "cpvppc":
+        if not args.target:
+            parser.error("cpvppc requires a target repo path")
+        from cpvppc.verify import main as cpvppc_main  # noqa: PLC0415
+
+        return cpvppc_main([args.target, *extra])
 
     # Build the argv for the target script
     script_argv = [os.path.join(_cpv_scripts_dir, module_name + ".py")]
