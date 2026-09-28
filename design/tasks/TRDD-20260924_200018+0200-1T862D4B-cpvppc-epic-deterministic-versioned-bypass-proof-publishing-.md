@@ -4,7 +4,7 @@ title: CPVPPC epic - deterministic versioned bypass-proof publishing canon
 column: dev
 status: tasked
 created: 2026-09-24T20:00:18+0200
-updated: 2026-09-24T20:01:34+0200
+updated: 2026-09-28T13:55:16+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -24,6 +24,7 @@ Epic for the approved CPVPPC plan, stored verbatim at design/specs/cpvppc-plan.m
 ## Approval log
 
 - 2026-09-24T20:00:18+0200 — MANDATE issued by main-agent@claude-plugins-validation (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-09-28T13:46:52+0200 — P1 (TRDD-DFRPRZYD) review round 6 of 02979bf7: no blocker; convergence point, apply-review cycle ended per the two-round rule (6 rounds total, all findings dispositioned). The archived card's Approval log stops at round 5 because design/archived/ is immutable (TRDD-MQE5D28T D8 refuses even the log); the round-6 disposition is recorded HERE as the living owner. Findings: (1) pin's failure message misdiagnoses a reformat as 'P1-era shape is back' — recorded NOT applied (stable spelling, green suite; cosmetic docstring tweak would trigger another cycle; the byte-identity pin's error message names the real fix path); (2) guide needle 3 forbids text a future before/after doc section trips legitimately — recorded (relevant only on guide edits; failure message states the cause); (3) 804b9451 in implementation-commits is docs-only — no action (harmless over-inclusion, chain resolves); (4) '93+ tests' checklist range — stands (terminal card), lesson: exact final counts in future checklists. Board coherence confirmed: code-complete-on-master, release-via absent = correct terminal.
 
 ## Phases
 
