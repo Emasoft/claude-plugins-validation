@@ -94,16 +94,20 @@ KNOWN_FRONTMATTER_FIELDS = {
 # produce MAJORs via ``PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS`` — we do NOT
 # double-count them here.
 #
-# plugins-reference.md L72 (re-fetched for the v2.1.258–281 sync) lists 14
-# "Supported" fields: name, description, model, effort, maxTurns, tools,
-# disallowedTools, skills, memory, background, omitClaudeMd, isolation,
-# color, experimental. ``color``/``experimental``/``omitClaudeMd`` were added
-# here because the doc now names them — v5.12.0 had deliberately held
-# ``experimental`` OUT because no doc listed it then; that reason expired.
-# ``system-prompt``/``context``/``initialPrompt``/``agent`` are NOT in the doc
-# list; they stay for the reason v5.12.0 recorded (they entered with the
-# v2.1.79–86 alignment and nothing shows CC stopped loading them, so dropping
-# them would MINOR agents that load fine).
+# plugins-reference.md no longer carries a per-field agent table; the
+# authoritative list moved to sub-agents.md ("Frontmatter reference" table +
+# the plugin-subagent security Note, re-fetched for the v2.1.258–281 sync).
+# That list carries 15 fields: name, description, model, effort, maxTurns,
+# tools, disallowedTools, skills, memory, background, omitClaudeMd, isolation,
+# color, initialPrompt, experimental. ``color``/``experimental``/
+# ``omitClaudeMd`` were added here because the doc now names them — v5.12.0
+# had deliberately held ``experimental`` OUT because no doc listed it then;
+# that reason expired.
+# ``system-prompt``/``context``/``initialPrompt``/``agent``: ``initialPrompt``
+# IS in the doc table; ``system-prompt``/``context``/``agent`` are NOT — they
+# stay for the reason v5.12.0 recorded (they entered with the v2.1.79–86
+# alignment and nothing shows CC stopped loading them, so dropping them would
+# MINOR agents that load fine).
 PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS: frozenset[str] = frozenset(
     {
         "name",
@@ -121,9 +125,9 @@ PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS: frozenset[str] = frozenset(
         "background",
         "initialPrompt",
         "agent",
-        "color",  # plugins-reference.md L72
-        "experimental",  # plugins-reference.md L72
-        "omitClaudeMd",  # plugins-reference.md L72 (CC v2.1.271)
+        "color",  # sub-agents.md frontmatter table
+        "experimental",  # sub-agents.md frontmatter table (v2.1.248)
+        "omitClaudeMd",  # sub-agents.md frontmatter table (CC v2.1.271)
     }
 )
 
@@ -136,7 +140,8 @@ PLUGIN_SHIPPED_AGENT_ALLOWED_FIELDS: frozenset[str] = frozenset(
 # Built-in agent types per official docs — custom agent names are also valid.
 # Aliased to the shared ``BUILTIN_AGENT_TYPES`` in ``cpv_validation_common`` to
 # keep one source of truth (updated in v2.22.0 with ``statusline-setup`` and
-# ``Claude Code Guide`` per sub-agents.md L29-74).
+# ``Claude Code Guide`` per sub-agents.md; the 2026-09-28 docs-drift sync
+# added ``claude`` and the ``claude-code-guide`` name spelling).
 VALID_AGENT_VALUES = BUILTIN_AGENT_TYPES
 
 # Valid values for the 'memory' field (persistent memory scope)
@@ -1630,24 +1635,27 @@ def validate_plugin_shipped_allowed_fields(
 ) -> None:
     """GAP-79 (v2.22.3): Enforce the narrower plugin-shipped agent field list.
 
-    CPV allows these 18 fields for a plugin-shipped agent: the 14 that
-    plugins-reference.md L72 lists as "Supported" (``name, description, model,
-    effort, maxTurns, tools, disallowedTools, skills, memory, background,
-    omitClaudeMd, isolation, color, experimental``) plus 4 CPV keeps on
-    purpose (``system-prompt, context, initialPrompt, agent``). Fields OUTSIDE
+    CPV allows these 18 fields for a plugin-shipped agent: the 15 the
+    sub-agents.md "Frontmatter reference" table lists (``name, description,
+    model, effort, maxTurns, tools, disallowedTools, skills, memory,
+    background, omitClaudeMd, isolation, color, initialPrompt,
+    experimental``) plus 4 CPV keeps on purpose (``system-prompt, context,
+    initialPrompt, agent``). Fields OUTSIDE
     this set (but inside the broader KNOWN_FRONTMATTER_FIELDS superset accepted
     for project/user agents) emit a MINOR so authors notice the drift.
 
-    The 4 extra fields are the recorded gap, not an oversight: they entered CPV
-    in the v2.1.79-86 alignment, the doc list omits them, and no evidence says
+    The extra fields are the recorded gap, not an oversight: they entered CPV
+    in the v2.1.79-86 alignment, the doc table omits them, and no evidence says
     CC stopped loading them -- so dropping them would emit a MINOR on agents
     that load fine, i.e. a false positive. Narrow only on evidence that CC
     rejects them.
 
     ``experimental`` (v2.1.248) was held OUT by v5.12.0 because no doc then
-    listed it for plugin agents. The CC v2.1.258–281 re-fetch shows L72 now
-    lists it, along with ``color`` and ``omitClaudeMd`` (v2.1.271) -- so all
-    three are in. Re-verify the line number on the next sync; it moves.
+    listed it for plugin agents. The CC v2.1.258–281 re-fetch shows the
+    frontmatter table (now in sub-agents.md — plugins-reference.md's own
+    per-field agent table no longer exists) lists it, along with ``color``
+    and ``omitClaudeMd`` (v2.1.271) -- so all three are in. The table moves;
+    re-verify on the next sync.
 
     ``hooks``/``mcpServers``/``permissionMode`` are NOT double-reported here:
     those already trigger MAJORs via PLUGIN_SHIPPED_AGENT_FORBIDDEN_FIELDS

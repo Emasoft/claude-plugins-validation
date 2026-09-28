@@ -459,6 +459,14 @@ BUILTIN_AGENT_TYPES = {
     # Agent-tool forked subagent (gated by CLAUDE_CODE_FORK_SUBAGENT): inherits
     # the parent conversation, has no agents/fork.md by design — never a ghost.
     "fork",
+    # 2026-09-28 docs-drift sync — sub-agents.md "Other" built-ins table lists
+    # the catch-all `claude` agent and the docs-guide agent under the
+    # `name`-column spellings `claude` / `claude-code-guide`. The display form
+    # "Claude Code Guide" is kept above: existing consumers (spawnable-tool
+    # checks in validate_agent.py) accept it today, and the doc's own
+    # case-insensitive resolver means both spellings resolve.
+    "claude",
+    "claude-code-guide",
 }
 
 # Bundled slash commands shipped by Claude Code (v2.1.121).
