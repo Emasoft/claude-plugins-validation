@@ -334,3 +334,21 @@ class TestReferenceDoc:
     def test_doc_documents_the_entry_name_contract(self, guide_text: str) -> None:
         assert "client_payload.plugin" in guide_text
         assert "ENTRY name" in guide_text or "entry name" in guide_text
+
+    def test_doc_step_carries_the_hardened_assert(self, guide_text: str) -> None:
+        """The guide's example step shows the hardened D9 shape, not the P1-era one.
+
+        The guide's comment block deliberately differs from the emitted one
+        (it is prose context, not a byte-copy), so full block-identity would
+        be wrong here — a needle pin is the right strength: if the guide ever
+        reverts to `print(json.load(...)['name'])` + a separate -z branch,
+        this fails while every generator/template pin stays green (the
+        round-5 review's enforcement-gap finding).
+        """
+        assert "isinstance(v,str) and v and" in guide_text, (
+            "guide's step lost the type/emptiness assert — the P1-era shape is back"
+        )
+        assert "'\\n' not in v" in guide_text, "guide's step lost the newline rejection"
+        assert "[ -z \"$PLUGIN_NAME\" ]" not in guide_text, (
+            "guide shows the retired separate empty-check branch"
+        )
