@@ -209,6 +209,17 @@ class TestEmittedWorkflowBehavior:
         assert rc != 0
         assert outputs.get("name") is None
 
+    def test_internal_newline_name_fails_loud(self, run_script: str, tmp_path: Path) -> None:
+        """Negative: 'name' containing a newline → exit non-zero.
+
+        printf would write `name=a` then a bare `b` line, and GITHUB_OUTPUT
+        multi-line semantics hand the dispatch a TRUNCATED payload name —
+        silent, the exact defect class the guard exists for (review round 3).
+        """
+        rc, outputs = _run_get_plugin_info(run_script, tmp_path, json.dumps({"name": "a\nb"}))
+        assert rc != 0
+        assert outputs.get("name") is None
+
 
 class TestEmittedWorkflowStatic:
     """Static pins on the rendered generator output."""
