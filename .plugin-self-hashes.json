@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-09-28T11:19:45+00:00",
+  "computed_at": "2026-09-28T11:26:12+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:5d7fbfae792b5d3d3713e319105f63747175700246c68c3bb7b33e5dabc64e01",
@@ -346,7 +346,7 @@
     "scripts/detect_language.py": "sha256:c3292c8a3ef91aa906c5ea80a9fa6c20b1e8cb624be499106467440e96809f0c",
     "scripts/detect_lockfiles.py": "sha256:17c03bd5d381395f6348a7a2b8c2d4df99422cabdd600b98fe7be0b01ebb6971",
     "scripts/generate_marketplace_repo.py": "sha256:264aef354847cc6be4d572ce9d170adbe6adaee31e2fe7f8a15aaaa81897b797",
-    "scripts/generate_plugin_repo.py": "sha256:25a7b710866a64f073a96000dd837f13f0298c4ca866325c3bf365227d4814ed",
+    "scripts/generate_plugin_repo.py": "sha256:0a24d4fe358d7643ded75647dec3416b7214d123cb2ca25f0a869b99d81f2ff3",
     "scripts/gitignore_filter.py": "sha256:2b6875cadc06b9908b9b8181457df5178d99e884e56e5ae9e939658d6d38f3dc",
     "scripts/manage_doctor.py": "sha256:7acf4dbbb2a78daea5ec12587fd19fb176c698ee75d5ab10063b34955d8c8dc4",
     "scripts/manage_github_validate.py": "sha256:5425e92e1d90c2223e5c1cdf054714cd2dd0672364e9fad146367a05b8af9a0e",
@@ -899,7 +899,7 @@
     "tests/test_cpv_validation_common.py": "sha256:bec989ed6421b0d518aa25605dfdbceb36d875fe1cd8c9d430b8d5fe0ce7bddc",
     "tests/test_cpv_version_skew.py": "sha256:980147288e2d70891cb623f4bd28cc49a2aee8893c7f0b42cd7f282885e573c0",
     "tests/test_cpv_write_sink_ast.py": "sha256:ec80dbc4d663e85f4599662e3b42f85007d583d74cebfef3352e4caaf3e359ec",
-    "tests/test_cpvppc_d9_notify.py": "sha256:47be76c1668964a6af6e2b09381cacade29fb33e6af9dc12a23c716246f7943f",
+    "tests/test_cpvppc_d9_notify.py": "sha256:038202517ab113957cb4f5e35e686f4216b9b9a09d89e7b6ab5d9844abdea3e4",
     "tests/test_cpvppc_framework.py": "sha256:02384c57aec9fd5f0b14c6f169c5fa853b0ae0d72fecbe66ae77e8172ade4978",
     "tests/test_cpvppc_marketplace_readme.py": "sha256:f6be031f61104c014db3ce4fe1b42f9101ec490d17c508fad30a5fb6045321aa",
     "tests/test_create_micro_agents_workflow.py": "sha256:c753adf186efaf31dff9e500b9fe0bcf67b8946d51326ebf1a39c009ff3d693f",
