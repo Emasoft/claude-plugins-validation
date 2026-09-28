@@ -4,7 +4,7 @@ title: CPVPPC P1 - framework and marketplace README-table assertions
 column: dev
 status: tasked
 created: 2026-09-24T18:48:35+0200
-updated: 2026-09-24T20:01:40+0200
+updated: 2026-09-28T10:28:40+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -49,3 +49,4 @@ Any push or PR to another repo. The one-line data fixes (web-scenario-tester 0.1
 ## Approval log
 
 - 2026-09-24T18:48:35+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-28T12:30:00+0200 — P1 slice 1 complete (commit 1e79599d): framework+canon.json+spec+remote_validation cpvppc mode, D9 notify fix (generator+template+guide), marketplace README fixture tests; 93 new tests, 175-test slice green, strict self-validate 0/0/0/0. Central-verified first-hand.
