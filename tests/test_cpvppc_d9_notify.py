@@ -294,6 +294,25 @@ class TestTemplateFile:
         assert "REPO_NAME: ${{ github.event.repository.name }}" in joined_env
         assert "REF_SHA: ${{ github.sha }}" in joined_env
 
+    def test_template_step_byte_identical_to_emitted(self, template_text: str) -> None:
+        """The template's Get-plugin-info run block EQUALS the generator's.
+
+        The template is a reference copy for hand-adoption; nothing at runtime
+        copies it into scaffolds (notify-marketplace.yml is not in
+        REQUIRED_TEMPLATES, and standardize routes through the generator), so
+        only this pin keeps the two aligned. Without it the template can
+        silently regress to a stale D9 shape while every generator test stays
+        green — the hole the round-4 review found: the negative tests bind the
+        generator fixture only, so the P1-era template shape passed every test
+        on the books before the round-4 propagation.
+        """
+        emitted_script = _step_run_script(gen_notify_marketplace_yml(_params()))
+        template_script = _step_run_script(template_text)
+        assert template_script == emitted_script, (
+            "template's Get-plugin-info step diverged from gen_notify_marketplace_yml — "
+            "re-render and copy the emitted block, one source of truth"
+        )
+
 
 class TestReferenceDoc:
     """skills/cpv-publish-to-marketplace/references/publish-pipeline-guide.md."""
