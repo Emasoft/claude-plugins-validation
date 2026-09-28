@@ -251,7 +251,7 @@ def main() -> int:
         "-o",
         "--output",
         metavar="FILE",
-        help="Save the validation report to FILE (passed as --report to the script)",
+        help="Save the validation report to FILE (passed as --report to the script; ignored by the cpvppc mode)",
     )
 
     # Parse only the known args — the rest are passed through to the script
@@ -268,7 +268,9 @@ def main() -> int:
 
     # cpvppc is a verdict mode, not a script dispatch: run the package module
     # in-process (its main() takes argv and returns the verdict exit code) and
-    # let 0/1/5/6 through untouched.
+    # let 0/1/5/6 through untouched. -o/--output is consumed by the launcher's
+    # own parser but verify.py has no --report flag; extra argv is forwarded
+    # to cpvppc_main verbatim, so the launcher does not honor it either.
     if script_name == "cpvppc":
         if not args.target:
             parser.error("cpvppc requires a target repo path")

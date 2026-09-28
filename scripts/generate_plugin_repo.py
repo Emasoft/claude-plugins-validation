@@ -7369,14 +7369,10 @@ jobs:
             echo "::error::plugin.json not found in $REPO_NAME — cannot determine the marketplace entry name." >&2
             exit 1
           fi
-          PLUGIN_NAME="$(python3 -c "import json;print(json.load(open('.claude-plugin/plugin.json'))['name'])")" || {{
-            echo "::error::plugin.json in $REPO_NAME is unreadable or has no 'name' field — refusing to notify the marketplace with a wrong plugin name." >&2
+          PLUGIN_NAME="$(python3 -c "import json;v=json.load(open('.claude-plugin/plugin.json')).get('name');assert isinstance(v,str) and v, 'name must be a non-empty string';print(v)")" || {{
+            echo "::error::plugin.json in $REPO_NAME is unreadable, has no 'name' field, or its 'name' is not a non-empty string — refusing to notify the marketplace with a wrong plugin name." >&2
             exit 1
           }}
-          if [ -z "$PLUGIN_NAME" ]; then
-            echo "::error::plugin.json 'name' is empty in $REPO_NAME — refusing to notify the marketplace." >&2
-            exit 1
-          fi
           printf 'name=%s\\n' "$PLUGIN_NAME" >> "$GITHUB_OUTPUT"
           printf 'ref=%s\\n'  "$REF_SHA"   >> "$GITHUB_OUTPUT"
 

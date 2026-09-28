@@ -188,6 +188,17 @@ class TestEmittedWorkflowBehavior:
         assert rc != 0
         assert outputs.get("name") is None
 
+    def test_non_string_name_fails_loud(self, run_script: str, tmp_path: Path) -> None:
+        """Negative: non-string 'name' (e.g. 123) → exit non-zero.
+
+        `print(123)` exits 0 and the shell sees "123" — without a type check the
+        step passes its own -z guard and notifies the marketplace with a
+        stringified number as the entry name (found by the P1 adversarial review).
+        """
+        rc, outputs = _run_get_plugin_info(run_script, tmp_path, json.dumps({"name": 123}))
+        assert rc != 0
+        assert outputs.get("name") is None
+
 
 class TestEmittedWorkflowStatic:
     """Static pins on the rendered generator output."""
