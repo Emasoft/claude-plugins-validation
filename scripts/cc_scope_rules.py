@@ -281,13 +281,23 @@ MANAGED_ONLY_KEYS: frozenset[str] = frozenset(
         #   allowedMcpServers / deniedMcpServers — Scope "Any file"; entries from
         #     every file MERGE; "Deploy it in managed settings to enforce it" is
         #     a choice, not a restriction.
-        #   forceLoginMethod — Scope "Any file"; "claudeai"/"console" honored from
-        #     any settings file; only the "gateway" VALUE is managed-only.
         #   forceLoginOrgUUID — Scope "Any file"; a non-managed single UUID
         #     pre-selects the org during login (its "only a managed source
         #     enforces" prose describes enforcement of the restriction, which is
         #     consistent with Any-file placement, not ambiguity).
-        # A wrong removal would create a CRITICAL-emitting hole; these four are
+        # forceLoginMethod was also removed on the same read, then RE-ADDED
+        # (review R8): its scope is PER-VALUE, not per-key — settings-reference.md
+        # and managed-settings.md both scope ONLY the "gateway" VALUE as
+        # managed-enforced ("It treats "gateway" as unset in user, project,
+        # local..."), while claudeai/console ARE honored from any file. Removing
+        # the key wholesale opened a hole (project "gateway" silently accepted);
+        # keeping it wholesale would false-MAJOR claudeai/console. The per-key
+        # set cannot express a per-value rule — the re-add is the asymmetric
+        # ambiguous→KEEP direction (wrong keep = false MAJOR on 2 of 3 values;
+        # wrong removal = CRITICAL-emitting hole). A per-value refinement is its
+        # own card.
+        "forceLoginMethod",  # re-added (R8): "gateway" value IS managed-only; claudeai/console are not — per-value rule owed
+        # A wrong removal would create a CRITICAL-emitting hole; these three are
         # unambiguous in BOTH halves. See docs_dev/cc-284-apply-report.md.
     }
 )
