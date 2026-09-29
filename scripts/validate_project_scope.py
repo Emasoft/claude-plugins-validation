@@ -88,6 +88,7 @@ from urllib.parse import parse_qsl, urlsplit
 from cc_scope_rules import (
     ENABLED_PLUGIN_RE,
     GLOBAL_CONFIG_KEYS,
+    KNOWN_SETTINGS_KEYS,
     MANAGED_ONLY_KEYS,
     MANAGED_ONLY_NESTED_KEYS,
     MAX_CLAUDE_MD_BYTES,
@@ -460,6 +461,18 @@ def _flag_managed_only_nested_keys(data: dict[str, Any], report: ValidationRepor
 
 def _flag_managed_only_keys(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
     """Flag keys that only work in a managed settings file."""
+    # forceLoginMethod is scoped PER-VALUE by the docs (only "gateway" is
+    # managed-enforced; claudeai/console are honored from any file), but the
+    # MANAGED_ONLY_KEYS set is per-key — so the finding stays (a project
+    # "gateway" IS ignored) and the message carries the carve-out instead of
+    # the wrong blanket remediation (review R10). The per-value rule is
+    # TRDD-2JJD4NA0.
+    _PER_VALUE_MANAGED_NOTES = {
+        "forceLoginMethod": (
+            " NOTE: only the \"gateway\" value is managed-enforced — "
+            '"claudeai"/"console" are honored from any file.'
+        )
+    }
     for key in sorted(MANAGED_ONLY_KEYS):
         if key in data:
             report.major(
@@ -467,6 +480,7 @@ def _flag_managed_only_keys(data: dict[str, Any], report: ValidationReport, file
                     f"settings.json has managed-only key '{key}' — Claude Code "
                     "only reads this from managed-settings.json deployed by an "
                     "administrator. Remove it from project settings."
+                    + _PER_VALUE_MANAGED_NOTES.get(key, "")
                 ),
                 file_label,
             )
@@ -703,6 +717,41 @@ def _flag_missing_schema(data: dict[str, Any], report: ValidationReport, file_la
         )
 
 
+# Top-level names of the managed-only nested key paths — part of the exclusion
+# set for _flag_unknown_settings_keys.
+_MANAGED_ONLY_NESTED_KEYS_TOP: frozenset[str] = frozenset(t[0] for t in MANAGED_ONLY_NESTED_KEYS)
+
+
+def _flag_unknown_settings_keys(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
+    """Wire KNOWN_SETTINGS_KEYS as a top-level typo detector (TRDD-NS1XJNPH item 2).
+
+    The set's own contract (cc_scope_rules.py): unknown keys produce an INFO,
+    never a MAJOR — Claude Code silently ignores unknown keys, so this is a UX
+    aid. INFO never blocks ``--strict``. Top-level keys ONLY, mirroring the
+    set's design (nested keys live in the *_NESTED_KEYS sets); keys already
+    flagged by the rejected/managed-only/global/plugin-only sets are skipped so
+    one defect is not counted twice.
+    """
+    already_flagged = (
+        PROJECT_REJECTED_KEYS
+        | USER_MANAGED_SETTINGS_ONLY_KEYS
+        | MANAGED_ONLY_KEYS
+        | _MANAGED_ONLY_NESTED_KEYS_TOP
+        | GLOBAL_CONFIG_KEYS
+        | PLUGIN_ONLY_KEYS
+    )
+    for key in sorted(data):
+        if key in KNOWN_SETTINGS_KEYS or key in already_flagged:
+            continue
+        report.info(
+            (
+                f"settings.json: '{key}' is not a known Claude Code settings key — "
+                "Claude Code silently ignores unknown keys; check for a typo"
+            ),
+            file_label,
+        )
+
+
 def validate_settings_json_project_scope(settings_path: Path, report: ValidationReport) -> dict[str, Any] | None:
     """Apply project-scope rules to ``.claude/settings.json`` contents.
 
@@ -740,6 +789,7 @@ def validate_settings_json_project_scope(settings_path: Path, report: Validation
     _flag_claude_md_excludes(data, report, file_label)
     _flag_no_effect_keys(data, report, file_label)
     _flag_attribution_boolean(data, report, file_label)
+    _flag_unknown_settings_keys(data, report, file_label)
     _flag_missing_schema(data, report, file_label)
 
     own_levels = {r.level for r in report.results[start_idx:]}

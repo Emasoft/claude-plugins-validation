@@ -210,13 +210,22 @@ def test_readded_key_known_false_major_documented(tmp_path: Path) -> None:
     """The re-add's known trade (R9 Q1): claudeai/console from a project file
     are honored by CC but draw the MAJOR anyway — the per-key set cannot express
     per-value scope. Pin the false MAJOR as a KNOWN limitation so a later
-    per-value rule (TRDD-2JJD4NA0) flips exactly this assertion."""
+    per-value rule (TRDD-2JJD4NA0) flips exactly this assertion. Also pins the
+    R10 message carve-out: the finding must carry the per-value note instead of
+    leaving users with only the wrong blanket remediation."""
     f = tmp_path / "settings.json"
     f.write_text(json.dumps({"forceLoginMethod": "claudeai"}), encoding="utf-8")
     report = cvc.ValidationReport()
     validate_settings_json_project_scope(f, report)
-    assert any(
-        "forceLoginMethod" in r.message and r.level == "MAJOR" for r in report.results
+    hits = [
+        r
+        for r in report.results
+        if "forceLoginMethod" in r.message and r.level == "MAJOR"
+    ]
+    assert hits, "expected the known false MAJOR on claudeai placement"
+    assert any("gateway" in r.message for r in hits), (
+        "finding must carry the per-value carve-out note (R10), not the "
+        "blanket 'remove from project' advice alone"
     )
 
 
