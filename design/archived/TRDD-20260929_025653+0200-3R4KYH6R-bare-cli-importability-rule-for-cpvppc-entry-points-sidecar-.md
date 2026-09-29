@@ -1,10 +1,10 @@
 ---
 trdd-id: 3R4KYH6R
 title: Bare-CLI importability rule for cpvppc entry points + sidecar symlink resolution check
-column: backburner
-status: tasked
+column: complete
+status: archived
 created: 2026-09-29T02:56:53+0200
-updated: 2026-09-29T03:16:24+0200
+updated: 2026-09-29T13:54:08+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -22,6 +22,7 @@ approval-datetime: 2026-09-29T02:56:53+0200
 ## Approval log
 
 - 2026-09-29T02:56:53+0200 — MANDATE issued by main-agent@claude-plugins-validation (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-29T13:54:08+0200 — COMPLETE by main-agent@claude-plugins-validation. Both deliverables landed and centrally verified (16 tests green); symlink check found no defect; retro-break carrier verified rendering.
 
 ## Problem
 
@@ -66,3 +67,10 @@ Second git-cliff path EXERCISED with its exact Gate 9 argv (cliff --unreleased -
 ## R23 final (no further prose rounds)
 
 R23 accepts the landing; precision notes recorded: mechanism reproduced, not the exact publish-time artifact (tag-dependent header; range-sensitive); release-notes file downstream consumer record-cited only — in scope only if a release body ever looks wrong. Compliance rounds vs substantive rounds distinguished; this was the last permitted prose round.
+
+## Acceptance checklist
+
+- [x] (a) parametrized bare-CLI importability test over all cpvppc entry+adapter modules (16-test file tests/test_cpvppc_bare_cli.py, commit 6dd84d16)
+- [x] (b) sidecar hooks-path symlink-symmetry verified: aliased==resolved verdicts, escape rejected both forms, no divergence, no validator defect
+- [x] (c) retro-break carrier commit landed (fix(hooks) empty commit + 80f87de1 docs subject) — renders in git-cliff release body
+- [x] (d) hooks.md:416/:601 citation recorded at the change site (earlier commit)
