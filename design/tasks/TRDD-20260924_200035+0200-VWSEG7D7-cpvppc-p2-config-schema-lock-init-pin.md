@@ -1,10 +1,10 @@
 ---
 trdd-id: VWSEG7D7
 title: CPVPPC P2 - Config schema, lock, init, pin
-column: backburner
+column: dev
 status: tasked
 created: 2026-09-24T20:00:35+0200
-updated: 2026-09-24T20:04:48+0200
+updated: 2026-09-29T02:09:25+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
