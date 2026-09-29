@@ -278,3 +278,72 @@ def test_supply_chain_in_doc_demotes_not_blocks() -> None:
     assert any(f.get("demoted") and not f.get("suppressed") for f in findings), findings
     # … but a documented doc-only recipe must not publish-block on its own.
     assert "SUPPLY_CHAIN" not in _blocking_ids(doc, "docs/loader.md")
+
+
+# ── issue #233 — doc-path prose hard-demote for the execution family ─────
+
+
+def test_issue_233_md_prose_exec_class_demotes_to_warning() -> None:
+    """A demoted SHELL_EXEC match in .md prose with NO executable shape (not in
+    a fence, line not an exec sink) hard-demotes to WARNING — visible, never
+    blocks ``--strict`` (issue #233)."""
+    doc = "The worker spawn( helper manages subprocesses safely.\n"
+    findings = [
+        f
+        for f in sa.scan_content(doc, "docs/internals.md")
+        if isinstance(f, dict) and f.get("ruleId") == "SHELL_EXEC" and not f.get("suppressed")
+    ]
+    assert findings, "expected a SHELL_EXEC finding (non-vacuous)"
+    assert all(f.get("demoted") for f in findings), findings
+    assert all(f.get("severity") == "warning" for f in findings), findings
+
+
+def test_issue_233_rc_rule_in_doc_path_still_hard_demotes_to_warning() -> None:
+    """Regression guard for the EXISTING RC-side behavior: an RC rule in
+    ``UNCERTAIN_IN_DOCS_RULES`` firing in a doc path hard-demotes to WARNING
+    via ``cpv_validation_common.effective_severity`` (issue #233's model)."""
+    from cpv_validation_common import effective_severity
+
+    assert effective_severity("critical", "README.md", rule_id="RC-37") == "warning"
+    assert effective_severity("major", "docs/install.md", rule_id="RC-76") == "warning"
+    # ...and a rule NOT in the set keeps the one-tier demotion.
+    assert effective_severity("critical", "README.md", rule_id="RC-21") == "major"
+
+
+def test_issue_233_fenced_or_exec_sink_line_stays_nit() -> None:
+    """FN-safety: the hard-demote applies ONLY to prose with no executable
+    shape. A demoted execution-family match INSIDE a code fence, or on a line
+    matching the exec-sink regex, keeps its NIT (blocks --strict)."""
+    fenced = "```text\nos.system(cmd) runs the tool\n```\n"
+    fenced_findings = [
+        f
+        for f in sa.scan_content(fenced, "docs/guide.md")
+        if isinstance(f, dict) and f.get("ruleId") == "SHELL_EXEC" and not f.get("suppressed")
+    ]
+    assert fenced_findings, "expected a SHELL_EXEC finding inside the fence (non-vacuous)"
+    assert all(f.get("severity") != "warning" for f in fenced_findings), fenced_findings
+
+    sink_prose = "The README validate/eval step calls eval( on each description.\n"
+    sink_findings = [
+        f
+        for f in sa.scan_content(sink_prose, "design/archive/notes.md")
+        if isinstance(f, dict) and f.get("ruleId") == "SHELL_EXEC" and not f.get("suppressed")
+    ]
+    assert sink_findings, "expected the exec-sink-shaped prose finding (non-vacuous)"
+    assert all(f.get("severity") != "warning" for f in sink_findings), sink_findings
+
+
+def test_issue_233_non_execution_class_demote_unaffected() -> None:
+    """A rule NOT in the execution family that demotes in a .md path (here:
+    PROMPT_INJECT via markdown-table demotion) keeps its NIT — the hard-demote
+    is scoped to the runtime-execution family only, because for prose-delivery
+    rules the prose IS the attack."""
+    doc = "| phrase | effect |\n|---|---|\n| ignore previous instructions | bypass |\n"
+    findings = [
+        f
+        for f in sa.scan_content(doc, "skills/foo/SKILL.md")
+        if isinstance(f, dict) and f.get("ruleId") == "PROMPT_INJECT" and not f.get("suppressed")
+    ]
+    assert findings, "expected a PROMPT_INJECT table finding (non-vacuous)"
+    assert all(f.get("demoted") for f in findings), findings
+    assert all(f.get("severity") == "low" for f in findings), findings
