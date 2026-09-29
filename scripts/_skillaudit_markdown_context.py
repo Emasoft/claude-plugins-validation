@@ -2100,39 +2100,31 @@ def _is_hyphenated_compound_sudo(line: str, match: str, rule_id: str) -> bool:
 _COMPOUND_GLUED_TAIL_RE: Final[re.Pattern[str]] = re.compile(r"\w[-/]$")
 _COMPOUND_PAREN_CONTENT_RE: Final[re.Pattern[str]] = re.compile(r"[\w\s.,()#'-]+")
 _COMPOUND_PAREN_DANGEROUS_RE: Final[re.Pattern[str]] = re.compile(
-    r"""["'`$;|&><]|\$\(|\brm\b|\bcurl\b|\bwget\b|\bsh\b|\bbash\b""",
+    r"""["'`$;|&><]|\$\(|\brm\b|\bcurl\b|\bwget\b|\bsh\b|\bbash\b|\bpython\b"""
+    r"""|\bnode\b|\bpowershell\b|\bosascript\b|\bchmod\b|\bmkfs\b|\bdd\b"""
+    r"""|\bkill\b|\bexec\b|\beval\b""",
     re.IGNORECASE,
 )
-_COMPOUND_TAIL_METACHAR_RE: Final[re.Pattern[str]] = re.compile(r"[;|&`]|\$\(|&&|\|\|")
+# A flag token inside the parenthetical is command syntax, never prose
+# (review R3): `python -c`, `--help`, `-rf`.
+_COMPOUND_PAREN_FLAG_RE: Final[re.Pattern[str]] = re.compile(r"\s-{1,2}[A-Za-z]")
+# Review R1: the tail after the parenthetical must not open a quoted string —
+# a quoted payload there is the FN shape the first cut missed.
+_COMPOUND_TAIL_METACHAR_RE: Final[re.Pattern[str]] = re.compile(r"""["'`;|&<>]|\$\(|&&|\|\|""")
+# Mirror of the catalog's SHELL_EXEC eval-call pattern (case-insensitive, like
+# the compiled catalog). Enumerating every occurrence enables the #136
+# all-occurrences discipline instead of analyzing only line.find()'s first hit.
+_EVAL_CALL_SHAPE_RE: Final[re.Pattern[str]] = re.compile(r"\beval\s*\(", re.IGNORECASE)
 
 
-def _is_inert_compound_glued_call(line: str, match: str, rule_id: str) -> bool:
-    """#233 — True iff a SHELL_EXEC ``eval (`` match is a compound-word tail
-    followed by a prose parenthetical (``validate/eval (commit fafa8f0)``).
-
-    The match must START at a token whose immediately-preceding two chars are
-    ``<word-char><slash-or-hyphen>`` — i.e. the ``eval`` is the tail of a
-    larger compound identifier — AND the parenthetical the match ends on must
-    contain only prose (identifier chars, digits, spaces, punctuation from a
-    CLOSED benign set), with no shell metacharacter after it. Every guard is
-    independently FN-refusing: see the block comment above.
-    """
-    if rule_id != "SHELL_EXEC":
+def _occurrence_is_inert_prose(line: str, m: re.Match[str]) -> bool:
+    """R1 helper — the guards for ONE ``eval (`` occurrence. A clear requires
+    EVERY occurrence on the line to pass (the first cut analyzed only
+    ``line.find(match)``'s first hit, which cleared a real second call)."""
+    start = m.start()
+    if start < 2 or _COMPOUND_GLUED_TAIL_RE.fullmatch(line[start - 2 : start]) is None:
         return False
-    token_idx = match.lower().find("eval")
-    if token_idx < 0:
-        return False
-    abs_start = line.find(match) if token_idx == 0 else -1
-    if abs_start < 0:
-        # The match does not begin with the token (or occurs mid-line in a way
-        # find() cannot disambiguate) — decline rather than guess.
-        return False
-    if not _COMPOUND_GLUED_TAIL_RE.search(line[max(0, abs_start - 2) : abs_start]):
-        return False
-    paren_open = match.rfind("(")
-    if paren_open < 0:
-        return False
-    rest = line[abs_start + paren_open + 1 :]
+    rest = line[m.end() :]
     close = rest.find(")")
     if close < 0:
         return False  # unbalanced paren — not a clean prose parenthetical
@@ -2141,9 +2133,33 @@ def _is_inert_compound_glued_call(line: str, match: str, rule_id: str) -> bool:
         return False  # quote / $ / backtick / operator inside → code, not prose
     if _COMPOUND_PAREN_DANGEROUS_RE.search(content):
         return False  # a command verb in the parenthetical — refuse the clear
+    if _COMPOUND_PAREN_FLAG_RE.search(content):
+        return False  # a command flag (`-c`, `--help`) — command syntax
     if _COMPOUND_TAIL_METACHAR_RE.search(rest[close + 1 :]):
         return False  # co-located executable tail — refuse the clear
     return True
+
+
+def _is_inert_compound_glued_call(line: str, match: str, rule_id: str) -> bool:
+    """#233 — True iff EVERY ``eval (`` shape on the line is a compound-word
+    tail followed by a prose parenthetical (``validate/eval (commit fafa8f0)``).
+
+    The all-occurrences discipline (review R1, mirroring #136): the match text
+    alone cannot say WHICH occurrence the dispatcher is adjudicating, so the
+    clear holds only when no occurrence anywhere on the line carries a code
+    payload, a command verb/flag, or a co-located executable tail. Every guard
+    is independently FN-refusing: see the block comment above.
+    """
+    if rule_id != "SHELL_EXEC":
+        return False
+    if "eval" not in match.lower():
+        return False
+    saw_inert = False
+    for occ in _EVAL_CALL_SHAPE_RE.finditer(line):
+        if not _occurrence_is_inert_prose(line, occ):
+            return False
+        saw_inert = True
+    return saw_inert
 
 
 # #79 — PRIVILEGE_ESC on the ubiquitous GitHub-Actions "Free disk space"
@@ -2847,7 +2863,11 @@ def _certain_benign_literal(
     #       `-` boundary and the parenthetical is English prose, not an argument.
     #       PROSE PATH ONLY (``fence_state is None``): inside a fence the same
     #       token can be a real path invocation, so the fence is never cleared.
-    if fence_state is None and _is_inert_compound_glued_call(line, match, rule_id):
+    if (
+        fence_state is None
+        and is_documentation_only_path(file_path)
+        and _is_inert_compound_glued_call(line, match, rule_id)
+    ):
         return True
 
     # (#79) PRIVILEGE_ESC on the GitHub-Actions free-disk-space runner-cleanup
