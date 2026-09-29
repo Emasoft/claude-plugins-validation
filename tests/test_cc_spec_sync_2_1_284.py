@@ -192,6 +192,34 @@ def test_control_managed_key_still_major(tmp_path: Path) -> None:
     )
 
 
+def test_readded_key_gateway_value_majors_end_to_end(tmp_path: Path) -> None:
+    """End-to-end control for the R8 re-add (membership alone is the
+    vacuous-source-pin shape): a project file carrying forceLoginMethod:"gateway"
+    — the one genuinely managed-only value — draws the MAJOR through the real
+    validator, not just via set membership."""
+    f = tmp_path / "settings.json"
+    f.write_text(json.dumps({"forceLoginMethod": "gateway"}), encoding="utf-8")
+    report = cvc.ValidationReport()
+    validate_settings_json_project_scope(f, report)
+    assert any(
+        "forceLoginMethod" in r.message and r.level == "MAJOR" for r in report.results
+    )
+
+
+def test_readded_key_known_false_major_documented(tmp_path: Path) -> None:
+    """The re-add's known trade (R9 Q1): claudeai/console from a project file
+    are honored by CC but draw the MAJOR anyway — the per-key set cannot express
+    per-value scope. Pin the false MAJOR as a KNOWN limitation so a later
+    per-value rule (TRDD-2JJD4NA0) flips exactly this assertion."""
+    f = tmp_path / "settings.json"
+    f.write_text(json.dumps({"forceLoginMethod": "claudeai"}), encoding="utf-8")
+    report = cvc.ValidationReport()
+    validate_settings_json_project_scope(f, report)
+    assert any(
+        "forceLoginMethod" in r.message and r.level == "MAJOR" for r in report.results
+    )
+
+
 # ───────────────────────────── manifest known_fields ────────────────────────
 
 
