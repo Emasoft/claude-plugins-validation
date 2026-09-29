@@ -1107,6 +1107,27 @@ def _resolve_plugin_vars(token: str, plugin_root: Path | None) -> str:
     return token
 
 
+def _relative_token_matches_plugin_file(script_path: Path, plugin_root: Path) -> bool:
+    """True iff a bare relative script token names an existing file under plugin_root.
+
+    Used to UPGRADE the relative-path advisory (TRDD-NS1XJNPH item 1): when the
+    token provably matches a file in the plugin, the "does not resolve at
+    runtime" diagnosis is certain and the message can name the exact fix.
+    Pure existence probe — never reads content. (The unresolvable MAJOR
+    suppression itself does not depend on this: a relative token that matches
+    nothing is still suppressed, because it is unresolvable either way.)
+    """
+    if plugin_root is None:
+        return False
+    rel = str(script_path)
+    if os.path.isabs(rel) or ".." in Path(rel).parts:
+        return False
+    try:
+        return (plugin_root / rel).is_file()
+    except OSError:
+        return False
+
+
 def _is_lintable_script(path_str: str) -> bool:
     """True if path's suffix is in the lintable-extensions set."""
     suffix = Path(path_str).suffix.lower()
@@ -2885,6 +2906,27 @@ def validate_command_hook(
         malformed_out=malformed_parts,
         args=args_val,
     )
+    # TRDD-NS1XJNPH item 1: the 3f relative-path MINOR above only sees the
+    # command's FIRST token (./x). An interpreter form (`bash hooks/pre.sh`)
+    # has the interpreter as token 1 and a relative SCRIPT token later —
+    # apply the same advisory to each extracted script path that is relative,
+    # so the token's unresolvability is still surfaced (it no longer draws
+    # the not-found MAJOR, which would be wrong — see the exists() branch).
+    if (
+        "${CLAUDE_PLUGIN_ROOT}" not in command
+        and "$CLAUDE_PLUGIN_ROOT" not in command
+        and "${CLAUDE_PLUGIN_DATA}" not in command
+        and "$CLAUDE_PLUGIN_DATA" not in command
+        and not cmd_first_token.startswith("./")
+    ):
+        for ref in refs:
+            ref_token = str(ref.path)
+            if not os.path.isabs(ref_token) and ".." not in Path(ref_token).parts:
+                report.minor(
+                    f"Command uses relative path '{ref_token}' without ${{CLAUDE_PLUGIN_ROOT}} — "
+                    "hook working directory is not guaranteed. Use ${{CLAUDE_PLUGIN_ROOT}}/... "
+                    "for reliability."
+                )
     for malformed in malformed_parts:
         report.major(
             f"Hook command simple-command portion is unparseable (likely unbalanced quote): "
@@ -3038,7 +3080,33 @@ def validate_command_hook(
                 and "$CLAUDE_PROJECT_DIR" not in invocation
                 and "${CLAUDE_PROJECT_DIR}" not in invocation
             ):
-                report.major(f"Script not found: {script_path}")
+                # TRDD-NS1XJNPH item 1: a BARE RELATIVE token (./hooks/pre.sh,
+                # hooks/pre.sh) is UNRESOLVABLE, not MISSING — Claude Code runs
+                # plugin hooks with cwd = PROJECT dir, so the token does not
+                # statically resolve against the plugin tree and a plugin_root
+                # join would manufacture a resolution CPV cannot verify (an FN
+                # in the dangerous direction). The existing relative-path MINOR
+                # already tells the author the real problem; only a RESOLVABLE
+                # root (a literal absolute path — ${CLAUDE_PLUGIN_ROOT} was
+                # already substituted to one during extraction) gets the
+                # not-found MAJOR.
+                raw_token = str(script_path)
+                if not os.path.isabs(raw_token):
+                    # BARE RELATIVE token: UNRESOLVABLE at runtime (hook cwd is
+                    # the PROJECT dir), never "missing". The relative-path
+                    # MINOR (3f, above) already tells the author the real
+                    # problem. When the token provably matches a file under
+                    # the plugin root, upgrade the MINOR's text to name the
+                    # exact fix — the ambiguity is provable there.
+                    if _relative_token_matches_plugin_file(script_path, plugin_root):
+                        report.minor(
+                            f"Script token '{raw_token}' matches a file in the plugin "
+                            f"({plugin_root / raw_token}), but hook commands run with the "
+                            "project directory as cwd, so a relative path does NOT resolve "
+                            f"against the plugin. Did you mean ${{CLAUDE_PLUGIN_ROOT}}/{raw_token.lstrip('./')}?"
+                        )
+                else:
+                    report.major(f"Script not found: {script_path}")
 
     return True
 

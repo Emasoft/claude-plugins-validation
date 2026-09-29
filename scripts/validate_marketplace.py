@@ -4054,6 +4054,27 @@ def validate_marketplace(marketplace_path: Path) -> ValidationReport:
                 file=json_path,
             )
 
+    # TRDD-NS1XJNPH item 3 — wire OPTIONAL_MARKETPLACE_TOP_LEVEL_FIELDS (dead
+    # since definition). DOCUMENT-level unknown keys: CC's own validator warns
+    # on them, so an INFO (never blocking) naming the key and pointing at the
+    # ENTRY-level strict allowlist (RC-MKPL-UNKNOWN-FIELD, which owns entries)
+    # is the right tier here. The internal _json_path/_marketplace_dir bookkeeping
+    # keys are excluded.
+    for key in sorted(data):
+        if key.startswith("_") or key in OPTIONAL_MARKETPLACE_TOP_LEVEL_FIELDS:
+            continue
+        report.add_marketplace_result(
+            level="INFO",
+            category="manifest",
+            message=(
+                f"[RC-MKPL-UNKNOWN-TOP-LEVEL-FIELD] '{key}' is not a documented "
+                "marketplace.json top-level field — Claude Code ignores it at load "
+                "time. (Per-ENTRY unknown fields are a separate, stricter check: "
+                "RC-MKPL-UNKNOWN-FIELD.)"
+            ),
+            file=json_path,
+        )
+
     # Validate owner field structure
     owner = data.get("owner")
     if isinstance(owner, dict):

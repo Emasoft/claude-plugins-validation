@@ -8,7 +8,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./hooks/pre.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre.sh"
           }
         ]
       }
