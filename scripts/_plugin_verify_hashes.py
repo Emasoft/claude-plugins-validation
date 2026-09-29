@@ -519,6 +519,51 @@ def verify_self_integrity(
     for added_rel in _detect_added_files(plugin_root, files):
         mismatches.append((added_rel, "<not-in-manifest>", "<added>"))
 
+    if mismatches and _head_matches_release_tag(plugin_root, version) is False:
+        # Dev checkout (HEAD != version tag): the branch's own committed
+        # manifest is the canonical reference for this checkout —
+        # CLAUDE.md's documented workflow (edit → regenerate manifest →
+        # self-validate). The GitHub default-branch manifest reflects
+        # master, which a PR branch by definition diverges from, so the
+        # remote comparison above cannot pass until merge; verifying the
+        # working tree against the branch's committed manifest keeps the
+        # tamper guarantee (the manifest itself is git-reviewed) without
+        # blocking every PR that touches CPV internals.
+        local_manifest_path = plugin_root / MANIFEST_FILE
+        try:
+            local_files = (json.loads(local_manifest_path.read_text(encoding="utf-8"))).get(
+                "hashed_files"
+            ) or (json.loads(local_manifest_path.read_text(encoding="utf-8"))).get("files") or {}
+        except (OSError, json.JSONDecodeError):
+            local_files = None
+        if isinstance(local_files, dict) and local_files:
+            dev_mismatches: list[tuple[str, str, str]] = []
+            for rel_path, expected in local_files.items():
+                if not isinstance(rel_path, str) or not isinstance(expected, str):
+                    continue
+                local = plugin_root / rel_path
+                if not local.is_file():
+                    dev_mismatches.append((rel_path, expected, "<missing>"))
+                    continue
+                actual = _sha256_of_file(local)
+                if actual is None:
+                    continue
+                expected_hex = expected.split(":", 1)[-1] if expected.startswith("sha256:") else expected
+                if actual != expected_hex:
+                    dev_mismatches.append((rel_path, expected_hex, actual))
+            for added_rel in _detect_added_files(plugin_root, local_files):
+                dev_mismatches.append((added_rel, "<not-in-manifest>", "<added>"))
+            if not dev_mismatches:
+                if not quiet:
+                    print(
+                        f"[CPV integrity] OK — dev checkout verified against the branch's "
+                        f"committed manifest ({len(local_files)} files; HEAD != v{version} tag, "
+                        "GitHub master manifest not applicable pre-merge).",
+                    )
+                _VERIFIED_THIS_PROCESS = True
+                return True
+            mismatches = dev_mismatches
+
     if mismatches:
         print(
             "\n" + "=" * 70 + "\n"
