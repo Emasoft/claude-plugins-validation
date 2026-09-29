@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-09-29T13:34:50+00:00",
+  "computed_at": "2026-09-29T13:50:57+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:5d7fbfae792b5d3d3713e319105f63747175700246c68c3bb7b33e5dabc64e01",
@@ -241,7 +241,7 @@
     "scripts/__init__.py": "sha256:49b607fe1a6453c02683b8e70f6543a50c90a886c72452e2c7a35f50e81d5dbf",
     "scripts/_minimal_yaml.py": "sha256:eff7403aab726e7cf23b5569c0836cb4bfc596d9b18610080941957b94a7497c",
     "scripts/_plugin_compute_hashes.py": "sha256:98e5937ca640e98ff81ef110ac247909994beb87b8863cd0c97818671009f21c",
-    "scripts/_plugin_verify_hashes.py": "sha256:406079e96a256a533713edc0259f0ddb56cb291dafd295a028f9bd99c276eca5",
+    "scripts/_plugin_verify_hashes.py": "sha256:dc3bb2fe2d47ae95dc3478b9c4a5a178c3bdfff7b3c99efaf95e7082eece79c6",
     "scripts/_skillaudit_html_context.py": "sha256:73b3f2c0011499a90d29545f30d41370cf1f010d918d7d6515d459ac97a1f71e",
     "scripts/_skillaudit_json_context.py": "sha256:7f22fbe9034463212103f7a29110ac73917bd7e0ba3fccd9ed48f3c813decbdc",
     "scripts/_skillaudit_markdown_context.py": "sha256:685a4c614432658c28e5aa3849cc3cbb88633d679f47afa8446e4c4bcbfb9ef8",
@@ -1110,7 +1110,7 @@
     "tests/test_pipeline_script_refs.py": "sha256:6792fccbee4d86dcce18227222c079968c308133840e43213e200869dbf2e322",
     "tests/test_plugin_json_default_folder_shadow.py": "sha256:491769824a61b971f1f32bd94ed6f621eb5907e5a2c9d300f41fb4ecf89aa302",
     "tests/test_plugin_readme_chain_gate.py": "sha256:097394f7e03cf797d09f086cf05ece78f0e54173b0f06bb0b7fc28bded1b8f2b",
-    "tests/test_plugin_verify_hashes.py": "sha256:317fbe2fccacd9a45cee853514427dfec1bfa25d0ddf0bbe2773152395919f04",
+    "tests/test_plugin_verify_hashes.py": "sha256:9237416089958e20244d7f8dfcf1ee12ac90445d33aef6fb8419b985705c5e08",
     "tests/test_point1_all_text_file_scan.py": "sha256:d4cc66cb04c726a138b4839ffc5af86d42f944b339a1ae091f6ed42e04deaebe",
     "tests/test_prepush_validate_budget.py": "sha256:6fbfdd29f2baf6e3998690a9581686939367317e78992e96b87eb98886bc6491",
     "tests/test_print_menu.py": "sha256:41c22a8b302ffc3483a7a8442fb85fd16376737f18554ee2fd65474efbc3a8a3",
