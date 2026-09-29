@@ -1,0 +1,350 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CPVPPC publishing-pipeline canon config (cpvppc.yaml)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "canon", "repo"],
+  "properties": {
+    "schema_version": {"const": "0.1.0"},
+    "canon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": {
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+      }
+    },
+    "repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["plugin", "marketplace", "plugin+marketplace"]},
+        "plugin_root": {"type": "string"},
+        "host": {"enum": ["github"]}
+      }
+    },
+    "preflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "local": {"enum": ["full", "minimal"]}
+      }
+    },
+    "units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "path", "adapter", "toolchain"],
+        "properties": {
+          "name": {"type": "string"},
+          "path": {"type": "string"},
+          "adapter": {"enum": ["python-uv", "node-ts", "rust-cargo", "c-cpp", "go", "shell", "dotnet", "swift", "zig", "java-gradle"]},
+          "adapter_options": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "bundler": {"enum": ["esbuild", "bun", "vite", "tsdown"]},
+              "entries": {"type": "object", "additionalProperties": {"type": "string"}},
+              "externals": {"type": "array", "items": {"type": "string"}},
+              "test": {"enum": ["vitest", "node --test", "bun test"]},
+              "import_mode": {"type": "string"},
+              "plugins": {"type": "array", "items": {"type": "string"}}
+            }
+          },
+          "source": {
+            "type": "object",
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "required": ["in-tree"],
+                "properties": {"in-tree": {"const": true}}
+              },
+              {
+                "additionalProperties": false,
+                "required": ["external-repo"],
+                "properties": {
+                  "external-repo": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["url", "ref"],
+                    "properties": {
+                      "url": {"type": "string"},
+                      "ref": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "toolchain": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["version"],
+            "properties": {
+              "version": {"type": "string"},
+              "system_packages": {"type": "array", "items": {"type": "string"}}
+            }
+          },
+          "build": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind"],
+            "properties": {
+              "kind": {"enum": ["none", "bundle", "compiled"]},
+              "outputs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "kind"],
+                  "properties": {
+                    "name": {"type": "string"},
+                    "kind": {"enum": ["bin", "cdylib", "node-addon", "wheel", "wasm", "bundle"]}
+                  }
+                }
+              },
+              "targets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["os", "arch", "runner", "method"],
+                  "properties": {
+                    "os": {"enum": ["darwin", "linux", "windows"]},
+                    "arch": {"enum": ["arm64", "x86_64"]},
+                    "triple": {"type": "string"},
+                    "runner": {"type": "string"},
+                    "method": {"enum": ["native", "cross", "zigbuild", "docker"]},
+                    "c_compiler": {"enum": ["clang", "gcc", "msvc", "zig"]},
+                    "node_abi": {"type": "array", "items": {"type": "integer"}}
+                  }
+                }
+              },
+              "network_hosts": {"type": "array", "items": {"type": "string"}},
+              "local_release": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["signing_key"],
+                "properties": {
+                  "signing_key": {"type": "string"}
+                }
+              }
+            }
+          },
+          "deps": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "lockfile": {"type": "string"},
+              "strategy": {"enum": ["bundled", "install-on-first-use", "system-prerequisite"]}
+            },
+            "if": {"required": ["strategy"], "properties": {"strategy": {"enum": ["bundled", "install-on-first-use"]}}},
+            "then": {"required": ["lockfile"]}
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "naming": {"type": "string"},
+        "archive": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "darwin": {"enum": ["raw", "tar.gz", "zip"]},
+            "linux": {"enum": ["raw", "tar.gz", "zip"]},
+            "windows": {"enum": ["raw", "tar.gz", "zip"]}
+          }
+        },
+        "delivery": {"enum": ["committed-bin", "release-asset-fetch", "both"]},
+        "manifest_path": {"type": "string"},
+        "signing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "macos": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "identity_secret": {"type": "string"},
+                "notarize": {"type": "boolean"}
+              }
+            },
+            "windows": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cert_secret": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "launchers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "output"],
+            "properties": {
+              "name": {"type": "string"},
+              "output": {"type": "string"}
+            }
+          }
+        },
+        "arch_aliases": {"type": "array", "items": {"enum": ["windows-arm64-to-x86_64"]}},
+        "path_shim": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dir"],
+          "properties": {
+            "dir": {"type": "string"}
+          }
+        },
+        "network_hosts": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "vendor": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "upstream", "commit", "license_file", "build", "output", "output_sha256", "reproducible"],
+        "properties": {
+          "name": {"type": "string"},
+          "upstream": {"type": "string"},
+          "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+          "license_file": {"type": "string"},
+          "build": {"type": "array", "items": {"type": "string"}},
+          "output": {"type": "string"},
+          "output_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "reproducible": {"type": "boolean"}
+        }
+      }
+    },
+    "external_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "source", "version", "sha256", "provenance"],
+        "properties": {
+          "name": {"type": "string"},
+          "source": {"type": "string"},
+          "version": {"type": "string"},
+          "sha256": {
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": {"pattern": "^(any|(darwin|linux|windows)-(arm64|x86_64))$"},
+            "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          },
+          "provenance": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["signer"],
+                "properties": {"signer": {"type": "string"}}
+              },
+              {"const": "none"}
+            ]
+          }
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "markdownlint": {"type": "boolean"},
+        "shellcheck": {"type": "boolean"},
+        "cspell": {"type": "boolean"},
+        "docgen": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tool"],
+          "properties": {
+            "tool": {"type": "string"}
+          }
+        },
+        "custom": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "stage", "argv"],
+            "properties": {
+              "name": {"type": "string"},
+              "stage": {"enum": ["pre-lint", "post-test", "docgen"]},
+              "argv": {"type": "array", "items": {"type": "string"}},
+              "network_hosts": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "coverage_min": {"type": "number", "minimum": 0},
+        "test_platforms": {"type": "array", "items": {"type": "string"}},
+        "max_test_minutes": {"type": "number", "minimum": 0}
+      }
+    },
+    "hooks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["script", "interpreter"],
+        "properties": {
+          "script": {"type": "string"},
+          "interpreter": {"enum": ["python-uv", "node", "bun", "sh"]}
+        }
+      }
+    },
+    "targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "marketplaces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["owner", "repo", "entry_name"],
+            "properties": {
+              "owner": {"type": "string"},
+              "repo": {"type": "string"},
+              "entry_name": {"type": "string"},
+              "visibility": {"enum": ["public", "private"]}
+            }
+          }
+        }
+      }
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "changelog": {"enum": ["git-cliff"]},
+        "prerelease_channel": {"type": "boolean"}
+      }
+    },
+    "docs": {
+      "type": "array",
+      "items": {"enum": ["install", "platforms", "components", "badges", "network", "unattested"]}
+    },
+    "writes_outside_data": {"type": "array", "items": {"type": "string"}}
+  }
+}

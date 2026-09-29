@@ -13,8 +13,10 @@ Canon version: 0.1.0
 - `json_path_equals`
 - `workflow_step`
 - `readme_section_current`
+- `config_valid`
+- `lock_consistent`
 
-Closed for 0.1.0. Later phases extend this list (config_valid, lock_consistent, actions_pinned, ... per the plan); an assertion naming a type absent from this registry is a canon-authoring error and verify.py refuses it rather than passing it silently.
+Closed for 0.1.0. Later phases extend this list (actions_pinned, unit_covers_executables, ... per the plan); an assertion naming a type absent from this registry is a canon-authoring error and verify.py refuses it rather than passing it silently.
 
 ## Assertions
 
@@ -73,3 +75,19 @@ Closed for 0.1.0. Later phases extend this list (config_valid, lock_consistent, 
 - Applies when: always
 - Fact: `workflow_step` {"resolves_against_manifest": true, "step_matches": "client_payload.plugin"}
 - Fix: P5: the update workflow must resolve the notified plugin identity against .claude-plugin/marketplace.json entries and fail loudly on an unknown one, so a repository_dispatch naming a plugin that is not listed never updates silently.
+
+### CPVPPC-CFG-001
+
+- Scope: `plugin-repo`
+- Since: 0.1.0
+- Applies when: cpvppc.yaml is present
+- Fact: `config_valid` {"config": "cpvppc.yaml", "schema": "scripts/cpvppc/config_schema.json"}
+- Fix: Fix the reported config errors in cpvppc.yaml. Unknown keys are always invalid — a shape the config cannot express is a canon change request, never an exception.
+
+### CPVPPC-CFG-002
+
+- Scope: `plugin-repo`
+- Since: 0.1.0
+- Applies when: .cpvppc-lock.json is present
+- Fact: `lock_consistent` {"config": "cpvppc.yaml", "lock": ".cpvppc-lock.json"}
+- Fix: Regenerate the lock with cpvppc init --force so the recorded config sha256 and canon version match the current cpvppc.yaml.
