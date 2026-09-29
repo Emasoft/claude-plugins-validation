@@ -40,7 +40,7 @@
         "properties": {
           "name": {"type": "string"},
           "path": {"type": "string"},
-          "adapter": {"enum": ["python-uv", "node-ts", "rust-cargo", "c-cpp", "go", "shell", "dotnet", "swift", "zig", "java-gradle"]},
+          "adapter": {"enum": ["python-uv", "node-ts", "rust-cargo", "c-cpp", "go", "shell"]},
           "adapter_options": {
             "type": "object",
             "additionalProperties": false,
