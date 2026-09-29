@@ -4,7 +4,7 @@ title: Bulk env-var drift 233 documented vars missing from VALID_PLUGIN_ENV_VARS
 column: backburner
 status: tasked
 created: 2026-09-29T02:19:00+0200
-updated: 2026-09-29T02:19:00+0200
+updated: 2026-09-29T02:22:50+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: bugfix
@@ -24,3 +24,4 @@ Scan docs_dev/cc-spec-284-diff.md (2026-09-29) row 10: 372 doc vars vs 187 in CP
 ## Approval log
 
 - 2026-09-29T02:19:00+0200 — MANDATE issued by main-agent@claude-plugins-validation (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+DURABLE SOURCE (review R4#D): the /tmp file citations in the body die with the machine, and the docs_dev snapshot fallback is gitignored. The durable regeneration source is the fetch procedure: llms.txt-discovered raw pages at code.claude.com/docs/en/<page>.md — env-vars.md carries the full variable table; set-diff it against cpv_validation_common.VALID_PLUGIN_ENV_VARS (plus is_valid_plugin_env_var's pattern coverage) per the cc-spec-drift-check-method.
