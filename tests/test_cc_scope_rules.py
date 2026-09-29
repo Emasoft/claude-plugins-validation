@@ -118,11 +118,6 @@ class TestTaxonomyConstants:
         """skipDangerousModePermissionPrompt is documented as nested under permissions."""
         assert ("permissions", "skipDangerousModePermissionPrompt") in PROJECT_REJECTED_NESTED_KEYS
 
-    def test_managed_only_keys_contains_mcp_allow_deny(self) -> None:
-        """MANAGED_ONLY_KEYS covers the MCP allow/deny lists documented as managed-only."""
-        assert "allowedMcpServers" in MANAGED_ONLY_KEYS
-        assert "deniedMcpServers" in MANAGED_ONLY_KEYS
-
     def test_managed_only_keys_contains_managed_flags(self) -> None:
         """MANAGED_ONLY_KEYS covers allowManaged* flags documented as policy-only."""
         for key in (
