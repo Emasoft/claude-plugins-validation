@@ -31,6 +31,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -1370,6 +1371,97 @@ def stage_bypass_guard() -> int:
     return 0
 
 
+_SELF_HASH_MANIFEST_NAMES = (".plugin-self-hashes.json", ".cpv-self-hashes.json")
+_SELF_HASH_LIST_CAP = 20
+
+
+def _self_hash_manifest_path(plugin_root: Path) -> Path | None:
+    """Return the self-hash manifest for this repo, or None if absent.
+
+    Same names validate_security._load_local_manifest prefers: canonical
+    `.plugin-self-hashes.json` first, legacy `.cpv-self-hashes.json`
+    fallback. No manifest means this is not a CPV-plugin repo — the
+    freshness check does not apply (skip silently).
+    """
+    for name in _SELF_HASH_MANIFEST_NAMES:
+        path = plugin_root / name
+        if path.is_file():
+            return path
+    return None
+
+
+def _verify_self_hash_manifest(plugin_root: Path, manifest_path: Path) -> str | None:
+    """Re-hash every manifest-listed file and diff the key set against `git ls-files`.
+
+    TRDD-L8LIHYPA: a STALE manifest silently disarms Gate 3's self-scan
+    exemption (per-file SHA mismatch → file gets scanned normally → CPV
+    flags its own rule-prose as CRITICAL). TWO failure mechanisms produce
+    that same FP-noise symptom, so BOTH are checked here (review note 2):
+
+    1. Staleness — a listed file's on-disk sha256 no longer matches the
+       recorded value.
+    2. Completeness — a git-tracked file is absent from the manifest
+       (enumeration is `git ls-files`, the same source
+       `_plugin_compute_hashes.py` uses; a NEW tracked file added after
+       the last regen passes every listed-SHA check).
+
+    Returns None when the manifest is fresh+complete, else a list of
+    "<rel_path>: <reason>" lines. Hashing matches
+    `_plugin_compute_hashes.sha256_of_file` exactly (sha256 of raw bytes,
+    streamed). The per-file warn-at-scan half of review note 3 already
+    lives in validate_security's RC-162 arming path — not duplicated here.
+    """
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        recorded: dict[str, str] = manifest.get("files") or {}
+    except (OSError, json.JSONDecodeError):
+        return [f"{manifest_path.name}: unreadable or malformed manifest"]
+
+    problems: list[str] = []
+
+    # 1. Staleness: re-hash every listed file (one streaming read each).
+    for rel_path, expected in sorted(recorded.items()):
+        path = plugin_root / rel_path
+        if not path.is_file():
+            problems.append(f"{rel_path}: listed in manifest but missing on disk")
+            continue
+        h = hashlib.sha256()
+        try:
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
+        except OSError:
+            problems.append(f"{rel_path}: unreadable")
+            continue
+        digest = h.hexdigest()
+        # Recorded values are "sha256:<hex>" (compute_manifest writes the prefix).
+        expected_hex = expected.split(":", 1)[-1] if isinstance(expected, str) else ""
+        if digest != expected_hex:
+            problems.append(f"{rel_path}: content changed after last manifest regen")
+
+    # 2. Completeness: every git-tracked file must have a manifest entry.
+    tracked = subprocess.run(
+        ["git", "-C", str(plugin_root), "ls-files", "-z"],
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    if tracked.returncode == 0:
+        # Manifest writer excludes its own two filenames (chicken-and-egg);
+        # mirror that so they never read as "missing".
+        tracked_files = {
+            entry
+            for entry in tracked.stdout.decode("utf-8", errors="surrogateescape").split("\0")
+            if entry and entry not in _SELF_HASH_MANIFEST_NAMES
+        }
+        for rel_path in sorted(tracked_files - set(recorded)):
+            problems.append(f"{rel_path}: git-tracked but absent from manifest")
+    # git unavailable/non-repo → completeness half cannot run; staleness
+    # still applies. (Gate 1 already ran git successfully, so this is rare.)
+
+    return problems or None
+
+
 def stage_check_working_tree(plugin_root: Path) -> int:
     """Gate 1: clean working tree check. Auto-commits a uv.lock *modification* if it is the only diff.
 
@@ -1423,6 +1515,37 @@ def stage_check_working_tree(plugin_root: Path) -> int:
             print("\n".join(dirty_lines))
             return 1
     print(f"{GREEN}✓ Working tree clean{NC}")
+
+    # TRDD-L8LIHYPA: a stale self-hash manifest silently disarms Gate 3's
+    # self-scan exemption and surfaces as unrelated CRITICAL findings in the
+    # self-validate. Fail HERE (staleness + completeness) with the full
+    # remediation, BEFORE the release machinery runs. The commit step is in
+    # the message because the regen dirties the (tracked) manifest — without
+    # it the next run is refused by THIS gate's dirty-tree check.
+    manifest_path = _self_hash_manifest_path(plugin_root)
+    if manifest_path is not None:
+        problems = _verify_self_hash_manifest(plugin_root, manifest_path)
+        if problems is not None:
+            print(
+                f"{RED}✗ Self-hash manifest is stale or incomplete "
+                f"(staleness + completeness checked){NC}",
+                file=sys.stderr,
+            )
+            shown = problems[:_SELF_HASH_LIST_CAP]
+            for problem in shown:
+                print(f"    - {problem}", file=sys.stderr)
+            if len(problems) > _SELF_HASH_LIST_CAP:
+                print(f"    … and {len(problems) - _SELF_HASH_LIST_CAP} more", file=sys.stderr)
+            print("\nRemediation:", file=sys.stderr)
+            print("    uv run python scripts/_plugin_compute_hashes.py", file=sys.stderr)
+            print(
+                "    git add .plugin-self-hashes.json .cpv-self-hashes.json   # whichever changed",
+                file=sys.stderr,
+            )
+            print('    git commit -m "chore: regen self-hash manifest"', file=sys.stderr)
+            print("    then re-run publish", file=sys.stderr)
+            return 1
+
     return 0
 
 
