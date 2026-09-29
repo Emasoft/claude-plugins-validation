@@ -75,14 +75,49 @@ REPO_RAW_TAG_URL_LEGACY = (
     f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/v{{version}}/{MANIFEST_FILE_LEGACY}"
 )
 
-# Fallback for dev branches / pre-release versions: main HEAD manifest.
-# Used only when the per-version URL returns 404 (tag doesn't exist yet).
-REPO_RAW_MAIN_URL = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{MANIFEST_FILE}"
-REPO_RAW_MAIN_URL_LEGACY = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{MANIFEST_FILE_LEGACY}"
+# Fallback for dev branches / pre-release versions: default-branch HEAD
+# manifest. Used only when the per-version URL returns 404 (tag doesn't
+# exist yet). The branch is resolved dynamically, not hard-coded: the
+# repo's default branch is `master` (verified 2026-09-29 — a hard-coded
+# `main` 404s, and step 3/4 of _fetch_github_manifest then silently
+# compare dev checkouts against the PER-TAG manifest of the installed
+# version, so any committed change to a CPV-internal file fails the
+# integrity gate even after the local manifest is correctly refreshed).
+REPO_RAW_MAIN_URL = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{{branch}}/{MANIFEST_FILE}"
+REPO_RAW_MAIN_URL_LEGACY = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{{branch}}/{MANIFEST_FILE_LEGACY}"
 
 CACHE_DIR = Path.home() / ".cache" / "cpv"
 CACHE_TTL = timedelta(hours=1)
 HTTP_TIMEOUT_SEC = 10
+
+_DEFAULT_BRANCH_CACHE: str | None = None
+
+
+def _default_branch() -> str:
+    """Resolve the repo's default branch name via the GitHub API.
+
+    The default branch is NOT hard-coded: this repo's default is
+    `master` (not `main`), and a hard-coded wrong branch makes steps 3/4
+    of `_fetch_github_manifest` silently skip to the per-tag manifest,
+    which pins dev-branch edits against the installed release — the
+    integrity gate then fails on any committed CPV-internal change even
+    after a correct local manifest refresh. Cached per process; on
+    failure falls back to `main` and the caller's own error handling.
+    """
+    global _DEFAULT_BRANCH_CACHE
+    if _DEFAULT_BRANCH_CACHE is None:
+        try:
+            req = Request(
+                f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}",
+                headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"},
+            )
+            with urlopen(req, timeout=HTTP_TIMEOUT_SEC) as resp:
+                import json as _json
+
+                _DEFAULT_BRANCH_CACHE = str(_json.loads(resp.read()).get("default_branch", "main"))
+        except (URLError, OSError, ValueError):
+            return "main"
+    return _DEFAULT_BRANCH_CACHE
 USER_AGENT = f"cpv-integrity-check/2.0 ({REPO_OWNER}/{REPO_NAME})"
 
 # Sentinels for "this process already verified / warned, don't repeat"
@@ -239,13 +274,13 @@ def _fetch_github_manifest(
             _warn_legacy_filename_once()
             return m
 
-    # 3. Main HEAD with NEW filename.
-    m = _fetch_one(REPO_RAW_MAIN_URL, version)
+    # 3. Default-branch HEAD with NEW filename.
+    m = _fetch_one(REPO_RAW_MAIN_URL.format(branch=_default_branch()), version)
     if m is not None:
         return m
 
-    # 4. Main HEAD with LEGACY filename.
-    m = _fetch_one(REPO_RAW_MAIN_URL_LEGACY, version)
+    # 4. Default-branch HEAD with LEGACY filename.
+    m = _fetch_one(REPO_RAW_MAIN_URL_LEGACY.format(branch=_default_branch()), version)
     if m is not None:
         _warn_legacy_filename_once()
         return m
@@ -375,7 +410,11 @@ def verify_self_integrity(
         # execution to continue. User may be offline; refusing to run
         # would be worse UX than running unverified with a warning.
         if not quiet:
-            tried_url = REPO_RAW_TAG_URL.format(version=version) if version else REPO_RAW_MAIN_URL
+            tried_url = (
+                REPO_RAW_TAG_URL.format(version=version)
+                if version
+                else REPO_RAW_MAIN_URL.format(branch=_default_branch())
+            )
             cache_path = _cache_path_for_version(version)
             print(
                 "[CPV integrity] WARNING: Could not fetch the canonical "
