@@ -4,7 +4,7 @@ title: Bare-CLI importability rule for cpvppc entry points + sidecar symlink res
 column: backburner
 status: tasked
 created: 2026-09-29T02:56:53+0200
-updated: 2026-09-29T02:59:24+0200
+updated: 2026-09-29T03:00:58+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -30,3 +30,7 @@ Review R12 carries: (a) no test pins every cpvppc entry module bare-CLI importab
 ## R13 dispositions
 
 Q2 ANSWERED by live probe: a genuinely-unknown plausible key (telemetryRetentionPeriod, invented, absent from the live settings-reference fetched this session) correctly draws the INFO — the detector fires on the unknown stratum and is silent on known/retained. The CC-tolerates-but-CPV-doesnt-know residue is unenumerable by definition; INFO visibility is the accepted typo-detector trade. Q1 fixed: comment now names the live re-derive URL. Q3b noted (card bundling repeat).
+
+## R14 dispositions
+
+Q1: cite stays line-anchored but the QUOTED FRAGMENTS are the durable anchors (already in the comment); at next touch of the file, drop the line numbers or mark them point-in-time. Q2: headline overreach accepted — probe proves the sampled member fires, not the stratum (body text already says this); severity-bounded regardless (INFO never blocks). Q5b: the interpreter-form MINOR retro-break (card item c) is a RELEASE-NOTES obligation for THIS publish — surfaced here so the notes author sees it: bash hooks/x.sh interpreter-form relative tokens newly draw a MINOR (was invisible before fa0a8982).
