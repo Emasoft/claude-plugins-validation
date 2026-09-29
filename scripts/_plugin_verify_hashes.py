@@ -519,7 +519,7 @@ def verify_self_integrity(
     for added_rel in _detect_added_files(plugin_root, files):
         mismatches.append((added_rel, "<not-in-manifest>", "<added>"))
 
-    if mismatches and _head_matches_release_tag(plugin_root, version) is False:
+    if mismatches and version is not None and _head_matches_release_tag(plugin_root, version) is False:
         # Dev checkout (HEAD != version tag): the branch's own committed
         # manifest is the canonical reference for this checkout —
         # CLAUDE.md's documented workflow (edit → regenerate manifest →
