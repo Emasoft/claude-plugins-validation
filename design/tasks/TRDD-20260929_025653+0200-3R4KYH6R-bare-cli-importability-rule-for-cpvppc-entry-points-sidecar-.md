@@ -4,7 +4,7 @@ title: Bare-CLI importability rule for cpvppc entry points + sidecar symlink res
 column: backburner
 status: tasked
 created: 2026-09-29T02:56:53+0200
-updated: 2026-09-29T03:10:47+0200
+updated: 2026-09-29T03:12:02+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -50,3 +50,7 @@ Read cliff.toml + Gate 9 (the missed fact): filter_unconventional + message=subj
 ## R19 disposition (PARTIAL CLOSED)
 
 Q1: Gate 9 argv read = [cliff_bin, --bump, --tag <tag>, -o CHANGELOG.md], no --config, repo-root cwd — same invocation shape as the dry-run; divergence risk closed. Q3/Q5a: fix(hooks)-prefixed empty carrier commit mints the RETRO-BREAK line; dry-run 2 confirms it renders under ### Bug Fixes in 5.22.0 (line 11). Accepted costs: the docs: carrier line double-lists (honest record), R17/R18 noise lines render (pre-existing repo pattern), 132-skip warning pre-existing. BREAKING marker not used: not a breaking API change, a tightening — the Bug Fixes placement + RETRO-BREAK wording carries it.
+
+## R20 disposition (channel closed)
+
+Release-notes surface closed from the record, not re-verified live: CLAUDE.md v5.3.0 records Gate 9/13's awk extractor takes THIS RELEASE'S SECTION ONLY from the freshly-rendered CHANGELOG.md (measured 277 chars) — the Bug Fixes line transitively reaches the GitHub release body. Q2 corrected: the R17/R18 noise lines are SESSION-AUTHORED this wave, not pre-existing convention — wrong to classify them as inherited. NIT adopted: empty subject-carrier commits are a sanctioned changelog channel; prefix semantically (fix:/feat:/docs:) — misuse guard.
