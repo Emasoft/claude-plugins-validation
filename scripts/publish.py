@@ -1390,7 +1390,7 @@ def _self_hash_manifest_path(plugin_root: Path) -> Path | None:
     return None
 
 
-def _verify_self_hash_manifest(plugin_root: Path, manifest_path: Path) -> str | None:
+def _verify_self_hash_manifest(plugin_root: Path, manifest_path: Path) -> list[str] | None:
     """Re-hash every manifest-listed file and diff the key set against `git ls-files`.
 
     TRDD-L8LIHYPA: a STALE manifest silently disarms Gate 3's self-scan
