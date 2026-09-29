@@ -4,7 +4,7 @@ title: Bare-CLI importability rule for cpvppc entry points + sidecar symlink res
 column: backburner
 status: tasked
 created: 2026-09-29T02:56:53+0200
-updated: 2026-09-29T03:12:02+0200
+updated: 2026-09-29T03:13:51+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -54,3 +54,7 @@ Q1: Gate 9 argv read = [cliff_bin, --bump, --tag <tag>, -o CHANGELOG.md], no --c
 ## R20 disposition (channel closed)
 
 Release-notes surface closed from the record, not re-verified live: CLAUDE.md v5.3.0 records Gate 9/13's awk extractor takes THIS RELEASE'S SECTION ONLY from the freshly-rendered CHANGELOG.md (measured 277 chars) — the Bug Fixes line transitively reaches the GitHub release body. Q2 corrected: the R17/R18 noise lines are SESSION-AUTHORED this wave, not pre-existing convention — wrong to classify them as inherited. NIT adopted: empty subject-carrier commits are a sanctioned changelog channel; prefix semantically (fix:/feat:/docs:) — misuse guard.
+
+## R21 wording corrections
+
+STILL OPEN (the card's original deliverables — do not read 'channel closed' as card-wide): (a) bare-CLI importability test for cpvppc entry modules; (b) sidecar hooks-path symlink-resolution verification. Channel saga wording softened: closed per the v5.3.0 record; live-mechanism identity (awk extractor vs the --strip call) unverified, conclusion robust under EITHER extractor (both render commit subjects). Bump-coupling noted: final section header [5.22.0] vs other depends on publish-time bump — cosmetic.
