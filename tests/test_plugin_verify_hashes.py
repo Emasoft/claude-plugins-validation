@@ -174,7 +174,7 @@ def test_schema_v1_files_key_read(monkeypatch, tmp_path):
     monkeypatch.setattr(
         _plugin_verify_hashes,
         "_fetch_github_manifest",
-        lambda v, prefer_cache=True: manifest,
+        lambda v, prefer_cache=True, plugin_root=None: manifest,
     )
     ok = _plugin_verify_hashes.verify_self_integrity(plugin_root=plugin_root, fail_on_mismatch=False, quiet=True)
     assert ok is True
@@ -196,7 +196,7 @@ def test_schema_v2_hashed_files_key_read(monkeypatch, tmp_path):
     monkeypatch.setattr(
         _plugin_verify_hashes,
         "_fetch_github_manifest",
-        lambda v, prefer_cache=True: manifest,
+        lambda v, prefer_cache=True, plugin_root=None: manifest,
     )
     ok = _plugin_verify_hashes.verify_self_integrity(plugin_root=plugin_root, fail_on_mismatch=False, quiet=True)
     assert ok is True
@@ -299,7 +299,7 @@ class TestChange3AddedFileDetection:
                 ".claude-plugin/plugin.json": _sha(root / ".claude-plugin" / "plugin.json"),
             },
         }
-        monkeypatch.setattr(_plugin_verify_hashes, "_fetch_github_manifest", lambda v, prefer_cache=True: manifest)
+        monkeypatch.setattr(_plugin_verify_hashes, "_fetch_github_manifest", lambda v, prefer_cache=True, plugin_root=None: manifest)
         ok = _plugin_verify_hashes.verify_self_integrity(plugin_root=root, fail_on_mismatch=False, quiet=True)
         assert ok is False, "verify must FAIL when an unhashed file is added to the install"
         err = capsys.readouterr().err
@@ -321,7 +321,7 @@ class TestChange3AddedFileDetection:
                 ".claude-plugin/plugin.json": _sha(root / ".claude-plugin" / "plugin.json"),
             },
         }
-        monkeypatch.setattr(_plugin_verify_hashes, "_fetch_github_manifest", lambda v, prefer_cache=True: manifest)
+        monkeypatch.setattr(_plugin_verify_hashes, "_fetch_github_manifest", lambda v, prefer_cache=True, plugin_root=None: manifest)
         ok = _plugin_verify_hashes.verify_self_integrity(plugin_root=root, fail_on_mismatch=False, quiet=True)
         assert ok is True
 
@@ -343,7 +343,7 @@ class TestChange3AddedFileDetection:
                 ".claude-plugin/plugin.json": _sha(root / ".claude-plugin" / "plugin.json"),
             },
         }
-        monkeypatch.setattr(_plugin_verify_hashes, "_fetch_github_manifest", lambda v, prefer_cache=True: manifest)
+        monkeypatch.setattr(_plugin_verify_hashes, "_fetch_github_manifest", lambda v, prefer_cache=True, plugin_root=None: manifest)
         ok = _plugin_verify_hashes.verify_self_integrity(plugin_root=root, fail_on_mismatch=False, quiet=True)
         assert ok is True, "cruft must not be flagged as an added file"
 
