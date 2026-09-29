@@ -2,6 +2,88 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.22.0] - 2026-09-29
+
+### Bug Fixes
+
+- P1 review follow-ups — D9 non-string name, exec-filter heredoc/compound, -o doc (TRDD-DFRPRZYD)
+- Review round 2 — widen heredoc tags, tighten D9 name validation (TRDD-DFRPRZYD)
+- Review round 3 — reject internal-newline names in D9 assert (TRDD-DFRPRZYD)
+- Review round 4 — propagate D9 name guard to the shipped template (TRDD-DFRPRZYD)
+- Review round 5 — byte-identity pin, guide surface, overclaim correction (TRDD-DFRPRZYD)
+- **scope:** Re-add forceLoginMethod to MANAGED_ONLY_KEYS — per-value scope hole (TRDD-ZGLUCFTV, TRDD-2JJD4NA0)
+- **scope:** Per-value note on the forceLoginMethod MAJOR (TRDD-2JJD4NA0, review R10)
+- **hooks:** Interpreter-form relative script paths newly draw the relative-path MINOR — RETRO-BREAK (TRDD-NS1XJNPH)
+- **skillaudit:** Prose compound word + parenthetical no longer trips SHELL_EXEC ([#233](https://github.com/Emasoft/claude-plugins-validation/issues/233))
+- **skillaudit:** Harden #233 clear per review — all-occurrences + doc-only gate (R1/R2/R3)
+- **publish:** Correct _verify_self_hash_manifest return annotation to list[str] | None
+
+### Documentation
+
+- Add TRDD-L8LIHYPA — Gate 1 manifest-freshness check backlog card
+- TRDD-L8LIHYPA — append the three review scope notes
+- TRDD-DFRPRZYD — P1 completion note (commit 1e79599d) + hashes
+- TRDD-1T862D4B — record P1 round-6 review disposition
+- TRDD-1T862D4B — corrective append from review of the P1 disposition record
+- Add TRDD-ZGLUCFTV — CC spec sync v2.1.284
+- TRDD-VWSEG7D7 — P2 moves to dev (TRDD-1T862D4B)
+- TRDD-ZGLUCFTV — spec sync card to dev, scan landed (review R1#2)
+- TRDD-NS1XJNPH — record generator-item disposition + relative-token defect and settled fix direction
+- Add TRDD-D9ISDLOZ — bulk env-var drift backlog (233 doc vars)
+- TRDD-D9ISDLOZ — durable fetch procedure replaces /tmp citations (review R4#D)
+- TRDD-L8LIHYPA — acceptance checklist + archive as complete (review R4#B)
+- TRDD-ZGLUCFTV complete — CC v2.1.284 sync outcome + acceptance checklist (TRDD-ZGLUCFTV)
+- TRDD-2JJD4NA0 review-disposition record (TRDD-2JJD4NA0)
+- TRDD-NS1XJNPH complete (TRDD-NS1XJNPH)
+- TRDD-VWSEG7D7 complete (TRDD-VWSEG7D7)
+- **hooks:** Doc-cite the relative-token suppression premise (TRDD-NS1XJNPH, review R12)
+- **hooks:** Cite re-derive URL + tolerated-unknown probe recorded (TRDD-3R4KYH6R, review R13)
+- R14 dispositions — probe reach + publish-time retro-break surfaced (TRDD-3R4KYH6R)
+- R15 — retro-break obligation moved to the handoff (TRDD-3R4KYH6R)
+- R16 — CHANGELOG lines are the binding surface (TRDD-3R4KYH6R)
+- **changelog:** Unreleased section carries both hook-token changes (TRDD-3R4KYH6R, review R17)
+- Revert Unreleased block — git-cliff regenerates from commit subjects only (TRDD-3R4KYH6R, review R18)
+- Hook validators — interpreter-form relative paths now MINOR, direct relative FP-fix (TRDD-NS1XJNPH)
+- R18 disposition — cliff.toml read, dry-run executed (TRDD-3R4KYH6R)
+- R19 — Gate 9 argv read + Bug Fixes placement verified by render (TRDD-3R4KYH6R)
+- R20 — release-notes transitivity cited, noise reclassified, carrier convention noted (TRDD-3R4KYH6R)
+- R21 — re-surface the card's still-open deliverables, soften channel wording (TRDD-3R4KYH6R)
+- R22 — second extractor path exercised by render, saga closed (TRDD-3R4KYH6R)
+- R23 final — precision notes, prose rounds end (TRDD-3R4KYH6R)
+- **trdd:** Archive TRDD-21ID8NG7 as complete — CPVPPC P3 adapter catalog
+- **trdd:** Archive TRDD-3R4KYH6R as complete — bare-CLI rule + sidecar symlink check
+- Inventory test-file row 546 -> 553 (re-derived, post #233 + P3 + bare-CLI tests)
+- **readme:** Troubleshooting row for the demoted-NIT prose-compound case ([#233](https://github.com/Emasoft/claude-plugins-validation/issues/233))
+
+### Features
+
+- CPVPPC P1 canon framework + D9 notify fix + CC docs-drift sync (TRDD-DFRPRZYD)
+- **publish:** Gate 1 verifies self-hash manifest freshness (TRDD-L8LIHYPA)
+- **spec:** CC v2.1.284 sync — slides + 6 env vars +14/-4 managed keys +settings field (TRDD-ZGLUCFTV)
+- **validators:** Wire dead constants + relative-hook-token fix + sidecar hooks paths (TRDD-NS1XJNPH)
+- **cpvppc:** P2 — config schema+validation, init, pin, support window (TRDD-VWSEG7D7)
+- **cpvppc:** P3 adapter catalog — 6 adapters, registry, schema enum narrowed (TRDD-21ID8NG7)
+
+### Miscellaneous Tasks
+
+- Review round 6 — guide alignment pin, archive DFRPRZYD (TRDD-DFRPRZYD)
+- Regen self-hash manifest after #233 fix + P3 adapters + bare-CLI tests
+- Regen hashes after CLAUDE.md inventory row update (hashes-last invariant)
+- Regen hashes after README troubleshooting row
+- Regen hashes after #233 review hardening
+- Regen self-hash manifest after review-round-2 acceptance (277acf1d)
+- Regen self-hash manifest after publish.py annotation fix
+
+### Styling
+
+- Ruff F401+I001 in NS1XJNPH test file (unused os import, unsorted block)
+
+### Testing
+
+- **scope:** End-to-end controls for the forceLoginMethod re-add (TRDD-2JJD4NA0, review R9)
+- **cpvppc:** Bare-CLI importability + hooks-path symlink symmetry (TRDD-3R4KYH6R)
+- **skillaudit:** Pin #233 review-round-2 tradeoffs, honest paren char class
+
 ## [5.21.1] - 2026-09-27
 
 ### Documentation
