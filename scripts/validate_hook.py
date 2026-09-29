@@ -3097,6 +3097,10 @@ def validate_command_hook(
                 # CC ever honors plugin-relative resolution, this suppression
                 # demotes rather than deletes (the MINOR keeps it visible) —
                 # re-check the doc cite before widening this family further.
+                # Cite provenance (R13): docs_dev/cc-docs-20260929/ is
+                # gitignored — re-derive the text from
+                # https://code.claude.com/docs/en/hooks.md (raw .md form,
+                # line-anchored the same way).
                 raw_token = str(script_path)
                 if not os.path.isabs(raw_token):
                     # BARE RELATIVE token: UNRESOLVABLE at runtime (hook cwd is

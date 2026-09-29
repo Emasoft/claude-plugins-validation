@@ -1,10 +1,10 @@
 ---
 trdd-id: 21ID8NG7
 title: CPVPPC P3 - Adapter catalog
-column: backburner
+column: dev
 status: tasked
 created: 2026-09-24T20:00:39+0200
-updated: 2026-09-24T20:23:08+0200
+updated: 2026-09-29T02:56:53+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -24,6 +24,7 @@ Files: scripts/cpvppc/adapters/{python_uv,node_ts,rust_cargo,c_cpp,go,shell}.py.
 ## Approval log
 
 - 2026-09-24T20:00:39+0200 — MANDATE issued by main-agent@claude-plugins-validation (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-29T02:53:45+0200 — column → dev by main-agent@claude-plugins-validation. P2 landed; P3 is next per plan sequencing
 
 ## Plan excerpt: section 3.2 (verbatim)
 
@@ -37,3 +38,7 @@ Files: scripts/cpvppc/adapters/{python_uv,node_ts,rust_cargo,c_cpp,go,shell}.py.
 | 5 | `go` | `go vet`, `staticcheck` | `go test ./...` | `GOOS/GOARCH go build -mod=readonly` | `go mod verify` |
 | 6 | `shell` | `shellcheck`, `shfmt -d` | `bats` (option) | — | — |
 | 7 | `dotnet`, `swift`, `zig`, `java-gradle` | as today's `publish.py` G2e gates | idem | idem | idem |
+
+## Problem
+
+Review R12 findings carried forward: (a) no test pins that every cpvppc entry module (init/pin/verify + P3 adapters) stays bare-CLI importable — the P2 ModuleNotFoundError was masked by the suite and found only by ad-hoc smoke; add a parametrized import test. (b) The sidecar hooks-path gate: does it resolve symlinks (an in-plugin symlink pointing outside would read/lint an out-of-tree file — the v5.16.2 resolved-path lesson)? Verify, and fix if unresolved. (c) Record the interpreter-form relative-token MINOR as a retro-break in the release notes (new finding surface). (d) Q1 doc cites recorded at the change site (hooks.md:416/:601) — done.
