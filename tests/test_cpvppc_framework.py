@@ -177,9 +177,12 @@ class TestCanonManifest:
         assert canon["canon_version"] == "0.1.0"
 
     def test_seven_assertions_present(self):
+        # P2 appended CPVPPC-CFG-001..002 (config schema + lock); the P1
+        # marketplace assertions stay first, in their original order.
         canon = load_canon()
         ids = [a["id"] for a in canon["assertions"]]
-        assert ids == [f"CPVPPC-MKT-{i:03d}" for i in range(1, 8)]
+        assert ids[:7] == [f"CPVPPC-MKT-{i:03d}" for i in range(1, 8)]
+        assert ids[7:] == ["CPVPPC-CFG-001", "CPVPPC-CFG-002"]
 
     def test_unknown_fact_type_is_refused(self, tmp_path):
         canon = load_canon()

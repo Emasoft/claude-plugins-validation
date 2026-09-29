@@ -20,13 +20,23 @@ here handle both spellings.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
+
+# Bare-CLI entry (`uv run python scripts/cpvppc/verify.py <dir>`) is NOT run as
+# a package member, so the sibling import below fails without the same
+# bootstrap init.py/pin.py carry (central verification caught the
+# ModuleNotFoundError; the suite passed because pytest resolves the package).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from cpvppc.config_validate import read_config, validate_config  # noqa: E402
 
 EXIT_COMPLIANT = 0
 EXIT_NON_COMPLIANT = 1
@@ -35,6 +45,14 @@ EXIT_NOT_DECLARED = 6
 
 _CPV_ROOT = Path(__file__).resolve().parents[2]
 _TEMPLATE_RENDERER = _CPV_ROOT / "templates" / "scripts" / "render_readme_table.py"
+
+# Support window (plan section 5): current + previous minor of the same major,
+# plus the last minor of the previous major for 6 months after that major
+# shipped. Window history is canon-owned; the current release extends it.
+_SUPPORT_WINDOW: dict[str, dict[str, Any]] = {
+    "0.1.0": {"current": "0.1.0", "majors": {}},
+}
+_WINDOW_MONTHS_PREV_MAJOR = 6
 
 
 def load_canon() -> dict[str, Any]:
@@ -350,15 +368,116 @@ def _fact_json_path_equals(repo: Path, args: dict) -> tuple[bool, str]:
     return True, f"{rel} has top-level {json_path!r}"
 
 
+def _fact_config_valid(repo: Path, args: dict) -> tuple[bool, str]:
+    """cpvppc.yaml parses as YAML and validates against config_schema.json."""
+    if args.get("config", "cpvppc.yaml") != "cpvppc.yaml":
+        return False, "cannot run: unrecognised config path"
+    doc, reason = read_config(repo)
+    if doc is None:
+        return False, reason
+    errs = validate_config(doc)
+    if errs:
+        return False, "cpvppc.yaml is invalid: " + "; ".join(errs)
+    return True, "cpvppc.yaml parses and validates against config_schema.json"
+
+
+def _fact_lock_consistent(repo: Path, args: dict) -> tuple[bool, str]:
+    """.cpvppc-lock.json matches the current cpvppc.yaml bytes + canon version."""
+    lock_rel = args.get("lock", ".cpvppc-lock.json")
+    text = _read_text(repo / lock_rel)
+    if text is None:
+        return False, f"missing {lock_rel}"
+    try:
+        lock = json.loads(text)
+    except json.JSONDecodeError as err:
+        return False, f"{lock_rel} is not valid JSON: {err}"
+    if not isinstance(lock, dict):
+        return False, f"{lock_rel} is not a JSON object"
+    raw = (repo / args.get("config", "cpvppc.yaml")).read_bytes()
+    cfg_sha = hashlib.sha256(raw).hexdigest()
+    if lock.get("config_sha256") != cfg_sha:
+        return False, (
+            f"{lock_rel} recorded config_sha256 does not match the current cpvppc.yaml bytes — regenerate the lock"
+        )
+    canon = load_canon()
+    if lock.get("canon_version") != canon["canon_version"]:
+        return False, (
+            f"{lock_rel} canon_version {lock.get('canon_version')!r} != current canon {canon['canon_version']!r}"
+        )
+    doc, reason = read_config(repo)
+    if doc is None:
+        return False, f"cannot run: {reason}"
+    # Principle 7: everything inferred is written explicitly into the lock.
+    if lock.get("config") != doc:
+        return False, f"{lock_rel} does not record every cpvppc.yaml field explicitly (principle 7)"
+    return True, "lock matches the current config bytes, canon version, and records the config in full"
+
+
+def support_window_versions(release: str) -> set[str]:
+    """Canon versions the window admits for a declared `release` version.
+
+    Rule (plan 5): the current and previous minor of the release's major,
+    plus the last minor of the previous major while it is within 6 months of
+    that major's ship date. Data comes from _SUPPORT_WINDOW (canon-owned).
+    """
+    try:
+        cur_maj, cur_min, _ = (int(x) for x in release.split("."))
+    except ValueError:
+        return set()
+    out = {f"{cur_maj}.{m}.0" for m in (cur_min, cur_min - 1) if m >= 0}
+    entry = _SUPPORT_WINDOW.get(release)
+    if entry is None:
+        return out
+    prev = entry.get("majors", {}).get(f"{cur_maj - 1}")
+    if prev is None:
+        return out
+    ship = _parse_iso(prev["shipped"])
+    if ship is None:
+        return out
+    # +6 months, stdlib-only: cap the day at 28 so February never overflows.
+    m = ship.month - 1 + _WINDOW_MONTHS_PREV_MAJOR
+    horizon = date(ship.year + m // 12, m % 12 + 1, min(ship.day, 28))
+    if date.today() <= horizon:
+        out.add(prev["last_minor"])
+    return out
+
+
+def _parse_iso(text: str) -> date | None:
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
 def run_assertions(repo_root: Path, canon_version: str) -> list[AssertionResult]:
     """Run every canon assertion applicable to `repo_root` under `canon_version`.
 
     Static facts only. UNKNOWN-when-unrunnable is expressed as passed=False
     with a detail beginning "cannot run:" so the verdict layer can lift it to
-    UNKNOWN rather than a plain failure.
+    UNKNOWN rather than a plain failure. Assertions are filtered by scope
+    against the repo's declared kind (plan section 5): a plugin repo is not
+    judged by marketplace-repo assertions and vice versa. With no config the
+    repo falls back to the marketplace scope (the P1 surface — the only
+    assertions 0.1.0 had before the config existed).
     """
     canon = load_canon()
     results: list[AssertionResult] = []
+
+    doc, _ = read_config(repo_root)
+    kind = doc.get("repo", {}).get("kind") if doc else None
+    if kind == "plugin":
+        scopes = {"plugin-repo"}
+    elif kind == "marketplace":
+        scopes = {"marketplace-repo"}
+    elif kind == "plugin+marketplace":
+        scopes = {"plugin-repo", "marketplace-repo"}
+    elif (repo_root / "cpvppc.yaml").is_file():
+        # The config exists but could not be parsed — the repo is still a
+        # CPVPPC repo, and CFG-001 is exactly the assertion that must fire
+        # ("not valid YAML" is a failure, never a scope miss).
+        scopes = {"plugin-repo", "marketplace-repo"}
+    else:
+        scopes = {"marketplace-repo"}
 
     # Pre-compute the byte-identity gate for MKT-003 (read file only, never run).
     repo_renderer = repo_root / "scripts" / "render_readme_table.py"
@@ -373,6 +492,8 @@ def run_assertions(repo_root: Path, canon_version: str) -> list[AssertionResult]
     for a in _parse_assertions(canon):
         if a.since != canon_version:
             continue
+        if a.scope and a.scope not in scopes:
+            continue
         args = a.args
         if a.fact_type == "file_present":
             ok, detail = _fact_file_present(repo_root, args)
@@ -384,6 +505,10 @@ def run_assertions(repo_root: Path, canon_version: str) -> list[AssertionResult]
             ok, detail = _workflow_step_facts(repo_root, args)
         elif a.fact_type == "json_path_equals":
             ok, detail = _fact_json_path_equals(repo_root, args)
+        elif a.fact_type == "config_valid":
+            ok, detail = _fact_config_valid(repo_root, args)
+        elif a.fact_type == "lock_consistent":
+            ok, detail = _fact_lock_consistent(repo_root, args)
         else:  # pragma: no cover — registry-gated above
             ok, detail = False, f"cannot run: fact type {a.fact_type!r} has no implementation"
         results.append(AssertionResult(id=a.id, passed=ok, detail=detail))
@@ -393,21 +518,16 @@ def run_assertions(repo_root: Path, canon_version: str) -> list[AssertionResult]
 def _declaration_version(repo_root: Path) -> str | None:
     """The repo's declared canon version, or None.
 
-    0.1.0 has no cpvppc.yaml/lock yet (P2): detect the generated-publish.py
-    CANON_VERSION convention (the additive declaration the plan keeps) and the
-    cpv manifest key, reading files only.
+    cpvppc.yaml is parsed as YAML and `canon.version` read properly (the
+    P1 line-scan could not see nested keys). The generated publish.py
+    CANON_VERSION convention stays as the fallback for repos not yet
+    migrated to the config file.
     """
-    # 1) future config file
-    cfg = repo_root / "cpvppc.yaml"
-    text = _read_text(cfg)
-    if text is not None:
-        for line in text.splitlines():
-            s = line.strip()
-            if s.startswith("version:"):
-                val = s.split(":", 1)[1].strip().strip("\"'")
-                if val:
-                    return val
-    # 2) generated publish.py CANON_VERSION (the additive convention)
+    doc, _ = read_config(repo_root)
+    if doc is not None:
+        v = doc.get("canon", {}).get("version") if isinstance(doc.get("canon"), dict) else None
+        if isinstance(v, str) and v:
+            return v
     pub = repo_root / "scripts" / "publish.py"
     ptext = _read_text(pub)
     if ptext:
@@ -487,6 +607,10 @@ def main(argv: list[str] | None = None) -> int:
     if target_version not in versions:
         print(f"error: canon {target_version} is not a known canon version (known: {', '.join(versions)})", file=sys.stderr)
         return EXIT_UNKNOWN
+    if target_version not in support_window_versions(target_version):
+        window = ", ".join(sorted(support_window_versions(target_version)))
+        print(f"NON-COMPLIANT (canon {target_version}): version outside the support window (inside: {window})")
+        return EXIT_NON_COMPLIANT
 
     results = run_assertions(repo, target_version)
     v = verdict(results, target_version)

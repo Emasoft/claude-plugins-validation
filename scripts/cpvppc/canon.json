@@ -6,9 +6,11 @@
     "file_matches_render",
     "json_path_equals",
     "workflow_step",
-    "readme_section_current"
+    "readme_section_current",
+    "config_valid",
+    "lock_consistent"
   ],
-  "fact_type_registry": "Closed for 0.1.0. Later phases extend this list (config_valid, lock_consistent, actions_pinned, ... per the plan); an assertion naming a type absent from this registry is a canon-authoring error and verify.py refuses it rather than passing it silently.",
+  "fact_type_registry": "Closed for 0.1.0. Later phases extend this list (actions_pinned, unit_covers_executables, ... per the plan); an assertion naming a type absent from this registry is a canon-authoring error and verify.py refuses it rather than passing it silently.",
   "assertions": [
     {
       "id": "CPVPPC-MKT-001",
@@ -108,6 +110,34 @@
         }
       },
       "fix": "P5: the update workflow must resolve the notified plugin identity against .claude-plugin/marketplace.json entries and fail loudly on an unknown one, so a repository_dispatch naming a plugin that is not listed never updates silently."
+    },
+    {
+      "id": "CPVPPC-CFG-001",
+      "since": "0.1.0",
+      "scope": "plugin-repo",
+      "applies_when": "cpvppc.yaml is present",
+      "fact": {
+        "type": "config_valid",
+        "args": {
+          "config": "cpvppc.yaml",
+          "schema": "scripts/cpvppc/config_schema.json"
+        }
+      },
+      "fix": "Fix the reported config errors in cpvppc.yaml. Unknown keys are always invalid — a shape the config cannot express is a canon change request, never an exception."
+    },
+    {
+      "id": "CPVPPC-CFG-002",
+      "since": "0.1.0",
+      "scope": "plugin-repo",
+      "applies_when": ".cpvppc-lock.json is present",
+      "fact": {
+        "type": "lock_consistent",
+        "args": {
+          "config": "cpvppc.yaml",
+          "lock": ".cpvppc-lock.json"
+        }
+      },
+      "fix": "Regenerate the lock with cpvppc init --force so the recorded config sha256 and canon version match the current cpvppc.yaml."
     }
   ]
 }
