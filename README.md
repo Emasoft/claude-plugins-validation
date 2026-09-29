@@ -725,7 +725,7 @@ No API keys, accounts, or cloud services needed for any validation.
 | NIT issues (exit 4) | Only in `--strict` mode -- optional |
 | A validation run hangs or is killed by a CI job timeout | Each phase prints `[cpv-phase] START <name>` before running and `DONE <name> <elapsed>` after, on **stderr**. A `START` with no matching `DONE` is the phase that was in flight. Set `PLUGIN_PROGRESS=0` to silence them. |
 | The dead-link phase is slow on a link-heavy repo | It has a 300s aggregate budget; over-budget URLs are reported as **skipped, never dead**. Raise it with `PLUGIN_URL_CHECK_PHASE_TIMEOUT=<seconds>`. |
-| A `(demoted, needs review)` NIT in `--strict` flags an English prose compound like `validate/eval (commit …)` | The scanner matched a call-shaped token inside a compound word plus a prose parenthetical. If the line documents prior work (no fence, no code), it is now auto-suppressed (v5.22.0). A genuinely-demoted finding can be recorded as a reviewed false positive in `.cpv-audit-consent.json` at the plugin root — the run's INFO line names the exact format; it is a consent record, not a mute button. |
+| A `(demoted, needs review)` NIT in `--strict` flags an English prose compound like `validate/eval (commit …)` | The scanner matched a call-shaped token inside a compound word plus a prose parenthetical. If the line documents prior work (no fence, no code) in a documentation path, it is now auto-suppressed; on instruction-loadable surfaces (SKILL.md, agents/) it keeps its demote. A genuinely-demoted finding can be recorded as a reviewed false positive in `.cpv-audit-consent.json` at the plugin root — the run's INFO line names the exact format; it is a consent record, not a mute button. |
 
 ## License
 
