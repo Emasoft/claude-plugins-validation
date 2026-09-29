@@ -40,6 +40,7 @@ the shipped code path.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -265,4 +266,81 @@ class TestReviewRound2:
         the clear (the tail guard now includes quote chars)."""
         doc = 'validate/eval (notes) "payload here"'
         hits = _active_findings(doc)
+        assert any(f.get("ruleId") == "SHELL_EXEC" for f in hits)
+
+
+# ────────────────────────────────────────────────────────────────────────
+# REVIEW ROUND 2 NOTES — tradeoffs pinned rather than discovered.
+# ────────────────────────────────────────────────────────────────────────
+
+
+class TestReviewRound2Notes:
+    def test_mixed_inert_and_uncompound_occurrence_refuses(self) -> None:
+        """N1: the all-occurrences discipline is all-or-nothing per line —
+        a changelog line mixing an inert compound reference with a second
+        eval shape that has no compound prefix keeps its finding (FP
+        direction, deliberate: visible NIT beats a suppressed threat)."""
+        doc = "fixed validate/eval (see #123) and now we eval (inputs) lazily"
+        assert not self._helper_refuses(doc)
+
+    @staticmethod
+    def _helper_refuses(doc: str) -> bool:
+        from _skillaudit_markdown_context import _is_inert_compound_glued_call  # type: ignore[import-not-found]
+
+        line = doc.splitlines()[0]
+        m = re.search(r"\beval\s*\(", line, re.IGNORECASE)
+        assert m is not None
+        return _is_inert_compound_glued_call(line, m.group(0), "SHELL_EXEC")
+
+    def test_catalog_mirror_equivalence(self) -> None:
+        """N2: `_EVAL_CALL_SHAPE_RE` must enumerate the SAME spans the real
+        catalog's SHELL_EXEC eval pattern matches over a battery of lines —
+        the mirror is load-bearing (all-occurrences veto) and is otherwise
+        only comment-enforced."""
+        import json
+
+        catalog = json.loads((REPO / "scripts" / "rules" / "skillaudit_patterns.json").read_text())
+        eval_patterns = [
+            re.compile(p, re.IGNORECASE)
+            for r in catalog["rules"]
+            if r.get("id") == "SHELL_EXEC"
+            for p in r["patterns"]
+            if "eval" in p
+        ]
+        assert len(eval_patterns) >= 1
+        from _skillaudit_markdown_context import _EVAL_CALL_SHAPE_RE  # type: ignore[import-not-found]
+
+        battery = [
+            "validate/eval (see fafa8f0)",
+            "re-eval(x)",
+            "EVAL (notes)",
+            "runme/eval (  x  )",
+            "eval (x) and more/eval (y)",
+            "a/eval(x)",
+            "prose eval (x)",
+        ]
+        for line in battery:
+            mirror_spans = [m.span() for m in _EVAL_CALL_SHAPE_RE.finditer(line)]
+            catalog_spans = [
+                m.span() for p in eval_patterns for m in p.finditer(line)
+            ]
+            assert mirror_spans == catalog_spans, (line, mirror_spans, catalog_spans)
+
+    def test_docs_subtree_path_clears_end_to_end(self) -> None:
+        """N5: the gate's docs/ subtree behavior, through the real scanner."""
+        doc = "changelog: the re-validate/re-eval (R8 disposition) landed"
+        assert _active_findings(doc, "docs/notes.md") == []
+
+    def test_nested_paren_prose_clears(self) -> None:
+        """N5: nested parens of prose cannot smuggle shell syntax (the class
+        excludes quotes and operators everywhere) — full suppress."""
+        doc = "the x/eval (see (R8) notes) was inert"
+        assert _active_findings(doc) == []
+
+    def test_skill_md_prose_compound_emits_visible_not_suppressed(self) -> None:
+        """N5 end-to-end: on SKILL.md the prose compound emits a VISIBLE
+        (unsuppressed) finding — demote-never-suppress on the
+        instruction-loadable surface, verified through the real scan."""
+        doc = "README validate/eval (commit fafa8f0)"
+        hits = _active_findings(doc, "skills/x/SKILL.md")
         assert any(f.get("ruleId") == "SHELL_EXEC" for f in hits)
