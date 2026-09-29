@@ -1,10 +1,10 @@
 ---
 trdd-id: VWSEG7D7
 title: CPVPPC P2 - Config schema, lock, init, pin
-column: dev
-status: tasked
+column: complete
+status: archived
 created: 2026-09-24T20:00:35+0200
-updated: 2026-09-29T02:09:25+0200
+updated: 2026-09-29T02:53:22+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -24,6 +24,7 @@ Files: config_schema.json, init.py, pin.py, lock read/write in verify.py. Key te
 ## Approval log
 
 - 2026-09-24T20:00:35+0200 — MANDATE issued by main-agent@claude-plugins-validation (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-29T02:53:22+0200 — COMPLETE by main-agent@claude-plugins-validation. P2 delivered, centrally verified, bare-CLI defect fixed, checklist complete.
 
 ## Plan excerpt: section 3.1 (verbatim)
 
@@ -130,3 +131,14 @@ targets:
 push); the SQLite addon is built in CI per target and Node ABI (`npm rebuild better-sqlite3
 --build-from-source`), fetched hash-pinned, and loaded through better-sqlite3's `nativeBinding`
 option, so no install script runs on a user's machine.
+
+## Outcome
+
+P2 implemented by lean-worker, centrally verified 2026-09-29 (commit aa4f8d8/family): schema+validator, verify fact types CFG-001/002 + support window, init, pin. Orchestrator caught + fixed the bare-CLI ModuleNotFoundError the 58-test suite masked (verify.py lacked the sys.path bootstrap init/pin carry); all 3 entry points smoke-tested bare-CLI (init then verify = COMPLIANT exit 0). Spec re-rendered byte-identical.
+
+## Acceptance checklist
+
+- [x] config_schema.json draft-07, additionalProperties:false; out-of-scope keys refused (TRDD-VWSEG7D7)
+- [x] config_valid + lock_consistent facts, CFG-001/002, support window in verify.py (TRDD-VWSEG7D7)
+- [x] init.py 4 shapes, pin.py ls-remote + SHA verify exits 0/2/4/5 (TRDD-VWSEG7D7)
+- [x] Bare-CLI entry points verified (bootstrap defect fixed centrally); 58+689 tests green (TRDD-VWSEG7D7)
