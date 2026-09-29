@@ -1,10 +1,10 @@
 ---
 trdd-id: ZGLUCFTV
 title: CC spec sync v2.1.284 sonnet-5-5 and gateway surface
-column: todo
+column: dev
 status: tasked
 created: 2026-09-29T01:55:18+0200
-updated: 2026-09-29T01:55:24+0200
+updated: 2026-09-29T02:15:15+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
