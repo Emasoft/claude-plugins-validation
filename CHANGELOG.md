@@ -2,23 +2,6 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [Unreleased]
-
-### Changed
-
-- **RETRO-BREAK (validator tightening)**: hook commands that invoke a script through an
-  interpreter with a bare RELATIVE path (`bash hooks/x.sh`) now draw the relative-path MINOR
-  (`hook works only if cwd happens to be the plugin root — use ${CLAUDE_PLUGIN_ROOT}/...`),
-  which previously went unvalidated. Plugins using that shape go from clean to 1 MINOR;
-  a MINOR blocks `--strict`. Fix: reference the script as
-  `${CLAUDE_PLUGIN_ROOT}/hooks/x.sh` (fa0a8982).
-- **False-positive fix (validator relaxed)**: hook commands using a bare relative path
-  DIRECTLY (`command: "./hooks/pre.sh"`) no longer draw the `Script not found` MAJOR when
-  the file exists in the plugin — hook commands run with the session's current directory
-  as cwd, so the token is unresolvable, not missing; the relative-path MINOR still fires
-  (upgraded with the exact fix when the target provably exists in-plugin). Absolute-path
-  and `${CLAUDE_PLUGIN_ROOT}`-anchored missing scripts keep the MAJOR unchanged (fa0a8982).
-
 ## [5.21.1] - 2026-09-27
 
 ### Documentation
