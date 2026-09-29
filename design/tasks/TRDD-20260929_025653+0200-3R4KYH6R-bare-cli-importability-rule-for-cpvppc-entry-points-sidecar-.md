@@ -4,7 +4,7 @@ title: Bare-CLI importability rule for cpvppc entry points + sidecar symlink res
 column: backburner
 status: tasked
 created: 2026-09-29T02:56:53+0200
-updated: 2026-09-29T03:00:58+0200
+updated: 2026-09-29T03:02:28+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -34,3 +34,7 @@ Q2 ANSWERED by live probe: a genuinely-unknown plausible key (telemetryRetention
 ## R14 dispositions
 
 Q1: cite stays line-anchored but the QUOTED FRAGMENTS are the durable anchors (already in the comment); at next touch of the file, drop the line numbers or mark them point-in-time. Q2: headline overreach accepted — probe proves the sampled member fires, not the stratum (body text already says this); severity-bounded regardless (INFO never blocks). Q5b: the interpreter-form MINOR retro-break (card item c) is a RELEASE-NOTES obligation for THIS publish — surfaced here so the notes author sees it: bash hooks/x.sh interpreter-form relative tokens newly draw a MINOR (was invisible before fa0a8982).
+
+## R15 disposition
+
+Q1/Q4 accepted: a backburner card cannot bind the publish step; the retro-break note now lives in the session handoff checklist (item 9) — the surface the publish step reads. Card keeps the record; handoff carries the obligation. Q3 noted: disposition-ledger accumulation is a recurring shape — future review rounds get their own cards, not appends.
