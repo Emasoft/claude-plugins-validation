@@ -54,6 +54,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -91,6 +92,49 @@ CACHE_TTL = timedelta(hours=1)
 HTTP_TIMEOUT_SEC = 10
 
 _DEFAULT_BRANCH_CACHE: str | None = None
+
+
+def _git_available(plugin_root: Path) -> bool:
+    """True when plugin_root sits inside a real git working tree."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(plugin_root), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.returncode == 0 and result.stdout.strip() == "true"
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _head_matches_release_tag(plugin_root: Path, version: str) -> bool:
+    """True when HEAD is exactly the commit the version tag points at
+    (or git is unavailable — a plugin-cache install has no metadata and
+    keeps the strict per-tag comparison). A dev/PR checkout whose HEAD
+    differs from the release tag can never verify against the per-tag
+    manifest: the tag pins CPV-internal files at their RELEASED bytes.
+    Without this guard, any committed edit on any PR branch fails the
+    integrity gate even after a correct local manifest refresh — exactly
+    what re-failed PR #234's Validate job (issue #233's downstream)."""
+    if not _git_available(plugin_root):
+        return True
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(plugin_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+        tag = subprocess.run(
+            ["git", "-C", str(plugin_root), "rev-parse", f"v{version}^{{commit}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return True
+    return bool(head) and bool(tag) and head == tag
 
 
 def _default_branch() -> str:
@@ -236,6 +280,7 @@ def _warn_legacy_filename_once() -> None:
 def _fetch_github_manifest(
     version: str | None,
     prefer_cache: bool = True,
+    plugin_root: Path | None = None,
 ) -> dict[str, object] | None:
     """Fetch the canonical manifest for the given plugin version.
 
@@ -262,7 +307,14 @@ def _fetch_github_manifest(
                 pass
 
     # 1. Try per-version tag URL with NEW filename first.
-    if version:
+    # GIT-METADATA GUARD (PR #234): a dev/PR checkout with committed edits
+    # to CPV-internal files can never verify against a RELEASE manifest —
+    # the tag pins the files at their released content. Detect that case
+    # (local git repo, HEAD not exactly the version tag) and skip straight
+    # to the default-branch manifest, which carries the branch's own
+    # refreshed hashes. Release installs (no git metadata or HEAD == tag)
+    # keep the strict per-tag comparison.
+    if version and plugin_root is not None and _head_matches_release_tag(plugin_root, version):
         url = REPO_RAW_TAG_URL.format(version=version)
         m = _fetch_one(url, version)
         if m is not None:
@@ -404,7 +456,7 @@ def verify_self_integrity(
         plugin_root = Path(__file__).resolve().parent.parent
 
     version = _read_local_plugin_version(plugin_root)
-    manifest = _fetch_github_manifest(version)
+    manifest = _fetch_github_manifest(version, plugin_root=plugin_root)
     if manifest is None:
         # No GitHub, no cache. Cannot verify — warn loudly but allow
         # execution to continue. User may be offline; refusing to run
