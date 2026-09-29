@@ -1416,6 +1416,11 @@ def validate_manifest(
         # emits a finding on input CC accepts.
         "privacyPolicyUrl",
         "supportUrl",
+        # plugins/manifest-reference.md:139 — root-level settings object shipped
+        # with the plugin; only `agent` and `subagentStatusLine` take effect, and
+        # a root-level settings.json in the plugin takes precedence. WARNING-only
+        # unknown-field check — no settings-shape validation added (v2.1.284 sync).
+        "settings",
     }
     for key in manifest.keys():
         if key not in known_fields:

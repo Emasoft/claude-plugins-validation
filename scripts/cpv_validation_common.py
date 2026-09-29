@@ -625,6 +625,7 @@ BUILTIN_SLASH_COMMANDS: frozenset[str] = frozenset(
         # A plugin shipping commands/<one of these>.md collides with the built-in.
         "output-style",  # v2.1.269 — list/switch output styles
         "skill-doctor",  # v2.1.261 — unused-skill context report
+        "slides",  # v2.1.265+ — bundled Claude Slides skill exposed as a command (commands.md:142)
         "update-config",  # bundled skill exposed as a command
         "workflow-authoring",  # v2.1.248 — bundled Workflow-script reference skill
         "design",
@@ -1078,10 +1079,21 @@ VALID_PLUGIN_ENV_VARS = {
     # CLAUDE_CODE_BG_TASKS_REPORT_RUNNING, CLAUDE_CODE_GATEWAY_MODEL_DISCOVERY_TIMEOUT_MS,
     # CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK, CLAUDE_CODE_DISABLE_SUBSTITUTION_RM_PROMPT,
     # CLAUDE_CODE_DISABLE_DANGEROUS_RM_TIMEOUT, and the OTEL_* additions.
+    # NOTE (v2.1.284 sync): the two *_RM_* toggles named above as skipped were
+    # added below when the v2.1.284 window documented them in env-vars.md —
+    # a documented var a plugin references should not draw "unknown variable".
     "CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH",  # v2.1.280 — cap on MCP tool descriptions / server instructions (default 2048)
     "CLAUDE_CODE_MCP_STARTUP_WAIT_MS",  # v2.1.274 — how long the first non-interactive turn waits for MCP servers (0 = don't wait)
     "CLAUDE_CODE_WEBFETCH_DEADLINE_MS",  # v2.1.268 — WebFetch deadline (default 300000; 0 turns it off)
     "CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS",  # v2.1.269 — per-run concurrent agent limit for the Workflow tool (1–256)
+    # CC spec sync v2.1.284 (env-vars.md, in-window only). The 233 pre-existing
+    # doc vars missing from this set are TRDD-D9ISDLOZ — NOT bulk-added blind.
+    "CLAUDE_CODE_PLUGIN_DIRS",  # v2.1.280 — additional plugin directories to load
+    "CLAUDE_CODE_DISABLE_DANGEROUS_RM_TIMEOUT",  # v2.1.281 — disables the rm command timeout guard
+    "CLAUDE_CODE_DISABLE_SUBSTITUTION_RM_PROMPT",  # v2.1.281 — suppresses the substitution rm confirmation prompt
+    "CLAUDE_CODE_DISABLE_POWERSHELL_CMD_RM_DENY",  # v2.1.283 — opt out of the PowerShell cmd rm deny rule
+    "VERTEX_REGION_CLAUDE_5_5_SONNET",  # v2.1.284 — Vertex region override for Sonnet 5.5
+    "VERTEX_REGION_CLAUDE_5_5_OPUS",  # v2.1.280 (sync miss) — Vertex region override for Opus 5.5
 }
 
 # Env var name pattern matching for dynamic plugin env vars.

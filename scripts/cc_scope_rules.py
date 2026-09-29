@@ -217,15 +217,11 @@ USER_MANAGED_SETTINGS_ONLY_KEYS: frozenset[str] = frozenset(
 MANAGED_ONLY_KEYS: frozenset[str] = frozenset(
     {
         "allowedChannelPlugins",
-        "allowedMcpServers",
-        "deniedMcpServers",
         "allowManagedHooksOnly",
         "allowManagedMcpServersOnly",
         "allowManagedPermissionRulesOnly",
         "blockedMarketplaces",
         "channelsEnabled",
-        "forceLoginMethod",  # memory.md L272 — admin authentication enforcement
-        "forceLoginOrgUUID",  # memory.md L272 — organization lock
         "forceRemoteSettingsRefresh",
         "pluginTrustMessage",
         "strictKnownMarketplaces",
@@ -263,6 +259,36 @@ MANAGED_ONLY_KEYS: frozenset[str] = frozenset(
         # v2.1.283 changelog: "Added deniedModels managed setting" — the
         # deny-list counterpart of availableModels.
         "deniedModels",
+        # ── CC spec sync v2.1.284 (settings-reference.md Managed-scope rows) ──
+        # Each verified to have its own `| [`key`]` index row with Managed scope.
+        "browserExternalPageTools",  # managed allowlist of Claude-in-Chrome page tools
+        "claudeMd",  # managed Claude-Md content injection
+        "disableBrowserExternalNavigation",  # managed kill-switch for browser navigation
+        "disableDesktopLocalSessions",  # managed kill-switch for desktop local sessions
+        "disableMobileSimulatorTools",  # managed kill-switch for mobile-simulator tools
+        "disableSideloadFlags",  # managed kill-switch for CLI sideload flags
+        "forceLoginGatewayUrl",  # managed — gateway login redirect target (sibling of forceLoginMethod)
+        "managedSourcesBehavior",  # managed — how managed sources combine with user sources
+        "modelPricing",  # managed — org model pricing overrides
+        "policyHelper",  # managed — external policy-decision helper command
+        "requiredMaximumVersion",  # managed — version ceiling enforcement
+        "requiredMinimumVersion",  # managed — version floor enforcement
+        "sshHostAllowlist",  # managed — SSH host allowlist for remote sessions
+        "strictPluginOnlyCustomization",  # managed — restrict customization to plugin-provided
+        # ── REMOVED in the v2.1.284 sync, both doc halves verified (2026-09-29,
+        # code.claude.com/docs/en/settings-reference.md raw fetch): scope row AND
+        # section body agree placement is honored beyond managed.
+        #   allowedMcpServers / deniedMcpServers — Scope "Any file"; entries from
+        #     every file MERGE; "Deploy it in managed settings to enforce it" is
+        #     a choice, not a restriction.
+        #   forceLoginMethod — Scope "Any file"; "claudeai"/"console" honored from
+        #     any settings file; only the "gateway" VALUE is managed-only.
+        #   forceLoginOrgUUID — Scope "Any file"; a non-managed single UUID
+        #     pre-selects the org during login (its "only a managed source
+        #     enforces" prose describes enforcement of the restriction, which is
+        #     consistent with Any-file placement, not ambiguity).
+        # A wrong removal would create a CRITICAL-emitting hole; these four are
+        # unambiguous in BOTH halves. See docs_dev/cc-284-apply-report.md.
     }
 )
 
