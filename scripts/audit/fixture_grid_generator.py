@@ -324,7 +324,7 @@ def _build_grid() -> tuple[FixtureSpec, ...]:
                         {
                             "matcher": "Bash",
                             "hooks": [
-                                {"type": "command", "command": "./hooks/pre.sh"},
+                                {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre.sh"},
                             ],
                         },
                     ],

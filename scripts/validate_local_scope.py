@@ -72,6 +72,7 @@ from typing import Any
 from cc_scope_rules import (
     ENABLED_PLUGIN_RE,
     GLOBAL_CONFIG_KEYS,
+    KNOWN_SETTINGS_KEYS,
     MANAGED_ONLY_KEYS,
     MANAGED_ONLY_NESTED_KEYS,
     MAX_CLAUDE_MD_BYTES,
@@ -432,6 +433,39 @@ def _flag_missing_schema_local(data: dict[str, Any], report: ValidationReport, f
         )
 
 
+# Top-level names of the managed-only nested key paths — the exclusion set for
+# _flag_unknown_settings_keys (a nested path's root key is itself a known key,
+# but keeping the derivation explicit means a future managed-only nested entry
+# is excluded here automatically).
+MANAGED_ONLY_NESTED_KEYS_TOP: frozenset[str] = frozenset(t[0] for t in MANAGED_ONLY_NESTED_KEYS)
+
+
+def _flag_unknown_settings_keys(data: dict[str, Any], report: ValidationReport, file_label: str) -> None:
+    """Wire KNOWN_SETTINGS_KEYS as a top-level typo detector (TRDD-NS1XJNPH item 2).
+
+    Same contract as the project-scope copy: INFO only, top-level keys only,
+    keys already flagged by the managed-only/global/plugin-only sets are
+    skipped so one defect is not counted twice. Local scope has no
+    project-rejected set of its own to exclude.
+    """
+    already_flagged = (
+        MANAGED_ONLY_KEYS
+        | MANAGED_ONLY_NESTED_KEYS_TOP
+        | GLOBAL_CONFIG_KEYS
+        | PLUGIN_ONLY_KEYS
+    )
+    for key in sorted(data):
+        if key in KNOWN_SETTINGS_KEYS or key in already_flagged:
+            continue
+        report.info(
+            (
+                f"{file_label}: '{key}' is not a known Claude Code settings key — "
+                "Claude Code silently ignores unknown keys; check for a typo"
+            ),
+            file_label,
+        )
+
+
 def validate_settings_local_json(settings_path: Path, report: ValidationReport) -> dict[str, Any] | None:
     """Apply local-scope rules to ``.claude/settings.local.json`` contents.
 
@@ -461,6 +495,7 @@ def validate_settings_local_json(settings_path: Path, report: ValidationReport) 
     _flag_auto_mode_ignored_local(data, report, file_label)
     _suggest_typically_shared_keys(data, report, file_label)
     _flag_deprecated_keys(data, report, file_label)
+    _flag_unknown_settings_keys(data, report, file_label)
     _flag_missing_schema_local(data, report, file_label)
 
     own_levels = {r.level for r in report.results[start_idx:]}
