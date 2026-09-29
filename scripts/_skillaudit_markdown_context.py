@@ -2098,9 +2098,9 @@ def _is_hyphenated_compound_sudo(line: str, match: str, rule_id: str) -> bool:
 #     (``path/eval $INPUT``) never reaches it.
 # re2-safe: plain char classes and finditer loops, no lookaround.
 _COMPOUND_GLUED_TAIL_RE: Final[re.Pattern[str]] = re.compile(r"\w[-/]$")
-_COMPOUND_PAREN_CONTENT_RE: Final[re.Pattern[str]] = re.compile(r"[\w\s.,()#'-]+")
+_COMPOUND_PAREN_CONTENT_RE: Final[re.Pattern[str]] = re.compile(r"[\w\s.,()#-]+")
 _COMPOUND_PAREN_DANGEROUS_RE: Final[re.Pattern[str]] = re.compile(
-    r"""["'`$;|&><]|\$\(|\brm\b|\bcurl\b|\bwget\b|\bsh\b|\bbash\b|\bpython\b"""
+    r"""["`$;|&><]|\$\(|\brm\b|\bcurl\b|\bwget\b|\bsh\b|\bbash\b|\bpython\b"""
     r"""|\bnode\b|\bpowershell\b|\bosascript\b|\bchmod\b|\bmkfs\b|\bdd\b"""
     r"""|\bkill\b|\bexec\b|\beval\b""",
     re.IGNORECASE,
