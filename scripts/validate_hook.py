@@ -3082,14 +3082,21 @@ def validate_command_hook(
             ):
                 # TRDD-NS1XJNPH item 1: a BARE RELATIVE token (./hooks/pre.sh,
                 # hooks/pre.sh) is UNRESOLVABLE, not MISSING — Claude Code runs
-                # plugin hooks with cwd = PROJECT dir, so the token does not
-                # statically resolve against the plugin tree and a plugin_root
-                # join would manufacture a resolution CPV cannot verify (an FN
-                # in the dangerous direction). The existing relative-path MINOR
-                # already tells the author the real problem; only a RESOLVABLE
-                # root (a literal absolute path — ${CLAUDE_PLUGIN_ROOT} was
-                # already substituted to one during extraction) gets the
-                # not-found MAJOR.
+                # plugin hooks with cwd = the session's CURRENT directory (docs
+                # hooks.md:416 "Handlers run in the current directory"; :601 the
+                # ${CLAUDE_PLUGIN_ROOT} placeholder exists precisely because
+                # relative paths are resolved "regardless of the working
+                # directory" — cwd follows Claude and may be a worktree), so the
+                # token does not statically resolve against the plugin tree and
+                # a plugin_root join would manufacture a resolution CPV cannot
+                # verify (an FN in the dangerous direction). The existing
+                # relative-path MINOR already tells the author the real problem;
+                # only a RESOLVABLE root (a literal absolute path —
+                # ${CLAUDE_PLUGIN_ROOT} was already substituted to one during
+                # extraction) gets the not-found MAJOR. Review R12: if a future
+                # CC ever honors plugin-relative resolution, this suppression
+                # demotes rather than deletes (the MINOR keeps it visible) —
+                # re-check the doc cite before widening this family further.
                 raw_token = str(script_path)
                 if not os.path.isabs(raw_token):
                     # BARE RELATIVE token: UNRESOLVABLE at runtime (hook cwd is
