@@ -4,7 +4,7 @@ title: Bare-CLI importability rule for cpvppc entry points + sidecar symlink res
 column: backburner
 status: tasked
 created: 2026-09-29T02:56:53+0200
-updated: 2026-09-29T03:02:28+0200
+updated: 2026-09-29T03:03:47+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -38,3 +38,7 @@ Q1: cite stays line-anchored but the QUOTED FRAGMENTS are the durable anchors (a
 ## R15 disposition
 
 Q1/Q4 accepted: a backburner card cannot bind the publish step; the retro-break note now lives in the session handoff checklist (item 9) — the surface the publish step reads. Card keeps the record; handoff carries the obligation. Q3 noted: disposition-ledger accumulation is a recurring shape — future review rounds get their own cards, not appends.
+
+## R16 disposition
+
+Q5a accepted as THE binding action: before publish, write BOTH changelog lines directly into CHANGELOG.md (Unreleased) or verify git-cliff emitted them from fa0a8982's message — (1) MINOR retro-break: interpreter-form relative hook tokens (bash hooks/x.sh) newly draw the relative-path MINOR (was invisible); (2) FP fix, reverse direction: bare relative tokens (./hooks/pre.sh) STOP drawing Script-not-found MAJOR when the file exists in-plugin. Q2 folds in: the FP fix gets its own explicit line, not a clause. Handoff item 9 remains the reminder; CHANGELOG is the binding surface.
