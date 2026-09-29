@@ -51,9 +51,12 @@ ADDED_MANAGED_ONLY_KEYS = [
 REMOVED_MANAGED_ONLY_KEYS = [
     "allowedMcpServers",
     "deniedMcpServers",
-    "forceLoginMethod",
     "forceLoginOrgUUID",
 ]
+# Re-added post-review (R8): the key's scope is PER-VALUE — only the "gateway"
+# value is managed-enforced; claudeai/console are honored from any file. The
+# per-key set cannot express that, so the ambiguous→KEEP direction wins.
+RE_ADDED_PER_VALUE_KEYS = ["forceLoginMethod"]
 
 
 # ────────────────────────────── BUILTIN_SLASH_COMMANDS ──────────────────────
@@ -147,9 +150,7 @@ def test_removed_key_no_longer_flagged_in_project_scope(tmp_path: Path, key: str
 
     Verified 2026-09-29 against the raw settings-reference.md fetch: the
     allowed/denied lists merge across files ("deploy in managed to enforce"),
-    forceLoginMethod honors claudeai/console from any file (only the "gateway"
-    VALUE is managed-only), and forceLoginOrgUUID pre-selects the org from a
-    non-managed single UUID.
+    and forceLoginOrgUUID pre-selects the org from a non-managed single UUID.
     """
     assert key not in cc_scope_rules.MANAGED_ONLY_KEYS, key
     f = tmp_path / "settings.json"
@@ -170,6 +171,14 @@ def test_removed_key_still_known(key: str) -> None:
     (a bare typo variant still draws the unknown-key hint)."""
     assert key in cc_scope_rules.KNOWN_SETTINGS_KEYS, key
     assert key + "x" not in cc_scope_rules.KNOWN_SETTINGS_KEYS
+
+
+@pytest.mark.parametrize("key", RE_ADDED_PER_VALUE_KEYS)
+def test_per_value_key_back_in_managed_only(key: str) -> None:
+    """forceLoginMethod is back in MANAGED_ONLY_KEYS: only its "gateway" value
+    is managed-enforced per settings-reference.md + managed-settings.md, and a
+    per-key set cannot express per-value scope — ambiguous→KEEP wins (R8)."""
+    assert key in cc_scope_rules.MANAGED_ONLY_KEYS, key
 
 
 def test_control_managed_key_still_major(tmp_path: Path) -> None:
