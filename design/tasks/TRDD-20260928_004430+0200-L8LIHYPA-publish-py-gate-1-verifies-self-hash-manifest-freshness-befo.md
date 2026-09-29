@@ -1,10 +1,10 @@
 ---
 trdd-id: L8LIHYPA
 title: publish.py Gate 1 verifies self-hash manifest freshness before the self-scan
-column: backburner
+column: dev
 status: tasked
 created: 2026-09-28T00:44:30+0200
-updated: 2026-09-28T00:52:20+0200
+updated: 2026-09-29T02:20:47+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
