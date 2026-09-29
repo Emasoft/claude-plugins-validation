@@ -29,7 +29,6 @@ Four items, every acceptance paired with a positive/negative control:
 from __future__ import annotations
 
 import json
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -41,8 +40,11 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from cc_scope_rules import KNOWN_SETTINGS_KEYS  # noqa: E402
 from cpv_validation_common import ValidationReport  # noqa: E402
-from validate_hook import extract_script_paths, validate_hooks_data  # noqa: E402
-from validate_hook import HookValidationReport  # noqa: E402
+from validate_hook import (  # noqa: E402
+    HookValidationReport,  # noqa: E402
+    extract_script_paths,
+    validate_hooks_data,
+)
 from validate_local_scope import validate_settings_local_json  # noqa: E402
 from validate_marketplace import (  # noqa: E402
     OPTIONAL_MARKETPLACE_TOP_LEVEL_FIELDS,
@@ -50,7 +52,6 @@ from validate_marketplace import (  # noqa: E402
 )
 from validate_plugin import validate_inline_hooks  # noqa: E402
 from validate_project_scope import validate_settings_json_project_scope  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Helpers
