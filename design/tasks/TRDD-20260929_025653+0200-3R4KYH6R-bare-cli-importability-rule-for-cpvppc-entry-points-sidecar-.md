@@ -4,7 +4,7 @@ title: Bare-CLI importability rule for cpvppc entry points + sidecar symlink res
 column: backburner
 status: tasked
 created: 2026-09-29T02:56:53+0200
-updated: 2026-09-29T03:13:51+0200
+updated: 2026-09-29T03:15:16+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -58,3 +58,7 @@ Release-notes surface closed from the record, not re-verified live: CLAUDE.md v5
 ## R21 wording corrections
 
 STILL OPEN (the card's original deliverables — do not read 'channel closed' as card-wide): (a) bare-CLI importability test for cpvppc entry modules; (b) sidecar hooks-path symlink-resolution verification. Channel saga wording softened: closed per the v5.3.0 record; live-mechanism identity (awk extractor vs the --strip call) unverified, conclusion robust under EITHER extractor (both render commit subjects). Bump-coupling noted: final section header [5.22.0] vs other depends on publish-time bump — cosmetic.
+
+## R22 disposition (saga closed on evidence)
+
+Second git-cliff path EXERCISED with its exact Gate 9 argv (cliff --unreleased --tag v5.22.0 --strip all): the release-notes file contains 'hooks: Interpreter-form relative script paths newly draw the relative-path MINOR — RETRO-BREAK' at line 12 under Bug Fixes. Both render paths now proven by execution; 'either extractor' is no longer an assumption. Stopping rule adopted: future rounds only for defects in shipped artifacts, not card prose. Carrier-commit emptiness: sanctioned convention (R20 note). Next action on this card = WORK deliverable (a) bare-CLI import test or (b) sidecar symlink check, not review.
