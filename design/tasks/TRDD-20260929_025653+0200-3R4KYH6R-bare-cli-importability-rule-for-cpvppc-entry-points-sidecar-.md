@@ -4,7 +4,7 @@ title: Bare-CLI importability rule for cpvppc entry points + sidecar symlink res
 column: backburner
 status: tasked
 created: 2026-09-29T02:56:53+0200
-updated: 2026-09-29T02:57:09+0200
+updated: 2026-09-29T02:59:24+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: feature
@@ -26,3 +26,7 @@ approval-datetime: 2026-09-29T02:56:53+0200
 ## Problem
 
 Review R12 carries: (a) no test pins every cpvppc entry module bare-CLI importable (P2 ModuleNotFoundError was suite-masked; found by ad-hoc smoke) — add parametrized import test incl. P3 adapters. (b) Sidecar hooks-path gate symlink resolution unverified (v5.16.2 resolved-path lesson): in-plugin symlink pointing outside could get read/linted. Verify, fix if unresolved. (c) Interpreter-form relative-token MINOR is a new finding surface — record as retro-break in release notes. (d) DONE: Q1 doc cites recorded at change site (hooks.md:416/:601); tolerated-unknown-key probe clean (retained keys silent).
+
+## R13 dispositions
+
+Q2 ANSWERED by live probe: a genuinely-unknown plausible key (telemetryRetentionPeriod, invented, absent from the live settings-reference fetched this session) correctly draws the INFO — the detector fires on the unknown stratum and is silent on known/retained. The CC-tolerates-but-CPV-doesnt-know residue is unenumerable by definition; INFO visibility is the accepted typo-detector trade. Q1 fixed: comment now names the live re-derive URL. Q3b noted (card bundling repeat).
