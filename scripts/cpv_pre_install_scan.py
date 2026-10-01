@@ -359,7 +359,21 @@ def _run_validate_plugin(root: Path, *, marketplace_only: bool = False) -> tuple
     ]
     if marketplace_only:
         cmd.append("--marketplace-only")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, check=False)
+    # Issue #237 — the target is untrusted, so its own `cpv.exclude_paths` /
+    # `.gitmodules` declaration must not hide anything from this scan: the child
+    # runs with the untrusted-target switch set.
+    import os  # noqa: PLC0415
+
+    from cpv_validation_common import UNTRUSTED_TARGET_ENV  # noqa: PLC0415
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+        env={**os.environ, UNTRUSTED_TARGET_ENV: "1"},
+    )
 
     # validate_plugin.py has early-exit error paths (path-not-found, "this is a
     # marketplace not a plugin", SKILL.md-at-root, etc.) that print to stderr
