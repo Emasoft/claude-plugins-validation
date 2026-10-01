@@ -6558,6 +6558,17 @@ def _scan_one_file_collect(file_path: Path, plugin_path: Path) -> tuple[list[Any
         return (local_report.results, stats)
 
     stats["files_scanned"] += 1
+    if _content_excluded(rel_path, plugin_path):
+        # Declared out of scope by the plugin (cpv.exclude_paths / .gitmodules,
+        # issue #237): skip every CONTENT-pattern scanner below and run ONLY the
+        # ones that look for leaked data — secrets, user paths, credential
+        # harvesting. The leak scanners are listed explicitly, so a NEW scanner
+        # must be classified here: tests/test_issue_237_exclude_paths_security_scan.py
+        # fails until a `scan_for_*` added to this function is placed on one side.
+        stats["secret_issues"] += scan_for_secrets(content, rel_path, local_report)
+        stats["user_path_issues"] += scan_for_user_paths(content, rel_path, local_report)
+        stats["credential_harvest_issues"] += scan_for_credential_harvest(content, rel_path, local_report)
+        return (local_report.results, stats)
     # CRITICAL: Injection detection runs FIRST, before any allowlisting.
     # Order matches the legacy serial loop so findings are emitted in the
     # same per-file order — important for tests that assert finding order.
@@ -7244,6 +7255,11 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             # v2.43 — drop findings inside vendored / cached / build dirs.
             if file_ref and _is_vendored_dep_path(str(file_ref)):
                 continue
+            # Issue #237 — a path the plugin declares out of scope
+            # (cpv.exclude_paths / .gitmodules) drops cc-audit's CONTENT-pattern
+            # findings; one whose rule or message names a secret/credential stays.
+            if file_ref and _content_excluded(str(file_ref), plugin_path, f"{rule_id} {message}"):
+                continue
             # v2.44 — drop findings inside gitignored dev-scratch dirs.
             if file_ref and _is_dev_scratch_path(str(file_ref)):
                 continue
@@ -7684,6 +7700,11 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
                 continue
             if _is_vendored_dep_path(f_str):
                 continue
+            # Issue #237 — a path the plugin declares out of scope
+            # (cpv.exclude_paths / .gitmodules) drops tirith's CONTENT-pattern
+            # findings (zero-width, config-injection); a credential finding stays.
+            if _content_excluded(f_str, plugin_path, f"{rule_id} {msg}"):
+                continue
             if _is_dev_scratch_path(f_str):
                 continue
             if _is_test_file_path(f_str):
@@ -7828,6 +7849,11 @@ def check_phase1_unicode_rules(plugin_path: Path, report: ValidationReport) -> i
     """RC-09 (zero-width), RC-10 (TAG block), RC-11 (mixed-script) — all pass."""
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        # Zero-width / TAG / mixed-script are CONTENT patterns: a path the plugin
+        # declares out of scope (cpv.exclude_paths / .gitmodules) is not scanned
+        # for them (issue #237). Secret phases never skip it.
+        if _content_excluded(rel_path, plugin_path):
+            continue
         # v2.48 P-2 — line-aware skip set (parametrize bodies, pattern
         # source). Each rule below consults this so attack tokens that
         # are pattern-fixtures (parametrize body) or rule-catalog
@@ -8514,6 +8540,49 @@ def _is_vendored_dep_path(file_path: str) -> bool:
     return any(f"/{part}/" in normalized or normalized.startswith(f"{part}/") for part in _VENDORED_DEP_DIR_PARTS)
 
 
+# Mixed into every cached external-scanner entry's args hash. The cache stores a
+# scanner's findings AFTER the post-filters ran, keyed on the tree and the tool
+# version — not on CPV's own filter logic — so a host holding an entry from a CPV
+# that predates the content-scan exclusion would keep replaying it and the fix
+# would stay invisible (same failure as TRUFFLEHOG_RESULTS_FLAG, #213). Bump the
+# suffix whenever the post-filter chain changes what a cached scan would report.
+_CONTENT_EXCLUDE_CACHE_REV = "--cpv-content-exclude-rev=1"
+
+
+# A finding whose rule id / message names a secret or credential is NEVER dropped
+# by a `cpv.exclude_paths` content-scan exclusion (issue #237). Used where only a
+# third-party scanner's rule text is available (cc-audit, tirith, semgrep, Cisco).
+# Deliberately broad: over-matching keeps a finding reported, which is the safe
+# direction; the in-process scanners are split structurally and do not use it.
+_SECRET_CLASS_RE = re.compile(r"secret|credential|passw|token|\bkeys?\b|webhook|\bjwt\b|private", re.IGNORECASE)
+
+
+def _content_excluded(file_path: str, plugin_path: Path, rule_text: str | None = None) -> bool:
+    """True if a CONTENT-pattern finding on `file_path` is suppressed by the plugin's
+    own `cpv.exclude_paths` / `.gitmodules` declaration (issue #237).
+
+    Pass `rule_text` (rule id + message) for an external scanner's finding so a
+    secret/credential finding is still reported; omit it where the caller is
+    already a content-only scanner.
+    """
+    from cpv_validation_common import is_content_scan_excluded  # noqa: PLC0415
+
+    if rule_text is not None and _SECRET_CLASS_RE.search(rule_text):
+        return False
+    return is_content_scan_excluded(file_path, plugin_path)
+
+
+def _drop_excluded_content_findings(report: ValidationReport, start: int, plugin_path: Path) -> None:
+    """Drop `report.results[start:]` content findings under a content-scan exclusion.
+
+    For an external scanner whose findings are appended by a library function
+    (Cisco) rather than by a loop this module owns.
+    """
+    report.results[start:] = [
+        r for r in report.results[start:] if not (r.file and _content_excluded(r.file, plugin_path, r.message))
+    ]
+
+
 def _rc76_is_source_code_file(rel_path: str) -> bool:
     """RC-76 — source-code files (TS/JS/Python/Go/Rust/etc) trip the
     stemmed-injection rule because LLM-tooling vocabulary
@@ -8688,6 +8757,10 @@ def check_phase9_stemmed_injection(plugin_path: Path, report: ValidationReport) 
     """
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        # RC-76 is a CONTENT pattern: skip a path the plugin declares out of scope
+        # (cpv.exclude_paths / .gitmodules, issue #237).
+        if _content_excluded(rel_path, plugin_path):
+            continue
         signals = find_stemmed_injection_signal(content)
         if not signals:
             continue
@@ -9982,6 +10055,11 @@ def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
         # v2.43 — drop findings inside vendored / cached / build dirs.
         if _is_vendored_dep_path(rel):
             continue
+        # Issue #237 — a path the plugin declares out of scope
+        # (cpv.exclude_paths / .gitmodules) drops semgrep's CONTENT-pattern
+        # findings; a rule or message naming a secret/credential stays.
+        if _content_excluded(rel, plugin_path, f"{rule_id} {message}"):
+            continue
         # v2.44 — drop findings inside gitignored dev-scratch dirs
         # (docs_dev/, reports/, scripts_dev/, design/tasks/, …) so
         # private workspace content never triggers semgrep noise.
@@ -10114,6 +10192,9 @@ def check_cisco_scanner(plugin_path: Path, report: ValidationReport, *, step_num
     report_len_before = len(report.results)
     cisco_result = run_cisco_scan(plugin_path)
     report_findings(cisco_result, plugin_path, report, should_skip=make_cisco_should_skip(plugin_path))
+    # Issue #237 — Cisco's findings are appended by the library, so the
+    # cpv.exclude_paths content-scan exclusion is applied to what it added.
+    _drop_excluded_content_findings(report, report_len_before, plugin_path)
     new_results = report.results[report_len_before:]
     # Detect "uvx package failed to resolve / cisco binary unavailable" via
     # the WARNING messages run_cisco_scan / report_findings emit.
@@ -10822,6 +10903,7 @@ def validate_security(
         # distinct entries. trufflehog's `--no-update` and similar
         # flags are also baked here — change any flag in
         # scanner_argv and the cache invalidates.
+        scanner_argv = [*scanner_argv, _CONTENT_EXCLUDE_CACHE_REV]
         full_args = [*scanner_argv, str(plugin_path)]
         args_hash = sha256_of_args(full_args)
         key = CacheKey(
@@ -11177,6 +11259,14 @@ def validate_security(
     # Check 29 — opt-in AI triage of SkillAudit residual findings. Advisory
     # only; never runs unless CPV_AI_TRIAGE_BUDGET_USD is set.
     check_ai_triage(plugin_path, report, skillaudit_result)
+    # Issue #237 — keep the cpv.exclude_paths content-scan exclusion auditable:
+    # name every excluded path in the report. Emitted BEFORE the RC-103
+    # disposition below, which must stay the final result.
+    from cpv_validation_common import content_scan_exclusion_notice  # noqa: PLC0415
+
+    exclusion_notice = content_scan_exclusion_notice(plugin_path)
+    if exclusion_notice:
+        report.info(exclusion_notice)
 
     # --- RC-103 disposition — single INFO line, computed from the FINAL
     # counts (after EVERY native phase AND every external scanner above).

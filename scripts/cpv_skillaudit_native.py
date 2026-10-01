@@ -5006,6 +5006,14 @@ def report_findings(
         return 1
 
     appended = 0
+    # Issue #237 — secret / credential detection is never suppressed by a
+    # `cpv.exclude_paths` content-scan exclusion: every `_SECRET_DETECTORS` rule
+    # id (derived, so a new detector is covered automatically) plus the
+    # credential categories (CRED_ENV_READ, TOKEN_STEAL, ...). Anything else is
+    # a content pattern.
+    from cpv_validation_common import is_content_scan_excluded  # noqa: PLC0415
+
+    secret_rule_ids = {detector[0] for detector in _SECRET_DETECTORS}
     # Demoted findings that a consent entry COULD resolve — the protected
     # family is excluded because pointing at a lever that refuses those rules
     # would send the reader to write an entry the loader will never honour.
@@ -5014,6 +5022,13 @@ def report_findings(
     for finding in result.findings:
         line = finding.line_number
         rel = _relativise(finding.file_path, plugin_path)
+        # A path the plugin declares out of scope (cpv.exclude_paths / .gitmodules,
+        # never a protected component root) drops CONTENT-pattern findings only.
+        # Kept here, not in `should_skip`, because that callback sees neither the
+        # rule nor the plugin root.
+        is_secret = finding.rule_id in secret_rule_ids or finding.category.startswith("credential")
+        if not is_secret and is_content_scan_excluded(rel, plugin_path):
+            continue
         if should_skip is not None and should_skip(finding.file_path or rel, line):
             continue
         # v2.99.1 — embed threat category so reviewers see the threat
