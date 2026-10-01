@@ -2695,6 +2695,14 @@ def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
     )
 
     result = run_skillaudit_scan(plugin_root)
+    # Issue #237 — skillaudit's report_findings drops CONTENT findings under the
+    # plugin's own cpv.exclude_paths / .gitmodules; name those paths here so the
+    # exclusion stays visible in the plugin report.
+    from cpv_validation_common import content_scan_exclusion_notice  # noqa: PLC0415
+
+    exclusion_notice = content_scan_exclusion_notice(plugin_root)
+    if exclusion_notice:
+        report.info(exclusion_notice)
 
     # Apply the same self-scan filter chain validate_security.py uses
     # when running its Check 27. Best-effort import — if validate_security
