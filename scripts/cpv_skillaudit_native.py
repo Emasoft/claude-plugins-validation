@@ -5011,9 +5011,16 @@ def report_findings(
     # id (derived, so a new detector is covered automatically) plus the
     # credential categories (CRED_ENV_READ, TOKEN_STEAL, ...). Anything else is
     # a content pattern.
-    from cpv_validation_common import is_content_scan_excluded  # noqa: PLC0415
+    from cpv_validation_common import (
+        _SECURITY_GATE_BUCKETS,  # noqa: PLC0415
+        is_content_scan_excluded,  # noqa: PLC0415
+    )
 
     secret_rule_ids = {detector[0] for detector in _SECRET_DETECTORS}
+    # The security-gate map's leak bucket "B" is the repo's single source for
+    # credential-class rules that are not literal secrets (CREDENTIAL_DISCOVERY,
+    # TOKEN_STEAL, ...): they are never excluded either.
+    secret_rule_ids |= {rule_id for rule_id, buckets in _SECURITY_GATE_BUCKETS.items() if "B" in buckets}
     # Demoted findings that a consent entry COULD resolve — the protected
     # family is excluded because pointing at a lever that refuses those rules
     # would send the reader to write an entry the loader will never honour.

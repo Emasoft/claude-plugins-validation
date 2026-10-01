@@ -1959,6 +1959,13 @@ def is_vendored_path(rel_path: Path | str, plugin_root: Path) -> bool:
     return is_manifest_excluded_path(rel, plugin_root)
 
 
+# Set (to any non-empty value) by a caller that scans an UNTRUSTED target — the
+# pre-install scan. The author of such a target controls its plugin.json, so a
+# `cpv.exclude_paths` declaration there must not hide anything from the scan.
+# The switch only ever tightens: it can turn the exclusion off, never on.
+UNTRUSTED_TARGET_ENV = "CPV_SCAN_UNTRUSTED"
+
+
 # Plugin component roots the host loads, executes or feeds to the model. An
 # author-declared exclusion NEVER silences content findings under these — it is
 # meant for inert data directories, and letting `"exclude_paths": ["skills/"]`
@@ -1983,9 +1990,14 @@ def is_content_scan_excluded(rel_path: Path | str, plugin_root: Path) -> bool:
     injection, unicode, template/command patterns) — never to secret or
     credential detection, which keeps scanning an excluded path.
 
+    Never true for an untrusted target (`UNTRUSTED_TARGET_ENV`): its author wrote
+    the declaration.
+
     `rel_path` may be absolute (external scanners report absolute paths); a path
     outside the plugin root, or one that climbs out of it, is never excluded.
     """
+    if os.environ.get(UNTRUSTED_TARGET_ENV):
+        return False
     path = Path(rel_path)
     if path.is_absolute():
         for root in (plugin_root, plugin_root.resolve()):
@@ -2006,11 +2018,17 @@ def content_scan_exclusion_notice(plugin_root: Path) -> str | None:
     """One INFO line naming every active content-scan exclusion, or None.
 
     Keeps the exclusion auditable: it appears in every security report, so a
-    reviewer sees which author-declared paths were not content-scanned.
+    reviewer sees which author-declared paths were not content-scanned. For an
+    untrusted target (`UNTRUSTED_TARGET_ENV`) it says the declaration was ignored.
     """
     active = [d for d in _declared_exclusions(plugin_root) if not _is_protected_component(Path(d).parts)]
     if not active:
         return None
+    if os.environ.get(UNTRUSTED_TARGET_ENV):
+        return (
+            f"cpv.exclude_paths / .gitmodules declare {', '.join(active)} as excluded from CONTENT-pattern "
+            "security findings; IGNORED because this is an untrusted target — those paths were scanned in full."
+        )
     return (
         f"cpv.exclude_paths / .gitmodules exclude {', '.join(active)} from CONTENT-pattern security findings "
         "(skillaudit, prompt-injection, unicode, injection, exfiltration and external-scanner content rules). "

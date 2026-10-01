@@ -8876,6 +8876,10 @@ def check_phase4_all(plugin_path: Path, report: ValidationReport) -> int:
     """
     issues = 0
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        # RC-85/86/87/88 are CONTENT / metadata patterns: skip a path the plugin
+        # declares out of scope (cpv.exclude_paths / .gitmodules, issue #237).
+        if _content_excluded(rel_path, plugin_path):
+            continue
         fence_state = build_fence_state(content)
         content_lines = _split_lines(content)
         for line_no, line in enumerate(content_lines, start=1):
@@ -8963,6 +8967,11 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
     # reading the clipboard. See `_plugin_claims_clipboard_domain`.
     plugin_is_clipboard_domain = _plugin_claims_clipboard_domain(plugin_path)
     for _file_path, rel_path, content in _iter_scannable_files(plugin_path):
+        # Issue #237 — under a path the plugin declares out of scope
+        # (cpv.exclude_paths / .gitmodules) only the patterns whose message names
+        # a secret / credential still run (RC-32, RC-58, RC-89, RC-96, ...); the
+        # prompt-injection and exec-shaped content patterns are skipped.
+        content_excluded = _content_excluded(rel_path, plugin_path)
         fence_state = build_fence_state(content)
         content_lines = _split_lines(content)
         # Pre-compute Python docstring line numbers (1-based) for
@@ -8986,6 +8995,8 @@ def check_phase3_all(plugin_path: Path, report: ValidationReport) -> int:
             if cpv_self_scan_skip_line(rel_path, content_lines, line_no):
                 continue
             for rule_id, severity, pattern, msg in PHASE3_PATTERNS:
+                if content_excluded and not _SECRET_CLASS_RE.search(msg):
+                    continue
                 m = pattern.search(line)
                 if not m:
                     continue
