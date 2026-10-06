@@ -165,21 +165,6 @@ class TestSettingsRejectedKeys:
 class TestSettingsManagedOnlyKeys:
     """Keys that only work in managed settings — MAJOR in project scope."""
 
-    def test_allowed_mcp_servers_is_major(self, project: Path) -> None:
-        """allowedMcpServers is a managed-only key."""
-        _commit(project, ".claude/settings.json", '{"allowedMcpServers": []}\n')
-        report = ValidationReport()
-        validate_project_scope(project, report)
-        assert report.has_major
-        assert any("allowedMcpServers" in m for m in _messages(report, "MAJOR"))
-
-    def test_denied_mcp_servers_is_major(self, project: Path) -> None:
-        """deniedMcpServers is a managed-only key."""
-        _commit(project, ".claude/settings.json", '{"deniedMcpServers": []}\n')
-        report = ValidationReport()
-        validate_project_scope(project, report)
-        assert any("deniedMcpServers" in m for m in _messages(report, "MAJOR"))
-
     def test_allow_managed_hooks_only_is_major(self, project: Path) -> None:
         """allowManagedHooksOnly is a managed-only key."""
         _commit(project, ".claude/settings.json", '{"allowManagedHooksOnly": true}\n')

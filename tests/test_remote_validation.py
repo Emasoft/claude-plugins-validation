@@ -180,10 +180,15 @@ class TestAllAliasesPointToValidScripts:
     def test_every_alias_maps_to_existing_script(self):
         """Catches typos in _ALIASES values (e.g. a rename that forgot to
         update the map). Each value must be the basename (no .py extension)
-        of a real scripts/*.py file.
+        of a real scripts/*.py file — except in-process entries: cpvppc is
+        dispatched to the cpvppc package module, not a scripts/-root script
+        (see remote_validation.py's cpvppc branch).
         """
+        in_process = {"cpvppc"}
         missing: list[tuple[str, str]] = []
         for alias, target in _ALIASES.items():
+            if alias in in_process:
+                continue
             script_path = scripts_dir / f"{target}.py"
             if not script_path.exists():
                 missing.append((alias, target))
@@ -191,6 +196,15 @@ class TestAllAliasesPointToValidScripts:
             f"The following aliases map to non-existent scripts: {missing}. "
             f"Either the script was renamed or the alias is stale."
         )
+
+    def test_in_process_aliases_are_exactly_known(self):
+        # The exemption set must not silently grow: every in-process alias
+        # must be a deliberate dispatch branch in remote_validation.py.
+        src = (scripts_dir / "remote_validation.py").read_text(encoding="utf-8")
+        for alias in ("cpvppc",):
+            assert f'script_name == "{alias}"' in src, (
+                f"alias {alias!r} is exempted here but has no in-process branch in remote_validation.py"
+            )
 
 
 class TestCommandsDictCoherentWithAliases:

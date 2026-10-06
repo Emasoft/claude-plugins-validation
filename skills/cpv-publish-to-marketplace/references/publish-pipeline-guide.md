@@ -92,9 +92,25 @@ jobs:
     steps:
       - name: Get plugin info
         id: plugin
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          REF_SHA: ${{ github.sha }}
         run: |
-          echo "name=${{ github.event.repository.name }}" >> $GITHUB_OUTPUT
-          echo "ref=${{ github.sha }}" >> $GITHUB_OUTPUT
+          # The payload "plugin" value MUST be the marketplace ENTRY name —
+          # the "name" field of .claude-plugin/plugin.json — which can differ
+          # from the repo name. NO silent fallback: if the manifest is missing,
+          # unreadable, or nameless, this step FAILS (exit 1) instead of
+          # sending a wrong name.
+          if [ ! -f ".claude-plugin/plugin.json" ]; then
+            echo "::error::plugin.json not found in $REPO_NAME — cannot determine the marketplace entry name." >&2
+            exit 1
+          fi
+          PLUGIN_NAME="$(python3 -c "import json;v=json.load(open('.claude-plugin/plugin.json')).get('name');v=v.strip() if isinstance(v,str) else v;assert isinstance(v,str) and v and '\n' not in v, 'name must be a single non-empty line';print(v)")" || {
+            echo "::error::plugin.json in $REPO_NAME is unreadable, has no 'name' field, or its 'name' is not a non-empty string — refusing to notify the marketplace with a wrong plugin name." >&2
+            exit 1
+          }
+          printf 'name=%s\n' "$PLUGIN_NAME" >> "$GITHUB_OUTPUT"
+          printf 'ref=%s\n'  "$REF_SHA"   >> "$GITHUB_OUTPUT"
 
       - name: Trigger marketplace update
         uses: peter-evans/repository-dispatch@v4
@@ -126,6 +142,7 @@ jobs:
 - **`paths`**: Only triggers on plugin-relevant file changes
 - **`MARKETPLACE_OWNER`** and **`MARKETPLACE_REPO`**: Fill with your marketplace repo coordinates
 - **`event-type: plugin-updated`**: Must match the marketplace's `update-submodules.yml` trigger
+- **`client_payload.plugin`**: The marketplace ENTRY name (the `name` field of `.claude-plugin/plugin.json`), NOT the repo name — the two can differ, and the marketplace matches its entries on the payload name. The workflow fails loudly (exit 1) if the manifest is missing, unreadable, or nameless; there is no repo-name fallback.
 
 ---
 
