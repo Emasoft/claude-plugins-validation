@@ -7281,6 +7281,13 @@ def gen_notify_marketplace_yml(p: PluginParams) -> str:
     bound to an ``env:`` mapping; the shell sees ``$VAR`` rather than the
     raw expression. Prevents shell-metacharacter exfil if the upstream
     repository metadata is ever crafted hostile.
+
+    Payload name (D9, TRDD-DFRPRZYD): the dispatch payload's ``plugin``
+    value is read from the ``name`` field of ``.claude-plugin/plugin.json``
+    — the marketplace ENTRY name — NOT from the repo name; the two can
+    differ, and the marketplace matches its entries on the payload name.
+    The step fails LOUD (exit 1) when the manifest is missing, unreadable,
+    or nameless: a silent repo-name fallback is the defect itself.
     """
     marketplace_owner = p.marketplace_owner if p.marketplace_owner else p.github_owner
     marketplace_repo = p.marketplace if p.marketplace else "my-plugins-marketplace"
@@ -7353,7 +7360,20 @@ jobs:
           REPO_NAME: ${{{{ github.event.repository.name }}}}
           REF_SHA: ${{{{ github.sha }}}}
         run: |
-          printf 'name=%s\\n' "$REPO_NAME" >> "$GITHUB_OUTPUT"
+          # D9 (TRDD-DFRPRZYD): the marketplace matches the dispatch on its
+          # ENTRY name — the "name" field of .claude-plugin/plugin.json — which
+          # can differ from the repo name. NO silent fallback: a missing,
+          # unreadable, or nameless manifest fails this step loudly, because a
+          # silently wrong name IS the defect this guard exists for.
+          if [ ! -f ".claude-plugin/plugin.json" ]; then
+            echo "::error::plugin.json not found in $REPO_NAME — cannot determine the marketplace entry name." >&2
+            exit 1
+          fi
+          PLUGIN_NAME="$(python3 -c "import json;v=json.load(open('.claude-plugin/plugin.json')).get('name');v=v.strip() if isinstance(v,str) else v;assert isinstance(v,str) and v and '\\n' not in v, 'name must be a single non-empty line';print(v)")" || {{
+            echo "::error::plugin.json in $REPO_NAME is unreadable, has no 'name' field, or its 'name' is not a non-empty string — refusing to notify the marketplace with a wrong plugin name." >&2
+            exit 1
+          }}
+          printf 'name=%s\\n' "$PLUGIN_NAME" >> "$GITHUB_OUTPUT"
           printf 'ref=%s\\n'  "$REF_SHA"   >> "$GITHUB_OUTPUT"
 
       - name: Trigger marketplace update

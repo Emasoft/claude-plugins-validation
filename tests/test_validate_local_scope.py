@@ -125,16 +125,16 @@ class TestSettingsLocalMajorRules:
         assert any("git-tracked" in m for m in _messages(report, "MAJOR"))
 
     def test_managed_only_key_is_major(self, project: Path) -> None:
-        """allowedMcpServers in settings.local.json is MAJOR."""
+        """allowManagedHooksOnly in settings.local.json is MAJOR."""
         _commit(project, ".gitignore", ".claude/settings.local.json\n")
         _write_untracked(
             project,
             ".claude/settings.local.json",
-            '{"allowedMcpServers": []}\n',
+            '{"allowManagedHooksOnly": true}\n',
         )
         report = ValidationReport()
         validate_local_scope(project, report)
-        assert any("allowedMcpServers" in m for m in _messages(report, "MAJOR"))
+        assert any("allowManagedHooksOnly" in m for m in _messages(report, "MAJOR"))
 
     def test_global_config_key_is_major(self, project: Path) -> None:
         """editorMode in settings.local.json is MAJOR."""

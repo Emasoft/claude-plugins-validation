@@ -138,6 +138,11 @@ BUILTIN_AGENTS: frozenset[str] = frozenset(
         # named agent — it has NO agents/fork.md BY DESIGN, so a dispatch to it
         # is NOT a ghost dispatch. (sub-agents.md "Fork the current conversation".)
         "fork",
+        # 2026-09-28 docs-drift sync — sub-agents.md "Other" built-ins table:
+        # the catch-all `claude` agent and `claude-code-guide` (normalized
+        # lowercase here; this set is compared via _normalize_subagent_type).
+        "claude",
+        "claude-code-guide",
     }
 )
 

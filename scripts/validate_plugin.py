@@ -1001,18 +1001,74 @@ def validate_inline_hooks(
     copying a single check, and still covers the v2.1.207 rule, which lives in
     ``validate_command_hook``. A malformed inline shape now fails the same
     top-level structure checks hooks.json does instead of going unexamined.
+
+    TRDD-NS1XJNPH item 4: a STRING or string-LIST value is a PATH to a hooks
+    file (the same non-default-path shape ``hooks/hooks.json`` covers) —
+    previously returned unvalidated. A path that resolves inside plugin_root
+    AND exists is run through the real ``validate_hooks``; a missing or
+    escaping path gets the manifest path-field MAJOR shape (CC v2.1.283
+    hard-fails a manifest path whose target is missing or outside the plugin
+    directory). Non-str/list junk keeps its current (no-op) behavior — the
+    generic manifest unknown-field warning already covers exotic shapes.
     """
     hooks_value = manifest.get("hooks")
-    if not isinstance(hooks_value, dict):
-        # A string / array value is a PATH to a hooks file, not inline config.
+    if isinstance(hooks_value, dict):
+        # Accept both the full hooks.json document shape ({"hooks": {...}}) and
+        # the bare event map the manifest usually carries ({"PreToolUse": [...]}).
+        data = hooks_value if isinstance(hooks_value.get("hooks"), dict) else {"hooks": hooks_value}
+        manifest_label = ".claude-plugin/plugin.json"
+        hook_report = validate_hooks_data(data, plugin_root, HookValidationReport(hook_path=manifest_label))
+        for result in hook_report.results:
+            report.add(result.level, f"(inline hooks) {result.message}", manifest_label, result.line)
         return
-    # Accept both the full hooks.json document shape ({"hooks": {...}}) and the
-    # bare event map the manifest usually carries ({"PreToolUse": [...]}).
-    data = hooks_value if isinstance(hooks_value.get("hooks"), dict) else {"hooks": hooks_value}
+    # Path-reference forms: string, or list of strings.
+    if isinstance(hooks_value, str):
+        path_tokens: list[str] = [hooks_value]
+    elif isinstance(hooks_value, list) and hooks_value and all(isinstance(v, str) for v in hooks_value):
+        path_tokens = list(hooks_value)
+    else:
+        # Non-str/list junk keeps current behavior (unvalidated here).
+        return
+    if plugin_root is None:
+        return
+    for token in path_tokens:
+        _validate_hooks_path_token(token, plugin_root, report)
+
+
+def _validate_hooks_path_token(token: str, plugin_root: Path, report: ValidationReport) -> None:
+    """Validate one non-default hooks path from the manifest (TRDD-NS1XJNPH item 4).
+
+    Security + correctness gate BEFORE any content validation: the path must
+    resolve INSIDE plugin_root (no ``..`` escape) and must exist on disk. An
+    escaping or missing path is a MAJOR matching the manifest path-field
+    messages and is never read or linted; only a resolved, existing file gets
+    the real ``validate_hooks`` run (a planted bad hook inside it produces its
+    usual findings).
+    """
     manifest_label = ".claude-plugin/plugin.json"
-    hook_report = validate_hooks_data(data, plugin_root, HookValidationReport(hook_path=manifest_label))
-    for result in hook_report.results:
-        report.add(result.level, f"(inline hooks) {result.message}", manifest_label, result.line)
+    rel = token[2:] if token.startswith("./") else token
+    candidate = (plugin_root / rel).resolve()
+    try:
+        candidate.relative_to(plugin_root.resolve())
+    except ValueError:
+        report.major(
+            f"Field 'hooks' contains path-traversal segment: {token} — paths "
+            "escaping the plugin root do not resolve post-install "
+            "(plugins-reference.md:568-571)",
+            manifest_label,
+        )
+        return
+    if not candidate.is_file():
+        report.major(
+            f"Field 'hooks' path does not exist: {token} — CC v2.1.283 "
+            "`claude plugin validate` rejects a manifest path whose target is "
+            "missing (plugins-reference.md:568-571)",
+            manifest_label,
+        )
+        return
+    hooks_report = validate_hook_file(candidate, plugin_root)
+    for result in hooks_report.results:
+        report.add(result.level, f"(inline hooks path '{token}') {result.message}", manifest_label, result.line)
 
 
 def _collect_strings(node: Any) -> list[str]:
@@ -1416,6 +1472,11 @@ def validate_manifest(
         # emits a finding on input CC accepts.
         "privacyPolicyUrl",
         "supportUrl",
+        # plugins/manifest-reference.md:139 — root-level settings object shipped
+        # with the plugin; only `agent` and `subagentStatusLine` take effect, and
+        # a root-level settings.json in the plugin takes precedence. WARNING-only
+        # unknown-field check — no settings-shape validation added (v2.1.284 sync).
+        "settings",
     }
     for key in manifest.keys():
         if key not in known_fields:
