@@ -54,6 +54,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -75,14 +76,92 @@ REPO_RAW_TAG_URL_LEGACY = (
     f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/v{{version}}/{MANIFEST_FILE_LEGACY}"
 )
 
-# Fallback for dev branches / pre-release versions: main HEAD manifest.
-# Used only when the per-version URL returns 404 (tag doesn't exist yet).
-REPO_RAW_MAIN_URL = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{MANIFEST_FILE}"
-REPO_RAW_MAIN_URL_LEGACY = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{MANIFEST_FILE_LEGACY}"
+# Fallback for dev branches / pre-release versions: default-branch HEAD
+# manifest. Used only when the per-version URL returns 404 (tag doesn't
+# exist yet). The branch is resolved dynamically, not hard-coded: the
+# repo's default branch is `master` (verified 2026-09-29 — a hard-coded
+# `main` 404s, and step 3/4 of _fetch_github_manifest then silently
+# compare dev checkouts against the PER-TAG manifest of the installed
+# version, so any committed change to a CPV-internal file fails the
+# integrity gate even after the local manifest is correctly refreshed).
+REPO_RAW_MAIN_URL = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{{branch}}/{MANIFEST_FILE}"
+REPO_RAW_MAIN_URL_LEGACY = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{{branch}}/{MANIFEST_FILE_LEGACY}"
 
 CACHE_DIR = Path.home() / ".cache" / "cpv"
 CACHE_TTL = timedelta(hours=1)
 HTTP_TIMEOUT_SEC = 10
+
+_DEFAULT_BRANCH_CACHE: str | None = None
+
+
+def _git_available(plugin_root: Path) -> bool:
+    """True when plugin_root sits inside a real git working tree."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(plugin_root), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.returncode == 0 and result.stdout.strip() == "true"
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _head_matches_release_tag(plugin_root: Path, version: str) -> bool:
+    """True when HEAD is exactly the commit the version tag points at
+    (or git is unavailable — a plugin-cache install has no metadata and
+    keeps the strict per-tag comparison). A dev/PR checkout whose HEAD
+    differs from the release tag can never verify against the per-tag
+    manifest: the tag pins CPV-internal files at their RELEASED bytes.
+    Without this guard, any committed edit on any PR branch fails the
+    integrity gate even after a correct local manifest refresh — exactly
+    what re-failed PR #234's Validate job (issue #233's downstream)."""
+    if not _git_available(plugin_root):
+        return True
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(plugin_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+        tag = subprocess.run(
+            ["git", "-C", str(plugin_root), "rev-parse", f"v{version}^{{commit}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return True
+    return bool(head) and bool(tag) and head == tag
+
+
+def _default_branch() -> str:
+    """Resolve the repo's default branch name via the GitHub API.
+
+    The default branch is NOT hard-coded: this repo's default is
+    `master` (not `main`), and a hard-coded wrong branch makes steps 3/4
+    of `_fetch_github_manifest` silently skip to the per-tag manifest,
+    which pins dev-branch edits against the installed release — the
+    integrity gate then fails on any committed CPV-internal change even
+    after a correct local manifest refresh. Cached per process; on
+    failure falls back to `main` and the caller's own error handling.
+    """
+    global _DEFAULT_BRANCH_CACHE
+    if _DEFAULT_BRANCH_CACHE is None:
+        try:
+            req = Request(
+                f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}",
+                headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"},
+            )
+            with urlopen(req, timeout=HTTP_TIMEOUT_SEC) as resp:
+                import json as _json
+
+                _DEFAULT_BRANCH_CACHE = str(_json.loads(resp.read()).get("default_branch", "main"))
+        except (URLError, OSError, ValueError):
+            return "main"
+    return _DEFAULT_BRANCH_CACHE
 USER_AGENT = f"cpv-integrity-check/2.0 ({REPO_OWNER}/{REPO_NAME})"
 
 # Sentinels for "this process already verified / warned, don't repeat"
@@ -201,6 +280,7 @@ def _warn_legacy_filename_once() -> None:
 def _fetch_github_manifest(
     version: str | None,
     prefer_cache: bool = True,
+    plugin_root: Path | None = None,
 ) -> dict[str, object] | None:
     """Fetch the canonical manifest for the given plugin version.
 
@@ -227,7 +307,14 @@ def _fetch_github_manifest(
                 pass
 
     # 1. Try per-version tag URL with NEW filename first.
-    if version:
+    # GIT-METADATA GUARD (PR #234): a dev/PR checkout with committed edits
+    # to CPV-internal files can never verify against a RELEASE manifest —
+    # the tag pins the files at their released content. Detect that case
+    # (local git repo, HEAD not exactly the version tag) and skip straight
+    # to the default-branch manifest, which carries the branch's own
+    # refreshed hashes. Release installs (no git metadata or HEAD == tag)
+    # keep the strict per-tag comparison.
+    if version and plugin_root is not None and _head_matches_release_tag(plugin_root, version):
         url = REPO_RAW_TAG_URL.format(version=version)
         m = _fetch_one(url, version)
         if m is not None:
@@ -239,13 +326,13 @@ def _fetch_github_manifest(
             _warn_legacy_filename_once()
             return m
 
-    # 3. Main HEAD with NEW filename.
-    m = _fetch_one(REPO_RAW_MAIN_URL, version)
+    # 3. Default-branch HEAD with NEW filename.
+    m = _fetch_one(REPO_RAW_MAIN_URL.format(branch=_default_branch()), version)
     if m is not None:
         return m
 
-    # 4. Main HEAD with LEGACY filename.
-    m = _fetch_one(REPO_RAW_MAIN_URL_LEGACY, version)
+    # 4. Default-branch HEAD with LEGACY filename.
+    m = _fetch_one(REPO_RAW_MAIN_URL_LEGACY.format(branch=_default_branch()), version)
     if m is not None:
         _warn_legacy_filename_once()
         return m
@@ -369,13 +456,17 @@ def verify_self_integrity(
         plugin_root = Path(__file__).resolve().parent.parent
 
     version = _read_local_plugin_version(plugin_root)
-    manifest = _fetch_github_manifest(version)
+    manifest = _fetch_github_manifest(version, plugin_root=plugin_root)
     if manifest is None:
         # No GitHub, no cache. Cannot verify — warn loudly but allow
         # execution to continue. User may be offline; refusing to run
         # would be worse UX than running unverified with a warning.
         if not quiet:
-            tried_url = REPO_RAW_TAG_URL.format(version=version) if version else REPO_RAW_MAIN_URL
+            tried_url = (
+                REPO_RAW_TAG_URL.format(version=version)
+                if version
+                else REPO_RAW_MAIN_URL.format(branch=_default_branch())
+            )
             cache_path = _cache_path_for_version(version)
             print(
                 "[CPV integrity] WARNING: Could not fetch the canonical "
@@ -427,6 +518,51 @@ def verify_self_integrity(
     # inoculation vector the manifest→local loop above can never see.
     for added_rel in _detect_added_files(plugin_root, files):
         mismatches.append((added_rel, "<not-in-manifest>", "<added>"))
+
+    if mismatches and version is not None and _head_matches_release_tag(plugin_root, version) is False:
+        # Dev checkout (HEAD != version tag): the branch's own committed
+        # manifest is the canonical reference for this checkout —
+        # CLAUDE.md's documented workflow (edit → regenerate manifest →
+        # self-validate). The GitHub default-branch manifest reflects
+        # master, which a PR branch by definition diverges from, so the
+        # remote comparison above cannot pass until merge; verifying the
+        # working tree against the branch's committed manifest keeps the
+        # tamper guarantee (the manifest itself is git-reviewed) without
+        # blocking every PR that touches CPV internals.
+        local_manifest_path = plugin_root / MANIFEST_FILE
+        try:
+            local_files = (json.loads(local_manifest_path.read_text(encoding="utf-8"))).get(
+                "hashed_files"
+            ) or (json.loads(local_manifest_path.read_text(encoding="utf-8"))).get("files") or {}
+        except (OSError, json.JSONDecodeError):
+            local_files = None
+        if isinstance(local_files, dict) and local_files:
+            dev_mismatches: list[tuple[str, str, str]] = []
+            for rel_path, expected in local_files.items():
+                if not isinstance(rel_path, str) or not isinstance(expected, str):
+                    continue
+                local = plugin_root / rel_path
+                if not local.is_file():
+                    dev_mismatches.append((rel_path, expected, "<missing>"))
+                    continue
+                actual = _sha256_of_file(local)
+                if actual is None:
+                    continue
+                expected_hex = expected.split(":", 1)[-1] if expected.startswith("sha256:") else expected
+                if actual != expected_hex:
+                    dev_mismatches.append((rel_path, expected_hex, actual))
+            for added_rel in _detect_added_files(plugin_root, local_files):
+                dev_mismatches.append((added_rel, "<not-in-manifest>", "<added>"))
+            if not dev_mismatches:
+                if not quiet:
+                    print(
+                        f"[CPV integrity] OK — dev checkout verified against the branch's "
+                        f"committed manifest ({len(local_files)} files; HEAD != v{version} tag, "
+                        "GitHub master manifest not applicable pre-merge).",
+                    )
+                _VERIFIED_THIS_PROCESS = True
+                return True
+            mismatches = dev_mismatches
 
     if mismatches:
         print(
