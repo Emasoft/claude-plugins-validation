@@ -1918,6 +1918,32 @@ def load_strip_config(plugin_root: Path) -> dict[str, object]:
     return strip if isinstance(strip, dict) else {}
 
 
+def _declared_exclusions(plugin_root: Path) -> tuple[str, ...]:
+    """Paths the plugin ITSELF declares out of scope: `.gitmodules` + `cpv.exclude_paths`.
+
+    Slash-trimmed, empty entries dropped (an empty prefix would match every path).
+    Hard-coded VENDORED_DIR_NAMES are NOT included — they are not declared by the
+    plugin, so only `is_vendored_path` consults them.
+    """
+    submodules = _read_gitmodules_paths(str(plugin_root.resolve()))
+    raw_exclude = load_cpv_config(plugin_root).get("exclude_paths", [])
+    declared = (
+        {e.strip().rstrip("/") for e in raw_exclude if isinstance(e, str)} if isinstance(raw_exclude, list) else set()
+    )
+    return tuple(sorted(d for d in {*submodules, *declared} if d))
+
+
+def is_manifest_excluded_path(rel_path: Path | str, plugin_root: Path) -> bool:
+    """True if `rel_path` is under a path the plugin declares out of scope.
+
+    Shared by `is_vendored_path` (style/structure rules) and
+    `is_content_scan_excluded` (security content scanners) so the two can never
+    disagree about what `cpv.exclude_paths` / `.gitmodules` cover.
+    """
+    rel_str = str(Path(rel_path)).rstrip("/")
+    return any(rel_str == d or rel_str.startswith(d + "/") for d in _declared_exclusions(plugin_root))
+
+
 def is_vendored_path(rel_path: Path | str, plugin_root: Path) -> bool:
     """True if a path lives under a vendored / submodule subtree.
 
@@ -1925,26 +1951,89 @@ def is_vendored_path(rel_path: Path | str, plugin_root: Path) -> bool:
       1. Hard-coded VENDORED_DIR_NAMES (external/, vendor/, node_modules/, ...)
       2. Submodule paths declared in .gitmodules
       3. Per-plugin `cpv.exclude_paths` declared in plugin.json
+    (2) and (3) live in `is_manifest_excluded_path`.
     """
     rel = Path(rel_path) if not isinstance(rel_path, Path) else rel_path
-    parts = rel.parts
-    for part in parts:
-        if part in VENDORED_DIR_NAMES:
-            return True
-    rel_str = str(rel).rstrip("/")
-    submodules = _read_gitmodules_paths(str(plugin_root.resolve()))
-    for sm in submodules:
-        if rel_str == sm or rel_str.startswith(sm + "/"):
-            return True
-    cpv_config = load_cpv_config(plugin_root)
-    raw_exclude = cpv_config.get("exclude_paths", [])
-    if isinstance(raw_exclude, list):
-        for entry in raw_exclude:
-            if isinstance(entry, str):
-                excl = entry.strip().rstrip("/")
-                if excl and (rel_str == excl or rel_str.startswith(excl + "/")):
-                    return True
-    return False
+    if any(part in VENDORED_DIR_NAMES for part in rel.parts):
+        return True
+    return is_manifest_excluded_path(rel, plugin_root)
+
+
+# Set (to any non-empty value) by a caller that scans an UNTRUSTED target — the
+# pre-install scan. The author of such a target controls its plugin.json, so a
+# `cpv.exclude_paths` declaration there must not hide anything from the scan.
+# The switch only ever tightens: it can turn the exclusion off, never on.
+UNTRUSTED_TARGET_ENV = "CPV_SCAN_UNTRUSTED"
+
+
+# Plugin component roots the host loads, executes or feeds to the model. An
+# author-declared exclusion NEVER silences content findings under these — it is
+# meant for inert data directories, and letting `"exclude_paths": ["skills/"]`
+# mute the content scanners would hand a malicious plugin a one-line way to hide
+# its payload (the abuse that got a blanket security-scan exclude declined, #123).
+_CONTENT_SCAN_PROTECTED_ROOTS = frozenset({".claude-plugin", "agents", "bin", "commands", "hooks", "scripts", "skills"})
+_CONTENT_SCAN_PROTECTED_FILES = frozenset({".mcp.json", ".lsp.json"})
+
+
+def _is_protected_component(parts: tuple[str, ...]) -> bool:
+    return bool(parts) and (
+        parts[0] in _CONTENT_SCAN_PROTECTED_ROOTS or (len(parts) == 1 and parts[0] in _CONTENT_SCAN_PROTECTED_FILES)
+    )
+
+
+def is_content_scan_excluded(rel_path: Path | str, plugin_root: Path) -> bool:
+    """True if CONTENT-pattern security findings for `rel_path` are suppressed.
+
+    Honors the plugin's own declaration (`cpv.exclude_paths`, `.gitmodules`) via
+    `is_manifest_excluded_path`, minus the protected component roots above.
+    Callers MUST apply it only to content-pattern rules (skillaudit, prompt
+    injection, unicode, template/command patterns) — never to secret or
+    credential detection, which keeps scanning an excluded path.
+
+    Never true for an untrusted target (`UNTRUSTED_TARGET_ENV`): its author wrote
+    the declaration.
+
+    `rel_path` may be absolute (external scanners report absolute paths); a path
+    outside the plugin root, or one that climbs out of it, is never excluded.
+    """
+    if os.environ.get(UNTRUSTED_TARGET_ENV):
+        return False
+    path = Path(rel_path)
+    if path.is_absolute():
+        for root in (plugin_root, plugin_root.resolve()):
+            try:
+                path = path.relative_to(root)
+                break
+            except ValueError:
+                continue
+        else:
+            return False
+    path = Path(os.path.normpath(path))
+    if not path.parts or path.parts[0] == "..":
+        return False
+    return not _is_protected_component(path.parts) and is_manifest_excluded_path(path, plugin_root)
+
+
+def content_scan_exclusion_notice(plugin_root: Path) -> str | None:
+    """One INFO line naming every active content-scan exclusion, or None.
+
+    Keeps the exclusion auditable: it appears in every security report, so a
+    reviewer sees which author-declared paths were not content-scanned. For an
+    untrusted target (`UNTRUSTED_TARGET_ENV`) it says the declaration was ignored.
+    """
+    active = [d for d in _declared_exclusions(plugin_root) if not _is_protected_component(Path(d).parts)]
+    if not active:
+        return None
+    if os.environ.get(UNTRUSTED_TARGET_ENV):
+        return (
+            f"cpv.exclude_paths / .gitmodules declare {', '.join(active)} as excluded from CONTENT-pattern "
+            "security findings; IGNORED because this is an untrusted target — those paths were scanned in full."
+        )
+    return (
+        f"cpv.exclude_paths / .gitmodules exclude {', '.join(active)} from CONTENT-pattern security findings "
+        "(skillaudit, prompt-injection, unicode, injection, exfiltration and external-scanner content rules). "
+        "Secret and credential scanning still covers these paths. Review: these entries are author-declared."
+    )
 
 
 def is_npm_package_shape(text: str) -> bool:
