@@ -1069,6 +1069,36 @@ _EXECUTION_CLASS_RULES: frozenset[str] = frozenset(
     }
 )
 
+# Issue #233 — the runtime-executable rule family whose PROSE mention in a
+# markdown host is documentation, not a payload. When one of these rules
+# fires in a `.md`/`.markdown` file, is demoted by the doc-context
+# heuristics, AND the match has no executable shape (the line is not inside
+# a fenced code block and does not match the exec-sink regex), the finding
+# hard-demotes to "warning" (visible, never blocks --strict) instead of
+# "low" (NIT — blocks). Mirrors how ``UNCERTAIN_IN_DOCS_RULES`` treats RC
+# rules in doc paths (``cpv_validation_common.effective_severity``).
+# FN-safe by construction: only the shell-execution family demotes —
+# prose-delivery threats (PROMPT_INJECT / INTENT_* / DATA_EXFIL /
+# MCP_SCHEMA_POISON / A2A_* / TOOL_*) keep their blocking NIT, because
+# there the prose IS the attack; a fenced line keeps its NIT (an agent may
+# copy-execute a fenced snippet verbatim); and a line matching the
+# exec-sink regex keeps its NIT, so a payload cannot hide behind prose
+# padding around a live `eval(` / `os.system(` call shape. Members mirror
+# ``_STYLE_LANG_INERT_EXEC_RULES`` — the module's existing precedent for
+# the "categorically cannot execute in this host surface" family.
+_MD_PROSE_INERT_EXEC_RULES: frozenset[str] = frozenset(
+    {
+        "CMD_INJECTION",
+        "SHELL_EXEC",
+        "REVERSE_SHELL",
+        "PRIVILEGE_ESC",
+        "CONTAINER_ESCAPE",
+        "PERSISTENCE",
+        "TIME_BOMB",
+        "SUPPLY_CHAIN",
+    }
+)
+
 # Pure styling languages (CSS + its preprocessors) are rendered by a browser;
 # they cannot invoke a shell, spawn a process, escalate privileges, persist, or
 # install a package. So the OS-execution / package-install rules below are
@@ -3684,7 +3714,24 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
                 elif consent_warn:
                     adj_sev = "warning"
                 elif demoted:
-                    adj_sev = "low"
+                    # Issue #233 — a demoted RUNTIME-EXECUTION-family match in a
+                    # markdown host with no executable shape (not inside a code
+                    # fence, line not an exec sink) is documentation prose, not a
+                    # payload: hard-demote to "warning" (visible, never blocks
+                    # --strict) instead of "low"/NIT (blocks). Prose-delivery
+                    # rules (PROMPT_INJECT / INTENT_* / DATA_EXFIL / …) are
+                    # deliberately NOT in the set — there the prose IS the
+                    # attack. FN-safety: a fenced line or an exec-sink-shaped
+                    # line keeps its NIT.
+                    if (
+                        rule_id in _MD_PROSE_INERT_EXEC_RULES
+                        and not in_cb
+                        and not _line_is_exec_sink(line)
+                        and file_path.lower().endswith((".md", ".markdown"))
+                    ):
+                        adj_sev = "warning"
+                    else:
+                        adj_sev = "low"
                 else:
                     adj_sev = rule_sev
                 # Severity uplift inside executable code blocks
