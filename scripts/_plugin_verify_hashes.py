@@ -32,6 +32,11 @@ Behavior:
     4. On network failure, fall back to the cached manifest. If no
        cache is available, emit a warning but allow execution to
        continue (user may be intentionally offline).
+       This fail-open applies to PLUGIN mode only. A self-located WHEEL
+       install (issue #243: uvx / pip) is checked against the manifest of
+       its exact release tag, only for the files the wheel ships, and
+       REFUSES (exit 2) when that manifest is unavailable or anything
+       differs; so does a root that is neither a wheel nor a plugin.
 
 Every CPV validator entry point (`validate_security.py`,
 `validate_plugin.py`, `validate_skill.py`, `validate_marketplace.py`,
@@ -317,6 +322,344 @@ def _detect_added_files(plugin_root: Path, manifest_files: dict[str, object]) ->
     return sorted(on_disk - manifest_set)
 
 
+# ---------------------------------------------------------------------------
+# Wheel (package-install) mode — issue #243.
+#
+# Under `uvx --from git+...@vX.Y.Z cpv-remote-validate`, CPV runs from a wheel
+# installed into a site-packages dir. There, `Path(__file__).parent.parent` is
+# site-packages itself: it has no `.claude-plugin/plugin.json`, so the plugin
+# path read the version as None, fell back to the `main` manifest (now 404, so
+# a stale cache was used) and reported every repository-only file the wheel
+# never ships as "deleted locally" — exit 2 on every package install.
+#
+# Wheel mode is detected POSITIVELY (never from a missing plugin.json alone):
+# this module sits in `<site-packages>/scripts/`, and exactly one
+# `claude_plugins_validation-*.dist-info` beside it lists this very file in its
+# RECORD. The version comes from THAT dist-info (not a sys.path lookup that
+# could resolve a different install), only the manifest of the exact tag
+# `v<version>` is trusted (no `main` fallback, cache keyed by the exact ref),
+# and only the files the wheel ships are compared, each at its INSTALLED path.
+# Anything that cannot be proven refuses: the owner's policy is "refuse to run
+# if not validated by hash".
+# ---------------------------------------------------------------------------
+
+# Distribution name of the wheel. Pinned against pyproject [project].name by
+# tests/test_issue_243_wheel_integrity.py so a rename updates both.
+DIST_NAME = "claude-plugins-validation"
+
+# Manifest key (repository path) -> installed path inside site-packages, for
+# the files pyproject's [tool.hatch.build.targets.wheel.force-include] adds to
+# the wheel. Pinned against pyproject by the same test. Everything else the
+# wheel ships comes from `packages = ["scripts"]` and keeps its path.
+_WHEEL_FORCE_INCLUDE: dict[str, str] = {
+    ".markdownlint.json": "scripts/.markdownlint.json",
+    ".markdownlintignore": "scripts/.markdownlintignore",
+    "templates/0.x/marketplace/render_readme_table.py": "templates/0.x/marketplace/render_readme_table.py",
+    "templates/scripts/render_readme_table.py": "templates/scripts/render_readme_table.py",
+    "templates/0.x/marketplace/validate-readme-table.yml": "templates/0.x/marketplace/validate-readme-table.yml",
+}
+
+# Top-level dirs under site-packages that the wheel writes; the added-file walk
+# covers exactly these.
+_WHEEL_TOP_DIRS = ("scripts", "templates")
+
+# OS-written cruft that may appear in any directory; never importable.
+_WHEEL_OS_CRUFT_BASENAMES = frozenset({".DS_Store", "Thumbs.db", "desktop.ini"})
+
+# Skip switches that plugin mode honours but a package install ignores (#243).
+_WHEEL_IGNORED_SKIP_VARS = ("PLUGIN_SKIP_GITHUB_INTEGRITY", "CPV_SKIP_GITHUB_INTEGRITY", "PYTEST_CURRENT_TEST")
+
+# Backoff before the single retry of the tag-manifest fetch (seconds).
+_WHEEL_FETCH_RETRY_SLEEP_SEC = 2.0
+
+# The module file used for wheel detection. A module attribute (not a bare
+# __file__ read) so tests can point detection at a fake site-packages tree.
+_MODULE_FILE = Path(__file__)
+
+_SITE_DIR_NAMES = frozenset({"site-packages", "dist-packages"})
+_SELF_RECORD_PATH = "scripts/_plugin_verify_hashes.py"
+# A version string is interpolated into a URL and a cache file name.
+_SAFE_VERSION_RE = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_-]*")
+
+REFUSAL_HEADLINE = (
+    "CPV refused to run: its own integrity could not be verified. This is not a verdict on the plugin being validated."
+)
+
+
+class _WheelInstall:
+    """A positively-proven wheel install of CPV."""
+
+    def __init__(self, site_packages: Path, dist_info: Path) -> None:
+        self.site_packages = site_packages
+        self.dist_info = dist_info
+
+
+class _WheelDetectionError(Exception):
+    """Wheel-shaped install whose identity cannot be proven (fail closed)."""
+
+
+def _refuse(reasons: list[str], *, fail_on_mismatch: bool) -> bool:
+    """Refuse to run: print why (ALWAYS, even when quiet) and exit 2 / return False.
+
+    Never memoizes success: `_VERIFIED_THIS_PROCESS` is left untouched so a
+    later strict gate re-checks instead of short-circuiting (finding 141).
+    """
+    print("\n" + "=" * 70 + "\n[CPV integrity] CRITICAL: " + REFUSAL_HEADLINE, file=sys.stderr)
+    for reason in reasons[:50]:
+        print(f"  - {reason}", file=sys.stderr)
+    if len(reasons) > 50:
+        print(f"  …and {len(reasons) - 50} more", file=sys.stderr)
+    print(
+        "Reinstall CPV from a released tag; if you are developing CPV itself, run it "
+        "from a source checkout instead.\n" + "=" * 70,
+        file=sys.stderr,
+    )
+    if fail_on_mismatch:
+        sys.exit(2)
+    return False
+
+
+def _note_ignored_skip_vars(context: str) -> None:
+    """Tell the user (always, on stderr) which skip switches are being ignored, and why."""
+    ignored = [name for name in _WHEEL_IGNORED_SKIP_VARS if os.environ.get(name, "").strip()]
+    if ignored:
+        print(
+            f"[CPV integrity] NOTE: {', '.join(ignored)} is ignored for {context}; the integrity check runs anyway.",
+            file=sys.stderr,
+        )
+
+
+def _record_lists_self(record: Path) -> bool:
+    import csv
+
+    try:
+        with open(record, encoding="utf-8", newline="") as fh:
+            return any(row and row[0] == _SELF_RECORD_PATH for row in csv.reader(fh))
+    except (OSError, csv.Error, UnicodeDecodeError):
+        return False
+
+
+def _normalized_dist_name(name: str) -> str:
+    """PEP 503/427 normalisation used in dist-info dir names: lowercase, runs of -_. -> _."""
+    return re.sub(r"[-_.]+", "_", name).lower()
+
+
+def _wheel_dist_info_prefix() -> str:
+    """`<normalized DIST_NAME>-` — the dist-info dir is `<prefix><version>.dist-info`."""
+    return _normalized_dist_name(DIST_NAME) + "-"
+
+
+def _detect_wheel_install(module_file: Path) -> _WheelInstall | None:
+    """Return the wheel install this module belongs to, or None if it is not one.
+
+    Wheel mode requires ALL of: the module's dir is named `scripts`, its parent
+    is a `site-packages`/`dist-packages` dir, and a `<dist>-*.dist-info` beside
+    it lists this module in its RECORD. The dist-info pattern is derived from
+    `DIST_NAME` (never hardcoded), so a package rename needs one edit. A dev /
+    editable install (module not under site-packages) is therefore never wheel
+    mode. More than one matching dist-info is ambiguous and raises
+    `_WheelDetectionError`.
+    """
+    module_file = module_file.resolve()
+    scripts_dir = module_file.parent
+    site_packages = scripts_dir.parent
+    if scripts_dir.name != "scripts" or site_packages.name not in _SITE_DIR_NAMES:
+        return None
+    prefix = _wheel_dist_info_prefix()
+    try:
+        candidates = sorted(
+            p
+            for p in site_packages.iterdir()
+            if p.is_dir() and p.name.lower().startswith(prefix) and p.name.endswith(".dist-info")
+        )
+    except OSError:
+        return None
+    matches = [p for p in candidates if _record_lists_self(p / "RECORD")]
+    if not matches:
+        return None
+    if len(matches) > 1:
+        raise _WheelDetectionError("more than one dist-info claims this module: " + ", ".join(p.name for p in matches))
+    return _WheelInstall(site_packages, matches[0])
+
+
+def _wheel_version(install: _WheelInstall) -> str | None:
+    """Version from the proven dist-info itself (its Name must normalise to DIST_NAME).
+
+    Read via `importlib.metadata.Distribution.at(<the dist-info whose RECORD
+    lists this module>)` rather than `importlib.metadata.version(DIST_NAME)`:
+    the latter resolves through sys.path and could return a DIFFERENT install
+    of the same distribution than the files being verified.
+    """
+    from importlib.metadata import Distribution
+
+    try:
+        dist = Distribution.at(install.dist_info)
+        name = dist.metadata["Name"]
+        version = dist.version
+    except Exception:  # noqa: BLE001 - any unreadable metadata means "unknown" -> refuse
+        return None
+    if not isinstance(name, str) or _normalized_dist_name(name) != _normalized_dist_name(DIST_NAME):
+        return None
+    if not isinstance(version, str) or not _SAFE_VERSION_RE.fullmatch(version):
+        return None
+    return version
+
+
+def _wheel_cache_path(version: str) -> Path:
+    """Cache keyed by the EXACT tag ref, in its own namespace.
+
+    Distinct from `_cache_path_for_version`, whose file for a version may hold a
+    `main`-branch manifest written by the plugin-mode fallback.
+    """
+    return CACHE_DIR / f"github-manifest-tag-v{version}.json"
+
+
+def _fetch_wheel_manifest(version: str) -> dict[str, object] | None:
+    """Manifest at tag `v<version>` only — never `main`. Cache of that exact tag as fallback."""
+    import time
+
+    cache_path = _wheel_cache_path(version)
+    url = REPO_RAW_TAG_URL.format(version=version)
+    parsed: object = None
+    data = ""
+    # One retry with a short backoff: a single attempt is fragile on CI runners.
+    for attempt in range(2):
+        if attempt:
+            time.sleep(_WHEEL_FETCH_RETRY_SLEEP_SEC)
+        try:
+            req = Request(url, headers={"User-Agent": USER_AGENT})
+            with urlopen(req, timeout=HTTP_TIMEOUT_SEC) as resp:  # noqa: S310 - hardcoded HTTPS
+                data = resp.read().decode("utf-8")
+            parsed = json.loads(data)
+        except (URLError, OSError, json.JSONDecodeError, TimeoutError, UnicodeDecodeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            break
+    if isinstance(parsed, dict):
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(data, encoding="utf-8")
+        except OSError:
+            pass  # Cache write failures are non-fatal.
+        return parsed
+    # Network/parse failure: a cached copy of the SAME immutable tag only.
+    if cache_path.is_file():
+        try:
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        return cached if isinstance(cached, dict) else None
+    return None
+
+
+def _wheel_expected_paths(files: dict[str, object]) -> dict[str, str]:
+    """Installed path -> expected hash, for the manifest entries the wheel ships.
+
+    Repository-only entries (workflows, tests, memory pages, plugin.json, ...)
+    are never expected in a package install, so they are not reported deleted.
+    """
+    out: dict[str, str] = {}
+    for key, expected in files.items():
+        if not isinstance(key, str) or not isinstance(expected, str):
+            continue
+        if key in _WHEEL_FORCE_INCLUDE:
+            out[_WHEEL_FORCE_INCLUDE[key]] = expected
+        elif key.startswith("scripts/"):
+            out[key] = expected
+    return out
+
+
+def _detect_added_wheel_files(site_packages: Path, expected: set[str]) -> list[str]:
+    """Files under the wheel's top dirs that the manifest does not account for.
+
+    The skip rule is applied HERE, without importing `_plugin_compute_hashes`
+    (a file that is itself being verified — importing it first would let a
+    tampered copy decide what the walk ignores). Skipped: `*.pyc` directly
+    inside a `__pycache__` dir (bytecode caches Python writes) and the OS
+    cruft basenames below. Everything else is reported, including a sourceless
+    `*.pyc` outside `__pycache__` (importable; no legitimate wheel ships one)
+    and any non-.pyc file inside `__pycache__` (a namespace-package path).
+    The plugin-mode `_SHIPPED_WALK_SKIP_DIRS` is deliberately NOT reused: it
+    skips `build`, `dist`, `reports`, ..., which would let
+    `scripts/build/evil.py` hide.
+    """
+    added: list[str] = []
+    for top in _WHEEL_TOP_DIRS:
+        base = site_packages / top
+        if not base.is_dir():
+            continue
+        for path in base.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(site_packages)
+            rel_path = rel.as_posix()
+            if rel.parent.name == "__pycache__" and rel.suffix == ".pyc":
+                continue
+            if rel.name in _WHEEL_OS_CRUFT_BASENAMES:
+                continue
+            if rel_path not in expected:
+                added.append(rel_path)
+    return sorted(added)
+
+
+def _verify_wheel_install(install: _WheelInstall, *, fail_on_mismatch: bool, quiet: bool) -> bool:
+    """Verify a wheel install against the manifest of its exact release tag."""
+    global _VERIFIED_THIS_PROCESS
+    version = _wheel_version(install)
+    if version is None:
+        return _refuse(
+            [f"the installed version of {DIST_NAME} could not be read from {install.dist_info}"],
+            fail_on_mismatch=fail_on_mismatch,
+        )
+    manifest = _fetch_wheel_manifest(version)
+    if manifest is None:
+        return _refuse(
+            [
+                f"no hash manifest for tag v{version} could be fetched "
+                f"({REPO_RAW_TAG_URL.format(version=version)}) and no cached copy of that tag "
+                f"exists at {_wheel_cache_path(version)}"
+            ],
+            fail_on_mismatch=fail_on_mismatch,
+        )
+    files = manifest.get("hashed_files") or manifest.get("files")
+    if not isinstance(files, dict):
+        return _refuse([f"the v{version} hash manifest is malformed or empty"], fail_on_mismatch=fail_on_mismatch)
+    expected = _wheel_expected_paths(files)
+    if not expected:
+        return _refuse(
+            [f"the v{version} hash manifest lists none of the files this package ships"],
+            fail_on_mismatch=fail_on_mismatch,
+        )
+    problems: list[str] = []
+    for rel_path, expected_hash in sorted(expected.items()):
+        local = install.site_packages / rel_path
+        if not local.is_file():
+            problems.append(f"{rel_path}  (shipped by v{version} but missing from this install)")
+            continue
+        actual = _sha256_of_file(local)
+        expected_hex = expected_hash.split(":", 1)[-1] if expected_hash.startswith("sha256:") else expected_hash
+        if actual != expected_hex:
+            problems.append(
+                f"{rel_path}  (changed: expected sha256:{expected_hex[:16]}…, actual sha256:{(actual or 'unreadable')[:16]}…)"
+            )
+    for added_rel in _detect_added_wheel_files(install.site_packages, set(expected)):
+        problems.append(f"{added_rel}  (present in this install but NOT in the v{version} manifest — added file)")
+    if problems:
+        return _refuse(
+            [f"{len(problems)} file(s) of this {DIST_NAME} v{version} install differ from its tag manifest:"]
+            + problems,
+            fail_on_mismatch=fail_on_mismatch,
+        )
+    if not quiet:
+        print(
+            f"[CPV integrity] OK — {len(expected)} files of the {DIST_NAME} v{version} package "
+            "verified against the GitHub tag manifest.",
+            file=sys.stderr,
+        )
+    _VERIFIED_THIS_PROCESS = True
+    return True
+
+
 def verify_self_integrity(
     plugin_root: Path | None = None,
     *,
@@ -338,7 +681,11 @@ def verify_self_integrity(
         True if every locally-present file matches the GitHub hash, OR
         if the network is unreachable AND no cached manifest exists
         (graceful degradation — user may be offline). False on mismatch
-        when `fail_on_mismatch=False`.
+        when `fail_on_mismatch=False`. That offline fail-open applies to
+        PLUGIN mode only (a root with `.claude-plugin/plugin.json`). A
+        self-located WHEEL install (issue #243) and a root that is neither
+        a wheel nor a plugin REFUSE instead: exit 2 (or False) whenever the
+        exact-tag manifest is unavailable or anything differs.
 
     Side effects:
         - Writes / refreshes the cached manifest at
@@ -348,6 +695,39 @@ def verify_self_integrity(
     global _VERIFIED_THIS_PROCESS
     if _VERIFIED_THIS_PROCESS:
         return True
+
+    # Issue #243: a self-located run from a wheel (uvx / pip install) is
+    # verified against the files THAT PACKAGE ships, at their installed
+    # paths, using only the manifest of its exact release tag. Detection runs
+    # BEFORE the skip checks below: owner policy is "refuse to run if not
+    # validated by hash", so no env var and no pytest auto-skip can turn the
+    # check off for a package install. (Plugin mode keeps its skips.)
+    if plugin_root is None:
+        try:
+            wheel = _detect_wheel_install(_MODULE_FILE)
+        except _WheelDetectionError as exc:
+            return _refuse([f"wheel install could not be identified: {exc}"], fail_on_mismatch=fail_on_mismatch)
+        if wheel is not None:
+            _note_ignored_skip_vars("package installs")
+            return _verify_wheel_install(wheel, fail_on_mismatch=fail_on_mismatch, quiet=quiet)
+        plugin_root = _MODULE_FILE.resolve().parent.parent
+
+    # Neither a proven wheel install nor a plugin root: there is no version to
+    # anchor a manifest to, and the old fallback (version None -> `main`
+    # manifest) compared CPV against a different tree. Refuse instead.
+    # Runs BEFORE the plugin-mode skips: this case has no version to anchor, so
+    # no skip switch may let it through (owner policy, #243).
+    if not (plugin_root / ".claude-plugin" / "plugin.json").is_file():
+        _note_ignored_skip_vars("a root that is neither a package install nor a plugin")
+        return _refuse(
+            [
+                f"{plugin_root} is neither a CPV plugin root (no .claude-plugin/plugin.json) "
+                f"nor a proven {DIST_NAME} wheel install (no matching dist-info RECORD)"
+                ". A non-standard install layout with no site-packages/dist-packages dir "
+                "(e.g. some Nix or conda layouts) is not recognised as a package install."
+            ],
+            fail_on_mismatch=fail_on_mismatch,
+        )
 
     # Dev / CI escape hatch: explicit opt-out of the GitHub round-trip.
     if _read_skip_env_var():
@@ -364,9 +744,6 @@ def verify_self_integrity(
     if os.environ.get("PYTEST_CURRENT_TEST"):
         _VERIFIED_THIS_PROCESS = True
         return True
-
-    if plugin_root is None:
-        plugin_root = Path(__file__).resolve().parent.parent
 
     version = _read_local_plugin_version(plugin_root)
     manifest = _fetch_github_manifest(version)
