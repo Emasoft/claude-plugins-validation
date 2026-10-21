@@ -2,6 +2,26 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.22.1] - 2026-10-21
+
+### Bug Fixes
+
+- **integrity:** Verify a package-installed CPV against its own release manifest (#243, TRDD-O3K5H8GG)
+- **integrity:** Match the wheel file map to what 5.22.x actually ships ([#243](https://github.com/Emasoft/claude-plugins-validation/issues/243))
+- **integrity:** Regenerate the self-hash manifest so it matches the tree ([#258](https://github.com/Emasoft/claude-plugins-validation/issues/258))
+- **cspell:** Seed the words cspell 10.4.0 rejects in a fresh scaffold
+- **integrity:** Release gates verify the candidate against its own manifest, never skip the check ([#258](https://github.com/Emasoft/claude-plugins-validation/issues/258))
+- **integrity:** Address the adversarial review of the release-candidate anchor ([#258](https://github.com/Emasoft/claude-plugins-validation/issues/258))
+
+### Documentation
+
+- **integrity:** The audit pytest_session label is self-reported ([#258](https://github.com/Emasoft/claude-plugins-validation/issues/258))
+
+### Miscellaneous Tasks
+
+- Regenerate self-hash manifest for the release-candidate anchor ([#258](https://github.com/Emasoft/claude-plugins-validation/issues/258))
+- Regenerate self-hash manifest after the anchor review fixes ([#258](https://github.com/Emasoft/claude-plugins-validation/issues/258))
+
 ## [5.22.0] - 2026-09-29
 
 ### Bug Fixes
@@ -22,7 +42,7 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 
 - Add TRDD-L8LIHYPA — Gate 1 manifest-freshness check backlog card
 - TRDD-L8LIHYPA — append the three review scope notes
-- TRDD-DFRPRZYD — P1 completion note (commit 1e79599d) + hashes
+- TRDD-DFRPRZYD — P1 completion note (commit fa8c27de) + hashes
 - TRDD-1T862D4B — record P1 round-6 review disposition
 - TRDD-1T862D4B — corrective append from review of the P1 disposition record
 - Add TRDD-ZGLUCFTV — CC spec sync v2.1.284
@@ -71,7 +91,7 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 - Regen hashes after CLAUDE.md inventory row update (hashes-last invariant)
 - Regen hashes after README troubleshooting row
 - Regen hashes after #233 review hardening
-- Regen self-hash manifest after review-round-2 acceptance (277acf1d)
+- Regen self-hash manifest after review-round-2 acceptance (5d1eed65)
 - Regen self-hash manifest after publish.py annotation fix
 
 ### Styling
@@ -233,7 +253,7 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 
 ### Bug Fixes
 
-- **hashes:** Regen self-hash manifests after 965d54e7
+- **hashes:** Regen self-hash manifests after b66ceab1
 - **spec-sync:** PermissionRequest agent hooks + narrow MCP url-without-type (TRDD-Q3CPZL0X)
 - **doctor:** Read `claude plugin validate --json`, report UNKNOWN when it cannot run (TRDD-Q3CPZL0X)
 - **doctor,cost:** No "healthy" verdict when a check could not run; price the 5.x models (TRDD-Q3CPZL0X)
@@ -281,7 +301,7 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 
 - Card the v5.17.0 red-CI regression (TRDD-MHCFOCBV)
 - Correct four overstated claims in TRDD-MHCFOCBV after adversarial review
-- Clear 9e7d2c1e of the v5.17.0 CI-red regression (TRDD-MHCFOCBV)
+- Clear 541802db of the v5.17.0 CI-red regression (TRDD-MHCFOCBV)
 - **memory:** Split the oversized RC-164 fold-tiers atom into two
 - Bump TRDD-4EE90MC1 updated: — the revert-granularity section adds assertions
 - Settle the four blocking rulings on TRDD-FK9Y6NCL
@@ -2809,13 +2829,8 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 
 ### Documentation
 
-- **TRDD:** Add strip-dev-parts and publish-auth-standard specs
-
-## [2.50.3] - 2026-05-02
-
-### Documentation
-
 - **TRDD:** Add zero-config universal publish pipeline plan (TRDD-9065109a)
+- **TRDD:** Add strip-dev-parts and publish-auth-standard specs
 
 ## [2.50.2] - 2026-05-02
 
@@ -2923,12 +2938,6 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 
 ### Bug Fixes
 
-- **secrets:** Split fake-token literals + add secret_scanning.yml allowlist
-
-## [2.46.0] - 2026-05-01
-
-### Bug Fixes
-
 - **RC-87:** Require all 4 octets in IPv4 regex (FP-A v2.46)
 - **RC-93:** Skip Unicode box-drawing rows in CLI banners (FP-O v2.46)
 - **RC-76:** Skip non-AI config files and markdown table rows (FP-L+M v2.46)
@@ -2944,6 +2953,7 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 - **validate_skill:** Allow shell-var $UPPERCASE refs in skill body
 - **consolidation:** Bump command count to 22; clean cache-validation-skill description
 - **strict:** Clean validate_plugin --strict — zero MAJOR/MINOR/NIT
+- **secrets:** Split fake-token literals + add secret_scanning.yml allowlist
 
 ### Documentation
 
