@@ -444,7 +444,7 @@ def test_bypass_guard_passes_with_clean_env(monkeypatch):
     runs.
     """
     forbidden_prefixes = ("PLUGIN_SKIP_", "PLUGIN_FORCE_", "PLUGIN_BYPASS_", "CPV_SKIP_", "SKIP_")
-    exemptions = {"CPV_SKIP_GITHUB_INTEGRITY", "CPV_SKIP_GH_AUTH_CHECK"}
+    exemptions = {"CPV_SKIP_GH_AUTH_CHECK"}
     # Scrub every env var matching a forbidden prefix that isn't an
     # explicit infrastructure exemption.
     import os

@@ -59,6 +59,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -395,12 +396,14 @@ class _WheelDetectionError(Exception):
     """Wheel-shaped install whose identity cannot be proven (fail closed)."""
 
 
-def _refuse(reasons: list[str], *, fail_on_mismatch: bool) -> bool:
+def _refuse(reasons: list[str], *, fail_on_mismatch: bool, audit: dict[str, object] | None = None) -> bool:
     """Refuse to run: print why (ALWAYS, even when quiet) and exit 2 / return False.
 
     Never memoizes success: `_VERIFIED_THIS_PROCESS` is left untouched so a
     later strict gate re-checks instead of short-circuiting (finding 141).
+    Every refusal is appended to the audit log first; `audit` adds context.
     """
+    _audit("refused", reasons=reasons[:50], **(audit or {}))
     print("\n" + "=" * 70 + "\n[CPV integrity] CRITICAL: " + REFUSAL_HEADLINE, file=sys.stderr)
     for reason in reasons[:50]:
         print(f"  - {reason}", file=sys.stderr)
@@ -424,6 +427,165 @@ def _note_ignored_skip_vars(context: str) -> None:
             f"[CPV integrity] NOTE: {', '.join(ignored)} is ignored for {context}; the integrity check runs anyway.",
             file=sys.stderr,
         )
+
+
+# ---------------------------------------------------------------------------
+# Release-candidate anchor (owner decision 2026-10-21, "Anchor to candidate";
+# directives: "never bypass security or validation or hash checks" and "make it
+# as hard as possible. so that even if someone succeed, he is more likely to
+# leave a trail behind").
+#
+# An unreleased version has no GitHub manifest yet, so CPV's own release gates
+# used to switch the check OFF with the skip variables. The anchor keeps every
+# file hashed and changes only the reference: the candidate's OWN manifest, bound
+# to one exact commit. It is NOT a skip — setting it alone passes nothing:
+#   * the value must be "<sha256 of .plugin-self-hashes.json>:<HEAD commit sha>";
+#   * the plugin root must be the top level of a git work tree whose HEAD is that
+#     commit, with NO tracked or untracked change;
+#   * the on-disk manifest must be byte-identical to the committed one (and the
+#     legacy copy, when present, identical to it);
+#   * every manifest entry must hash equal, every git-tracked file must be listed,
+#     every listed file must be tracked, and no unlisted shipped file may exist.
+# So passing requires the tampered files AND a regenerated manifest to be
+# COMMITTED, which leaves a commit behind; every use and every refusal is also
+# appended to the audit log. Any git failure refuses (fail closed). Skip
+# variables are ignored while the anchor is set.
+# ---------------------------------------------------------------------------
+RELEASE_CANDIDATE_ENV = "PLUGIN_INTEGRITY_RELEASE_CANDIDATE"
+_RELEASE_CANDIDATE_RE = re.compile(r"\A([0-9a-f]{64}):([0-9a-f]{40})\Z")
+_AUDIT_LOG = CACHE_DIR / "integrity-audit.log"
+
+
+def _audit(event: str, **fields: object) -> None:
+    """Append one JSON line to the integrity audit log, the trail a bypass leaves.
+
+    Best effort by necessity (a read-only home must not stop validation), but
+    never silent: a write failure is reported on stderr.
+    """
+    record: dict[str, object] = {
+        "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "event": event,
+        "pid": os.getpid(),
+        "ppid": os.getppid(),
+        "module": str(_MODULE_FILE.resolve()),
+        **fields,
+    }
+    try:
+        _AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(_AUDIT_LOG, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, sort_keys=True, default=str) + "\n")
+    except OSError as exc:
+        print(f"[CPV integrity] WARNING: could not append to the audit log {_AUDIT_LOG}: {exc}", file=sys.stderr)
+
+
+class _AnchorError(Exception):
+    """A release-candidate precondition failed; the message is the refusal reason."""
+
+
+def _git_bytes(root: Path, *args: str) -> bytes:
+    """Run git inside `root` and return stdout; ANY failure raises (fail closed)."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise _AnchorError(f"git {' '.join(args)} could not run: {exc}") from exc
+    if proc.returncode != 0:
+        detail = proc.stderr.decode("utf-8", errors="replace").strip()[:300]
+        raise _AnchorError(f"git {' '.join(args)} failed (exit {proc.returncode}): {detail}")
+    return proc.stdout
+
+
+def _release_candidate_reasons(root: Path, anchor: str) -> tuple[list[str], int]:
+    """Every reason the candidate at `root` fails `anchor`, and how many files hashed equal."""
+    match = _RELEASE_CANDIDATE_RE.match(anchor)
+    if match is None:
+        return [f"{RELEASE_CANDIDATE_ENV} is malformed (expected '<64 hex>:<40 hex>', lowercase)"], 0
+    manifest_sha, commit_sha = match.groups()
+    reasons: list[str] = []
+    checked = 0
+    try:
+        top = Path(_git_bytes(root, "rev-parse", "--show-toplevel").decode("utf-8").strip()).resolve()
+        if top != root:
+            raise _AnchorError(f"{root} is not the top level of its git work tree ({top})")
+        head = _git_bytes(root, "rev-parse", "--verify", "HEAD^{commit}").decode("utf-8").strip()
+        if head != commit_sha:
+            raise _AnchorError(f"HEAD is {head}, not the anchored commit {commit_sha}")
+        status = _git_bytes(root, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
+        if status.strip():
+            lines = status.decode("utf-8", errors="replace").splitlines()
+            raise _AnchorError(f"the working tree is not clean ({len(lines)} change(s), first: {lines[0].strip()})")
+        try:
+            on_disk = (root / MANIFEST_FILE).read_bytes()
+        except OSError as exc:
+            raise _AnchorError(f"{MANIFEST_FILE} is unreadable: {exc}") from exc
+        if hashlib.sha256(on_disk).hexdigest() != manifest_sha:
+            raise _AnchorError(f"{MANIFEST_FILE} does not hash to the anchored value")
+        if _git_bytes(root, "show", f"{commit_sha}:{MANIFEST_FILE}") != on_disk:
+            raise _AnchorError(f"{MANIFEST_FILE} differs from the copy committed in {commit_sha}")
+        legacy = root / MANIFEST_FILE_LEGACY
+        if legacy.exists() and legacy.read_bytes() != on_disk:
+            raise _AnchorError(f"{MANIFEST_FILE_LEGACY} differs from {MANIFEST_FILE}")
+        try:
+            files = json.loads(on_disk).get("files")
+        except (ValueError, AttributeError) as exc:
+            raise _AnchorError(f"{MANIFEST_FILE} is not a JSON object: {exc}") from exc
+        if not isinstance(files, dict) or not files:
+            raise _AnchorError(f"{MANIFEST_FILE} has no 'files' table")
+        tracked = {
+            entry
+            for entry in _git_bytes(root, "ls-files", "-z").decode("utf-8", errors="surrogateescape").split("\0")
+            if entry and entry not in (MANIFEST_FILE, MANIFEST_FILE_LEGACY)
+        }
+    except _AnchorError as exc:
+        return [str(exc)], 0
+    for rel_path, expected in sorted(files.items()):
+        if not isinstance(rel_path, str) or not isinstance(expected, str):
+            reasons.append(f"malformed manifest entry: {rel_path!r}")
+            continue
+        if rel_path not in tracked:
+            reasons.append(f"{rel_path}: listed in the manifest but not tracked by git")
+        local = root / rel_path
+        if not local.is_file():
+            reasons.append(f"{rel_path}: missing")
+            continue
+        actual = _sha256_of_file(local)
+        # An unreadable file refuses here; the GitHub-anchored path skips it.
+        if actual is None:
+            reasons.append(f"{rel_path}: unreadable")
+            continue
+        if actual != expected.split(":", 1)[-1]:
+            reasons.append(f"{rel_path}: content differs from the committed manifest")
+            continue
+        checked += 1
+    for rel_path in sorted(tracked - set(files)):
+        reasons.append(f"{rel_path}: tracked by git but absent from the manifest")
+    for added in _detect_added_files(root, files):
+        reasons.append(f"{added}: present but absent from the manifest")
+    return reasons, checked
+
+
+def _verify_release_candidate(plugin_root: Path, anchor: str, *, fail_on_mismatch: bool, quiet: bool) -> bool:
+    """Verify an unreleased CPV checkout against its own committed manifest (see the block comment)."""
+    global _VERIFIED_THIS_PROCESS
+    root = plugin_root.resolve()
+    _note_ignored_skip_vars("a release-candidate check")
+    reasons, checked = _release_candidate_reasons(root, anchor)
+    if reasons:
+        audit: dict[str, object] = {"mode": "release-candidate", "root": str(root), "anchor": anchor}
+        return _refuse(reasons, fail_on_mismatch=fail_on_mismatch, audit=audit)
+    _audit("release-candidate-verified", root=str(root), anchor=anchor, files=checked)
+    # Printed even when quiet: a run that did not compare against GitHub must say so.
+    print(
+        f"[CPV integrity] OK (release candidate) — {checked} files verified against the manifest "
+        f"committed in {anchor.split(':')[1][:12]}; no GitHub anchor exists for an unreleased version.",
+        file=sys.stderr,
+    )
+    _VERIFIED_THIS_PROCESS = True
+    return True
 
 
 def _record_lists_self(record: Path) -> bool:
@@ -706,6 +868,15 @@ def verify_self_integrity(
             return _refuse([f"wheel install could not be identified: {exc}"], fail_on_mismatch=fail_on_mismatch)
         if wheel is not None:
             _note_ignored_skip_vars("package installs")
+            # The anchor is for an unreleased source checkout; a package install
+            # always verifies against its exact release tag, so it is ignored here.
+            if RELEASE_CANDIDATE_ENV in os.environ:
+                print(
+                    f"[CPV integrity] NOTE: {RELEASE_CANDIDATE_ENV} is ignored for package installs; "
+                    "the release-tag check runs anyway.",
+                    file=sys.stderr,
+                )
+                _audit("release-candidate-ignored", mode="wheel")
             return _verify_wheel_install(wheel, fail_on_mismatch=fail_on_mismatch, quiet=quiet)
         plugin_root = _MODULE_FILE.resolve().parent.parent
 
@@ -726,8 +897,27 @@ def verify_self_integrity(
             fail_on_mismatch=fail_on_mismatch,
         )
 
+    # Release-candidate anchor (see its block comment). Checked BEFORE the skip
+    # variable and the pytest shortcut below, so neither can override it: with
+    # the anchor set, the candidate is verified against its own committed
+    # manifest or the run refuses.
+    anchor = os.environ.get(RELEASE_CANDIDATE_ENV)
+    if anchor is not None:
+        return _verify_release_candidate(plugin_root, anchor, fail_on_mismatch=fail_on_mismatch, quiet=quiet)
+
     # Dev / CI escape hatch: explicit opt-out of the GitHub round-trip.
     if _read_skip_env_var():
+        # Leave a trail (owner directive 2026-10-21). Skipped under pytest only
+        # because PYTEST_CURRENT_TEST already disables this whole check (an open
+        # item), so the condition grants nothing new; it keeps test subprocesses
+        # from flooding the user's audit log.
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            _audit("skip-variable-honoured", root=str(plugin_root))
+            print(
+                "[CPV integrity] WARNING: integrity check SKIPPED by PLUGIN_SKIP_GITHUB_INTEGRITY "
+                f"(or its legacy name); this run is unverified and was logged to {_AUDIT_LOG}.",
+                file=sys.stderr,
+            )
         _VERIFIED_THIS_PROCESS = True
         return True
 
@@ -745,6 +935,7 @@ def verify_self_integrity(
     version = _read_local_plugin_version(plugin_root)
     manifest = _fetch_github_manifest(version)
     if manifest is None:
+        _audit("unverified-no-manifest", root=str(plugin_root), version=version)
         # No GitHub, no cache. Cannot verify — warn loudly but allow
         # execution to continue. User may be offline; refusing to run
         # would be worse UX than running unverified with a warning.
@@ -767,6 +958,7 @@ def verify_self_integrity(
     # readable by this v2.51.0 module without error.
     files = manifest.get("hashed_files") or manifest.get("files") or {}
     if not isinstance(files, dict):
+        _audit("unverified-malformed-manifest", root=str(plugin_root), version=version)
         if not quiet:
             print(
                 "[CPV integrity] WARNING: GitHub manifest is malformed "
@@ -803,6 +995,7 @@ def verify_self_integrity(
         mismatches.append((added_rel, "<not-in-manifest>", "<added>"))
 
     if mismatches:
+        _audit("github-mismatch", root=str(plugin_root), version=version, files=[m[0] for m in mismatches[:50]])
         print(
             "\n" + "=" * 70 + "\n"
             "[CPV integrity] CRITICAL: integrity manifest mismatch\n" + "=" * 70 + "\n"

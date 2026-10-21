@@ -420,8 +420,8 @@ def run(
     `env=None` means use `os.environ` unchanged — the safe default. Use
     this for git/gh subprocesses, file operations, and anything that does
     not load CPV's own self-integrity verifier. For validator subprocesses
-    (Gates 3, 4, 8) use `run_with_integrity_bypass` instead — that wrapper
-    threads the bypass env through this helper.
+    (Gates 3 and 4) use `run_with_candidate_anchor` instead — that wrapper
+    threads the release-candidate anchor through this helper.
 
     `timeout` is the per-call wall-clock bound. Callers that run a whole suite
     or a whole validator MUST pass their own; the default is sized for a single
@@ -443,58 +443,54 @@ def run(
     return result
 
 
-def _bypass_env() -> dict[str, str]:
-    """Build the env dict that disables the GitHub-anchored integrity gate.
+# Release-candidate anchor for the validator subprocesses (owner decision
+# 2026-10-21, "Anchor to candidate"; directive: "never bypass security or
+# validation or hash checks"). The validators used to run with the integrity
+# check switched OFF, because an unreleased version has no GitHub manifest. Now
+# Gate 1 records "<sha256 of the manifest>:<HEAD sha>" once the manifest is
+# proven fresh, and the validators verify every file against THAT commit's
+# manifest (see _plugin_verify_hashes, "Release-candidate anchor"). A HEAD that
+# moves after Gate 1, or any change in the tree, refuses the run.
+_RELEASE_CANDIDATE_ENV = "PLUGIN_INTEGRITY_RELEASE_CANDIDATE"
+_INTEGRITY_SKIP_VARS = ("PLUGIN_SKIP_GITHUB_INTEGRITY", "CPV_SKIP_GITHUB_INTEGRITY")
+_release_anchor: str | None = None
 
-    Both names are set: new canonical PLUGIN_SKIP_GITHUB_INTEGRITY plus the
-    legacy CPV_SKIP_GITHUB_INTEGRITY (TRDD-bbff5bc5) for verifier shims that
-    may still be invoked transitively.
 
-    The legacy name is STILL EMITTED and still exempted by Gate 0. This
-    docstring used to claim it was "removed in v2.53.0" — false since the day
-    it was written, and worse than no comment: a reader checking whether the
-    legacy spelling was still live got a confident wrong answer from the very
-    function that emits it.
+def _compute_release_anchor(plugin_root: Path) -> str:
+    """Return "<sha256 of .plugin-self-hashes.json>:<HEAD commit sha>" for `plugin_root`."""
+    manifest_sha = hashlib.sha256((plugin_root / _SELF_HASH_MANIFEST_NAMES[0]).read_bytes()).hexdigest()
+    head = run(["git", "rev-parse", "--verify", "HEAD^{commit}"], cwd=plugin_root).stdout.strip()
+    return f"{manifest_sha}:{head}"
+
+
+def _candidate_anchor_env() -> dict[str, str]:
+    """The environment for a validator subprocess: skip variables removed, anchor set.
+
+    The skip variables are removed even though Gate 0 already refuses them, so
+    no inherited value can reach a validator. With no anchor (the repository has
+    no `.plugin-self-hashes.json`, so it is not a self-hashing plugin) the
+    verifier runs its normal GitHub check; nothing is switched off.
     """
-    return {
-        **os.environ,
-        "PLUGIN_SKIP_GITHUB_INTEGRITY": "1",
-        "CPV_SKIP_GITHUB_INTEGRITY": "1",
-    }
+    env = {name: value for name, value in os.environ.items() if name not in _INTEGRITY_SKIP_VARS}
+    env.pop(_RELEASE_CANDIDATE_ENV, None)
+    if _release_anchor is not None:
+        env[_RELEASE_CANDIDATE_ENV] = _release_anchor
+    return env
 
 
-def run_with_integrity_bypass(
+def run_with_candidate_anchor(
     cmd: list[str],
     cwd: Path,
     *,
     check: bool = True,
     timeout: float = _RUN_DEFAULT_TIMEOUT_SEC,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a validator subprocess WITH the GitHub-anchored integrity gate disabled.
+    """Run a validator subprocess with the integrity check ON, anchored to the candidate.
 
-    Trust trade-off (Codex adversarial review 2026-05-04, finding #2):
-    publish.py emits a NEW version whose in-tree validator code, by
-    definition, differs from whatever the last GitHub tag carries. The
-    integrity gate refuses to run when local hashes diverge from the
-    canonical manifest, so it MUST be bypassed for the validator gates to
-    execute at all during release.
-
-    The bypass is now scoped to the SPECIFIC subprocess that needs it,
-    not blanket-injected by `run()` into every call. That makes the trust
-    window explicit at each call site so a reviewer can see exactly which
-    gates run with integrity disabled.
-
-    Implementation note: this is a thin wrapper around `run()` that adds
-    the bypass env. Doing it that way (instead of calling subprocess.run
-    directly) means tests that monkeypatch `publish.run` still intercept
-    bypass calls without having to know about both helpers.
-
-    A future TRDD will add a "compare against in-tree release-candidate
-    manifest" mode so the gate can stay enabled even during publish; until
-    then, the maintainer's defense against tampered validator code is
-    git history + code review + signed commits.
+    A thin wrapper around `run()`, so tests that monkeypatch `publish.run` still
+    intercept these calls.
     """
-    return run(cmd, cwd, check=check, env=_bypass_env(), timeout=timeout)
+    return run(cmd, cwd, check=check, env=_candidate_anchor_env(), timeout=timeout)
 
 
 # ── Semver helpers (absorbed from bump_version.py) ───────────────────────────
@@ -918,10 +914,11 @@ ENV_VARS: list[tuple[str, str]] = [
         "Exempted by name from Gate 0.",
     ),
     (
-        "PLUGIN_SKIP_GITHUB_INTEGRITY / CPV_SKIP_GITHUB_INTEGRITY",
-        "SET BY THIS SCRIPT (not by you) for the validator subprocesses — the "
-        "release under construction necessarily differs from the last published "
-        "manifest. Exempted by name from Gate 0.",
+        "PLUGIN_INTEGRITY_RELEASE_CANDIDATE",
+        "SET BY THIS SCRIPT (not by you) for the validator subprocesses: they verify "
+        "every file against the manifest committed in the release candidate. The "
+        "integrity skip variables PLUGIN_SKIP_GITHUB_INTEGRITY / CPV_SKIP_GITHUB_INTEGRITY "
+        "are refused by Gate 0 and stripped from the validator environment.",
     ),
     (
         "PLUGIN_FORK_PARITY_TIMEOUT=<seconds>",
@@ -1319,33 +1316,19 @@ def stage_bypass_guard() -> int:
     fixed list. Also covers TRDD-c0ee9543's ``CPV_SKIP_UPSTREAM_CROSS_CHECK``
     (matched by the ``CPV_SKIP_`` prefix; bypass-pattern wins).
 
-    Documented infrastructure exemptions — these are READ-ONLY overrides
-    used by CPV's own subsystems and never skip a publish gate:
-        * ``PLUGIN_SKIP_GITHUB_INTEGRITY=1`` — bypasses the GitHub-anchored
-          integrity check inside the hash-verify module (set by publish.py
-          itself for the test-fixture publish path).
-        * ``CPV_SKIP_GITHUB_INTEGRITY=1`` — the LEGACY spelling of the same
-          override, still honoured (deprecated, TRDD-bbff5bc5).
+    Documented infrastructure exemption — a READ-ONLY override that never
+    skips a publish gate:
         * ``CPV_SKIP_GH_AUTH_CHECK=1`` — bypasses the ``gh auth status``
           round-trip in _ensure_gh_auth on flaky networks. Auth still
           has to work for the real `git push` / `gh release create`.
 
-    The ``PLUGIN_`` spelling MUST be exempt alongside the legacy one:
-    ``_plugin_verify_hashes`` renamed the var to ``PLUGIN_SKIP_GITHUB_INTEGRITY``
-    and tells users to export it, but ``PLUGIN_SKIP_`` is a forbidden PREFIX
-    here — so before this exemption, following the module's own deprecation
-    notice aborted the publish with a "Bypass attempt detected" error. This
-    grants NO new capability: the identical override is already exempt under
-    its legacy name, so this only makes the documented migration path work.
-    Note there is deliberately no ``PLUGIN_SKIP_GH_AUTH_CHECK`` exemption —
-    that var does not exist anywhere in the codebase, and exempting a
-    non-existent name would widen the bypass surface for nothing.
+    ``PLUGIN_SKIP_GITHUB_INTEGRITY`` and its legacy name
+    ``CPV_SKIP_GITHUB_INTEGRITY`` are NOT exempt any more (owner decision
+    2026-10-21): the validator gates verify the candidate against its own
+    committed manifest instead (`run_with_candidate_anchor`), so nothing in a
+    release may switch the integrity check off.
     """
-    exemptions = {
-        "PLUGIN_SKIP_GITHUB_INTEGRITY",
-        "CPV_SKIP_GITHUB_INTEGRITY",
-        "CPV_SKIP_GH_AUTH_CHECK",
-    }
+    exemptions = {"CPV_SKIP_GH_AUTH_CHECK"}
     forbidden_prefixes = (
         "PLUGIN_SKIP_",
         "PLUGIN_FORCE_",
@@ -1546,6 +1529,13 @@ def stage_check_working_tree(plugin_root: Path) -> int:
             print("    then re-run publish", file=sys.stderr)
             return 1
 
+    # Record the release-candidate anchor while the tree is proven clean and the
+    # manifest proven fresh; the validator gates verify against exactly this.
+    global _release_anchor
+    _release_anchor = None
+    if (plugin_root / _SELF_HASH_MANIFEST_NAMES[0]).is_file():
+        _release_anchor = _compute_release_anchor(plugin_root)
+
     return 0
 
 
@@ -1721,7 +1711,7 @@ def stage_validate_plugin(plugin_root: Path) -> int:
     Returns the validator's exit code directly (1-4 severity or 0 success).
     """
     print(f"\n{BLUE}═══ Gate 3: Validate plugin — ZERO errors required ═══{NC}")
-    vresult = run_with_integrity_bypass(
+    vresult = run_with_candidate_anchor(
         ["uv", "run", "python", "scripts/validate_plugin.py", ".", "--strict"],
         cwd=plugin_root,
         check=False,
@@ -2060,7 +2050,7 @@ def stage_validate_marketplace(plugin_root: Path, layout: str) -> int:
         print(f"  (skipped — not a marketplace repo, layout={layout})")
         print(f"{GREEN}✓ Marketplace validation not applicable{NC}")
         return 0
-    vresult = run_with_integrity_bypass(
+    vresult = run_with_candidate_anchor(
         ["uv", "run", "python", "scripts/validate_marketplace.py", ".", "--strict"],
         cwd=plugin_root,
         check=False,
@@ -2769,10 +2759,9 @@ def stage_refresh_self_hashes(plugin_root: Path) -> int:
             file=sys.stderr,
         )
         return 0
-    # Hash-refresh script may import _plugin_verify_hashes transitively;
-    # use the bypass helper so it doesn't error on the previous tag's
-    # manifest mismatch with the current working tree.
-    run_with_integrity_bypass(["uv", "run", "python", str(script), str(plugin_root)], cwd=plugin_root)
+    # The hash-refresh script never loads the integrity verifier (it only
+    # writes the manifest), so it runs with the plain environment.
+    run(["uv", "run", "python", str(script), str(plugin_root)], cwd=plugin_root)
     print(f"{GREEN}✓ Integrity manifest refreshed (issue #18 fix){NC}")
     return 0
 

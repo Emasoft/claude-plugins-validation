@@ -130,7 +130,7 @@ def test_finding1_broken_symlink_is_unsafe_under_opt_in(tmp_path: Path) -> None:
 def test_finding2_publish_run_does_not_inject_bypass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """publish.run() must run subprocesses with plain os.environ — no
     integrity bypass injected. That helper is for non-validator commands
-    (git, gh, lint). The bypass lives in run_with_integrity_bypass()."""
+    (git, gh, lint). Validators go through run_with_candidate_anchor()."""
     captured: dict[str, Any] = {}
 
     def fake_run(cmd: list[str], cwd: Path, **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -144,10 +144,14 @@ def test_finding2_publish_run_does_not_inject_bypass(monkeypatch: pytest.MonkeyP
     assert captured["env"] is None, "publish.run() must not inject env overrides — finding #2 regression."
 
 
-def test_finding2_publish_run_with_integrity_bypass_does_inject(
+def test_finding2_candidate_anchor_wrapper_strips_skips_and_sets_anchor(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The dedicated wrapper SHOULD inject the bypass — that is its sole job."""
+    """The validator wrapper keeps the integrity check ON: skip vars removed, anchor set.
+
+    Owner decision 2026-10-21 ("Anchor to candidate") replaced the old bypass
+    wrapper, which switched the check off for the validator gates.
+    """
     captured: dict[str, Any] = {}
 
     def fake_run(cmd: list[str], cwd: Path, **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -155,22 +159,25 @@ def test_finding2_publish_run_with_integrity_bypass_does_inject(
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    publish.run_with_integrity_bypass(["echo", "hi"], cwd=tmp_path)
+    monkeypatch.setenv("PLUGIN_SKIP_GITHUB_INTEGRITY", "1")
+    monkeypatch.setenv("CPV_SKIP_GITHUB_INTEGRITY", "1")
+    monkeypatch.setattr(publish, "_release_anchor", "a" * 64 + ":" + "b" * 40)
+    publish.run_with_candidate_anchor(["echo", "hi"], cwd=tmp_path)
 
     env = captured["env"]
     assert env is not None
-    assert env.get("PLUGIN_SKIP_GITHUB_INTEGRITY") == "1"
-    # Legacy alias kept for one release per TRDD-bbff5bc5
-    assert env.get("CPV_SKIP_GITHUB_INTEGRITY") == "1"
+    assert "PLUGIN_SKIP_GITHUB_INTEGRITY" not in env
+    assert "CPV_SKIP_GITHUB_INTEGRITY" not in env
+    assert env["PLUGIN_INTEGRITY_RELEASE_CANDIDATE"] == "a" * 64 + ":" + "b" * 40
+    assert not hasattr(publish, "run_with_integrity_bypass")
+    assert not hasattr(publish, "_bypass_env")
 
 
-def test_finding2_validate_plugin_uses_bypass_helper(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Gate 4 (validate_plugin) MUST go through the bypass wrapper, not plain run().
+def test_finding2_validate_plugin_uses_candidate_anchor(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Gate 3 (validate_plugin) MUST go through the anchor wrapper, never with a skip var.
 
-    Since the bypass wrapper is implemented as a thin call into run(), monkey-
-    patching `publish.run` lets us assert (a) the validator got called AND
-    (b) the call carried the bypass env. The previous implementation called
-    `publish.run` directly without env, which is the regression we're guarding."""
+    The wrapper is a thin call into run(), so monkeypatching `publish.run` shows
+    both that the validator was called and what environment it got."""
     plugin_root = tmp_path / "p"
     (plugin_root / ".claude-plugin").mkdir(parents=True)
     (plugin_root / ".claude-plugin" / "plugin.json").write_text('{"name":"x","version":"1.0.0"}', encoding="utf-8")
@@ -186,12 +193,15 @@ def test_finding2_validate_plugin_uses_bypass_helper(monkeypatch: pytest.MonkeyP
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(publish, "run", fake_run)
+    monkeypatch.setenv("PLUGIN_SKIP_GITHUB_INTEGRITY", "1")
+    monkeypatch.setattr(publish, "_release_anchor", "c" * 64 + ":" + "d" * 40)
     publish.stage_validate_plugin(plugin_root)
 
     assert any("validate_plugin.py" in part for part in captured["cmd"])
     env = captured["env"]
-    assert env is not None, "Gate 4 must call run_with_integrity_bypass (which sets env) — finding #2 regression."
-    assert env.get("PLUGIN_SKIP_GITHUB_INTEGRITY") == "1"
+    assert env is not None, "Gate 3 must call run_with_candidate_anchor (which sets env)."
+    assert "PLUGIN_SKIP_GITHUB_INTEGRITY" not in env
+    assert env["PLUGIN_INTEGRITY_RELEASE_CANDIDATE"] == "c" * 64 + ":" + "d" * 40
 
 
 # ─────────────────────────────────────────────────────────────────────────────

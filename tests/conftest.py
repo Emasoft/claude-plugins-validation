@@ -155,6 +155,21 @@ def _trdd_21es7xex_no_real_tirith_install(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("CPV_NO_TIRITH_INSTALL", "1")
 
 
+@pytest.fixture(autouse=True)
+def _integrity_audit_log_in_tmp(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Point the integrity audit log at a session temp file for in-process tests.
+
+    _plugin_verify_hashes appends every refusal, skip and release-candidate
+    check to ~/.cache/cpv/integrity-audit.log (the trail an integrity bypass
+    leaves). A test must not write to the developer's real log. Subprocesses
+    still use the real path; the module has no override by design (an override
+    would also let an attacker point the trail at /dev/null).
+    """
+    import _plugin_verify_hashes as _pvh
+
+    monkeypatch.setattr(_pvh, "_AUDIT_LOG", tmp_path_factory.getbasetemp() / "integrity-audit.log")
+
+
 @pytest.fixture
 def temp_dir():
     """Create a temporary directory for test files.

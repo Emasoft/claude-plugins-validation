@@ -390,16 +390,18 @@ def test_row15_unexpected_gate_exception_is_captured_and_replayed(monkeypatch, t
     assert "validate ran" in captured.out
 
 
-# ── Row 17: the _bypass_env docstring matches the code ─────────────────────
+# ── Row 17: the integrity bypass helper is gone ─────────────────────────────
 
 
-def test_row17_bypass_env_docstring_does_not_claim_the_legacy_name_was_removed():
-    """Row 17: _bypass_env still emits the legacy name and no longer denies it."""
-    doc = publish._bypass_env.__doc__ or ""
-    # The docstring may still QUOTE the retracted claim while correcting it, so
-    # pin the correction rather than the absence of the words.
-    assert "STILL EMITTED" in doc
-    assert "CPV_SKIP_GITHUB_INTEGRITY" in publish._bypass_env()
+def test_row17_integrity_bypass_helper_is_retired():
+    """Row 17 (superseded 2026-10-21): no helper in publish.py switches the integrity check off.
+
+    The owner chose "Anchor to candidate": the validator gates now verify the
+    candidate against its own committed manifest (run_with_candidate_anchor).
+    """
+    assert not hasattr(publish, "_bypass_env")
+    assert not hasattr(publish, "run_with_integrity_bypass")
+    assert "CPV_SKIP_GITHUB_INTEGRITY" not in publish._candidate_anchor_env()
 
 
 # ── Row 18: the parallel-preflight docstring lists six gates ────────────────
