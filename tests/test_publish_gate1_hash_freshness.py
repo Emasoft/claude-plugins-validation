@@ -33,9 +33,7 @@ def _sha256(path: Path) -> str:
 
 
 def _git(*args: str, cwd: Path) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True
-    )
+    result = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True)
     return result.stdout
 
 
@@ -89,6 +87,17 @@ def test_fresh_manifest_gate1_passes(monkeypatch, tmp_path, capsys):
     _write_manifest(root)
     rc, _err = _gate(root, monkeypatch, capsys)
     assert rc == 0
+
+
+def test_gate1_records_the_release_candidate_anchor(monkeypatch, tmp_path, capsys):
+    """Gate 1 records '<sha256 of the manifest>:<HEAD>' for the validator gates (owner decision 2026-10-21)."""
+    root = _init_repo(tmp_path)
+    _write_manifest(root)
+    monkeypatch.setattr(publish, "_release_anchor", None)
+    rc, _err = _gate(root, monkeypatch, capsys)
+    assert rc == 0
+    head = _git("rev-parse", "HEAD", cwd=root).strip()
+    assert publish._release_anchor == f"{_sha256(root / MANIFEST_NEW).split(':')[-1]}:{head}"
 
 
 def test_edited_tracked_file_stale_manifest_fails_naming_file(monkeypatch, tmp_path, capsys):

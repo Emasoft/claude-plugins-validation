@@ -450,6 +450,10 @@ def _note_ignored_skip_vars(context: str) -> None:
 # COMMITTED, which leaves a commit behind; every use and every refusal is also
 # appended to the audit log. Any git failure refuses (fail closed). Skip
 # variables are ignored while the anchor is set.
+# Known limits, all fail-closed: a checkout whose eol filters rewrite the
+# manifest on checkout (core.autocrlf), and a SHA-256-object repository
+# (64-hex commit ids), always refuse. Gitignored bytecode is not hashed, so a
+# poisoned __pycache__/*.pyc is outside this check (recorded as open).
 # ---------------------------------------------------------------------------
 RELEASE_CANDIDATE_ENV = "PLUGIN_INTEGRITY_RELEASE_CANDIDATE"
 _RELEASE_CANDIDATE_RE = re.compile(r"\A([0-9a-f]{64}):([0-9a-f]{40})\Z")
@@ -468,6 +472,10 @@ def _audit(event: str, **fields: object) -> None:
         "pid": os.getpid(),
         "ppid": os.getppid(),
         "module": str(_MODULE_FILE.resolve()),
+        # A label, not a filter: the line is written either way. It lets a
+        # reader separate test-suite runs (pytest exports PYTEST_VERSION to its
+        # subprocesses) from real use without deleting either.
+        "pytest_session": "PYTEST_VERSION" in os.environ,
         **fields,
     }
     try:

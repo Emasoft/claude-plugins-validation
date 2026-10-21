@@ -347,6 +347,25 @@ def test_skip_variables_are_ignored_in_wheel_mode(armed, tmp_path, capsys, monke
     assert f"{var} is ignored for package installs" in err
 
 
+def test_release_candidate_anchor_is_ignored_and_audited_in_wheel_mode(armed, tmp_path, capsys, monkeypatch):
+    """A package install ignores PLUGIN_INTEGRITY_RELEASE_CANDIDATE, says so, audits it, and still refuses a tamper."""
+    site = _build_site(tmp_path)
+    manifest = _manifest_for(site)
+    p = site / "scripts" / "validate_x.py"
+    p.write_bytes(p.read_bytes()[:-1] + b"!")
+    armed(site, {TAG_URL: manifest})
+    log = tmp_path / "audit.log"
+    monkeypatch.setattr(pvh, "_AUDIT_LOG", log)
+    monkeypatch.setenv(pvh.RELEASE_CANDIDATE_ENV, "a" * 64 + ":" + "b" * 40)
+    with pytest.raises(SystemExit) as exc:
+        _run(fail=True)
+    assert exc.value.code == 2
+    assert f"{pvh.RELEASE_CANDIDATE_ENV} is ignored for package installs" in capsys.readouterr().err
+    events = [json.loads(line)["event"] for line in log.read_text().splitlines()]
+    assert events[0] == "release-candidate-ignored"
+    assert "refused" in events
+
+
 @pytest.mark.parametrize("var", ["PLUGIN_SKIP_GITHUB_INTEGRITY", "CPV_SKIP_GITHUB_INTEGRITY", "PYTEST_CURRENT_TEST"])
 def test_plugin_mode_keeps_its_skips(armed, tmp_path, monkeypatch, var):
     """Plugin mode (a root with plugin.json) still honours its skip switches (out of #243 scope)."""

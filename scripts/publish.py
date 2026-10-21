@@ -459,7 +459,15 @@ _release_anchor: str | None = None
 def _compute_release_anchor(plugin_root: Path) -> str:
     """Return "<sha256 of .plugin-self-hashes.json>:<HEAD commit sha>" for `plugin_root`."""
     manifest_sha = hashlib.sha256((plugin_root / _SELF_HASH_MANIFEST_NAMES[0]).read_bytes()).hexdigest()
-    head = run(["git", "rev-parse", "--verify", "HEAD^{commit}"], cwd=plugin_root).stdout.strip()
+    # subprocess directly, not run(): the anchor must name the REAL HEAD even
+    # where a caller (or a test) has replaced run() for Gate 1's other git calls.
+    head = subprocess.run(
+        ["git", "-C", str(plugin_root), "rev-parse", "--verify", "HEAD^{commit}"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=_RUN_DEFAULT_TIMEOUT_SEC,
+    ).stdout.strip()
     return f"{manifest_sha}:{head}"
 
 
@@ -2759,7 +2767,7 @@ def stage_refresh_self_hashes(plugin_root: Path) -> int:
             file=sys.stderr,
         )
         return 0
-    # The hash-refresh script never loads the integrity verifier (it only
+    # The hash-refresh script never CALLS the integrity verifier (it only
     # writes the manifest), so it runs with the plain environment.
     run(["uv", "run", "python", str(script), str(plugin_root)], cwd=plugin_root)
     print(f"{GREEN}✓ Integrity manifest refreshed (issue #18 fix){NC}")

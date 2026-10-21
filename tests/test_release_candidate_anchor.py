@@ -153,14 +153,29 @@ def test_tracked_file_missing_from_manifest_refuses(
     _refused_with(candidate, "scripts/extra.py: tracked by git but absent from the manifest", capsys, _fresh_state)
 
 
-def test_on_disk_manifest_differs_from_committed_refuses(
+def test_manifest_hidden_by_skip_worktree_refuses(
     candidate: Path, monkeypatch: pytest.MonkeyPatch, capsys, _fresh_state
 ) -> None:
-    """A manifest edited on disk (anchor computed from the edited bytes) refuses as a dirty tree."""
+    """A manifest edit hidden from `git status` by skip-worktree is caught by the committed-copy comparison."""
+    _git(candidate, "update-index", "--skip-worktree", pvh.MANIFEST_FILE)
     manifest = candidate / pvh.MANIFEST_FILE
-    manifest.write_text(manifest.read_text().replace("sha256:", "sha256:", 1) + "\n")
+    data = json.loads(manifest.read_text())
+    data["files"]["scripts/tool.py"] = "sha256:" + "0" * 64
+    manifest.write_text(json.dumps(data, indent=2) + "\n")
+    assert _git(candidate, "status", "--porcelain") == ""
     monkeypatch.setenv(ENV, _anchor(candidate))
-    _refused_with(candidate, "the working tree is not clean", capsys, _fresh_state)
+    _refused_with(candidate, "differs from the copy committed in", capsys, _fresh_state)
+
+
+def test_script_hidden_by_skip_worktree_refuses(
+    candidate: Path, monkeypatch: pytest.MonkeyPatch, capsys, _fresh_state
+) -> None:
+    """A script edit hidden from `git status` by skip-worktree is caught by the per-file hash."""
+    _git(candidate, "update-index", "--skip-worktree", "scripts/tool.py")
+    (candidate / "scripts" / "tool.py").write_text("print('tampered')\n")
+    assert _git(candidate, "status", "--porcelain") == ""
+    monkeypatch.setenv(ENV, _anchor(candidate))
+    _refused_with(candidate, "scripts/tool.py: content differs from the committed manifest", capsys, _fresh_state)
 
 
 def test_legacy_manifest_mismatch_refuses(
@@ -262,3 +277,46 @@ def test_skip_variable_outside_pytest_is_warned_and_audited(
     assert _verify(candidate) is True
     assert "integrity check SKIPPED" in capsys.readouterr().err
     assert _events(_fresh_state)[-1]["event"] == "skip-variable-honoured"
+
+
+def test_gate4_marketplace_validation_uses_the_anchor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gate 4 (Layout B) runs validate_marketplace with the anchor set and no skip variable."""
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd, cwd, *, check=True, env=None, **kwargs):
+        captured["cmd"], captured["env"] = cmd, env
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(publish, "run", fake_run)
+    monkeypatch.setenv("PLUGIN_SKIP_GITHUB_INTEGRITY", "1")
+    monkeypatch.setattr(publish, "_release_anchor", "e" * 64 + ":" + "f" * 40)
+    assert publish.stage_validate_marketplace(tmp_path, "B") == 0
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert "validate_marketplace.py" in " ".join(captured["cmd"])  # type: ignore[arg-type]
+    assert env[ENV] == "e" * 64 + ":" + "f" * 40
+    assert "PLUGIN_SKIP_GITHUB_INTEGRITY" not in env
+
+
+def test_no_github_manifest_fail_open_is_audited(
+    candidate: Path, monkeypatch: pytest.MonkeyPatch, _fresh_state: Path
+) -> None:
+    """Plugin mode with no reachable manifest still passes (pre-existing fail-open, open item) but leaves an audit line."""
+    monkeypatch.delenv(ENV, raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr(pvh, "_fetch_github_manifest", lambda version: None)
+    assert _verify(candidate) is True
+    assert _events(_fresh_state)[-1]["event"] == "unverified-no-manifest"
+
+
+def test_github_mismatch_is_audited(candidate: Path, monkeypatch: pytest.MonkeyPatch, _fresh_state: Path) -> None:
+    """A plugin-mode mismatch against the GitHub manifest is refused and audited with the file names."""
+    monkeypatch.delenv(ENV, raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    manifest = json.loads((candidate / pvh.MANIFEST_FILE).read_text())
+    manifest["files"]["scripts/tool.py"] = "sha256:" + "0" * 64
+    monkeypatch.setattr(pvh, "_fetch_github_manifest", lambda version: manifest)
+    assert _verify(candidate) is False
+    event = _events(_fresh_state)[-1]
+    assert event["event"] == "github-mismatch"
+    assert "scripts/tool.py" in event["files"]  # type: ignore[operator]
