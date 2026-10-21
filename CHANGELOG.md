@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.22.2] - 2026-10-21
+
+### Bug Fixes
+
+- **integrity:** Every plugin-mode skip leaves a warning and an audit line (TRDD-O3K5H8GG)
+
+### Miscellaneous Tasks
+
+- Regenerate self-hash manifest for the skip-trail fix (TRDD-O3K5H8GG)
+
 ## [5.22.1] - 2026-10-21
 
 ### Bug Fixes
