@@ -474,7 +474,9 @@ def _audit(event: str, **fields: object) -> None:
         "module": str(_MODULE_FILE.resolve()),
         # A label, not a filter: the line is written either way. It lets a
         # reader separate test-suite runs (pytest exports PYTEST_VERSION to its
-        # subprocesses) from real use without deleting either.
+        # subprocesses) from real use without deleting either. The label is
+        # self-reported: anyone can set PYTEST_VERSION, so a forensic review
+        # must read every line and never drop the ones marked true.
         "pytest_session": "PYTEST_VERSION" in os.environ,
         **fields,
     }
