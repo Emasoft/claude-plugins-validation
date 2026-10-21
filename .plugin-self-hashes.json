@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-10-21T19:33:41+00:00",
+  "computed_at": "2026-10-21T21:48:15+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:029c27b509cf0a3b53c8937eea8ad9052b76dcde33eb2d7b44c95231d1401ee8",
@@ -247,7 +247,7 @@
     "scripts/__init__.py": "sha256:49b607fe1a6453c02683b8e70f6543a50c90a886c72452e2c7a35f50e81d5dbf",
     "scripts/_minimal_yaml.py": "sha256:eff7403aab726e7cf23b5569c0836cb4bfc596d9b18610080941957b94a7497c",
     "scripts/_plugin_compute_hashes.py": "sha256:98e5937ca640e98ff81ef110ac247909994beb87b8863cd0c97818671009f21c",
-    "scripts/_plugin_verify_hashes.py": "sha256:f6f93d5d4ea093fdc612d2083cf1633bc88cbcd10e34d30af894608d394f4d69",
+    "scripts/_plugin_verify_hashes.py": "sha256:9b681e46cf8c51302af75e49850371514c109e751bd28991119ebdc837745b48",
     "scripts/_skillaudit_html_context.py": "sha256:73b3f2c0011499a90d29545f30d41370cf1f010d918d7d6515d459ac97a1f71e",
     "scripts/_skillaudit_json_context.py": "sha256:7f22fbe9034463212103f7a29110ac73917bd7e0ba3fccd9ed48f3c813decbdc",
     "scripts/_skillaudit_markdown_context.py": "sha256:8642d21879a8e8c7a8d3a89e66418c0c4c8f499cdd707e5b5be508d35daac3e9",
@@ -957,6 +957,7 @@
     "tests/test_hook_writes_to_plugin_root.py": "sha256:0691bae2b3aea980df5dbc3e891808403751c4f95ce0190c998052a244fadc41",
     "tests/test_inplugin_write_guard.py": "sha256:bd4303822133c8870a38fa6353244d42d9cff191342d9da906e5cf241da31708",
     "tests/test_install_scanners_re2.py": "sha256:989ba90453d557404e5fa889905ea196461515cd1263f1f2616d0ec057618fe9",
+    "tests/test_integrity_skip_trail.py": "sha256:719182f99306f42139d496553deb2c0acb007d79913f88fd529782822255d195",
     "tests/test_issue_100_self_match_fp.py": "sha256:e1fbe6fd9d2b43bf6dcee952493a3b8c0eca2bff4d499044b7cb8cfafe46d8d6",
     "tests/test_issue_101_audit_consent_sentinel.py": "sha256:d3ea9d6b01e21a554fcdc2b632cc598098d5de31ac01cd0276d77e1c27cec9e6",
     "tests/test_issue_102_jwt_vuln_doc.py": "sha256:575b64f39315cde385fe6959702b8d4f996741cb3dc82b482beebe9e580b6f48",
