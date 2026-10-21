@@ -915,30 +915,33 @@ def verify_self_integrity(
     if anchor is not None:
         return _verify_release_candidate(plugin_root, anchor, fail_on_mismatch=fail_on_mismatch, quiet=quiet)
 
-    # Dev / CI escape hatch: explicit opt-out of the GitHub round-trip.
-    if _read_skip_env_var():
-        # Leave a trail (owner directive 2026-10-21). Skipped under pytest only
-        # because PYTEST_CURRENT_TEST already disables this whole check (an open
-        # item), so the condition grants nothing new; it keeps test subprocesses
-        # from flooding the user's audit log.
-        if not os.environ.get("PYTEST_CURRENT_TEST"):
-            _audit("skip-variable-honoured", root=str(plugin_root))
-            print(
-                "[CPV integrity] WARNING: integrity check SKIPPED by PLUGIN_SKIP_GITHUB_INTEGRITY "
-                f"(or its legacy name); this run is unverified and was logged to {_AUDIT_LOG}.",
-                file=sys.stderr,
-            )
-        _VERIFIED_THIS_PROCESS = True
-        return True
-
-    # Auto-bypass when running under pytest. The variable PYTEST_CURRENT_TEST
-    # is set by pytest for the duration of every test and is the canonical
-    # way to detect "we are inside the test suite". Test runs by definition
-    # use the working-tree validator source — so the GitHub gate would fire
-    # on every commit-in-progress and break the dev loop. Setting the env
-    # var explicitly in every subprocess.run() call would be repetitive and
-    # easy to forget; making the gate self-disable here is the durable fix.
-    if os.environ.get("PYTEST_CURRENT_TEST"):
+    # Dev / CI escape hatch (the skip variable) and the test-suite auto-skip
+    # (PYTEST_CURRENT_TEST). The test-suite skip stays for the dev loop: tests
+    # run the working-tree source, so a GitHub gate would break every
+    # commit-in-progress. But PYTEST_CURRENT_TEST is only an environment
+    # variable anyone can set (hooks can persist env vars), so skipping
+    # silently would be an untraceable bypass. Both skips therefore ALWAYS
+    # print a warning and write an audit line; that is the trail. No setting
+    # may redirect or disable the audit log, or it would erase the trail.
+    skip_var = _read_skip_env_var()
+    test_run = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    if skip_var or test_run:
+        _audit(
+            "skip-variable-honoured" if skip_var else "test-run-skip",
+            root=str(plugin_root),
+            test_run=test_run,
+            skip_variable=skip_var,
+        )
+        cause = (
+            "by PLUGIN_SKIP_GITHUB_INTEGRITY (or its legacy name)"
+            if skip_var
+            else "because PYTEST_CURRENT_TEST is set (test-suite auto-skip)"
+        )
+        print(
+            f"[CPV integrity] WARNING: integrity check SKIPPED {cause}; "
+            f"this run is unverified and was logged to {_AUDIT_LOG}.",
+            file=sys.stderr,
+        )
         _VERIFIED_THIS_PROCESS = True
         return True
 
@@ -948,18 +951,18 @@ def verify_self_integrity(
         _audit("unverified-no-manifest", root=str(plugin_root), version=version)
         # No GitHub, no cache. Cannot verify — warn loudly but allow
         # execution to continue. User may be offline; refusing to run
-        # would be worse UX than running unverified with a warning.
-        if not quiet:
-            tried_url = REPO_RAW_TAG_URL.format(version=version) if version else REPO_RAW_MAIN_URL
-            cache_path = _cache_path_for_version(version)
-            print(
-                "[CPV integrity] WARNING: Could not fetch the canonical "
-                f"hash manifest from GitHub ({tried_url}) and no cached "
-                f"copy is available at {cache_path}. Cannot verify "
-                "validator integrity. If your network is restricted, this "
-                "is expected; if not, the validator may be tampered with.",
-                file=sys.stderr,
-            )
+        # would be worse UX than running unverified with a warning. The
+        # warning ignores `quiet`: every skipped verification leaves a trail.
+        tried_url = REPO_RAW_TAG_URL.format(version=version) if version else REPO_RAW_MAIN_URL
+        cache_path = _cache_path_for_version(version)
+        print(
+            "[CPV integrity] WARNING: Could not fetch the canonical "
+            f"hash manifest from GitHub ({tried_url}) and no cached "
+            f"copy is available at {cache_path}. Cannot verify "
+            "validator integrity. If your network is restricted, this "
+            "is expected; if not, the validator may be tampered with.",
+            file=sys.stderr,
+        )
         _VERIFIED_THIS_PROCESS = True
         return True
 
@@ -969,12 +972,11 @@ def verify_self_integrity(
     files = manifest.get("hashed_files") or manifest.get("files") or {}
     if not isinstance(files, dict):
         _audit("unverified-malformed-manifest", root=str(plugin_root), version=version)
-        if not quiet:
-            print(
-                "[CPV integrity] WARNING: GitHub manifest is malformed "
-                "(expected {'files'|'hashed_files': {path: hash}}). Cannot verify.",
-                file=sys.stderr,
-            )
+        print(
+            "[CPV integrity] WARNING: GitHub manifest is malformed "
+            "(expected {'files'|'hashed_files': {path: hash}}). Cannot verify.",
+            file=sys.stderr,
+        )
         _VERIFIED_THIS_PROCESS = True
         return True
 
