@@ -354,9 +354,6 @@ DIST_NAME = "claude-plugins-validation"
 _WHEEL_FORCE_INCLUDE: dict[str, str] = {
     ".markdownlint.json": "scripts/.markdownlint.json",
     ".markdownlintignore": "scripts/.markdownlintignore",
-    "templates/0.x/marketplace/render_readme_table.py": "templates/0.x/marketplace/render_readme_table.py",
-    "templates/scripts/render_readme_table.py": "templates/scripts/render_readme_table.py",
-    "templates/0.x/marketplace/validate-readme-table.yml": "templates/0.x/marketplace/validate-readme-table.yml",
 }
 
 # Top-level dirs under site-packages that the wheel writes; the added-file walk

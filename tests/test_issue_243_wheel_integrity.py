@@ -69,7 +69,6 @@ def _build_site(
     _write(site / "scripts" / "validate_x.py", "print('x')\n")
     _write(site / "scripts" / "rules" / "r.json", "{}\n")
     _write(site / "scripts" / ".markdownlint.json", '{"default": true}\n')
-    _write(site / "templates" / "scripts" / "render_readme_table.py", "# tpl\n")
     dist_info = site / f"{_norm(dist_name)}-{version or '0'}.dist-info"
     meta = f"Metadata-Version: 2.1\nName: {dist_name}\n" + (f"Version: {version}\n" if version else "")
     _write(dist_info / "METADATA", meta)
@@ -88,7 +87,7 @@ def _manifest_for(site: Path) -> dict[str, object]:
             "scripts/rules/r.json": _sha(site / "scripts" / "rules" / "r.json"),
             # force-included: repo key differs from the installed path
             ".markdownlint.json": _sha(site / "scripts" / ".markdownlint.json"),
-            "templates/scripts/render_readme_table.py": _sha(site / "templates" / "scripts" / "render_readme_table.py"),
+            # (5.22.x wheels force-include no templates; a templates/ key is repository-only)
             # repository-only entries a wheel never ships
             ".github/workflows/x.yml": "sha256:" + "1" * 64,
             ".claude-plugin/plugin.json": "sha256:" + "2" * 64,
@@ -219,10 +218,10 @@ def test_changed_force_included_file_refuses(armed, tmp_path, capsys):
 def test_missing_shipped_file_refuses(armed, tmp_path, capsys):
     site = _build_site(tmp_path)
     manifest = _manifest_for(site)
-    (site / "templates" / "scripts" / "render_readme_table.py").unlink()
+    (site / "scripts" / "rules" / "r.json").unlink()
     armed(site, {TAG_URL: manifest})
     assert _run() is False
-    assert "templates/scripts/render_readme_table.py" in capsys.readouterr().err
+    assert "scripts/rules/r.json" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
