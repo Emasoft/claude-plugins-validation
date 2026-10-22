@@ -4,7 +4,7 @@ title: Hardening - no external input may skip lower or narrow CPV validation and
 column: dev
 status: tasked
 created: 2026-10-22T02:37:19+0200
-updated: 2026-10-22T18:55:45+0200
+updated: 2026-10-22T19:30:12+0200
 current-owner: main-agent@complete-plugin-validation
 created-by: main-agent@complete-plugin-validation
 task-type: security
@@ -155,3 +155,10 @@ Already fixed, closable by the owner (no GitHub write made): #243, #258, #261.
 Version decision: --patch (v5.22.5). No batch adds a flag, option or config input; the new output is diagnostic only (a markdownlint total line, a named bunx environment error that blocks as before, a consent-registry warning).
 Implemented and committed on the scratch clone's master: 919ed457 (250/251/259 half 1), 02042245 (262 half A), ea79bd5f (246 genuine false positives, 244/245 TOC port), 2cd58015 (235, 252), aa0152c0 (239), ce559011 (240, b14 temp dirs), e500db4d (249), a2e07028 (CLAUDE.md test-file count 564). Full suite before the commits: 14937 passed, 24 skipped.
 Residuals for a later release: `rm -rf ~/Library` has no finding anywhere; Windows-spelled chmod targets are never judged; the skillaudit fence map and the docs fence stripper are two parsers with different closer rules (the native code-block map also ignores ~~~ fences); a single-line ```x``` span is no longer stripped in validate_md_file_paths; a JSX key containing a space is not skipped; the issue-74 reference guard cannot see a module-qualified or string reference to _spawn_linter_once.
+
+## Release v5.22.5 (2026-10-22)
+
+- Published from the scratch clone's master with scripts/publish.py --patch, integrity ON (release-candidate anchor: 1303 files verified against the manifest committed in 5a777ff7), no skip variables. Release commit a0ffdf73; tags v5.22.5 and claude-plugins-validation--v5.22.5; GitHub release v5.22.5; CI green on a0ffdf73; clean-dir install smoke passed. Installed copy: "[CPV integrity] OK — 1303 CPV files verified against the GitHub canonical manifest".
+- The first publish run was blocked at Gate 3c (Linux fork-parity probe) by a load flake in tests/test_trdd_ezhm759t_canon.py::test_row20_only_pytests_own_process_group_is_killed (one fixed 1s sleep before a single ps snapshot). Fixed in 357f1e36 (poll up to 15s; a broken _ps_table still fails), manifests regenerated in 5a777ff7, second run published. Nothing was pushed by the blocked run.
+- Corrections to the plan section above (review of b3ef77d3): a failed bunx markdownlint run with no finding line now blocks as a MAJOR even without --strict (before: a NIT or the crash branch), so blocking strength rose; some false-positive blocks were removed (246, 259 half 1, 262 half A); no flag, option, config or env input was added, which is why --patch. The "14937 passed" figure predates the round-3b test edits; publish Gate 2 then ran the full suite on the exact tree. The CLAUDE.md count 564 includes one test file already uncounted before v5.22.5 (558 + 5 new = 563).
+- Further residuals: _ps_table returns {} when ps fails or times out, so the generated canon's browser cleanup reports 0 ("clean") instead of "could not check"; test_row20's own-group step expects exactly 1 kill and can flake if a parallel test starts another browser-signature process in the same group; the scratch clone keeps a local refs/tmp/six (never pushed; removal needs the git guard's confirmation).
