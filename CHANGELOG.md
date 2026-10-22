@@ -2,6 +2,40 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.22.3] - 2026-10-22
+
+### Bug Fixes
+
+- **security:** Scan every file regardless of name; Cisco output outside the tree (TRDD-N4GLZXZ6)
+- **security:** Folders above a plugin never drop or demote its findings (TRDD-N4GLZXZ6, #259)
+- **skillaudit:** Keep Tier 1 skips when the root is spelled differently (TRDD-N4GLZXZ6)
+- **skillaudit:** Shipped-surface check uses the placed path too (TRDD-N4GLZXZ6)
+
+### Documentation
+
+- **card:** Open the hardening epic with the owner's verbatim policy (TRDD-N4GLZXZ6)
+- **card:** Record increment 1 review, the #260 decision and ce0ed7f1 (TRDD-N4GLZXZ6)
+- **card:** Broaden increment 1b scope and correct the self-scan note (TRDD-N4GLZXZ6)
+- **card:** Publish-asap release plan and issue 261 record (TRDD-N4GLZXZ6)
+- **card:** Apply review of 8536b988 (TRDD-N4GLZXZ6)
+- **card:** Apply review of 4703343a (TRDD-N4GLZXZ6)
+- Re-derive the CLAUDE.md test-file count to 558 (TRDD-N4GLZXZ6)
+- Correct the provenance note of the CLAUDE.md test-file pin (TRDD-N4GLZXZ6)
+- **card:** Record 1b tests, known gaps and release next action (TRDD-N4GLZXZ6)
+- **card:** Name the 1b tests, refresh STATE, relabel measured evidence (TRDD-N4GLZXZ6)
+- **card:** Amend the changelog gate; mark findings as pre-1b (TRDD-N4GLZXZ6)
+
+### Miscellaneous Tasks
+
+- Regenerate self-hash manifest for the 5.22.3 hardening (TRDD-N4GLZXZ6)
+
+### Testing
+
+- Fail clearly when the root hash manifest is absent (TRDD-N4GLZXZ6)
+- Correct where the root manifest is said to ship (TRDD-N4GLZXZ6)
+- **skillaudit:** Pin that only gitignored-AND-untracked files are skipped (TRDD-N4GLZXZ6)
+- **skillaudit:** Isolate git fixtures from global config; assert subdir toplevel (TRDD-N4GLZXZ6)
+
 ## [5.22.2] - 2026-10-21
 
 ### Bug Fixes
