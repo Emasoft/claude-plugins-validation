@@ -2,6 +2,29 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.23.0] - 2026-10-22
+
+### Bug Fixes
+
+- **rc-164:** Judge Markdown chmod targets the plugin does not ship as foreign (issue 248, TRDD-N4GLZXZ6)
+- **integrity:** Self-integrity check fails closed when no manifest can be verified (issue 255, TRDD-O3K5H8GG) [**BREAKING**]
+
+### Documentation
+
+- **card:** Record the v5.22.5 release and its review corrections (TRDD-N4GLZXZ6)
+- **card:** STATE after v5.22.5; correct the suite figure; account for 256 and 257.3 (TRDD-N4GLZXZ6)
+- **card:** V5.23.0 plan, STATE next action, review corrections (TRDD-N4GLZXZ6)
+- **card:** Record the 5.23.0 content, the dropped 253/236 attempt, and 14 backlog cards (TRDD-N4GLZXZ6)
+- **card:** 5.23.0 commit map, two message corrections, approval-field residue (TRDD-N4GLZXZ6)
+
+### Features
+
+- **hardening:** No scanned plugin can narrow what CPV scans; CPV-authored lint rules (issues 237, 254, 257, TRDD-N4GLZXZ6) [**BREAKING**]
+
+### Miscellaneous Tasks
+
+- **integrity:** Regenerate self-hash manifests for 5.23.0 (TRDD-N4GLZXZ6)
+
 ## [5.22.5] - 2026-10-22
 
 ### Bug Fixes
