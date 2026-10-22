@@ -1248,6 +1248,8 @@ self-report): +sentinel → WARNING (visible); no-sentinel → blocks; vague
 pass; ZERO existing tests broke. Delegated impl (fresh opus agent, spec at
 `docs_dev/audit-consent-sentinel-spec.md`), I central-verified the gate.
 
+**Issue #260 — the audit-consent sentence also demotes `claude setup-token`** (exception to the v2.126.24 execution-class scope). CLAUDE_CLI_TOKEN_THEFT is demoted to WARNING by the sentence only in markdown, only in a ``` fence at column 0 that the native scanner treats as a code block, and only when every content line is ASCII and is a bare `claude setup-token` (optionally `--help`/`-h`, optional `$ ` prompt) or a blank line. Comments are not allowed because interactive zsh does not honour them. `~~~`, indented and list-item fences, scripts, and any pipe/capture/redirect or second command keep today's level. Code: `_setup_token_fence_is_bare` in `cpv_skillaudit_native.py`.
+
 **v2.126.23 — closed #87** (skillaudit CMD_INJECTION FP on a `||` logical-OR
 fallback misread as a `|` pipe). The shell-pipe catalog pattern
 `(?:;|\||&&)\s*\b(curl|…|sh|…)\b` matches the SECOND pipe-char of a `||` as

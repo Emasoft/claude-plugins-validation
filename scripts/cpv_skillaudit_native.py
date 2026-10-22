@@ -1680,6 +1680,8 @@ def _is_benign_cgroup_detection_read(match: str, content: str) -> bool:
 # publish-blocking by prepending the consent line. No sentinel → unchanged
 # (the finding stays whatever it is today — typically NIT, which blocks
 # ``--strict``).
+# Exception (issue #260): CLAUDE_CLI_TOKEN_THEFT also demotes, but only for a bare
+# `claude setup-token` column-0 ``` markdown fence (see _setup_token_fence_is_bare).
 _AUDIT_CONSENT_SENTINEL: str = (
     "warning: the following code could be malicious. audit it for safety before executing it!"
 )
@@ -1800,6 +1802,60 @@ def _audit_consent_sentinel_present(
     return False
 
 
+# ASCII-only on purpose (issue #260): Python `\s` / `str.strip()` treat NBSP,
+# U+2007, U+202F, U+3000 as whitespace but bash does not, so a non-ASCII
+# "separator" could hide a runnable `#$(...)` behind a fake comment.
+_BARE_SETUP_TOKEN_RE: re.Pattern[str] = re.compile(
+    r"^(?:\$[ \t]+)?claude[ \t]+setup-token(?:[ \t]+(?:--help|-h))?[ \t]*$",
+    re.ASCII,
+)
+
+
+def _setup_token_fence_is_bare(lines: list[str], line_idx: int) -> bool:
+    """True iff ``lines[line_idx]`` sits in a native code block that is a
+    column-0 ``` fence whose every content line is ASCII and is blank or a
+    bare ``claude setup-token`` invocation (at least one of the latter).
+
+    Comments are NOT allowed: interactive zsh (the macOS default) does not
+    honour ``#`` unless INTERACTIVE_COMMENTS is set, so a pasted
+    ``# $(...)`` would run.
+
+    The two fence detectors disagree (``_build_fence_map`` accepts ``~~~`` and
+    indented fences; the native ``_build_code_block_map`` strips every line), so
+    BOTH must agree and the opener must be a column-0 ``` — any wider match
+    would turn today's CRITICAL/low into a WARNING for shapes the owner did not
+    approve (~~~, indented, list-item fences)."""
+    try:
+        from _skillaudit_markdown_context import _build_fence_map  # type: ignore[import-not-found]
+    except ImportError:
+        return False
+    fence_map = _build_fence_map("\n".join(lines))
+    if line_idx < 0 or line_idx >= len(fence_map):
+        return False
+    entry = fence_map[line_idx]
+    if entry is None:
+        return False
+    cb_map, _ranges = _build_code_block_map(lines)
+    if not cb_map[line_idx]:
+        return False
+    # entry = (first_content_line, last_content_line, lang), 1-based inclusive.
+    if entry[0] < 2:
+        return False
+    if not lines[entry[0] - 2].startswith("```"):
+        return False
+    seen_bare = False
+    for raw in lines[entry[0] - 1 : entry[1]]:
+        if not raw.isascii():
+            return False
+        stripped = raw.strip(" \t\r\n")
+        if not stripped:
+            continue
+        if not _BARE_SETUP_TOKEN_RE.match(stripped):
+            return False
+        seen_bare = True
+    return seen_bare
+
+
 def _context_classifier_verdict(
     file_path: str,
     lines: list[str],
@@ -1824,7 +1880,9 @@ def _context_classifier_verdict(
       consent, not suppression.
     * Otherwise → return the inner verdict unchanged.
 
-    The sentinel overlay is scoped to execution-class rules ONLY; intent-class
+    The sentinel overlay is scoped to execution-class rules ONLY, plus one
+    exception (issue #260): CLAUDE_CLI_TOKEN_THEFT in a markdown fence made only
+    of bare `claude setup-token` invocations. Intent-class
     / prose-vector rules (PROMPT_INJECT / DATA_EXFIL / INTENT_* / …) keep their
     current behavior (they are prose-delivery threats, not "executable code").
     """
@@ -1832,6 +1890,25 @@ def _context_classifier_verdict(
     if inner == "suppress":
         return inner
     if rule_id in _EXECUTION_CLASS_RULES and _audit_consent_sentinel_present(file_path, lines, line_idx):
+        return "warn"
+    # Issue #260 (owner directive): `claude setup-token` shown to the HUMAN in a
+    # markdown fenced block whose opening fence is preceded by the exact
+    # audit-consent sentence is a visible, non-blocking WARNING. Narrow on
+    # purpose: markdown only (a script RUNS the command), and the WHOLE fence
+    # must hold only bare invocations (optionally `--help`/`-h`) plus blank
+    # lines (column-0 ``` fence the native scanner also sees, ASCII only, no
+    # comments — see `_setup_token_fence_is_bare`) — a pipe, capture, redirect or
+    # chained command in the same
+    # block would otherwise let a mint-and-exfiltrate recipe pass --strict,
+    # since the sentence already demotes the execution-class findings on those
+    # lines. Not added to _EXECUTION_CLASS_RULES: that set also feeds the
+    # doc-only carve-outs.
+    if (
+        rule_id == "CLAUDE_CLI_TOKEN_THEFT"
+        and file_path.lower().endswith((".md", ".markdown"))
+        and _setup_token_fence_is_bare(lines, line_idx)
+        and _audit_consent_sentinel_present(file_path, lines, line_idx)
+    ):
         return "warn"
     return inner
 
@@ -1892,7 +1969,7 @@ def _context_classifier_dispatch(
     # (The dangerous CLI rules — CLAUDE_CLI_TOKEN_THEFT /
     # CLAUDE_CLI_PERMISSION_BYPASS — are intentionally NOT carved out: a doc that
     # tells the user to run `claude setup-token` / `--dangerously-skip-permissions`
-    # stays visible.)
+    # stays visible; issue #260 may make it a visible WARNING, never a suppression.)
     if rule_id == "CLAUDE_CLI_UNAUTHORIZED_INSTALL" and fp_lower.endswith((".md", ".markdown")):
         return "suppress"
     # Issue #71 — AGENT_MEMORY_MOD on a skill whose OWN frontmatter declares
