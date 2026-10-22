@@ -29,6 +29,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -230,69 +231,72 @@ def run_cisco_scan(
             exit_code=-1,
         )
 
-    json_path = plugin_path / ".cpv-cisco-scan.json"
-    cmd = build_scan_command(
-        plugin_path,
-        json_output_path=json_path,
-        policy=policy,
-        use_behavioral=use_behavioral,
-        use_trigger=use_trigger,
-    )
-
-    try:
-        completed = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        return CiscoScanResult(
-            invoked=False,
-            findings=(),
-            skipped_reason=f"Cisco scan timed out after {timeout_seconds}s",
-            raw_stdout=exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or ""),
-            raw_stderr=exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or ""),
-            exit_code=-2,
-        )
-    except FileNotFoundError as exc:
-        return CiscoScanResult(
-            invoked=False,
-            findings=(),
-            skipped_reason=f"uvx invocation failed: {exc}",
-            raw_stdout="",
-            raw_stderr=str(exc),
-            exit_code=-3,
+    # The scanner's JSON output goes to a temp dir OUTSIDE the scanned tree.
+    # It used to be written to <plugin>/.cpv-cisco-scan.json and then read and
+    # unlinked, so a file the target shipped under that name was parsed as
+    # scanner findings and deleted from the target. Nothing inside plugin_path
+    # is ever read, written or deleted here (TRDD-N4GLZXZ6).
+    # ignore_cleanup_errors: uvx's grandchild can outlive the timeout kill and still
+    # hold files in this dir; a failed cleanup must not turn a skipped scan into a crash.
+    with tempfile.TemporaryDirectory(prefix="cpv-cisco-", ignore_cleanup_errors=True) as tmp_dir:
+        json_path = Path(tmp_dir) / "cisco-scan.json"
+        cmd = build_scan_command(
+            plugin_path,
+            json_output_path=json_path,
+            policy=policy,
+            use_behavioral=use_behavioral,
+            use_trigger=use_trigger,
         )
 
-    findings: tuple[CiscoFinding, ...] = ()
-    if json_path.is_file():
         try:
-            findings = parse_findings(json_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            findings = ()
-        finally:
+            completed = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return CiscoScanResult(
+                invoked=False,
+                findings=(),
+                skipped_reason=f"Cisco scan timed out after {timeout_seconds}s",
+                raw_stdout=exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or ""),
+                raw_stderr=exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or ""),
+                exit_code=-2,
+            )
+        except FileNotFoundError as exc:
+            return CiscoScanResult(
+                invoked=False,
+                findings=(),
+                skipped_reason=f"uvx invocation failed: {exc}",
+                raw_stdout="",
+                raw_stderr=str(exc),
+                exit_code=-3,
+            )
+
+        findings: tuple[CiscoFinding, ...] = ()
+        if json_path.is_file():
             try:
-                json_path.unlink()
-            except OSError:
-                pass
-    elif completed.stdout.strip().startswith("{"):
-        # Some skill-scanner builds emit JSON to stdout when --output-json
-        # is set but the file write fails (e.g. read-only fs); fall back.
-        try:
-            findings = parse_findings(completed.stdout)
-        except json.JSONDecodeError:
-            findings = ()
+                findings = parse_findings(json_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                findings = ()
+        elif completed.stdout.strip().startswith("{"):
+            # Some skill-scanner builds emit JSON to stdout when --output-json
+            # is set but the file write fails (e.g. read-only fs); fall back.
+            try:
+                findings = parse_findings(completed.stdout)
+            except json.JSONDecodeError:
+                findings = ()
 
-    return CiscoScanResult(
-        invoked=True,
-        findings=findings,
-        skipped_reason="",
-        raw_stdout=completed.stdout,
-        raw_stderr=completed.stderr,
-        exit_code=completed.returncode,
-    )
+        return CiscoScanResult(
+            invoked=True,
+            findings=findings,
+            skipped_reason="",
+            raw_stdout=completed.stdout,
+            raw_stderr=completed.stderr,
+            exit_code=completed.returncode,
+        )
 
 
 def report_findings(

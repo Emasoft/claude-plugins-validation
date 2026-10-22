@@ -76,7 +76,8 @@ reports_dev/
 reviews/
 
 # Cisco AI Defense skill-scanner runtime artifact (full plugin scan output;
-# token-heavy and project-private)
+# token-heavy and project-private). Older CPV versions (5.22.2 and earlier)
+# wrote this file into scanned trees; it is no longer written.
 .cpv-cisco-scan.json
 
 # ai-maestro-janitor runtime state (per-machine: heartbeat timestamps,

@@ -2702,7 +2702,6 @@ def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
     # scanner is still mandatory; just slightly noisier on CPV self-scan).
     try:
         from validate_security import (  # noqa: PLC0415
-            _is_always_skip_basename,
             _is_dev_scratch_path,
             _is_test_file_path,
             _is_vendored_dep_path,
@@ -2762,8 +2761,6 @@ def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
         def _should_skip(file_path: str, line: int | None) -> bool:
             if not file_path:
                 return False
-            if _is_always_skip_basename(file_path):
-                return True
             if cpv_self_scan_skip(file_path):
                 return True
             if _is_vendored_dep_path(file_path):

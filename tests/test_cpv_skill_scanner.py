@@ -10,6 +10,8 @@ via monkeypatch so the suite stays hermetic — no network, no uvx download.
 from __future__ import annotations
 
 import json
+import os
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -281,9 +283,13 @@ class TestRunCiscoScan:
         assert result.findings == ()
         assert result.exit_code == -1
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell stand-in for uvx")
     def test_invocation_writes_json_then_parses(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr(css, "is_uvx_available", lambda: True)
-        json_path = tmp_path / ".cpv-cisco-scan.json"
+        """A real stand-in uvx writes the JSON to --output-json; it is parsed, then removed with its temp dir."""
+        plugin = tmp_path / "plugin"
+        plugin.mkdir()
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
         sample = {
             "results": [
                 {
@@ -293,7 +299,7 @@ class TestRunCiscoScan:
                             "rule_id": "static.x",
                             "message": "leaks env",
                             "location": {
-                                "file": str(tmp_path / "agents/x.md"),
+                                "file": str(plugin / "agents/x.md"),
                                 "line": 7,
                             },
                         }
@@ -301,18 +307,37 @@ class TestRunCiscoScan:
                 }
             ]
         }
+        sample_file = tmp_path / "sample.json"
+        sample_file.write_text(json.dumps(sample), encoding="utf-8")
+        out_log = tmp_path / "out_path.txt"
+        stand_in = bindir / "uvx"
+        stand_in.write_text(
+            "#!/bin/sh\n"
+            "while [ $# -gt 0 ]; do\n"
+            '  if [ "$1" = "--output-json" ]; then\n'
+            f'    printf \'%s\\n\' "$2" > "{out_log}"\n'
+            f'    cp "{sample_file}" "$2"\n'
+            "  fi\n"
+            "  shift\n"
+            "done\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        stand_in.chmod(stand_in.stat().st_mode | stat.S_IXUSR)
+        # System dirs only after the stand-in: no `skill-scanner` binary may win over uvx.
+        monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}/usr/bin{os.pathsep}/bin")
 
-        def fake_run(*_a: Any, **_kw: Any) -> _FakeCompleted:
-            json_path.write_text(json.dumps(sample), encoding="utf-8")
-            return _FakeCompleted(stdout="", stderr="", returncode=0)
+        result = css.run_cisco_scan(plugin)
 
-        monkeypatch.setattr(subprocess, "run", fake_run)
-        result = css.run_cisco_scan(tmp_path)
         assert result.invoked is True
         assert len(result.findings) == 1
         assert result.findings[0].severity == "major"
-        # Sentinel JSON file must be cleaned up afterwards.
+        # The output file lives in a temp dir outside the plugin, removed afterwards.
+        json_path = Path(out_log.read_text(encoding="utf-8").strip())
+        assert plugin.resolve() not in json_path.resolve().parents
         assert not json_path.exists()
+        assert not json_path.parent.exists()
+        assert list(plugin.iterdir()) == []
 
     def test_invocation_falls_back_to_stdout_json(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """When the JSON file isn't written, parse stdout if it looks JSON."""
