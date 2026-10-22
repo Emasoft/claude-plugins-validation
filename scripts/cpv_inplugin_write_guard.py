@@ -55,8 +55,11 @@ the two modules cannot drift.
 
 from __future__ import annotations
 
+import functools
 import os
 import re
+import subprocess
+import unicodedata
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, NamedTuple
 
@@ -175,6 +178,9 @@ _CHMOD_PATH_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"^[\w.@+~${}/-]+$")
 # message such as "run: chmod +x scripts/{name}"), never one literal path.
 _BARE_BRACE_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|[^$])\{")
 _DOTTED_SUFFIX_RE: Final[re.Pattern[str]] = re.compile(r"[^./]\.[A-Za-z0-9]{1,8}$")
+# A single-quoted span (closed, or running to the end of the word) holding `$`, a
+# backtick or a backslash — characters single quotes make literal (#248 review M2).
+_SQ_LITERAL_SPECIAL_RE: Final[re.Pattern[str]] = re.compile(r"'[^']*[$`\\][^']*(?:'|$)")
 
 
 def _is_script_destination(dst: str) -> bool:
@@ -586,7 +592,29 @@ def _chmod_target(
         return _resolve_name_destination(lines, lo, hi, idx, tok)
     # Trailing shell separators glued to the word (`chmod +x a.sh;`) are not
     # part of the path.
-    tok = raw.strip().rstrip(";&|,").strip("'\"")
+    # Why (#248, part 1): a quote may wrap only PART of the word
+    # (`"${CLAUDE_PLUGIN_ROOT}"/x.sh`). Stripping only the outer quotes left an inner
+    # one, the shape gate below rejected the token and the chmod went unjudged.
+    # Removing every quote (and a glued `)`) is monotone-STRICTER: the gate already
+    # rejects `"` `'` `)`, so every token this newly admits returned None before.
+    # Why (#248 review M2): inside single quotes `$`, a backtick and `\` are LITERAL,
+    # so `'$X'/y.sh` names the path `$X/y.sh`, not the expansion of X. Removing every
+    # quote would reinterpret it as the variable. Such a word keeps EXACTLY the
+    # pre-part-1 handling (outer quotes only): `'$X'/y.sh` stays rejected (None) and a
+    # fully quoted `'${X}/y.sh'` keeps the verdict it had, so nothing gets laxer.
+    # An ODD number of either quote means the word ends (or starts) inside an outer
+    # string — `chmod +x .git/hooks/x")` in a Python test literal — so the quote is
+    # a string delimiter, not part of the path: keep the pre-part-1 handling there
+    # too (measured on CPV and installed plugin caches: the only new finding).
+    if _SQ_LITERAL_SPECIAL_RE.search(raw) or raw.count('"') % 2 or raw.count("'") % 2:
+        tok = raw.strip().rstrip(";&|,").strip("'\"")
+    else:
+        tok = raw.strip().rstrip(";&|,)").replace('"', "").replace("'", "")
+    # Why (#248 review): a DECOMPOSED accent (`cafe` + U+0301) is not `\w`, so the
+    # gate rejected the word and the chmod went unjudged, although macOS resolves it
+    # to the shipped NFC name. Retry in NFC only after a rejection: still stricter.
+    if tok and not _CHMOD_PATH_TOKEN_RE.match(tok):
+        tok = unicodedata.normalize("NFC", tok)
     if not tok or not _CHMOD_PATH_TOKEN_RE.match(tok) or _BARE_BRACE_RE.search(tok):
         return None
     if "/" in tok or tok[0] in "$~" or _DOTTED_SUFFIX_RE.search(tok) or tok in written:
@@ -874,6 +902,240 @@ def _cwd_at(
     return here
 
 
+# ────────────────────────────────────────────────────────────────────────
+# Issue #248: a Markdown shell-fence chmod of the READER's project path
+# ────────────────────────────────────────────────────────────────────────
+#
+# Documentation routinely tells the reader to `chmod +x .claude/hooks/x.sh` in
+# THEIR project. The fold resolves every relative word against the plugin root,
+# so such a line fired a blocking RC-164 although the plugin ships no such path.
+# The narrowing below is deliberately NOT a working-directory tracker (a cd/pushd
+# scan was rejected: `env -C`, `sudo -D`, `builtin cd`, `eval "c""d x"`, `$(…)`,
+# aliases, autocd … all move chmod's directory without a cd word, and the per-
+# chmod rescan was quadratic). Instead ONE linear pre-pass classifies each fence:
+# any sign that the fence MAY change directory or assemble commands keeps today's
+# verdict. Every test below fails toward FLAGGING.
+
+# A fence may only be narrowed when EVERY character of it is in this plain set.
+# It excludes `$` `` ` `` `(` `<` `\` quotes `{` `[` `*` `?` `~` `!` `;` `&` `|`
+# `>` and all non-ASCII, which closes whole families at once: `$(…)`, `${X}` as a
+# command word, subshells, function definitions, heredocs, quote/backslash
+# assembled words (`c""d`, `c\d` need no eval), brace/glob expansion, history
+# expansion, separators chaining a second command. Stricter than the #248 spec.
+_MD_SAFE_FENCE_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9 \t._/@+=:,#-]*$")
+# Words that change directory, run assembled text, or redefine commands. Case-
+# insensitive: on a case-insensitive filesystem `ENV -C dir` runs /usr/bin/env.
+# Comment text counts too (prose counts). re2-safe boundaries, no lookaround.
+_MD_RISKY_WORD_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[^A-Za-z0-9_])(?:cd|pushd|popd|chdir|builtin|eval|exec|source|alias|unalias"
+    r"|env|sudo|doas|function|autocd|setopt|shopt|set-location|push-location)"
+    r"(?:[^A-Za-z0-9_]|$)",
+    re.IGNORECASE,
+)
+# `.` as a command (`. ./env.sh`) sources a file into the shell.
+_MD_DOT_COMMAND_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\s)\.(?:\s|$)")
+# The only commands a narrowable fence may run. A line starting with anything
+# else (a bare directory name under zsh/bash autocd, `./x.sh`, a wrapper) keeps
+# the finding. Exact lowercase match.
+_MD_PLAIN_COMMANDS: Final[frozenset[str]] = frozenset({"chmod", "mkdir", "ls", "touch", "echo", "cat"})
+# Directory-change words — in PROSE ("First cd into …") or in ANY fence. Either
+# sets a FILE-WIDE flag (#248 review B1): a reader runs the fences of one page in
+# one terminal, so `cd "$CLAUDE_PLUGIN_ROOT/hooks"` in fence 1 moves the chmod in
+# fence 2 into the plugin. A per-fence flag would have silenced that chmod.
+_MD_DIR_CHANGE_WORD_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[^A-Za-z0-9_])(?:cd|pushd|popd|chdir|set-location|push-location|autocd)"
+    r"(?:[^A-Za-z0-9_]|$)",
+    re.IGNORECASE,
+)
+# `env -C dir` / `env --chdir` / `sudo -D dir` / `sudo --chdir` (combined short
+# flags such as `env -iC` included) — the wrappers that move chmod's directory
+# without a cd word. Case-insensitive, so `-c` / `-d` count too (stricter).
+_MD_WRAPPER_CHDIR_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[^A-Za-z0-9_])(?:env|sudo)(?:\s.*)?(?:\s-[A-Za-z]*[CD]|--chdir)",
+    re.IGNORECASE,
+)
+# Any mention of the plugin's own root, anywhere in the file, means the page may
+# send the reader into the plugin tree: no narrowing for that file (#248 review B1).
+_MD_PLUGIN_ROOT_MENTION_RE: Final[re.Pattern[str]] = re.compile(
+    r"plugin[ _-]?(?:root|dir(?:ectory)?)",
+    re.IGNORECASE,
+)
+# A line that may CREATE or WRITE a path (prose or fence). Every path component
+# on such a line counts as created at runtime, so a chmod of it keeps the finding.
+_MD_CREATE_LINE_RE: Final[re.Pattern[str]] = re.compile(
+    r">|(?:^|[^A-Za-z0-9_])(?:mkdir|cp|mv|install|tee|touch|ln|git|clone|curl|wget|unzip"
+    r"|tar|rsync|ditto|scp|sftp|dd|cpio|7z|7za|unar|bsdtar|gunzip|bunzip2|xz|sed|cat"
+    r"|printf|echo|mktemp|npm|npx|pnpm|yarn|bun|uv|pip|makedirs|write_text|write_bytes"
+    r"|copy|copyfile|copytree|rename|move)(?:[^A-Za-z0-9_]|$)",
+    re.IGNORECASE,
+)
+_MD_COMPONENT_SPLIT_RE: Final[re.Pattern[str]] = re.compile(r"[\s/\\'\"`$(){}\[\];&|<>=:,*?~!]+")
+# A chmod target the narrowing may judge: plain ASCII relative segments only
+# (no `$`, `~`, glob, quote residue, backslash, absolute path, drive letter).
+_MD_LITERAL_REL_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9._@+-]+(?:/[A-Za-z0-9._@+-]+)*$")
+_MD_CHMOD_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^chmod\s")
+
+
+def _norm_segment(seg: str) -> str:
+    """NFC + casefold: macOS/Windows resolve `Scripts/` (or a decomposed accent)
+    to the shipped `scripts/`, so the comparison must too."""
+    return unicodedata.normalize("NFC", seg).casefold()
+
+
+class _MdChmodScan(NamedTuple):
+    risky_scopes: frozenset[int]  # fences that may change directory / assemble commands
+    file_dir_change: bool  # the file may move the reader's directory (any fence/prose)
+    created: frozenset[str]  # normalized components of every create/write line
+
+
+def _md_fence_line_risky(line: str) -> bool:
+    """True iff this fence line may change directory or assemble a command."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if not _MD_SAFE_FENCE_LINE_RE.match(line) or _MD_RISKY_WORD_RE.search(line) or _MD_DOT_COMMAND_RE.search(line):
+        return True
+    if stripped.startswith("#"):
+        return False
+    return stripped.split()[0] not in _MD_PLAIN_COMMANDS
+
+
+def _md_chmod_prepass(lines: list[str], contexts: list[_LineCtx]) -> _MdChmodScan:
+    """ONE linear pass over a markdown file (issue #248)."""
+    risky: set[int] = set()
+    dir_change = False
+    created: set[str] = set()
+    for line, ctx in zip(lines, contexts):
+        if not dir_change and (
+            _MD_DIR_CHANGE_WORD_RE.search(line)
+            or _MD_PLUGIN_ROOT_MENTION_RE.search(line)
+            or (not ctx.prose and _MD_WRAPPER_CHDIR_RE.search(line))
+        ):
+            dir_change = True
+        if ctx.marker:
+            continue
+        if not ctx.prose and ctx.scope not in risky and _md_fence_line_risky(line):
+            risky.add(ctx.scope)
+        if _MD_CREATE_LINE_RE.search(line):
+            created.update(_norm_segment(c) for c in _MD_COMPONENT_SPLIT_RE.split(line) if c)
+    return _MdChmodScan(frozenset(risky), dir_change, frozenset(created))
+
+
+def _run_git_stripped(root: str, *args: str) -> subprocess.CompletedProcess[bytes] | None:
+    """Run git on the UNTRUSTED plugin with every inherited ``GIT_*`` variable
+    dropped (a ``GIT_DIR`` / ``GIT_INDEX_FILE`` / ``GIT_CONFIG_*`` from the caller
+    must not redirect what is read) and fsmonitor forced off, so the scanned
+    repo's config cannot run a hook (#248 review M3). ``None`` on any failure."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        result = subprocess.run(
+            ["git", "-c", "core.fsmonitor=false", "-C", root, *args],
+            capture_output=True,
+            timeout=30,
+            check=False,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result if result.returncode == 0 else None
+
+
+def _git_index_stamp(root: str) -> tuple[int, int] | None:
+    """(mtime_ns, size) of the git index governing ``root``, or None."""
+    result = _run_git_stripped(root, "rev-parse", "--git-path", "index")
+    if result is None:
+        return None
+    index = Path(result.stdout.decode("utf-8", errors="surrogateescape").strip())
+    if not index.is_absolute():
+        index = Path(root) / index
+    try:
+        st = index.stat()
+    except OSError:
+        return None
+    return st.st_mtime_ns, st.st_size
+
+
+@functools.lru_cache(maxsize=64)
+def _plugin_top_level_cached(root: str, _mtime_ns: int, _index_stamp: tuple[int, int] | None) -> frozenset[str] | None:
+    """Normalized top-level entry names of ``root``: the directory listing UNION
+    the first component of every ``git ls-files`` entry (a tracked file deleted
+    from disk still counts). Keyed on the root's mtime (it changes whenever a
+    top-level entry is added, removed or renamed) and the index's (mtime, size),
+    so the cache cannot go stale. ``None`` when the root cannot be listed — the
+    caller keeps the finding."""
+    try:
+        names = set(os.listdir(root))
+    except OSError:
+        return None
+    # When ``root`` sits inside a PARENT repository, ls-files run from it lists
+    # only the paths under ``root`` (relative to it), and any extra name it
+    # returns can only ADD to the shipped set — which keeps more findings, never
+    # fewer. A git failure leaves the listing, already the on-disk superset.
+    result = _run_git_stripped(root, "ls-files", "-z")
+    if result is not None:
+        for entry in result.stdout.decode("utf-8", errors="surrogateescape").split("\0"):
+            if entry:
+                names.add(entry.split("/", 1)[0])
+    return frozenset(_norm_segment(n) for n in names)
+
+
+def _plugin_top_level(plugin_root: Path) -> frozenset[str] | None:
+    try:
+        root = str(plugin_root.resolve())
+        return _plugin_top_level_cached(root, plugin_root.stat().st_mtime_ns, _git_index_stamp(root))
+    except OSError:
+        return None
+
+
+def _md_segment_shipped(seg: str, top_level: frozenset[str]) -> bool:
+    return _norm_segment(seg) in top_level
+
+
+def _md_reader_project_chmod(
+    line: str,
+    raw: str,
+    scope: int,
+    scan: _MdChmodScan,
+    written: set[str],
+    plugin_root: Path,
+    top_cache: dict[str, frozenset[str] | None] | None = None,
+) -> bool:
+    """True iff a shell-fence chmod names a path of the READER's project (#248).
+
+    Only when: the fence cannot change directory or assemble commands, prose
+    mentions no directory change, the chmod is the line's first word (so no
+    same-line wrapper such as `env -C` / `sudo -D` / `find -execdir` precedes
+    it), the RAW target is a plain literal relative path, the fence did not write
+    it, nothing in the file creates its first segment, and the plugin does not
+    ship that first segment. Any doubt keeps the finding.
+    """
+    if scope in scan.risky_scopes or scan.file_dir_change:
+        return False
+    # One target only: a second operand (`chmod +x foreign/x.sh scripts/a.sh`)
+    # would ride along unjudged, so a line with anything after the target keeps it.
+    if not _MD_CHMOD_LINE_RE.match(line.strip()) or line.split()[-1] != raw.strip():
+        return False
+    tok = raw.strip()
+    while tok.startswith("./"):
+        tok = tok[2:]
+    if not _MD_LITERAL_REL_RE.match(tok) or tok in written:
+        return False
+    segments = tok.split("/")
+    if any(s in (".", "..") for s in segments):
+        return False
+    first = segments[0]
+    if first.startswith("-") or _norm_segment(first) in scan.created:
+        return False
+    # One top-level lookup per scanned FILE (``top_cache``), never per chmod: the
+    # index stamp costs a git process, and 2000 chmods must stay linear.
+    if top_cache is None:
+        top_cache = {}
+    if "v" not in top_cache:
+        top_cache["v"] = _plugin_top_level(plugin_root)
+    top_level = top_cache["v"]
+    return top_level is not None and not _md_segment_shipped(first, top_level)
+
+
 def inplugin_script_write_findings(
     content: str,
     rel_path: str,
@@ -944,6 +1206,9 @@ def _regex_path_findings(
     self_path = rel_path if _is_shell_script(rel_path, lines) else None
     doc_only = is_documentation_only_path(rel_path)
     contexts = _line_contexts(lines, rel_path, self_path is not None)
+    # Issue #248: one linear pre-pass, never a per-chmod rescan (O(n), not O(n²)).
+    md_scan = _md_chmod_prepass(lines, contexts) if rel_path.lower().endswith((".md", ".markdown")) else None
+    md_top: dict[str, frozenset[str] | None] = {}
     root_n = Path(os.path.normpath(plugin_root))
     unresolved_chmod: list[int] = []
     scope = -1
@@ -1065,8 +1330,18 @@ def _regex_path_findings(
                     unresolved_chmod.append(line_no)  # unplaceable root → T3
                 break
             target_judged = _rebase(target, _cwd_at(cwd_before, cwd_events, mo.start()), root_n)
-            if target_judged is not None and _destination_in_tree(
-                target_judged, plugin_root, self_path
+            # Issue #248: a plain shell-fence chmod of a path the plugin does not
+            # ship is the READER's project path (see `_md_reader_project_chmod`).
+            reader_path = (
+                md_scan is not None
+                and ctx.shell
+                and not is_os_chmod
+                and _md_reader_project_chmod(line, mo.group(1), ctx.scope, md_scan, written, plugin_root, md_top)
+            )
+            if (
+                not reader_path
+                and target_judged is not None
+                and _destination_in_tree(target_judged, plugin_root, self_path)
             ):
                 findings.append(
                     WriteFinding(
