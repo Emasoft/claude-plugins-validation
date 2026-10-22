@@ -4,7 +4,7 @@ title: Hardening - no external input may skip lower or narrow CPV validation and
 column: dev
 status: tasked
 created: 2026-10-22T02:37:19+0200
-updated: 2026-10-22T16:33:56+0200
+updated: 2026-10-22T18:55:45+0200
 current-owner: main-agent@complete-plugin-validation
 created-by: main-agent@complete-plugin-validation
 task-type: security
@@ -144,3 +144,14 @@ Machine path removed from the STATE block before the v5.22.4 push (it was never 
 - Tag manifest check: all 1298 manifest entries equal `git show v5.22.4:<file>` hashes (1300 tracked files minus the two manifests); installed 5.22.4 copy: "[CPV integrity] OK — 1298 CPV files verified against the GitHub canonical manifest".
 - Gate 14 (advisory CI) was red on attempt 1: tests/test_audit_fix_b14.py::test_local_hook_accepts_relative_string_source_end_to_end raised FileExistsError because its two temp dirs are named r{abs(hash(hook_src)) % 10000} and collided (about 1 run in 10000, per-process hash randomization). The local full suite and Gate 2 had passed; the failed job was re-run and attempt 2 is green. Fix queued for v5.22.5.
 - Issue 259 status: the reports_dev scan skip was fixed in v5.22.3 (increment 1b); the token sentence is covered by the issue-260 exception in v5.22.4; still open: SHELL_EXEC on a `subprocess.run(` call whose argv list continues on the next lines (same call on one line is not flagged), a genuine false positive for a later release.
+
+## Release v5.22.5 plan (2026-10-22)
+
+Owner directive 2026-10-22 (verbatim): "have you fixed all open issues on github? if not, fan out subagents! fix all and publish!"
+v5.22.5 scope (8 disjoint-file batches on the scratch clone): #250 fence info strings, #251 consent registry resolved against the plugin root, #259 half 1 multi-line subprocess.run judged as a whole call, #262 half A RC-39 removal predicate, #244/#245 TOC port of 3a4978fc (6.0.0 line, TRDD-P4JSYC7C step 1a), #246 scheme:// and JSX/MDX link false positives, #235 bunx first-run race (still blocks if it persists), #252 markdownlint total count (NIT kept), #239 gh secret list --repo (publish.py and the generated canon), #240 cspell port of 356e71b6, #249 cpv-agent dispatches the fixer, test_audit_fix_b14 temp-dir collision.
+Deferred with reason: #236 TOKEN_STEAL/RESOURCE_ABUSE and #253 precision need an adversarial corpus (5.23.0); #254 needs an owner decision (audited subprocess wrapper vs CPV-authored bandit config); #255 fail-closed outside wheel mode is increment 5 (changes release ordering); #257 items 1/2/4/5; #237 exclude_paths retirement is increment 2. #248 deferred after three review rounds: wrapper commands (env -C, sudo -D, zsh chdir, eval-assembled cd) change chmod's directory without a cd word, and the per-chmod cd scan was quadratic; the patch is kept outside git in the main checkout's docs_dev/deferred-248/ and its stricter quoted-target judgement should re-land on its own.
+Policy conflict, not implemented: #247 sidecar config; the exclude_paths part of #246; #237 main ask; #236 test-span demotion; #259 half 2 (keep the finding, the sanctioned sentence is the route).
+Already fixed, closable by the owner (no GitHub write made): #243, #258, #261.
+Version decision: --patch (v5.22.5). No batch adds a flag, option or config input; the new output is diagnostic only (a markdownlint total line, a named bunx environment error that blocks as before, a consent-registry warning).
+Implemented and committed on the scratch clone's master: 919ed457 (250/251/259 half 1), 02042245 (262 half A), ea79bd5f (246 genuine false positives, 244/245 TOC port), 2cd58015 (235, 252), aa0152c0 (239), ce559011 (240, b14 temp dirs), e500db4d (249), a2e07028 (CLAUDE.md test-file count 564). Full suite before the commits: 14937 passed, 24 skipped.
+Residuals for a later release: `rm -rf ~/Library` has no finding anywhere; Windows-spelled chmod targets are never judged; the skillaudit fence map and the docs fence stripper are two parsers with different closer rules (the native code-block map also ignores ~~~ fences); a single-line ```x``` span is no longer stripped in validate_md_file_paths; a JSX key containing a space is not skipped; the issue-74 reference guard cannot see a module-qualified or string reference to _spawn_linter_once.
