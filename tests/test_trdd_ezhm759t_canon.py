@@ -76,6 +76,7 @@ def _exec_helpers(names: tuple[str, ...], extra_names: tuple[str, ...] = ()) -> 
     constants or `cprint` is asserted on text instead.
     """
     import os
+    import shutil
     import subprocess
 
     tree = ast.parse(_src())
@@ -90,7 +91,7 @@ def _exec_helpers(names: tuple[str, ...], extra_names: tuple[str, ...] = ()) -> 
     found = {n.name for n in wanted if isinstance(n, ast.FunctionDef)}
     assert found == set(names), f"missing helper(s): {set(names) - found}"
     module = ast.Module(body=wanted, type_ignores=[])
-    ns: dict = {"os": os, "subprocess": subprocess, "Path": Path, "sys": sys}
+    ns: dict = {"os": os, "subprocess": subprocess, "Path": Path, "sys": sys, "shutil": shutil}
     exec(compile(module, "<canon>", "exec"), ns)  # noqa: S102 - the code under test
     return ns
 
@@ -369,7 +370,7 @@ def test_row20_only_pytests_own_process_group_is_killed() -> None:
     import time
 
     ns = _exec_helpers(
-        ("_ps_table", "_snapshot_browser_pids", "_cleanup_browser_orphans"),
+        ("_exe", "_ps_table", "_snapshot_browser_pids", "_cleanup_browser_orphans"),
         extra_names=("_BROWSER_ORPHAN_SIGNATURES",),
     )
     # No owner pgid => nothing is killed, rather than falling back to a global diff.
@@ -434,7 +435,11 @@ def test_row23_pool_scan_survives_a_directory_named_dot_py() -> None:
 def test_row24_pyproject_names_no_phantom_pre_commit_hook() -> None:
     """Row 24: extend-include lists only a hook the scaffold actually emits."""
     toml = gen_pyproject_toml(_params())
-    assert 'extend-include = ["git-hooks/pre-push"]' in toml
+    # #254: the ruff table moved from pyproject.toml into the canonical .ruff.toml.
+    from generate_plugin_repo import gen_ruff_toml  # noqa: PLC0415
+
+    assert "[tool.ruff" not in toml
+    assert 'extend-include = ["git-hooks/pre-push"]' in gen_ruff_toml(_params())
     emitted = {rel for rel, _c, _x in generate_all_files(_params())}
     assert "git-hooks/pre-commit" not in emitted, "the phantom entry would now be real"
 

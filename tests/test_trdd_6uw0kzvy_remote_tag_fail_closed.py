@@ -13,6 +13,7 @@ path), None = could not read (destructive consumers refuse).
 from __future__ import annotations
 
 import importlib
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -35,7 +36,8 @@ def _emitted_helpers() -> SimpleNamespace:
     start = body.index("def _remote_tag_state(")
     end = body.index("\ndef ", body.index("def _remote_tag_exists("))
     snippet = body[start:end]
-    ns: dict = {"subprocess": subprocess, "Path": Path}
+    # #254: the template resolves binaries through its module-level _exe(); same PATH lookup.
+    ns: dict = {"subprocess": subprocess, "Path": Path, "_exe": lambda name: shutil.which(name) or name}
     exec(compile("from __future__ import annotations\n" + snippet, "emitted-helpers", "exec"), ns)  # noqa: S102
     return SimpleNamespace(**ns)
 

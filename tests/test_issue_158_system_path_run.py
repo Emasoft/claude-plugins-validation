@@ -168,7 +168,9 @@ class TestRealLeaksStillFire:
         report = _scan(
             tmp_path,
             "notes.md",
-            "PATH was `/usr/bin:/Users/attacker/evil/bin:/bin`\n",
+            # `alice`, not `attacker`: task G round 3 made `attacker` a security-doc
+            # placeholder (EXAMPLE_USERNAMES), so it no longer exercises a real login.
+            "PATH was `/usr/bin:/Users/alice/evil/bin:/bin`\n",
         )
         assert _blocking_levels(report), "a run containing a /Users segment must still fire"
 

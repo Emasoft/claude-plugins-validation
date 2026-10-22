@@ -3,14 +3,15 @@
 Coverage by category:
 - A: orchestrator parent-traversal detection (`is_orchestrator_skill`,
      downgrade to MINOR when target is an orchestrator with ≥3 sibling
-     consumers, allow_orchestrator_traversal opt-out)
+     consumers; the plugin-declared allow_orchestrator_traversal opt-out is inert)
 - C: npm-package shape skip (`is_npm_package_shape`)
 - D: TOC threshold ≥500 lines (short reference files emit INFO not MINOR)
 - E: REMOVED in TRDD-021250b5 — the trigger-phrase description exemption
      (`description_has_trigger_phrases`) is gone; description limits are
      token-based (200 tokens) and non-negotiable
-- F: vendored-path skip (`is_vendored_path` covers external/, vendor/,
-     third_party/, node_modules/, .gitmodules submodules, cpv.exclude_paths)
+- F: vendored-path skip (`is_vendored_path`): only UNTRACKED content under a
+     CPV vendored name is skipped; tracked files, .gitmodules paths and
+     cpv.exclude_paths are scanned (task G, issues #237 / #257)
 - I: numbered-prose Instructions list accepted as valid checklist
      (`has_numbered_prose_steps`)
 - B: generic cpv config loader (`load_cpv_config`) round-trips supported keys.
@@ -22,6 +23,7 @@ Coverage by category:
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -83,39 +85,69 @@ class TestNpmPackageShape:
 
 
 class TestVendoredPathSkip:
-    def test_external_dir_skipped(self, tmp_path):
+    """Task G (issues #237 / #257): only UNTRACKED content under a CPV vendored name is skipped.
+
+    Owner policy: "everything that is git tracked must be scanned, no exceptions".
+    """
+
+    @staticmethod
+    def _git(root: Path, *args: str) -> None:
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
+
+    def _repo(self, tmp_path: Path) -> Path:
+        root = _make_plugin_with_cpv_config(tmp_path, {})
+        self._git(root, "init", "-q")
+        return root
+
+    def test_non_git_root_skips_nothing(self, tmp_path):
+        # Without git CPV cannot prove a file is untracked, so it scans it.
         plugin_root = _make_plugin_with_cpv_config(tmp_path, {})
+        for rel in ("external/lib/foo.md", "node_modules/x/y.md", "third_party/lib.md"):
+            assert not cvc.is_vendored_path(Path(rel), plugin_root), rel
+
+    def test_untracked_vendored_names_skipped(self, tmp_path):
+        plugin_root = self._repo(tmp_path)
+        for rel in ("external/lib/foo.md", "node_modules/x/y.md", "third_party/lib.md"):
+            assert cvc.is_vendored_path(Path(rel), plugin_root), rel
+
+    def test_tracked_vendored_file_and_dir_not_skipped(self, tmp_path):
+        plugin_root = self._repo(tmp_path)
+        target = plugin_root / "external" / "lib" / "foo.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("x\n", encoding="utf-8")
+        # Before `git add` the file is untracked: skipped.
         assert cvc.is_vendored_path(Path("external/lib/foo.md"), plugin_root)
-
-    def test_node_modules_skipped(self, tmp_path):
-        plugin_root = _make_plugin_with_cpv_config(tmp_path, {})
-        assert cvc.is_vendored_path(Path("node_modules/x/y.md"), plugin_root)
-
-    def test_third_party_skipped(self, tmp_path):
-        plugin_root = _make_plugin_with_cpv_config(tmp_path, {})
-        assert cvc.is_vendored_path(Path("third_party/lib.md"), plugin_root)
+        self._git(plugin_root, "add", "external/lib/foo.md")
+        # After `git add` (the index stamp changes, so the cache is re-read):
+        # the file, its parent dirs and the top-level root are all scanned.
+        assert not cvc.is_vendored_path(Path("external/lib/foo.md"), plugin_root)
+        assert not cvc.is_vendored_path(Path("external/lib"), plugin_root)
+        assert not cvc.is_vendored_path(Path("external"), plugin_root)
+        # An untracked sibling under the same vendored root is still skipped.
+        assert cvc.is_vendored_path(Path("external/other.md"), plugin_root)
 
     def test_normal_path_not_skipped(self, tmp_path):
-        plugin_root = _make_plugin_with_cpv_config(tmp_path, {})
+        plugin_root = self._repo(tmp_path)
         assert not cvc.is_vendored_path(Path("skills/my-skill/SKILL.md"), plugin_root)
 
-    def test_gitmodule_path_skipped(self, tmp_path):
-        plugin_root = _make_plugin_with_cpv_config(tmp_path, {})
+    def test_gitmodules_entry_alone_skips_nothing(self, tmp_path):
+        plugin_root = self._repo(tmp_path)
         (plugin_root / ".gitmodules").write_text(
-            '[submodule "vendored/lib"]\n  path = vendored/lib\n  url = x\n',
+            '[submodule "libs/ext"]\n  path = libs/ext\n  url = x\n',
             encoding="utf-8",
         )
-        # Clear caches so the new .gitmodules is read
         cvc._read_gitmodules_paths.cache_clear()
-        assert cvc.is_vendored_path(Path("vendored/lib/foo.md"), plugin_root)
+        assert not cvc.is_vendored_path(Path("libs/ext/foo.md"), plugin_root)
 
-    def test_cpv_exclude_paths_honored(self, tmp_path):
+    def test_cpv_exclude_paths_ignored(self, tmp_path):
+        # Issue #237: a plugin-declared exclude_paths must NOT hide tracked files.
         plugin_root = _make_plugin_with_cpv_config(
             tmp_path, {"exclude_paths": ["custom-vendor/", "SKILLS-TO-INTEGRATE"]}
         )
+        self._git(plugin_root, "init", "-q")
         cvc._load_cpv_config_cached.cache_clear()
-        assert cvc.is_vendored_path(Path("custom-vendor/x.md"), plugin_root)
-        assert cvc.is_vendored_path(Path("SKILLS-TO-INTEGRATE/foo.md"), plugin_root)
+        assert not cvc.is_vendored_path(Path("custom-vendor/x.md"), plugin_root)
+        assert not cvc.is_vendored_path(Path("SKILLS-TO-INTEGRATE/foo.md"), plugin_root)
 
 
 # ── Category A: orchestrator skill detection ────────────────────────────────

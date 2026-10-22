@@ -80,23 +80,12 @@ def test_jscpd_json_threshold_is_not_zero() -> None:
     assert data.get("threshold") != 0, "threshold 0 would over-block every plugin"
 
 
-def test_jscpd_json_ignores_dev_and_fixture_dirs() -> None:
-    """The ``ignore`` list carries the dev-dir + test-fixture globs (mirrors
-    ``.mega-linter.yml`` FILTER_REGEX_EXCLUDE) so neither gate counts a dup in a
-    dev/scratch/fixture tree."""
+def test_jscpd_json_ignores_only_never_tracked_trees() -> None:
+    """#257 item 5: the ``ignore`` list names ONLY node_modules and .git (never tracked);
+    no dev-dir, ``.claude/`` or fixture glob keeps tracked content out of the scan."""
     data = json.loads(gen_jscpd_json(_params()))
     ignore = data.get("ignore")
-    assert isinstance(ignore, list) and ignore, "ignore must be a non-empty list"
-    required = [
-        "**/scripts_dev/**",
-        "**/docs_dev/**",
-        "**/tests/fixtures/**",
-        "**/fixtures/**",
-        "**/node_modules/**",
-        "**/.git/**",
-    ]
-    missing = [g for g in required if g not in ignore]
-    assert not missing, f"jscpd ignore list missing required globs: {missing}"
+    assert ignore == ["**/node_modules/**", "**/.git/**"], ignore
 
 
 def test_jscpd_json_does_not_ignore_real_source() -> None:

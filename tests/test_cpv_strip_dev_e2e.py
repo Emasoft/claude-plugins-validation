@@ -46,7 +46,9 @@ def test_gen_plugin_json_includes_cpv_strip_block_by_default():
     # PSS-style default: ONE submodule per plugin (tests/ only).
     assert "tests/" in srcs
     assert len(extract) == 1, "Default scaffold emits exactly one extract entry"
-    assert pj["cpv"]["strip"]["require_url_allowlist"] is True
+    # Issue #237: the URL allowlist is CPV-owned, so the generator no longer
+    # writes the (now inert) plugin-side `require_url_allowlist` key.
+    assert "require_url_allowlist" not in pj["cpv"]["strip"]
 
 
 def test_gen_plugin_json_omits_cpv_strip_block_when_disabled():

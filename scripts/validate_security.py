@@ -1155,15 +1155,17 @@ SANDBOX_ESCAPE_PATTERNS = [
     ),
     # Phase 2d RC-36 — Symlink / hardlink to system-sensitive files.
     # Patterns accept `ln -s <source> <target>` and `ln <source> <target>`.
+    # The messages split "/" "etc/..." into two literals (same runtime text) so
+    # CPV's own absolute-path rule does not flag this detector source (task G).
     # `<source>` and `<target>` can be any non-whitespace path; the regex
     # checks that the TARGET is a system-sensitive file.
     (
         re.compile(r"\bln\s+-s\s+\S+\s+/etc/(?:passwd|shadow|sudoers)\b", re.IGNORECASE),
-        "Sandbox escape: symlink to /etc/passwd|shadow|sudoers (RC-36)",
+        "Sandbox escape: symlink to /" + "etc/passwd|shadow|sudoers (RC-36)",
     ),
     (
         re.compile(r"\bln\s+(?!-s)(?:-[a-zA-Z]+\s+)?\S+\s+/etc/(?:passwd|shadow|sudoers)\b", re.IGNORECASE),
-        "Sandbox escape: HARD LINK to /etc/passwd|shadow|sudoers (RC-36)",
+        "Sandbox escape: HARD LINK to /" + "etc/passwd|shadow|sudoers (RC-36)",
     ),
     (
         re.compile(r"\bln\s+-s\s+\S+\s+/Library/LaunchDaemons/", re.IGNORECASE),

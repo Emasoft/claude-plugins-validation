@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -14,6 +15,21 @@ import pytest
 scripts_dir = Path(__file__).parent.parent / "scripts"
 if str(scripts_dir) not in sys.path:
     sys.path.insert(0, str(scripts_dir))
+
+
+# ----------------------------------------------------------------------------
+# Issue #255 — the CPV self-integrity check no longer skips itself when
+# PYTEST_CURRENT_TEST is set (that was an environment variable anyone can set:
+# an unsanctioned bypass with no owner behind it). The suite runs the WORKING
+# TREE, whose files differ from any released tag manifest, and dozens of tests
+# run validate_*.py as CHILD processes that a monkeypatch cannot reach. So the
+# suite sets the ONE owner-sanctioned dev skip, PLUGIN_SKIP_GITHUB_INTEGRITY,
+# for its own process tree, here and nowhere else (never in scripts/ or
+# publish.py). It keeps its trail: every skipping process prints a WARNING and
+# appends one audit line. It is ignored for package installs and by the
+# release-candidate anchor, and publish.py Gate 0 refuses it in the publisher's
+# own environment. Tests that exercise the real check monkeypatch.delenv it.
+os.environ["PLUGIN_SKIP_GITHUB_INTEGRITY"] = "1"
 
 
 # ----------------------------------------------------------------------------
@@ -74,6 +90,12 @@ def _trdd_fa70f9b8_reset_global_state():
         )
 
         _read_gitmodules_paths.cache_clear()
+        # Task G (4g): the git tracked-set cache and the positive index-path map.
+        import cpv_validation_common as _cvc
+
+        _cvc._git_tracked_sets.cache_clear()
+        _cvc._GIT_INDEX_PATHS.clear()
+        _cvc._GIT_INDEX_NEGATIVE.clear()
         _load_cpv_config_cached.cache_clear()
     except ImportError:
         pass
@@ -111,6 +133,12 @@ def _trdd_fa70f9b8_reset_global_state():
         )
 
         _read_gitmodules_paths.cache_clear()
+        # Task G (4g): the git tracked-set cache and the positive index-path map.
+        import cpv_validation_common as _cvc
+
+        _cvc._git_tracked_sets.cache_clear()
+        _cvc._GIT_INDEX_PATHS.clear()
+        _cvc._GIT_INDEX_NEGATIVE.clear()
         _load_cpv_config_cached.cache_clear()
     except ImportError:
         pass

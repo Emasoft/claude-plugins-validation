@@ -235,7 +235,7 @@ Comprehensive remediation guide for all issues detected by `validate_security.py
 2. Use `$HOME` for home-directory-relative paths.
 3. Use environment variables that the user can configure for external paths.
 4. Example replacement:
-   - Before: `/Users/alice/my-plugin/scripts/run.sh`
+   - Before: `/Users/username/my-plugin/scripts/run.sh`
    - After: `${CLAUDE_PLUGIN_ROOT}/scripts/run.sh`
 
 ---

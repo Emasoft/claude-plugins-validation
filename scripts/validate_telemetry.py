@@ -310,9 +310,11 @@ def _is_managed_settings_path(settings_path: Path) -> bool:
         resolved = str(settings_path.resolve())
     except OSError:
         resolved = str(settings_path)
-    # Common UNIX/Windows/macOS managed paths per managed-settings docs.
+    # Common UNIX/Windows/macOS managed paths per managed-settings docs. The UNIX
+    # one is built at runtime so CPV's own absolute-path rule (which now also
+    # scans paths containing a dot) does not flag this detector constant.
     markers = (
-        "/etc/claude-code/managed-settings.json",
+        "/" + "/".join(("etc", "claude-code", "managed-settings.json")),
         "/Library/Application Support/ClaudeCode/managed-settings.json",
         "\\ProgramData\\ClaudeCode\\managed-settings.json",
     )

@@ -30,8 +30,8 @@ Subcommands:
   * ``add-standard-sections`` — insert missing ``## Overview`` /
     ``## Examples`` / ``## Output`` headings
   * ``dedup-trailing-blanks`` — collapse ``\\n\\n\\n+`` → ``\\n\\n``
-  * ``external-skip-list`` — auto-add ``external/``, vendored paths to
-    the plugin's CPV exclusion list in ``.claude-plugin/plugin.json``
+  * (``external-skip-list`` was REMOVED, issue #237: CPV ignores
+    ``cpv.exclude_paths``, so the codemod never writes it)
   * ``all`` — run every applicable subcommand in safe order
   * ``apply`` — read a CPV ``--strict --json`` findings report, select the
     ``fixable: true`` entries, and dispatch each by ``fix_id`` to its
@@ -392,83 +392,22 @@ def _apply_add_standard_sections(text: str) -> str:
     return text + "".join(additions)
 
 
-# ── Subcommand: external-skip-list ────────────────────────────────────────────
-@dataclass(frozen=True)
-class SkipListResult:
-    """Structured outcome of ``_apply_external_skip_list``.
+# ── Manifest readability (used by `all`, findings #63 / #64) ──────────────────
+def _manifest_readable(plugin_root: Path) -> bool:
+    """False when `.claude-plugin/plugin.json` exists but cannot be parsed.
 
-    ``ok`` is the success signal the exit code is derived from — a clean
-    no-op (manifest missing, no vendored dirs, already excluded) is still
-    ``ok=True`` (exit 0); only a genuine inability to proceed is ``ok=False``.
-    Deriving the exit code from this flag — rather than substring-matching
-    ``summary`` — means the human-readable text can be reworded without
-    silently flipping the CLI's exit status (finding #9).
-
-    ``changed`` is True only when ``apply`` was set AND the manifest was
-    actually rewritten; in dry-run it is always False even when a write
-    WOULD have happened (see ``would_change``).
-    """
-
-    changed: bool
-    ok: bool
-    summary: str
-    would_change: bool = False
-
-
-def _apply_external_skip_list(plugin_root: Path, *, apply: bool) -> SkipListResult:
-    """Add detected vendored dirs to plugin.json's cpv exclusion list.
-
-    Honors the module-wide dry-run-by-default contract (finding #1): in
-    dry-run (``apply=False``) the manifest is NEVER written — instead the
-    diff is printed and ``would_change`` reports what an ``--apply`` run
-    would do. In apply mode the manifest is backed up (mirroring the
-    markdown transforms' backup behavior) BEFORE it is rewritten.
+    A missing manifest is fine (nothing to read). A malformed or unreadable one
+    is reported so `all` exits 1 instead of passing silently.
     """
     manifest = plugin_root / ".claude-plugin" / "plugin.json"
     if not manifest.is_file():
-        # No manifest to update is a clean no-op, not a failure.
-        return SkipListResult(changed=False, ok=True, summary=f"No .claude-plugin/plugin.json under {plugin_root}")
-    # A malformed or unreadable manifest is a genuine inability to proceed
-    # (ok=False → exit 1), NOT a crash (finding #64). Surfacing it as a
-    # structured failure — rather than letting JSONDecodeError/OSError
-    # propagate as a traceback — keeps the `all` run from aborting after
-    # it has already rewritten the markdown files.
+        return True
     try:
-        raw = manifest.read_text(encoding="utf-8")
-        data = json.loads(raw)
+        json.loads(manifest.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
-        return SkipListResult(changed=False, ok=False, summary=f"Cannot read .claude-plugin/plugin.json: {exc}")
-    detected: set[str] = set()
-    submodules = _read_gitmodules(plugin_root)
-    detected.update(submodules)
-    for child in plugin_root.iterdir():
-        if child.is_dir() and child.name in VENDORED_DIR_NAMES:
-            detected.add(child.name)
-    if not detected:
-        return SkipListResult(changed=False, ok=True, summary="No vendored directories detected")
-    cpv_block = data.setdefault("cpv", {})
-    existing = set(cpv_block.get("exclude_paths", []))
-    new = sorted(existing | detected)
-    if new == sorted(existing):
-        return SkipListResult(changed=False, ok=True, summary=f"All {len(detected)} vendored paths already excluded")
-    cpv_block["exclude_paths"] = new
-    new_raw = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-    if new_raw == raw:
-        return SkipListResult(changed=False, ok=True, summary="No change after re-serialization")
-    added = len(detected - existing)
-    # Always show the diff so the user can review it (dry-run AND apply).
-    _print_diff(manifest.relative_to(plugin_root), raw, new_raw)
-    if not apply:
-        return SkipListResult(
-            changed=False,
-            ok=True,
-            would_change=True,
-            summary=f"Would add {added} vendored path(s) to cpv.exclude_paths (dry-run — re-run with --apply to write)",
-        )
-    backup_root = _backup_dir(plugin_root)
-    _backup_file(manifest, plugin_root, backup_root)
-    manifest.write_text(new_raw, encoding="utf-8")
-    return SkipListResult(changed=True, ok=True, summary=f"Added {added} vendored path(s) to cpv.exclude_paths")
+        print(f"[all] Cannot read .claude-plugin/plugin.json: {exc}")
+        return False
+    return True
 
 
 # ── fix_id-dispatched apply mode (Phase 2, TRDD-GVMOKJBB) ─────────────────────
@@ -700,12 +639,6 @@ def _run_subcommand(
     min_toc_lines: int,
 ) -> int:
     """Run one subcommand across the plugin tree. Returns exit code."""
-    if transform == "external-skip-list":
-        result = _apply_external_skip_list(plugin_root, apply=apply)
-        print(f"[{transform}] {result.summary}")
-        # Exit code comes from the structured `ok` flag — never from
-        # scraping `summary` (finding #9). Reword the text freely.
-        return 0 if result.ok else 1
     backup_root = _backup_dir(plugin_root)
     files_touched = 0
     # The backup tree (.cpv-codemod-backup/) is excluded inside
@@ -760,7 +693,6 @@ Safety contract:
             "wrap-placeholder-paths",
             "add-standard-sections",
             "dedup-trailing-blanks",
-            "external-skip-list",
             "all",
             "apply",
         ],
@@ -813,18 +745,17 @@ def main(argv: list[str] | None = None) -> int:
         return _run_apply(plugin_root, args.json.expanduser().resolve(), apply=args.apply)
 
     if args.subcommand == "all":
-        # Every applicable subcommand in safe order: content transforms
-        # first, then external-skip-list which rewrites the manifest.
-        # add-standard-sections is included here too — _process_file
-        # self-skips every file except SKILL.md, so running it over the
-        # whole tree is a no-op everywhere else (finding #62).
+        # Every content transform in safe order. add-standard-sections is
+        # included — _process_file self-skips every file except SKILL.md, so
+        # running it over the whole tree is a no-op everywhere else (finding #62).
+        # (The former external-skip-list subcommand is GONE, issue #237 / task G:
+        # CPV ignores cpv.exclude_paths, so nothing may write it.)
         subs = [
             "backtick-to-link",
             "add-toc",
             "dedup-trailing-blanks",
             "wrap-placeholder-paths",
             "add-standard-sections",
-            "external-skip-list",
         ]
         # Propagate the worst per-subcommand exit code instead of discarding
         # it (finding #63): a single failing subcommand must fail `all`.
@@ -833,6 +764,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\n══════════════════════ {sub} ══════════════════════")
             rc = _run_subcommand(sub, plugin_root, args.apply, args.min_lines)
             worst = max(worst, rc)
+        # Findings #63 / #64: `all` still fails cleanly (exit 1, no traceback)
+        # on an unreadable plugin.json, after the content transforms ran.
+        if not _manifest_readable(plugin_root):
+            worst = max(worst, 1)
         return worst
     return _run_subcommand(args.subcommand, plugin_root, args.apply, args.min_lines)
 

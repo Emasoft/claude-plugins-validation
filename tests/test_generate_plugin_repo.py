@@ -144,31 +144,31 @@ class TestGenPyprojectToml:
         """Generated pyproject.toml contains ruff configuration."""
         p = _default_params()
         content = gen_pyproject_toml(p)
-        assert "[tool.ruff]" in content
-        assert "line-length" in content
+        from generate_plugin_repo import gen_ruff_toml  # noqa: PLC0415
+
+        # #254: ruff lives in the canonical .ruff.toml (ruff ignores [tool.ruff] beside it).
+        assert "[tool.ruff]" not in content
+        assert "line-length = 120" in gen_ruff_toml(p)
 
 
 class TestFixtureLintExclusion:
-    """Every generated linter config MUST skip test fixtures (deliberate-defect
-    sample data) — in any language, locally and on CI. Regression guard so the
-    creator / migrate / upgrade agents never scaffold a pipeline that lints the
-    very fixtures the plugin's tests rely on being malformed.
+    """#257 item 5: NO generated linter config may keep git-tracked content (test
+    fixtures, `.claude/`) out of a scan. The old tests pinned the opposite; the
+    exact-surface property lives in tests/test_issue_257_canon_excludes.py.
     """
 
-    def test_mega_linter_excludes_fixtures_all_languages(self):
-        """gen_mega_linter_yml FILTER_REGEX_EXCLUDE covers fixture dirs (cross-language CI + local runner)."""
+    def test_mega_linter_has_no_filter_regex_exclude(self):
+        """gen_mega_linter_yml emits no FILTER_REGEX_EXCLUDE key at all."""
         content = gen_mega_linter_yml(_default_params())
-        assert "FILTER_REGEX_EXCLUDE" in content
-        line = next(ln for ln in content.splitlines() if ln.startswith("FILTER_REGEX_EXCLUDE"))
-        for frag in ("tests?/fixtures/", "spec/fixtures/", "__fixtures__/", "testdata/", "fixtures/"):
-            assert frag in line, f"Mega-Linter FILTER_REGEX_EXCLUDE missing fixture pattern: {frag}"
+        assert not any(ln.startswith("FILTER_REGEX_EXCLUDE") for ln in content.splitlines())
 
-    def test_pyproject_ruff_excludes_fixtures(self):
-        """gen_pyproject_toml ruff extend-exclude covers fixture dirs (Python local `ruff check tests/`)."""
-        content = gen_pyproject_toml(_default_params())
-        assert "extend-exclude" in content
-        for frag in ("**/fixtures", "**/testdata", "**/__fixtures__"):
-            assert frag in content, f"ruff extend-exclude missing fixture pattern: {frag}"
+    def test_ruff_toml_has_no_extend_exclude(self):
+        """The canonical .ruff.toml excludes no fixture dir either."""
+        from generate_plugin_repo import gen_ruff_toml  # noqa: PLC0415
+
+        content = gen_ruff_toml(_default_params())
+        assert "extend-exclude" not in content
+        assert "fixtures" not in content
 
 
 class TestGenGitignore:
@@ -494,7 +494,7 @@ class TestPublishPyCornerstoneRule:
         src = self._src()
         assert "_called_by_publish_orchestrator" in src
         assert "_get_process_ancestry" in src
-        assert '["ps", "-p"' in src, "Must walk ancestry via ps(1)"
+        assert '[_exe("ps"), "-p"' in src, "Must walk ancestry via ps(1)"
         assert "[G0] Checking push orchestrator" in src
         assert "Direct push not allowed" in src
 
@@ -709,6 +709,8 @@ class TestTemplateGetOriginSlug:
         ns: dict = {
             "subprocess": _types.SimpleNamespace(run=_mock_run, SubprocessError=_sp.SubprocessError),
             "Path": _Path,
+            # #254: the template resolves binaries via _exe() (bandit B607); identity is enough here.
+            "_exe": lambda name: name,
         }
         exec(fn_src, ns)
         return ns["_get_origin_slug"], _Result

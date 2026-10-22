@@ -8,7 +8,7 @@ Covers three findings from the full-audit report:
 * #63 — the ``all`` subcommand discarded every per-subcommand exit code
   and unconditionally returned 0, so a failing subcommand could not fail
   ``all``.
-* #64 — ``_apply_external_skip_list`` crashed with an unhandled
+* #64 — the (since removed, task G #237) ``_apply_external_skip_list`` crashed with an unhandled
   ``JSONDecodeError`` / ``OSError`` when ``plugin.json`` was malformed,
   aborting the whole ``all`` run with a traceback.
 
@@ -66,8 +66,8 @@ def test_all_subcommand_propagates_failure_exit_code(monkeypatch, tmp_path):
     (tmp_path / "README.md").write_text("# hi\n", encoding="utf-8")
 
     def one_fails(transform, plugin_root, apply, min_toc_lines):  # noqa: ANN001, ANN202
-        # external-skip-list fails; everything else succeeds.
-        return 1 if transform == "external-skip-list" else 0
+        # add-toc fails; everything else succeeds.
+        return 1 if transform == "add-toc" else 0
 
     monkeypatch.setattr(cpv_codemod, "_run_subcommand", one_fails)
     rc = cpv_codemod.main(["all", "--plugin", str(tmp_path)])
@@ -93,39 +93,36 @@ def _write_manifest(plugin_root: Path, body: str) -> None:
 
 
 def test_external_skip_list_malformed_json_no_crash(tmp_path):
-    """Malformed plugin.json -> ok=False, no exception (finding #64)."""
+    """Malformed plugin.json -> _manifest_readable is False, no exception (finding #64).
+
+    Task G (#237): the external-skip-list subcommand that used to carry this
+    check was removed; `all` now reads the manifest itself.
+    """
     _write_manifest(tmp_path, "{ not valid json ")
-    # Guard: pre-fix this raised json.JSONDecodeError instead of returning.
-    result = cpv_codemod._apply_external_skip_list(tmp_path, apply=False)
-    assert result.ok is False
-    assert result.changed is False
-    assert "plugin.json" in result.summary
+    assert cpv_codemod._manifest_readable(tmp_path) is False
 
 
 def test_external_skip_list_malformed_json_returns_failure_exit(tmp_path):
-    """_run_subcommand surfaces the malformed-manifest failure as exit 1."""
+    """`all` surfaces the malformed-manifest failure as exit 1 (finding #64)."""
     _write_manifest(tmp_path, "}}} totally broken")
-    rc = cpv_codemod._run_subcommand("external-skip-list", tmp_path, apply=False, min_toc_lines=50)
-    assert rc == 1
+    assert cpv_codemod.main(["all", "--plugin", str(tmp_path)]) == 1
 
 
 def test_all_run_does_not_abort_on_malformed_manifest(tmp_path):
     """A malformed manifest fails `all` cleanly (non-zero) without a traceback.
 
-    The markdown transforms run first; external-skip-list then reports a
-    structured failure instead of crashing mid-run (findings #63 + #64).
+    The markdown transforms run first; `all` then reports the unreadable
+    manifest as a failure instead of crashing (findings #63 + #64).
     """
     _write_manifest(tmp_path, "{ broken")
     (tmp_path / "README.md").write_text("# hi\n\n\n\n\nbody\n", encoding="utf-8")
     rc = cpv_codemod.main(["all", "--plugin", str(tmp_path)])
-    # Non-zero because external-skip-list could not read the manifest,
+    # Non-zero because `all` could not read the manifest (_manifest_readable),
     # but the call returns normally (no uncaught exception).
     assert rc == 1
 
 
 def test_external_skip_list_valid_manifest_still_succeeds(tmp_path):
-    """A well-formed manifest with no vendored dirs is a clean ok=True no-op."""
+    """A well-formed manifest is readable (no false failure)."""
     _write_manifest(tmp_path, '{\n  "name": "demo"\n}\n')
-    result = cpv_codemod._apply_external_skip_list(tmp_path, apply=False)
-    assert result.ok is True
-    assert result.changed is False
+    assert cpv_codemod._manifest_readable(tmp_path) is True

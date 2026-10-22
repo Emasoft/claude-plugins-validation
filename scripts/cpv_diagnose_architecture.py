@@ -713,14 +713,16 @@ def diagnose(plugin_path: str | Path, *, threshold_mb: float = 1.0) -> Diagnosis
             continue
 
         # For entries we could NOT positively classify into a build-only
-        # category, fall back to treating a vendored / excluded subtree as
-        # runtime. CRITICAL: this fallback applies ONLY to CAT_UNKNOWN — a
+        # category, fall back to treating a vendored subtree as runtime.
+        # CRITICAL: this fallback applies ONLY to CAT_UNKNOWN — a
         # positively-classified RUNTIME_DEP (node_modules/, .venv/) or
         # BUILD_CACHE (dist/, build/, __pycache__/) MUST still be surfaced, even
         # though those names also appear in VENDORED_DIR_NAMES. The vendored
         # guard exists to avoid false-flagging an UNRECOGNISED vendored subtree
-        # (external/, third_party/, a .gitmodules/cpv.exclude_paths path) as
-        # mass — not to swallow the build-only categories the diagnostic is for.
+        # as mass. Task G (#237): is_vendored_path now matches only UNTRACKED
+        # content under a CPV-defined vendored dir name (external/, third_party/);
+        # a tracked subtree, a .gitmodules path or a plugin-declared
+        # cpv.exclude_paths entry is not vendored, so it is sized like any other.
         if category == CAT_UNKNOWN:
             if is_vendored_path(rel_posix, plugin_root):
                 result.shipped_runtime_bytes += size

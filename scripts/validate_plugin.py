@@ -58,11 +58,12 @@ from cpv_lint_engine import lint_repo as run_lint_engine
 from cpv_validation_common import (
     COLORS,
     ValidationReport,
+    _is_vendored_root_dir,
     check_remote_execution_guard,
     emit_phase_done,
     emit_phase_start,
     gitignored_unshipped_paths,
-    is_vendored_path,
+    is_untracked_in_git,
     load_cpv_config,
     # Segment-aware `..` check shared with validate_marketplace (CC 2.1.265/.268
     # accept a directory named `..tools`); one rule, no drifting local copy.
@@ -78,6 +79,7 @@ from cpv_validation_common import (
     validate_md_urls,
     validate_no_absolute_paths,
     validate_toc_embedding,
+    warn_inert_cpv_keys,
 )
 from detect_language import detect_languages
 from detect_lockfiles import detect_lockfiles
@@ -1371,6 +1373,11 @@ def validate_manifest(
     # at the plugin level, where plugin.json is read a single time. (It used to
     # live in the per-skill token-budget check, which made validate_plugin fire
     # one identical warning per skill — 44× on CPV itself.)
+    # Task G (issue #237, owner policy "in no case an user should be able to
+    # customize the validation rules"): one WARNING per inert cpv.* key the
+    # plugin still declares (exclude_paths, allow_root_dirs, ...). Called ONCE
+    # per run here, where plugin.json is read a single time.
+    warn_inert_cpv_keys(plugin_root, report)
     _removed_size_keys = removed_cpv_size_keys_present(load_cpv_config(plugin_root))
     if _removed_size_keys:
         report.warning(
@@ -1492,8 +1499,9 @@ def validate_manifest(
     cpv_optout_block = manifest.get("cpv")
     if isinstance(cpv_optout_block, dict):
         for removed_key in (
-            "allow_root_dirs",
-            "allow_orchestrator_traversal",
+            # `allow_root_dirs` / `allow_orchestrator_traversal` are warned once by
+            # warn_inert_cpv_keys above (task G); listing them here too would
+            # emit a second WARNING for the same key.
             "allow_unversioned_dependencies",
             "allow_pipeline_drift",
         ):
@@ -2276,32 +2284,36 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
             # Submodule pattern: subdirectory named after the plugin itself.
             # Common in Layout B nested marketplaces and dev-cached plugins.
             continue
-        # Issue #16 category H: skip vendoring-conventional roots
-        # (external/, vendor/, third_party/, node_modules/, etc.) AND any
-        # directory listed as a submodule in .gitmodules.
-        if is_vendored_path(Path(dirname), plugin_root):
+        # Issue #16 category H, task G round 3: a root dir named in CPV's own
+        # VENDORED_DIR_NAMES, or one the git INDEX records as a submodule gitlink,
+        # is not reported as non-standard. This exemption is for THIS check only;
+        # its content is still scanned by every other rule (is_vendored_path is
+        # tracked-only), and a .gitmodules entry without a gitlink exempts nothing.
+        if _is_vendored_root_dir(dirname, plugin_root):
             continue
-        # Issue #37 — directories the plugin explicitly excludes from
-        # distribution via .gitignore are not part of "what the plugin
-        # ships" and therefore can't cause an empty install. Common
-        # patterns: research material (INPUT_DEV/, _research/), training
-        # fixtures (samples/, fixtures/), local builds (build/, dist/)
-        # that the publish pipeline doesn't include in the tarball. The
-        # .gitignore was parsed ONCE above the loop; just consult it here.
+        # Issue #37 — directories the plugin excludes from distribution via
+        # .gitignore are not part of "what the plugin ships" and therefore can't
+        # cause an empty install (research material, fixtures, local builds).
+        # Task G (4a, owner policy "everything that is git tracked must be
+        # scanned"): .gitignore is plugin-controlled, so it only excuses a dir
+        # that git PROVES holds no tracked file. A tracked file inside an ignored
+        # dir ships anyway, and a non-git tree (an installed cache) cannot prove
+        # anything, so both are still checked. Parsed ONCE above the loop.
         if gitignore_patterns is not None and is_path_gitignored is not None:
             try:
-                if is_path_gitignored(dirname, gitignore_patterns) or is_path_gitignored(
+                ignored = is_path_gitignored(dirname, gitignore_patterns) or is_path_gitignored(
                     dirname + "/", gitignore_patterns
-                ):
-                    continue
+                )
             except (OSError, ValueError):
-                pass
-        # Severity: MAJOR (was WARNING). The user's directive: "NO DEVIATION
-        # FROM THE STANDARD can be allowed unless you declare the custom
-        # folder in plugin.json". An undeclared non-standard root folder
-        # is the #1 source of "the plugin published but installs to
-        # nothing" because the install pipeline only knows about the
-        # standard component directories.
+                ignored = False
+            if ignored and is_untracked_in_git(dirname, plugin_root):
+                continue
+        # Severity: MAJOR (was WARNING). An earlier directive allowed a custom
+        # folder declared in plugin.json; the owner policy (the scanned plugin
+        # cannot customise CPV rules, issue #237) supersedes it. A non-standard
+        # root folder is the #1 source of "the plugin published but installs to
+        # nothing" because the install pipeline only knows about the standard
+        # component directories.
         report.major(
             f"[RC-NONSTD-DIR-001] Non-standard directory '{dirname}/' — not part "
             "of the plugin spec and not recognised by CPV. Move its contents "
@@ -2397,7 +2409,9 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
                             "managed-settings.md). Claude Code silently ignores this "
                             "block from any plugin-shipped settings.json — the author "
                             "is relying on lockdown enforcement that will NEVER fire. "
-                            "Strict allowlists belong in /etc/claude-code/managed-settings.json "
+                            # Split literal: keeps CPV's own absolute-path rule off this text.
+                            "Strict allowlists belong in /"
+                            "etc/claude-code/managed-settings.json "
                             "(Linux), /Library/Application Support/ClaudeCode/managed-settings.json "
                             "(macOS), or C:\\ProgramData\\ClaudeCode\\managed-settings.json (Windows).",
                             "settings.json",
@@ -4824,13 +4838,12 @@ def validate_strip_gitmodules(plugin_root: Path, report: ValidationReport) -> No
 
       * URL-shape rules (no userinfo, no `..`, scheme in {https,ssh},
         no backslash/newline) → CRITICAL on violation (STRIP-G010)
-      * Per-plugin allowlist via `cpv.strip.allowed_submodule_urls`
-        → CRITICAL on alien URL (STRIP-G011)
-      * Default rule when allowlist is absent: same owner as parent OR
-        `Emasoft` (transitional shared-dev repos) → CRITICAL on alien
-        owner (STRIP-G013)
-      * Opt-out via `cpv.strip.require_url_allowlist=false` → WARNING
-        for traceability (STRIP-G014)
+      * Allowlist rule: same owner as the parent repo, or a URL in the
+        CPV-defined CPV_SUBMODULE_URL_ALLOWLIST → CRITICAL on an alien owner
+        (STRIP-G013) or a non-GitHub URL (STRIP-G012). Task G (issue #237):
+        the plugin-declared `cpv.strip.allowed_submodule_urls` /
+        `cpv.strip.require_url_allowlist` are ignored (STRIP-G011 / G014 are
+        gone) and warned about by warn_inert_cpv_keys.
       * Recorded `submodule_commit_sha` cross-check vs git index
         → CRITICAL on mismatch (STRIP-G015)
 
@@ -7655,8 +7668,17 @@ _CANONICAL_PIPELINE_FILES: tuple[tuple[str, str], ...] = (
     (".github/workflows/notify-marketplace.yml", "gen_notify_marketplace_yml"),
     ("cliff.toml", "gen_cliff_toml"),
     (".mega-linter.yml", "gen_mega_linter_yml"),
+    # Task G (review): the ruff and bandit configs carry the lint/security rule
+    # set; a plugin editing them (an extra bandit skip, a ruff ignore) would be
+    # customising CPV-enforced rules, so they drift-check like mega-linter.
+    (".ruff.toml", "gen_ruff_toml"),
+    (".bandit.yml", "gen_bandit_yml"),
     (".markdownlint.json", "gen_markdownlint_json"),
 )
+
+# Rule-set configs that .mega-linter.yml references by path (see the loop in
+# validate_canonical_pipeline_drift: a missing one is drift, not silence).
+_MEGALINTER_RULE_CONFIGS: frozenset[str] = frozenset({".ruff.toml", ".bandit.yml"})
 
 
 # ── Profile-aware drift (TRDD-e9f13df1, issues #130 / #118-d2) ───────────────
@@ -7789,6 +7811,46 @@ def _classify_drift_direction(diff_lines: list[str]) -> str:
     if plugin_has_extra_hardening and canon_has_extra_hardening:
         return "mixed"
     return "plain"
+
+
+_NOTIFY_RENDER_REL = ".github/workflows/notify-marketplace.yml"
+# GitHub owner / repo names are [A-Za-z0-9._-]; nothing else may be taken from the file.
+_NOTIFY_VALUE_RE = re.compile(r"[A-Za-z0-9._-]{1,100}")
+
+
+def _params_with_notify_values(params: Any, plugin_root: Path) -> Any:
+    """Return params carrying the notify-marketplace owner/repo the file declares.
+
+    Issue #257 item 4: these two values are per-plugin and not in plugin.json, so
+    the canonical render must use the file's own. FAIL TOWARD FLAGGING: a value
+    that is absent, a placeholder, or not a plain GitHub name is ignored, the
+    render keeps the default, differs from the file, and drift is still reported.
+    The rest of the file (secret name, payload, triggers, permissions) is still
+    compared byte for byte, so only these two values are free.
+
+    Behaviour change (release-note item): a well-formed notify target other than
+    the default (e.g. a different marketplace owner/repo) is no longer reported
+    as drift; before, every non-default plugin drifted.
+    """
+    # Catch EVERYTHING (incl. ImportError) and return params unchanged: the file is
+    # attacker-controlled input, and an exception escaping to the caller's broad
+    # `except` would skip the whole drift check (fail-open). Unchanged params make
+    # the render differ from the file, so drift is still reported (fail-closed).
+    try:
+        import dataclasses
+
+        from standardize_plugin import _detect_existing_notify_marketplace
+
+        detected = _detect_existing_notify_marketplace(plugin_root)
+        changes: dict[str, str] = {}
+        owner, repo = detected["owner"], detected["repo"]
+        if owner and _NOTIFY_VALUE_RE.fullmatch(owner):
+            changes["marketplace_owner"] = owner
+        if repo and _NOTIFY_VALUE_RE.fullmatch(repo):
+            changes["marketplace"] = repo
+        return dataclasses.replace(params, **changes) if changes else params
+    except Exception:  # noqa: BLE001 — fail toward flagging, see comment above
+        return params
 
 
 def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationReport) -> None:
@@ -7940,6 +8002,20 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
     for rel_path, gen_func_name in _CANONICAL_PIPELINE_FILES:
         target = plugin_root / rel_path
         if not target.is_file():
+            # Task G (review): .mega-linter.yml points PYTHON_RUFF_CONFIG_FILE /
+            # PYTHON_BANDIT_CONFIG_FILE at these two files. Deleting one silently
+            # drops the canonical rule set (linters fall back to their own
+            # defaults), so a missing one is drift whenever the plugin ships the
+            # canonical mega-linter config. Other missing files stay silent
+            # (validate_pipeline_readiness flags those).
+            if rel_path in _MEGALINTER_RULE_CONFIGS and (plugin_root / ".mega-linter.yml").is_file():
+                report.warning(
+                    f"[RC-PIPELINE-DRIFT-001] {rel_path} is missing, but .mega-linter.yml "
+                    f"points at it: the canonical lint/security rule set is not applied. "
+                    f"Restore it with `/cpv-upgrade-plugin` (or "
+                    f"`generate_plugin_repo.py --force-templates`).",
+                    file=rel_path,
+                )
             continue
         try:
             actual_content = target.read_text(encoding="utf-8", errors="replace")
@@ -7948,6 +8024,14 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
         gen_func = getattr(gen_module, gen_func_name, None)
         if gen_func is None:
             continue
+        # Issue #257 item 4: notify-marketplace.yml carries two per-plugin VALUES
+        # (MARKETPLACE_OWNER / MARKETPLACE_REPO) absent from plugin.json; render with
+        # the values the file declares (well-formed only, see the helper). Computed
+        # OUTSIDE the try below ON PURPOSE: the helper never raises, and a failure
+        # must not reach that broad except, which would skip the file's drift check
+        # (fail-open). On any error the helper returns params unchanged, so the
+        # default render differs and drift is still reported.
+        gen_params = _params_with_notify_values(params, plugin_root) if rel_path == _NOTIFY_RENDER_REL else params
         try:
             # Some gen_* are unparameterized; introspect the signature instead
             # of guessing. A gen_* that ALSO declares a `profile` parameter
@@ -7966,9 +8050,11 @@ def validate_canonical_pipeline_drift(plugin_root: Path, report: ValidationRepor
             if not sig.parameters:
                 expected_content = gen_func()
             elif "profile" in sig.parameters:
-                expected_content = gen_func(params, profile)
+                # gen_params in every branch (task G round 3): a 2-arg generator
+                # rendering the notify file must see the same values as a 1-arg one.
+                expected_content = gen_func(gen_params, profile)
             else:
-                expected_content = gen_func(params)
+                expected_content = gen_func(gen_params)
         except Exception:  # noqa: BLE001 — gen_func is an arbitrary template generator; a failure in one just skips that file's drift check
             continue
         if actual_content == expected_content:

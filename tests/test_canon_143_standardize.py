@@ -92,8 +92,8 @@ def test_canonical_jscpd_content_parses_with_threshold_5():
     assert data["minTokens"] == 50
     assert data["reporters"] == ["console"]
     assert data["gitignore"] is True
-    for glob in ("**/tests_dev/**", "**/fixtures/**", "**/node_modules/**", "**/.git/**"):
-        assert glob in data["ignore"], glob
+    # #257 item 5: only the never-tracked trees are ignored, no tracked-content glob.
+    assert data["ignore"] == ["**/node_modules/**", "**/.git/**"], data["ignore"]
 
 
 def test_canonical_constant_threshold_is_5():

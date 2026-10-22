@@ -1920,7 +1920,7 @@ These errors come from `validate_marketplace_private_info()` (marketplace valida
 **Root Cause:** A file in the marketplace or a plugin subfolder contains a path that includes the current user's private home directory path (auto-detected from the system).
 
 **Fix:**
-1. Replace absolute paths with relative paths: `./scripts/foo.sh` instead of `/Users/john/marketplace/scripts/foo.sh`
+1. Replace absolute paths with relative paths: `./scripts/foo.sh` instead of `/Users/username/marketplace/scripts/foo.sh`
 2. Use environment variables: `${CLAUDE_PLUGIN_ROOT}`, `${HOME}`
 3. Search and replace: `grep -rn "/Users/$(whoami)" .`
 
@@ -1935,7 +1935,7 @@ These errors come from `validate_marketplace_private_info()` (marketplace valida
 | **Message** | `Absolute path found: '<path>...' (use relative path, ${CLAUDE_PLUGIN_ROOT}, or ${HOME})` |
 | **Category** | `private-info` |
 
-**Root Cause:** A file contains hardcoded absolute paths (e.g., `/Users/someone/...` or `/home/user/...`) that are not example/documentation paths and not environment variable references.
+**Root Cause:** A file contains hardcoded absolute paths (e.g., `/Users/username/...` or `/home/user/...`) that are not example/documentation paths and not environment variable references.
 
 **Fix:**
 1. Replace with relative paths where possible.

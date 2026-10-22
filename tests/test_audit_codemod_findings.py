@@ -3,11 +3,10 @@
 Findings (report 20260525_105207+0200-batch-menu-cli-content.md):
 
 * #1 MAJOR — cpv_codemod ``external-skip-list`` rewrote ``plugin.json``
-  UNCONDITIONALLY, ignoring ``--apply`` and violating the module's
-  dry-run-by-default safety contract (no diff, no backup).
-* #9 NIT  — cpv_codemod ``external-skip-list`` derived its exit code by
-  substring-matching the human summary, so summary-text drift could
-  silently flip the exit code.
+  UNCONDITIONALLY, ignoring ``--apply``. Task G (issue #237) removed that
+  subcommand entirely (CPV ignores ``cpv.exclude_paths``); `all` is now
+  asserted never to write the manifest.
+* #9 NIT  — moot after the removal (it concerned the subcommand's exit code).
 * #2 MINOR — cpv_parametrize_body_predicate cached the body-line set on
   ``id(content)``; CPython reuses freed addresses after GC, so a
   different file could receive a STALE wrong answer.
@@ -50,74 +49,13 @@ def _manifest_text(plugin_root: Path) -> str:
 
 
 class TestExternalSkipListDryRunContract:
-    """``external-skip-list`` writes plugin.json ONLY with --apply (finding #1)."""
+    """Finding #1 follow-up (task G, issue #237): the external-skip-list subcommand is gone.
 
-    def test_dry_run_does_not_mutate_plugin_json(self, tmp_path):
-        plugin_root = _make_plugin(tmp_path)
-        (plugin_root / "external").mkdir()
-        (plugin_root / "node_modules").mkdir()
-        before = _manifest_text(plugin_root)
-
-        result = cpv_codemod._apply_external_skip_list(plugin_root, apply=False)
-
-        # The manifest is byte-for-byte unchanged.
-        assert _manifest_text(plugin_root) == before
-        # Nothing was written; the result advertises what WOULD change.
-        assert result.changed is False
-        assert result.would_change is True
-        assert result.ok is True
-        # No exclude_paths leaked into the on-disk manifest.
-        assert "cpv" not in json.loads(before)
-
-    def test_dry_run_writes_no_backup(self, tmp_path):
-        plugin_root = _make_plugin(tmp_path)
-        (plugin_root / "external").mkdir()
-        cpv_codemod._apply_external_skip_list(plugin_root, apply=False)
-        # Dry-run leaves no backup directory behind.
-        assert not (plugin_root / ".cpv-codemod-backup").exists()
-
-    def test_apply_writes_and_backs_up(self, tmp_path):
-        plugin_root = _make_plugin(tmp_path)
-        (plugin_root / "external").mkdir()
-        before = _manifest_text(plugin_root)
-
-        result = cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
-
-        # The manifest changed and now lists the vendored dir.
-        assert result.changed is True
-        manifest = json.loads(_manifest_text(plugin_root))
-        assert "external" in manifest["cpv"]["exclude_paths"]
-        # A backup of the ORIGINAL manifest was written first.
-        backup_dir = plugin_root / ".cpv-codemod-backup"
-        assert backup_dir.is_dir()
-        backups = list(backup_dir.rglob("plugin.json"))
-        assert len(backups) == 1
-        assert backups[0].read_text(encoding="utf-8") == before
-
-    def test_cli_default_invocation_does_not_write(self, tmp_path):
-        """The DOCUMENTED contract: no --apply ⇒ no mutation (via main())."""
-        plugin_root = _make_plugin(tmp_path)
-        (plugin_root / "external").mkdir()
-        before = _manifest_text(plugin_root)
-
-        rc = cpv_codemod.main(["external-skip-list", "--plugin", str(plugin_root)])
-
-        assert rc == 0
-        assert _manifest_text(plugin_root) == before
-        assert not (plugin_root / ".cpv-codemod-backup").exists()
-
-    def test_cli_apply_invocation_writes(self, tmp_path):
-        plugin_root = _make_plugin(tmp_path)
-        (plugin_root / "vendor").mkdir()
-
-        rc = cpv_codemod.main(["external-skip-list", "--plugin", str(plugin_root), "--apply"])
-
-        assert rc == 0
-        manifest = json.loads(_manifest_text(plugin_root))
-        assert "vendor" in manifest["cpv"]["exclude_paths"]
+    `all` never writes plugin.json (it used to via external-skip-list), and the
+    removed subcommand is rejected by argparse.
+    """
 
     def test_all_subcommand_dry_run_does_not_write_manifest(self, tmp_path):
-        """`all` (dry-run) used to silently rewrite plugin.json (finding #1)."""
         plugin_root = _make_plugin(tmp_path)
         (plugin_root / "external").mkdir()
         before = _manifest_text(plugin_root)
@@ -125,70 +63,22 @@ class TestExternalSkipListDryRunContract:
         rc = cpv_codemod.main(["all", "--plugin", str(plugin_root)])
 
         assert rc == 0
-        # Manifest untouched by the dry-run `all` run.
         assert _manifest_text(plugin_root) == before
         assert not (plugin_root / ".cpv-codemod-backup").exists()
 
-
-# ── Finding #9 — exit code from structured result, not string scraping ────────
-
-
-class TestExternalSkipListExitCode:
-    """Exit code derives from ``SkipListResult.ok``, not summary text (finding #9)."""
-
-    def test_changed_result_is_ok_exit_zero(self, tmp_path):
+    def test_all_apply_never_writes_exclude_paths(self, tmp_path):
         plugin_root = _make_plugin(tmp_path)
         (plugin_root / "external").mkdir()
-        result = cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
-        assert result.changed is True
-        assert result.ok is True
+        before = _manifest_text(plugin_root)
 
-    def test_no_vendored_dirs_is_ok_exit_zero(self, tmp_path):
-        plugin_root = _make_plugin(tmp_path)
-        (plugin_root / "src").mkdir()
-        result = cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
-        assert result.changed is False
-        assert result.ok is True
+        rc = cpv_codemod.main(["all", "--plugin", str(plugin_root), "--apply"])
 
-    def test_already_excluded_is_ok_exit_zero(self, tmp_path):
-        plugin_root = _make_plugin(tmp_path)
-        (plugin_root / "external").mkdir()
-        cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
-        result = cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
-        assert result.changed is False
-        assert result.ok is True
-
-    def test_missing_manifest_is_ok_exit_zero(self, tmp_path):
-        # A plugin root with no .claude-plugin/plugin.json — a clean no-op.
-        bare = tmp_path / "bare"
-        bare.mkdir()
-        result = cpv_codemod._apply_external_skip_list(bare, apply=True)
-        assert result.changed is False
-        assert result.ok is True
-
-    def test_exit_code_independent_of_summary_wording(self, tmp_path):
-        """The exit code must NOT depend on phrases in `summary`.
-
-        Build a result whose summary contains NONE of the old magic
-        substrings ("already excluded" / "No vendored") yet is a clean
-        no-op; the CLI must still exit 0 because `ok` is True.
-        """
-        reworded = cpv_codemod.SkipListResult(
-            changed=False,
-            ok=True,
-            summary="nothing to do — manifest is in sync",  # no magic substrings
-        )
-        # The pre-fix code did: 0 if changed or "already excluded" in s
-        #                          or "No vendored" in s else 1
-        # which would have returned 1 for this summary. Prove the new
-        # contract: ok=True ⇒ exit 0 regardless of wording.
-        rc = 0 if reworded.ok else 1
         assert rc == 0
-        # And the converse — a genuine failure (ok=False) maps to exit 1.
-        failed = cpv_codemod.SkipListResult(changed=False, ok=False, summary="boom")
-        assert (0 if failed.ok else 1) == 1
+        assert _manifest_text(plugin_root) == before
+        assert "exclude_paths" not in _manifest_text(plugin_root)
 
 
+# ── Finding #9 — moot: the external-skip-list subcommand was removed (task G) ──
 # ── Finding #2 — content-hash cache key, no stale answer ──────────────────────
 
 _PARAM_BODY = (

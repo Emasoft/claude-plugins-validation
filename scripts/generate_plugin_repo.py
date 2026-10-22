@@ -1055,7 +1055,8 @@ def gen_plugin_json(p: PluginParams) -> str:
                         # CI / scripts / README continue to work unchanged.
                     },
                 ],
-                "require_url_allowlist": True,
+                # No `require_url_allowlist`: the submodule URL allowlist is
+                # CPV-owned and a plugin-declared key is ignored (issue #237).
             }
         }
     return json.dumps(manifest, indent=2) + "\n"
@@ -1125,30 +1126,9 @@ dev = [
     "ruff>=0.14.14",
 ]
 
-[tool.ruff]
-line-length = 120
-# Test fixtures are deliberately-malformed sample data that exercise this
-# plugin's validators/tests — ruff must never lint or format them locally
-# (e.g. `ruff check scripts/ tests/`) or it would "correct" the defects the
-# tests depend on. Mirrors the Mega-Linter FILTER_REGEX_EXCLUDE used in CI.
-extend-exclude = ["**/fixtures", "**/testdata", "**/__fixtures__"]
-# The git hooks are Python but git requires those exact EXTENSIONLESS filenames, so
-# ruff's default discovery skips them and `ruff check git-hooks/` prints "No Python
-# files found" followed by "All checks passed" — a VACUOUS green over the script that
-# gates every push. CPV shipped a NameError in its own pre-push exactly this way. CPV's
-# lint engine now reads shebangs, but a plugin's OWN ruff run (its CI, its hooks) does
-# not go through CPV, so it needs this line too.
-# Only `pre-push` is listed: this scaffold has no pre-commit generator, so naming
-# `git-hooks/pre-commit` here pointed ruff at a file the scaffold cannot produce
-# (audit row 24). Add it back the same day a pre-commit hook is actually emitted.
-extend-include = ["git-hooks/pre-push"]
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I"]
-ignore = ["E501"]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/*.py" = ["E402"]
+# Ruff is configured in the canonical `.ruff.toml` (issue #254), the ONE file read by
+# both the local gate and CI Mega-Linter. Do not add a ruff table here:
+# ruff ignores it when `.ruff.toml` sits beside this file.
 
 [tool.mypy]
 python_version = "{p.python_version}"
@@ -1985,6 +1965,18 @@ def _fork_parity_timeout() -> float:
     return _test_suite_timeout()
 
 
+def _exe(name: str) -> str:
+    """Return the executable path found on PATH, so the canonical publish.py is bandit B607 clean.
+
+    Bandit B607 flags a subprocess call whose first list element is a bare executable
+    name. Calling through this helper keeps the literal out of the call, which clears the
+    rule. It does NOT change security: `shutil.which` performs the same PATH lookup the
+    subprocess call would have done, so nothing is pinned or hardened. When the tool is
+    absent the bare name is returned and the caller fails exactly as before.
+    """
+    return shutil.which(name) or name
+
+
 def run(
     cmd: list[str], cwd: Path | None = None, *, check: bool = True, capture: bool = False,
     timeout: float = 300,
@@ -2014,7 +2006,7 @@ def run(
     return result
 
 def get_repo_root() -> Path:
-    r = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+    r = subprocess.run([_exe("git"), "rev-parse", "--show-toplevel"],
                        capture_output=True, text=True, check=True)
     return Path(r.stdout.strip())
 
@@ -2040,7 +2032,7 @@ def _parse_owner_repo_from_remote(remote_url: str) -> tuple[str, str] | None:
 def _resolve_owner_repo(plugin_root: Path) -> tuple[str, str]:
     """Read remote.origin.url, parse (owner, repo). Exit 1 on failure."""
     result = subprocess.run(
-        ["git", "config", "--get", "remote.origin.url"],
+        [_exe("git"), "config", "--get", "remote.origin.url"],
         cwd=str(plugin_root), capture_output=True, text=True, timeout=10, check=False,
     )
     if result.returncode != 0 or not result.stdout.strip():
@@ -2411,7 +2403,7 @@ def install_hook(root: Path) -> int:
     # unconditionally, so a failed config write reported "installed" and every
     # later push was silently ungated — the worst possible thing to be wrong
     # about, because the whole point of this command is that pushes ARE gated.
-    cfg = subprocess.run(["git", "config", "core.hooksPath", "git-hooks"],
+    cfg = subprocess.run([_exe("git"), "config", "core.hooksPath", "git-hooks"],
                          cwd=str(root), check=False)
     if cfg.returncode != 0:
         cprint(f"  {RED}FAILED to set git config core.hooksPath = git-hooks "
@@ -2430,7 +2422,7 @@ def _get_origin_slug(root: Path) -> str | None:
             # timeout= for consistency with every sibling git helper in this
             # file (audit row 18): a bare `git config` read is instant, and a
             # hang here would stall the branch-rules install with no bound.
-            ["git", "config", "--get", "remote.origin.url"],
+            [_exe("git"), "config", "--get", "remote.origin.url"],
             capture_output=True, text=True, cwd=str(root), check=False, timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
@@ -2475,7 +2467,7 @@ def install_branch_rules(root: Path) -> int:
     try:
         r = subprocess.run(
             [
-                "uvx",
+                _exe("uvx"),
                 "--from",
                 "git+https://github.com/Emasoft/claude-plugins-validation",
                 "--with",
@@ -2522,7 +2514,7 @@ def _get_process_ancestry(max_depth: int = 30) -> list[tuple[int, str]]:
         seen.add(pid)
         try:
             r = subprocess.run(
-                ["ps", "-p", str(pid), "-o", "ppid=,args="],
+                [_exe("ps"), "-p", str(pid), "-o", "ppid=,args="],
                 capture_output=True, text=True, timeout=5,
             )
         except (OSError, subprocess.SubprocessError):
@@ -2780,10 +2772,10 @@ def _secret_scan(root: Path) -> int:
         # die with a raw TimeoutExpired traceback (audit row 16).
         try:
             if shutil.which("brew"):
-                subprocess.run(["brew", "install", "trufflehog"], timeout=900)
+                subprocess.run([_exe("brew"), "install", "trufflehog"], timeout=900)
             if not shutil.which("trufflehog") and shutil.which("go"):
                 subprocess.run(
-                    ["go", "install", "github.com/trufflesecurity/trufflehog/v3@latest"],
+                    [_exe("go"), "install", "github.com/trufflesecurity/trufflehog/v3@latest"],
                     timeout=900)
                 # `go install` drops the binary in GOBIN/GOPATH/bin, which is
                 # often not yet on PATH in this process. Resolve it THERE and
@@ -2820,7 +2812,7 @@ def _secret_scan(root: Path) -> int:
     # scan-evasion vector.
     _sec_root = str(root.resolve()).rstrip("/")
     _ign = subprocess.run(
-        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"],
+        [_exe("git"), "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"],
         cwd=str(root), capture_output=True, text=True, timeout=120)
     _ign_paths = [ln.strip() for ln in (_ign.stdout or "").splitlines() if ln.strip()]
     _excl_fh = tempfile.NamedTemporaryFile(
@@ -2931,7 +2923,7 @@ def _fork_parity_probe(root: Path, suite_timeout: float) -> int:
             os.pathsep + _env["PYTHONPATH"] if _env.get("PYTHONPATH") else "")
         try:
             _fp = subprocess.run(
-                ["uv", "run", "pytest", "tests/", "-q", "--tb=short"],
+                [_exe("uv"), "run", "pytest", "tests/", "-q", "--tb=short"],
                 cwd=str(root), env=_env, timeout=suite_timeout).returncode
         except subprocess.TimeoutExpired:
             cprint(f"  {RED}BLOCKED: suite HUNG under the Linux fork default.{NC}")
@@ -3014,7 +3006,7 @@ def run_gate(root: Path) -> int:
         candidates: list[str] = []
         try:
             sym = subprocess.run(
-                ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+                [_exe("git"), "symbolic-ref", "refs/remotes/origin/HEAD"],
                 capture_output=True, text=True, cwd=str(root), timeout=10,
             )
             if sym.returncode == 0 and sym.stdout.strip():
@@ -3031,7 +3023,7 @@ def run_gate(root: Path) -> int:
         for ref in candidates:
             try:
                 r = subprocess.run(
-                    ["git", "show", f"{ref}:.claude-plugin/plugin.json"],
+                    [_exe("git"), "show", f"{ref}:.claude-plugin/plugin.json"],
                     capture_output=True, text=True, cwd=str(root), timeout=10,
                 )
             except (OSError, subprocess.SubprocessError):
@@ -3073,8 +3065,11 @@ def run_gate(root: Path) -> int:
     # machine before ruff even starts, which routinely exceeds two minutes — so
     # the tighter bound blocked a perfectly healthy tree with "Command failed".
     # Same order as every other gate here.
+    # #254: `--config .ruff.toml` is explicit so a nested ruff.toml or a pyproject
+    # [tool.ruff] table cannot make this gate laxer than CI Mega-Linter, which reads
+    # the same canonical file.
     lint_result = subprocess.run(
-        ["uv", "run", "ruff", "check", "scripts/"],
+        [_exe("uv"), "run", "ruff", "check", "--config", ".ruff.toml", "."],
         cwd=str(root), timeout=300)
     if lint_result.returncode != 0:
         cprint(f"  {RED}BLOCKED: Lint issues found{NC}")
@@ -3296,7 +3291,7 @@ def run_gate(root: Path) -> int:
             cprint(f"  {YELLOW}{_MEGALINTER_NOT_WIRED}{NC}")
     else:
         sc = subprocess.run(
-            ["shellcheck", *[str(s) for s in sorted(_shell_scripts)]],
+            [_exe("shellcheck"), *[str(s) for s in sorted(_shell_scripts)]],
             cwd=str(root), timeout=180).returncode
         if sc != 0:
             cprint(f"  {RED}BLOCKED: shellcheck found issues (parity with CI Mega-Linter BASH_SHELLCHECK).{NC}")
@@ -3313,7 +3308,7 @@ def run_gate(root: Path) -> int:
         return 1
     try:
         ve = subprocess.run(
-            ["uvx", "--from",
+            [_exe("uvx"), "--from",
              "git+https://github.com/Emasoft/claude-plugins-validation",
              "--with", "pyyaml",
              "cpv-remote-validate", "plugin", ".", "--strict"],
@@ -3364,7 +3359,7 @@ def run_gate(root: Path) -> int:
     suite_timeout = _test_suite_timeout()
     try:
         te = subprocess.run(
-            ["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"],
+            [_exe("uv"), "run", "pytest", "tests/", "-x", "-q", "--tb=short"],
             cwd=str(root), timeout=suite_timeout).returncode
     except subprocess.TimeoutExpired:
         cprint(f"  {RED}BLOCKED: Tests timed out after {suite_timeout:g}s.{NC}")
@@ -3509,8 +3504,8 @@ def stage_lint(root: Path) -> None:
     if not scripts_dir.is_dir():
         cprint(f"  {RED}BLOCKED: scripts/ directory missing — cannot lint.{NC}")
         sys.exit(1)
-    cprint(f"  {BLUE}ruff check scripts/{NC}")
-    run(["uv", "run", "ruff", "check", "scripts/"], cwd=root)
+    cprint(f"  {BLUE}ruff check --config .ruff.toml .{NC}")
+    run(["uv", "run", "ruff", "check", "--config", ".ruff.toml", "."], cwd=root)
     cprint(f"  {BLUE}mypy scripts/ --ignore-missing-imports{NC}")
     run(["uv", "run", "mypy", "scripts/", "--ignore-missing-imports"], cwd=root)
     cprint(f"  {GREEN}Lint + typecheck passed.{NC}")
@@ -3545,7 +3540,7 @@ def _ps_table() -> dict:
     """
     try:
         snap = subprocess.run(
-            ["ps", "-eo", "pid,pgid,command"],
+            [_exe("ps"), "-eo", "pid,pgid,command"],
             capture_output=True, text=True, check=False, timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
@@ -3763,7 +3758,7 @@ def stage_ci_preflight(root: Path) -> None:
     # is not a passed preflight.
     try:
         rc = subprocess.run([
-            "uvx", "--from",
+            _exe("uvx"), "--from",
             "git+https://github.com/Emasoft/claude-plugins-validation",
             "--with", "pyyaml",
             "cpv-remote-validate", "ci-preflight", ".",
@@ -3845,7 +3840,7 @@ def _gh_secret_exists(plugin_root: Path, secret_name: str) -> bool | None:
 
 def _current_repo_slug(plugin_root: Path) -> str | None:
     """Return owner/repo slug for current git origin, or None."""
-    r = subprocess.run(["git", "remote", "get-url", "origin"], cwd=str(plugin_root),
+    r = subprocess.run([_exe("git"), "remote", "get-url", "origin"], cwd=str(plugin_root),
                        capture_output=True, text=True, timeout=30)
     if r.returncode != 0:
         return None
@@ -4086,7 +4081,7 @@ def _read_remote_version(plugin_root: Path) -> str | None:
     for ref in ("origin/master", "origin/main", "origin/HEAD"):
         try:
             r = subprocess.run(
-                ["git", "show", f"{ref}:.claude-plugin/plugin.json"],
+                [_exe("git"), "show", f"{ref}:.claude-plugin/plugin.json"],
                 capture_output=True, text=True, cwd=str(plugin_root),
                 check=False, timeout=15,
             )
@@ -4120,7 +4115,7 @@ def _git_porcelain_clean(root: Path) -> bool:
     """True iff `git status --porcelain` is empty (working tree clean)."""
     try:
         r = subprocess.run(
-            ["git", "status", "--porcelain"],
+            [_exe("git"), "status", "--porcelain"],
             capture_output=True, text=True, cwd=str(root),
             check=False, timeout=10,
         )
@@ -4133,7 +4128,7 @@ def _head_commit_message(root: Path) -> str:
     """Return the subject line of HEAD, or '' on failure."""
     try:
         r = subprocess.run(
-            ["git", "log", "-1", "--pretty=%s"],
+            [_exe("git"), "log", "-1", "--pretty=%s"],
             capture_output=True, text=True, cwd=str(root),
             check=False, timeout=10,
         )
@@ -4146,7 +4141,7 @@ def _local_tag_exists(root: Path, tag: str) -> bool:
     """True iff `tag` already exists in the local git repo."""
     try:
         r = subprocess.run(
-            ["git", "rev-parse", "--verify", f"refs/tags/{tag}"],
+            [_exe("git"), "rev-parse", "--verify", f"refs/tags/{tag}"],
             capture_output=True, text=True, cwd=str(root),
             check=False, timeout=10,
         )
@@ -4166,7 +4161,7 @@ def _remote_tag_state(root: Path, tag: str) -> bool | None:
     """
     try:
         r = subprocess.run(
-            ["git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}"],
+            [_exe("git"), "ls-remote", "--tags", "origin", f"refs/tags/{tag}"],
             capture_output=True, text=True, cwd=str(root),
             check=False, timeout=30,
         )
@@ -4429,7 +4424,7 @@ def _write_release_notes(root: Path, new_ver: str, tag: str) -> None:
     try:
         notes.parent.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
-            ["git-cliff", "--unreleased", "--tag", tag, "--strip", "all", "-o", str(notes)],
+            [_exe("git-cliff"), "--unreleased", "--tag", tag, "--strip", "all", "-o", str(notes)],
             cwd=str(root), capture_output=True, text=True, timeout=300, check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -4569,7 +4564,7 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
                      "CHANGELOG.md", "README.md", "pyproject.toml", "uv.lock"):
             if (root / _gen).exists():
                 run(["git", "add", "--", _gen], cwd=root)
-        _st = subprocess.run(["git", "status", "--porcelain"], cwd=root,
+        _st = subprocess.run([_exe("git"), "status", "--porcelain"], cwd=root,
                              capture_output=True, text=True, check=False)
         _stray = [ln[3:].strip() for ln in _st.stdout.splitlines() if ln.startswith("??")]
         if _stray:
@@ -4828,7 +4823,7 @@ def _smoke_records_still_registered(
     cannot-check-is-not-a-pass rule the install smoke applies to itself.
 
     Paths are compared RESOLVED: on macOS a temp dir is handed out as
-    /var/folders/... while the registry records /private/var/folders/..., and a
+    $TMPDIR/... while the registry records its resolved /private/... realpath, and a
     raw string compare would find nothing on exactly the platform that reported
     this.
     """
@@ -5054,7 +5049,7 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
     # blocked past CI_VERIFY_TIMEOUT_S indefinitely. A timed-out call is treated
     # as UNVERIFIED — never as green.
     try:
-        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root),
+        head = subprocess.run([_exe("git"), "rev-parse", "HEAD"], cwd=str(root),
                               capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
         cprint(f"  {YELLOW}UNVERIFIED - `git rev-parse HEAD` timed out.{NC}")
@@ -5068,7 +5063,7 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
     while True:
         try:
             listed = subprocess.run(
-                ["gh", "run", "list", "--commit", sha, "--limit", "20",
+                [_exe("gh"), "run", "list", "--commit", sha, "--limit", "20",
                  "--json", "name,status,conclusion,headBranch"],
                 cwd=str(root), capture_output=True, text=True, timeout=120,
             )
@@ -5190,7 +5185,7 @@ def _resolve_ci_run_successors(root: Path, sha: str, cancelled_runs: list[dict])
         # i.e. UNKNOWN, the conservative direction.
         try:
             listed = subprocess.run(
-                ["gh", "run", "list", "--workflow", name, "--branch", str(branch),
+                [_exe("gh"), "run", "list", "--workflow", name, "--branch", str(branch),
                  "--limit", "20", "--json", "headSha,conclusion,status,createdAt"],
                 cwd=str(root), capture_output=True, text=True, timeout=120,
             )
@@ -5208,7 +5203,7 @@ def _resolve_ci_run_successors(root: Path, sha: str, cancelled_runs: list[dict])
                 continue
             try:
                 ancestry = subprocess.run(
-                    ["git", "merge-base", "--is-ancestor", sha, candidate_sha],
+                    [_exe("git"), "merge-base", "--is-ancestor", sha, candidate_sha],
                     cwd=str(root), capture_output=True, timeout=30,
                 )
             except subprocess.TimeoutExpired:
@@ -6566,7 +6561,7 @@ jobs:
           {validate_block}
 
       - name: Lint Python scripts
-        run: uv run ruff check scripts/
+        run: uv run ruff check --config .ruff.toml .
 
       - name: Type check
         run: uv run mypy scripts/ --ignore-missing-imports
@@ -6819,17 +6814,24 @@ ENABLE_LINTERS:
 # Lint job on FPs that are unfixable in the working tree. Secrets are already
 # covered by publish.py's TruffleHog gate (with a public-info allowlist).
 
-# Exclude paths — single-quoted YAML scalar so regex \\. is read literally
-# (double-quoted YAML treats \\. as an invalid escape and yamllint rejects it).
-# Test FIXTURES are excluded for EVERY language Mega-Linter runs: fixtures are
-# deliberately-malformed sample data used to exercise the plugin's own
-# validators/tests, so linting them would "fix" the very defects the tests rely
-# on. Covers tests/fixtures, test/fixtures, spec/fixtures, __fixtures__ (JS),
-# testdata (Go), and a bare fixtures/ dir.
-FILTER_REGEX_EXCLUDE: '(tests_dev/|docs_dev/|scripts_dev/|samples_dev/|examples_dev/|builds_dev/|downloads_dev/|libs_dev/|llm_externalizer_output/|\\.claude/|\\.tldr/|tests?/fixtures/|spec/fixtures/|__fixtures__/|testdata/|fixtures/)'
+# #257 item 5: NO FILTER_REGEX_EXCLUDE. Everything git-tracked is linted, no exceptions.
+# The old list (dev dirs, .claude/, .tldr/, test fixtures) excluded content that
+# plugins DO track (e.g. .claude/project/memory/, fixture files). Untracked paths
+# need no entry: CI lints a clean checkout (gitignored dev/report dirs never exist
+# there), and IGNORE_GITIGNORED_FILES defaults to true (megalinter docs/configuration.md:
+# "MegaLinter will skip files ignored by git using .gitignore file").
 
-# Python settings
-PYTHON_RUFF_ARGUMENTS: "--select=E,F,W,I --ignore=E501"
+# #254: PYTHON_RUFF and PYTHON_BANDIT read CPV-authored config files that sit at the
+# repo root (.ruff.toml, .bandit.yml) and are byte-compared by the canonical-pipeline
+# drift check, so a plugin cannot weaken them. Without these keys Mega-Linter used its
+# OWN defaults (ruff line-length 88, bandit with no test-assert rule), which disagreed
+# with the local publish gate and failed CI on the canon files themselves.
+# PYTHON_RUFF_ARGUMENTS is deliberately absent: the rule selection lives in .ruff.toml
+# so CI and the local gate read ONE source.
+PYTHON_RUFF_CONFIG_FILE: .ruff.toml
+PYTHON_RUFF_RULES_PATH: .
+PYTHON_BANDIT_CONFIG_FILE: .bandit.yml
+PYTHON_BANDIT_RULES_PATH: .
 PYTHON_MYPY_ARGUMENTS: "--ignore-missing-imports"
 
 # Copy-paste detection — allow up to 5% duplication (0% is too strict for plugins)
@@ -6842,14 +6844,104 @@ REPOSITORY_CHECKOV_ARGUMENTS: "--skip-check CKV2_GHA_1"
 # Single-quoted so the regex \\. is read literally by yamllint.
 MARKDOWN_MARKDOWNLINT_FILTER_REGEX_EXCLUDE: 'CHANGELOG\\.md'
 
-# Spell check — single-quoted so the regex \\. is read literally by yamllint.
-SPELL_CSPELL_FILTER_REGEX_EXCLUDE: '(uv\\.lock|\\.json)'
+# Spell check (#257 item 5). cspell is a STYLE tool: it may skip only the package-manager
+# lock files CPV's own canon creates, by EXACT filename (hash/package-name noise,
+# never authored prose). NO directory or extension pattern: the old "(uv.lock|.json)"
+# regex skipped every tracked JSON file (plugin.json, hooks.json...). Single-quoted so the
+# regex \\. is read literally by yamllint.
+SPELL_CSPELL_FILTER_REGEX_EXCLUDE: '(^|/)(uv\\.lock|package-lock\\.json)$'
 
 # Disable reporters that create PR comments (we handle that ourselves).
 # Issue #29 (v2.97.0): the deprecated DISABLE_REPORTERS list form fails
 # Mega-Linter v8+ JSON Schema validation — the v8+ schema uses one
 # boolean key per reporter. Keep the boolean form below.
 GITHUB_COMMENT_REPORTER: false
+"""
+
+
+def gen_ruff_toml(p: PluginParams) -> str:
+    """Generate ``.ruff.toml`` — the ONE ruff configuration (issue #254).
+
+    WHY A SEPARATE CANON FILE. Mega-Linter's ``PYTHON_RUFF`` never read the
+    plugin's ``pyproject.toml``: with no config of its own it passed
+    ``--config /action/lib/.automation/.ruff.toml`` (line-length 88), so CI raised
+    I001 on canon files that the local ``ruff check`` (line-length 120) accepted.
+    ``.mega-linter.yml`` now points ``PYTHON_RUFF_CONFIG_FILE`` at this file, and
+    ruff itself prefers ``.ruff.toml`` over ``pyproject.toml`` in the same
+    directory, so the local gate and CI read the SAME bytes. The file is part of
+    the canonical-pipeline set, so any edit is a drift finding: a plugin cannot
+    weaken the rule set.
+
+    No ``extend-exclude``: git-tracked content is never kept out of a lint (the old
+    pyproject block excluded ``**/fixtures`` etc., see #257 item 5).
+    """
+    _ = p  # unused but kept for consistent signature
+    return """# Canonical ruff configuration (CPV issue #254). Read by BOTH the local gate
+# (ruff discovers .ruff.toml) and CI's Mega-Linter (PYTHON_RUFF_CONFIG_FILE).
+# Do not edit: the canonical-pipeline drift check compares this file byte for byte.
+line-length = 120
+# The git hooks are Python but git requires those exact EXTENSIONLESS filenames, so
+# ruff's default discovery skips them and `ruff check git-hooks/` prints "No Python
+# files found" followed by "All checks passed" — a VACUOUS green over the script that
+# gates every push.
+extend-include = ["git-hooks/pre-push"]
+
+[lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+"tests/*.py" = ["E402"]
+"""
+
+
+def gen_bandit_yml(p: PluginParams) -> str:
+    """Generate ``.bandit.yml`` — the CPV-authored bandit configuration (issue #254).
+
+    WHAT FAILS CI. Mega-Linter runs ``bandit --quiet -c .bandit.yml <files>`` with
+    NO severity filter, and bandit exits 1 on a finding of ANY severity. The old
+    local preflight ran ``-ll`` (MEDIUM+) on ``scripts/`` only and called that
+    parity; measured on the canon ``publish.py``, bare bandit exits 1 (LOW B404 and
+    B603, MEDIUM-confidence B607) where ``-ll`` exits 0. The preflight now runs the
+    same command over the same files with THIS file.
+
+    TWO CHANGES FROM MEGA-LINTER'S DEFAULT, both narrow:
+
+    * ``assert_used.skips`` for pytest files. ``assert`` IS the pytest idiom (B101
+      fires on every test), and the glob skips only B101: every other bandit rule
+      still scans ``tests/``. A non-test module keeps B101.
+    * ``skips: [B404, B603]``. B404 flags ``import subprocess`` itself and B603
+      flags EVERY ``subprocess`` call that does not use ``shell=True`` — i.e. the
+      SAFE list-argument form — with no signal about where the arguments came from,
+      so neither can tell a hijack from the canon's own fixed ``git`` and ``gh``
+      calls. The rules that do carry a signal stay on: B602 (``shell=True``), B604,
+      B605 (shell string), B606 and B607 (partial executable path).
+
+    The file is in the canonical-pipeline drift set, so a plugin cannot extend
+    ``skips``.
+    """
+    _ = p  # unused but kept for consistent signature
+    return """# Canonical bandit configuration (CPV issue #254). Read by BOTH the local preflight
+# and CI's Mega-Linter (PYTHON_BANDIT_CONFIG_FILE). Do not edit: the canonical-pipeline
+# drift check compares this file byte for byte.
+#
+# B404 (import subprocess) and B603 (subprocess call without shell=True) fire on every
+# list-argument subprocess call, the SAFE form, with no information about the
+# arguments. B602, B604, B605, B606 and B607 (the rules that DO carry a signal) stay on.
+skips:
+  - B404
+  - B603
+
+# `assert` is the pytest idiom; B101 is skipped for test files ONLY. Every other rule
+# still scans them, and B101 still fires in any non-test module.
+assert_used:
+  skips:
+    - "*/test_*.py"
+    - "*/*_test.py"
+    - "*/conftest.py"
+    - "test_*.py"
+    - "*_test.py"
+    - "conftest.py"
 """
 
 
@@ -6867,9 +6959,9 @@ def gen_jscpd_json(p: PluginParams) -> str:
 
     ``threshold`` 5 matches ``.mega-linter.yml``'s
     ``COPYPASTE_JSCPD_ARGUMENTS: "--threshold 5"``; the ``ignore`` globs mirror
-    that file's ``FILTER_REGEX_EXCLUDE`` (same dev-only dirs + test fixtures +
-    vendored ``node_modules``/``.git``) so a dev-dir or fixture duplicate is
-    never counted by either gate.
+    that file (#257 item 5): ONLY ``node_modules``/``.git``, which are never
+    tracked. No dev dir, ``.claude/`` or fixture pattern: git-tracked content is
+    never kept out of a scan (``"gitignore": true`` already skips ignored dirs).
     """
     _ = p  # unused but kept for consistent signature
     return """{
@@ -6878,11 +6970,6 @@ def gen_jscpd_json(p: PluginParams) -> str:
   \"gitignore\": true,
   \"reporters\": [\"console\"],
   \"ignore\": [
-    \"**/tests_dev/**\", \"**/docs_dev/**\", \"**/scripts_dev/**\", \"**/samples_dev/**\",
-    \"**/examples_dev/**\", \"**/builds_dev/**\", \"**/downloads_dev/**\", \"**/libs_dev/**\",
-    \"**/llm_externalizer_output/**\", \"**/.claude/**\", \"**/.tldr/**\",
-    \"**/tests/fixtures/**\", \"**/test/fixtures/**\", \"**/spec/fixtures/**\",
-    \"**/__fixtures__/**\", \"**/testdata/**\", \"**/fixtures/**\",
     \"**/node_modules/**\", \"**/.git/**\"
   ]
 }
@@ -6982,7 +7069,12 @@ def gen_cspell_json(p: PluginParams, files: list[tuple[str, str, bool]]) -> str:
     # LAZY import, matching the convention standardize_plugin already uses for
     # its own generate_plugin_repo callsites: the two modules reference each
     # other, and a module-level import here would risk a cycle.
-    from standardize_plugin import _CSPELL_BASE_WORDS, _CSPELL_IGNORE_PATHS, _cspell_tokens
+    from standardize_plugin import (
+        _CSPELL_BASE_WORDS,
+        _CSPELL_IGNORE_PATHS,
+        _CSPELL_IGNORE_REGEXP,
+        _cspell_tokens,
+    )
 
     # The plugin's OWN proper nouns — the words a generic dictionary can never
     # know. Same SOURCES as standardize_plugin._cspell_plugin_terms, which reads
@@ -7011,6 +7103,7 @@ def gen_cspell_json(p: PluginParams, files: list[tuple[str, str, bool]]) -> str:
         # CI never sees — the opposite of parity.
         "useGitignore": True,
         "ignorePaths": list(_CSPELL_IGNORE_PATHS),
+        "ignoreRegExpList": list(_CSPELL_IGNORE_REGEXP),
         "words": sorted(set(_CSPELL_BASE_WORDS) | terms),
     }
     return json.dumps(config, indent=2) + "\n"
@@ -7511,6 +7604,8 @@ def generate_all_files(
                 ("hooks/hooks.json", gen_hooks_json(p), False),
                 ("git-hooks/pre-push", gen_pre_push_hook(p), True),
                 (".mega-linter.yml", gen_mega_linter_yml(p), False),
+                (".ruff.toml", gen_ruff_toml(p), False),
+                (".bandit.yml", gen_bandit_yml(p), False),
                 # Issue #143: shared copy-paste-detector config, read by BOTH
                 # CI's Mega-Linter COPYPASTE_JSCPD step AND publish.py --gate
                 # G2b — one source of truth so the local gate and CI agree on

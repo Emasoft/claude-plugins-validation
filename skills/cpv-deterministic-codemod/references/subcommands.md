@@ -17,8 +17,9 @@
 | 3 | `wrap-placeholder-paths` | Wrap unresolved placeholder-shaped prose paths in `<...>` | MINORs across plugins |
 | 4 | `add-standard-sections` | Insert missing `## Overview` / `## Examples` / `## Output` in SKILL.md | Structural MAJORs |
 | 5 | `dedup-trailing-blanks` | Collapse runs of 3+ newlines into exactly 2 | NITs |
-| 6 | `external-skip-list` | Add `external/`, `vendor/`, submodule paths to `cpv.exclude_paths` | Issue #16 F — vendored MINORs |
-| 7 | `all` | Run every applicable subcommand in safe order | All of the above |
+| 6 | `all` | Run every applicable subcommand in safe order | All of the above |
+
+The former `external-skip-list` subcommand was REMOVED (issue #237): CPV no longer honors `cpv.exclude_paths`, so the codemod never writes it.
 
 ## Safety contract
 

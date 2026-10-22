@@ -22,7 +22,7 @@ See [subcommands](references/subcommands.md) for detail.
 
 ## Instructions
 
-1. Choose a subcommand: `backtick-to-link`, `add-toc`, `wrap-placeholder-paths`, `add-standard-sections`, `dedup-trailing-blanks`, `external-skip-list`, or `all`.
+1. Choose a subcommand: `backtick-to-link`, `add-toc`, `wrap-placeholder-paths`, `add-standard-sections`, `dedup-trailing-blanks`, or `all`.
 2. Run dry-run first (default — no `--apply`). Inspect the diff output.
 3. Re-run with `--apply` to write. A per-file backup is created under `.cpv-codemod-backup/<timestamp>/<rel-path>`.
 4. Re-validate via `cpv-plugin-validation-skill` and confirm finding counts dropped.

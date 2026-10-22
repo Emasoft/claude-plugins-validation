@@ -92,14 +92,15 @@ _PATH_TRAVERSAL_RE = re.compile(r"\.\.")
 # deliberate parser confusion.
 _FORBIDDEN_CHARS_RE = re.compile(r"[\\\n\r]")
 
-# The default allowlist applied when `cpv.strip.allowed_submodule_urls`
-# is absent and `cpv.strip.require_url_allowlist` is True (the default).
-# Rule: SAME OWNER as the parent repo ONLY. A universal validator carries no
-# personal/vendor carve-out — a hardcoded owner would let ANY third-party plugin
-# allowlist that owner's submodule URLs (a supply-chain hole). Cross-owner
-# submodules must be declared explicitly in `cpv.strip.allowed_submodule_urls`.
-# Per TRDD-793ac32a §2.2, hardened: the former `OR Emasoft` transitional carve-out
-# was removed as a universal-validator leak (issue #175 follow-up).
+# The submodule-URL allowlist. Rule: SAME OWNER as the parent repo, or a URL
+# matching an entry of CPV_SUBMODULE_URL_ALLOWLIST below. The list is defined
+# HERE, inside CPV, and is empty: a universal validator carries no personal/vendor
+# carve-out (a hardcoded owner would let ANY third-party plugin allowlist that
+# owner's submodule URLs, a supply-chain hole), and since task G (issue #237) the
+# scanned plugin cannot extend it or switch it off either. Per TRDD-793ac32a
+# §2.2, hardened: the former `OR Emasoft` transitional carve-out was removed as a
+# universal-validator leak (issue #175 follow-up).
+CPV_SUBMODULE_URL_ALLOWLIST: tuple[str, ...] = ()
 
 
 # ── Data classes ───────────────────────────────────────────────────────────────
@@ -127,8 +128,8 @@ class GitmodulesFinding:
 def _read_remote_owner(plugin_root: Path) -> str | None:
     """Return the owner of `git config remote.origin.url` (or None).
 
-    Used to compute the default-rule allowlist when no explicit
-    `allowed_submodule_urls` is set in plugin.json.
+    Used to compute the same-owner allowlist rule (the only rule besides the
+    CPV-defined CPV_SUBMODULE_URL_ALLOWLIST).
     """
     try:
         result = subprocess.run(
@@ -149,8 +150,15 @@ def _read_remote_owner(plugin_root: Path) -> str | None:
     return m.group(1) if m else None
 
 
+# Task G (issue #237, owner policy "url allowlist must also be not configurable
+# by the user"): these strip keys used to let the scanned plugin widen or switch
+# off the submodule-URL allowlist. They are dropped on read, so nothing in this
+# module can honor them; validate_plugin warns about each one present.
+_INERT_STRIP_KEYS: frozenset[str] = frozenset({"allowed_submodule_urls", "require_url_allowlist"})
+
+
 def _read_strip_block(plugin_root: Path) -> dict[str, object]:
-    """Return the `cpv.strip` block from plugin.json (or {})."""
+    """Return the `cpv.strip` block from plugin.json (or {}), minus the inert keys."""
     pj = plugin_root / ".claude-plugin" / "plugin.json"
     if not pj.is_file():
         return {}
@@ -162,7 +170,9 @@ def _read_strip_block(plugin_root: Path) -> dict[str, object]:
     if not isinstance(cpv_block, dict):
         return {}
     strip = cpv_block.get("strip")
-    return strip if isinstance(strip, dict) else {}
+    if not isinstance(strip, dict):
+        return {}
+    return {k: v for k, v in strip.items() if k not in _INERT_STRIP_KEYS}
 
 
 def _scheme_of(url: str) -> str | None:
@@ -309,8 +319,12 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
 
     Order of checks per URL:
       1. URL shape — scheme, characters, traversal, userinfo (CRITICAL)
-      2. Allowlist match — explicit list OR default-rule (CRITICAL when
-         `require_url_allowlist=True`; WARNING otherwise)
+      2. Allowlist match — same owner as the parent repo, or a URL in the
+         CPV-defined ``CPV_SUBMODULE_URL_ALLOWLIST`` (CRITICAL otherwise).
+         Task G (issue #237): the plugin can no longer widen this list
+         (`cpv.strip.allowed_submodule_urls`) or switch it off
+         (`cpv.strip.require_url_allowlist=false`); both keys are ignored
+         and warned about by validate_plugin (warn_inert_cpv_keys).
       3. SHA pin match — if `cpv.strip.extract[].submodule_commit_sha`
          is provided, the actual git-tree-tracked SHA must match
          (CRITICAL on mismatch)
@@ -323,10 +337,6 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
         return findings
 
     strip = _read_strip_block(plugin_root)
-    explicit_allowlist = strip.get("allowed_submodule_urls")
-    if not isinstance(explicit_allowlist, list):
-        explicit_allowlist = None
-    require_allowlist = strip.get("require_url_allowlist", True)
 
     # Default rule: same owner as the parent repo only. Computed lazily
     # because reading `git config remote.origin.url` is one fork.
@@ -360,24 +370,8 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
             )
             continue
 
-        # 2. Allowlist match.
-        if explicit_allowlist is not None:
-            if not _matches_allowlist(url, explicit_allowlist):
-                findings.append(
-                    GitmodulesFinding(
-                        severity="CRITICAL",
-                        code="STRIP-G011",
-                        submodule_name=name,
-                        url=url,
-                        path=path,
-                        message=(
-                            f"Submodule URL '{url}' is not in `cpv.strip.allowed_submodule_urls` ({explicit_allowlist})"
-                        ),
-                    )
-                )
-                continue
-        elif require_allowlist:
-            # Default rule: parent repo owner only.
+        # 2. Allowlist match: the CPV-defined list, else same owner only.
+        if not _matches_allowlist(url, list(CPV_SUBMODULE_URL_ALLOWLIST)):
             if not parent_owner_loaded:
                 parent_owner = _read_remote_owner(plugin_root)
                 parent_owner_loaded = True
@@ -392,10 +386,8 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
                         path=path,
                         message=(
                             f"Submodule URL '{url}' is not GitHub-shaped; the "
-                            "default allowlist rule (same-owner-only) "
-                            "cannot evaluate it. Add an explicit "
-                            "`cpv.strip.allowed_submodule_urls` entry, OR set "
-                            "`require_url_allowlist=false` to opt out."
+                            "allowlist rule (same owner as the parent repo) cannot "
+                            "evaluate it. CPV allows no plugin-declared exception."
                         ),
                     )
                 )
@@ -410,29 +402,12 @@ def validate_gitmodules(plugin_root: Path) -> list[GitmodulesFinding]:
                         path=path,
                         message=(
                             f"Submodule URL '{url}' owner '{url_owner}' is not the "
-                            f"parent repo owner ('{parent_owner}'). Declare it in "
-                            f"`cpv.strip.allowed_submodule_urls` to allow a cross-owner submodule."
+                            f"parent repo owner ('{parent_owner}'). Cross-owner submodules "
+                            f"are rejected; CPV allows no plugin-declared exception."
                         ),
                     )
                 )
                 continue
-        else:
-            # No explicit allowlist AND require_url_allowlist=False —
-            # opt-out. Emit advisory WARNING for traceability.
-            findings.append(
-                GitmodulesFinding(
-                    severity="WARNING",
-                    code="STRIP-G014",
-                    submodule_name=name,
-                    url=url,
-                    path=path,
-                    message=(
-                        f"Submodule URL '{url}' accepted without allowlist "
-                        f"(require_url_allowlist=false). Reviewers must "
-                        f"manually verify this URL on every change."
-                    ),
-                )
-            )
 
         # 3. SHA-pin verification (best-effort; needs git in working repo).
         pinned_sha = sha_pins.get(path.rstrip("/"))

@@ -366,7 +366,7 @@ def test_emitted_publish_py_carries_a_release_path_secret_gate():
 
 def test_emitted_gate_installs_trufflehog_rather_than_demanding_it():
     body = _emitted_publish_py()
-    assert '"brew", "install", "trufflehog"' in body
+    assert '_exe("brew"), "install", "trufflehog"' in body
     assert "github.com/trufflesecurity/trufflehog/v3@latest" in body
 
 

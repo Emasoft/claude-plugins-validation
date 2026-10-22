@@ -698,6 +698,10 @@ def _gate_uv_sync_dev(result: PreflightResult) -> None:
 # skipped (a clean PASS), so adding an entry here never forces a probe on a
 # plugin that didn't opt into that Mega-Linter linter.
 _BANDIT_LINTER_ID = "PYTHON_BANDIT"
+_RUFF_LINTER_ID = "PYTHON_RUFF"
+# Directory names skipped by NAME only when the root is not a git repo (no `git ls-files`
+# to ask). `.git` is skipped everywhere: git data is never a tracked file.
+_NEVER_TRACKED_DIRS = frozenset({".git", "node_modules", ".venv", "venv"})
 _SHELLCHECK_LINTER_ID = "BASH_SHELLCHECK"
 _SHFMT_LINTER_ID = "BASH_SHFMT"
 _CSPELL_LINTER_ID = "SPELL_CSPELL"
@@ -876,6 +880,7 @@ def _gate_megalinter_tool(
     install_hint: str,
     build_argv: Callable[[str, Path], list[str]],
     enabled: set[str] | None,
+    build_argvs: Callable[[str, Path], list[list[str]]] | None = None,
 ) -> None:
     """One Mega-Linter sub-linter parity probe, following the gate contract.
 
@@ -918,14 +923,22 @@ def _gate_megalinter_tool(
             ),
         )
         return
+    # One argv normally; a per-file linter fed a long file list is split into chunks (see
+    # `_chunked_argvs`) so a big plugin cannot hit the OS argument-length limit. A chunk
+    # that exits non-zero fails the gate; the outputs of failing chunks are concatenated.
+    argvs = build_argvs(tool_bin, result.plugin_path) if build_argvs else [build_argv(tool_bin, result.plugin_path)]
+    failed_out: list[str] = []
     try:
-        proc = subprocess.run(
-            build_argv(tool_bin, result.plugin_path),
-            cwd=str(result.plugin_path),
-            capture_output=True,
-            text=True,
-            timeout=_MEGALINTER_TIMEOUT,
-        )
+        for argv in argvs:
+            proc = subprocess.run(
+                argv,
+                cwd=str(result.plugin_path),
+                capture_output=True,
+                text=True,
+                timeout=_MEGALINTER_TIMEOUT,
+            )
+            if proc.returncode != 0:
+                failed_out.append((proc.stdout or proc.stderr or "").strip())
     except (OSError, subprocess.TimeoutExpired) as exc:
         result.add(
             gate,
@@ -934,8 +947,8 @@ def _gate_megalinter_tool(
             + (f"CI's Mega-Linter still enforces {linter_id}." if wired else _MEGALINTER_NOT_WIRED),
         )
         return
-    if proc.returncode != 0:
-        detail = (proc.stdout or proc.stderr or "").strip()
+    if failed_out:
+        detail = "\n".join(failed_out)
         first = ""
         for ln in detail.splitlines():
             if ln.strip():
@@ -1101,23 +1114,36 @@ def _argv_trivy(tool_bin: str, root: Path) -> list[str]:
     return [tool_bin, "fs", "--exit-code", "1", "--no-progress", "."]
 
 
+_ARGV_CHUNK = 500
+
+
+def _chunked_argvs(prefix: list[str], files: list[str], size: int = _ARGV_CHUNK) -> list[list[str]]:
+    """Split a long file list into argvs of at most ``size`` paths (OS argument-length limit)."""
+    return [[*prefix, *files[i : i + size]] for i in range(0, len(files), size)] or [prefix]
+
+
+def _bandit_prefix(root: Path) -> list[str]:
+    # Mirror Mega-Linter PYTHON_BANDIT exactly (issues #254, #257 item 3): `bandit
+    # --quiet -c .bandit.yml <files>`, NO severity filter, over every shipped .py file
+    # (scripts/ AND tests/), because that is what CI runs and bandit exits 1 on a finding
+    # of ANY severity. The old `-r scripts/ -q -ll` comment claimed Mega-Linter does not
+    # block on LOW findings; measured on the canon publish.py, bare bandit exits 1 (LOW
+    # B404/B603) while `-ll` exits 0, and CI failed with 98 LOW findings. The canonical
+    # `.bandit.yml` (CPV-authored, drift-checked) carries the only exceptions. Without it
+    # Mega-Linter falls back to its own default, which is bare bandit.
+    return ["-q", "-c", ".bandit.yml"] if (root / ".bandit.yml").is_file() else ["-q"]
+
+
 def _argv_bandit(tool_bin: str, root: Path) -> list[str]:
-    # Mirror Mega-Linter PYTHON_BANDIT on the plugin's scripts/. `-r` recurses;
-    # `-q` quiet; `-ll` filters to MEDIUM+ severity. The `-ll` filter is
-    # load-bearing for the degrade-gracefully "never false-block" contract: the
-    # canonical generated `publish.py` (which IS CI-green) produces ~50
-    # LOW-severity B404/B603 "subprocess call" findings that Mega-Linter's
-    # PYTHON_BANDIT does NOT block on (no adopter CI failure was ever traced to
-    # bandit — only checkov/trivy/cspell). A bare `bandit -r` exits non-zero on
-    # those LOW findings → it would FALSE-BLOCK a provably-CI-green plugin. `-ll`
-    # restricts the FAIL to MEDIUM+ severity (a real issue — e.g. a `shell=True`
-    # injection, B602), which is what CI actually fails on.
-    _ = root
-    return [tool_bin, "-r", "scripts/", "-q", "-ll"]
+    return [tool_bin, *_bandit_prefix(root), *_python_file_paths(root)]
 
 
-def _shell_script_paths(root: Path) -> list[str]:
-    """Return the plugin-relative `*.sh`/`*.bash` paths shellcheck/shfmt lint.
+def _argvs_bandit(tool_bin: str, root: Path) -> list[list[str]]:
+    return _chunked_argvs([tool_bin, *_bandit_prefix(root)], _python_file_paths(root))
+
+
+def _shipped_file_paths(root: Path, patterns: tuple[str, ...]) -> list[str]:
+    """Return the plugin-relative paths matching ``patterns`` that actually ship.
 
     Skips genuinely-unshipped paths — gitignored AND untracked (issue #176). A
     CI checkout of the published artifact never contains those files (e.g. a
@@ -1139,15 +1165,32 @@ def _shell_script_paths(root: Path) -> list[str]:
         unshipped = None
         path_is_unshipped = None  # type: ignore[assignment]
     paths: list[str] = []
-    for pat in ("*.sh", "*.bash"):
+    for pat in patterns:
         for p in sorted(root.rglob(pat)):
             if not p.is_file():
                 continue
             rel_posix = p.relative_to(root).as_posix()
+            # No git: nothing says what is tracked, so skip only the trees that are never
+            # part of a checkout by name (VCS data, dependency and virtualenv dirs). In a git
+            # repo this name skip must NOT run: `git ls-files` is the authority, and a TRACKED
+            # docs/venv/x.py would otherwise escape the lint (issue #257 item 5 policy).
+            parts = rel_posix.split("/")
+            if ".git" in parts or (unshipped is None and _NEVER_TRACKED_DIRS.intersection(parts)):
+                continue
             if unshipped is not None and path_is_unshipped is not None and path_is_unshipped(rel_posix, unshipped):
                 continue
             paths.append(str(p.relative_to(root)))
     return paths
+
+
+def _shell_script_paths(root: Path) -> list[str]:
+    """Return the plugin-relative `*.sh`/`*.bash` paths shellcheck/shfmt lint."""
+    return _shipped_file_paths(root, ("*.sh", "*.bash"))
+
+
+def _python_file_paths(root: Path) -> list[str]:
+    """Return the plugin-relative `*.py` paths Mega-Linter feeds ruff and bandit."""
+    return _shipped_file_paths(root, ("*.py",))
 
 
 def _gate_shellcheck(result: PreflightResult, enabled: set[str] | None) -> None:
@@ -1213,6 +1256,101 @@ def _gate_shfmt(result: PreflightResult, enabled: set[str] | None) -> None:
     )
 
 
+def _warn_missing_canon_config(result: PreflightResult, gate: str, name: str) -> None:
+    """The canonical config file is absent: say so (drift), then the gate still runs without it."""
+    if not (result.plugin_path / name).is_file():
+        result.add(
+            gate,
+            _SEV_WARNING,
+            f"canonical {name} is missing (canonical-pipeline drift): CI Mega-Linter will use its own "
+            f"default configuration, not CPV's. Run `standardize --fix --force-templates` to restore it.",
+        )
+
+
+def _gate_bandit(result: PreflightResult, enabled: set[str] | None) -> None:
+    """Mega-Linter PYTHON_BANDIT parity probe (issue #254, #257 item 3).
+
+    Runs EXACTLY what CI runs: ``bandit --quiet -c .bandit.yml <every shipped .py>``
+    with no severity filter. The previous probe ran ``-ll`` over ``scripts/`` only
+    and reported "parity", so it passed where CI failed. A clean PASS when the plugin
+    ships no Python file (bandit with no file argument is a usage error, not a pass).
+    """
+    if enabled is None or _BANDIT_LINTER_ID not in enabled:
+        result.add(
+            "bandit",
+            _SEV_PASS,
+            f"bandit ({_BANDIT_LINTER_ID}) not enabled in .mega-linter.yml — skipped.",
+        )
+        return
+    if not _python_file_paths(result.plugin_path):
+        result.add("bandit", _SEV_PASS, "No *.py files — bandit not needed (Mega-Linter parity).")
+        return
+    _warn_missing_canon_config(result, "bandit", ".bandit.yml")
+    _gate_megalinter_tool(
+        result,
+        gate="bandit",
+        linter_id=_BANDIT_LINTER_ID,
+        tool_name="bandit",
+        install_hint="pip install bandit",
+        build_argv=_argv_bandit,
+        build_argvs=_argvs_bandit,
+        enabled=enabled,
+    )
+
+
+def _ruff_file_paths(root: Path) -> list[str]:
+    # The `.ruff.toml` extend-include names the extensionless git hook; an explicit file
+    # list bypasses ruff's own discovery, so add it here (issue #254 m3), but only when it
+    # really is Python: the generated hook is a POSIX shell script and ruff cannot parse it.
+    hook = root / "git-hooks" / "pre-push"
+    is_python = False
+    if hook.is_file():
+        first = hook.read_text(encoding="utf-8", errors="replace").split("\n", 1)[0]
+        is_python = first.startswith("#!") and "python" in first
+    return [*_python_file_paths(root), *(["git-hooks/pre-push"] if is_python else [])]
+
+
+def _ruff_prefix(root: Path) -> list[str]:
+    # Mirror Mega-Linter PYTHON_RUFF (`PYTHON_RUFF_CONFIG_FILE: .ruff.toml`). The config is
+    # passed EXPLICITLY: discovery would let a nested ruff.toml or a pyproject [tool.ruff]
+    # table make the local gate laxer than CI. Lint every shipped file, scripts/ AND tests/.
+    cfg = ["--config", ".ruff.toml"] if (root / ".ruff.toml").is_file() else []
+    return ["check", "--no-cache", *cfg]
+
+
+def _argv_ruff(tool_bin: str, root: Path) -> list[str]:
+    return [tool_bin, *_ruff_prefix(root), *_ruff_file_paths(root)]
+
+
+def _argvs_ruff(tool_bin: str, root: Path) -> list[list[str]]:
+    return _chunked_argvs([tool_bin, *_ruff_prefix(root)], _ruff_file_paths(root))
+
+
+def _gate_ruff(result: PreflightResult, enabled: set[str] | None) -> None:
+    """Mega-Linter PYTHON_RUFF parity probe (issue #254): same config, same files."""
+    if enabled is None or _RUFF_LINTER_ID not in enabled:
+        result.add(
+            "ruff",
+            _SEV_PASS,
+            f"ruff ({_RUFF_LINTER_ID}) not enabled in .mega-linter.yml — skipped.",
+        )
+        return
+    if not _ruff_file_paths(result.plugin_path):
+        result.add("ruff", _SEV_PASS, "No *.py files — ruff not needed (Mega-Linter parity).")
+        return
+    _warn_missing_canon_config(result, "ruff", ".ruff.toml")
+    _gate_megalinter_tool(
+        result,
+        gate="ruff",
+        linter_id=_RUFF_LINTER_ID,
+        tool_name="ruff",
+        install_hint="pip install ruff",
+        build_argv=_argv_ruff,
+        build_argvs=_argvs_ruff,
+        enabled=enabled,
+    )
+
+
 def _gate_megalinter(result: PreflightResult) -> None:
     """Run every Mega-Linter sub-linter parity probe, gated on `.mega-linter.yml`.
 
@@ -1240,15 +1378,8 @@ def _gate_megalinter(result: PreflightResult) -> None:
         build_argv=_argv_trivy,
         enabled=enabled,
     )
-    _gate_megalinter_tool(
-        result,
-        gate="bandit",
-        linter_id=_BANDIT_LINTER_ID,
-        tool_name="bandit",
-        install_hint="pip install bandit",
-        build_argv=_argv_bandit,
-        enabled=enabled,
-    )
+    _gate_ruff(result, enabled)
+    _gate_bandit(result, enabled)
     _gate_shellcheck(result, enabled)
     _gate_shfmt(result, enabled)
 

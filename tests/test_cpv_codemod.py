@@ -8,7 +8,7 @@ Coverage:
 - dedup-trailing-blanks: collapse triple+ newlines
 - wrap-placeholder-paths: wrap unresolved placeholder-shaped paths
 - add-standard-sections: insert missing standard headings in SKILL.md only
-- external-skip-list: detect vendored subtrees + write to plugin.json
+- external-skip-list: REMOVED (issue #237); the subcommand is rejected (exit 2)
 - vendored-subtree skip helper: external/, vendor/, .gitmodules paths
 - dry-run vs --apply: dry-run never writes, --apply writes + backs up
 - CLI integration: argparse choices, --min-lines flag, exit codes
@@ -251,45 +251,18 @@ class TestAddStandardSections:
 
 
 class TestExternalSkipList:
-    def test_vendored_dirs_added_to_plugin_json(self, tmp_path):
+    """Issue #237 / task G: the external-skip-list subcommand was removed."""
+
+    def test_subcommand_is_unknown_exit_2(self, tmp_path, capsys):
         plugin_root = _make_plugin(tmp_path)
         (plugin_root / "external").mkdir()
-        (plugin_root / "node_modules").mkdir()
-        result = cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
-        assert result.changed
-        assert result.ok
-        manifest = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-        assert "external" in manifest["cpv"]["exclude_paths"]
-        assert "node_modules" in manifest["cpv"]["exclude_paths"]
-
-    def test_no_vendored_dirs_returns_false(self, tmp_path):
-        plugin_root = _make_plugin(tmp_path)
-        (plugin_root / "src").mkdir()
-        result = cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
-        assert not result.changed
-        assert result.ok
-        assert "No vendored" in result.summary
-
-    def test_already_excluded_paths_idempotent(self, tmp_path):
-        plugin_root = _make_plugin(tmp_path)
-        (plugin_root / "external").mkdir()
-        cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
-        # Run again — should report no NEW additions
-        result = cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
-        assert not result.changed
-        assert result.ok
-        assert "already excluded" in result.summary
-
-    def test_gitmodules_paths_included(self, tmp_path):
-        plugin_root = _make_plugin(tmp_path)
-        (plugin_root / ".gitmodules").write_text(
-            '[submodule "vendored/lib"]\n  path = vendored/lib\n  url = https://example.com/lib.git\n',
-            encoding="utf-8",
-        )
-        result = cpv_codemod._apply_external_skip_list(plugin_root, apply=True)
-        assert result.changed
-        manifest = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-        assert "vendored/lib" in manifest["cpv"]["exclude_paths"]
+        before = (plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+        with pytest.raises(SystemExit) as exc:
+            cpv_codemod.main(["external-skip-list", "--plugin", str(plugin_root), "--apply"])
+        assert exc.value.code == 2
+        assert "invalid choice" in capsys.readouterr().err
+        assert (plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8") == before
+        assert not hasattr(cpv_codemod, "_apply_external_skip_list")
 
 
 # ── Vendored-subtree skip helper ────────────────────────────────────────────

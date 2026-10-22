@@ -391,8 +391,10 @@ def test_bandit_not_enabled_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 
 def test_bandit_enabled_clean_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """bandit enabled + on PATH + exit 0 → PASS (argv targets scripts/)."""
+    """bandit enabled + on PATH + exit 0 → PASS (argv targets the shipped .py files, no severity filter)."""
     root = _make_plugin(tmp_path)
+    (root / "scripts" / "x.py").write_text("x = 1\n", encoding="utf-8")
+    (root / ".bandit.yml").write_text("skips: []\n", encoding="utf-8")
     _write_mega_linter(root, ["PYTHON_BANDIT"])
     captured: list[list[str]] = []
 
@@ -408,9 +410,10 @@ def test_bandit_enabled_clean_passes(tmp_path: Path, monkeypatch: pytest.MonkeyP
     result = PreflightResult(plugin_path=root)
     cpv_ci_preflight._gate_megalinter(result)
     assert _finding(result, "bandit").severity == "PASS"
-    # The bandit invocation recurses scripts/.
+    # The bandit invocation runs on the shipped .py files with the canonical config (#254).
     bandit_calls = [a for a in captured if Path(a[0]).name == "bandit"]
-    assert bandit_calls and "scripts/" in bandit_calls[0]
+    assert bandit_calls and "scripts/x.py" in bandit_calls[0] and "-c" in bandit_calls[0]
+    assert "-ll" not in bandit_calls[0]
 
 
 # ===========================================================================
@@ -536,6 +539,7 @@ def test_megalinter_absent_tools_never_block_preflight(
         ["SPELL_CSPELL", "REPOSITORY_CHECKOV", "REPOSITORY_TRIVY", "PYTHON_BANDIT", "BASH_SHELLCHECK", "BASH_SHFMT"],
     )
     (root / "scripts" / "x.sh").write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+    (root / "scripts" / "x.py").write_text("x = 1\n", encoding="utf-8")
     # A cspell dictionary is shipped so this test isolates what it claims to test —
     # TOOL ABSENCE. Without one the plugin carries the separate RC-3 config DEFECT
     # (SPELL enabled, no dictionary → CI hard-errors on its proper nouns), which is
@@ -586,20 +590,21 @@ def test_megalinter_unreadable_config_skips_all(
 
 
 # ---------------------------------------------------------------------------
-# Regression: a probe MUST NOT false-block the canonical generated plugin
-# (central-verify dogfood, TRDD-HZSI0BZ6). A freshly-scaffolded plugin IS
-# CI-green, yet its generated publish.py emits ~50 LOW-severity B404/B603
-# "subprocess call" bandit findings. A bare `bandit -r` exits non-zero on those
-# → it would FALSE-BLOCK a provably-CI-green plugin (the degrade-gracefully
-# contract's cardinal sin). `_argv_bandit` filters to MEDIUM+ severity (`-ll`).
+# Parity (issues #254, #257 item 3): the local bandit probe runs EXACTLY what CI runs.
+# The old probe filtered to MEDIUM+ (`-ll`) and called that parity, yet Mega-Linter
+# runs bandit with no severity filter and bandit exits 1 on a LOW finding. The
+# canonical `.bandit.yml` now carries the only exceptions; the full set of two-sided
+# tests lives in tests/test_issue_254_canon_linters.py.
 # ---------------------------------------------------------------------------
 
 
-def test_argv_bandit_filters_to_medium_severity() -> None:
-    """`_argv_bandit` passes `-ll` (MEDIUM+ severity) so the LOW subprocess noise
-    every canonical generated publish.py produces does not false-block a publish."""
-    argv = cpv_ci_preflight._argv_bandit("/usr/bin/bandit", Path("/x"))
-    assert "-ll" in argv, f"bandit probe must filter to MEDIUM+ severity (-ll): {argv}"
+def test_argv_bandit_has_no_severity_filter(tmp_path: Path) -> None:
+    """`_argv_bandit` passes NO `-ll`/`-l` filter: a LOW finding must fail locally as in CI."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "x.py").write_text("x = 1\n", encoding="utf-8")
+    argv = cpv_ci_preflight._argv_bandit("/usr/bin/bandit", tmp_path)
+    assert not {"-l", "-ll", "-lll"} & set(argv), argv
+    assert "scripts/x.py" in argv
 
 
 def _scaffold(tmp_path: Path, name: str = "ml-clean-sample") -> Path:

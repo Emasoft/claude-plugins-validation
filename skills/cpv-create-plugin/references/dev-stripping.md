@@ -23,15 +23,17 @@ they carry the target repo slug and mount path, not a git submodule):
       "extract": [
         {"src": "tests/", "submodule": "<owner>/<plugin>-tests",
          "submodule_path": "tests/"}
-      ],
-      "require_url_allowlist": true
+      ]
     }
   }
 }
 ```
 
 into the generated plugin.json. Nothing is extracted until the user runs
-`cpv strip-dev-parts --auto` separately.
+`cpv strip-dev-parts --auto` separately. Submodule URLs are checked against
+CPV's own allowlist rule (same owner as the parent repo); the former
+`cpv.strip.allowed_submodule_urls` / `require_url_allowlist` keys are ignored
+and warned about (issue #237).
 
 ## Why this exists
 

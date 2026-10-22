@@ -1802,9 +1802,10 @@ def should_skip_directory(dir_name: str) -> bool:
 # Issue #16 helpers — vendored-path skip + npm-shape detection + cpv config
 # =============================================================================
 
-# Conventional vendored-code root directory names. Paths under any of these
-# subtrees are skipped from path-based, link-based, and content-based rules
-# because they hold third-party code the plugin author shouldn't modify.
+# Conventional vendored-code root directory names. UNTRACKED content under any
+# of these subtrees (an installed node_modules/, a local build/) is skipped from
+# path-based, link-based, and content-based rules; git-tracked content under
+# them is always scanned (task G, issues #237 / #257 — see is_vendored_path).
 # Matches the same set used by scripts/cpv_codemod.py (issue #17).
 VENDORED_DIR_NAMES: frozenset[str] = frozenset(
     {
@@ -1860,11 +1861,13 @@ def _load_cpv_config_cached(plugin_root_str: str) -> dict[str, object]:
     """Load the optional `cpv` block from `<plugin_root>/.claude-plugin/plugin.json`.
 
     Returns an empty dict if the manifest is missing or has no `cpv` block.
-    Maintainers can add per-plugin opt-outs:
-
-      {"cpv": {"exclude_paths":         ["external/", "vendor/"],
-               "allow_root_dirs":       ["external", "SKILLS-TO-INTEGRATE"],
-               "allow_orchestrator_traversal": "skills/amw-design-principles"}}
+    The scanned plugin can no longer opt out of any CPV rule through this block
+    (owner policy, issues #237 / TRDD-02e1672b): `exclude_paths`, `allow_root_dirs`,
+    `allow_orchestrator_traversal`, `strip.allowed_submodule_urls` and
+    `strip.require_url_allowlist` are declared INERT and warned about (see
+    ``INERT_CPV_KEYS`` / ``warn_inert_cpv_keys``). The two `strip.*` keys are
+    also dropped on read by ``cpv_validate_gitmodules._read_strip_block``, so no
+    reader honors them.
 
     REMOVED (TRDD-021250b5): the skill-size overrides ``max_chars`` /
     ``max_lines`` / ``skill_size_severity``. Skill/agent/command size limits are
@@ -1903,10 +1906,11 @@ def load_strip_config(plugin_root: Path) -> dict[str, object]:
             ],
             "keep_in_main":            ["tests/fixtures/small-snippets/"],
             "keep_dev_configs":        false,
-            "symlinks_for_devs":       true,
-            "allowed_submodule_urls":  ["https://github.com/Emasoft/*"],
-            "require_url_allowlist":   true
+            "symlinks_for_devs":       true
         }}}
+
+    (`allowed_submodule_urls` / `require_url_allowlist` are no longer part of
+    the schema: CPV owns the submodule allowlist, issue #237.)
 
     Returns an empty dict if the plugin has no cpv.strip block. Both
     `validate_plugin.py` (publish-time allowlist rule) and
@@ -1915,36 +1919,279 @@ def load_strip_config(plugin_root: Path) -> dict[str, object]:
     """
     cpv = load_cpv_config(plugin_root)
     strip = cpv.get("strip")
-    return strip if isinstance(strip, dict) else {}
+    if not isinstance(strip, dict):
+        return {}
+    # Issue #237: the submodule-allowlist keys are INERT (the allowlist is
+    # CPV-owned). Drop them here so no caller of this loader can read them back.
+    inert = {key[1] for key in INERT_CPV_KEYS if len(key) == 2 and key[0] == "strip"}
+    return {k: v for k, v in strip.items() if k not in inert}
+
+
+# Task G (issues #237 / #257, owner policy "everything that is git tracked must be
+# scanned, no exceptions"): the vendored-dir skip may only drop content git does
+# NOT track. Both answers are cached for the process lifetime: a positive in
+# _GIT_INDEX_PATHS, a negative (None sentinel) in _GIT_INDEX_NEGATIVE. Caching a
+# negative cannot hide anything, because "not a usable git tree" means the skip
+# drops NOTHING; it only stops a non-git tree paying one `git rev-parse` per
+# scanned file (measured 109.7 s vs 29.2 s). Both dicts and the lru_cache are
+# cleared between tests by the conftest suite-pollution fixture.
+_GIT_INDEX_PATHS: dict[str, Path] = {}
+_GIT_INDEX_NEGATIVE: dict[str, None] = {}
+
+
+def _git_run(root_str: str, *args: str, timeout: int) -> subprocess.CompletedProcess[bytes] | None:
+    """Run git in ``root_str`` with an environment the caller cannot steer.
+
+    Every ``GIT_*`` variable is dropped (GIT_INDEX_FILE, GIT_DIR, GIT_WORK_TREE ...
+    would let the environment that launched CPV point it at another index and
+    make tracked files look untracked), and ``core.fsmonitor`` is forced off so
+    a repo-configured fsmonitor hook is never executed. Returns None on any
+    launch failure (callers then skip nothing).
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        return subprocess.run(
+            ["git", "-c", "core.fsmonitor=false", "-C", root_str, *args],
+            capture_output=True,
+            env=env,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _git_index_path(root_str: str) -> Path | None:
+    """Return the git index path for ``root_str`` (None = not a usable work tree).
+
+    Task G (#237): the repo is accepted only when its top level IS the plugin
+    root, or when the plugin root sits inside it AND the plugin manifest
+    `.claude-plugin/plugin.json` is tracked there. A plugin dropped inside an
+    unrelated repo (whose index knows nothing about the plugin files) would
+    otherwise see all its own files as untracked and skip its vendored dirs.
+    """
+    cached = _GIT_INDEX_PATHS.get(root_str)
+    if cached is not None:
+        return cached
+    if root_str in _GIT_INDEX_NEGATIVE:
+        return None
+    index = _probe_git_index_path(root_str)
+    if index is None:
+        _GIT_INDEX_NEGATIVE[root_str] = None
+    else:
+        _GIT_INDEX_PATHS[root_str] = index
+    return index
+
+
+def _probe_git_index_path(root_str: str) -> Path | None:
+    """Uncached body of :func:`_git_index_path` (runs git)."""
+    proc = _git_run(root_str, "rev-parse", "--show-toplevel", "--git-path", "index", timeout=30)
+    if proc is None or proc.returncode != 0:
+        return None
+    lines = proc.stdout.decode("utf-8", "surrogateescape").splitlines()
+    if len(lines) < 2 or not lines[0] or not lines[1]:
+        return None
+    try:
+        same_root = Path(lines[0]).resolve() == Path(root_str).resolve()
+    except OSError:
+        return None
+    if not same_root:
+        chk = _git_run(root_str, "ls-files", "--error-unmatch", "--", ".claude-plugin/plugin.json", timeout=30)
+        if chk is None or chk.returncode != 0:
+            return None
+    out = lines[1]
+    return Path(out) if Path(out).is_absolute() else Path(root_str) / out
+
+
+@functools.lru_cache(maxsize=128)
+def _git_tracked_sets(root_str: str, _index_stamp: tuple[int, int]) -> tuple[frozenset[str], frozenset[str]] | None:
+    """Return (tracked files, their ancestor dirs) relative to ``root_str``, or None.
+
+    ``_index_stamp`` (index mtime_ns, size) is part of the cache key so a `git add`
+    after a first query is seen. ``--recurse-submodules`` lists the files of every
+    checked-out submodule (and the gitlink path of an uninitialised one):
+    submodule content is installed with the plugin, so it counts as tracked and
+    is scanned. Any git failure returns None, which makes ``is_vendored_path``
+    skip nothing (fail toward scanning).
+    """
+    proc = _git_run(root_str, "ls-files", "-z", "--recurse-submodules", timeout=120)
+    if proc is None or proc.returncode != 0:
+        return None
+    files: set[str] = set()
+    dirs: set[str] = set()
+    for raw in proc.stdout.split(b"\0"):
+        if not raw:
+            continue
+        rel = raw.decode("utf-8", "surrogateescape")
+        files.add(rel)
+        parts = rel.split("/")
+        for i in range(1, len(parts)):
+            dirs.add("/".join(parts[:i]))
+    return frozenset(files), frozenset(dirs)
+
+
+def _git_tracked_index(plugin_root: Path) -> tuple[frozenset[str], frozenset[str]] | None:
+    """Tracked (files, dirs) for ``plugin_root``; None when it is not a usable work tree."""
+    root_str = str(plugin_root.resolve())
+    index = _git_index_path(root_str)
+    if index is None:
+        return None
+    try:
+        st = index.stat()
+        stamp = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        # A repo with no index yet (fresh `git init`): nothing is tracked.
+        stamp = (0, 0)
+    return _git_tracked_sets(root_str, stamp)
+
+
+# Task G item 4 (issue #237, owner policy "in no case an user should be able to
+# customize the validation rules"): keys a scanned plugin may still carry in its
+# plugin.json `cpv` block but that CPV no longer honors. Each one present gets a
+# visible WARNING so a stale key is noticed and an attempt to use one leaves a
+# trail in the report. Defined here, inside CPV, never extended by the plugin.
+INERT_CPV_KEYS: tuple[tuple[str, ...], ...] = (
+    ("exclude_paths",),
+    ("allow_root_dirs",),
+    ("allow_orchestrator_traversal",),
+    ("strip", "allowed_submodule_urls"),
+    ("strip", "require_url_allowlist"),
+)
+
+
+def inert_cpv_keys_present(plugin_root: Path) -> list[str]:
+    """Return the dotted names (without the ``cpv.`` prefix) of inert keys the plugin declares."""
+    cfg = load_cpv_config(plugin_root)
+    present: list[str] = []
+    for key_path in INERT_CPV_KEYS:
+        node: object = cfg
+        for part in key_path:
+            if not isinstance(node, dict) or part not in node:
+                break
+            node = node[part]
+        else:
+            present.append(".".join(key_path))
+    return present
+
+
+def warn_inert_cpv_keys(plugin_root: Path, report: ValidationReport) -> None:
+    """Emit ONE WARNING per inert ``cpv.*`` key declared in the scanned plugin.json."""
+    for dotted in inert_cpv_keys_present(plugin_root):
+        report.warning(
+            f"cpv.{dotted} is ignored: CPV rules cannot be changed by the scanned plugin (owner policy)",
+            ".claude-plugin/plugin.json",
+        )
 
 
 def is_vendored_path(rel_path: Path | str, plugin_root: Path) -> bool:
-    """True if a path lives under a vendored / submodule subtree.
+    """True if a path is UNTRACKED content under a CPV-defined vendored dir name.
 
-    Skips the path from path-based, link-based, content-based rules. Honors:
-      1. Hard-coded VENDORED_DIR_NAMES (external/, vendor/, node_modules/, ...)
-      2. Submodule paths declared in .gitmodules
-      3. Per-plugin `cpv.exclude_paths` declared in plugin.json
+    Task G (issues #237 / #257, owner policy "everything that is git tracked must
+    be scanned, no exceptions"):
+      * ``rel_path`` is relative to ``plugin_root``. An absolute path, or one with
+        a `..` part, is never vendored: it cannot be checked against the tracked
+        set, so it is scanned (fail toward flagging).
+      * Only content git does NOT track (``git ls-files --recurse-submodules``)
+        may be skipped, and only when a path part is in VENDORED_DIR_NAMES
+        (external/, vendor/, node_modules/, ...). A tracked file, or a directory
+        holding any tracked file, is never vendored.
+      * A `.gitmodules` entry alone skips nothing: checked-out submodule content
+        is installed with the plugin and is listed as tracked.
+      * A root that is not its own git work tree (see ``_git_index_path``), or
+        where git fails, skips NOTHING: CPV cannot prove a file is untracked.
+      * A plugin-declared `cpv.exclude_paths` is NOT honored: the scanned plugin
+        must not choose which of its own files CPV skips.
     """
     rel = Path(rel_path) if not isinstance(rel_path, Path) else rel_path
-    parts = rel.parts
-    for part in parts:
-        if part in VENDORED_DIR_NAMES:
+    if rel.is_absolute() or ".." in rel.parts:
+        return False
+    tracked = _git_tracked_index(plugin_root)
+    if tracked is None:
+        return False
+    rel_str = rel.as_posix().rstrip("/")
+    while rel_str.startswith("./"):
+        rel_str = rel_str[2:]
+    files, dirs = tracked
+    if rel_str in files or rel_str in dirs:
+        return False
+    return any(part in VENDORED_DIR_NAMES for part in rel.parts)
+
+
+def is_untracked_in_git(rel_path: Path | str, plugin_root: Path) -> bool:
+    """True only when ``plugin_root`` is a usable git work tree AND ``rel_path``
+    (a file, or a directory) holds no tracked content.
+
+    Task G (4a): a plugin-controlled file such as `.gitignore` may only excuse
+    content that provably does not ship. Absolute or `..` paths, a non-git tree
+    and any git failure all return False (the content is treated as shipped).
+    """
+    rel = Path(rel_path) if not isinstance(rel_path, Path) else rel_path
+    if rel.is_absolute() or ".." in rel.parts:
+        return False
+    tracked = _git_tracked_index(plugin_root)
+    if tracked is None:
+        return False
+    rel_str = rel.as_posix().rstrip("/")
+    while rel_str.startswith("./"):
+        rel_str = rel_str[2:]
+    files, dirs = tracked
+    return rel_str not in files and rel_str not in dirs
+
+
+def _is_vendored_root_dir(dirname: str, plugin_root: Path) -> bool:
+    """True when a plugin ROOT dir is exempt from the non-standard-dir check only.
+
+    Task G round 3 (coordinator Q2): the root-dir check keeps its prior exemption
+    for a CPV-defined VENDORED_DIR_NAMES dir, or for a dir the git INDEX records
+    as a submodule gitlink (mode 160000). The .gitmodules text is never consulted:
+    it is plugin-written and proves nothing. This exemption is for that one call
+    site only; content under these dirs is still scanned everywhere else because
+    is_vendored_path stays tracked-only.
+    """
+    if dirname in VENDORED_DIR_NAMES:
+        return True
+    root_str = str(plugin_root)
+    if _git_index_path(root_str) is None:
+        return False
+    proc = _git_run(root_str, "ls-files", "-s", "-z", "--", dirname, timeout=30)
+    if proc is None or proc.returncode != 0:
+        return False
+    for entry in proc.stdout.decode("utf-8", "surrogateescape").split("\0"):
+        meta, _, path_part = entry.partition("\t")
+        if path_part == dirname and meta.split(" ", 1)[0] == "160000":
             return True
-    rel_str = str(rel).rstrip("/")
-    submodules = _read_gitmodules_paths(str(plugin_root.resolve()))
-    for sm in submodules:
-        if rel_str == sm or rel_str.startswith(sm + "/"):
-            return True
-    cpv_config = load_cpv_config(plugin_root)
-    raw_exclude = cpv_config.get("exclude_paths", [])
-    if isinstance(raw_exclude, list):
-        for entry in raw_exclude:
-            if isinstance(entry, str):
-                excl = entry.strip().rstrip("/")
-                if excl and (rel_str == excl or rel_str.startswith(excl + "/")):
-                    return True
     return False
+
+
+def _enclosing_plugin_root(start: Path) -> Path | None:
+    """Nearest ancestor (or ``start`` itself) holding `.claude-plugin/plugin.json`."""
+    try:
+        cur = start.resolve()
+    except OSError:
+        return None
+    for cand in (cur, *cur.parents):
+        if (cand / ".claude-plugin" / "plugin.json").is_file():
+            return cand
+    return None
+
+
+def _ref_is_vendored(ref: str, base_dir: Path) -> bool:
+    """is_vendored_path for a reference written relative to ``base_dir``.
+
+    The reference is re-anchored on the enclosing plugin root so the tracked set
+    and the path agree (task G 4d). Absolute or `..` references, and a base_dir
+    outside any plugin, are never vendored (fail toward scanning).
+    """
+    ref_path = Path(ref)
+    if ref_path.is_absolute() or ".." in ref_path.parts:
+        return False
+    root = _enclosing_plugin_root(base_dir)
+    if root is None:
+        return False
+    try:
+        rel = (base_dir.resolve() / ref_path).relative_to(root)
+    except (ValueError, OSError):
+        return False
+    return is_vendored_path(rel, root)
 
 
 def is_npm_package_shape(text: str) -> bool:
@@ -2132,38 +2379,33 @@ KNOWN_EXAMPLE_SECRETS = {
     "AKIAIOSFODNN7EXAMPLE",
     "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
 }
-
-# Generic example usernames that are acceptable in documentation
+# Issue #257 item 1: a home-path username is acceptable in a doc example ONLY when
+# it is an obvious PLACEHOLDER defined here, inside CPV. A real-looking login
+# (john, admin, runner, dev, test, demo, foo ...) is a finding: a plugin must not
+# be able to hide a real private path by choosing an allowlisted name. Doubt
+# fails toward flagging. Callers lowercase before the lookup, so `USERNAME` is
+# covered by "username".
 EXAMPLE_USERNAMES = {
     "username",
     "user",
-    "dev",
-    "developer",
-    "runner",
-    "admin",
-    "root",
     "yourname",
     "your-name",
     "your_name",
     "yourusername",
     "your-username",
-    "example",
-    "test",
-    "demo",
-    "sample",
-    "foo",
-    "bar",
-    "john",
-    "jane",
-    "me",
     "you",
+    "me",
     "name",
-    "xxx",
     "myuser",
     "myname",
     "your",
     "my",
-    "[^/\\s]+",  # Regex pattern in code
+    "xxx",
+    # Standard security-doc placeholders (`/Users/victim/.ssh/id_rsa`): a real
+    # login with these names is negligible, and an attacker cannot choose the
+    # victim's login, so skipping them cannot be used to hide a real home path.
+    "victim",
+    "attacker",
     # v2.46 FP-K — literal `...` placeholder commonly used in
     # docstring schemas and JSON examples to indicate elision:
     #   "settingsPath": "/Users/.../.llm-externalizer/settings.yaml"
@@ -2171,6 +2413,62 @@ EXAMPLE_USERNAMES = {
     "...",
     "…",  # Unicode horizontal ellipsis (U+2026)
 }
+
+# System logins that are not a person: the GitHub Actions runner and root. Used by
+# the private-username auto-detection (below) and, task G 4k, by the PRIVATE-INFO
+# scanner only, so /home/runner/ (a CI home) is not reported as a personal
+# leak there. The absolute-path rule still flags /home/runner/... and /root/...
+_SYSTEM_LOGIN_NAMES: frozenset[str] = frozenset({"root", "runner"})
+
+# Login names that are NOT personal identifiers. Used ONLY by the private-username
+# auto-detection, so a machine whose login is `runner` or `root` does not register
+# that name as a "private" username (which would turn every /home/runner/ path in
+# a doc into a CRITICAL leak). Task G item 2: narrowed to the placeholders plus
+# those two system logins. A real person login such as `john`, `dev` or `admin`
+# IS registered, so a leak of that machine home is caught. Known limit (4l): a
+# real login that equals a placeholder (a person whose login is literally `user`
+# or `me`) cannot be told apart from the placeholder and is not registered. It
+# must never be consulted to ALLOW a path (issue #257 item 1).
+_NON_PERSONAL_LOGIN_NAMES = EXAMPLE_USERNAMES | _SYSTEM_LOGIN_NAMES
+
+
+# Task G item 3: characters that mark a matched "path" as a regex pattern (a
+# detector source such as `/home/[^/]+/`), not a literal path. `.` is NOT here:
+# it is the most common character of a real file name, and treating it as regex
+# syntax meant /home/john/x/file.txt was never flagged. `$` counts only as a
+# trailing anchor (see _looks_like_regex_text). Doubt fails toward flagging.
+_REGEX_SYNTAX_CHARS = frozenset("\\[]()*+?{|^")
+
+
+def _looks_like_regex_text(text: str) -> bool:
+    """True when ``text`` carries real regex syntax (never for a bare dot)."""
+    return any(c in _REGEX_SYNTAX_CHARS for c in text) or text.endswith("$")
+
+
+# Task G 4j: the home prefix of a matched path, up to and including the username
+# segment. Only that segment decides "this is a regex detector source": a real
+# path with a regex-looking TAIL (`/Users/alice/projects/*`, `report(1).pdf`) is
+# still a leak. Separators (`/` or `\`) are not inspected, so a Windows home path
+# no longer counts as regex just because it uses backslashes.
+_HOME_PREFIX_RE = re.compile(r"^(?:[A-Za-z]:)?[\\/](?:Users|home)[\\/]([^\\/]*)", re.IGNORECASE)
+_FIRST_SEGMENT_RE = re.compile(r"^(?:[A-Za-z]:)?[\\/]?([^\\/]*)")
+
+
+# Task G round 3 (d): in the USERNAME segment only characters illegal in every OS
+# login count as regex syntax. `(`, `)`, `{`, `}` and `$` are legal in some logins
+# or display names (`C:\Users\John (Work)\`), so they no longer hide a home path.
+_USERNAME_REGEX_CHARS: frozenset[str] = frozenset("[]\\*+?|")
+
+
+def _path_prefix_looks_like_regex(text: str) -> bool:
+    """True when the path prefix (username segment, else first segment) is regex syntax."""
+    home = _HOME_PREFIX_RE.match(text)
+    if home:
+        seg = home.group(1)
+        return seg.startswith("^") or any(c in _USERNAME_REGEX_CHARS for c in seg)
+    m = _FIRST_SEGMENT_RE.match(text)
+    return _looks_like_regex_text(m.group(1)) if m else False
+
 
 # Patterns for hardcoded user paths (should use ${CLAUDE_PLUGIN_ROOT} instead)
 # Note: These are generic patterns that may produce false positives for example paths
@@ -5376,13 +5674,13 @@ def _get_private_usernames() -> set[str]:
     if explicit:
         for u in explicit.split(","):
             u = u.strip().lower()
-            if u and u not in EXAMPLE_USERNAMES:
+            if u and u not in _NON_PERSONAL_LOGIN_NAMES:
                 usernames.add(u)
 
     # Get current user's login name
     try:
         username = getpass.getuser().lower()
-        if username and username not in EXAMPLE_USERNAMES:
+        if username and username not in _NON_PERSONAL_LOGIN_NAMES:
             usernames.add(username)
     except Exception:
         pass
@@ -5390,7 +5688,7 @@ def _get_private_usernames() -> set[str]:
     # Get username from home directory path
     try:
         home = Path.home()
-        if home.name and home.name.lower() not in EXAMPLE_USERNAMES:
+        if home.name and home.name.lower() not in _NON_PERSONAL_LOGIN_NAMES:
             usernames.add(home.name.lower())
     except Exception:
         pass
@@ -5398,7 +5696,7 @@ def _get_private_usernames() -> set[str]:
     # Also check environment variables
     for var in ("USER", "USERNAME", "LOGNAME"):
         val = os.environ.get(var, "").strip().lower()
-        if val and val not in EXAMPLE_USERNAMES:
+        if val and val not in _NON_PERSONAL_LOGIN_NAMES:
             usernames.add(val)
 
     return usernames
@@ -5476,6 +5774,22 @@ PRIVATE_INFO_SKIP_DIRS = {
     "libs_dev",
     "builds_dev",
 }
+
+
+def _keep_walk_dir(root_path: Path, rel_dir: Path, name: str, caller_skip: set[str]) -> bool:
+    """Whether the absolute-path / private-info walkers descend into ``name``.
+
+    Task G round 3 (h, owner policy "everything that is git tracked must be
+    scanned"): `.git` (git plumbing, never content) and a CPV caller's own
+    skip_dirs are always pruned. A build/dependency dir name (target/, dist/,
+    node_modules/ ...) is pruned only when ``is_untracked_in_git`` proves it
+    holds no tracked file; otherwise it is scanned (fail toward scanning).
+    """
+    if name == ".git" or name in caller_skip:
+        return False
+    if name in PRIVATE_INFO_SKIP_DIRS or should_skip_directory(name):
+        return not is_untracked_in_git(rel_dir / name, root_path)
+    return True
 
 
 # =============================================================================
@@ -7885,8 +8199,9 @@ def scan_file_for_private_info(
             for match in pattern.finditer(content):
                 matched_text = match.group(0)
 
-                # Skip if this looks like a regex pattern (contains metacharacters)
-                if any(c in matched_text for c in r"[]\^$.*+?{}|()"):
+                # Skip if this looks like a regex pattern. Task G: a bare `.` is NOT
+                # regex syntax, and only the username segment is inspected (4j).
+                if _path_prefix_looks_like_regex(matched_text):
                     continue
 
                 # Extract the username from the path
@@ -7898,8 +8213,14 @@ def scan_file_for_private_info(
 
                 if username_match:
                     extracted_username = username_match.group(1).lower()
-                    # Skip if it's a generic example username
-                    if extracted_username in EXAMPLE_USERNAMES:
+                    # Skip a generic example username, or a CI/system login
+                    # (/home/runner/): this scanner reports PERSONAL leaks; the
+                    # absolute-path rule still flags the path (task G 4k).
+                    if extracted_username in EXAMPLE_USERNAMES or extracted_username in _SYSTEM_LOGIN_NAMES:
+                        continue
+                    # `/home/$USER/`: an env-var username (see the twin note in
+                    # scan_file_for_absolute_paths, task G item 3).
+                    if extracted_username.startswith("$"):
                         continue
 
                 line_num = content[: match.start()].count("\n") + 1
@@ -7939,33 +8260,31 @@ def scan_directory_for_private_info(
     # .gitignore syntax (wildcards, negations, directory-only rules, etc.)
     from gitignore_filter import GitignoreFilter
 
-    # Issue #71: always prune well-known build / dependency output dirs
-    # (target/, dist/, build/, node_modules/, .venv/, __pycache__/, .next/,
-    # vendor/ …). They are regenerated, never part of a plugin's shipped
-    # surface, and routinely embed absolute paths from the build machine —
-    # Rust's target/.rustc_info.json carries the builder's $HOME, npm's
-    # node_modules embeds install-time paths, etc. The root .gitignore alone
-    # does NOT compose nested per-directory .gitignore rules, so a Rust crate
-    # under tools/<x>/ whose target/ is ignored only by tools/<x>/.gitignore
-    # was still walked. Unioning PRIVATE_INFO_SKIP_DIRS makes the built-in
-    # skip set the reliable floor regardless of caller or nested-gitignore
-    # depth. FN-safe: a leaked private path in a TRACKED, shipped file (any
-    # dir NOT in this build/dep set) is unaffected and still fires.
-    extra_skip = (skip_dirs or set()) | PRIVATE_INFO_SKIP_DIRS
+    # Issue #71: an UNTRACKED build / dependency output dir (target/, dist/,
+    # build/, node_modules/, .venv/, __pycache__/, .next/, vendor/ ...) is
+    # regenerated and routinely embeds build-machine paths (Rust's
+    # target/.rustc_info.json carries the builder's $HOME), so it is pruned at
+    # any depth, including a nested crate whose target/ only a nested .gitignore
+    # ignores.
+    # Task G round 3 (h): a build/dependency dir name (PRIVATE_INFO_SKIP_DIRS,
+    # SKIP_DIRS) is pruned only when git PROVES it holds no tracked content
+    # (_keep_walk_dir). A tracked dist/ or build/ ships, so it is scanned, and a
+    # non-git tree cannot prove anything, so nothing there is pruned by name.
+    caller_skip = set(skip_dirs or ())
     if respect_gitignore:
         gi = GitignoreFilter(root_path)
-        walker = gi.walk(root_path, skip_dirs=extra_skip)
+        walker = gi.walk(root_path, skip_dirs={".git"} | caller_skip)
     else:
-        # Fallback: raw os.walk with SKIP_DIRS (uses should_skip_directory for wildcards)
+
         def _raw_walk():  # type: ignore[return]
-            for dirpath, dirnames, filenames in os.walk(root_path):
-                dirnames[:] = [d for d in dirnames if not should_skip_directory(d) and d not in extra_skip]
-                yield dirpath, dirnames, filenames
+            yield from os.walk(root_path)
 
         walker = _raw_walk()
 
-    for dirpath, _dirnames, filenames in walker:
+    for dirpath, dirnames, filenames in walker:
         rel_dir = Path(dirpath).relative_to(root_path)
+        # In-place prune: both walkers descend only into the names left here.
+        dirnames[:] = [d for d in dirnames if _keep_walk_dir(root_path, rel_dir, d, caller_skip)]
 
         for filename in filenames:
             filepath = Path(dirpath) / filename
@@ -8197,8 +8516,9 @@ def scan_file_for_absolute_paths(
         for match in pattern.finditer(content):
             matched_text = match.group(1) if match.lastindex else match.group(0)
 
-            # Skip if this looks like a regex pattern
-            if any(c in matched_text for c in r"[]\^$.*+?{}|()"):
+            # Skip if this looks like a regex pattern. Task G: a bare `.` is NOT
+            # regex syntax, and only the username/first segment is inspected (4j).
+            if _path_prefix_looks_like_regex(matched_text):
                 continue
 
             # Issue #59 Section B — `@/…` is a TypeScript/JS import-path alias
@@ -8217,12 +8537,24 @@ def scan_file_for_absolute_paths(
             if "${" in matched_text or matched_text.startswith("$"):
                 continue
 
-            # Extract username if it's a home path
-            username_match = re.search(r"/(?:Users|home)/([^/\s]+)/", matched_text)
+            # Extract username if it is a home path. Task G: `\` separators too,
+            # because a Windows home path is no longer swallowed by the regex
+            # skip (4j), so `C:\Users\…\` and `C:\Users\<name>\` must reach the
+            # placeholder checks below like their `/Users/...` twins.
+            username_match = re.search(r"[\\/](?:Users|home)[\\/]([^\\/\s]+)(?:[\\/]|$)", matched_text)
             if username_match:
                 extracted_username = username_match.group(1).lower()
                 # Skip example usernames in documentation
                 if extracted_username in EXAMPLE_USERNAMES:
+                    continue
+                # `/home/$USER/...`: an env-var username, not a literal one. The
+                # bare `$` used to be swallowed by the metachar skip above; that
+                # skip now fires only on a TRAILING `$` (task G item 3).
+                if extracted_username.startswith("$"):
+                    continue
+                # `<name>` / `<user>`: a template placeholder. `<` cannot occur in
+                # a real login name, so this hides no real home path.
+                if extracted_username.startswith("<"):
                     continue
 
             line_num = content[: match.start()].count("\n") + 1
@@ -8316,30 +8648,36 @@ def validate_no_absolute_paths(
     files_checked = 0
     total_issues = 0
 
+    # Issue #237: a plugin-declared cpv.exclude_paths skips nothing. Its WARNING
+    # is emitted once per run by warn_inert_cpv_keys (called from
+    # validate_plugin.validate_manifest), not here, so it is not duplicated.
+
     # Use GitignoreFilter when respect_gitignore is True — it fully respects
     # .gitignore syntax (wildcards, negations, directory-only rules, etc.)
     from gitignore_filter import GitignoreFilter
 
-    # Issue #71: prune build / dependency output dirs (see the matching note
-    # in scan_directory_for_private_info). An absolute /Users/<name> path in
-    # Rust's target/.rustc_info.json or npm's node_modules is a build artifact,
-    # not a leak in the plugin's shipped surface. FN-safe: an absolute path in
-    # a TRACKED, shipped file (any dir NOT in the build/dep set) still fires.
-    extra_skip = (skip_dirs or set()) | PRIVATE_INFO_SKIP_DIRS
+    # Issue #71: an UNTRACKED build / dependency output dir (Rust target/, npm
+    # node_modules/) holds build-machine paths, not the plugin's shipped surface,
+    # so it is pruned (see the matching note in scan_directory_for_private_info).
+    # Task G round 3 (h): a build/dependency dir name (PRIVATE_INFO_SKIP_DIRS,
+    # SKIP_DIRS) is pruned only when git PROVES it holds no tracked content
+    # (_keep_walk_dir). A tracked dist/ or build/ ships, so it is scanned, and a
+    # non-git tree cannot prove anything, so nothing there is pruned by name.
+    caller_skip = set(skip_dirs or ())
     if respect_gitignore:
         gi = GitignoreFilter(root_path)
-        walker = gi.walk(root_path, skip_dirs=extra_skip)
+        walker = gi.walk(root_path, skip_dirs={".git"} | caller_skip)
     else:
 
         def _raw_walk():  # type: ignore[return]
-            for dirpath, dirnames, filenames in os.walk(root_path):
-                dirnames[:] = [d for d in dirnames if not should_skip_directory(d) and d not in extra_skip]
-                yield dirpath, dirnames, filenames
+            yield from os.walk(root_path)
 
         walker = _raw_walk()
 
-    for dirpath, _dirnames, filenames in walker:
+    for dirpath, dirnames, filenames in walker:
         rel_dir = Path(dirpath).relative_to(root_path)
+        # In-place prune: both walkers descend only into the names left here.
+        dirnames[:] = [d for d in dirnames if _keep_walk_dir(root_path, rel_dir, d, caller_skip)]
 
         for filename in filenames:
             filepath = Path(dirpath) / filename
@@ -8396,14 +8734,10 @@ def validate_no_absolute_paths(
             ):
                 continue
 
-            # FP issue #127: honor `cpv.exclude_paths` (and VENDORED_DIR_NAMES /
-            # .gitmodules) for this STYLE/PORTABILITY rule. A vendored doc tree
-            # (e.g. shadcn MDX under an excluded `skills/.../docs/`) legitimately
-            # carries upstream import aliases like `/lib/utils` that read as
-            # "system absolute path" — skipping the excluded subtree clears the
-            # FP. FN-safe: a NON-excluded absolute path anywhere else still
-            # fires. This is purely a style/portability skip; no security scanner
-            # is touched (the no-exempt rule is not engaged).
+            # FP issue #127, narrowed by task G (#237 / #257): skip only UNTRACKED
+            # content under a CPV-defined VENDORED_DIR_NAMES dir (an installed
+            # node_modules/, a local build/). Every git-tracked file is scanned,
+            # and a plugin-declared `cpv.exclude_paths` is ignored.
             if is_vendored_path(Path(rel_path), root_path):
                 continue
 
@@ -8951,10 +9285,14 @@ def validate_toc_embedding(
         if bt_line_num in fenced_lines:
             continue
 
-        # Issue #16 category F: skip references that target a vendored
-        # subtree (external/, vendor/, node_modules/, third_party/, …,
-        # plus .gitmodules paths and per-plugin cpv.exclude_paths).
-        if is_vendored_path(Path(bt_path_str), base_dir):
+        # Issue #16 category F: skip references that target UNTRACKED content
+        # under a CPV-defined vendored dir name (external/, vendor/,
+        # node_modules/, ...). Tracked content is never skipped (task G).
+        # Task G (4d): is_vendored_path takes a path relative to the PLUGIN root
+        # (that is the root whose git index decides "tracked"). base_dir is a
+        # skill/agent dir, so re-anchor the reference on the enclosing plugin
+        # root; with no plugin root found nothing is skipped.
+        if _ref_is_vendored(bt_path_str, base_dir):
             continue
 
         # Resolve the referenced file path (same logic as markdown links)

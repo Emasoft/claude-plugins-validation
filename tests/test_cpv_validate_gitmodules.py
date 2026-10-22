@@ -148,30 +148,37 @@ def test_validate_gitmodules_no_file_no_findings(tmp_path):
     assert cvg.validate_gitmodules(plugin) == []
 
 
-def test_validate_gitmodules_passes_with_explicit_allowlist(tmp_path):
-    plugin = _make_plugin(
-        tmp_path,
-        plugin_json={
-            "name": "demo",
-            "version": "0.1.0",
-            "description": "x",
-            "cpv": {
-                "strip": {
-                    "allowed_submodule_urls": ["https://github.com/Emasoft/*.git"],
-                },
-            },
-        },
-        gitmodules_text="""\
+def test_validate_gitmodules_plugin_allowlist_is_ignored(tmp_path, monkeypatch):
+    """Task G (#237): `cpv.strip.allowed_submodule_urls` has no effect.
+
+    Two-sided: the cross-owner URL the plugin allowlists is still rejected
+    (STRIP-G013), exactly as for the same plugin without the key.
+    """
+    monkeypatch.setattr(cvg, "_read_remote_owner", lambda root: "acme")
+    gm = """\
 [submodule "tests"]
 \tpath = dev/tests
 \turl = https://github.com/Emasoft/demo-tests.git
-""",
+"""
+    with_key = _make_plugin(
+        tmp_path / "a",
+        plugin_json={
+            "name": "demo",
+            "version": "0.1.0",
+            "description": "x",
+            "cpv": {"strip": {"allowed_submodule_urls": ["https://github.com/Emasoft/*.git"]}},
+        },
+        gitmodules_text=gm,
     )
-    findings = cvg.validate_gitmodules(plugin)
-    assert findings == []
+    without_key = _make_plugin(tmp_path / "b", gitmodules_text=gm)
+    got = [(f.severity, f.code) for f in cvg.validate_gitmodules(with_key)]
+    assert got == [("CRITICAL", "STRIP-G013")]
+    assert got == [(f.severity, f.code) for f in cvg.validate_gitmodules(without_key)]
+    assert "allowed_submodule_urls" not in cvg._read_strip_block(with_key)
 
 
-def test_validate_gitmodules_rejects_alien_owner_with_explicit_allowlist(tmp_path):
+def test_validate_gitmodules_rejects_alien_owner_despite_plugin_allowlist(tmp_path, monkeypatch):
+    monkeypatch.setattr(cvg, "_read_remote_owner", lambda root: "Emasoft")
     plugin = _make_plugin(
         tmp_path,
         plugin_json={
@@ -180,7 +187,7 @@ def test_validate_gitmodules_rejects_alien_owner_with_explicit_allowlist(tmp_pat
             "description": "x",
             "cpv": {
                 "strip": {
-                    "allowed_submodule_urls": ["https://github.com/Emasoft/*"],
+                    "allowed_submodule_urls": ["https://github.com/attacker/*"],
                 },
             },
         },
@@ -193,7 +200,7 @@ def test_validate_gitmodules_rejects_alien_owner_with_explicit_allowlist(tmp_pat
     findings = cvg.validate_gitmodules(plugin)
     assert len(findings) == 1
     assert findings[0].severity == "CRITICAL"
-    assert findings[0].code == "STRIP-G011"
+    assert findings[0].code == "STRIP-G013"
     assert "attacker" in findings[0].message
 
 
@@ -271,7 +278,9 @@ def test_validate_gitmodules_default_rule_rejects_cross_owner_no_carveout(tmp_pa
     assert any(f.code == "STRIP-G013" for f in findings)
 
 
-def test_validate_gitmodules_opt_out_emits_warning(tmp_path):
+def test_validate_gitmodules_opt_out_key_is_ignored(tmp_path, monkeypatch):
+    """Task G (#237): `require_url_allowlist=false` no longer downgrades to a WARNING."""
+    monkeypatch.setattr(cvg, "_read_remote_owner", lambda root: "Emasoft")
     plugin = _make_plugin(
         tmp_path,
         plugin_json={
@@ -292,8 +301,9 @@ def test_validate_gitmodules_opt_out_emits_warning(tmp_path):
     )
     findings = cvg.validate_gitmodules(plugin)
     assert len(findings) == 1
-    assert findings[0].severity == "WARNING"
-    assert findings[0].code == "STRIP-G014"
+    assert findings[0].severity == "CRITICAL"
+    assert findings[0].code == "STRIP-G013"
+    assert "require_url_allowlist" not in cvg._read_strip_block(plugin)
 
 
 def test_main_returns_zero_when_no_gitmodules(tmp_path, monkeypatch, capsys):

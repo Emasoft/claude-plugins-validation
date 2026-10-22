@@ -8,9 +8,9 @@ FP-1 (`_collect_script_refs`): a `scripts/*.py` token inside a `#` comment is
     documentation, not a live invocation, so it must NOT flag as dangling. A
     real `run:`/invocation token (before any `#`) still records.
 
-FP-2 (`validate_no_absolute_paths`): the style/portability rule must honor
-    `cpv.exclude_paths` (and VENDORED_DIR_NAMES / .gitmodules) — an absolute
-    path under an excluded/vendored subtree is skipped; a NON-excluded absolute
+FP-2 (`validate_no_absolute_paths`): a plugin-declared `cpv.exclude_paths` is
+    IGNORED (issue #237); only UNTRACKED content under a CPV vendored dir name is
+    skipped (task G), and the walker prunes PRIVATE_INFO_SKIP_DIRS (issue #71). A
     path anywhere else still fires.
 
 FP-3 (`validate_bin_executables`): a gitignored-AND-untracked bin/ file
@@ -118,14 +118,20 @@ def _abs_path_findings(report: ValidationReport) -> list:
 
 
 def test_fp2_excluded_vendored_doc_is_skipped(tmp_path: Path) -> None:
-    """An absolute path under a `cpv.exclude_paths` subtree → 0 absolute-path findings."""
+    """Issue #237: a plugin-declared `cpv.exclude_paths` no longer skips scanning.
+
+    The path under the "excluded" subtree still fires. The ignored-key WARNING is
+    emitted once per run by warn_inert_cpv_keys (validate_plugin), not by this
+    scanner, so the scanner itself adds none (task G).
+    """
     _write_plugin_json(tmp_path, {"exclude_paths": ["skills/amw-shadcn-ui/docs/"]})
     doc = tmp_path / "skills" / "amw-shadcn-ui" / "docs" / "x.mdx"
     doc.parent.mkdir(parents=True, exist_ok=True)
     doc.write_text('import { cn } from "/lib/utils"\n', encoding="utf-8")
     report = ValidationReport()
     validate_no_absolute_paths(tmp_path, report, respect_gitignore=False)
-    assert _abs_path_findings(report) == []
+    assert len(_abs_path_findings(report)) >= 1
+    assert not any("cpv.exclude_paths is ignored" in r.message for r in report.results)
 
 
 def test_fp2_nonexcluded_path_still_fires(tmp_path: Path) -> None:
@@ -158,17 +164,28 @@ def test_fp2_no_config_unchanged(tmp_path: Path) -> None:
 
 
 def test_fp2_vendored_dir_name_is_skipped(tmp_path: Path) -> None:
-    """A VENDORED_DIR_NAMES subtree (e.g. node_modules/) is skipped via the same helper."""
-    _write_plugin_json(tmp_path, None)
-    vendored = tmp_path / "node_modules" / "pkg" / "x.mjs"
-    vendored.parent.mkdir(parents=True, exist_ok=True)
-    # `/lib/utils` is a genuine MINOR-class "system absolute path" (NOT an
-    # INFO-only system-binary path), so this passes ONLY because node_modules/
-    # is vendored-skipped — not because the path is otherwise benign.
-    vendored.write_text('import x from "/lib/utils"\n', encoding="utf-8")
-    report = ValidationReport()
-    validate_no_absolute_paths(tmp_path, report, respect_gitignore=False)
-    assert _abs_path_findings(report) == []
+    """An UNTRACKED node_modules/ in a git tree is pruned (issue #71); in a non-git
+    tree nothing can prove it untracked, so it is scanned (task G round 3, item 7)."""
+    # Two separate roots: the git-index lookup caches its answer per root for the
+    # process lifetime, so one root must not change from non-git to git mid-test.
+    findings = {}
+    for kind in ("nogit", "git"):
+        root = tmp_path / kind
+        _write_plugin_json(root, None)
+        vendored = root / "node_modules" / "pkg" / "x.mjs"
+        vendored.parent.mkdir(parents=True, exist_ok=True)
+        # `/lib/utils` is a genuine MINOR-class "system absolute path" (NOT an
+        # INFO-only system-binary path), so the git-tree case passes ONLY because
+        # the untracked node_modules/ is pruned — not because the path is benign.
+        vendored.write_text('import x from "/lib/utils"\n', encoding="utf-8")
+        if kind == "git":
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True, capture_output=True)
+            subprocess.run(["git", "add", ".claude-plugin/plugin.json"], cwd=root, check=True, capture_output=True)
+        report = ValidationReport()
+        validate_no_absolute_paths(root, report, respect_gitignore=False)
+        findings[kind] = _abs_path_findings(report)
+    assert len(findings["nogit"]) >= 1
+    assert findings["git"] == []
 
 
 # ───────────────────────── FP-3 — bin/ unshipped skip ────────────────────────

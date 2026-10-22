@@ -926,7 +926,7 @@ allowed-tools: Read, Write, Edit, Grep, Glob, Agent, WebFetch, ...
 **Fix**: Replace with `{baseDir}` placeholder:
 ```markdown
 # Wrong
-Read the config at /Users/john/myproject/config.yaml
+Read the config at /Users/username/myproject/config.yaml
 # Correct
 Read the config at {baseDir}/config.yaml
 ```

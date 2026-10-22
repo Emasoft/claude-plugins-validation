@@ -464,7 +464,7 @@ Detected OS patterns:
 1. Replace with relative path:
    ```python
    # WRONG:
-   config_path = "/Users/johndoe/projects/my-plugin/config.json"
+   config_path = "/Users/username/projects/my-plugin/config.json"
 
    # RIGHT:
    config_path = "${CLAUDE_PLUGIN_ROOT}/config.json"
@@ -552,7 +552,7 @@ Same as [6.1](#61-home-directory-absolute-path-major).
 
 **Severity:** MINOR (in non-doc code files) or MAJOR (in documentation files)
 
-**Root cause:** The file contains a Unix system absolute path like `/usr/...`, `/opt/...`, `/etc/...`, `/var/...`, `/bin/...`, `/sbin/...`, `/lib/...`, `/root/...`. In scripts this may be intentional (MINOR); in documentation it signals non-portable examples.
+**Root cause:** The file contains an absolute path under a Unix system directory (usr, opt, etc, var, bin, sbin, lib, root at the filesystem root). In scripts this may be intentional (MINOR); in documentation it signals non-portable examples.
 
 The lookbehind `(?<![#!])` skips shebangs. Paths using `${CLAUDE_PLUGIN_ROOT}` or `${CLAUDE_PROJECT_DIR}` prefixes are also excluded.
 

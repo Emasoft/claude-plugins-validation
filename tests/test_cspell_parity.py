@@ -394,7 +394,7 @@ def test_emitted_dictionary_is_valid_json_and_self_consistent(tmp_path: Path) ->
 
     assert cfg["version"] == "0.2"
     assert cfg["useGitignore"] is True, "CI only spell-checks tracked files"
-    assert "**/*.json" in cfg["ignorePaths"], "CI's SPELL_CSPELL_FILTER_REGEX_EXCLUDE skips .json"
+    assert "**/*.json" not in cfg["ignorePaths"], "#257 item 5: tracked JSON files must be spell-checked"
     assert "**/uv.lock" in cfg["ignorePaths"]
     assert cfg["words"] == sorted(cfg["words"]), "words must be sorted for a stable diff"
     assert len(cfg["words"]) == len(set(cfg["words"])), "no duplicate words"

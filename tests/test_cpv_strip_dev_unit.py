@@ -461,7 +461,7 @@ def _strip_manifest(records: list[dict]) -> dict:
         "version": "0.1.0",
         "description": "x",
         "repository": "https://github.com/Emasoft/demo",
-        "cpv": {"strip": {"extract": records, "require_url_allowlist": True}},
+        "cpv": {"strip": {"extract": records, "keep_dev_configs": False}},
     }
 
 
@@ -594,7 +594,7 @@ def test_record_extract_reference_upserts_and_preserves_keys(tmp_path):
     # The declaration is replaced by exactly one record.
     assert extract == [{"path": "tests", "url": "https://github.com/Emasoft/demo-tests.git", "sha": _FAKE_SHA}]
     # Sibling strip keys are preserved (upsert never clobbers the block).
-    assert pj["cpv"]["strip"]["require_url_allowlist"] is True
+    assert pj["cpv"]["strip"]["keep_dev_configs"] is False
 
 
 def test_record_extract_reference_is_idempotent(tmp_path):

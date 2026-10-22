@@ -159,7 +159,7 @@ def test_the_changelog_call_still_renders_full_history() -> None:
 def test_the_notes_call_is_a_separate_unreleased_render() -> None:
     """`--unreleased` belongs to the NOTES file and nowhere else."""
     body = _func_source(_emitted_publish(), "_write_release_notes")
-    assert '"git-cliff", "--unreleased", "--tag", tag, "--strip", "all", "-o", str(notes)' in body
+    assert '[_exe("git-cliff"), "--unreleased", "--tag", tag, "--strip", "all", "-o", str(notes)' in body
     assert "CHANGELOG.md" not in body.split('"""', 2)[-1], "the notes render must not touch CHANGELOG.md"
 
 

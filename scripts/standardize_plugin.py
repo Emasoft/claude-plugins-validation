@@ -63,6 +63,8 @@ STANDARD_FILES: list[tuple[str, bool, str]] = [
     ("README.md", False, "Project documentation"),
     ("cliff.toml", False, "git-cliff changelog config"),
     (".mega-linter.yml", False, "Mega-Linter configuration"),
+    (".ruff.toml", False, "Canonical ruff configuration"),
+    (".bandit.yml", False, "Canonical bandit configuration"),
     ("scripts/publish.py", False, "Publish pipeline script"),
     ("git-hooks/pre-push", False, "Pre-push quality gate hook"),
     (".github/workflows/ci.yml", False, "CI workflow (consolidated: lint + validate + test)"),
@@ -787,6 +789,8 @@ _FILE_TO_GENERATOR: dict[str, str] = {
     "README.md": "gen_readme",
     "cliff.toml": "gen_cliff_toml",
     ".mega-linter.yml": "gen_mega_linter_yml",
+    ".ruff.toml": "gen_ruff_toml",
+    ".bandit.yml": "gen_bandit_yml",
     ".markdownlint.json": "gen_markdownlint_json",
     "scripts/publish.py": "gen_publish_py",
     "scripts/cpv_network_resilience.py": "gen_cpv_network_resilience_py",
@@ -817,6 +821,8 @@ _FORCE_TEMPLATE_FILES: set[str] = {
     ".github/workflows/notify-marketplace.yml",
     "cliff.toml",
     ".mega-linter.yml",
+    ".ruff.toml",
+    ".bandit.yml",
     ".markdownlint.json",
 }
 
@@ -3177,9 +3183,9 @@ def audit_inverted_private_usernames(plugin_path: Path) -> list[AuditItem]:
 # This canonical content is kept HERE as standardize's own copy (NOT imported
 # from generate_plugin_repo) — exactly like _PROVISION_DEV_EXTRA — so a
 # `standardize --fix` adoption and a freshly scaffolded plugin write the SAME
-# .jscpd.json. The `ignore` globs mirror the canonical `.mega-linter.yml`'s
-# FILTER_REGEX_EXCLUDE dirs (dev-submodules, fixtures, vendored trees); threshold
-# 5 matches COPYPASTE_JSCPD_ARGUMENTS "--threshold 5".
+# .jscpd.json. The `ignore` globs name ONLY never-tracked trees (node_modules, .git);
+# #257 item 5: no dev dir, .claude/ or fixture pattern, because git-tracked content is
+# never kept out of a scan. Threshold 5 matches COPYPASTE_JSCPD_ARGUMENTS "--threshold 5".
 _JSCPD_CONFIG_REL = ".jscpd.json"
 _CANONICAL_JSCPD_CONFIG: dict[str, object] = {
     "threshold": 5,
@@ -3187,23 +3193,6 @@ _CANONICAL_JSCPD_CONFIG: dict[str, object] = {
     "gitignore": True,
     "reporters": ["console"],
     "ignore": [
-        "**/tests_dev/**",
-        "**/docs_dev/**",
-        "**/scripts_dev/**",
-        "**/samples_dev/**",
-        "**/examples_dev/**",
-        "**/builds_dev/**",
-        "**/downloads_dev/**",
-        "**/libs_dev/**",
-        "**/llm_externalizer_output/**",
-        "**/.claude/**",
-        "**/.tldr/**",
-        "**/tests/fixtures/**",
-        "**/test/fixtures/**",
-        "**/spec/fixtures/**",
-        "**/__fixtures__/**",
-        "**/testdata/**",
-        "**/fixtures/**",
         "**/node_modules/**",
         "**/.git/**",
     ],
@@ -3588,43 +3577,32 @@ _CSPELL_CONFIG_NAMES: tuple[str, ...] = (
     "project-words.txt",
 )
 
-# Paths cspell must not spell-check. Mirrors the canonical `.mega-linter.yml`'s
-# FILTER_REGEX_EXCLUDE (dev submodules, fixtures, vendored trees) and its
-# SPELL_CSPELL_FILTER_REGEX_EXCLUDE ('(uv\.lock|\.json)'), so the LOCAL
-# `cspell lint .` sees the same file set CI's Mega-Linter feeds cspell.
-# `useGitignore` covers the rest: CI only ever sees tracked files, while a local
-# `cspell lint .` would otherwise walk gitignored trees (reports/, .venv/) and
-# false-block on noise that CI never reads.
+# Paths cspell must not spell-check (#257 item 5). cspell is a STYLE tool, so it may
+# skip (a) trees that are never tracked (.git, node_modules, virtualenvs, bytecode
+# caches) and (b) the package-manager lock files the canon creates, by EXACT filename
+# (hash and package-name noise, never authored prose). NO extension or directory
+# glob: the old `**/*.json`, `**/*.lock`, `**/.claude/**`, dev-dir and fixture
+# entries kept tracked content (plugin.json, hooks.json, .claude/ memory pages,
+# fixtures) out of the scan. This tuple is rendered into `.cspell.json` by both the
+# scaffold and `standardize`. `useGitignore` skips the
+# gitignored dev/report dirs: CI only ever sees tracked files, while a local
+# `cspell lint .` would otherwise walk reports/ and false-block on noise CI never reads.
 _CSPELL_IGNORE_PATHS: tuple[str, ...] = (
-    "**/*.json",
     "**/uv.lock",
     "**/package-lock.json",
-    "**/*.lock",
     "**/.git/**",
     "**/node_modules/**",
     "**/.venv/**",
     "**/venv/**",
     "**/__pycache__/**",
-    "**/tests_dev/**",
-    "**/docs_dev/**",
-    "**/scripts_dev/**",
-    "**/samples_dev/**",
-    "**/examples_dev/**",
-    "**/builds_dev/**",
-    "**/downloads_dev/**",
-    "**/libs_dev/**",
-    "**/reports/**",
-    "**/reports_dev/**",
-    "**/llm_externalizer_output/**",
-    "**/.claude/**",
-    "**/.tldr/**",
-    "**/tests/fixtures/**",
-    "**/test/fixtures/**",
-    "**/spec/fixtures/**",
-    "**/__fixtures__/**",
-    "**/testdata/**",
-    "**/fixtures/**",
 )
+
+# Precision instead of a blanket `**/*.json` exclusion (#257 item 5): long hex digests
+# (sha256 manifests such as .plugin-self-hashes.json, commit ids) are not prose, so
+# only THOSE tokens are skipped, never a whole file. A 16+ character run of pure hex
+# digits cannot hide a misspelled English word of any realistic length in a way that
+# matters for a spell checker, and every other token in the same file is still checked.
+_CSPELL_IGNORE_REGEXP: tuple[str, ...] = (r"\b[0-9a-fA-F]{16,}\b",)
 
 # The project-vocabulary seed. TWO groups, both load-bearing:
 #
@@ -3910,6 +3888,7 @@ def _render_canonical_cspell_config(plugin_path: Path) -> str:
         # otherwise walk gitignored trees and fail on content CI never sees.
         "useGitignore": True,
         "ignorePaths": list(_CSPELL_IGNORE_PATHS),
+        "ignoreRegExpList": list(_CSPELL_IGNORE_REGEXP),
         "words": _cspell_seed_words(plugin_path),
     }
     return json.dumps(config, indent=2) + "\n"

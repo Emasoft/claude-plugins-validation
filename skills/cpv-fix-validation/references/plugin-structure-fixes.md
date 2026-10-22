@@ -1257,7 +1257,7 @@ Rules validation is delegated to `validate_rules.py`. All results are transferre
 1. Replace the absolute path with a relative path or environment variable:
    ```
    # WRONG:
-   /Users/johndoe/projects/my-plugin/scripts/run.sh
+   /Users/username/projects/my-plugin/scripts/run.sh
 
    # RIGHT (relative):
    ./scripts/run.sh
@@ -1285,7 +1285,7 @@ Rules validation is delegated to `validate_rules.py`. All results are transferre
 1. Replace with relative paths or environment variables:
    ```
    # WRONG:
-   /home/deploy/app/config.json
+   /home/user/app/config.json
 
    # RIGHT:
    ./config.json
@@ -1305,7 +1305,7 @@ Rules validation is delegated to `validate_rules.py`. All results are transferre
 1. Replace with environment variable references or generic examples:
    ```markdown
    <!-- WRONG -->
-   Edit `/Users/john/projects/plugin/config.json`
+   Edit `/Users/username/projects/plugin/config.json`
 
    <!-- RIGHT -->
    Edit `${CLAUDE_PLUGIN_ROOT}/config.json`
