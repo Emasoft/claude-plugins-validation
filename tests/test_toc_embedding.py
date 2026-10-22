@@ -119,15 +119,15 @@ Endpoint details...
 
 Error info...
 """)
-        # Create SKILL.md that links to the reference and embeds TOC headings nearby
+        # Create SKILL.md that links to the reference and embeds the TOC as the
+        # list right after the link. (A heading between the link and the list
+        # ends the embedded block — see test_heading_between_link_and_list_is_minor.)
         skill_content = """\
 # My Skill
 
 ## References
 
 See the [API Guide](references/api-guide.md) for details.
-
-### API Guide Contents
 
 - Authentication
 - Endpoints
@@ -1019,3 +1019,201 @@ Use it.
         assert "notes.md" in nits[0].message
         assert "Table of Contents" in nits[0].message
         assert len(minors) == 0
+
+
+class TestTocBlockBoundaries:
+    """Issues #244 and #245: the TOC block on both sides ends where its list ends.
+
+    #244: the reference file's TOC used to run until the next ``## `` heading,
+    so ``###`` / ``> ##`` headings or a missing later H2 made every body bullet
+    a required "TOC entry". #245: the embedded TOC in SKILL.md was searched in a
+    fixed 100-line window, so a long, fully embedded TOC could never pass.
+    Every relaxation here is paired with a test proving a real incomplete
+    embedding is still a MINOR.
+    """
+
+    @staticmethod
+    def _run(tmp_path: Path, ref_text: str, skill_content: str) -> ValidationReport:
+        ref_dir = tmp_path / "references"
+        ref_dir.mkdir(exist_ok=True)
+        (ref_dir / "guide.md").write_text(ref_text)
+        skill_path = tmp_path / "SKILL.md"
+        skill_path.write_text(skill_content)
+        report = ValidationReport()
+        validate_toc_embedding(skill_content, skill_path, tmp_path, report)
+        return report
+
+    @staticmethod
+    def _toc_minors(report: ValidationReport) -> list[str]:
+        return [r.message for r in report.results if r.level == "MINOR" and "TOC headings embedded" in r.message]
+
+    @staticmethod
+    def _ref(entries: list[str], tail: str = "") -> str:
+        toc = "\n".join(f"- [{e}](#{e.lower().replace(' ', '-')})" for e in entries)
+        return f"# Guide\n\n## Table of Contents\n\n{toc}\n{tail}"
+
+    _BODY_BULLETS = "\n### Body\n\n" + "".join(f"- body bullet number {k}\n" for k in range(10))
+
+    # --- reference-file side (#244) -------------------------------------
+
+    def test_244_h3_after_toc_ends_reference_toc(self, tmp_path: Path):
+        """2-entry TOC, blank, ``### Body`` + 10 bullets: total is 2, and embedding both passes."""
+        ref = self._ref(["Alpha Setup", "Beta Usage"], self._BODY_BULLETS)
+        assert extract_toc_headings(ref) == ["Alpha Setup", "Beta Usage"]
+        skill = "# S\n\nSee the [guide](references/guide.md).\n\n- Alpha Setup\n- Beta Usage\n"
+        report = self._run(tmp_path, ref, skill)
+        assert self._toc_minors(report) == []
+        assert any(r.level == "PASSED" for r in report.results)
+
+    def test_244_real_incomplete_embedding_still_minor(self, tmp_path: Path):
+        """Same reference, only 1 of the 2 TOC entries embedded: MINOR 1/2 (rule unchanged)."""
+        ref = self._ref(["Alpha Setup", "Beta Usage"], self._BODY_BULLETS)
+        skill = "# S\n\nSee the [guide](references/guide.md).\n\n- Alpha Setup\n"
+        minors = self._toc_minors(self._run(tmp_path, ref, skill))
+        assert len(minors) == 1
+        assert "1/2 TOC headings" in minors[0]
+
+    def test_244_blockquoted_heading_ends_reference_toc(self, tmp_path: Path):
+        """The MDX-converted shape: a ``> ## Documentation Index`` heading ends the TOC."""
+        ref = (
+            "## Title\n\n## Table of Contents\n\n- [Title](#title)\n  - [Section](#section)\n\n"
+            "> ## Documentation Index\n> Fetch the index.\n\n### Title\n- a body bullet\n- another body bullet\n"
+        )
+        assert extract_toc_headings(ref) == ["Title", "Section"]
+
+    def test_244_paragraph_ends_reference_toc(self, tmp_path: Path):
+        """A non-indented paragraph line ends the TOC; later bullets are not entries."""
+        ref = "## Table of Contents\n\n- [One](#one)\n\nSome prose paragraph.\n\n- not a toc entry\n"
+        assert extract_toc_headings(ref) == ["One"]
+
+    def test_reference_toc_blank_separated_groups_stay_intact(self):
+        """Blank lines BETWEEN items of one TOC do not end it."""
+        ref = (
+            "## Table of Contents\n\n- [One](#one)\n- [Two](#two)\n\n- [Three](#three)\n"
+            "  - [Four](#four)\n\n- [Five](#five)\n\n## One\n\n- body\n"
+        )
+        assert extract_toc_headings(ref) == ["One", "Two", "Three", "Four", "Five"]
+
+    def test_reference_toc_intro_sentence_is_skipped_not_fatal(self):
+        """An intro sentence between the TOC heading and its list does not empty the TOC."""
+        ref = "## Contents\n\nThis document covers:\n\n- [One](#one)\n- [Two](#two)\n"
+        assert extract_toc_headings(ref) == ["One", "Two"]
+
+    # --- embedded side (#245) ------------------------------------------
+
+    _LONG = [f"Section {k:03d}" for k in range(1, 167)]
+
+    def test_245_166_entries_embedded_contiguously_pass(self, tmp_path: Path):
+        """166 entries embedded right after the link: 166/166, no finding."""
+        ref = self._ref(self._LONG)
+        assert len(extract_toc_headings(ref)) == 166
+        skill = "# S\n\nSee the [guide](references/guide.md).\n\n" + "".join(f"- {e}\n" for e in self._LONG)
+        assert self._toc_minors(self._run(tmp_path, ref, skill)) == []
+
+    def test_245_166_entries_one_missing_minor(self, tmp_path: Path):
+        """Same, with entry 150 missing: MINOR 165/166."""
+        ref = self._ref(self._LONG)
+        embedded = [e for e in self._LONG if e != "Section 150"]
+        skill = "# S\n\nSee the [guide](references/guide.md).\n\n" + "".join(f"- {e}\n" for e in embedded)
+        minors = self._toc_minors(self._run(tmp_path, ref, skill))
+        assert len(minors) == 1
+        assert "165/166 TOC headings" in minors[0]
+
+    def test_245_heading_after_list_ended_does_not_count(self, tmp_path: Path):
+        """A missing entry that appears only as a later heading is not part of the embedded TOC."""
+        ref = self._ref(["Alpha", "Beta", "Gamma"])
+        skill = "# S\n\nSee the [guide](references/guide.md).\n\n- Alpha\n- Beta\n\n## Gamma\n\nText.\n"
+        minors = self._toc_minors(self._run(tmp_path, ref, skill))
+        assert len(minors) == 1
+        assert "2/3 TOC headings" in minors[0]
+
+    def test_heading_between_link_and_list_is_minor(self, tmp_path: Path):
+        """A heading between the link and the list ends the block: 0/3."""
+        ref = self._ref(["Alpha", "Beta", "Gamma"])
+        skill = "# S\n\nSee the [guide](references/guide.md).\n\n### Contents\n\n- Alpha\n- Beta\n- Gamma\n"
+        minors = self._toc_minors(self._run(tmp_path, ref, skill))
+        assert len(minors) == 1
+        assert "0/3 TOC headings" in minors[0]
+
+    def test_separate_list_after_blank_line_is_not_absorbed(self, tmp_path: Path):
+        """Incomplete TOC, one blank line, then an unrelated list naming the missing
+        headings: still MINOR. The block may span blank lines only within the same list."""
+        ref = self._ref(["Alpha", "Beta", "Gamma"])
+        skill = (
+            "# S\n\nSee the [guide](references/guide.md).\n\n- Alpha\n- Beta\n\n"
+            "- Gamma is also the name of a release channel\n- Delta\n"
+        )
+        minors = self._toc_minors(self._run(tmp_path, ref, skill))
+        assert len(minors) == 1
+        assert "2/3 TOC headings" in minors[0]
+
+    def test_nested_items_after_blank_line_stay_in_the_list(self, tmp_path: Path):
+        """Positive sibling of the test above: a blank line followed by a NESTED item
+        of the same list keeps the block going."""
+        ref = self._ref(["Alpha", "Beta", "Gamma"])
+        skill = "# S\n\nSee the [guide](references/guide.md).\n\n- Alpha\n- Beta\n\n  - Gamma\n"
+        assert self._toc_minors(self._run(tmp_path, ref, skill)) == []
+
+    def test_paragraph_line_after_list_ends_block(self, tmp_path: Path):
+        """A paragraph line right after the list (no blank) is not part of the TOC."""
+        ref = self._ref(["Alpha", "Beta", "Gamma"])
+        skill = "# S\n\nSee the [guide](references/guide.md).\n\n- Alpha\n- Beta\nGamma is covered elsewhere.\n"
+        minors = self._toc_minors(self._run(tmp_path, ref, skill))
+        assert len(minors) == 1
+        assert "2/3 TOC headings" in minors[0]
+
+    def test_list_item_link_with_quoted_continuation_passes(self, tmp_path: Path):
+        """CPV's canonical shape: ``- [X](ref) — desc`` then an indented ``> A · B · C`` line."""
+        ref = self._ref(["Alpha", "Beta", "Gamma"])
+        skill = "# S\n\n## Resources\n\n- [Guide](references/guide.md) — the guide\n  > Alpha · Beta · Gamma\n"
+        assert self._toc_minors(self._run(tmp_path, ref, skill)) == []
+
+    def test_list_item_link_does_not_see_sibling_items(self, tmp_path: Path):
+        """A sibling item at the link's own level is not the link's embedded TOC."""
+        ref = self._ref(["Alpha", "Beta", "Gamma"])
+        skill = "# S\n\n- [Guide](references/guide.md)\n  > Alpha · Beta\n- Gamma\n"
+        minors = self._toc_minors(self._run(tmp_path, ref, skill))
+        assert len(minors) == 1
+        assert "2/3 TOC headings" in minors[0]
+
+    def test_blockquoted_resources_block_passes(self, tmp_path: Path):
+        """A link inside a ``>`` Resources list with nested ``>`` items passes."""
+        ref = self._ref(["Alpha", "Beta"])
+        skill = "# S\n\n> - [Guide](references/guide.md)\n>   - Alpha\n>   - Beta\n"
+        assert self._toc_minors(self._run(tmp_path, ref, skill)) == []
+
+    def test_paragraph_link_with_quote_digest_passes(self, tmp_path: Path):
+        """A paragraph link followed IMMEDIATELY by a ``> A · B · C`` digest passes."""
+        ref = self._ref(["Alpha", "Beta", "Gamma"])
+        skill = "# S\n\nRun [guide](references/guide.md)\n> Alpha · Beta · Gamma\non the target first.\n"
+        assert self._toc_minors(self._run(tmp_path, ref, skill)) == []
+
+    def test_quote_digest_stops_at_unquoted_line(self, tmp_path: Path):
+        """The digest is only the quoted lines: a heading name in the following prose does not count."""
+        ref = self._ref(["Alpha", "Beta", "Gamma"])
+        skill = "# S\n\nRun [guide](references/guide.md)\n> Alpha · Beta\nGamma is covered elsewhere.\n"
+        minors = self._toc_minors(self._run(tmp_path, ref, skill))
+        assert len(minors) == 1
+        assert "2/3 TOC headings" in minors[0]
+
+    def test_quote_after_blank_line_is_not_a_digest(self, tmp_path: Path):
+        """A blockquote separated from the link by a blank line is not its embedded TOC."""
+        ref = self._ref(["Alpha", "Beta", "Gamma"])
+        skill = "# S\n\nRun [guide](references/guide.md).\n\n> Alpha · Beta · Gamma\n"
+        minors = self._toc_minors(self._run(tmp_path, ref, skill))
+        assert len(minors) == 1
+        assert "0/3 TOC headings" in minors[0]
+
+    def test_backtick_ref_uses_same_block(self, tmp_path: Path):
+        """The backtick branch: long contiguous TOC passes, a separate later list does not count."""
+        ref = self._ref(self._LONG)
+        skill = "# S\n\nSee `references/guide.md`.\n" + "".join(f"- {e}\n" for e in self._LONG)
+        assert self._toc_minors(self._run(tmp_path, ref, skill)) == []
+        skill2 = (
+            "# S\n\nSee `references/guide.md`.\n"
+            + "".join(f"- {e}\n" for e in self._LONG[:-1])
+            + "\nSome prose.\n\n- Section 166\n"
+        )
+        minors = self._toc_minors(self._run(tmp_path, ref, skill2))
+        assert len(minors) == 1
+        assert "165/166 TOC headings" in minors[0]

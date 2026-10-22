@@ -8422,11 +8422,170 @@ def validate_no_absolute_paths(
 # TOC Embedding Validation — ensures .md files embed TOCs from referenced files
 # =============================================================================
 
-# Regex to extract TOC entries from a reference file's "## Table of Contents" section
-_TOC_SECTION_RE = re.compile(
-    r"(?im)^##\s*(table\s+of\s+contents|contents|toc|index)\s*\n(.*?)(?=\n##\s|\Z)",
-    re.DOTALL,
-)
+# Regex matching the heading LINE of a reference file's "## Table of Contents"
+# section. The TOC block itself is collected by ``_scan_reference_toc_block``,
+# a line scanner, never by a regex span: the old
+# ``(.*?)(?=\n##\s|\Z)`` capture ended only at the next ``## `` heading, so a
+# ``###`` heading, a blockquoted ``> ## ...`` heading, or a missing later H2
+# let every body bullet of the document count as a TOC entry (issue #244).
+_TOC_HEADING_RE = re.compile(r"(?im)^##\s*(?:table\s+of\s+contents|contents|toc|index)\s*$")
+
+# Splits a markdown line into leading whitespace, blockquote markers, the
+# whitespace after them, and the body. Used to measure a line's effective
+# indentation inside or outside a blockquote.
+_MD_LINE_SHAPE_RE = re.compile(r"^([ \t]*)((?:>[ \t]?)*)([ \t]*)(.*)$")
+# A heading of ANY level, judged on the quote-stripped body (so ``> ## X``
+# is a heading too).
+_MD_HEADING_BODY_RE = re.compile(r"^#{1,6}(?:\s|$)")
+# A list item (bullet or numbered), judged on the quote-stripped body.
+_MD_LIST_BODY_RE = re.compile(r"^(?:[-*+]|\d+[.)])\s")
+
+
+def _md_line_shape(line: str) -> tuple[int, str]:
+    """Return (effective indentation, quote-stripped body) of a markdown line.
+
+    The body is empty for a blank line and for a bare ``>`` line.
+    """
+    m = _MD_LINE_SHAPE_RE.match(line)
+    if not m:  # pragma: no cover - the pattern matches every string
+        return 0, line.strip()
+    lead, _quote, inner, body = m.groups()
+    return len(lead.expandtabs(4)) + len(inner.expandtabs(4)), body.rstrip()
+
+
+def _scan_reference_toc_block(lines: list[str], start: int) -> list[str]:
+    """Collect the list lines of a reference file's TOC, starting at ``start``.
+
+    ``start`` is the index of the line right after the TOC heading. Rules:
+
+    * Lines before the first list item (blank lines or an intro sentence) are
+      skipped; a heading met before any list item means the TOC is empty.
+    * From the first list item on, the block takes list items, indented
+      continuation lines, and blank lines that sit BETWEEN items (a blank line
+      is kept only when the next non-blank line is a list item or an indented
+      continuation, so blank-line-separated groups of one TOC stay intact).
+    * It stops at any heading of any level (including a blockquoted
+      ``> ## ...``), at the first non-indented non-list line, or at EOF.
+
+    This replaces the regex span that only ended at the next ``## `` heading
+    and so swallowed every later body bullet (issue #244). Lines are returned
+    quote-stripped and re-indented so ``_TOC_ENTRY_RE`` can match them.
+    """
+    n = len(lines)
+    i = start
+    while i < n:
+        _ind, body = _md_line_shape(lines[i])
+        if _MD_HEADING_BODY_RE.match(body):
+            return []
+        if _MD_LIST_BODY_RE.match(body):
+            break
+        i += 1
+    block: list[str] = []
+    while i < n:
+        ind, body = _md_line_shape(lines[i])
+        if not body:
+            j = i + 1
+            while j < n and not _md_line_shape(lines[j])[1]:
+                j += 1
+            if j >= n:
+                break
+            j_ind, j_body = _md_line_shape(lines[j])
+            if _MD_HEADING_BODY_RE.match(j_body):
+                break
+            if not (_MD_LIST_BODY_RE.match(j_body) or j_ind > 0):
+                break
+            i = j
+            continue
+        if _MD_HEADING_BODY_RE.match(body):
+            break
+        if not (_MD_LIST_BODY_RE.match(body) or ind > 0):
+            break
+        block.append(" " * ind + body)
+        i += 1
+    return block
+
+
+def _scan_embedded_toc_block(lines: list[str], anchor: int) -> str:
+    """Return the text a link at line ``anchor`` may use as its embedded TOC.
+
+    The block is the anchor line plus the contiguous list that belongs to it.
+    It replaces the fixed 100-line window, which could never be satisfied by a
+    TOC longer than ~100 entries and could also see unrelated later text
+    (issue #245). Stop rules:
+
+    * Link inside a list item at indentation ``i``: the block is that item's
+      continuation, every following line indented deeper than ``i`` (nested
+      items, an indented ``> A · B`` line). It stops at the first non-blank
+      line indented ``<= i`` (a sibling item or a paragraph).
+    * Link in a paragraph: blank lines right after the anchor are skipped, and
+      the next line must be a list item, else the block is the anchor line
+      only. With that first item's indentation ``b``, the block takes items at
+      ``b`` and any line indented deeper than ``b``; it stops at a non-blank
+      line that is neither (a paragraph, a less indented line).
+    * Link in a paragraph whose NEXT line (no blank between) is a blockquote:
+      the block is that contiguous run of quoted lines (CPV's one-line
+      ``> A · B · C`` digest). It stops at a blank or bare ``>`` line, a
+      non-quoted line, or a quoted heading.
+    * In both list modes a blank line is kept only when the next non-blank line is
+      indented deeper than the base (``i`` or ``b``): blank lines may separate
+      nested parts of the SAME list, never a later separate list at the base
+      level. Any heading of any level (including ``> #...``) and EOF stop the
+      block. Indentation is measured after blockquote markers.
+    """
+    n = len(lines)
+    if anchor >= n:
+        return ""
+    out = [lines[anchor]]
+    a_ind, a_body = _md_line_shape(lines[anchor])
+    i = anchor + 1
+    in_item = bool(_MD_LIST_BODY_RE.match(a_body))
+    if in_item:
+        base = a_ind
+    elif i < n and lines[i].lstrip().startswith(">"):
+        # CPV's one-line digest shape: the TOC as a blockquote (``> A · B · C``)
+        # on the line IMMEDIATELY after the link (no blank line between). The
+        # block is that contiguous run of quoted, non-blank, non-heading lines.
+        while i < n and lines[i].lstrip().startswith(">"):
+            body = _md_line_shape(lines[i])[1]
+            if not body or _MD_HEADING_BODY_RE.match(body):
+                break
+            out.append(lines[i])
+            i += 1
+        return "\n".join(out)
+    else:
+        while i < n and not _md_line_shape(lines[i])[1]:
+            i += 1
+        if i >= n:
+            return "\n".join(out)
+        first_ind, first_body = _md_line_shape(lines[i])
+        if not _MD_LIST_BODY_RE.match(first_body):
+            return "\n".join(out)
+        base = first_ind
+    while i < n:
+        ind, body = _md_line_shape(lines[i])
+        if not body:
+            j = i + 1
+            while j < n and not _md_line_shape(lines[j])[1]:
+                j += 1
+            if j >= n:
+                break
+            j_ind, j_body = _md_line_shape(lines[j])
+            if _MD_HEADING_BODY_RE.match(j_body) or j_ind <= base:
+                break
+            i = j
+            continue
+        if _MD_HEADING_BODY_RE.match(body):
+            break
+        if in_item:
+            belongs = ind > base
+        else:
+            belongs = ind > base or (ind == base and bool(_MD_LIST_BODY_RE.match(body)))
+        if not belongs:
+            break
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
 
 # Regex to extract individual TOC heading titles from list items only.
 # Must start with a list marker (-, *, +, or digit.) to avoid matching prose paragraphs.
@@ -8448,11 +8607,13 @@ def extract_toc_headings(md_content: str) -> list[str]:
     Returns a list of heading title strings (stripped of numbering/links/bullets).
     Returns empty list if no TOC section is found.
     """
-    m = _TOC_SECTION_RE.search(md_content)
+    m = _TOC_HEADING_RE.search(md_content)
     if not m:
         return []
 
-    toc_block = m.group(2)
+    lines = md_content.split("\n")
+    heading_line = md_content[: m.start()].count("\n")
+    toc_block = "\n".join(_scan_reference_toc_block(lines, heading_line + 1))
     headings: list[str] = []
 
     for entry_match in _TOC_ENTRY_RE.finditer(toc_block):
@@ -8651,11 +8812,11 @@ def validate_toc_embedding(
             # For non-list links or exempt files: skip (no TOC to embed)
             continue
 
-        # Check if TOC headings appear within ~100 lines after the link
-        # (large reference files can have 30+ TOC entries)
-        search_start = max(0, link_line_num)
-        search_end = min(len(lines), link_line_num + 100)
-        nearby_text = "\n".join(lines[search_start:search_end])
+        # Check the TOC headings against the contiguous list block that
+        # follows the link (issue #245: a fixed 100-line window could never
+        # be satisfied by a long embedded TOC). See _scan_embedded_toc_block
+        # for the exact stop rules.
+        nearby_text = _scan_embedded_toc_block(lines, link_line_num)
 
         # Strip inline code backticks from both sides for fuzzy matching —
         # SKILL.md may embed headings with or without backtick formatting
@@ -8848,10 +9009,8 @@ def validate_toc_embedding(
 
         refs_checked += 1
 
-        # Check if TOC headings appear within ~50 lines after the backtick ref
-        search_start = max(0, bt_line_num)
-        search_end = min(len(lines), bt_line_num + 100)
-        nearby_text = "\n".join(lines[search_start:search_end])
+        # Same contiguous-list block as the markdown-link branch (issue #245).
+        nearby_text = _scan_embedded_toc_block(lines, bt_line_num)
 
         nearby_lower_bt = nearby_text.lower()
         nearby_no_bt = nearby_lower_bt.replace("`", "")
@@ -8899,6 +9058,78 @@ def validate_toc_embedding(
         )
 
 
+# A URL scheme prefix (`claude-cli://x`, `vscode://x`): a link target with one
+# is a URL, never a local file (#246). Why: scheme length >= 2 so a Windows drive
+# (`C://x`) is not taken for a URL, and `file:` is excluded because a file: target
+# IS a local file and must keep being checked.
+_URL_SCHEME_RE = re.compile(r"^(?!file:)[a-z][a-z0-9+.-]+://", re.IGNORECASE)
+
+
+# Why: #246 - link text that opens a JS object literal (`{ key: ...`) is JSX/MDX
+# code, not link text. Needs `{`, an identifier or quoted key, then `:` so that
+# template-style text such as `{config}: options` is still a real link.
+_JS_OBJECT_LITERAL_RE = re.compile(r"\s*\{\s*[\"']?[\w$-]+[\"']?\s*:")
+
+
+def _fence_run(line: str) -> tuple[str, int, str] | None:
+    """Return (fence char, run length, rest of line) if `line` starts a fence, else None.
+
+    Why: ANY leading-space indentation is accepted. CommonMark measures the 0-3
+    spaces from the list content column, and CPV docs put fences under indented
+    numbered steps, so a fixed 3-space cap would stop stripping them.
+    """
+    body = line.lstrip(" ")
+    char = body[:1]
+    if char not in ("`", "~"):
+        return None
+    run = len(body) - len(body.lstrip(char))
+    if run < 3:
+        return None
+    return char, run, body[run:]
+
+
+def _strip_fenced_blocks(content: str) -> str:
+    """Blank fenced code blocks (``` and ~~~) using the CommonMark fence rule.
+
+    Why (#246): a closing fence uses the same character as the opener, is at
+    least as long (so ``` nested in ```` does not end it), may carry trailing
+    whitespace or a CR (CRLF files), and a backtick fence whose info string
+    holds a backtick is not a fence. An UNCLOSED opener is left as plain text,
+    never stripped to EOF: a stray fence must not blind the check to the rest
+    of the file (fail-safe toward checking). Block lines become empty lines.
+    """
+    lines = content.split("\n")
+    out = list(lines)
+    # Why: once an opener of run r found no closer, any later opener of the same
+    # char with run >= r cannot have one either (its closer would also have closed
+    # the first). Remembering that keeps many unclosed openers linear, not O(n^2).
+    no_closer_from: dict[str, int] = {}
+    i = 0
+    while i < len(lines):
+        opener = _fence_run(lines[i].rstrip("\r"))
+        if opener is None or (opener[0] == "`" and "`" in opener[2]):
+            i += 1
+            continue
+        char, run, _rest = opener
+        if run >= no_closer_from.get(char, run + 1):
+            i += 1
+            continue
+        close = None
+        for j in range(i + 1, len(lines)):
+            closer = _fence_run(lines[j].rstrip())
+            if closer and closer[0] == char and closer[1] >= run and not closer[2].strip():
+                close = j
+                break
+        if close is None:
+            no_closer_from[char] = run
+            i += 1
+            continue
+        for k in range(i, close + 1):
+            out[k] = ""
+        i = close + 1
+    return "\n".join(out)
+
+
 def validate_md_file_paths(
     md_file: Path,
     plugin_root: Path,
@@ -8935,11 +9166,14 @@ def validate_md_file_paths(
 
     # Strip fenced code blocks to avoid false positives from example code
     # Match ```...``` blocks (including with language specifier)
-    content_no_codeblocks = re.sub(r"```[\s\S]*?```", "", content)
+    # Why: #246 - the old ```...``` regex ignored ~~~ fences and mis-paired a
+    # ```-fence nested inside a longer (````) fence, so links shown as examples
+    # inside such fences were reported as broken (CommonMark fence rule instead).
+    content_no_codeblocks = _strip_fenced_blocks(content)
 
     # 1. Extract markdown link targets: [text](path)
     # Skip: URLs (http/https/mailto), anchors (#), empty
-    md_link_re = re.compile(r"\[(?:[^\]]*)\]\(([^)]+)\)")
+    md_link_re = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 
     # 2. Extract backtick file path references: `path/to/file.ext`
     # Only match if it looks like a real file path (has extension or path separator)
@@ -8985,9 +9219,16 @@ def validate_md_file_paths(
         return False
 
     for match in md_link_re.finditer(content_no_codeblocks):
-        raw_path = match.group(1).strip()
+        # Why: #246 - `[{ id: ... }](x)` is a JS/JSX object literal, not a link.
+        if _JS_OBJECT_LITERAL_RE.match(match.group(1)):
+            continue
+        raw_path = match.group(2).strip()
         # Skip URLs, anchors, mailto, data URIs
         if raw_path.startswith(("http://", "https://", "#", "mailto:", "data:", "tel:")):
+            continue
+        # Why: #246 - `claude-cli://...` (any `scheme://`) is a URL, not a file;
+        # an unknown scheme was resolved against the filesystem and reported.
+        if _URL_SCHEME_RE.match(raw_path):
             continue
         # Strip anchor from path (e.g., "file.md#section" -> "file.md")
         path_no_anchor = raw_path.split("#")[0].strip()

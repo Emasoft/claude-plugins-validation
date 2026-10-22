@@ -41,8 +41,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cpv_validation_common import (
+    _JS_OBJECT_LITERAL_RE,
+    _URL_SCHEME_RE,
     COLORS,
     ValidationReport,
+    _strip_fenced_blocks,
     get_gitignore_filter,
     is_test_path,
     save_report_and_print_summary,
@@ -150,42 +153,13 @@ def _strip_code_regions(content: str) -> str:
       * fenced blocks (``` or ~~~ ... closing fence) are blanked, and
       * inline code spans (`...`, ``...``) on non-fence lines are blanked.
     """
+    # Why: #246 - fenced blocks go through the same CommonMark stripper as
+    # validate_md_file_paths so both link checks agree on ~~~ / nested / unclosed fences.
     out_lines: list[str] = []
-    in_fence = False
-    fence_marker = ""  # the exact opening run, e.g. "```" or "~~~~"
-
-    for line in content.split("\n"):
-        stripped = line.lstrip()
-        # A fence line is one whose first non-space run is >=3 backticks or
-        # tildes. The closing fence must use the same character and be at
-        # least as long as the opener (CommonMark rule).
-        fence_char = ""
-        if stripped.startswith("```"):
-            fence_char = "`"
-        elif stripped.startswith("~~~"):
-            fence_char = "~"
-
-        if fence_char:
-            run_len = len(stripped) - len(stripped.lstrip(fence_char))
-            if not in_fence:
-                in_fence = True
-                fence_marker = fence_char * run_len
-                out_lines.append("")  # blank the opening fence line
-                continue
-            # Inside a fence: only a same-char run >= opener length closes it.
-            if fence_char == fence_marker[0] and run_len >= len(fence_marker) and stripped.rstrip(fence_char) == "":
-                in_fence = False
-                fence_marker = ""
-            out_lines.append("")  # blank every line inside / closing a fence
-            continue
-
-        if in_fence:
-            out_lines.append("")  # blank all content lines inside a fence
-            continue
-
-        # Outside fences: blank inline code spans so backticked snippets that
-        # look like links don't match. Replace each `...` span (1+ backticks)
-        # with spaces of equal length to preserve column positions.
+    for line in _strip_fenced_blocks(content).split("\n"):
+        # Blank inline code spans so backticked snippets that look like links
+        # do not match. Each `...` span (1+ backticks) becomes spaces of equal
+        # length to preserve column positions.
         out_lines.append(re.sub(r"`+[^`]*`+", lambda m: " " * len(m.group(0)), line))
 
     return "\n".join(out_lines)
@@ -533,9 +507,15 @@ def validate_broken_links(plugin_path: Path, report: DocumentationValidationRepo
         links = re.findall(r"(?<!!)\[([^\]]*)\]\(((?:[^()]|\([^()]*\))*)\)", scrubbed)
 
         for link_text, link_target in links:
+            # Why: #246 - `[{ id: ... }](...)` is a JS/JSX object literal, not
+            # link text; markdown link text never opens with `{` and spans lines.
+            if _JS_OBJECT_LITERAL_RE.match(link_text):
+                continue
             target = link_target.strip()
             # Skip external URLs, absolute/doc-site paths, anchors, empty.
-            if not target or target.startswith(_NON_LOCAL_LINK_PREFIXES):
+            # Why: #246 - any `scheme://` target (claude-cli://, vscode://, ...) is a
+            # URL, not a file; only a fixed scheme list was skipped before.
+            if not target or target.startswith(_NON_LOCAL_LINK_PREFIXES) or _URL_SCHEME_RE.match(target):
                 continue
 
             # Skip documentation placeholders / globs / regex examples.
