@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-10-22T16:56:26+00:00",
+  "computed_at": "2026-10-22T17:09:23+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:5f40a7e5324f36e221ef7baa8557f868168235269b42375eea26bc9c70e60a37",
@@ -1233,7 +1233,7 @@
     "tests/test_trdd_0f1f7889_missing_rules.py": "sha256:1acdcdaf10f4314ac275637cce588a417ae2e9638efd1f465fa4cb37e3ee7129",
     "tests/test_trdd_1yny73nt_agent_trailer.py": "sha256:6f6c008b006143bb8164619057bc9b2a0671a4bc9aa649f4d4cb2edab54a9bcd",
     "tests/test_trdd_6uw0kzvy_remote_tag_fail_closed.py": "sha256:df2b78ea405c2903cb35579280195c8fc73218ce5a92d61066e7c6c2bf2358d5",
-    "tests/test_trdd_ezhm759t_canon.py": "sha256:f4f03df8cf7b0f09da66aa0e7497baaf062035656eddc7c0f28a9af9cdce7415",
+    "tests/test_trdd_ezhm759t_canon.py": "sha256:d6946886ecc3f3bde8f9e4cc8532e8d02bcc9d90acf4cea2f2c98856ae010463",
     "tests/test_trdd_ezhm759t_own_publish.py": "sha256:13e8a93cb8c89ace1f6c0c15177fd36c651738e0f825e1f2eb3bc89f79db38c3",
     "tests/test_trdd_ezhm759t_pipeline_rules_parity.py": "sha256:6b6a6de0509ddd97489a4fe7358176f485b8b8839acba231ecbc82e7a7aaedc7",
     "tests/test_trdd_ezhm759t_resilience.py": "sha256:6c43c44dd3bd51645214f1cad4c105a7dbfea1ae85855b6c1cc3eb3d347a66c0",
