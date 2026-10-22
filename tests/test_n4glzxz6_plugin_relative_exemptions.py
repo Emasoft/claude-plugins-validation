@@ -278,6 +278,51 @@ def test_filter_scannable_files_unshipped_check_applies_across_root_spellings(tm
     assert [p.name for p in kept] == ["payload.md"]
 
 
+def test_filter_scannable_files_force_added_file_under_ignored_dir_is_scanned_across_root_spellings(
+    tmp_path: Path,
+) -> None:
+    """Git plugin, root via a symlink: a tracked file under a gitignored dir is scanned, an untracked sibling is not."""
+    real = tmp_path / "real"
+    plug_real = _plugin(real, "clean", git=True)
+    (plug_real / ".gitignore").write_text("scratch/\n", encoding="utf-8")
+    (plug_real / "scratch").mkdir()
+    (plug_real / "scratch" / "x.md").write_text(PAYLOAD, encoding="utf-8")
+    (plug_real / "scratch" / "forced.md").write_text(PAYLOAD, encoding="utf-8")
+    subprocess.run(["git", "-C", str(plug_real), "add", ".gitignore"], check=True)
+    subprocess.run(["git", "-C", str(plug_real), "add", "-f", "scratch/forced.md"], check=True)
+    subprocess.run(
+        ["git", "-C", str(plug_real), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"],
+        check=True,
+    )
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    plug_link = link / "clean" / "plug"
+    supplied = [
+        (plug_real / "scratch" / "x.md").resolve(),
+        (plug_real / "scratch" / "forced.md").resolve(),
+        (plug_real / PAYLOAD_REL).resolve(),
+    ]
+    kept = na.filter_scannable_files(plug_link, supplied)
+    assert sorted(p.name for p in kept) == sorted(["forced.md", "payload.md"])
+
+
+def test_filter_scannable_files_unshipped_check_plugin_in_repo_subdir(tmp_path: Path) -> None:
+    """Git toplevel is a parent of the plugin (resolved plugin dir, absolute paths): an ignored untracked file is still filtered."""
+    repo = (tmp_path / "repo").resolve()
+    plug = _plugin(repo, "plugins")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (plug / ".gitignore").write_text("scratch/\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"], check=True
+    )
+    (plug / "scratch").mkdir()
+    (plug / "scratch" / "x.md").write_text(PAYLOAD, encoding="utf-8")
+    supplied = [plug / "scratch" / "x.md", plug / PAYLOAD_REL]
+    kept = na.filter_scannable_files(plug, supplied)
+    assert [p.name for p in kept] == ["payload.md"]
+
+
 def test_filter_scannable_files_path_outside_root_gets_no_name_exemption(tmp_path: Path) -> None:
     """Regression guard: a path truly outside the root is never name-exempted, even under a `.git/` folder of its own."""
     plug = _plugin(tmp_path, "clean")
