@@ -711,7 +711,11 @@ def _build_code_block_map(lines: list[str]) -> tuple[list[bool], list[_CodeBlock
             if not in_block:
                 in_block = True
                 block_start = i
-                block_lang = line.strip().removeprefix("```").strip().lower()
+                # Why: issue #250 — keep only the LANGUAGE word; the rest of the opener
+                # line is a CommonMark info string (```json theme={null}) and must not
+                # leak into the lang that _DATA_LANG_FENCES / exec-lang lookups compare.
+                info = line.strip().removeprefix("```").strip().lower()
+                block_lang = info.split(None, 1)[0] if info else ""
             else:
                 in_block = False
                 ranges.append(_CodeBlockRange(block_start, i, block_lang))
@@ -5141,7 +5145,7 @@ def _load_audit_consent_registry(plugin_root: Path) -> dict[tuple[str, str, str]
 _CONSENT_PROTECTED_RULES: frozenset[str] = _INTENT_HARD_SIGNAL_RULES
 
 
-def _consent_line_text(file_path: str, line_number: int | None) -> str:
+def _consent_line_text(file_path: str, line_number: int | None, plugin_root: Path) -> str:
     """The FULL stripped text of the flagged line, read from disk — the consent
     hash input. Deliberately NOT the finding's ``lineContent``: that field is
     truncated to 200 chars, so hashing it would let an edit BEYOND char 200 of
@@ -5150,8 +5154,18 @@ def _consent_line_text(file_path: str, line_number: int | None) -> str:
     if line_number is None or line_number < 1:
         return ""
     try:
-        lines = Path(file_path).read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
+        # Why: issue #251 — a finding's file_path may be plugin-relative; opening it
+        # relative to the PROCESS cwd made every consent silently dead unless cwd was
+        # the plugin root. Anchor a relative path at the plugin_root the caller has.
+        target = Path(file_path)
+        if not target.is_absolute():
+            target = plugin_root / target
+        # Why: issue #251 review — a ``../`` (or symlink) path must never let a consent
+        # hash a line from OUTSIDE the plugin; fail closed.
+        if not target.resolve().is_relative_to(plugin_root.resolve()):
+            return ""
+        lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+    except (OSError, RuntimeError, ValueError):  # Why: #251 — resolve() raises RuntimeError on a symlink loop; fail closed
         return ""
     if line_number > len(lines):
         return ""
@@ -5222,11 +5236,32 @@ def report_findings(
         # exposing ``warning`` (else fall through to the blocking path —
         # fail-closed, never fail-permissive).
         if is_demoted and consents:
+            line_text = _consent_line_text(finding.file_path, line, plugin_path)
+            # Why: issue #251 — a registry entry for this (file, rule) whose line cannot
+            # be read must be LOUD, not a silent decline: the author believes it is
+            # consented while the finding keeps blocking. The decline itself stays
+            # fail-closed (reason is None below when line_text is empty).
+            if (
+                not line_text
+                and finding.rule_id not in _CONSENT_PROTECTED_RULES
+                and any(key[0] == Path(rel).as_posix() and key[1] == finding.rule_id for key in consents)
+            ):
+                unread_warn = getattr(report, "warning", None)
+                if callable(unread_warn):
+                    unread_warn(
+                        f"[skillaudit:{category} {finding.rule_id}] consent registry entry exists "
+                        "for this file/rule but its flagged line could not be read, so the "
+                        "consent was NOT applied (finding stays blocking)",
+                        rel,
+                        line,
+                    )
+            # A consent applies only to a line that was actually read (see #251 above).
+            # Why: the lookup stays fail-closed — an empty line_text matches no entry.
             reason = _consent_for_finding(
                 consents,
                 rel,
                 finding.rule_id,
-                _consent_line_text(finding.file_path, line),
+                line_text,
             )
             warn_method = getattr(report, "warning", None)
             if reason is not None and callable(warn_method):

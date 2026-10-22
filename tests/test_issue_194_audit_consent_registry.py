@@ -226,14 +226,17 @@ def test_live_finding_cannot_be_consented_away(tmp_path: Path) -> None:
 
 
 def test_flagged_file_missing_on_disk_declines_consent(tmp_path: Path) -> None:
-    """Fail-closed: if the flagged file cannot be read, the hash cannot be verified and the finding keeps blocking."""
+    """Fail-closed: if the flagged file cannot be read, the hash cannot be verified and the finding keeps blocking (issue #251: with a visible WARNING saying why, never consented)."""
     _write_registry(
         tmp_path,
         [{"file": _REL, "ruleId": "A2A_CROSS_AGENT_INJECT", "lineSha256": _digest(_LINE), "reason": "ok"}],
     )
     report = _FakeReport()
     _run(tmp_path, _finding_under(tmp_path, demoted=True), report)
-    assert not report.warning_calls
+    # Why: issue #251 — the decline is no longer silent: one WARNING names the unread line.
+    assert len(report.warning_calls) == 1
+    assert "could not be read" in report.warning_calls[0][0]
+    assert "(demoted, consented)" not in report.warning_calls[0][0]
     assert len(report.nit_calls) == 1
 
 

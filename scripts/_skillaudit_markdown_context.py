@@ -116,7 +116,29 @@ _DATA_LANGS: Final[frozenset[str]] = frozenset(
 # ``_build_code_block_map`` matches against ``line.strip()``; without the
 # ``\s*`` here this classifier would mis-see an indented fence as prose →
 # lose the bash-fence severity uplift the native loop applies. (audit MINOR #7)
-_FENCE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?P<fence>```+|~~~+)\s*(?P<lang>[A-Za-z0-9_+-]*)\s*$")
+# Why: issue #250 — CommonMark lets a fence carry an INFO STRING after the language
+# word (```bash theme={null}, ```python title="x.py"). The old ``\s*lang\s*$`` anchor
+# rejected those, so the opener was not seen as a fence: sentinels/fence state were lost
+# and opener/closer pairing desynced for the rest of the file. ``_fence_parts`` enforces
+# the CommonMark rule: a BACKTICK fence's info string may not contain a backtick (else it
+# is inline code, e.g. ```` ```x``` ````); a TILDE fence's may.
+_FENCE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+
+
+def _fence_parts(line: str) -> tuple[str, str, bool] | None:
+    """Return ``(fence, lang, has_info)`` if ``line`` is a fence line, else None.
+
+    ``lang`` is the first token of the info string (case preserved); ``has_info``
+    is True when ANY info string is present (a closer must have none).
+    """
+    m = _FENCE_RE.match(line)
+    if m is None:
+        return None
+    fence = m.group("fence")
+    info = m.group("info").strip()
+    if fence[0] == "`" and "`" in info:
+        return None
+    return fence, (info.split(None, 1)[0] if info else ""), bool(info)
 
 
 def _html_comment_spans(source: str) -> list[tuple[int, int]]:
@@ -209,17 +231,19 @@ def _build_fence_map(source: str) -> list[tuple[int, int, str] | None]:
 
     i = 0
     while i < len(lines):
-        m = _FENCE_RE.match(lines[i])
+        m = _fence_parts(lines[i])
         if not m:
             i += 1
             continue
-        fence = m.group("fence")
-        lang = (m.group("lang") or "").lower()
+        fence, lang_raw, _ = m
+        lang = lang_raw.lower()
         # Find matching closer.
         j = i + 1
         while j < len(lines):
-            close = _FENCE_RE.match(lines[j])
-            if close and close.group("fence") == fence and not (close.group("lang") or ""):
+            close = _fence_parts(lines[j])
+            # A closer carries NO info string (CommonMark); an info-bearing line inside
+            # a block is content, not a closer.
+            if close and close[0] == fence and not close[2]:
                 break
             j += 1
         if j >= len(lines):
@@ -1810,6 +1834,94 @@ def _is_safe_literal_argv_subprocess(line: str) -> bool:
     return True
 
 
+# Why: issue #259 — the #81 safe-shape check judged only the FLAGGED line, so the same
+# ``subprocess.run([...])`` call was certified when written on one line yet flagged when
+# its literal argv list continued on following lines. Judge the WHOLE call instead.
+# Bounded look-ahead + fail closed: a call whose parentheses do not balance within the
+# bound (or whose quotes do not close on their line) is never certified.
+_SUBPROCESS_CALL_OPEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bsubprocess\.(?:run|call|check_output|check_call|Popen)\s*\("
+)
+_SUBPROCESS_CALL_MAX_LINES: Final[int] = 12
+_SUBPROCESS_CALL_PREFIX_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\s*(?:[A-Za-z_][\w.]*(?:\s*,\s*[A-Za-z_][\w.]*)*\s*=\s*)?$"
+)
+_SUBPROCESS_CALL_SUFFIX_RE: Final[re.Pattern[str]] = re.compile(r"^\s*[),]*\s*(?:#.*)?$")
+
+
+def _gather_subprocess_call(lines: list[str], line_idx: int) -> tuple[str, int] | None:
+    """Return ``(text, end_idx)``: the single-spaced text of the ``subprocess.X(...)``
+    call that opens on ``lines[line_idx]`` (call name to balanced closing paren) and the
+    index of the line holding that closing paren; None when it cannot be closed within
+    ``_SUBPROCESS_CALL_MAX_LINES`` lines or contains an unquoted ``#`` comment."""
+    first = _SUBPROCESS_CALL_OPEN_RE.search(lines[line_idx])
+    if first is None:
+        return None
+    depth = 0
+    parts: list[str] = []
+    # Why: issue #259 round 3 — other statements on the call's own line (``os.system(c);
+    # subprocess.run([...])``, ``log("subprocess.run("); ...``) were never judged; only a
+    # bare assignment target may precede the call, else fail closed.
+    if not _SUBPROCESS_CALL_PREFIX_RE.match(lines[line_idx][: first.start()]):
+        return None
+    for offset in range(_SUBPROCESS_CALL_MAX_LINES):
+        idx = line_idx + offset
+        if idx >= len(lines):
+            return None
+        text = lines[idx][first.start() :] if offset == 0 else lines[idx]
+        quote = ""
+        escaped = False
+        for pos, ch in enumerate(text):
+            if quote:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == quote:
+                    quote = ""
+                continue
+            if ch == "#":
+                # Why: issue #259 review — a Python comment (``# a)``) must not feed the
+                # paren counter (it could close the call early and hide a later
+                # ``shell=True``); fail closed instead of modelling comments.
+                return None
+            if ch in "\"'":
+                quote = ch
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    # Why: issue #259 round 3 — trailing text after the closing paren
+                    # (``; subprocess.run(c, shell=True)``) must be only closers/comment.
+                    if not _SUBPROCESS_CALL_SUFFIX_RE.match(text[pos + 1 :]):
+                        return None
+                    parts.append(text[: pos + 1].strip())
+                    return " ".join(parts), idx
+        if quote:
+            return None  # unterminated string on this line: not provably a plain literal
+        parts.append(text.strip())
+    return None
+
+
+def _certified_literal_argv_call_end(lines: list[str], line_idx: int) -> int | None:
+    """#81 + #133 + #259 — ``_is_safe_literal_argv_subprocess`` applied to the whole
+    call joined across its continuation lines. Returns the index of the call's last
+    line when certified, else None. A call that cannot be closed within the bound is
+    never certified: a ``shell=True`` may hide on a later line."""
+    gathered = _gather_subprocess_call(lines, line_idx)
+    if gathered is None or not _is_safe_literal_argv_subprocess(gathered[0]):
+        return None
+    return gathered[1]
+
+
+def _is_safe_literal_argv_subprocess_call(lines: list[str], line_idx: int) -> bool:
+    """True iff the call opening on ``lines[line_idx]`` is certified safe (see
+    ``_certified_literal_argv_call_end``). Kept for tests only: production code calls
+    ``_certified_literal_argv_call_end`` directly because it needs the end index."""
+    return _certified_literal_argv_call_end(lines, line_idx) is not None
+
+
 # #83.3 — LOG_INJECTION ``${env:…}`` / ``$env:…`` is a log4shell-lookup
 # pattern, but the SAME ``${env:NAME}`` form is benign PowerShell variable
 # syntax. The genuinely-dangerous LOG_INJECTION shapes carry a JNDI / LDAP /
@@ -2814,11 +2926,15 @@ def _certain_benign_literal(
     #       string interpolation. `shell=True` / f-string / $VAR / + / .format
     #       / % / a bare-identifier element keeps it visible. Gated on the
     #       absence of a payload-construction / network sink in context.
+    call_end = _certified_literal_argv_call_end(lines, line_idx) if rule_id in {"SHELL_EXEC", "CMD_INJECTION"} else None
+    # Why: issue #259 review — the sink look-around must cover the WHOLE certified call
+    # (plus 2 lines), not just 2 lines after its first line, or a ``curl … | sh`` /
+    # URL string on a later argv line would be certified away.
+    sink_span = max(2, call_end - line_idx + 2) if call_end is not None else 2
     if (
-        rule_id in {"SHELL_EXEC", "CMD_INJECTION"}
-        and _is_safe_literal_argv_subprocess(line)
-        and not _context_has_payload_sink(lines, line_idx, span=2)
-        and not _context_has_network_sink(lines, line_idx, span=2)
+        call_end is not None
+        and not _context_has_payload_sink(lines, line_idx, span=sink_span)
+        and not _context_has_network_sink(lines, line_idx, span=sink_span)
     ):
         return True
 
