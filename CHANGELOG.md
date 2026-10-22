@@ -2,6 +2,29 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.22.4] - 2026-10-22
+
+### Bug Fixes
+
+- **security:** Sentence demotes bare claude setup-token in a consented fence (TRDD-N4GLZXZ6)
+- **security:** Require a column-0 closer for the setup-token consent fence (TRDD-N4GLZXZ6)
+- **skillaudit:** The setup-token consent sentence must be visible text (TRDD-N4GLZXZ6)
+
+### Documentation
+
+- **card:** Record the 5.22.3 release and the issue 261 auto-close incident (TRDD-N4GLZXZ6)
+- **card:** Unblock the 6.0.0 port; label Gate 0; record the unpushed state (TRDD-N4GLZXZ6)
+- **card:** Record increment 1c, its limits, gaps and follow-ups (TRDD-N4GLZXZ6)
+- **card:** Record the durability branch, the open decisions and the port method (TRDD-N4GLZXZ6)
+- **card:** STATE gates the port on the owner's decision and points to git for unpushed commits (TRDD-N4GLZXZ6)
+- **card:** STATE says fetch before listing unpushed commits; older list marked historical (TRDD-N4GLZXZ6)
+- **card:** Record the v5.22.4 decisions and review outcomes (TRDD-N4GLZXZ6)
+- **card:** Replace the machine path in STATE with a pointer to the LOCAL note (TRDD-N4GLZXZ6)
+
+### Miscellaneous Tasks
+
+- Regen self-hash manifest for the v5.22.4 candidate (TRDD-N4GLZXZ6)
+
 ## [5.22.3] - 2026-10-22
 
 ### Bug Fixes
