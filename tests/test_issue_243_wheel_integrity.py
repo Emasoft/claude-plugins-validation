@@ -366,9 +366,9 @@ def test_release_candidate_anchor_is_ignored_and_audited_in_wheel_mode(armed, tm
     assert "refused" in events
 
 
-@pytest.mark.parametrize("var", ["PLUGIN_SKIP_GITHUB_INTEGRITY", "CPV_SKIP_GITHUB_INTEGRITY", "PYTEST_CURRENT_TEST"])
+@pytest.mark.parametrize("var", ["PLUGIN_SKIP_GITHUB_INTEGRITY", "CPV_SKIP_GITHUB_INTEGRITY"])
 def test_plugin_mode_keeps_its_skips(armed, tmp_path, monkeypatch, var):
-    """Plugin mode (a root with plugin.json) still honours its skip switches (out of #243 scope)."""
+    """Plugin mode (a root with plugin.json) still honours the sanctioned skip switches (out of #243 scope)."""
     root = tmp_path / "plugin"
     _write(root / ".claude-plugin" / "plugin.json", json.dumps({"name": "x", "version": "1.2.3"}))
     armed(_build_site(tmp_path / "unused"))
@@ -377,6 +377,18 @@ def test_plugin_mode_keeps_its_skips(armed, tmp_path, monkeypatch, var):
     monkeypatch.setenv(var, "1")
     assert pvh.verify_self_integrity(root, fail_on_mismatch=False, quiet=True) is True
     assert called == []
+
+
+def test_plugin_mode_pytest_env_is_not_a_skip(armed, tmp_path, monkeypatch):
+    """Issue #255: PYTEST_CURRENT_TEST no longer skips plugin mode; the check runs (and refuses with no manifest)."""
+    root = tmp_path / "plugin"
+    _write(root / ".claude-plugin" / "plugin.json", json.dumps({"name": "x", "version": "1.2.3"}))
+    armed(_build_site(tmp_path / "unused"))
+    called: list[object] = []
+    monkeypatch.setattr(pvh, "_fetch_github_manifest", lambda v, prefer_cache=True: called.append(v))
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "1")
+    assert pvh.verify_self_integrity(root, fail_on_mismatch=False, quiet=True) is False
+    assert called == ["1.2.3"]
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,4 @@
-"""The integrity check never skips silently: each skip warns on stderr and writes one audit line."""
+"""The integrity check never skips silently: each skip warns on stderr and writes one audit line; a check that cannot verify refuses (issue #255)."""
 
 from __future__ import annotations
 
@@ -35,12 +35,26 @@ def _run_and_check(root: Path, capsys: pytest.CaptureFixture[str], stderr_text: 
     assert json.loads(after[-1])["event"] == event
 
 
-def test_pytest_env_alone_warns_and_audits(
+def _refuse_and_check(root: Path, capsys: pytest.CaptureFixture[str], stderr_text: str) -> None:
+    """Issue #255: the check REFUSES (False), names the cause and the dev skip, and writes one `refused` line."""
+    before = len(_lines())
+    assert pvh.verify_self_integrity(root, fail_on_mismatch=False, quiet=True) is False
+    err = capsys.readouterr().err
+    assert stderr_text in err
+    assert "PLUGIN_SKIP_GITHUB_INTEGRITY=1" in err
+    assert "SKIPPED" not in err
+    after = _lines()
+    assert len(after) - before == 1
+    assert json.loads(after[-1])["event"] == "refused"
+
+
+def test_pytest_env_alone_is_not_a_skip(
     root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """PYTEST_CURRENT_TEST without a skip variable still warns (SKIPPED, names it) and logs test-run-skip."""
+    """Issue #255: PYTEST_CURRENT_TEST alone no longer skips; with no manifest the check refuses."""
     monkeypatch.setenv("PYTEST_CURRENT_TEST", "t::t (call)")
-    _run_and_check(root, capsys, "SKIPPED because PYTEST_CURRENT_TEST", "test-run-skip")
+    monkeypatch.setattr(pvh, "_fetch_github_manifest", lambda version: None)
+    _refuse_and_check(root, capsys, "no hash manifest for tag v0.0.1")
 
 
 def test_pytest_env_plus_skip_variable_audits_skip_variable(
@@ -61,19 +75,19 @@ def test_skip_variable_without_pytest_env_audits(
     _run_and_check(root, capsys, "SKIPPED", "skip-variable-honoured")
 
 
-def test_no_manifest_warns_even_when_quiet(
+def test_no_manifest_refuses_even_when_quiet(
     root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """No manifest available: quiet mode still warns (Cannot verify) and logs unverified-no-manifest."""
+    """No manifest available: the check refuses (issue #255 fail-closed), prints even when quiet, logs refused."""
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.setattr(pvh, "_fetch_github_manifest", lambda version: None)
-    _run_and_check(root, capsys, "Cannot verify", "unverified-no-manifest")
+    _refuse_and_check(root, capsys, "no hash manifest for tag v0.0.1")
 
 
-def test_malformed_manifest_warns_even_when_quiet(
+def test_malformed_manifest_refuses_even_when_quiet(
     root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Malformed manifest: quiet mode still warns (malformed) and logs unverified-malformed-manifest."""
+    """Malformed manifest: the check refuses (issue #255 fail-closed), prints even when quiet, logs refused."""
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.setattr(pvh, "_fetch_github_manifest", lambda version: {"files": ["x"]})
-    _run_and_check(root, capsys, "malformed", "unverified-malformed-manifest")
+    _refuse_and_check(root, capsys, "malformed or empty")

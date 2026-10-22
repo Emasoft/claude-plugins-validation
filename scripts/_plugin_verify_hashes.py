@@ -17,26 +17,26 @@ This is the **canonical** module per TRDD-bbff5bc5 (publish.py auth
 standard). For one release (v2.51.0) the legacy `cpv_integrity` module
 still exists as a thin shim that re-exports from here. The legacy shim
 is removed in v2.53.0.
-
 Behavior:
-    1. Fetch the canonical manifest from
-       `https://raw.githubusercontent.com/Emasoft/claude-plugins-validation/main/.plugin-self-hashes.json`
-       (with a 1-hour cache at `~/.cache/cpv/github-manifest-vN.json`).
-       Falls back to the legacy filename `.cpv-self-hashes.json` for
-       one release while v2.50.x cached clients are still in the wild.
-    2. For each file in the manifest that exists locally, compute its
-       SHA256 and compare to the canonical hash.
+    1. Fetch the canonical manifest of the plugin's OWN version tag,
+       `https://raw.githubusercontent.com/Emasoft/claude-plugins-validation/v<version>/.plugin-self-hashes.json`
+       (with a 1-hour cache at `~/.cache/cpv/github-manifest-tag-v<version>.json`).
+       Falls back to the legacy filename `.cpv-self-hashes.json` at the same
+       tag. There is no branch fallback (issue #255).
+    2. For each file in the manifest, compute its SHA256 locally and compare
+       to the canonical hash; any added shipped file is reported too.
     3. On mismatch, print a CRITICAL warning naming every modified
        file and (by default) exit with code 2 — refusing to trust the
        validator's output.
-    4. On network failure, fall back to the cached manifest. If no
-       cache is available, emit a warning but allow execution to
-       continue (user may be intentionally offline).
-       This fail-open applies to PLUGIN mode only. A self-located WHEEL
-       install (issue #243: uvx / pip) is checked against the manifest of
-       its exact release tag, only for the files the wheel ships, and
-       REFUSES (exit 2) when that manifest is unavailable or anything
-       differs; so does a root that is neither a wheel nor a plugin.
+    4. On network failure, fall back to the cached manifest of the same tag.
+       If the version is unreadable, or no manifest of that tag can be
+       obtained, or it is malformed, the check REFUSES (exit 2 / False) and
+       names the cause and the dev skip variable (issue #255). It never
+       passes unverified.
+       A self-located WHEEL install (issue #243: uvx / pip) is checked
+       against the manifest of its exact release tag, only for the files the
+       wheel ships, and REFUSES likewise; so does a root that is neither a
+       wheel nor a plugin.
 
 Every CPV validator entry point (`validate_security.py`,
 `validate_plugin.py`, `validate_skill.py`, `validate_marketplace.py`,
@@ -46,8 +46,10 @@ typically < 200ms) and idempotent (cached after the first call per
 process).
 
 Bypass for development:
-    Set `PLUGIN_SKIP_GITHUB_INTEGRITY=1` in the environment to skip
-    the GitHub fetch (still verifies local manifest if present).
+    Set `PLUGIN_SKIP_GITHUB_INTEGRITY=1` in the environment to skip the
+    check in plugin mode (ignored for package installs). Every skip prints a
+    warning and appends an audit line. No other variable skips it: the
+    `PYTEST_CURRENT_TEST` auto-skip was removed (issue #255).
     The legacy `CPV_SKIP_GITHUB_INTEGRITY=1` is still honoured for
     backward compatibility (a DeprecationWarning is printed once per
     process). The legacy alias will be removed in a future major release.
@@ -62,6 +64,7 @@ import re
 import subprocess
 import sys
 from datetime import datetime, timedelta
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -81,10 +84,12 @@ REPO_RAW_TAG_URL_LEGACY = (
     f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/v{{version}}/{MANIFEST_FILE_LEGACY}"
 )
 
-# Fallback for dev branches / pre-release versions: main HEAD manifest.
-# Used only when the per-version URL returns 404 (tag doesn't exist yet).
+# Issue #255: the `main`-branch fallback is REMOVED. A version's manifest comes
+# only from its own tag (or the cache of that tag). This constant is no longer
+# read by any verification path; it is kept ONLY because the deprecated
+# `cpv_integrity` shim re-exports it by name (removing it would break that
+# import). The LEGACY-filename twin had no such consumer and is gone.
 REPO_RAW_MAIN_URL = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{MANIFEST_FILE}"
-REPO_RAW_MAIN_URL_LEGACY = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{MANIFEST_FILE_LEGACY}"
 
 CACHE_DIR = Path.home() / ".cache" / "cpv"
 CACHE_TTL = timedelta(hours=1)
@@ -154,31 +159,39 @@ def _discover_sibling_cached_versions(plugin_root: Path) -> list[Path]:
     return out
 
 
-def _cache_path_for_version(version: str | None) -> Path:
-    """Cache file is per-version so different installations don't collide."""
-    safe = (version or "main").replace("/", "_").replace(":", "_")
-    return CACHE_DIR / f"github-manifest-v{safe}.json"
+def _cache_path_for_version(version: str) -> Path:
+    """Cache of the manifest at tag `v<version>`, keyed by that exact tag.
+
+    Issue #255: the old key was `github-manifest-v<version>.json` (or `vmain`
+    for no version), and that file could hold a `main`-branch manifest written
+    by the removed branch fallback. The `tag-` namespace is written ONLY from
+    the tag URL (it is the same file the wheel path uses), so a stale
+    branch manifest left by an older CPV is never read back as this tag.
+    """
+    return CACHE_DIR / f"github-manifest-tag-v{version}.json"
 
 
-def _read_cached_manifest(version: str | None) -> dict[str, object] | None:
+def _read_cached_manifest(version: str) -> dict[str, object] | None:
     cache_path = _cache_path_for_version(version)
     if not cache_path.is_file():
         return None
     try:
         parsed = json.loads(cache_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return None
     return parsed if isinstance(parsed, dict) else None
 
 
-def _fetch_one(url: str, version: str | None) -> dict[str, object] | None:
+def _fetch_one(url: str, version: str) -> dict[str, object] | None:
     """Fetch a single URL and cache it for the given version key."""
     try:
         req = Request(url, headers={"User-Agent": USER_AGENT})
         with urlopen(req, timeout=HTTP_TIMEOUT_SEC) as resp:  # noqa: S310 - hardcoded HTTPS
             data = resp.read().decode("utf-8")
         parsed = json.loads(data)
-    except (URLError, OSError, json.JSONDecodeError, TimeoutError):
+    # Issue #255 review: an HTTPException (IncompleteRead, RemoteDisconnected, ...)
+    # or a ValueError from a malformed response reads as "not fetched", never a traceback.
+    except (URLError, OSError, HTTPException, ValueError, TimeoutError, UnicodeDecodeError):
         return None
     if not isinstance(parsed, dict):
         return None
@@ -208,18 +221,27 @@ def _fetch_github_manifest(
     version: str | None,
     prefer_cache: bool = True,
 ) -> dict[str, object] | None:
-    """Fetch the canonical manifest for the given plugin version.
+    """Fetch the canonical manifest for the given plugin version, from its tag only.
 
-    Strategy (per TRDD-bbff5bc5 §2.2):
-        1. If `version` is set, prefer the per-tag URL with NEW filename.
-        2. Same per-tag URL with LEGACY filename (one-release compat).
-        3. Fall back to the `main` branch URL with NEW filename.
-        4. Same `main` branch URL with LEGACY filename.
-        5. Per-version cache (any age) on total network failure.
+    Strategy (per TRDD-bbff5bc5 §2.2, narrowed by issue #255):
+        1. The per-tag URL `v<version>` with the NEW filename.
+        2. The same per-tag URL with the LEGACY filename (one-release compat).
+        3. The cache of that exact tag (any age) on total network failure.
+
+    Issue #255: there is NO branch fallback. The old steps 3-4 fetched the
+    `main` branch manifest, a moving target that anyone with push access
+    controls (and that does not even exist here: the default branch is
+    `master`), and its bytes were cached under the version key, so a later
+    offline run compared the install against a different tree. A version is
+    now anchored to its own immutable tag or to nothing: `version=None` (or a
+    version unsafe to put in a URL) returns None WITHOUT reading any cache,
+    and the caller refuses.
 
     `prefer_cache=True` short-circuits to the cache if the cached copy
     is younger than `CACHE_TTL`. Set False to force a fresh fetch.
     """
+    if not version or not _PLUGIN_VERSION_RE.fullmatch(version):
+        return None
     if prefer_cache:
         cache_path = _cache_path_for_version(version)
         if cache_path.is_file():
@@ -232,31 +254,19 @@ def _fetch_github_manifest(
             except OSError:
                 pass
 
-    # 1. Try per-version tag URL with NEW filename first.
-    if version:
-        url = REPO_RAW_TAG_URL.format(version=version)
-        m = _fetch_one(url, version)
-        if m is not None:
-            return m
-        # 2. Per-tag URL with LEGACY filename.
-        url_legacy = REPO_RAW_TAG_URL_LEGACY.format(version=version)
-        m = _fetch_one(url_legacy, version)
-        if m is not None:
-            _warn_legacy_filename_once()
-            return m
-
-    # 3. Main HEAD with NEW filename.
-    m = _fetch_one(REPO_RAW_MAIN_URL, version)
+    # 1. Per-version tag URL with the NEW filename first.
+    url = REPO_RAW_TAG_URL.format(version=version)
+    m = _fetch_one(url, version)
     if m is not None:
         return m
-
-    # 4. Main HEAD with LEGACY filename.
-    m = _fetch_one(REPO_RAW_MAIN_URL_LEGACY, version)
+    # 2. Per-tag URL with the LEGACY filename.
+    url_legacy = REPO_RAW_TAG_URL_LEGACY.format(version=version)
+    m = _fetch_one(url_legacy, version)
     if m is not None:
         _warn_legacy_filename_once()
         return m
 
-    # 5. Last resort: any cached copy, even stale.
+    # 3. Last resort: the cached copy of the SAME tag, even stale.
     return _read_cached_manifest(version)
 
 
@@ -289,6 +299,10 @@ def _read_skip_env_var() -> bool:
     return False
 
 
+class _AddedFilesError(Exception):
+    """The added-file enumeration could not run; the message is the refusal reason (issue #255)."""
+
+
 def _detect_added_files(plugin_root: Path, manifest_files: dict[str, object]) -> list[str]:
     """Shipped files present on disk but ABSENT from the canonical manifest.
 
@@ -305,21 +319,24 @@ def _detect_added_files(plugin_root: Path, manifest_files: dict[str, object]) ->
     logic the manifest builder uses), so runtime cruft, caches, and
     gitignored files are excluded symmetrically and never false-flag. The two
     manifest files are excluded by the enumerator. Returns a sorted list of
-    relative paths; empty when enumeration is unavailable (graceful — an
-    enumeration failure must not become a spurious integrity CRITICAL).
+    relative paths.
+
+    Issue #255: an enumeration failure RAISES `_AddedFilesError`. It used to
+    return [] ("no added files"), so breaking the import or the walk made
+    every added file invisible: a fail-open. Callers turn it into a refusal.
     """
     try:
         scripts_dir = Path(__file__).resolve().parent
         if str(scripts_dir) not in sys.path:
             sys.path.insert(0, str(scripts_dir))
         from _plugin_compute_hashes import enumerate_shipped_files
-    except ImportError:
-        return []
+    except ImportError as exc:
+        raise _AddedFilesError(f"the added-file check could not load enumerate_shipped_files: {exc}") from exc
+    manifest_set = {k for k in manifest_files if isinstance(k, str)}
     try:
         on_disk = enumerate_shipped_files(plugin_root)
-    except (OSError, ValueError):
-        return []
-    manifest_set = {k for k in manifest_files if isinstance(k, str)}
+    except (OSError, ValueError) as exc:
+        raise _AddedFilesError(f"the added-file check could not list the files of {plugin_root}: {exc}") from exc
     return sorted(on_disk - manifest_set)
 
 
@@ -378,6 +395,10 @@ _SITE_DIR_NAMES = frozenset({"site-packages", "dist-packages"})
 _SELF_RECORD_PATH = "scripts/_plugin_verify_hashes.py"
 # A version string is interpolated into a URL and a cache file name.
 _SAFE_VERSION_RE = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_-]*")
+# Issue #255: in plugin mode the version picks the tag whose manifest is trusted,
+# so it must LOOK like a release version (dotted numeric, optional -/+ suffix).
+# A name such as "main" would select a ref that is not a release tag.
+_PLUGIN_VERSION_RE = re.compile(r"\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.+_-]+)?")
 
 REFUSAL_HEADLINE = (
     "CPV refused to run: its own integrity could not be verified. This is not a verdict on the plugin being validated."
@@ -573,7 +594,13 @@ def _release_candidate_reasons(root: Path, anchor: str) -> tuple[list[str], int]
         checked += 1
     for rel_path in sorted(tracked - set(files)):
         reasons.append(f"{rel_path}: tracked by git but absent from the manifest")
-    for added in _detect_added_files(root, files):
+    # Issue #255: an enumeration failure is a refusal reason, never "no added files".
+    try:
+        added_files = _detect_added_files(root, files)
+    except _AddedFilesError as exc:
+        added_files = []
+        reasons.append(str(exc))
+    for added in added_files:
         reasons.append(f"{added}: present but absent from the manifest")
     return reasons, checked
 
@@ -677,8 +704,8 @@ def _wheel_version(install: _WheelInstall) -> str | None:
 def _wheel_cache_path(version: str) -> Path:
     """Cache keyed by the EXACT tag ref, in its own namespace.
 
-    Distinct from `_cache_path_for_version`, whose file for a version may hold a
-    `main`-branch manifest written by the plugin-mode fallback.
+    Since issue #255 this is the same file `_cache_path_for_version` uses:
+    both are written only from the tag URL, never from a branch.
     """
     return CACHE_DIR / f"github-manifest-tag-v{version}.json"
 
@@ -847,18 +874,18 @@ def verify_self_integrity(
             are still printed.
 
     Returns:
-        True if every locally-present file matches the GitHub hash, OR
-        if the network is unreachable AND no cached manifest exists
-        (graceful degradation — user may be offline). False on mismatch
-        when `fail_on_mismatch=False`. That offline fail-open applies to
-        PLUGIN mode only (a root with `.claude-plugin/plugin.json`). A
-        self-located WHEEL install (issue #243) and a root that is neither
-        a wheel nor a plugin REFUSE instead: exit 2 (or False) whenever the
-        exact-tag manifest is unavailable or anything differs.
+        True if every manifest file matches the hash of the plugin's own
+        version tag and no unlisted shipped file exists (or the sanctioned
+        dev skip variable is set in plugin mode). Otherwise it REFUSES:
+        exit 2, or False when `fail_on_mismatch=False`. Issue #255: this
+        includes an unreadable version, an unobtainable tag manifest (no
+        network and no cache of that tag) and a malformed or empty one; the
+        old offline fail-open is gone. A self-located WHEEL install (issue
+        #243) and a root that is neither a wheel nor a plugin refuse alike.
 
     Side effects:
         - Writes / refreshes the cached manifest at
-          `~/.cache/cpv/github-manifest-vN.json`.
+          `~/.cache/cpv/github-manifest-tag-v<version>.json`.
         - On mismatch with `fail_on_mismatch=True`: calls `sys.exit(2)`.
     """
     global _VERIFIED_THIS_PROCESS
@@ -869,8 +896,8 @@ def verify_self_integrity(
     # verified against the files THAT PACKAGE ships, at their installed
     # paths, using only the manifest of its exact release tag. Detection runs
     # BEFORE the skip checks below: owner policy is "refuse to run if not
-    # validated by hash", so no env var and no pytest auto-skip can turn the
-    # check off for a package install. (Plugin mode keeps its skips.)
+    # validated by hash", so no env var can turn the check off for a package
+    # install. (Plugin mode keeps the sanctioned dev skip variable.)
     if plugin_root is None:
         try:
             wheel = _detect_wheel_install(_MODULE_FILE)
@@ -908,77 +935,98 @@ def verify_self_integrity(
         )
 
     # Release-candidate anchor (see its block comment). Checked BEFORE the skip
-    # variable and the pytest shortcut below, so neither can override it: with
-    # the anchor set, the candidate is verified against its own committed
-    # manifest or the run refuses.
+    # variable below, so it cannot override it: with the anchor set, the
+    # candidate is verified against its own committed manifest or the run
+    # refuses.
     anchor = os.environ.get(RELEASE_CANDIDATE_ENV)
     if anchor is not None:
         return _verify_release_candidate(plugin_root, anchor, fail_on_mismatch=fail_on_mismatch, quiet=quiet)
 
-    # Dev / CI escape hatch (the skip variable) and the test-suite auto-skip
-    # (PYTEST_CURRENT_TEST). The test-suite skip stays for the dev loop: tests
-    # run the working-tree source, so a GitHub gate would break every
-    # commit-in-progress. But PYTEST_CURRENT_TEST is only an environment
-    # variable anyone can set (hooks can persist env vars), so skipping
-    # silently would be an untraceable bypass. Both skips therefore ALWAYS
-    # print a warning and write an audit line; that is the trail. No setting
-    # may redirect or disable the audit log, or it would erase the trail.
-    skip_var = _read_skip_env_var()
-    test_run = bool(os.environ.get("PYTEST_CURRENT_TEST"))
-    if skip_var or test_run:
-        _audit(
-            "skip-variable-honoured" if skip_var else "test-run-skip",
-            root=str(plugin_root),
-            test_run=test_run,
-            skip_variable=skip_var,
-        )
-        cause = (
-            "by PLUGIN_SKIP_GITHUB_INTEGRITY (or its legacy name)"
-            if skip_var
-            else "because PYTEST_CURRENT_TEST is set (test-suite auto-skip)"
-        )
+    # Dev escape hatch: the owner-sanctioned skip variable (development of CPV
+    # itself). It ALWAYS prints a warning and writes an audit line; that is the
+    # trail. No setting may redirect or disable the audit log, or it would
+    # erase the trail.
+    # Issue #255: the PYTEST_CURRENT_TEST auto-skip that used to sit here is
+    # GONE. It was an environment variable anyone can set, i.e. a second,
+    # unsanctioned bypass. The test suite sets the sanctioned skip variable
+    # for its own process tree instead (tests/conftest.py), and in-process
+    # tests that need a bypass monkeypatch this module.
+    if _read_skip_env_var():
+        _audit("skip-variable-honoured", root=str(plugin_root), skip_variable=True)
         print(
-            f"[CPV integrity] WARNING: integrity check SKIPPED {cause}; "
+            "[CPV integrity] WARNING: integrity check SKIPPED by PLUGIN_SKIP_GITHUB_INTEGRITY (or its legacy name); "
             f"this run is unverified and was logged to {_AUDIT_LOG}.",
             file=sys.stderr,
         )
         _VERIFIED_THIS_PROCESS = True
         return True
 
+    # Issue #255: fail CLOSED. Every case below used to print a warning and
+    # return True ("the user may be offline"), so an unreadable version, an
+    # unreachable or deleted tag manifest, or a malformed one all PASSED.
+    # Owner policy: "refuse to run if not validated by hash". Each case now
+    # refuses through `_refuse` (printed even when quiet, audited) and names
+    # its own cause plus the sanctioned dev skip.
+    dev_hint = (
+        "if you are developing CPV itself (an unreleased version has no tag manifest yet), "
+        "set PLUGIN_SKIP_GITHUB_INTEGRITY=1 for the run; the skip is logged"
+    )
+    audit_ctx: dict[str, object] = {"mode": "plugin", "root": str(plugin_root)}
     version = _read_local_plugin_version(plugin_root)
+    if version is None or not _PLUGIN_VERSION_RE.fullmatch(version):
+        return _refuse(
+            [
+                f"the plugin version could not be read from {plugin_root / '.claude-plugin' / 'plugin.json'} "
+                f"(missing, unreadable, or not a safe version string: {version!r}); "
+                "no tag manifest can be chosen without it",
+                dev_hint,
+            ],
+            fail_on_mismatch=fail_on_mismatch,
+            audit=audit_ctx,
+        )
+    audit_ctx["version"] = version
+    user_hint = (
+        f"if you are a normal user, run once with network access so the manifest of tag v{version} "
+        f"is cached at {_cache_path_for_version(version)}; offline runs then verify from that cache"
+    )
     manifest = _fetch_github_manifest(version)
     if manifest is None:
-        _audit("unverified-no-manifest", root=str(plugin_root), version=version)
-        # No GitHub, no cache. Cannot verify — warn loudly but allow
-        # execution to continue. User may be offline; refusing to run
-        # would be worse UX than running unverified with a warning. The
-        # warning ignores `quiet`: every skipped verification leaves a trail.
-        tried_url = REPO_RAW_TAG_URL.format(version=version) if version else REPO_RAW_MAIN_URL
-        cache_path = _cache_path_for_version(version)
-        print(
-            "[CPV integrity] WARNING: Could not fetch the canonical "
-            f"hash manifest from GitHub ({tried_url}) and no cached "
-            f"copy is available at {cache_path}. Cannot verify "
-            "validator integrity. If your network is restricted, this "
-            "is expected; if not, the validator may be tampered with.",
-            file=sys.stderr,
+        return _refuse(
+            [
+                f"no hash manifest for tag v{version} could be fetched "
+                f"({REPO_RAW_TAG_URL.format(version=version)}) and no cached copy of that tag "
+                f"exists at {_cache_path_for_version(version)}",
+                user_hint,
+                dev_hint,
+            ],
+            fail_on_mismatch=fail_on_mismatch,
+            audit=audit_ctx,
         )
-        _VERIFIED_THIS_PROCESS = True
-        return True
 
     # Forward-compat with v2 schema: v1 uses `files`, v2 uses `hashed_files`.
     # The v2.51.0 reader handles BOTH so a v2.53.0 schema-v2 manifest is
     # readable by this v2.51.0 module without error.
-    files = manifest.get("hashed_files") or manifest.get("files") or {}
-    if not isinstance(files, dict):
-        _audit("unverified-malformed-manifest", root=str(plugin_root), version=version)
-        print(
-            "[CPV integrity] WARNING: GitHub manifest is malformed "
-            "(expected {'files'|'hashed_files': {path: hash}}). Cannot verify.",
-            file=sys.stderr,
+    # A non-dict manifest (a JSON list, a string, ...) is malformed too: refuse, never AttributeError.
+    files = (manifest.get("hashed_files") or manifest.get("files")) if isinstance(manifest, dict) else None
+    # Issue #255: an empty or missing table used to verify 0 files and pass, and
+    # a non-string path or hash was skipped. Both mean the manifest is malformed.
+    bad_entries = (
+        [repr(k) for k, v in files.items() if not isinstance(k, str) or not isinstance(v, str)]
+        if isinstance(files, dict)
+        else []
+    )
+    if not isinstance(files, dict) or not files or bad_entries:
+        detail = f"; non-string entries: {', '.join(bad_entries[:5])}" if bad_entries else ""
+        return _refuse(
+            [
+                f"the v{version} hash manifest is malformed or empty "
+                f"(expected {{'files'|'hashed_files': {{path: hash}}}}){detail}",
+                user_hint,
+                dev_hint,
+            ],
+            fail_on_mismatch=fail_on_mismatch,
+            audit=audit_ctx,
         )
-        _VERIFIED_THIS_PROCESS = True
-        return True
 
     mismatches: list[tuple[str, str, str]] = []
     checked = 0
@@ -993,9 +1041,12 @@ def verify_self_integrity(
             mismatches.append((rel_path, expected, "<missing>"))
             continue
         actual = _sha256_of_file(local)
-        if actual is None:
-            continue
         expected_hex = expected.split(":", 1)[-1] if expected.startswith("sha256:") else expected
+        if actual is None:
+            # Issue #255: an unreadable file used to be skipped silently (a
+            # chmod 000 hid any content). It is a mismatch, as on the anchor path.
+            mismatches.append((rel_path, expected_hex, "<unreadable>"))
+            continue
         checked += 1
         if actual != expected_hex:
             mismatches.append((rel_path, expected_hex, actual))
@@ -1003,7 +1054,12 @@ def verify_self_integrity(
     # Bidirectional check (TRDD-b8c6d04f change 3): an ADDED shipped file —
     # present locally but absent from the canonical manifest — is an
     # inoculation vector the manifest→local loop above can never see.
-    for added_rel in _detect_added_files(plugin_root, files):
+    try:
+        added_files = _detect_added_files(plugin_root, files)
+    except _AddedFilesError as exc:
+        # Issue #255: an enumeration failure refuses; it is never "no added files".
+        return _refuse([str(exc)], fail_on_mismatch=fail_on_mismatch, audit=audit_ctx)
+    for added_rel in added_files:
         mismatches.append((added_rel, "<not-in-manifest>", "<added>"))
 
     if mismatches:
@@ -1019,6 +1075,8 @@ def verify_self_integrity(
         for rel_path, expected_hex, actual in mismatches[:50]:
             if actual == "<missing>":
                 print(f"  - {rel_path}  (deleted locally)", file=sys.stderr)
+            elif actual == "<unreadable>":
+                print(f"  - {rel_path}  (unreadable — cannot be hashed)", file=sys.stderr)
             elif actual == "<added>":
                 print(
                     f"  - {rel_path}  (present locally but NOT in the canonical manifest — added/inoculated file)",
@@ -1099,10 +1157,11 @@ def verify_self_integrity(
 def fetch_canonical_manifest(version: str | None) -> dict[str, object] | None:
     """Public-facing fetcher used by the self-scan skip logic.
 
-    Returns the canonical hash manifest for the given version (per-tag
-    GitHub URL), falling back to main HEAD then to any cached copy.
-    Falls back through the legacy filename for one release. Returns None
-    on total failure (no network, no cache, malformed response).
+    Returns the canonical hash manifest for the given version from its own
+    tag (new filename, then the legacy filename), then the cache of that same
+    tag. There is no branch fallback (issue #255). Returns None on total
+    failure (no version, no network, no cache, malformed response); the
+    caller then scans every file, i.e. it fails toward flagging.
 
     Used by validate_security.py when the target plugin claims to be CPV
     but is NOT the running CPV. The local manifest of the target cannot

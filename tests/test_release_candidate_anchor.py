@@ -298,15 +298,16 @@ def test_gate4_marketplace_validation_uses_the_anchor(tmp_path: Path, monkeypatc
     assert "PLUGIN_SKIP_GITHUB_INTEGRITY" not in env
 
 
-def test_no_github_manifest_fail_open_is_audited(
-    candidate: Path, monkeypatch: pytest.MonkeyPatch, _fresh_state: Path
+def test_no_github_manifest_refuses_and_is_audited(
+    candidate: Path, monkeypatch: pytest.MonkeyPatch, capsys, _fresh_state: Path
 ) -> None:
-    """Plugin mode with no reachable manifest still passes (pre-existing fail-open, open item) but leaves an audit line."""
+    """Plugin mode with no reachable manifest REFUSES (issue #255 fail-closed), names the dev skip, and is audited."""
     monkeypatch.delenv(ENV, raising=False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.setattr(pvh, "_fetch_github_manifest", lambda version: None)
-    assert _verify(candidate) is True
-    assert _events(_fresh_state)[-1]["event"] == "unverified-no-manifest"
+    assert _verify(candidate) is False
+    assert "PLUGIN_SKIP_GITHUB_INTEGRITY=1" in capsys.readouterr().err
+    assert _events(_fresh_state)[-1]["event"] == "refused"
 
 
 def test_github_mismatch_is_audited(candidate: Path, monkeypatch: pytest.MonkeyPatch, _fresh_state: Path) -> None:

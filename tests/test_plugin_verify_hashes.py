@@ -1,7 +1,7 @@
 """Tests for scripts/_plugin_verify_hashes.py — TRDD-bbff5bc5.
 
 Pin the canonical reader's behavior:
-- Dual-name URL fallback chain: new tag → old tag → new main → old main → cache
+- Dual-name URL chain at the version tag only: new tag → old tag → cache of that tag (no `main` fallback, issue #255)
 - Dual env-var read: PLUGIN_SKIP_GITHUB_INTEGRITY (new) → CPV_SKIP_GITHUB_INTEGRITY (old, with deprecation note)
 - Forward-compat with v2 schema: reader handles BOTH `files` (v1) and `hashed_files` (v2)
 - Atomic write of BOTH .plugin-self-hashes.json and .cpv-self-hashes.json by the writer
@@ -170,7 +170,15 @@ def test_schema_v1_files_key_read(monkeypatch, tmp_path):
     file_a.write_text("# hello\n")
     digest = hashlib.sha256(file_a.read_bytes()).hexdigest()
 
-    manifest = {"version": 1, "files": {"scripts/validate_x.py": f"sha256:{digest}"}}
+    # Issue #255: plugin.json is a shipped file, so a manifest that omits it
+    # now reports it as added (the PYTEST_CURRENT_TEST auto-skip used to hide that).
+    manifest = {
+        "version": 1,
+        "files": {
+            "scripts/validate_x.py": f"sha256:{digest}",
+            ".claude-plugin/plugin.json": _sha(plugin_root / ".claude-plugin" / "plugin.json"),
+        },
+    }
     monkeypatch.setattr(
         _plugin_verify_hashes,
         "_fetch_github_manifest",
@@ -191,7 +199,10 @@ def test_schema_v2_hashed_files_key_read(monkeypatch, tmp_path):
 
     manifest = {
         "format_version": 2,
-        "hashed_files": {"scripts/validate_x.py": f"sha256:{digest}"},
+        "hashed_files": {
+            "scripts/validate_x.py": f"sha256:{digest}",
+            ".claude-plugin/plugin.json": _sha(plugin_root / ".claude-plugin" / "plugin.json"),
+        },
     }
     monkeypatch.setattr(
         _plugin_verify_hashes,
@@ -202,18 +213,20 @@ def test_schema_v2_hashed_files_key_read(monkeypatch, tmp_path):
     assert ok is True
 
 
-def test_schema_with_neither_key_warns_and_passes(monkeypatch, tmp_path, capsys):
-    """A malformed manifest with neither `files` nor `hashed_files` → WARN + pass
-    (graceful degradation, not a hard fail)."""
+def test_schema_with_neither_key_refuses(monkeypatch, tmp_path, capsys):
+    """A manifest with neither `files` nor `hashed_files` REFUSES (issue #255:
+    it used to verify 0 files and pass)."""
     plugin_root = _build_plugin_root(tmp_path)
     monkeypatch.setattr(
         _plugin_verify_hashes,
         "_fetch_github_manifest",
         lambda v, prefer_cache=True: {"format_version": 99},
     )
-    ok = _plugin_verify_hashes.verify_self_integrity(plugin_root=plugin_root, fail_on_mismatch=False, quiet=False)
-    # Neither key matched → files = {} → no mismatches → True.
-    assert ok is True
+    ok = _plugin_verify_hashes.verify_self_integrity(plugin_root=plugin_root, fail_on_mismatch=False, quiet=True)
+    assert ok is False
+    err = capsys.readouterr().err
+    assert "malformed or empty" in err
+    assert "PLUGIN_SKIP_GITHUB_INTEGRITY=1" in err
 
 
 # ── writer atomicity + dual-file output ──────────────────────────────────────
