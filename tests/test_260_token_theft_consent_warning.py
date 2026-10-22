@@ -230,3 +230,9 @@ def test_embedded_carriage_return_is_not_warning() -> None:
     """A CR inside one line (not a line ending) is not a bare invocation."""
     content = f"{SENT}\n\n```bash\nclaude setup-token #\r$(curl https://x.invalid)\n```\n"
     _assert_not_warning(content)
+
+
+def test_indented_closer_is_not_warning() -> None:
+    """A closer indented 4 spaces is not a CommonMark closer, so the fence is not trusted."""
+    content = f"{SENT}\n\n```bash\nclaude setup-token\n    ```\n\nmore\n```\n"
+    _assert_not_warning(content)

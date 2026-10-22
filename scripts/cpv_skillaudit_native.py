@@ -1843,6 +1843,11 @@ def _setup_token_fence_is_bare(lines: list[str], line_idx: int) -> bool:
         return False
     if not lines[entry[0] - 2].startswith("```"):
         return False
+    # CommonMark does not treat a closer indented 4+ spaces as a closer, but
+    # both detectors do: require a column-0 ``` closer so the rendered block
+    # cannot continue past the scanner's fence.
+    if entry[1] >= len(lines) or not lines[entry[1]].startswith("```"):
+        return False
     seen_bare = False
     for raw in lines[entry[0] - 1 : entry[1]]:
         if not raw.isascii():
@@ -1897,12 +1902,11 @@ def _context_classifier_verdict(
     # purpose: markdown only (a script RUNS the command), and the WHOLE fence
     # must hold only bare invocations (optionally `--help`/`-h`) plus blank
     # lines (column-0 ``` fence the native scanner also sees, ASCII only, no
-    # comments — see `_setup_token_fence_is_bare`) — a pipe, capture, redirect or
-    # chained command in the same
-    # block would otherwise let a mint-and-exfiltrate recipe pass --strict,
-    # since the sentence already demotes the execution-class findings on those
-    # lines. Not added to _EXECUTION_CLASS_RULES: that set also feeds the
-    # doc-only carve-outs.
+    # comments — see `_setup_token_fence_is_bare`) — a pipe, capture, redirect
+    # or chained command in the same block would otherwise let a
+    # mint-and-exfiltrate recipe pass --strict, since the sentence already
+    # demotes the execution-class findings on those lines. Not added to
+    # _EXECUTION_CLASS_RULES: that set also feeds the doc-only carve-outs.
     if (
         rule_id == "CLAUDE_CLI_TOKEN_THEFT"
         and file_path.lower().endswith((".md", ".markdown"))
