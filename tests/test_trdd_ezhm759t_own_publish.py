@@ -204,6 +204,7 @@ def test_row6_gh_probes_pass_an_explicit_timeout_and_attempt_budget(monkeypatch,
         return _completed(0, stdout="MARKETPLACE_PAT\n")
 
     monkeypatch.setattr(publish, "gh_with_retry", fake_gh)
+    monkeypatch.setattr(publish, "_current_repo_slug", lambda root: "o/r")  # Why: #239
     publish._gh_secret_exists(tmp_path, "MARKETPLACE_PAT", gh_bin="/usr/bin/gh")
     assert calls[0]["timeout"] == publish._GH_PROBE_TIMEOUT_SEC
     assert calls[0]["max_attempts"] == publish._GH_PROBE_MAX_ATTEMPTS
@@ -280,6 +281,7 @@ def test_row9_positive_control_successful_fetch_still_reads_the_ref(monkeypatch,
 def test_row10_gh_failure_reports_unknown_not_a_missing_secret(monkeypatch, tmp_path):
     """Row 10: a failing gh probe returns None (UNKNOWN), not False."""
     monkeypatch.setattr(publish, "gh_with_retry", lambda cmd, **kw: _completed(1, stderr="502"))
+    monkeypatch.setattr(publish, "_current_repo_slug", lambda root: "o/r")  # Why: #239
     assert publish._gh_secret_exists(tmp_path, "MARKETPLACE_PAT", gh_bin="/usr/bin/gh") is None
     assert publish._remote_has_receiver_workflow("o", "r", gh_bin="/usr/bin/gh") is None
 
@@ -287,6 +289,7 @@ def test_row10_gh_failure_reports_unknown_not_a_missing_secret(monkeypatch, tmp_
 def test_row10_positive_control_a_real_absence_is_still_false(monkeypatch, tmp_path):
     """Row 10 positive control: gh answering with an empty list still reports absent."""
     monkeypatch.setattr(publish, "gh_with_retry", lambda cmd, **kw: _completed(0, stdout="OTHER_SECRET\n"))
+    monkeypatch.setattr(publish, "_current_repo_slug", lambda root: "o/r")  # Why: #239
     assert publish._gh_secret_exists(tmp_path, "MARKETPLACE_PAT", gh_bin="/usr/bin/gh") is False
 
 

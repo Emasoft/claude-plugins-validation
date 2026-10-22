@@ -3822,15 +3822,21 @@ def _detect_layout(plugin_root: Path) -> tuple[str, dict]:
     return "none", {}
 
 
-def _gh_secret_exists(plugin_root: Path, secret_name: str) -> bool:
-    """Check whether a GitHub secret with the given name exists on this repo."""
+def _gh_secret_exists(plugin_root: Path, secret_name: str) -> bool | None:
+    """Whether a GitHub secret exists on this repo: True, False, or None (cannot check)."""
     gh = shutil.which("gh")
     if gh is None:
-        return False
-    r = subprocess.run([gh, "secret", "list"], cwd=str(plugin_root),
+        return None
+    # Why: issue #239 — without --repo, gh infers the repo from cwd/remotes and can
+    # query a different repo than the one being released. Pin it to the origin
+    # slug; no slug or a gh failure = cannot check (None), never a false "absent".
+    slug = _current_repo_slug(plugin_root)
+    if not slug:
+        return None
+    r = subprocess.run([gh, "secret", "list", "--repo", slug], cwd=str(plugin_root),
                        capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
-        return False
+        return None
     for line in r.stdout.splitlines():
         if line.split("\t", 1)[0].strip() == secret_name:
             return True
@@ -3991,7 +3997,14 @@ def stage_marketplace_registration(root: Path) -> None:
         if shutil.which("gh") is None:
             cprint(f"  {RED}BLOCKED: gh CLI not installed — cannot verify secret/marketplace.{NC}")
             sys.exit(1)
-        if not _gh_secret_exists(root, "MARKETPLACE_PAT"):
+        pat_state = _gh_secret_exists(root, "MARKETPLACE_PAT")
+        if pat_state is None:
+            # Why: issue #239 — a cannot-check is not a pass and not a "missing":
+            # block, but do not assert a negative gh never confirmed.
+            cprint(f"  {RED}BLOCKED: UNVERIFIED — could not read this repo's secrets via gh.{NC}")
+            cprint(f"  {RED}  Diagnose: gh secret list --repo {_current_repo_slug(root) or 'OWNER/REPO'}{NC}")
+            sys.exit(1)
+        if not pat_state:
             cprint(f"  {RED}BLOCKED: MARKETPLACE_PAT secret not configured on this plugin repo.{NC}")
             cprint(f"  {RED}  Fix: uv run python scripts/set_marketplace_pat.py {_current_repo_slug(root) or 'OWNER/REPO'}{NC}")
             sys.exit(1)

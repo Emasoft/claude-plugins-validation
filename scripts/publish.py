@@ -1121,11 +1121,17 @@ def _gh_secret_exists(
     """
     if gh_bin is None:
         gh_bin = shutil.which("gh") or "gh"
+    # Why: issue #239 — without --repo, gh infers the repo from cwd/remotes and
+    # can query a different repo (a fork, or the wrong remote) than the one being
+    # released. Pin it to the origin slug; no slug = cannot check (None).
+    slug = _current_repo_slug(plugin_root)
+    if not slug:
+        return None
     # Use --json for stable parsing: gh's tab-separated default format is
     # not formally specified and a future gh version may add color codes
     # or extra columns. --json name --jq '.[].name' is forwards-compatible.
     result = gh_with_retry(
-        [gh_bin, "secret", "list", "--json", "name", "--jq", ".[].name"],
+        [gh_bin, "secret", "list", "--repo", slug, "--json", "name", "--jq", ".[].name"],
         cwd=str(plugin_root),
         check=False,
         capture_output=True,
