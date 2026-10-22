@@ -57,7 +57,9 @@ def test_real_root_manifest_produces_no_findings(tmp_path: Path) -> None:
     manifest_path = REPO_ROOT / ".plugin-self-hashes.json"
     # Fail rather than skip: a skip would silently hide this check when the manifest is absent.
     if not manifest_path.is_file():
-        pytest.fail(f"{manifest_path} is missing: this test needs the plugin's root hash manifest, which ships only in a git checkout of CPV")
+        pytest.fail(
+            f"{manifest_path} is missing: this test needs CPV's root hash manifest, present in a source checkout or plugin install and absent from a partial copy"
+        )
     manifest = manifest_path.read_bytes()
     (plugin / ".plugin-self-hashes.json").write_bytes(manifest)
     report = _scan(plugin)
