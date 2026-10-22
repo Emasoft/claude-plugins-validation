@@ -54,7 +54,11 @@ def test_nested_file_named_like_a_cpv_artifact_is_scanned(tmp_path: Path, name: 
 def test_real_root_manifest_produces_no_findings(tmp_path: Path) -> None:
     """Regression guard: CPV's own root manifest scanned as plugin content gives zero findings."""
     plugin = _minimal_plugin(tmp_path / "plug")
-    manifest = (REPO_ROOT / ".plugin-self-hashes.json").read_bytes()
+    manifest_path = REPO_ROOT / ".plugin-self-hashes.json"
+    # Fail rather than skip: a skip would silently hide this check when the manifest is absent.
+    if not manifest_path.is_file():
+        pytest.fail(f"{manifest_path} is missing: this test needs the plugin's root hash manifest, which ships only in a git checkout of CPV")
+    manifest = manifest_path.read_bytes()
     (plugin / ".plugin-self-hashes.json").write_bytes(manifest)
     report = _scan(plugin)
     assert [r for r in report.results if ".plugin-self-hashes.json" in (r.file or "")] == []
