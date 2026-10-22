@@ -43,6 +43,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -80,6 +81,8 @@ from gitignore_filter import GitignoreFilter
 # matched). `\.mdx?:` matches both `.md:` and `.mdx:`; keep it in sync with
 # the markdown collect() patterns if a new markdown suffix is ever added.
 _MARKDOWNLINT_FINDING_RE = re.compile(r"\.mdx?:\d+(?::\d+)?\s+(?:error|warning|info)\s+MD\d+")
+# Rule id of a finding line (e.g. `MD013`), for the per-rule summary (issue #252).
+_MARKDOWNLINT_RULE_RE = re.compile(r"(?<=\s)MD\d+")
 
 # htmlhint (and some other CLIs) colorize stdout with ANSI SGR escapes; strip
 # them so captured finding lines are readable and prefix-matching (banner /
@@ -385,6 +388,28 @@ _NONINTERACTIVE_ENV: dict[str, str] = {
     "HOMEBREW_NO_AUTO_UPDATE": "1",
 }
 
+# Issue #235: signature of the `bunx` package-cache race seen when several
+# linters first-run in parallel. "Resolving dependencies" alone is normal
+# chatter, so it only counts on a failed run that produced no markdownlint
+# finding line.
+_BUNX_CACHE_RACE_RE = re.compile(r"EEXIST|Failed to link", re.IGNORECASE)
+_BUNX_RESOLVING_RE = re.compile(r"Resolving dependencies", re.IGNORECASE)
+_BUNX_RETRY_LOCK = threading.Lock()
+
+
+def _bunx_cache_race_in(output: str) -> bool:
+    """True when `output` carries the bunx cache-race signature (issue #235)."""
+    if _BUNX_CACHE_RACE_RE.search(output):
+        return True
+    return bool(_BUNX_RESOLVING_RE.search(output)) and not _MARKDOWNLINT_FINDING_RE.search(output)
+
+
+def _is_bunx_cache_race(cmd: list[str], result: subprocess.CompletedProcess[str]) -> bool:
+    """True when a failed bunx / `bun x` spawn died on the package-cache race."""
+    if not cmd or Path(cmd[0]).name not in ("bunx", "bun") or result.returncode == 0:
+        return False
+    return _bunx_cache_race_in(f"{result.stderr or ''}\n{result.stdout or ''}")
+
 
 # Hard ceiling applied to EVERY linter spawn (issue #148). The per-linter call
 # sites pass a sane default (60/120/180s); `PLUGIN_REPO_LINT_TIMEOUT` lets a CI
@@ -502,6 +527,25 @@ def _repo_lint_disabled() -> bool:
 
 
 def _run_linter(
+    cmd: list[str],
+    *,
+    timeout: float,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a linter (see `_spawn_linter_once`), retrying once on a bunx cache race."""
+    result = _spawn_linter_once(cmd, timeout=timeout, cwd=cwd)
+    # Why (issue #235): parallel `bunx` first runs race on the shared package
+    # cache (EEXIST / "Failed to link"). The race is transient, so retry ONCE
+    # under a process-wide lock: concurrent retries cannot re-race each other
+    # and the first retry warms the cache for the rest. Never loop — a
+    # persistent failure is returned and reported by the caller as blocking.
+    if _is_bunx_cache_race(cmd, result):
+        with _BUNX_RETRY_LOCK:
+            result = _spawn_linter_once(cmd, timeout=timeout, cwd=cwd)
+    return result
+
+
+def _spawn_linter_once(
     cmd: list[str],
     *,
     timeout: float,
@@ -1444,12 +1488,18 @@ def lint_markdown(
         report.passed(f"markdownlint passed for {len(files)} markdown file(s)")
         return True
 
-    # markdownlint-cli2 prints one issue per line — surface up to 20 as
-    # NIT (issue #20: stylistic markdownlint findings should NOT block a
-    # publish via --strict; the canonical pipeline's correctness gates
-    # are the JSON/YAML/Python validators, not markdown prose style).
+    # markdownlint-cli2 prints one issue per line — surface up to 20 as NIT.
+    # NIT DOES block under --strict (verified: cpv_validation_common.py
+    # lines 216/230 and 6082-6090) (owner policy: strictness is never lowered
+    # for markdown style); the cap only bounds how many lines are listed, and
+    # the summary line after the loop reports the true total (issue #252).
     output = (result.stderr or result.stdout or "").strip()
     surfaced = 0
+    # Why (issue #252): the 20-line cap used to hide how many findings there
+    # really were, so count EVERY finding line (per rule) while only the first
+    # 20 are surfaced.
+    total_findings = 0
+    rule_counts: dict[str, int] = {}
     # Issue #113: track which (file, MD004-signature) pairs have already been
     # surfaced so a consistent-mode-poisoned file emits one explanatory NIT
     # instead of N near-identical ones on its healthy bullets.
@@ -1463,6 +1513,10 @@ def lint_markdown(
         # finding and would otherwise leak through as a spurious NIT.
         if not _MARKDOWNLINT_FINDING_RE.search(line):
             continue
+        total_findings += 1
+        rule_match = _MARKDOWNLINT_RULE_RE.search(line)
+        if rule_match is not None:
+            rule_counts[rule_match.group(0)] = rule_counts.get(rule_match.group(0), 0) + 1
         # Issue #113: collapse repeated same-signature MD004 (ul-style) findings
         # within one file to a single, clearer NIT. A stray prose-wrap marker
         # poisons markdownlint's consistent-style check and flags every healthy
@@ -1475,21 +1529,31 @@ def lint_markdown(
             if key in seen_md004_signatures:
                 continue
             seen_md004_signatures.add(key)
-            report.nit(
-                f"markdownlint: MD004/ul-style — {md004.group('file')} mixes "
-                f"unordered-list markers {md004.group('sig')}; standardize the file "
-                "on one marker. A hard-wrapped prose line beginning '+ ' or '* ' can "
-                "poison markdownlint's consistent-style check and flag every healthy "
-                "bullet (issue #113)."
-            )
-            surfaced += 1
-            if surfaced >= 20:
-                break
+            # Why (issue #252): the MD004 branch must obey the same 20-NIT cap as
+            # plain findings, else >20 poisoned files list more than the summary
+            # claims; the total is still counted above.
+            if surfaced < 20:
+                report.nit(
+                    f"markdownlint: MD004/ul-style — {md004.group('file')} mixes "
+                    f"unordered-list markers {md004.group('sig')}; standardize the file "
+                    "on one marker. A hard-wrapped prose line beginning '+ ' or '* ' can "
+                    "poison markdownlint's consistent-style check and flag every healthy "
+                    "bullet (issue #113)."
+                )
+                surfaced += 1
             continue
-        report.nit(f"markdownlint: {line.strip()}")
-        surfaced += 1
-        if surfaced >= 20:
-            break
+        if surfaced < 20:
+            report.nit(f"markdownlint: {line.strip()}")
+            surfaced += 1
+    if total_findings:
+        # Why: rule ids are lowercased here so existing per-rule filters on the
+        # NIT stream (`"MD004" in message`) never mistake the summary for a finding.
+        per_rule = ", ".join(f"{r.lower()}: {n}" for r, n in sorted(rule_counts.items()))
+        # INFO, not a finding level: informational only, never blocks or counts.
+        report.info(
+            f"Markdown lint summary: {total_findings} finding(s) in total, "
+            f"{surfaced} listed above (cap 20); per rule — {per_rule or 'n/a'}"
+        )
     # Silent-failure surface (issue #20): if markdownlint exited non-zero
     # but produced no parseable per-line output, the developer used to see
     # only "CPV blocked the push (exit 3)" with no clue what failed. Now
@@ -1505,6 +1569,25 @@ def lint_markdown(
     # reachable ONLY when surfaced == 0, so a real MD### finding (surfaced > 0)
     # can never be down-graded by this discriminator.
     if not surfaced:
+        if _bunx_cache_race_in(output) and Path(invocation[0]).name in ("bunx", "bun"):
+            # Why (issue #235): the retry in `_run_linter` already ran once, so a
+            # race signature here means the bunx package cache is persistently
+            # broken (or the run failed with only launcher chatter). Blocking
+            # MAJOR with a distinct name — never a WARNING or dropped chatter,
+            # which would let an unlinted tree pass --strict. The "race" label is
+            # used only when EEXIST / Failed to link really matched.
+            if _BUNX_CACHE_RACE_RE.search(output):
+                report.major(
+                    "markdownlint tool-environment error: bunx package-cache race "
+                    f"(EEXIST / Failed to link) persisted after one retry — rc={result.returncode}: "
+                    f"{output[:200]}"
+                )
+            else:
+                report.major(
+                    "markdownlint tool-environment error (bunx, no finding output) — "
+                    f"rc={result.returncode}: {output[:200]}"
+                )
+            return False
         if output and not _MARKDOWNLINT_TOOL_CRASH_RE.search(output):
             report.nit(f"markdownlint: {output[:200]}")
         else:

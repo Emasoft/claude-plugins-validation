@@ -96,7 +96,12 @@ class TestLintEngineNoBareSpawn:
         # the only functions allowed to spawn directly.
         allowed_spans: list[tuple[int, int]] = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name in {"_run_linter", "_kill_process_tree"}:
+            if isinstance(node, ast.FunctionDef) and node.name in {
+                # `_run_linter` is deliberately NOT here: since issue #235 it only
+                # delegates to `_spawn_linter_once`, so a spawn added to it is an offender.
+                "_spawn_linter_once",
+                "_kill_process_tree",
+            }:
                 allowed_spans.append((node.lineno, node.end_lineno or node.lineno))
 
         offenders: list[str] = []
@@ -116,16 +121,38 @@ class TestLintEngineNoBareSpawn:
                     if not in_allowed:
                         offenders.append(f"{name} at line {node.lineno}")
         assert not offenders, (
-            "Every linter spawn must route through _run_linter (issue #74). "
-            f"Bare spawn call sites found: {offenders}"
+            f"Every linter spawn must route through _run_linter (issue #74). Bare spawn call sites found: {offenders}"
         )
 
-    def test_run_linter_redirects_stdin_to_devnull(self) -> None:
-        """``_run_linter`` passes ``stdin=subprocess.DEVNULL`` to its Popen —
-        the universal anti-hang guarantee (no blocking on a missing TTY)."""
+    def test_spawn_linter_once_called_only_from_run_linter(self) -> None:
+        """``_spawn_linter_once`` (the raw spawn) is referenced ONLY from inside
+        ``_run_linter`` (calls AND plain references such as ``submit(...)`` or
+        ``partial(...)``), so the bunx retry wrapper cannot be bypassed."""
         tree = ast.parse(LINT_ENGINE_SRC.read_text(encoding="utf-8"))
+        spans = [
+            (n.lineno, n.end_lineno or n.lineno)
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_run_linter"
+        ]
+        offenders = [
+            f"line {n.lineno}"
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Name)
+            and isinstance(n.ctx, ast.Load)
+            and n.id == "_spawn_linter_once"
+            and not any(lo <= n.lineno <= hi for lo, hi in spans)
+        ]
+        assert not offenders, f"_spawn_linter_once called outside _run_linter: {offenders}"
+
+    def test_run_linter_redirects_stdin_to_devnull(self) -> None:
+        """``_spawn_linter_once`` (the Popen holder behind ``_run_linter``) passes
+        ``stdin=subprocess.DEVNULL`` — the universal anti-hang guarantee (no
+        blocking on a missing TTY)."""
+        tree = ast.parse(LINT_ENGINE_SRC.read_text(encoding="utf-8"))
+        # Why: issue #235 split the spawn into a single-shot helper, so the
+        # Popen now lives in `_spawn_linter_once`, not `_run_linter`.
         run_linter = next(
-            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_run_linter"
+            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_spawn_linter_once"
         )
         popen_calls = [
             n for n in ast.walk(run_linter) if isinstance(n, ast.Call) and _call_name(n) == "subprocess.Popen"
@@ -140,29 +167,28 @@ class TestLintEngineNoBareSpawn:
             )
 
     def test_run_linter_starts_new_session_for_group_kill(self) -> None:
-        """``_run_linter`` uses ``start_new_session=`` so a timed-out child's
-        whole process group (incl. a forked uvx/npx grandchild) can be killed."""
+        """``_spawn_linter_once`` (behind ``_run_linter``) uses ``start_new_session=``
+        so a timed-out child's whole process group (incl. a forked uvx/npx
+        grandchild) can be killed."""
         tree = ast.parse(LINT_ENGINE_SRC.read_text(encoding="utf-8"))
+        # Why: issue #235 split the spawn into a single-shot helper, so the
+        # Popen now lives in `_spawn_linter_once`, not `_run_linter`.
         run_linter = next(
-            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_run_linter"
+            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_spawn_linter_once"
         )
-        popen = next(
-            n for n in ast.walk(run_linter) if isinstance(n, ast.Call) and _call_name(n) == "subprocess.Popen"
-        )
-        assert any(kw.arg == "start_new_session" for kw in popen.keywords), (
-            "_run_linter Popen must pass start_new_session= for group-kill on timeout"
-        )
+        popens = [n for n in ast.walk(run_linter) if isinstance(n, ast.Call) and _call_name(n) == "subprocess.Popen"]
+        assert popens, "_spawn_linter_once must spawn via subprocess.Popen"
+        for popen in popens:
+            assert any(kw.arg == "start_new_session" for kw in popen.keywords), (
+                "every _spawn_linter_once Popen must pass start_new_session= for group-kill on timeout"
+            )
 
     def test_smart_exec_get_version_redirects_stdin(self) -> None:
         """smart_exec.get_version's ``--version`` probe sets stdin=DEVNULL so it
         cannot block on a TTY in bare CI (issue #74)."""
         tree = ast.parse(SMART_EXEC_SRC.read_text(encoding="utf-8"))
-        get_version = next(
-            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "get_version"
-        )
-        run = next(
-            n for n in ast.walk(get_version) if isinstance(n, ast.Call) and _call_name(n) == "subprocess.run"
-        )
+        get_version = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "get_version")
+        run = next(n for n in ast.walk(get_version) if isinstance(n, ast.Call) and _call_name(n) == "subprocess.run")
         stdin_kw = next((kw for kw in run.keywords if kw.arg == "stdin"), None)
         assert stdin_kw is not None and _call_attr_is(stdin_kw.value, "subprocess", "DEVNULL"), (
             "smart_exec.get_version must set stdin=subprocess.DEVNULL"
@@ -263,7 +289,9 @@ _README_REGEX_DOS_LINE = "| **Empirical Loading Bugs** *(v2.23.0+)* | Silent-fai
 _README_SUPPLY_LINE_597 = (
     "| **uv** | Runs CPV scripts | `curl -LsSf https://astral.sh/uv/install.sh \\| sh` ([docs](x)) |"
 )
-_README_SUPPLY_LINE_627 = "| `uvx` command not found | Install uv: `curl -LsSf https://astral.sh/uv/install.sh \\| sh` |"
+_README_SUPPLY_LINE_627 = (
+    "| `uvx` command not found | Install uv: `curl -LsSf https://astral.sh/uv/install.sh \\| sh` |"
+)
 
 
 def _visible(findings: list[dict], rule_id: str) -> list[dict]:
@@ -345,9 +373,5 @@ class TestRealReadmeScansClean:
         readme = REPO / "README.md"
         content = readme.read_text(encoding="utf-8")
         findings = scan_content(content, "README.md")
-        blocking = [
-            f
-            for f in findings
-            if f.get("ruleId") in {"REGEX_DOS", "SUPPLY_CHAIN"} and not f.get("suppressed")
-        ]
+        blocking = [f for f in findings if f.get("ruleId") in {"REGEX_DOS", "SUPPLY_CHAIN"} and not f.get("suppressed")]
         assert blocking == [], f"README still has blocking REGEX_DOS/SUPPLY_CHAIN findings: {blocking}"
