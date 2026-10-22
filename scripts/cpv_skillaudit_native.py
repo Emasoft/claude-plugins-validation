@@ -1861,6 +1861,99 @@ def _setup_token_fence_is_bare(lines: list[str], line_idx: int) -> bool:
     return seen_bare
 
 
+_RAW_TEXT_BLOCK_TAGS: tuple[str, ...] = ("script", "pre", "style", "textarea")
+
+
+# Why: the owner's issue-260 directive calls the consent sentence the visible,
+# in-file consent. Visible = the sentence alone (optional single `>` quote,
+# optional single emphasis pair), compared case-insensitively, preceded by a
+# blank line or the file start, not inside an HTML comment or a
+# script/pre/style/textarea block. Link-reference definitions (`[//]: # (...)`)
+# and HTML attributes are rejected by the exact match (invisible in rendered
+# markdown). Known residual: an unclosed `<div hidden>`/`<details>` spanning a
+# blank line is not modelled (the result is still a visible WARNING, only for a
+# bare setup-token fence). Fails closed on unclosed openers.
+# Known fail-closed false blocks: an earlier `<!--`, `<style>`, `<pre>`,
+# `<script>` or `<textarea>` without a closer, even inside a code span or
+# fenced example, keeps the finding at its blocking level; do not skip fenced
+# lines here, because a fence-map disagreement would then fail open. The #101
+# execution-class consent is deliberately unchanged.
+def _setup_token_consent_is_visible(lines: list[str], line_idx: int) -> bool:
+    """True iff the nearest non-blank line above the fence opener holding
+    ``lines[line_idx]`` is the audit-consent sentence alone (optional ``>``
+    quote, optional single emphasis pair), preceded by a blank line or the file
+    start, and not inside an HTML comment or a raw-text HTML block."""
+    try:
+        from _skillaudit_markdown_context import _build_fence_map  # type: ignore[import-not-found]
+    except ImportError:
+        return False
+    fence_map = _build_fence_map("\n".join(lines))
+    if line_idx < 0 or line_idx >= len(fence_map):
+        return False
+    entry = fence_map[line_idx]
+    if entry is None:
+        return False
+    idx = entry[0] - 3  # the line above the ``` opener (opener is entry[0] - 2)
+    while idx >= 0 and not lines[idx].strip():
+        idx -= 1
+    if idx < 0:
+        return False
+    sentence = lines[idx].strip()
+    if sentence.startswith(">"):
+        sentence = sentence[1:].strip()
+    for marker in ("**", "__", "*", "_"):
+        if len(sentence) > 2 * len(marker) and sentence.startswith(marker) and sentence.endswith(marker):
+            sentence = sentence[len(marker) : -len(marker)].strip()
+            break
+    if sentence.lower() != _AUDIT_CONSENT_SENTINEL:
+        return False
+    # A non-blank line directly above makes the sentence a continuation line of
+    # a paragraph, an HTML block (e.g. `<div hidden>`) or a multi-line
+    # link-reference title, which cannot be told apart, so it is rejected even
+    # when it would render (a title cannot span a blank line).
+    if idx > 0 and lines[idx - 1].strip():
+        return False
+    # Not inside an open HTML comment: walk delimiters in order before the line.
+    before = "\n".join(lines[0:idx])
+    is_open = False
+    pos = 0
+    while True:
+        opener = before.find("<!--", pos)
+        closer = before.find("-->", pos)
+        if opener == -1 and closer == -1:
+            break
+        if closer == -1 or (opener != -1 and opener < closer):
+            # CommonMark 0.31: the closer search starts at opener + 2, so
+            # `<!-->` and `<!--->` are complete comments.
+            end = before.find("-->", opener + 2)
+            if end == -1:
+                is_open = True
+                break
+            pos = end + 3
+        else:
+            is_open = False
+            pos = closer + 3
+    if is_open:
+        return False
+    # Not inside an open raw-text HTML block (script/pre/style/textarea).
+    open_tag: str | None = None
+    for line in lines[0:idx]:
+        low = line.lower()
+        if open_tag is None:
+            if len(line) - len(line.lstrip(" ")) > 3:
+                continue
+            stripped = low.lstrip()
+            for tag in _RAW_TEXT_BLOCK_TAGS:
+                after = stripped[len(tag) + 1 :]
+                if stripped.startswith("<" + tag) and (not after or after[0].isspace() or after[0] == ">"):
+                    open_tag = tag
+                    break
+        if open_tag is not None:
+            if "</" + open_tag + ">" in low:
+                open_tag = None
+    return open_tag is None
+
+
 def _context_classifier_verdict(
     file_path: str,
     lines: list[str],
@@ -1907,10 +2000,12 @@ def _context_classifier_verdict(
     # mint-and-exfiltrate recipe pass --strict, since the sentence already
     # demotes the execution-class findings on those lines. Not added to
     # _EXECUTION_CLASS_RULES: that set also feeds the doc-only carve-outs.
+    # The sentence must also be visible text (see `_setup_token_consent_is_visible`).
     if (
         rule_id == "CLAUDE_CLI_TOKEN_THEFT"
         and file_path.lower().endswith((".md", ".markdown"))
         and _setup_token_fence_is_bare(lines, line_idx)
+        and _setup_token_consent_is_visible(lines, line_idx)
         and _audit_consent_sentinel_present(file_path, lines, line_idx)
     ):
         return "warn"

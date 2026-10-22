@@ -236,3 +236,116 @@ def test_indented_closer_is_not_warning() -> None:
     """A closer indented 4 spaces is not a CommonMark closer, so the fence is not trusted."""
     content = f"{SENT}\n\n```bash\nclaude setup-token\n    ```\n\nmore\n```\n"
     _assert_not_warning(content)
+
+
+FENCE = "```bash\nclaude setup-token\n```\n"
+
+
+def test_html_comment_sentence_is_not_warning() -> None:
+    """A sentence wrapped in a one-line HTML comment is invisible, so it keeps the no-sentence level."""
+    assert _only(f"<!-- {SENT} -->\n\n{FENCE}")["severity"] == "low"
+
+
+def test_empty_comment_is_closed() -> None:
+    """`<!-->` is a complete empty comment (CommonMark 0.31), so the sentence after it is visible."""
+    assert _only(f"<!-->\n\n{SENT}\n\n{FENCE}")["severity"] == "warning"
+
+
+def test_dash_empty_comment_is_closed() -> None:
+    """`<!--->` is a complete empty comment (CommonMark 0.31), so the sentence after it is visible."""
+    assert _only(f"<!--->\n\n{SENT}\n\n{FENCE}")["severity"] == "warning"
+
+
+def test_style_block_sentence_is_not_warning() -> None:
+    """A sentence inside an unclosed-at-that-point style block is not rendered text."""
+    assert _only(f"<style>\n{SENT}\n\n{FENCE}</style>\n")["severity"] == "low"
+
+
+def test_style_block_with_blank_line_sentence_is_not_warning() -> None:
+    """A blank line after `<style>` does not end the raw-text block, so the sentence stays hidden (isolates the raw-block walk)."""
+    assert _only(f"<style>\n\n{SENT}\n\n{FENCE}</style>\n")["severity"] == "low"
+
+
+def test_hidden_div_sentence_is_not_warning() -> None:
+    """A sentence directly under an `<div hidden>` line is a continuation of that HTML block."""
+    assert _only(f"<div hidden>\n{SENT}\n\n{FENCE}</div>\n")["severity"] == "low"
+
+
+def test_triple_emphasis_sentence_is_not_warning() -> None:
+    """Only one emphasis pair is tolerated; a triple pair leaves stray markers so the match fails."""
+    assert _only(f"***{SENT}***\n\n{FENCE}")["severity"] == "low"
+
+
+def test_crlf_sentence_is_warning() -> None:
+    """A CRLF file with the sentence, a blank line and the fence is visible consent."""
+    assert _only(f"{SENT}\n\n{FENCE}".replace("\n", "\r\n"))["severity"] == "warning"
+
+
+def test_crlf_html_comment_sentence_is_not_warning() -> None:
+    """A CRLF file whose sentence sits in an HTML comment is not visible consent."""
+    assert _only(f"<!-- {SENT} -->\n\n{FENCE}".replace("\n", "\r\n"))["severity"] == "low"
+
+
+def test_uppercase_sentence_is_warning() -> None:
+    """The sentence is compared case-insensitively (the sentinel is lowercase and both checks lowercase the line)."""
+    assert _only(f"{SENT.upper()}\n\n{FENCE}")["severity"] == "warning"
+
+
+def test_sentence_without_blank_line_above_is_not_warning() -> None:
+    """A sentence directly under a non-blank line is rejected on purpose: it cannot be told apart from an HTML-block or link-reference-title continuation line."""
+    assert _only(f"Intro line\n{SENT}\n\n{FENCE}")["severity"] == "low"
+
+
+def test_multiline_html_comment_sentence_is_not_warning() -> None:
+    """A sentence inside a multi-line HTML comment (closing delimiter on its line) is not visible consent."""
+    assert _only(f"<!--\n{SENT} -->\n\n{FENCE}")["severity"] == "low"
+
+
+def test_sentence_after_inline_comment_opener_is_not_warning() -> None:
+    """A line that opens an HTML comment before the sentence is not visible consent."""
+    assert _only(f"Note <!-- {SENT} -->\n\n{FENCE}")["severity"] == "low"
+
+
+def test_sentence_with_only_comment_closer_is_not_warning() -> None:
+    """A sentence line carrying a stray comment closer is not visible consent."""
+    assert _only(f"{SENT} -->\n\n{FENCE}")["severity"] == "low"
+
+
+def test_comment_wrapping_sentence_and_fence_is_not_warning() -> None:
+    """A comment that wraps both the sentence and the fence leaves no visible consent."""
+    assert _only(f"<!--\n{SENT}\n\n{FENCE}-->\n")["severity"] == "low"
+
+
+def test_link_reference_definition_sentence_is_not_warning() -> None:
+    """A link-reference definition line is invisible in rendered markdown, so it is no consent."""
+    assert _only(f"[//]: # ({SENT})\n\n{FENCE}")["severity"] == "low"
+
+
+def test_html_attribute_sentence_is_not_warning() -> None:
+    """A sentence hidden in an HTML attribute is not visible consent."""
+    assert _only(f'<span title="{SENT}"></span>\n\n{FENCE}')["severity"] == "low"
+
+
+def test_sentence_with_extra_words_is_not_warning() -> None:
+    """The sentence must stand alone on its line; extra words void the consent."""
+    assert _only(f"{SENT} and more words\n\n{FENCE}")["severity"] == "low"
+
+
+def test_quoted_sentence_is_warning() -> None:
+    """A sentence in a blockquote is visible consent."""
+    assert _only(f"> {SENT}\n\n{FENCE}")["severity"] == "warning"
+
+
+def test_bold_sentence_is_warning() -> None:
+    """A sentence wrapped in one bold pair is visible consent."""
+    assert _only(f"**{SENT}**\n\n{FENCE}")["severity"] == "warning"
+
+
+def test_italic_underscore_sentence_is_warning() -> None:
+    """A sentence wrapped in one underscore emphasis pair is visible consent."""
+    assert _only(f"_{SENT}_\n\n{FENCE}")["severity"] == "warning"
+
+
+def test_sentence_after_closed_comment_is_warning() -> None:
+    """A comment closed earlier in the file does not hide a later visible sentence."""
+    assert _only(f"<!-- note -->\n\n{SENT}\n\n{FENCE}")["severity"] == "warning"
