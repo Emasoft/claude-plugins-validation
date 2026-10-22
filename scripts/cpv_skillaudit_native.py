@@ -4123,6 +4123,8 @@ def _file_passes_scan_filters(
     # a caller-supplied path spelled differently from the root (/private/tmp vs /tmp symlink) must still
     # be placed, else Tier 1 (.git, node_modules, ...) silently stops applying to it. The path itself is
     # kept as given, never resolved. A path neither spelling places gets no name exemption: it is scanned.
+    # The SAME placed path feeds the shipped-surface (gitignored-and-untracked) check below: placing it
+    # against the given root only left rel empty for a differently-spelled path, so that skip silently stopped.
     # (Not imported from validate_security._plugin_relpath: this module is deliberately
     # dependency-free and validate_security imports it lazily; a reverse import would
     # pull the whole validator in.)
@@ -4159,10 +4161,7 @@ def _file_passes_scan_filters(
     # verdict — every step is an AND-ed rejection returning False — it only
     # stops the work whose result is thrown away.
     if unshipped is not None and path_is_unshipped is not None:
-        try:
-            rel = p.relative_to(plugin_root).as_posix()
-        except ValueError:
-            rel = ""
+        rel = "/".join(rel_parts)
         if rel and path_is_unshipped(rel, unshipped):
             return False
     try:
