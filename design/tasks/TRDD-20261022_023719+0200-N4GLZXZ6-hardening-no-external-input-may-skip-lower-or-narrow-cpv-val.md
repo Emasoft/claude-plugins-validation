@@ -4,7 +4,7 @@ title: Hardening - no external input may skip lower or narrow CPV validation and
 column: dev
 status: tasked
 created: 2026-10-22T02:37:19+0200
-updated: 2026-10-23T00:28:17+0200
+updated: 2026-10-23T00:39:36+0200
 current-owner: main-agent@complete-plugin-validation
 created-by: main-agent@complete-plugin-validation
 task-type: security
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@complete-plugin-validation
 approval-datetime: 2026-10-22T02:37:19+0200
-implementation-commits: [ce0ed7f1, 77cf67ac, 1b860b49, 8621d2d5, a821c6b7, 087e00a8, 3eaa6553, aab9b092]
+implementation-commits: [ce0ed7f1, 77cf67ac, 1b860b49, 8621d2d5, a821c6b7, 087e00a8, 3eaa6553, aab9b092, e951f181, 76354ff0, 843c1d63, 935f0a93]
 ---
 
 # Hardening - no external input may skip lower or narrow CPV validation and every installed file is scanned
@@ -194,4 +194,15 @@ Reason: all four reporter-exact samples still fired; it read the scan root from 
 
 ## Card residue
 
-The 14 follow-up cards (Z5NYE7ZI, TJHQD2VC, AJZNQRO0, N95S62EW, 4XQG5MEF, AF2Q841A, 565D542B, HQF9MW6T, WHMZZVS5, I5PUJHNT, 6YQWVBUK, AI6QSSXH, 4LZB5RY7, DBQ32N1M) carry the template fields mandate: true, approval-judge and approval-datetime, and a "MANDATE issued" approval-log line. trddgrep refused to clear approval-judge and approval-datetime; clearing mandate was not attempted; each also carries a later line saying it is a backlog record only and not approved as a work order. That later line is authoritative.
+The 14 follow-up cards (Z5NYE7ZI, TJHQD2VC, AJZNQRO0, N95S62EW, 4XQG5MEF, AF2Q841A, 565D542B, HQF9MW6T, WHMZZVS5, I5PUJHNT, 6YQWVBUK, AI6QSSXH, 4LZB5RY7, DBQ32N1M) carry the template fields mandate: true, approval-judge and approval-datetime, and a "MANDATE issued" approval-log line. trddgrep refused to clear approval-judge and approval-datetime; clearing mandate was attempted and refused (see below); each also carries a later line saying it is a backlog record only and not approved as a work order. That later line is authoritative.
+Setting mandate false on the 14 cards was refused by trddgrep (exit 2) with: mandate: is written only by the create/approve code paths, never by a generic field write
+Setting min-approval-requirement to user on these 14 cards made trddgrep lint report MANDATE-FORGED on each (a mandate whose issuer is below the required approver), and mandate cannot be changed by a field write, so the field was set back to none. The cards stay in backburner and their own backlog-only line is the authority: none of them is a work order.
+Not verified: whether trddgrep next excludes the backburner column.
+
+## Commit map for 5.23.0
+
+e951f181 is issue 248 (worker A). 76354ff0 is issue 255 except its tests/conftest.py part (worker B). 843c1d63 is issue 237 and 257 item 1 (workers D and G), issue 254 and 257 items 3 and 5 (worker C), 257 item 4 (worker E), plus the issue-255 dev-skip line and worker G's cache resets in tests/conftest.py, the CLAUDE.md test-file count and worker G's skill-doc sweep (retired example usernames replaced by the placeholder username). They were combined because several workers edited the same files and partial staging needs an interactive command that is not available. 935f0a93 records the cards.
+Bisecting: treat 76354ff0 and 843c1d63 as one step; between them, tests that spawn validator processes fail because the test-tree dev skip lands in 843c1d63.
+Correction to the 76354ff0 commit message: it says only __pycache__/*.pyc names are ignored. That holds for the wheel-mode walk only. The added-files check uses the shipped-file enumerator, which excludes whole __pycache__ directories, so a planted file there is not detected; tracked in TRDD-HQF9MW6T.
+Correction to the 843c1d63 footer: an adopter's [tool.ruff] settings in pyproject.toml are shadowed only once the canon .ruff.toml is present; while it is missing in a tree that has .mega-linter.yml, the drift rule reports it and ruff still reads pyproject.toml (see TRDD-WHMZZVS5).
+The skip-variable mentions in the earlier Release v5.23.0 content and audit-trail lines may be reworded in a later commit if CPV flags them.

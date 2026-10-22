@@ -4,7 +4,7 @@ title: Issue 248 residue RC-164 Markdown chmod
 column: backburner
 status: tasked
 created: 2026-10-23T00:14:58+0200
-updated: 2026-10-23T00:19:32+0200
+updated: 2026-10-23T00:36:38+0200
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: bugfix
@@ -46,3 +46,7 @@ Fail toward flagging; no plugin-side exception (owner policy).
 - 2026-10-23T00:14:58+0200 — MANDATE issued by main-agent@claude-plugins-validation (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - Backlog record only; not approved as a work order. Owner approval required before dev.
 - 2026-10-23 — Backlog record only; not approved as a work order.
+
+## Shipped part
+
+The partial fix for issue 248 shipped in commit e951f181 (5.23.0).
