@@ -42,8 +42,9 @@ import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any, Callable
 
 # Issue #174 — the dependency agent-context-writer detector (RC-165). Flags a
@@ -7150,6 +7151,7 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
         # gitignored (research corpora / vendored repos / extracted archives
         # the hardcoded _is_dev_scratch_path list below doesn't cover).
         gi = get_gitignore_filter(plugin_path)
+        judge = make_path_judge(plugin_path)  # TRDD-N4GLZXZ6 (#259)
         for finding in findings:
             if not isinstance(finding, dict):
                 continue
@@ -7201,11 +7203,11 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
                 except OSError:
                     pass
 
-            # v2.43 — drop findings inside vendored / cached / build dirs.
-            if file_ref and _is_vendored_dep_path(str(file_ref)):
-                continue
-            # v2.44 — drop findings inside gitignored dev-scratch dirs.
-            if file_ref and _is_dev_scratch_path(str(file_ref)):
+            # v2.43/v2.44/v2.48 — drop findings inside vendored / cached / build dirs,
+            # gitignored dev-scratch dirs and test files (fixture strings by design).
+            # TRDD-N4GLZXZ6 (#259): file_ref is ABSOLUTE here, so the names are judged on
+            # the plugin-RELATIVE path; folders above the plugin never drop findings.
+            if file_ref and judge.exempt(str(file_ref)):
                 continue
             # Issue #67 — drop findings inside ANY path the plugin's own
             # .gitignore excludes (generalises the hardcoded dev-scratch list
@@ -7213,17 +7215,6 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
             if file_ref and _external_finding_is_gitignored(str(file_ref), gi):
                 continue
 
-            # v2.48 P-2 sibling — drop findings on Python test files.
-            # Pytest test files (test_*.py, *_test.py, conftest.py, anything
-            # under tests/) ship with fixture strings containing the very
-            # tokens the rules detect, so the test can verify the detector
-            # fires. cc-audit grep-matches the file content directly,
-            # missing these as fixtures. Other CPV scanners (RC-37 in
-            # `check_phase1_supply_chain_rules`, RC-21 / RC-65 in their
-            # respective phase scanners) already early-exit on
-            # `_is_test_file_path`; this brings cc-audit in line.
-            if file_ref and _is_test_file_path(str(file_ref)):
-                continue
             # v2.48 P-3 — drop findings on rule-corpus markdown.
             # `is_fp_corpus_markdown` requires both directory shape AND
             # an in-file marker, so coincidental `fixtures/` markdown
@@ -7233,7 +7224,7 @@ def check_cc_audit(plugin_path: Path, report: ValidationReport) -> int:
                     fpath = Path(str(file_ref))
                     if fpath.is_file() and fpath.stat().st_size < 2_000_000:
                         body = fpath.read_text(encoding="utf-8", errors="ignore")
-                        if is_fp_corpus_markdown(str(file_ref), body):
+                        if judge.is_fp_corpus(str(file_ref), body):
                             continue
                 except OSError:
                     pass
@@ -7597,6 +7588,7 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
     # Issue #67 — gitignore filter built ONCE; drop tirith findings whose path
     # the plugin's own .gitignore excludes (gitignored = not shipped).
     gi = get_gitignore_filter(plugin_path)
+    judge = make_path_judge(plugin_path)  # TRDD-N4GLZXZ6 (#259)
     for finding in findings:
         if not isinstance(finding, dict):
             continue
@@ -7640,11 +7632,9 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
             f_str = str(file_ref)
             if cpv_self_scan_skip(f_str):
                 continue
-            if _is_vendored_dep_path(f_str):
-                continue
-            if _is_dev_scratch_path(f_str):
-                continue
-            if _is_test_file_path(f_str):
+            # TRDD-N4GLZXZ6 (#259): tirith hands back ABSOLUTE paths; vendored /
+            # dev-scratch / test-file names are judged on the plugin-relative path only.
+            if judge.exempt(f_str):
                 continue
             # Issue #67 — drop findings inside ANY gitignored path (generalises
             # the hardcoded dev-scratch list above to the actual .gitignore).
@@ -7660,7 +7650,7 @@ def check_tirith_scanner(plugin_path: Path, report: ValidationReport) -> int:
                             continue
                         # FP-corpus markdown skip (file-level, requires
                         # both directory shape AND in-file marker).
-                        if is_fp_corpus_markdown(f_str, body):
+                        if judge.is_fp_corpus(f_str, body):
                             continue
                 except OSError:
                     pass
@@ -8465,6 +8455,70 @@ def _is_vendored_dep_path(file_path: str) -> bool:
         return False
     normalized = file_path.replace("\\", "/").lower()
     return any(f"/{part}/" in normalized or normalized.startswith(f"{part}/") for part in _VENDORED_DEP_DIR_PARTS)
+
+
+def _plugin_relpath(file_ref: str, roots: tuple[Path, ...]) -> str | None:
+    """Return ``file_ref`` as a plugin-root-relative POSIX path, or None if it cannot be placed inside the plugin.
+
+    WHY (TRDD-N4GLZXZ6, issue #259): the vendored/dev-scratch/test-file/FP-corpus
+    predicates match directory NAMES anywhere in the string they receive. Fed an
+    ABSOLUTE path, they also match the folders ABOVE the plugin root (a plugin
+    checked out under ``reports/``, ``build/``, ``tests/`` or ``.claude/worktrees/``
+    had every external-scanner finding dropped). The folders above a plugin must
+    never decide whether its findings are dropped or demoted, so callers judge
+    this relative form instead. LEXICAL only (no ``resolve()``): the verdict must
+    not depend on the filesystem or on symlink targets.
+
+    None means "not placeable": the caller applies NO path exemption and NO path
+    demotion, i.e. the finding is kept (the fail-safe direction).
+    """
+    if not file_ref:
+        return None
+    norm = PurePath(os.path.normpath(file_ref.replace("\\", "/")))
+    if not norm.is_absolute():
+        # ``..`` first means the path climbs out of the plugin root.
+        return None if norm.parts and norm.parts[0] == ".." else norm.as_posix()
+    for root in roots:
+        try:
+            rel = norm.relative_to(root)
+        except ValueError:
+            continue
+        return None if rel.parts and rel.parts[0] == ".." else rel.as_posix()
+    return None
+
+
+@dataclass(frozen=True)
+class PathJudge:
+    """Plugin-relative path verdicts for the external-scanner suppression chains (TRDD-N4GLZXZ6, #259)."""
+
+    roots: tuple[Path, ...]
+
+    def rel(self, file_ref: str) -> str | None:
+        """Plugin-relative POSIX form of ``file_ref``, or None when it cannot be placed inside the plugin."""
+        return _plugin_relpath(file_ref, self.roots)
+
+    def exempt(self, file_ref: str) -> bool:
+        """True iff the plugin-relative path is vendored, dev-scratch or a test file (None -> never exempt)."""
+        rel = self.rel(file_ref)
+        return rel is not None and (_is_vendored_dep_path(rel) or _is_dev_scratch_path(rel) or _is_test_file_path(rel))
+
+    def is_fp_corpus(self, file_ref: str, content: str) -> bool:
+        """FP-corpus markdown verdict on the plugin-relative path (None -> never an FP corpus)."""
+        rel = self.rel(file_ref)
+        return rel is not None and is_fp_corpus_markdown(rel, content)
+
+
+def make_path_judge(plugin_root: Path | None) -> PathJudge:
+    """Build the path judge for one plugin (``None`` -> relative inputs only; absolute ones are never placed).
+
+    Roots are the plugin root in its absolute AND resolved spellings so a
+    symlinked root matches a finding path given in either spelling.
+    """
+    if plugin_root is None:
+        return PathJudge(roots=())
+    absolute = Path(os.path.normpath(Path(plugin_root).absolute()))
+    roots = tuple(dict.fromkeys((absolute, Path(plugin_root).resolve())))
+    return PathJudge(roots=roots)
 
 
 def _rc76_is_source_code_file(rel_path: str) -> bool:
@@ -9702,6 +9756,7 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
     # path the plugin's own .gitignore excludes (gitignored = not shipped). This
     # is the reported case: a gitignored INPUT_DEV/**/*.zip corpus = ~97 hits.
     gi = get_gitignore_filter(plugin_path)
+    judge = make_path_judge(plugin_path)  # TRDD-N4GLZXZ6 (#259)
     # Clear any "did not finish" mark left by an earlier run in this process
     # before we learn anything about THIS one — a stale mark would make a
     # completed scan report itself as aborted.
@@ -9798,30 +9853,17 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
         # intentional pattern-source material).
         if cpv_self_scan_skip(rel):
             continue
-        # v2.43 — drop findings inside vendored / cached / build dirs
-        # (node_modules, .venv, site-packages, …). These are transitive
-        # deps' bundled tests / READMEs / typedef files that contain
-        # placeholder credentials by design — not the plugin author's
-        # responsibility.
-        if _is_vendored_dep_path(rel):
-            continue
-        # v2.44 — drop findings inside gitignored dev-scratch dirs
-        # (docs_dev/, reports/, scripts_dev/, design/tasks/, …). Those
-        # paths legitimately quote credentials as fixture / audit
-        # examples and are never shipped, so any external-scanner hit
-        # in them is operational noise, not a security finding.
-        if _is_dev_scratch_path(rel):
+        # v2.43/v2.44 — drop findings inside vendored / cached / build dirs and
+        # gitignored dev-scratch dirs, plus test files (fixture tokens by design).
+        # TRDD-N4GLZXZ6 (#259): trufflehog reports ABSOLUTE paths, so the names are
+        # judged on the plugin-RELATIVE path; `rel` stays raw for the gitignore check
+        # and the emitted finding.
+        rel_in_plugin = judge.rel(rel) or ""
+        if judge.exempt(rel):
             continue
         # Issue #67 — drop findings inside ANY gitignored path (generalises the
         # hardcoded dev-scratch list above to the actual .gitignore).
         if _external_finding_is_gitignored(rel, gi):
-            continue
-        # Test-file skip — fixture tokens like `const FAKE = "ghs_..."`
-        # in `test_*.py` / `*.test.ts` / `tests/fixtures/...` exist by
-        # construction. The in-process secret scanners already early-
-        # exit on _is_test_file_path; aligning trufflehog with that
-        # contract eliminates the matching FPs here too.
-        if _is_test_file_path(rel):
             continue
         # FP-corpus markdown skip (file-level, requires both
         # directory shape AND in-file marker — coincidental
@@ -9831,12 +9873,15 @@ def check_trufflehog(plugin_path: Path, report: ValidationReport) -> int:
             fpath = plugin_path / rel
             if fpath.is_file() and fpath.stat().st_size < 2_000_000:
                 body = fpath.read_text(encoding="utf-8", errors="ignore")
-                if is_fp_corpus_markdown(rel, body):
+                if judge.is_fp_corpus(rel, body):
                     continue
         except OSError:
             pass
         base_level = "critical" if verified else "major"
-        level = effective_severity(base_level, rel)
+        # TRDD-N4GLZXZ6 (#259): trufflehog reports ABSOLUTE paths; demoting on them let
+        # ancestor folders (tests/, docs/, anything containing README) lower every
+        # finding. Demote on the plugin-relative path; "" matches no demotion pattern.
+        level = effective_severity(base_level, rel_in_plugin)
         getattr(report, level)(
             f"trufflehog {'VERIFIED' if verified else 'UNVERIFIED'} secret: detector={detector}",
             rel,
@@ -9909,6 +9954,7 @@ def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
     # Issue #67 — gitignore filter built ONCE; drop semgrep findings whose path
     # the plugin's own .gitignore excludes (gitignored = not shipped).
     gi = get_gitignore_filter(plugin_path)
+    judge = make_path_judge(plugin_path)  # TRDD-N4GLZXZ6 (#259)
     for finding in data.get("results", []):
         if not isinstance(finding, dict):
             continue
@@ -9926,20 +9972,12 @@ def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
         # under the same hash-gated self-scan rule applied elsewhere.
         if cpv_self_scan_skip(rel):
             continue
-        # v2.43 — drop findings inside vendored / cached / build dirs.
-        if _is_vendored_dep_path(rel):
-            continue
-        # v2.44 — drop findings inside gitignored dev-scratch dirs
-        # (docs_dev/, reports/, scripts_dev/, design/tasks/, …) so
-        # private workspace content never triggers semgrep noise.
-        if _is_dev_scratch_path(rel):
-            continue
-        # Drop findings inside test files. Test bodies routinely use
-        # the very tokens semgrep flags (`subprocess.run(shell=True, …)`
-        # in `test_*.py` to assert detection); the in-process scanners
-        # already early-exit on _is_test_file_path, this aligns
-        # semgrep with that contract.
-        if _is_test_file_path(rel):
+        # v2.43/v2.44 — drop findings inside vendored / cached / build dirs, gitignored
+        # dev-scratch dirs (docs_dev/, reports/, ...) and test files (fixture tokens by
+        # design). TRDD-N4GLZXZ6 (#259): judged on the plugin-RELATIVE path only; `rel`
+        # itself stays raw for the gitignore check and the emitted finding.
+        rel_in_plugin = judge.rel(rel) or ""
+        if judge.exempt(rel):
             continue
         # Issue #67 — drop findings inside ANY gitignored path (generalises the
         # hardcoded dev-scratch list above to the actual .gitignore).
@@ -9951,14 +9989,16 @@ def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
             fpath = plugin_path / rel
             if fpath.is_file() and fpath.stat().st_size < 2_000_000:
                 body = fpath.read_text(encoding="utf-8", errors="ignore")
-                if is_fp_corpus_markdown(rel, body):
+                if judge.is_fp_corpus(rel, body):
                     continue
                 # Per-line catalog/docstring/comment pattern-source skip.
                 if isinstance(line_no, int) and line_no > 0 and cpv_self_scan_skip_line(rel, body, int(line_no)):
                     continue
         except OSError:
             pass
-        cpv_level_eff = effective_severity(cpv_level, rel)
+        # TRDD-N4GLZXZ6 (#259): demote on the plugin-relative path only; "" matches no
+        # demotion pattern, so an unplaceable path is never demoted.
+        cpv_level_eff = effective_severity(cpv_level, rel_in_plugin)
         getattr(report, cpv_level_eff)(f"semgrep {rule_id}: {message}", rel, line_no)
         issues += 1
 
@@ -9982,17 +10022,16 @@ def make_cisco_should_skip(plugin_path: Path) -> "Callable[[str, int | None], bo
     two entry points disagree about the same file.
     """
     cisco_gi = get_gitignore_filter(plugin_path)
+    # TRDD-N4GLZXZ6 (#259): Cisco reports ABSOLUTE paths; judge them relative to the
+    # plugin root so folders ABOVE it (reports/, build/, tests/, ...) never drop findings.
+    judge = make_path_judge(plugin_path)
 
     def _cisco_should_skip(file_path: str, line: int | None) -> bool:
         if not file_path:
             return False
         if cpv_self_scan_skip(file_path):
             return True
-        if _is_vendored_dep_path(file_path):
-            return True
-        if _is_dev_scratch_path(file_path):
-            return True
-        if _is_test_file_path(file_path):
+        if judge.exempt(file_path):
             return True
         # Issue #67 — drop findings inside ANY gitignored path (generalises the
         # hardcoded dev-scratch list above to the actual .gitignore).
@@ -10005,7 +10044,7 @@ def make_cisco_should_skip(plugin_path: Path) -> "Callable[[str, int | None], bo
                     body = fpath.read_text(encoding="utf-8", errors="ignore")
                     if cpv_self_scan_skip_line(file_path, body, int(line)):
                         return True
-                    if is_fp_corpus_markdown(file_path, body):
+                    if judge.is_fp_corpus(file_path, body):
                         return True
             except OSError:
                 pass
@@ -10106,17 +10145,16 @@ def make_snyk_should_skip(plugin_path: Path) -> "Callable[[str, int | None], boo
     applies. Module-level for the same SSOT reason.
     """
     snyk_gi = get_gitignore_filter(plugin_path)
+    # TRDD-N4GLZXZ6 (#259): finding paths may be absolute; judge them relative to the
+    # plugin root so folders ABOVE it never drop findings.
+    judge = make_path_judge(plugin_path)
 
     def _snyk_should_skip(file_path: str, line: int | None) -> bool:
         if not file_path:
             return False
         if cpv_self_scan_skip(file_path):
             return True
-        if _is_vendored_dep_path(file_path):
-            return True
-        if _is_dev_scratch_path(file_path):
-            return True
-        if _is_test_file_path(file_path):
+        if judge.exempt(file_path):
             return True
         if _external_finding_is_gitignored(file_path, snyk_gi):
             return True
@@ -10273,11 +10311,11 @@ def skillaudit_should_skip(file_path: str, line: int | None) -> bool:
         return False
     if cpv_self_scan_skip(file_path):
         return True
-    if _is_vendored_dep_path(file_path):
-        return True
-    if _is_dev_scratch_path(file_path):
-        return True
-    if _is_test_file_path(file_path):
+    # TRDD-N4GLZXZ6 (#259): this entry point receives plugin-relative paths, so judge
+    # them relative; an absolute path gets no path exemption (folders above the
+    # plugin must never drop its findings).
+    judge = make_path_judge(None)
+    if judge.exempt(file_path):
         return True
     if isinstance(line, int) and line > 0:
         try:
@@ -10286,7 +10324,7 @@ def skillaudit_should_skip(file_path: str, line: int | None) -> bool:
                 body = fpath.read_text(encoding="utf-8", errors="ignore")
                 if cpv_self_scan_skip_line(file_path, body, int(line)):
                     return True
-                if is_fp_corpus_markdown(file_path, body):
+                if judge.is_fp_corpus(file_path, body):
                     return True
         except OSError:
             pass

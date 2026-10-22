@@ -402,9 +402,9 @@ def build_closure_mirror(
     * every external wrapper is DIRECTORY-shaped (``run_cisco_scan(dir)``,
       ``check_trufflehog(dir, report)``, ``run_snyk_agent_scan(dir)``), so a bare
       file list cannot be handed to any of them;
-    * the Cisco scanner WRITES its JSON dump into the directory it scans, so
-      pointing it at the user's real skill directory would mutate the tree under
-      audit — unacceptable;
+    * the Cisco scanner is pointed at a directory and walks it recursively, so
+      pointing it at the user's real skill directory would scan files outside the closure
+      being audited — unacceptable;
     * each file is placed at its OWNING-ROOT-RELATIVE path, so the mirror
       reproduces the ``agents/…`` + ``skills/<name>/…`` layout every wrapper
       already knows how to discover: ``native_skill_targets`` finds

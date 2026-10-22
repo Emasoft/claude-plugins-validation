@@ -2702,14 +2702,11 @@ def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
     # scanner is still mandatory; just slightly noisier on CPV self-scan).
     try:
         from validate_security import (  # noqa: PLC0415
-            _is_dev_scratch_path,
-            _is_test_file_path,
-            _is_vendored_dep_path,
             _set_cpv_self_scan,
             cpv_self_scan_skip,
             cpv_self_scan_skip_line,
             is_cpv_self_scan,
-            is_fp_corpus_markdown,
+            make_path_judge,
         )
     except ImportError:
         skillaudit_report_findings(result, plugin_root, report, should_skip=None)
@@ -2758,16 +2755,16 @@ def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
 
             gitignore_check = _is_gitignored
 
+        judge = make_path_judge(plugin_root)  # TRDD-N4GLZXZ6 (#259)
+
         def _should_skip(file_path: str, line: int | None) -> bool:
             if not file_path:
                 return False
             if cpv_self_scan_skip(file_path):
                 return True
-            if _is_vendored_dep_path(file_path):
-                return True
-            if _is_dev_scratch_path(file_path):
-                return True
-            if _is_test_file_path(file_path):
+            # TRDD-N4GLZXZ6 (#259): judged on the plugin-relative path; folders above
+            # the plugin root never exempt its findings.
+            if judge.exempt(file_path):
                 return True
             # v2.99.1 — gitignored content during self-scan only.
             if gitignore_check is not None and gitignore_check(file_path):
@@ -2787,7 +2784,7 @@ def _run_skillaudit_native(plugin_root: Path, report: ValidationReport) -> None:
                         body = fpath.read_text(encoding="utf-8", errors="replace")
                         if cpv_self_scan_skip_line(file_path, body, int(line)):
                             return True
-                        if is_fp_corpus_markdown(file_path, body):
+                        if judge.is_fp_corpus(file_path, body):
                             return True
                 except OSError:
                     pass

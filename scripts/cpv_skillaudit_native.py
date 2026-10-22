@@ -4116,9 +4116,19 @@ def _file_passes_scan_filters(
     this same predicate is what keeps a file-set scan's verdict identical to
     the tree scan's for the same file.
     """
-    parts = p.parts
+    # TRDD-N4GLZXZ6 (#259): the Tier 1/Tier 2 NAME tests look only at the part of the path
+    # INSIDE the plugin root. Testing the absolute `p.parts` let folders ABOVE the plugin
+    # (reports/, build/, .cache/, vendor/, ...) silently drop every file of the plugin.
+    # A path outside the root (ValueError) gets no name exemption: it is scanned.
+    # (Not imported from validate_security._plugin_relpath: this module is deliberately
+    # dependency-free and validate_security imports it lazily; a reverse import would
+    # pull the whole validator in.)
+    try:
+        rel_parts = p.relative_to(plugin_root).parts
+    except ValueError:
+        rel_parts = ()
     # Tier 1 — VCS/cache/package cruft: skip unconditionally.
-    if any(part in _ALWAYS_SKIP_DIRS for part in parts):
+    if any(part in _ALWAYS_SKIP_DIRS for part in rel_parts):
         return False
     # Tier 2 — conventionally-gitignored dev/output/private dirs: skip by
     # NAME only when git cannot prove shipped-ness (no git → conservative,
@@ -4127,7 +4137,7 @@ def _file_passes_scan_filters(
     # shipped-surface check below, which skips iff the file is genuinely
     # unshipped (gitignored AND untracked) and SCANS a tracked payload,
     # closing the name-skip false negative (issue #176 follow-up).
-    if unshipped is None and any(part in _SKIP_IF_UNSHIPPED_DIRS for part in parts):
+    if unshipped is None and any(part in _SKIP_IF_UNSHIPPED_DIRS for part in rel_parts):
         return False
     # Point 1 (v2.114.0) — scan EVERY text file, not a 14-suffix
     # allowlist. Text → always scanned; binary → scanned by the binary
