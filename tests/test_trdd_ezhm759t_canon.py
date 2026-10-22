@@ -380,8 +380,17 @@ def test_row20_only_pytests_own_process_group_is_killed() -> None:
     # sleep — no browser needed, and nothing real can be hit by mistake.
     kid = sp.Popen(["/bin/bash", "-c", "exec -a headless_shell sleep 20"])
     try:
-        time.sleep(1)
-        seen = ns["_snapshot_browser_pids"]() - baseline
+        # Why: the release gate runs this under heavy parallel load; a fixed 1s
+        # sleep + one snapshot flaked (exec -a not yet done, or ps returned {}),
+        # 2026-10-22. Poll until seen or 15s; a genuinely broken _ps_table still
+        # fails loudly because kid.pid never appears.
+        seen: set = set()
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            seen = ns["_snapshot_browser_pids"]() - baseline
+            if kid.pid in seen:
+                break
+            time.sleep(0.25)
         assert kid.pid in seen, "probe is broken: the fake browser was never seen by _ps_table"
 
         # Foreign process group: spared.
@@ -390,7 +399,10 @@ def test_row20_only_pytests_own_process_group_is_killed() -> None:
 
         # Our own group (the one stage_tests runs pytest in): killed.
         assert ns["_cleanup_browser_orphans"](baseline, os.getpgrp()) == 1
-        time.sleep(1)
+        # Why: same load flake as above; SIGKILL delivery can lag under load.
+        deadline = time.monotonic() + 10
+        while kid.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.25)
         assert kid.poll() is not None, "an owned orphan survived the cleanup"
     finally:
         if kid.poll() is None:
