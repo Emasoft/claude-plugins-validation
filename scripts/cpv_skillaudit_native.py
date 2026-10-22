@@ -4119,14 +4119,20 @@ def _file_passes_scan_filters(
     # TRDD-N4GLZXZ6 (#259): the Tier 1/Tier 2 NAME tests look only at the part of the path
     # INSIDE the plugin root. Testing the absolute `p.parts` let folders ABOVE the plugin
     # (reports/, build/, .cache/, vendor/, ...) silently drop every file of the plugin.
-    # A path outside the root (ValueError) gets no name exemption: it is scanned.
+    # The root is tried in the spelling given AND resolved (mirrors validate_security.make_path_judge):
+    # a caller-supplied path spelled differently from the root (/private/tmp vs /tmp symlink) must still
+    # be placed, else Tier 1 (.git, node_modules, ...) silently stops applying to it. The path itself is
+    # kept as given, never resolved. A path neither spelling places gets no name exemption: it is scanned.
     # (Not imported from validate_security._plugin_relpath: this module is deliberately
     # dependency-free and validate_security imports it lazily; a reverse import would
     # pull the whole validator in.)
     try:
         rel_parts = p.relative_to(plugin_root).parts
     except ValueError:
-        rel_parts = ()
+        try:
+            rel_parts = p.relative_to(plugin_root.resolve()).parts
+        except ValueError:
+            rel_parts = ()
     # Tier 1 — VCS/cache/package cruft: skip unconditionally.
     if any(part in _ALWAYS_SKIP_DIRS for part in rel_parts):
         return False

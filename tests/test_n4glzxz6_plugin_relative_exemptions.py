@@ -244,6 +244,33 @@ def test_native_walker_still_skips_inplugin_cache_dir(tmp_path: Path) -> None:
     assert not any(str(p).endswith("inner.md") for p in na._iter_scannable_files(plug))
 
 
+# --- filter_scannable_files: root spelling differs from the supplied path spelling ---------------
+
+
+@pytest.mark.parametrize("cruft", [".git", "node_modules"])
+def test_filter_scannable_files_tier1_applies_across_root_spellings(tmp_path: Path, cruft: str) -> None:
+    """Root given via a symlink, file given resolved: an in-plugin `.git/` or `node_modules/` file is still filtered."""
+    real = tmp_path / "real"
+    plug_real = _plugin(real, "clean")
+    (plug_real / cruft).mkdir()
+    (plug_real / cruft / "inner.md").write_text(PAYLOAD, encoding="utf-8")
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    plug_link = link / "clean" / "plug"
+    supplied = [(plug_real / cruft / "inner.md").resolve(), (plug_real / PAYLOAD_REL).resolve()]
+    kept = na.filter_scannable_files(plug_link, supplied)
+    assert [p.name for p in kept] == ["payload.md"]
+
+
+def test_filter_scannable_files_path_outside_root_gets_no_name_exemption(tmp_path: Path) -> None:
+    """Regression guard: a path truly outside the root is never name-exempted, even under a `.git/` folder of its own."""
+    plug = _plugin(tmp_path, "clean")
+    outside = tmp_path / "elsewhere" / ".git"
+    outside.mkdir(parents=True)
+    (outside / "x.md").write_text(PAYLOAD, encoding="utf-8")
+    assert [p.name for p in na.filter_scannable_files(plug, [outside / "x.md"])] == ["x.md"]
+
+
 # --- trufflehog demotion ----------------------------------------------------------------------
 
 

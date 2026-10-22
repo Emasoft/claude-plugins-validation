@@ -8521,6 +8521,10 @@ def make_path_judge(plugin_root: Path | None) -> PathJudge:
     return PathJudge(roots=roots)
 
 
+# Shared: a root-less judge holds no per-plugin state; skillaudit_should_skip runs per finding.
+_RELATIVE_ONLY_JUDGE = make_path_judge(None)
+
+
 def _rc76_is_source_code_file(rel_path: str) -> bool:
     """RC-76 — source-code files (TS/JS/Python/Go/Rust/etc) trip the
     stemmed-injection rule because LLM-tooling vocabulary
@@ -10314,7 +10318,7 @@ def skillaudit_should_skip(file_path: str, line: int | None) -> bool:
     # TRDD-N4GLZXZ6 (#259): this entry point receives plugin-relative paths, so judge
     # them relative; an absolute path gets no path exemption (folders above the
     # plugin must never drop its findings).
-    judge = make_path_judge(None)
+    judge = _RELATIVE_ONLY_JUDGE
     if judge.exempt(file_path):
         return True
     if isinstance(line, int) and line > 0:
