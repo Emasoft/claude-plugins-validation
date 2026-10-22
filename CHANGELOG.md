@@ -2,6 +2,37 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.22.5] - 2026-10-22
+
+### Bug Fixes
+
+- **skillaudit:** Info-string fences, plugin-root consent paths, whole-call subprocess judgement (TRDD-N4GLZXZ6)
+- **security:** RC-39 skips a line that only removes a launchd job (TRDD-N4GLZXZ6)
+- **docs-validation:** Scheme links, JSX/MDX object literals, CommonMark fences, TOC port (TRDD-N4GLZXZ6)
+- **lint:** One locked retry on the bunx cache race; markdownlint total count (TRDD-N4GLZXZ6)
+- **publish:** Gh secret list targets origin's repo explicitly (TRDD-N4GLZXZ6)
+- **standardize:** Cspell parity port; deterministic b14 temp dirs (TRDD-N4GLZXZ6)
+
+### Documentation
+
+- **card:** Record the v5.22.4 release and queue v5.22.5 (TRDD-N4GLZXZ6)
+- **card:** STATE describes the v5.22.4 consent form (TRDD-N4GLZXZ6)
+- **claude-md:** Re-derive the test-file count to 564 (TRDD-N4GLZXZ6)
+- **card:** V5.22.5 plan, scope, deferrals and residuals (TRDD-N4GLZXZ6)
+
+### Features
+
+- **cpv-agent:** Blocking findings dispatch the fixer or list CPV-internal remedies (TRDD-N4GLZXZ6)
+
+### Miscellaneous Tasks
+
+- **integrity:** Regenerate self-hash manifests for v5.22.5 (TRDD-N4GLZXZ6)
+- **integrity:** Regenerate self-hash manifests after the row20 test fix (TRDD-N4GLZXZ6)
+
+### Testing
+
+- **canon:** Poll for the fake browser instead of one fixed sleep (TRDD-N4GLZXZ6)
+
 ## [5.22.4] - 2026-10-22
 
 ### Bug Fixes
