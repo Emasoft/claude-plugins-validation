@@ -290,8 +290,25 @@ def test_filter_scannable_files_force_added_file_under_ignored_dir_is_scanned_ac
     (plug_real / "scratch" / "forced.md").write_text(PAYLOAD, encoding="utf-8")
     subprocess.run(["git", "-C", str(plug_real), "add", ".gitignore"], check=True)
     subprocess.run(["git", "-C", str(plug_real), "add", "-f", "scratch/forced.md"], check=True)
+    # Isolate from the machine global git config: no signing, no hooks, so the fixture cannot fail or prompt.
     subprocess.run(
-        ["git", "-C", str(plug_real), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"],
+        [
+            "git",
+            "-C",
+            str(plug_real),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "-q",
+            "-m",
+            "x",
+        ],
         check=True,
     )
     link = tmp_path / "link"
@@ -313,9 +330,32 @@ def test_filter_scannable_files_unshipped_check_plugin_in_repo_subdir(tmp_path: 
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     (plug / ".gitignore").write_text("scratch/\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    # Isolate from the machine global git config: no signing, no hooks, so the fixture cannot fail or prompt.
     subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"], check=True
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "-q",
+            "-m",
+            "x",
+        ],
+        check=True,
     )
+    # Why: the test is only meaningful if the plugin is NOT its own git root; assert the toplevel is the parent repo.
+    top = subprocess.run(
+        ["git", "-C", str(plug), "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
+    )
+    assert Path(top.stdout.strip()).resolve() == repo
     (plug / "scratch").mkdir()
     (plug / "scratch" / "x.md").write_text(PAYLOAD, encoding="utf-8")
     supplied = [plug / "scratch" / "x.md", plug / PAYLOAD_REL]
