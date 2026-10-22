@@ -48,6 +48,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import cpv_ci_preflight  # noqa: E402
+import generate_plugin_repo  # noqa: E402
 import standardize_plugin  # noqa: E402
 from cpv_ci_preflight import PreflightResult  # noqa: E402
 
@@ -327,7 +328,7 @@ def test_emitted_dictionary_carries_the_tech_terms_that_would_false_block(
     an undictionaried plugin (the RC-3 CI failure, reproduced) — this is not a
     guessed list. `uvx` is deliberately NOT here: it is 3 chars and cspell's default
     `minWordLength` is 4, so it is never flagged (measured) and seeding it would be
-    dead weight."""
+    dead weight. Coverage also verifies the reported canonical-workflow vocabulary."""
     root = _make_plugin(tmp_path)
     standardize_plugin.provision_cspell_config(root)
     cfg = json.loads((root / ".cspell.json").read_text(encoding="utf-8"))
@@ -335,6 +336,39 @@ def test_emitted_dictionary_carries_the_tech_terms_that_would_false_block(
 
     for token in ("pyproject", "venv", "pipefail", "mypy", "pytest", "shellcheck", "toplevel", "endfor"):
         assert token in words, f"{token!r} would false-block a CI-green plugin"
+
+    params = generate_plugin_repo.PluginParams(
+        name="sample", description="sample", author="sample", author_email="sample@example.com"
+    )
+    workflows = (
+        generate_plugin_repo.gen_ci_yml(params)
+        + generate_plugin_repo.gen_release_yml(params)
+        + generate_plugin_repo.gen_notify_marketplace_yml(params)
+    ).lower()
+    for token in (
+        "anchore",
+        "artipacked",
+        "catchable",
+        "callsites",
+        "commitlintrc",
+        "dfrprzyd",
+        "gitlog",
+        "isinstance",
+        "pinact",
+        "pipestatus",
+        "procps",
+        "pythonunbuffered",
+        "rhysd",
+        "sarif",
+        "slsa",
+        "softprops",
+        "unvalidated",
+        "urlopen",
+        "wagoid",
+        "zizmorcore",
+    ):
+        assert token in workflows, f"{token!r} is emitted by canonical workflows"
+        assert token in words, f"{token!r} from canonical workflows missing from cspell seed"
 
 
 def test_emitted_dictionary_does_not_whitelist_actual_misspellings(tmp_path: Path) -> None:

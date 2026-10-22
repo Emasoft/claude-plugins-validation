@@ -119,8 +119,11 @@ def test_local_hook_accepts_relative_string_source_end_to_end(tmp_path: Path) ->
         "plugins": [{"name": "p", "source": "./plugins/p"}],
     }
 
-    def _run(hook_src: str) -> int:
-        root = tmp_path / f"r{abs(hash(hook_src)) % 10000}"
+    def _run(hook_src: str, root_name: str) -> int:
+        # Why: fixed per-role directory names. A hash()-derived name can collide between
+        # the two _run calls (per-process hash randomization, about 1 run in 10000), and the
+        # second mkdir then raised FileExistsError in CI on 2026-10-22.
+        root = tmp_path / root_name
         (root / ".claude-plugin").mkdir(parents=True)
         (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps(mkt))
         ghooks = root / ".githooks"
@@ -129,8 +132,8 @@ def test_local_hook_accepts_relative_string_source_end_to_end(tmp_path: Path) ->
         hook_file.write_text(hook_src)
         return subprocess.run([sys.executable, str(hook_file)], capture_output=True, text=True, input="").returncode
 
-    assert _run(local_hook) == 0  # corrected behavior
-    assert _run(hub_hook) == 1  # guard: the wrong hook would have blocked
+    assert _run(local_hook, "r_local") == 0  # corrected behavior
+    assert _run(hub_hook, "r_hub") == 1  # guard: the wrong hook would have blocked
 
 
 # --------------------------------------------------------------------------
