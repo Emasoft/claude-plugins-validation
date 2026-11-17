@@ -2186,7 +2186,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "target",
         "output-styles",
         "design",  # TRDD design docs (design/tasks/)
-        "reports",  # v2.24.0 — mandated report output folder (gitignored; see cpv_validation_common.resolve_reports_dir())
+        "reports",  # v2.24.0 — mandated report output folder (git-tracked final reports since 2026-11-15, #275; see cpv_validation_common.resolve_reports_dir())
         "reviews",  # code-review output folder (recognised built-in; TRDD-02e1672b)
         "workflows",  # Workflow-DSL scripts (Claude Code 2.1.154+ Workflow tool / ultracode); #94. Files inside are still security-scanned — this only stops the structural RC-NONSTD-DIR-001 MAJOR.
         # Common dirs across many plugins (added v2.23.2 after empirical scan
@@ -4573,16 +4573,17 @@ EXPECTED_GITIGNORE_CATEGORIES: list[tuple[list[str], str, str]] = [
     ([".claude"], "Claude Code cache directory (.claude/)", "minor"),
     (["llm_externalizer_output"], "LLM Externalizer output directory", "warning"),
     ([".tldr"], "TLDR cache directory (.tldr/)", "warning"),
-    # Agent/script reports — per ~/.claude/rules/agent-reports-location.md,
-    # every plugin MUST have both `reports/` and `reports_dev/` explicitly
-    # gitignored. Reports routinely contain private data (absolute paths,
-    # source snippets, auth tokens in logs, PII in test fixtures), so both
-    # entries MUST be present even if the folders do not yet exist — this
-    # is defensive intent, not a filesystem reflection. The trailing slash
-    # in each pattern disambiguates `reports/` from `reports_dev/` under
-    # the validator's substring-match logic (line 2673). Added v2.25.0.
-    (["reports/"], "Agent/script reports (reports/)", "major"),
-    (["reports_dev/"], "Dev-only report scratch (reports_dev/)", "warning"),
+    # Private report scratch — `reports_dev/` MUST be explicitly gitignored (MAJOR).
+    # Why: the owner's report convention (2026-11-15, issue #275) split reports in
+    # two. `reports/` is git-TRACKED and holds only final, sanitized reports, so
+    # requiring it to be ignored contradicted the convention and blocked the strict
+    # publish gate of plugins that deliberately track it (that entry was removed).
+    # `reports_dev/` (like every `*_dev/` folder) is the private home for
+    # intermediate/partial reports, raw logs and anything with absolute paths,
+    # tokens or PII, so leaking it is the real risk — hence MAJOR, not WARNING.
+    # Like every category it is flagged only when the folder exists. The trailing
+    # slash disambiguates it from `reports/` under the substring fallback.
+    (["reports_dev/"], "Dev-only report scratch (reports_dev/)", "major"),
 ]
 
 

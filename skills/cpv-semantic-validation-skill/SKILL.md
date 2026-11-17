@@ -34,7 +34,7 @@ Deep AI analysis. Opus 1M, ~10-50× tokens of script validation.
 
 ## Output
 
-- **Grade**: A-F. **Criteria**: Pass/Partial/Fail per pillar. **Report**: `$MAIN_ROOT/reports/cpv-semantic-validator-agent/<ts±tz>-<slug>.md`. Both `reports/` and `reports_dev/` gitignored.
+- **Grade**: A-F. **Criteria**: Pass/Partial/Fail per pillar. **Report**: `$MAIN_ROOT/reports/cpv-semantic-validator-agent/<ts±tz>-<slug>.md`. `reports/` is git-tracked (final, sanitized reports only); `reports_dev/` is gitignored (intermediate/private).
 
 ## Error Handling
 

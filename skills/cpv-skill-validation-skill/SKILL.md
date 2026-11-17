@@ -39,7 +39,7 @@ Script-based validation of structure, frontmatter, content, and pillars. For sem
 
 - **Syntactic Score**: 0-100 numeric with tier (PASS / CONDITIONAL_PASS / FAIL)
 - **Exit Code**: 0 (pass), 1 (CRITICAL), 2 (MAJOR), 3 (MINOR), 4 (NIT)
-- **Report File**: `$MAIN_ROOT/reports/validate_skill/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the **main-repo root** (first entry of `git worktree list`) — never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp mandatory. Both `reports/` and `reports_dev/` gitignored.
+- **Report File**: `$MAIN_ROOT/reports/validate_skill/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the **main-repo root** (first entry of `git worktree list`) — never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp mandatory. `reports/` is git-tracked (final, sanitized reports only); `reports_dev/` is gitignored (intermediate/private).
 
 > For **Semantic Quality Grading** (A-F letter grades), use `/cpv-semantic-validation` instead.
 

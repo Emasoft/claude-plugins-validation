@@ -343,5 +343,5 @@ every operation was additive:
 Record every rollback step in
 `$MAIN_ROOT/reports/cpv-migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
 at the main-repo root (first entry of `git worktree list` — never a linked
-worktree) so the audit trail is complete. Both `reports/` and
-`reports_dev/` are gitignored.
+worktree) so the audit trail is complete. `reports/` is git-tracked (final,
+sanitized reports only); `reports_dev/` is gitignored (intermediate/private).

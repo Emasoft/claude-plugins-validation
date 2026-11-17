@@ -720,14 +720,14 @@ uv run python scripts/validate_plugin.py . --strict --json 2>/dev/null | \
 
 ## Category 6 — `.gitignore` + dev folders (CHECK-32..36)
 
-### CHECK-32 [BLOCKER] `/reports/` AND `/reports_dev/` listed in `.gitignore`
-**Why**: Reports contain private data (paths, tokens, internal notes). Per `~/.claude/rules/agent-reports-location.md` both MUST be gitignored.
+### CHECK-32 [MAJOR] `reports_dev/` is gitignored
+**Why**: Raw and intermediate reports contain private data (paths, tokens, internal notes). `reports/` is git-TRACKED (final, sanitized reports only; owner convention 2026-11-15, CPV issue #275), so `.gitignore` must NOT be required to list it; `reports_dev/` is the private folder and MUST be ignored.
 **Verify**:
 ```bash
-grep -qxF '/reports/' .gitignore && grep -qxF '/reports_dev/' .gitignore
+git check-ignore -q reports_dev/
 ```
 **Pass when**: exit 0.
-**On fail**: append both lines to `.gitignore`.
+**On fail**: append `/reports_dev/` to `.gitignore`.
 
 ### CHECK-33 [MAJOR] `/.trashcan/` listed in `.gitignore`
 **Why**: `ai-maestro-janitor:janitor-safe-delete` writes `claude-plugins-validation/.trashcan/`. Per CPV memory: this directory must never be committed.
@@ -1645,7 +1645,7 @@ run_all_checks() {
     "29|MAJOR|cpv.allow_root_dirs covers non-std|cpv_check_29"
     "30|MINOR|Version bumped if changes since tag|cpv_check_30"
     "31|MINOR|No unknown plugin.json keys|cpv_check_31"
-    "32|BLOCKER|/reports/ + /reports_dev/ ignored|cpv_check_32"
+    "32|MAJOR|/reports_dev/ ignored|cpv_check_32"
     "33|MAJOR|/.trashcan/ in .gitignore|cpv_check_33"
     "34|MINOR|*_dev/ folders gitignored|cpv_check_34"
     "35|MINOR|No tracked file under *_dev/|cpv_check_35"

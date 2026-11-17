@@ -6962,9 +6962,11 @@ def resolve_reports_dir(
     """Resolve ``$MAIN_ROOT/reports/<component>/`` per the agent-reports rule.
 
     Every agent, skill, and script that saves a report MUST write into the
-    directory returned here. Reports often contain private data (full paths,
-    source snippets, validation output, user decisions), so the folder is
-    gitignored by convention. Reports from a linked worktree still land in
+    directory returned here. Raw reports often contain private data (full paths,
+    source snippets, validation output, user decisions); since the owner's
+    2026-11-15 convention (#275) ``reports/`` is git-tracked and holds only final,
+    sanitized reports, while intermediate or private ones belong in the
+    gitignored ``reports_dev/``. Reports from a linked worktree still land in
     the **main** repo's ``reports/`` — never the worktree's own.
 
     Args:

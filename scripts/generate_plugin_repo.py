@@ -1198,13 +1198,16 @@ Thumbs.db
 # examples_dev, downloads_dev, libs_dev, builds_dev, etc.
 *_dev/
 
-# Agent/script reports — ALWAYS gitignored since they often contain private data
-# (full paths, source snippets, API output, validation results, env metadata).
-# Canonical rule: every agent/skill/script that saves a report MUST write
-# under the main-repo `./reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`.
-# Neither folder may ever be tracked. `reports_dev/` is also covered by the
-# `*_dev/` rule above, listed explicitly because both entries must be present.
-reports/
+# Agent/script reports (owner convention of 2026-11-15, issue #275): `reports/` is
+# git-TRACKED and holds only final, sanitized reports, so it is deliberately NOT
+# listed here — ignoring it would hide the tracked reports a plugin ships and make
+# CPV demand an ignore rule the convention forbids. `reports_dev/` is the private
+# home for intermediate/partial reports, raw logs and anything with full paths,
+# source snippets, API output or env metadata, so it MUST be ignored. It is also
+# covered by the `*_dev/` rule above, listed explicitly because the validator
+# (validate_gitignore) requires the explicit entry (MAJOR when the folder exists).
+# Final reports go under the main-repo `./reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`;
+# intermediate and private ones under `./reports_dev/<component>/`.
 reports_dev/
 
 # Node
@@ -4411,8 +4414,11 @@ def _write_release_notes(root: Path, new_ver: str, tag: str) -> None:
     since the previous tag — and `--strip all` drops the changelog header/footer,
     which are boilerplate inside a release body.
 
-    The output goes to the gitignored `reports/` tree, NEVER into the repo
-    proper: a file sitting in the working tree at release time is one `git add`
+    The output goes to the gitignored `reports_dev/` tree, NEVER into the repo
+    proper (`reports_dev/`, not `reports/`: since #275 the scaffolded .gitignore no
+    longer ignores the git-tracked `reports/`, so a notes file written there would
+    dirty the tree and trip the next publish's clean-tree gate). A file sitting in
+    the working tree at release time is one `git add`
     away from being swept into the release commit.
 
     BEST-EFFORT on purpose. Any failure leaves no usable notes file and
@@ -4420,7 +4426,7 @@ def _write_release_notes(root: Path, new_ver: str, tag: str) -> None:
     best-effort slice is worse than generated notes — a mis-sliced body ships the
     PREVIOUS release's notes under the new tag.
     """
-    notes = root / "reports" / "publish" / f"release-notes-{new_ver}.md"
+    notes = root / "reports_dev" / "publish" / f"release-notes-{new_ver}.md"
     try:
         notes.parent.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
@@ -4439,7 +4445,7 @@ def _write_release_notes(root: Path, new_ver: str, tag: str) -> None:
         for line in tail:
             cprint(f"  {YELLOW}  {line}{NC}")
         return
-    cprint(f"  {GREEN}Release notes for {tag} rendered to reports/publish/"
+    cprint(f"  {GREEN}Release notes for {tag} rendered to reports_dev/publish/"
            f"release-notes-{new_ver}.md.{NC}")
 
 
@@ -4669,7 +4675,7 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     _ensure_gh_auth(owner, repo)
     # THIS RELEASE'S notes, never CHANGELOG.md. Step 9 renders the section for
     # this tag alone (`git-cliff --unreleased --strip all`) into the gitignored
-    # reports/ tree; CHANGELOG.md is full history, so passing it here would
+    # reports_dev/ tree; CHANGELOG.md is full history, so passing it here would
     # publish the whole project history as this one release's body and would
     # eventually breach GitHub's 125,000-character release-body limit AFTER the
     # tag is already public.
@@ -4677,7 +4683,7 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     # The path is spelled out here as well as in `_write_release_notes` so each
     # stage stands alone (they are exercised independently); the two spellings
     # are pinned identical by the canon's tests.
-    notes_file = root / "reports" / "publish" / f"release-notes-{new_ver}.md"
+    notes_file = root / "reports_dev" / "publish" / f"release-notes-{new_ver}.md"
     notes_usable = False
     if notes_file.is_file():
         try:

@@ -24,7 +24,7 @@ Copy this checklist into your fix log and tick each item as you go:
 - [ ] Stop when findings empty AND no blocking warnings (CONVERGED), OR escalate when the finding set RECURS vs **any** prior iteration (oscillation — tracked deterministically by `scripts/cpv_fix_loop_state.py`, not just vs N-1). NO fixed iteration cap.
 - [ ] **For migration runs only (`/cpv-upgrade-plugin`)**: run `run_all_checks` from `references/canonical-pipeline-migration-checklist.md` — every BLOCKER + MAJOR must pass.
 - [ ] **For migration runs only**: run `uv run python scripts/publish.py --print-gates` then `--dry-run` then `--patch`, then `gh run watch <run-id> --exit-status` on the resulting tag (and on the marketplace tag if Layout C / Layout A).
-- [ ] Write the iteration-by-iteration fix log to `$MAIN_ROOT/reports/cpv-plugin-fixer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (at the **main-repo root** — first entry of `git worktree list`, never a linked worktree; both `reports/` and `reports_dev/` gitignored). NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
+- [ ] Write the iteration-by-iteration fix log to `$MAIN_ROOT/reports/cpv-plugin-fixer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (at the **main-repo root** — first entry of `git worktree list`, never a linked worktree; `reports/` git-tracked, `reports_dev/` gitignored). NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
 - [ ] Return one-line summary to caller
 
 ## Why a loop

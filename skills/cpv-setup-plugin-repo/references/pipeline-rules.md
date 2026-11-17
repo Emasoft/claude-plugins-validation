@@ -316,7 +316,7 @@ AUDIT (no `--fix`) path only WARNs: it surfaces a missing `.jscpd.json` and a
 | Issue | Fix |
 |-------|-----|
 | SKILL.md missing sections | Add: Overview, Prerequisites, Instructions (numbered), Output, Error Handling, Examples, Resources |
-| .gitignore gaps | Append missing patterns: __pycache__/, .venv/, .env, dist/, build/, .coverage, .pytest_cache/, .ruff_cache/, node_modules/, *_dev/, reports/ |
+| .gitignore gaps | Append missing patterns: __pycache__/, .venv/, .env, dist/, build/, .coverage, .pytest_cache/, .ruff_cache/, node_modules/, *_dev/, reports_dev/ |
 | Missing README badges | Add `<!--BADGES-START-->` block with CI, Version, License, Validation badges |
 | Missing LICENSE | Create MIT LICENSE file |
 | Script not executable | `chmod +x <script>` |

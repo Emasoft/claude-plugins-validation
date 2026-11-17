@@ -11329,7 +11329,7 @@ def _resolve_report_root() -> Path:
 
     Anchors reports to the **main checkout root** (first entry of
     ``git worktree list``) so they survive when a linked worktree is
-    removed/merged. ``./reports/`` is gitignored everywhere; writing
+    removed/merged. A linked worktree's own ``./reports/`` is deleted with it; writing
     inside a worktree's local copy loses the audit trail.
 
     Resolution order:
@@ -12291,8 +12291,8 @@ Exit Codes:
             #   1. main checkout root from `git worktree list` — anchors
             #      reports to the primary working tree so they survive
             #      when a linked worktree gets removed/merged. The
-            #      worktree's local `./reports/` is gitignored
-            #      everywhere, so writing there loses the audit trail.
+            #      worktree's local `./reports/` is deleted with it
+            #      when the worktree goes, so writing there loses the audit trail.
             #   2. CLAUDE_PROJECT_DIR — only as fallback when not in a
             #      git context. Inside a linked worktree,
             #      CLAUDE_PROJECT_DIR resolves to the WORKTREE root,
