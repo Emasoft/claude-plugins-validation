@@ -2499,6 +2499,33 @@ ABSOLUTE_PATH_PATTERNS = [
     ),
 ]
 
+
+def absolute_path_match_text(match: re.Match[str], desc: str) -> str:
+    """Return the path an ``ABSOLUTE_PATH_PATTERNS`` match names, minus sentence punctuation.
+
+    Issue #277: the ``system absolute path`` body stops only at whitespace/quotes/
+    brackets, so a sentence-ending `,` `;` `.` `:` `!` `?` is captured AS PART OF the
+    path (`/usr/bin,`). Every classification downstream (system-dir downgrade by `in` /
+    `startswith`, doc-prefix allowlist) compares the whole string, so `/usr/bin,`
+    matched nothing and a bare system dir in prose fired MAJOR. The punctuation belongs
+    to the sentence, not the path: trim it BEFORE classifying so the bare directory is
+    what gets judged. No allowlist entry, no suppression, no severity change.
+
+    Deliberately ONLY for the system-path pattern. The home patterns must keep their
+    text untouched: the username check reads the segment after the Users or home
+    directory, and the placeholder username `...` (EXAMPLE_USERNAMES, e.g. the docs
+    line showing a Windows Users path with an ellipsis) would be trimmed to an empty
+    segment and start firing MAJOR (seen on CPV self-validation). A home path
+    therefore keeps firing exactly as before.
+    ONE helper, called by every scanner that consumes ABSOLUTE_PATH_PATTERNS, so the
+    trim cannot drift between them.
+    """
+    text = match.group(1) if match.lastindex else match.group(0)
+    if desc == "system absolute path":
+        return text.rstrip(",;.:!?")
+    return text
+
+
 # Allowed absolute path prefixes in documentation examples
 # These are skipped in doc files (.md, .txt, .html) to reduce false positives
 ALLOWED_DOC_PATH_PREFIXES = {
@@ -8514,7 +8541,7 @@ def scan_file_for_absolute_paths(
     # Then check for ALL absolute paths (MAJOR)
     for pattern, desc in ABSOLUTE_PATH_PATTERNS:
         for match in pattern.finditer(content):
-            matched_text = match.group(1) if match.lastindex else match.group(0)
+            matched_text = absolute_path_match_text(match, desc)
 
             # Skip if this looks like a regex pattern. Task G: a bare `.` is NOT
             # regex syntax, and only the username/first segment is inspected (4j).

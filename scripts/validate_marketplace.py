@@ -3598,6 +3598,7 @@ def validate_marketplace_private_info(
             ALLOWED_DOC_PATH_PREFIXES,
             EXAMPLE_USERNAMES,
             PRIVATE_USERNAMES,
+            absolute_path_match_text,
             build_private_path_patterns,
             is_scannable_text_file,
         )
@@ -3647,7 +3648,7 @@ def validate_marketplace_private_info(
         # Check for ANY absolute paths (MAJOR) - stricter check
         for pattern, desc in absolute_patterns:
             for match in pattern.finditer(content):
-                matched_text = match.group(1) if match.lastindex else match.group(0)
+                matched_text = absolute_path_match_text(match, desc)
 
                 # Skip if this looks like a regex *pattern* rather than a real path.
                 # Only treat unambiguous regex metacharacters as a signal: anchors
