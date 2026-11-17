@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import platform
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
@@ -357,7 +358,6 @@ dist/
 .claude/
 llm_externalizer_output/
 .tldr/
-reports/
 reports_dev/
 """
 
@@ -417,40 +417,60 @@ reports_dev/
                 f"flagged non-existent .claude/ — v2.25.0 should suppress: {r.message}"
             )
 
-    def test_reports_dir_missing_reports_major(self, tmp_path):
-        """Missing reports/ in gitignore reports MAJOR — only when reports/
-        actually exists (v2.25.0 rule)."""
-        gi = self._full_gitignore().replace("reports/\n", "")
-        plugin = _make_plugin(tmp_path, gitignore=gi)
+    # Issue #275: `reports/` is git-TRACKED (final, sanitized reports), so CPV must
+    # never demand it be ignored; `reports_dev/` is the private folder and MUST be.
+    # Each case runs twice: in a real git repo (`git check-ignore` path) and in a
+    # plain directory (substring fallback) — the two code paths of the same check.
+    @staticmethod
+    def _plugin_for_reports(tmp_path, gitignore, *, in_git):
+        plugin = _make_plugin(tmp_path, gitignore=gitignore)
+        if in_git:
+            subprocess.run(["git", "init", "-q"], cwd=plugin, check=True)
+        return plugin
+
+    @pytest.mark.parametrize("in_git", [False, True], ids=["substring-fallback", "git-check-ignore"])
+    def test_reports_dir_not_in_gitignore_is_not_flagged(self, tmp_path, in_git):
+        """A real, tracked reports/ folder missing from .gitignore raises NO finding
+        (issue #275) while reports_dev/ is ignored — the whole report is clean."""
+        gi = self._full_gitignore()  # no `reports/` entry: it is tracked, not ignored
+        plugin = self._plugin_for_reports(tmp_path, gi, in_git=in_git)
         (plugin / "reports").mkdir()
+        (plugin / "reports_dev").mkdir()
         report = ValidationReport()
         validate_gitignore(plugin, report)
-        msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("reports/" in m for m in msgs)
+        flagged = [r.message for r in report.results if "missing coverage" in r.message]
+        assert not flagged, f"reports/ must not be required in .gitignore: {flagged}"
+        assert any("all expected categories" in r.message.lower() for r in report.results if r.level == "PASSED")
 
-    def test_reports_dev_dir_missing_warns(self, tmp_path):
-        """Missing reports_dev/ in gitignore reports WARNING — only when the
-        folder actually exists (v2.25.0 rule)."""
+    @pytest.mark.parametrize("in_git", [False, True], ids=["substring-fallback", "git-check-ignore"])
+    def test_reports_dev_dir_missing_reports_major(self, tmp_path, in_git):
+        """Missing reports_dev/ in gitignore reports MAJOR (raised from WARNING in
+        issue #275) — only when the folder actually exists (v2.25.0 rule)."""
         gi = self._full_gitignore().replace("reports_dev/\n", "")
-        plugin = _make_plugin(tmp_path, gitignore=gi)
+        plugin = self._plugin_for_reports(tmp_path, gi, in_git=in_git)
         (plugin / "reports_dev").mkdir()
         report = ValidationReport()
         validate_gitignore(plugin, report)
-        msgs = [r.message for r in report.results if r.level == "WARNING"]
-        assert any("reports_dev/" in m for m in msgs)
+        major = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("reports_dev/" in m and "missing coverage" in m for m in major), (
+            f"missing reports_dev/ must be MAJOR: {[(r.level, r.message) for r in report.results]}"
+        )
+        warned = [r.message for r in report.results if r.level == "WARNING" and "reports_dev/" in r.message]
+        assert not warned, f"reports_dev/ must no longer be a WARNING: {warned}"
 
-    def test_reports_pattern_does_not_false_match_reports_dev(self, tmp_path):
-        """`reports_dev/` in .gitignore must NOT satisfy the `reports/`
-        requirement (regression guard: trailing-slash substring-matching)."""
-        gi = self._full_gitignore().replace("reports/\n", "")
-        plugin = _make_plugin(tmp_path, gitignore=gi)
+    @pytest.mark.parametrize("in_git", [False, True], ids=["substring-fallback", "git-check-ignore"])
+    def test_reports_pattern_does_not_satisfy_reports_dev(self, tmp_path, in_git):
+        """`reports/` in .gitignore must NOT satisfy the `reports_dev/` requirement
+        (regression guard: trailing-slash substring-matching, now in the other direction)."""
+        gi = self._full_gitignore().replace("reports_dev/\n", "") + "reports/\n"
+        plugin = self._plugin_for_reports(tmp_path, gi, in_git=in_git)
         (plugin / "reports").mkdir()
         (plugin / "reports_dev").mkdir()
         report = ValidationReport()
         validate_gitignore(plugin, report)
-        msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("reports/" in m for m in msgs), (
-            "reports_dev/ satisfied the reports/ requirement — the validator "
+        major = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("reports_dev/" in m for m in major), (
+            "reports/ satisfied the reports_dev/ requirement — the validator "
             "is substring-matching without the trailing slash"
         )
 

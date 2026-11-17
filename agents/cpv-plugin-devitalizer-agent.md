@@ -68,7 +68,7 @@ Run the security scan ONE MORE TIME as a clean-room re-check, independent of the
 
 ## Phase 5 — report
 
-Write the per-finding before/after diff + outcome (devitalized: transform T#, OR flagged: reason) to `$MAIN_ROOT/reports/cpv-plugin-devitalizer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (`$MAIN_ROOT` = main-repo root via `git worktree list | head -n1 | awk '{print $1}'`, never a linked worktree; `reports/` is gitignored). Mark each transform that is also a security improvement (T1 / T5 / T9 / dead-sink removal) as such. End with the two-perspective close: what a perfectionist would still object to (the remaining flagged-not-devitalized load-bearing findings and why each is irreducible) vs what a pragmatist accepts (the plugin now passes the gate honestly, with the irreducible items surfaced for an explicit human decision). Return ONE line.
+Write the per-finding before/after diff + outcome (devitalized: transform T#, OR flagged: reason) to `$MAIN_ROOT/reports/cpv-plugin-devitalizer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (`$MAIN_ROOT` = main-repo root via `git worktree list | head -n1 | awk '{print $1}'`, never a linked worktree; `reports/` is git-tracked and holds only final, sanitized reports; intermediate or private ones go to gitignored `reports_dev/`). Mark each transform that is also a security improvement (T1 / T5 / T9 / dead-sink removal) as such. End with the two-perspective close: what a perfectionist would still object to (the remaining flagged-not-devitalized load-bearing findings and why each is irreducible) vs what a pragmatist accepts (the plugin now passes the gate honestly, with the irreducible items surfaced for an explicit human decision). Return ONE line.
 
 ## Hard rules — NON-NEGOTIABLE
 

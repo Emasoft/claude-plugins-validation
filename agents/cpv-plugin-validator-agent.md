@@ -218,7 +218,7 @@ Steps (both modes):
 
 ## Rules
 
-- **ALWAYS write reports to `$MAIN_ROOT/reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. Both `reports/` and `reports_dev/` are gitignored. NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
+- **ALWAYS write reports to `$MAIN_ROOT/reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. `reports/` is git-tracked (final, sanitized reports only); `reports_dev/` is gitignored (intermediate/private). NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
 - **ALWAYS use `--report`** — saves full output to file, prints only compact summary to stdout
 - **NEVER read the report file** — provide the path to the user
 - **NEVER read source files** — the scripts do the reading

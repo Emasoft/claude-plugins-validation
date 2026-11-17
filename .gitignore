@@ -59,14 +59,12 @@ Thumbs.db
 # examples_dev, downloads_dev, libs_dev, builds_dev, etc.
 *_dev/
 
-# Agent/script reports — ALWAYS gitignored since they often contain private data
-# (full paths, source snippets, API output, validation results, env metadata).
-# Canonical rule (~/.claude/rules/agent-reports-location.md): every
-# agent/skill/script that saves a report MUST write under the main-repo
-# `./reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`. Neither
-# `reports/` nor `reports_dev/` may ever be tracked. `reports_dev/` is
-# separately also matched by the `*_dev/` rule above, but it's listed
-# explicitly here because the rule says both entries must be present.
+# Agent/script reports. Owner convention (2026-11-15, issue #275): `reports/` is
+# git-TRACKED in a plugin and `reports_dev/` is the private, gitignored folder, so
+# CPV (validate_gitignore) now requires only `reports_dev/`. THIS repo still ignores
+# `reports/` too, as before (this repo's own choice, unchanged by #275).
+# `reports_dev/` is also matched by the `*_dev/` rule above, but it is listed
+# explicitly because the validator requires the explicit entry.
 reports/
 reports_dev/
 

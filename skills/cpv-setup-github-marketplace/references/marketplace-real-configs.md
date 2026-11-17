@@ -246,11 +246,11 @@ temp/
 # examples_dev, downloads_dev, libs_dev, builds_dev, etc.
 *_dev/
 
-# Agent/script reports — ALWAYS gitignored since they often contain private data
-# (full paths, source snippets, API output, validation results, env metadata).
+# Agent/script reports: `reports/` is git-TRACKED (final, sanitized reports only), so it
+# is NOT ignored here. `reports_dev/` is the private home for intermediate/partial
+# reports (full paths, source snippets, API output, env metadata) and MUST be ignored.
 # Rule: write reports under `./reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
-# at the MAIN-repo root (worktree-aware). Neither folder may be tracked.
-reports/
+# at the MAIN-repo root (worktree-aware); intermediate/private ones under `./reports_dev/`.
 reports_dev/
 
 # Rust build artifacts

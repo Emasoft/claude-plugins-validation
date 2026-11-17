@@ -91,7 +91,7 @@ Run for every plugin / marketplace / skill-folder mode in the validator table ab
 | D3 Skill invocability | unreachable user-invocable skill, dead `user-invocable: false` skill, name collision | DOC-020..022 |
 | D4 Design-conflict | name collision across commands∪agents∪skills, built-in shadow, agent trigger overlap | DOC-030..032 |
 | D5 Manifest/marketplace consistency | version drift across plugin.json/tag/marketplace/CHANGELOG, dead `source.repo` | DOC-040..041 |
-| D6 Canonical-pipeline presence | publish.py, bump_version.py, release/notify workflows, cliff.toml, CHANGELOG.md, reports gitignored | DOC-050..056 |
+| D6 Canonical-pipeline presence | publish.py, bump_version.py, release/notify workflows, cliff.toml, CHANGELOG.md, reports_dev gitignored | DOC-050..056 |
 | D7 README/CONTRIBUTING coverage | Install/Usage/command-list/version-badge; optional CONTRIBUTING dev-setup/tests | DOC-070..075 |
 | D8 Cross-reference integrity | dangling skill reference, missing `agent:`/`subagent_type:`/`skills:` target | DOC-080..083 |
 | D9 cpv-the-skills-menu adoption (advisory) | method not adopted, multi-entry `skills:`, missing loader instruction, caller-named description | DOC-090..093 |

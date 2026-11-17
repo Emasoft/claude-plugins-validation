@@ -70,7 +70,7 @@ this work agent.
 
 ### Phase 1 — Audit
 
-Run the cache validator. Anchor the report path to `$MAIN_ROOT` — the **main checkout root** (first entry of `git worktree list`), NEVER the linked worktree's own root. The worktree's local `./reports/` is gitignored and disappears when the worktree is removed/merged, so writing reports there loses the audit trail. `${CLAUDE_PROJECT_DIR}` resolves to the WORKTREE root when Claude Code is launched inside a linked worktree, so it is only safe as a fallback for non-git contexts.
+Run the cache validator. Anchor the report path to `$MAIN_ROOT` — the **main checkout root** (first entry of `git worktree list`), NEVER the linked worktree's own root. The worktree's local `./reports/` disappears when the worktree is removed/merged, so writing reports there loses the audit trail. `${CLAUDE_PROJECT_DIR}` resolves to the WORKTREE root when Claude Code is launched inside a linked worktree, so it is only safe as a fallback for non-git contexts.
 
 Both the assignment AND the use must happen IN THE SAME Bash tool call — shell variables do NOT persist across separate Bash tool calls.
 

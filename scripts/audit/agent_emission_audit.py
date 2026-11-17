@@ -221,9 +221,9 @@ SPEC_TOPICS: tuple[SpecTopic, ...] = (
     # ── Repo hygiene ──────────────────────────────────────────────────────
     SpecTopic(
         topic="gitignore-defaults",
-        keywords=(".gitignore", "gitignore defaults", "/reports/", "/reports_dev/"),
+        keywords=(".gitignore", "gitignore defaults", "/reports_dev/"),
         severity="MINOR",
-        rationale=".gitignore must exclude /reports/ + /reports_dev/ per agent-reports-location rule",
+        rationale=".gitignore must exclude /reports_dev/ (reports/ is git-tracked since the 2026-11-15 convention, #275)",
     ),
     SpecTopic(
         topic="env-example-no-secrets",

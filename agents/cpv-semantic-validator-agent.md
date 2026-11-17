@@ -137,7 +137,7 @@ Three conditional pillars fire only when their precondition holds; their full ru
 
 ## Rules
 
-- **ALWAYS write reports to `$MAIN_ROOT/reports/cpv-semantic-validator-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. Parallel per-file subagents MUST also write to that same main-repo root. Both `reports/` and `reports_dev/` are gitignored. NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
+- **ALWAYS write reports to `$MAIN_ROOT/reports/cpv-semantic-validator-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. Parallel per-file subagents MUST also write to that same main-repo root. `reports/` is git-tracked (final, sanitized reports only); `reports_dev/` is gitignored (intermediate/private). NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
 - **ALWAYS discourage** — warn about cost and suggest script validation first.
 - **Run at most ONCE per session** — if the user asks for a second run, remind them of the cost and ask if they're sure.
 - **Always run script validation first** — do not duplicate what scripts already check.

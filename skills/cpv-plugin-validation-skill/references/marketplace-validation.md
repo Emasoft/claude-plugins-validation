@@ -656,7 +656,8 @@ my-marketplace/               # Main marketplace git repo
 
    **Read that listing before going on.** The next block stages everything and
    pushes it, so delete or `.gitignore` anything that is not the plugin *now* —
-   "not the plugin" means whatever a fresh clone would not need: `reports/`,
+   "not the plugin" means whatever a fresh clone would not need: `reports_dev/`, any
+   unsanitized `reports/` output,
    `.venv/`, `node_modules/`, scratch output, local config.
 
    Nothing ENFORCES this review — that is why it is a separate block. The split

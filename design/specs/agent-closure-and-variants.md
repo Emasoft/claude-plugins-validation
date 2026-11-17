@@ -459,4 +459,4 @@ static estimate must never be presented as a measured result.
   control passes vacuously.
 - `ruff check` + `mypy` clean. re2-safe regexes (no lookbehind/lookahead) if any
   pattern enters the skillaudit catalog.
-- Reports go under `reports/`; both `reports/` and `reports_dev/` are gitignored.
+- Final reports go under `reports/` (git-tracked, sanitized); intermediate/private ones under `reports_dev/` (gitignored).

@@ -140,7 +140,7 @@ When the user asks "fix/upgrade the pipeline" / "match the latest CPV pipeline",
 
 ## Rules
 
-- **ALWAYS write reports/fix logs to `$MAIN_ROOT/reports/cpv-plugin-fixer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** (`$MAIN_ROOT` = main-repo root via `git worktree list | head -n1 | awk '{print $1}'`, never a linked worktree; `reports/`+`reports_dev/` gitignored). The log holds the iteration history, per-batch diffs, and advisory-warning list; return only a one-line summary.
+- **ALWAYS write reports/fix logs to `$MAIN_ROOT/reports/cpv-plugin-fixer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** (`$MAIN_ROOT` = main-repo root via `git worktree list | head -n1 | awk '{print $1}'`, never a linked worktree; `reports/` git-tracked, `reports_dev/` gitignored). The log holds the iteration history, per-batch diffs, and advisory-warning list; return only a one-line summary.
 - **Evaluate every WARNING.** Publish-blockers (missing CI/`notify-marketplace.yml`/`publish.py`, version mismatch across manifests, unsatisfiable dependency, `platform:` vs script-extension mismatch) MUST be fixed; advisory warnings stay listed with a one-line justification (`iterative-fix-loop.md`).
 - **Own the full loop**; never read files speculatively (only those the CURRENT report points at), and never lower severity / add ignore rules / patch the validator to converge.
 - **Token budget:** locate patterns with MCP search tools (grepika, serena, tldr), verify docs via WebFetch, offload bounded analysis to LLM Externalizer (`mcp__plugin_llm-externalizer_llm-externalizer__*`).

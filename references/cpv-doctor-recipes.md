@@ -69,7 +69,7 @@ For each file: present + non-empty + (where applicable) shape-match against the 
 | `.github/workflows/notify-marketplace.yml` (Layout A) | `DOC-053 [MAJOR] missing notify-marketplace workflow — marketplace cache goes stale after publish` |
 | `cliff.toml` | `DOC-054 [MINOR] missing cliff.toml — CHANGELOG won't auto-generate` |
 | `CHANGELOG.md` | `DOC-055 [MINOR] missing CHANGELOG.md` |
-| `reports/` + `reports_dev/` not in `.gitignore` | `DOC-056 [MAJOR] reports/ and reports_dev/ not gitignored — reports may leak private data` |
+| `reports_dev/` not in `.gitignore` | `DOC-056 [MAJOR] reports_dev/ not gitignored — private report scratch may leak` |
 
 ### D7 — README / CONTRIBUTING coverage
 
