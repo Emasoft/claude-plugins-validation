@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.23.1] - 2026-11-18
+
+### Bug Fixes
+
+- **absolute-path:** Trim trailing sentence punctuation before classifying a system path ([#277](https://github.com/Emasoft/claude-plugins-validation/issues/277)) ([#278](https://github.com/Emasoft/claude-plugins-validation/issues/278))
+
+### Miscellaneous Tasks
+
+- Regen self-hash manifest
+
 ## [5.23.0] - 2026-10-22
 
 ### Bug Fixes
