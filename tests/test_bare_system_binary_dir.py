@@ -151,3 +151,95 @@ class TestDerivedListStaysInSync:
         assert len(_SYSTEM_BINARY_DIRS) == len(_SYSTEM_BINARY_PREFIXES)
         # No entry may retain a trailing slash — that would make the exact match dead.
         assert not any(d.endswith("/") for d in _SYSTEM_BINARY_DIRS)
+
+
+class TestTrailingSentencePunctuation:
+    """Issue #277: sentence punctuation after a path is not part of the path.
+
+    The path regex stops only at whitespace/quotes/brackets, so `/usr/bin,` used
+    to be captured with its comma; the exact-match `in` / `startswith` downgrade
+    then missed it and a bare system dir in prose fired MAJOR in a doc file (no
+    compliant remedy: `/usr/bin` has no `${CLAUDE_PLUGIN_ROOT}` form).
+    """
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "The test skips when lsof is not in /usr/bin, /bin, /usr/sbin or /sbin, ok.\n",
+            "The binary is found in /usr/bin.\n",
+            "For admin tools see /usr/sbin;\n",
+            "Its PATH contains /usr/bin and more.\n",
+            "Really, is it in /usr/bin?\n",
+            "It is in /usr/bin!\n",
+            "Look in /usr/bin:\n",
+        ],
+    )
+    def test_system_dir_followed_by_punctuation_in_doc_does_not_block(self, tmp_path: Path, line: str) -> None:
+        """A bare system bin dir followed by `, . ; : ! ?` in a .md file is not a blocking finding."""
+        report = _scan(tmp_path, "notes.md", line)
+        assert not _blocking(report), f"{line!r} blocked --strict: {_blocking(report)}"
+
+    def test_home_path_followed_by_comma_still_fires_at_full_severity(self, tmp_path: Path) -> None:
+        """POSITIVE CONTROL: a home path before a comma is still a MAJOR leak."""
+        report = _scan(tmp_path, "notes.md", "It was built in /Users/alice/code/thing, then moved.\n")
+        levels = [r.level.upper() for r in report.results if "Absolute path found" in r.message]
+        assert levels == ["MAJOR"], f"a home path followed by a comma must fire MAJOR, got {levels}"
+
+    def test_inner_dot_path_is_unchanged(self, tmp_path: Path) -> None:
+        """Only a TRAILING run is trimmed: `/usr/local/bin/python3.12` still clears, an inner dot is kept."""
+        assert not _blocking(_scan(tmp_path, "conf.yml", "interp: /usr/local/bin/python3.12\n"))
+        report = _scan(tmp_path, "conf2.yml", "p: /etc/app.v2/thing,\n")
+        messages = _blocking(report)
+        assert len(messages) == 1, f"/etc/app.v2/thing must still fire once, got {messages}"
+        assert "'/etc/app.v2/thing...'" in messages[0], f"trim must drop only the comma: {messages[0]}"
+
+
+class TestTrailingPunctuationWindowsHomeAndMarketplace:
+    """Issue #277: the trim is ONE shared helper (system paths only), so both scanners get it."""
+
+    def test_usr_bin_python_with_inner_dot_is_unchanged(self, tmp_path: Path) -> None:
+        """`/usr/bin/python3.12` (inner dot, no trailing punctuation) still clears, in code and in docs."""
+        assert not _blocking(_scan(tmp_path, "conf.yml", "interp: /usr/bin/python3.12\n"))
+        assert not _blocking(_scan(tmp_path, "notes.md", "Run /usr/bin/python3.12 first.\n"))
+
+    def test_windows_home_path_followed_by_comma_still_fires_at_full_severity(self, tmp_path: Path) -> None:
+        """POSITIVE CONTROL: a Windows home path before a comma is still a MAJOR leak."""
+        report = _scan(tmp_path, "notes.md", "It was built in C:\\Users\\alice\\code\\thing, then moved.\n")
+        levels = [r.level.upper() for r in report.results if "Absolute path found" in r.message]
+        assert levels == ["MAJOR"], f"a Windows home path followed by a comma must fire MAJOR, got {levels}"
+
+    def test_marketplace_scanner_reports_the_trimmed_path(self, tmp_path: Path) -> None:
+        """The marketplace scanner reuses the pattern: its finding names the path, not the comma."""
+        from validate_marketplace import validate_marketplace_private_info
+
+        (tmp_path / "README.md").write_text("Spool lives in /var/spool/thing, see docs.\n", encoding="utf-8")
+        results = validate_marketplace_private_info(tmp_path, [])
+        messages = [r.message for r in results if "Absolute path found" in r.message]
+        assert len(messages) == 1, f"expected one finding, got {messages}"
+        assert "'/var/spool/thing'" in messages[0], f"the comma leaked into the path: {messages[0]}"
+
+    def test_marketplace_scanner_home_path_with_comma_still_fires_major(self, tmp_path: Path) -> None:
+        """POSITIVE CONTROL for the marketplace scanner: a home path before a comma is still MAJOR."""
+        from validate_marketplace import validate_marketplace_private_info
+
+        (tmp_path / "README.md").write_text("Built in /Users/alice/code/thing, then moved.\n", encoding="utf-8")
+        results = validate_marketplace_private_info(tmp_path, [])
+        found = [(r.level.upper(), r.message) for r in results if "Absolute path found" in r.message]
+        assert [lvl for lvl, _ in found] == ["MAJOR"], f"expected one MAJOR, got {found}"
+        assert "thing,'" in found[0][1], f"a home path must be reported exactly as before (untrimmed): {found[0][1]}"
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "A Windows path looks like `C:\\Users\\...` or `C:/Users/...`.\n",
+            "The settings live at /Users/.../.llm-externalizer/settings.yaml, see docs.\n",
+        ],
+    )
+    def test_home_placeholder_ellipsis_is_not_trimmed_into_a_finding(self, tmp_path: Path, line: str) -> None:
+        """REGRESSION (CPV self-validation): the `...` username placeholder must not be trimmed away.
+
+        Trimming trailing dots on a HOME pattern turned the Windows Users path with an
+        ellipsis into a bare Users path, which loses the placeholder username and fired
+        MAJOR on CPV own docs. Only the system-path pattern is trimmed.
+        """
+        assert not _blocking(_scan(tmp_path, "notes.md", line)), f"{line!r} fired after the trim"
