@@ -1,10 +1,10 @@
 ---
 trdd-id: ZO54IL46
 title: Two false positives refuse a digit-first plugin name and a multiple string userConfig list default
-column: dev
+column: blocked
 status: tasked
 created: 2026-11-20T00:46:55+0100
-updated: 2026-11-20T01:54:05+0100
+updated: 2026-11-20T02:11:49+0100
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: bugfix
@@ -15,6 +15,10 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@claude-plugins-validation
 approval-datetime: 2026-11-20T00:46:55+0100
+blocked-by: [8OI25ZJ4]
+pre-block-column: dev
+blocker-probe: [git, ls-remote, --tags, https://github.com/Emasoft/claude-plugins-validation.git, refs/tags/v5.23.2]
+blocker-holds-if: not-match:refs/tags/v5.23.2
 ---
 
 # Two false positives refuse a digit-first plugin name and a multiple string userConfig list default

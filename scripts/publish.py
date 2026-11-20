@@ -486,6 +486,25 @@ def _candidate_anchor_env() -> dict[str, str]:
     return env
 
 
+def _release_push_env(plugin_root: Path) -> dict[str, str]:
+    """The environment for Gate 12's `git push`: skip variables removed, anchor at the release commit.
+
+    WHY (TRDD-8OI25ZJ4): the tracked pre-push hook runs validate_plugin.py, and its
+    integrity check needs either the GitHub manifest of the new tag, which cannot
+    exist before this push, or a release-candidate anchor. Gate 1's anchor names the
+    pre-bump HEAD, and Gates 6-10 then bump the version, refresh the manifest and
+    commit, so a reused Gate 1 anchor would refuse too. The anchor is recomputed
+    here, at the release commit, by the same `_compute_release_anchor` Gate 1 uses.
+    Without a manifest (not a self-hashing plugin) no anchor is set and the
+    verifier runs its normal GitHub check.
+    """
+    env = _candidate_anchor_env()
+    env.pop(_RELEASE_CANDIDATE_ENV, None)
+    if (plugin_root / _SELF_HASH_MANIFEST_NAMES[0]).is_file():
+        env[_RELEASE_CANDIDATE_ENV] = _compute_release_anchor(plugin_root)
+    return env
+
+
 def run_with_candidate_anchor(
     cmd: list[str],
     cwd: Path,
@@ -3455,23 +3474,40 @@ def stage_commit_tag_push(
     # capture_output MUST be True (TRDD-WC2GEDOC): the transient classifier
     # reads result.stderr, and with capture_output=False stderr is None, so
     # `if not stderr: return False` classified EVERY failure as permanent and
-    # the release push could never retry a network blip. The captured stderr
-    # is echoed below (success and failure) so nothing git says is swallowed.
+    # the release push could never retry a network blip. The captured stdout
+    # and stderr are echoed below (success and failure) so nothing git or the
+    # pre-push hook says is swallowed.
+    #
+    # env (TRDD-8OI25ZJ4): the tracked pre-push hook runs validate_plugin.py,
+    # whose integrity check refuses an unreleased version unless the run
+    # carries the release-candidate anchor. os.environ has none, so the hook
+    # refused the 5.23.2 push. _release_push_env anchors it to the release
+    # commit with the same computation Gate 1 uses.
+    push_env = _release_push_env(plugin_root)
     try:
         push_result = git_with_retry(
             # Both tags in ONE atomic push: a release can never ship with the plain tag
             # and not the dependency tag (which is exactly how this defect hid).
             ["git", "push", "--atomic", "origin", "HEAD", tag_name, *([dep_tag_name] if dep_tag_name else [])],
             cwd=plugin_root,
-            env=os.environ.copy(),
+            env=push_env,
             # issue #224: the pre-push gate runs inside this call's wall clock.
             timeout=_PUSH_TIMEOUT_SEC,
             max_attempts=_PUSH_MAX_ATTEMPTS,
         )
     except subprocess.CalledProcessError as exc:
+        # Print BOTH streams (TRDD-8OI25ZJ4): a hook may write its refusal to
+        # either one, and printing only stderr can hide it. Flush stdout first:
+        # in a redirected log stdout is block-buffered, so without the flush the
+        # refusal lands ABOVE the "$ git push" line and reads as unrelated.
+        sys.stdout.flush()
+        if exc.stdout:
+            print(exc.stdout, file=sys.stderr, end="")
         if exc.stderr:
             print(exc.stderr, file=sys.stderr, end="")
         raise
+    if push_result.stdout:
+        print(push_result.stdout, end="")
     if push_result.stderr:
         print(push_result.stderr, file=sys.stderr, end="")
     print(f"{GREEN}✓ Pushed branch and tag {tag_name} atomically{NC}")
