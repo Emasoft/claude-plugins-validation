@@ -841,6 +841,10 @@ class TestIsValidKebabCase:
         assert is_valid_kebab_case("plugin123") is True
         assert is_valid_kebab_case("my-cool-plugin") is True
         assert is_valid_kebab_case("a1-b2-c3") is True
+        # A leading digit is valid (TRDD-ZO54IL46): the marketplace manifest
+        # reference says names start "with a letter or digit".
+        assert is_valid_kebab_case("123start") is True
+        assert is_valid_kebab_case("3-pillars-tasks-management") is True
 
     def test_invalid_kebab_case_names(self):
         """Invalid kebab-case names should return False."""
@@ -849,7 +853,7 @@ class TestIsValidKebabCase:
         assert is_valid_kebab_case("-leading") is False  # leading hyphen
         assert is_valid_kebab_case("trailing-") is False  # trailing hyphen
         assert is_valid_kebab_case("") is False  # empty
-        assert is_valid_kebab_case("123start") is False  # starts with digit
+        assert is_valid_kebab_case("1-") is False  # trailing hyphen after a digit
 
 
 class TestColorizeAndFormat:
