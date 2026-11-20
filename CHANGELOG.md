@@ -2,6 +2,27 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.23.2] - 2026-11-20
+
+### Bug Fixes
+
+- **naming,userconfig:** Accept digit-first names and multiple string list defaults (TRDD-ZO54IL46)
+- **publish:** Gate 12 push carries the release-candidate anchor and prints both streams (TRDD-8OI25ZJ4)
+
+### Documentation
+
+- **card:** Record the Gate 12 block and correct the 10a7b025 message (TRDD-ZO54IL46)
+- **card:** Mark the Gate 12 cause as inferred and list the release options (TRDD-ZO54IL46)
+
+### Miscellaneous Tasks
+
+- Regen self-hash manifest (TRDD-ZO54IL46)
+- Regen self-hash manifest (TRDD-8OI25ZJ4)
+
+### Testing
+
+- **naming:** Is_valid_kebab_case accepts a digit-first name (TRDD-ZO54IL46)
+
 ## [5.23.1] - 2026-11-18
 
 ### Bug Fixes
