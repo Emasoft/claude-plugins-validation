@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-11-20T00:52:38+00:00",
+  "computed_at": "2026-11-20T00:54:16+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:5d6837343bb49d8e298474dbdbdb54d0d4681f7526929bc1de2e33195cdcd352",
@@ -247,7 +247,7 @@
     "design/tasks/TRDD-20261023_001815+0200-6YQWVBUK-verify-whether-windows-backslash-home-paths-are-skipped-by-t.md": "sha256:37eac4b1482d3e4d47eb954b885b1f6d96167f796868413aed8957f8760c86ee",
     "design/tasks/TRDD-20261023_001815+0200-AI6QSSXH-test-suite-validator-subprocesses-write-integrity-skip-lines.md": "sha256:6209c0f33605bdee91d9e31516c1859d649e0ca357fd68741dd8810f75954392",
     "design/tasks/TRDD-20261023_002218+0200-4LZB5RY7-issues-253-and-236-false-positives-still-open-after-the-5-23.md": "sha256:15c2f9d41be3883f5490620fade49d5bf1e0991f115da14a118d97967b2b4116",
-    "design/tasks/TRDD-20261120_004655+0100-ZO54IL46-two-false-positives-refuse-a-digit-first-plugin-name-and-a-m.md": "sha256:8b0c3aee5f41f1557100a7a400c635c5614cbb14a5b6dd08dbed73b1b6d11e2e",
+    "design/tasks/TRDD-20261120_004655+0100-ZO54IL46-two-false-positives-refuse-a-digit-first-plugin-name-and-a-m.md": "sha256:b05e279ee53d0cd781424e490a4f00e35772f3678e5408ac48f4f5a9e93971c3",
     "git-hooks/pre-commit": "sha256:47cf32b6b340cd973b6a15466d8b752993a68534429dca2e6df7159ba7240810",
     "git-hooks/pre-push": "sha256:90880138be62d7cd5ec6b451bc8803127ee4a3ce430d0f5d9caa5fa86d57aa12",
     "pyproject.toml": "sha256:e8fb5f6b49b92b9a24b20502c2c17ef70f794556a0c4da111ea9c089aa8c0cd2",

@@ -4,7 +4,7 @@ title: Two false positives refuse a digit-first plugin name and a multiple strin
 column: dev
 status: tasked
 created: 2026-11-20T00:46:55+0100
-updated: 2026-11-20T01:52:34+0100
+updated: 2026-11-20T01:54:05+0100
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: bugfix
@@ -58,3 +58,4 @@ Before the fix: the 38 selected new or inverted tests ran 30 failed, 8 passed (t
 
 2026-11-20: publish.py --patch (run 3, from a fresh clone fast-forwarded to 10a7b025) passed Gates 1-11 and failed at Gate 12. The atomic push did not land: origin master stays ff4ec418, no v5.23.2 tag on GitHub. The integrity audit entry at 01:44:07 (version 5.23.2, root the release clone) reads: no hash manifest for tag v5.23.2 could be fetched. The pre-push hook runs validate_plugin.py --strict; publish.py starts the Gate 12 push with env=os.environ.copy(), with no PLUGIN_INTEGRITY_RELEASE_CANDIDATE, so the hook validator looks for a GitHub tag manifest that cannot exist before the push. A manual simulation (anchor hand-computed at the clone HEAD, no push) passed the integrity check. Fix belongs in publish.py Gate 12 under its own card; not done here.
 Correction to the 10a7b025 commit message: it says test_scenario_21_large_marketplace_performance does not touch naming. validate_dependencies imports cpv_dependency_schema, which holds the changed name pattern. Timing (5 solo runs each, machine loaded): base 1.46-1.55 s (4 timed), fix 1.33-1.96 s; inconclusive.
+Correction to the entry above: the Gate 12 cause is INFERRED, not observed. publish.py captured the hook output and did not print it; the evidence is one integrity audit refusal at 01:44:07 for version 5.23.2 in the release clone, between Gate 11 and the push failure. Comparison with 5.23.1: its release clone (/private/tmp/cpv-release) logged release-candidate-verified at 02:17:24 and 02:28:11 and no integrity audit entry at all after 02:37:10, while its release commit is 02:39:54, so no CPV validator ran during its push. That suggests the 5.23.1 clone had no CPV pre-push hook installed (the user-global hooksPath holds only a git-lfs hook); this run's clone had the tracked git-hooks/pre-push installed by hand. Unverified hypothesis. Options for the owner: (a) publish.py Gate 12 passes a fresh release-candidate anchor to the push (own card plus test); (b) release from a clone without the CPV hook, as 5.23.1 apparently was; (c) the owner runs the release.
