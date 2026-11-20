@@ -4,7 +4,7 @@ title: Two false positives refuse a digit-first plugin name and a multiple strin
 column: dev
 status: tasked
 created: 2026-11-20T00:46:55+0100
-updated: 2026-11-20T01:01:03+0100
+updated: 2026-11-20T01:52:34+0100
 current-owner: main-agent@claude-plugins-validation
 created-by: main-agent@claude-plugins-validation
 task-type: bugfix
@@ -53,3 +53,8 @@ Scaffolders and helpers still require a letter-first name when CREATING somethin
 ## Evidence
 
 Before the fix: the 38 selected new or inverted tests ran 30 failed, 8 passed (the 8 are refusal siblings that also hold on the old code). After the fix: 38 passed; the 7 touched test files ran 634 passed. mypy scripts/ --ignore-missing-imports: no issues in 163 files. ruff check scripts/ tests/: clean.
+
+## Release status
+
+2026-11-20: publish.py --patch (run 3, from a fresh clone fast-forwarded to 10a7b025) passed Gates 1-11 and failed at Gate 12. The atomic push did not land: origin master stays ff4ec418, no v5.23.2 tag on GitHub. The integrity audit entry at 01:44:07 (version 5.23.2, root the release clone) reads: no hash manifest for tag v5.23.2 could be fetched. The pre-push hook runs validate_plugin.py --strict; publish.py starts the Gate 12 push with env=os.environ.copy(), with no PLUGIN_INTEGRITY_RELEASE_CANDIDATE, so the hook validator looks for a GitHub tag manifest that cannot exist before the push. A manual simulation (anchor hand-computed at the clone HEAD, no push) passed the integrity check. Fix belongs in publish.py Gate 12 under its own card; not done here.
+Correction to the 10a7b025 commit message: it says test_scenario_21_large_marketplace_performance does not touch naming. validate_dependencies imports cpv_dependency_schema, which holds the changed name pattern. Timing (5 solo runs each, machine loaded): base 1.46-1.55 s (4 timed), fix 1.33-1.96 s; inconclusive.
