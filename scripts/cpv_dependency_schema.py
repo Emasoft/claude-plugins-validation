@@ -41,8 +41,11 @@ from cpv_validation_common import Level
 
 # Kebab-case plugin / marketplace name — byte-identical to
 # cpv_validation_common.NAME_PATTERN and validate_plugin._PLUGIN_NAME_RE.
+# The first character may be a digit (TRDD-ZO54IL46): the marketplace manifest
+# reference says plugin and marketplace names start "with a letter or digit", so a
+# dependency on a plugin such as `3-pillars-tasks-management` is valid.
 # re2-safe: anchored, no lookaround.
-_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+_NAME_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 # Syntactic npm-semver-RANGE check for plugin dependencies. The spec
 # (plugin-dependencies.md:44-52) says ``version`` accepts "any expression

@@ -83,7 +83,7 @@ root cause, and step-by-step fix instructions.
      "name": "my-plugin-name"
    }
    ```
-2. The name must be lowercase, kebab-case, no spaces, matching `^[a-z][a-z0-9-]*$`.
+2. The name must be lowercase, kebab-case, no spaces, matching `^[a-z0-9]+(-[a-z0-9]+)*$` (a leading digit is valid).
 3. Re-run validation.
 
 ### MAJOR: plugin.json EXISTS but should NOT for marketplace-only (strict=false)
@@ -145,13 +145,13 @@ root cause, and step-by-step fix instructions.
 **Error message**: `Plugin name must be kebab-case: <name>`
 **Severity**: MAJOR
 **File**: `.claude-plugin/plugin.json`
-**Root cause**: Plugin names must match the regex `^[a-z][a-z0-9-]*$` — start with a letter, lowercase alphanumeric and hyphens only.
+**Root cause**: Plugin names must match the regex `^[a-z0-9]+(-[a-z0-9]+)*$` — start with a letter or digit, lowercase alphanumeric and single hyphens only.
 **Fix**:
 1. Rename to kebab-case format:
    ```json
    { "name": "my-plugin-v2" }
    ```
-   Not: `{ "name": "my_plugin" }` or `{ "name": "123-plugin" }` or `{ "name": "my.plugin" }`
+   Not: `{ "name": "my_plugin" }` or `{ "name": "My-Plugin" }` or `{ "name": "my.plugin" }`. A leading digit such as `{ "name": "3-pillars-tasks-management" }` is valid; do not rename it.
 
 ### MAJOR: Version must be semver format
 

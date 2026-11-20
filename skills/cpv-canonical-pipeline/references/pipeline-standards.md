@@ -93,7 +93,7 @@ validated against a strict regex/allowlist BEFORE use. Concrete rules:
 - (b) repo slugs match `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$` (canonical
   regex: `set_marketplace_pat.py:REPO_PATTERN`).
 - (c) version strings match `^\d+\.\d+\.\d+(?:[-+][\w.]+)?$`.
-- (d) plugin names match `^[a-z][a-z0-9-]*$` (kebab-case).
+- (d) plugin names match `^[a-z0-9]+(-[a-z0-9]+)*$` (kebab-case; a leading digit is valid).
 - (e) file paths resolved with `Path(...).resolve()` and checked against
   the plugin root via `relative_to()` to reject `..`-traversal.
 - (f) regex patterns from user input go through `re.escape()` before compile.

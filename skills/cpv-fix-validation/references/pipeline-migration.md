@@ -547,8 +547,9 @@ validation.
    # Semantic version
    SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+(?:[-+][\w.]+)?$")
 
-   # Plugin / marketplace name (kebab-case, must start with letter)
-   NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
+   # Plugin / marketplace name (kebab-case; a leading digit is valid, as in
+   # cpv_validation_common.NAME_PATTERN, TRDD-ZO54IL46)
+   NAME_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
    # Tag name (vX.Y.Z form only — no arbitrary tag names accepted)
    TAG_PATTERN = re.compile(r"^v\d+\.\d+\.\d+(?:[-+][\w.]+)?$")

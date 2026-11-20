@@ -525,18 +525,38 @@ class TestManifestFieldValidation:
         critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
         assert any("naming pattern" in m.lower() for m in critical_msgs)
 
-    def test_non_kebab_case_name_reports_critical(self, tmp_path):
-        """validate_manifest reports CRITICAL when plugin name starts with digit."""
+    def test_digit_first_plugin_name_accepted(self, tmp_path):
+        """validate_manifest accepts a digit-first kebab-case plugin name (TRDD-ZO54IL46).
+
+        `claude plugin validate` passes on plugin `3-pillars-tasks-management`, and
+        the marketplace manifest reference says a plugin name starts "with a letter
+        or digit", so no naming CRITICAL may fire.
+        """
+        plugin_dir = tmp_path / "digit-name"
+        plugin_dir.mkdir()
+        claude_dir = plugin_dir / ".claude-plugin"
+        claude_dir.mkdir()
+        manifest = {"name": "3-pillars-tasks-management", "version": "1.0.0"}
+        (claude_dir / "plugin.json").write_text(json.dumps(manifest))
+        report = ValidationReport()
+        validate_manifest(plugin_dir, report)
+        name_criticals = [
+            r.message for r in report.results if r.level == "CRITICAL" and "3-pillars-tasks-management" in r.message
+        ]
+        assert name_criticals == []
+
+    def test_digit_first_uppercase_plugin_name_reports_critical(self, tmp_path):
+        """validate_manifest still reports CRITICAL for a digit-first name that has uppercase."""
         plugin_dir = tmp_path / "bad-name"
         plugin_dir.mkdir()
         claude_dir = plugin_dir / ".claude-plugin"
         claude_dir.mkdir()
-        manifest = {"name": "123bad", "version": "1.0.0"}
+        manifest = {"name": "3Pillars", "version": "1.0.0"}
         (claude_dir / "plugin.json").write_text(json.dumps(manifest))
         report = ValidationReport()
         validate_manifest(plugin_dir, report)
         critical_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
-        assert any("must not start with a digit" in m for m in critical_msgs)
+        assert any("contains uppercase" in m for m in critical_msgs)
 
     def test_bad_semver_reports_major(self, tmp_path):
         """validate_manifest reports MAJOR when version is not semver (line 134)."""
@@ -3927,6 +3947,46 @@ class TestPhase14UserConfigSchema:
             for r in results
             if r.level == "MINOR"
         )
+
+    # TRDD-ZO54IL46: the plugin manifest reference, userConfig table, says
+    # `multiple` | No | For `string`, allows an array of strings. So a list of
+    # strings is the right default shape for a `multiple: true` string option.
+    def test_multiple_string_list_default_accepted(self) -> None:
+        """A list-of-strings default on a `multiple: true` string option draws no type MAJOR."""
+        results = self._validate_uc(
+            {
+                "allowedModes": {
+                    "type": "string",
+                    "multiple": True,
+                    "title": "T",
+                    "description": "D",
+                    "default": ["default", "acceptEdits", "plan"],
+                }
+            }
+        )
+        assert not any("does not match declared type" in r.message for r in results), [r.message for r in results]
+
+    def test_list_default_without_multiple_still_major(self) -> None:
+        """A list default on a string option without `multiple` still draws the type MAJOR."""
+        results = self._validate_uc({"k": {"type": "string", "title": "T", "description": "D", "default": ["a", "b"]}})
+        majors = [r.message for r in results if r.level == "MAJOR"]
+        assert any("does not match declared type (string)" in m for m in majors), majors
+
+    def test_list_default_with_multiple_false_still_major(self) -> None:
+        """A list default on a string option with `multiple: false` still draws the type MAJOR."""
+        results = self._validate_uc(
+            {"k": {"type": "string", "multiple": False, "title": "T", "description": "D", "default": ["a"]}}
+        )
+        majors = [r.message for r in results if r.level == "MAJOR"]
+        assert any("does not match declared type (string)" in m for m in majors), majors
+
+    def test_multiple_list_default_with_non_string_item_still_major(self) -> None:
+        """A `multiple: true` default list holding a non-string item still draws the type MAJOR."""
+        results = self._validate_uc(
+            {"k": {"type": "string", "multiple": True, "title": "T", "description": "D", "default": ["a", 3]}}
+        )
+        majors = [r.message for r in results if r.level == "MAJOR"]
+        assert any("does not match declared type (string)" in m for m in majors), majors
 
     def test_invalid_identifier_key_major(self) -> None:
         results = self._validate_uc({"1invalid_start_digit": {"type": "string", "title": "T", "description": "D"}})

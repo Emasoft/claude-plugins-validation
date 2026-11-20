@@ -1078,8 +1078,9 @@ def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResul
             )
         )
 
-    # Naming pattern check (kebab-case, must start and end with letter).
-    # NAME_PATTERN = ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ already requires every hyphen
+    # Naming pattern check (kebab-case, must start and end with a letter or digit;
+    # a leading digit is valid per the marketplace manifest reference, TRDD-ZO54IL46).
+    # NAME_PATTERN = ^[a-z0-9]+(-[a-z0-9]+)*$ already requires every hyphen
     # to be followed by [a-z0-9]+, so a trailing-hyphen name can never match and
     # is reported here. (A former `elif name[-1] == "-"` branch was unreachable
     # dead code — the pattern always fails first — so it was removed; audit LOW.)
@@ -1088,7 +1089,7 @@ def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResul
             ValidationResult(
                 level="CRITICAL",
                 category="manifest",
-                message=f"Marketplace name '{name}' does not match naming pattern (lowercase letters, digits, hyphens; must start with letter, no trailing hyphen)",
+                message=f"Marketplace name '{name}' does not match naming pattern (lowercase letters, digits, hyphens; must start with a letter or digit, no trailing hyphen)",
                 file=json_path,
                 suggestion="Use format: my-marketplace-name",
             )
@@ -1594,7 +1595,7 @@ def validate_plugin_entry(
                 ValidationResult(
                     level="CRITICAL",
                     category="plugin",
-                    message=f"Plugin name '{name}' does not match naming pattern (lowercase, hyphens, must start with letter, no trailing hyphen)",
+                    message=f"Plugin name '{name}' does not match naming pattern (lowercase, hyphens, must start with a letter or digit, no trailing hyphen)",
                     file=json_path,
                     suggestion="Use format: my-plugin-name",
                 )

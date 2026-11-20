@@ -216,12 +216,12 @@ For the pipeline validator, the `version` field is also required:
 | **Category** | `manifest` |
 | **Suggestion** | Use format: my-marketplace-name |
 
-**Root Cause:** The name contains uppercase letters, underscores, spaces, or starts with a digit. Must match: `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`
+**Root Cause:** The name contains uppercase letters, underscores, or spaces. Must match: `^[a-z0-9]+(-[a-z0-9]+)*$`. A leading digit is valid: the marketplace manifest reference allows a name "starting with a letter or digit".
 
 **Fix:** Convert to kebab-case. Examples:
 - `MyMarketplace` -> `my-marketplace`
 - `my_marketplace` -> `my-marketplace`
-- `123-market` -> `market-123`
+- `123_market` -> `123-market` (a leading digit is valid; keep it)
 
 ---
 
@@ -478,7 +478,7 @@ These errors come from `validate_plugin_entry()`, `validate_local_path()`, `vali
 | **Category** | `plugin` |
 | **Suggestion** | Use format: my-plugin-name |
 
-**Root Cause:** Plugin name does not match `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`.
+**Root Cause:** Plugin name does not match `^[a-z0-9]+(-[a-z0-9]+)*$`. A leading digit is valid (the marketplace manifest reference allows a name "starting with a letter or digit"), so never rename `3-pillars-tasks-management`-style names.
 
 **Fix:** Convert to lowercase kebab-case (e.g., `my-plugin-name`).
 

@@ -391,6 +391,23 @@ class TestValidateMarketplaceNameEdgeCases:
         results = validate_marketplace_name("claude-code-marketplace", "test.json")
         assert any(r.level == "CRITICAL" and "reserved" in r.message for r in results)
 
+    def test_digit_first_marketplace_name_accepted(self):
+        """A digit-first marketplace name draws no naming CRITICAL (TRDD-ZO54IL46).
+
+        Marketplace manifest reference, `name` row: "starting with a letter or digit".
+        """
+        from validate_marketplace import validate_marketplace_name
+
+        results = validate_marketplace_name("3p-market", "test.json")
+        assert not any("naming pattern" in r.message for r in results), [r.message for r in results]
+
+    def test_digit_first_uppercase_marketplace_name_is_critical(self):
+        """A digit-first marketplace name with uppercase still draws the naming CRITICAL."""
+        from validate_marketplace import validate_marketplace_name
+
+        results = validate_marketplace_name("3P-Market", "test.json")
+        assert any(r.level == "CRITICAL" and "naming pattern" in r.message for r in results)
+
 
 class TestValidatePluginEntryFields:
     """Tests for validate_plugin_entry covering version, source, path, repository, tags, deps."""
@@ -402,6 +419,18 @@ class TestValidatePluginEntryFields:
         plugin = {"name": "BadName!", "source": "github"}
         results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
         assert any(r.level == "CRITICAL" and "naming pattern" in r.message.lower() for r in results)
+
+    def test_digit_first_plugin_entry_name_accepted(self, tmp_path):
+        """A digit-first plugin entry name draws no naming CRITICAL (TRDD-ZO54IL46).
+
+        Marketplace manifest reference, plugin entry `name` row: "starting with a
+        letter or digit".
+        """
+        from validate_marketplace import validate_plugin_entry
+
+        plugin = {"name": "3-pillars-tasks-management", "source": "github"}
+        results = validate_plugin_entry(plugin, 0, tmp_path, "mp.json")
+        assert not any("naming pattern" in r.message for r in results), [r.message for r in results]
 
     def test_non_string_version_produces_major(self, tmp_path):
         """Non-string version must produce MAJOR (lines 387-397)."""

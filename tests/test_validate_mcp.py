@@ -488,13 +488,26 @@ class TestValidateMcpConfigAdvanced:
         infos = [r for r in report.results if r.level == "INFO"]
         assert any("No MCP servers defined" in i.message for i in infos)
 
-    def test_invalid_server_name_format_produces_critical(self, tmp_path):
-        """Server name starting with digit should produce CRITICAL."""
+    def test_digit_first_server_name_accepted(self, tmp_path):
+        """A digit-first server name is accepted (TRDD-ZO54IL46).
+
+        The MCP reference allows letters, numbers, hyphens and underscores in a
+        server name and sets no first-character rule, so "123bad" must not draw
+        the old "must not start with a digit" CRITICAL.
+        """
         mcp_file = tmp_path / ".mcp.json"
         mcp_file.write_text(json.dumps({"mcpServers": {"123bad": {"type": "stdio", "command": "node"}}}))
         report = validate_mcp_config(mcp_file)
+        name_criticals = [r for r in report.results if r.level == "CRITICAL" and "123bad" in r.message]
+        assert name_criticals == [], [r.message for r in name_criticals]
+
+    def test_uppercase_server_name_still_critical(self, tmp_path):
+        """A digit-first server name with uppercase still draws the naming CRITICAL."""
+        mcp_file = tmp_path / ".mcp.json"
+        mcp_file.write_text(json.dumps({"mcpServers": {"1Bad": {"type": "stdio", "command": "node"}}}))
+        report = validate_mcp_config(mcp_file)
         criticals = [r for r in report.results if r.level == "CRITICAL"]
-        assert any("must not start with a digit" in m.message for m in criticals)
+        assert any("contains uppercase" in m.message for m in criticals)
 
     def test_server_config_not_dict_produces_critical(self, tmp_path):
         """Server config that is not a dict should produce CRITICAL and skip validation."""

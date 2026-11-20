@@ -92,6 +92,20 @@ class TestValidateDependencyElement:
         findings = validate_dependency_element(0, {"name": "lib", "marketplace": "Bad Mkpl"})
         assert any(lvl == "MAJOR" and ".marketplace" in msg for lvl, msg in findings)
 
+    def test_digit_first_names_accepted(self):
+        """A digit-first dependency name and marketplace are accepted (TRDD-ZO54IL46).
+
+        Marketplace manifest reference: plugin and marketplace names start "with a
+        letter or digit", so a dependency may name `3-pillars-tasks-management`.
+        """
+        dep = {"name": "3-pillars-tasks-management", "marketplace": "3p-market", "version": "^1.0.0"}
+        assert validate_dependency_element(0, dep) == []
+
+    def test_digit_first_uppercase_name_still_major(self):
+        """A digit-first dependency name with uppercase is still refused."""
+        findings = validate_dependency_element(0, {"name": "3Pillars", "version": "^1.0.0"})
+        assert any(lvl == "MAJOR" for lvl, _msg in findings), findings
+
     def test_object_unknown_subkey_minor(self):
         """An unknown sub-key → MINOR referencing the index + key name."""
         findings = validate_dependency_element(0, {"name": "lib", "version": "1.0.0", "wat": "x"})

@@ -2,18 +2,21 @@
 """Tests for validate_component_name from cpv_validation_common.py.
 
 Coverage: 100% (all code paths)
-- Valid names: simple, single-char, two-char, long kebab, at-max-length
-- Invalid names: ends-with-digit, starts-with-digit, underscore, uppercase,
-  consecutive hyphens, empty, too-long
+- Valid names: simple, single-char, two-char, long kebab, ends-with-digit,
+  starts-with-digit (every component type, TRDD-ZO54IL46), at-max-length
+- Invalid names: underscore, uppercase, consecutive hyphens, empty, too-long,
+  and a digit-first name that still breaks one of those rules
 - Directory name matching: mismatch, match, None (skipped)
 
-15 tests, all executing real validate_component_name logic with no mocking.
+All tests execute real validate_component_name logic with no mocking.
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
+
+import pytest
 
 # Add scripts directory to path for imports
 scripts_dir = Path(__file__).parent.parent / "scripts"
@@ -65,13 +68,43 @@ class TestValidateComponentName:
         criticals = [r for r in report.results if r.level == "CRITICAL"]
         assert len(criticals) == 0
 
-    def test_invalid_starts_with_digit(self):
-        """Name starting with digit '2plugin' produces CRITICAL with 'must not start with a digit'."""
+    # TRDD-ZO54IL46: a leading digit is ACCEPTED. Claude Code itself accepts it
+    # (`claude plugin validate` passes on plugin `3-pillars-tasks-management` with
+    # command `3p-uninstall-rules`), and the marketplace manifest reference says a
+    # plugin entry name starts "with a letter or digit". No Claude Code reference
+    # chapter forbids a leading digit for any type this function validates.
+    @pytest.mark.parametrize("component_type", ["plugin", "skill", "agent", "command", "mcp-server"])
+    @pytest.mark.parametrize("name", ["3-pillars-tasks-management", "3p-uninstall-rules", "2plugin", "7"])
+    def test_valid_starts_with_digit(self, component_type, name):
+        """A digit-first kebab-case name produces no CRITICAL or MAJOR for any component type."""
         report = ValidationReport()
-        validate_component_name("2plugin", "plugin", report)
+        validate_component_name(name, component_type, report)
+        levels = {r.level for r in report.results}
+        assert "CRITICAL" not in levels, [r.message for r in report.results]
+        assert "MAJOR" not in levels, [r.message for r in report.results]
+
+    def test_digit_first_with_uppercase_still_critical(self):
+        """A digit-first name with an uppercase letter still produces the uppercase CRITICAL."""
+        report = ValidationReport()
+        validate_component_name("3Pillars", "plugin", report)
         criticals = [r for r in report.results if r.level == "CRITICAL"]
         assert len(criticals) == 1
-        assert "must not start with a digit" in criticals[0].message
+        assert "uppercase" in criticals[0].message.lower()
+
+    def test_digit_first_with_underscore_still_critical(self):
+        """A digit-first name with an underscore still produces the underscore CRITICAL."""
+        report = ValidationReport()
+        validate_component_name("3p_rules", "command", report)
+        criticals = [r for r in report.results if r.level == "CRITICAL"]
+        assert len(criticals) == 1
+        assert "underscore" in criticals[0].message.lower()
+
+    @pytest.mark.parametrize("name", ["-3p", "3p-", "3p--rules"])
+    def test_digit_first_hyphen_shape_still_critical(self, name):
+        """A leading hyphen, trailing hyphen, or doubled hyphen is still refused after a digit start."""
+        report = ValidationReport()
+        validate_component_name(name, "agent", report)
+        assert any(r.level == "CRITICAL" for r in report.results), name
 
     def test_invalid_underscore(self):
         """Name with underscore 'my_plugin' produces CRITICAL mentioning 'underscore'."""

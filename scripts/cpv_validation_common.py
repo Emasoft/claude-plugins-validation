@@ -6125,8 +6125,15 @@ def get_skip_dirs_with_gitignore(root_path: Path, additional_skip: set[str] | No
 # Validation Name Patterns
 # =============================================================================
 
-# Name validation pattern (kebab-case)
-NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+# Name validation pattern (kebab-case). The FIRST character may be a lowercase
+# letter OR a digit (TRDD-ZO54IL46). Claude Code accepts a leading digit: the
+# marketplace manifest reference says plugin and marketplace names start "with a
+# letter or digit", `claude plugin validate` passes on `3-pillars-tasks-management`,
+# and no reference chapter (plugin manifest, skills, subagents, MCP servers) sets a
+# letter-first rule for any component this pattern guards. Requiring a letter
+# refused valid plugins with a CRITICAL. Every other part is unchanged: lowercase
+# only, single hyphens, and a letter or digit at both ends.
+NAME_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 # Maximum recommended values for names and descriptions
 MAX_NAME_LENGTH = 64  # Official Claude Code spec: max 64 characters for skill/component names
@@ -6172,7 +6179,7 @@ def validate_component_name(
 
     Enforces consistent naming across all component types (plugin, skill, agent,
     command, mcp-server, marketplace-plugin, reference-file):
-    - Must start with a lowercase letter
+    - Must start with a lowercase letter or a digit (TRDD-ZO54IL46)
     - May end with a letter or digit
     - Only lowercase letters, digits, and single hyphens allowed
     - No consecutive hyphens, no underscores, no uppercase
@@ -6191,12 +6198,13 @@ def validate_component_name(
     # Length check
     if len(name) > MAX_NAME_LENGTH:
         report.add("MAJOR", f"{component_type} name '{name}' exceeds {MAX_NAME_LENGTH} chars ({len(name)})")
-    # Pattern check: NAME_PATTERN validates structure (start with letter, kebab-case, no --)
+    # Pattern check: NAME_PATTERN validates structure (start with a letter or digit,
+    # kebab-case, no --). There is deliberately NO "must not start with a digit"
+    # branch: Claude Code accepts a digit-first name for every type validated here
+    # (TRDD-ZO54IL46, see NAME_PATTERN), and that branch refused real plugins.
     if not NAME_PATTERN.match(name):
         # Provide specific diagnostic message
-        if name[0].isdigit():
-            report.add("CRITICAL", f"{component_type} name '{name}' must not start with a digit")
-        elif "--" in name:
+        if "--" in name:
             report.add("CRITICAL", f"{component_type} name '{name}' contains consecutive hyphens")
         elif "_" in name:
             report.add("CRITICAL", f"{component_type} name '{name}' contains underscore (use hyphen)")
@@ -6205,7 +6213,7 @@ def validate_component_name(
         else:
             report.add(
                 "CRITICAL",
-                f"{component_type} name '{name}' does not match naming pattern (lowercase letters, digits, hyphens; must start with letter)",
+                f"{component_type} name '{name}' does not match naming pattern (lowercase letters, digits, hyphens; must start and end with a letter or digit)",
             )
     # Directory name match (for skills: frontmatter name must equal directory name)
     if directory_name is not None and name != directory_name:

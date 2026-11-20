@@ -114,7 +114,9 @@ _gi: GitignoreFilter | None = None
 
 # Plugin-name pattern (kebab-case) — mirrors cpv_validation_common.NAME_PATTERN but
 # expressed here as a local regex so dependency + channel validators don't reach out.
-_PLUGIN_NAME_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+# A leading digit is valid (TRDD-ZO54IL46), as in NAME_PATTERN: the marketplace
+# manifest reference says names start "with a letter or digit".
+_PLUGIN_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 # Identifier pattern for userConfig keys — Python-style identifier.
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
@@ -582,6 +584,19 @@ def validate_user_config_structure(manifest: dict[str, Any], report: ValidationR
             is_match = isinstance(default_value, expected_py_types)
             if declared == "number" and isinstance(default_value, bool):
                 is_match = False
+            # A `multiple: true` string option takes an ARRAY of strings, so its
+            # default is a list of str (TRDD-ZO54IL46). Plugin manifest reference,
+            # userConfig table: "`multiple` | No | For `string`, allows an array of
+            # strings". Without this, a correct list default drew a MAJOR. The
+            # finding is kept when `multiple` is absent or false, and when any list
+            # item is not a string.
+            if (
+                declared == "string"
+                and entry.get("multiple") is True
+                and isinstance(default_value, list)
+                and all(isinstance(item, str) for item in default_value)
+            ):
+                is_match = True
             if not is_match:
                 report.major(
                     f"'userConfig.{key}.default' type ({type(default_value).__name__}) "
