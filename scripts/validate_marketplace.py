@@ -804,16 +804,16 @@ CLAUDEAI_PREFIX_PATTERN = re.compile(r"^claudeai-")
 
 # v2.1.280 spelling-variant rule (plugins-marketplace-reference.md): a name
 # identical to a reserved name after normalization — lowercase, any run of
-# `.`/`-`/`_`/`@` separators collapsed to one `-`, then `-`/`.` stripped at
-# BOTH ends (the doc names trailing symbols; stripping a leading one too only
-# widens the match toward refusing more look-alikes) — is refused exactly like the reserved name itself (e.g.
+# `.`/`-`/`_`/`@` separators collapsed to one `-`, then trailing `-`/`.` stripped
+# (trailing only, as the doc states: a leading-symbol strip would draw a
+# CRITICAL on names CC was never shown to refuse) — is refused exactly like the reserved name itself (e.g.
 # `claude.code.plugins` == `claude-code-plugins`). Deliberately a check-time
 # helper, not a rename of the set: the canonical reserved spellings stay the
 # SSOT.
 def _normalize_marketplace_name(name: str) -> str:
     lowered = name.lower()
     normalized = re.sub(r"[.\-_@]+", "-", lowered)
-    return normalized.strip("-.")
+    return normalized.rstrip("-.")
 
 # Names Claude CODE accepts but Claude DESKTOP's managed marketplace sync
 # rejects, taking the WHOLE marketplace with it (plugin-marketplaces.md:1153,
