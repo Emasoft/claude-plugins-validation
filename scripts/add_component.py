@@ -189,9 +189,10 @@ def _register_in_the_skills_menu(
 
 # Component names become path segments (skills/<name>/, agents/<name>.md,
 # commands/<name>.md), so they must be a bare kebab-case slug — no path
-# separators, no "..". Mirrors cpv_pack_components._validate_name so the two
-# authoring tools agree.
-_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+# separators, no "..". Mirrors cpv_validation_common.NAME_PATTERN (a letter OR a
+# digit may come first, TRDD-ZO54IL46: Claude Code accepts digit-first names) so
+# the authoring tools never create a name the validator rejects.
+_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 
 def _validate_name(name: str, kind: str) -> None:

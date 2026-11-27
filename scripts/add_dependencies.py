@@ -57,7 +57,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-_SPEC_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+# Mirrors cpv_dependency_schema._NAME_PATTERN; a digit may come first (TRDD-ZO54IL46).
+_SPEC_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 
 def _parse_add_spec(raw: str) -> dict[str, str] | str:

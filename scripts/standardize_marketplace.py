@@ -32,8 +32,9 @@ CYAN = "\033[0;36m"
 BOLD = "\033[1m"
 NC = "\033[0m"
 
-# Kebab-case: lowercase letters/digits/hyphens, starts with letter, ends with letter/digit
-KEBAB_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$")
+# Kebab-case: lowercase letters, digits, single hyphens; a letter or digit may come
+# first. Mirrors cpv_validation_common.NAME_PATTERN (TRDD-ZO54IL46).
+KEBAB_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 # Names a NEW marketplace should not be scaffolded with. Two sources, and the
 # split is the point:

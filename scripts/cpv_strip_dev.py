@@ -83,7 +83,9 @@ from cpv_network_resilience import gh_with_retry, git_with_retry  # noqa: E402
 
 # Whitelist regex for `cpv.strip.extract[].src` paths.
 # Lowercase + alnum + hyphen + underscore + slash, no `..`, no leading `/`.
-_SAFE_SRC_RE = re.compile(r"^[a-z][a-z0-9_-]*(/[a-z][a-z0-9_-]*)*/?$")
+# A segment may start with a digit (TRDD-ZO54IL46); the safety property is the
+# absence of `.`, `/`-prefix and `..`, which a leading digit does not weaken.
+_SAFE_SRC_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*(/[a-z0-9][a-z0-9_-]*)*/?$")
 
 # A pushed/recorded commit id — 40 lowercase hex chars. The clone-by-URL
 # model PINS restore to this exact SHA, so a short or malformed value is

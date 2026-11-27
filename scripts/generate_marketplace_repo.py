@@ -148,8 +148,9 @@ def _cpv_verdict_shell(
     return "\n".join(indent + ln for ln in lines)
 
 
-# Kebab-case pattern: lowercase letters, digits, hyphens only
-KEBAB_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$")
+# Kebab-case pattern: lowercase letters, digits, single hyphens; a digit may come
+# first. Mirrors cpv_validation_common.NAME_PATTERN (TRDD-ZO54IL46).
+KEBAB_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 # ANSI colors for terminal output
 GREEN = "\033[0;32m"

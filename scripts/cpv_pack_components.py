@@ -368,7 +368,8 @@ def create_marketplace(target: Path, plugin_params: gpr.PluginParams) -> None:
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 
-_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+# Mirrors cpv_validation_common.NAME_PATTERN; a digit may come first (TRDD-ZO54IL46).
+_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 
 def _validate_name(name: str) -> None:

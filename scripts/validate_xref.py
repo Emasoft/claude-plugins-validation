@@ -58,8 +58,10 @@ SUBAGENT_TYPE_PATTERN = re.compile(
 )
 
 # Pattern to find agent references in markdown (e.g., "spawn agent-name agent")
+# The capture may start with a digit (TRDD-ZO54IL46: `3d-renderer`, `3-pillars-x`)
+# but must contain a letter, so prose like "use 2 agents" never yields "2".
 AGENT_SPAWN_PATTERN = re.compile(
-    r'(?:spawn|invoke|call|use)\s+(?:the\s+)?["\']?([a-z][a-z0-9-]*)["\']?\s+agent',
+    r'(?:spawn|invoke|call|use)\s+(?:the\s+)?["\']?((?:[0-9]+-)*[0-9]*[a-z][a-z0-9-]*)["\']?\s+agent',
     re.IGNORECASE,
 )
 
@@ -81,7 +83,7 @@ _LOOKS_LIKE_AGENT_IDENTIFIER = re.compile(r"[-0-9]")
 # ``amvcp-wf-`` that no plugin can ship. The new form requires the
 # capture (when longer than 1 char) to end in ``[a-z0-9]`` so a
 # trailing hyphen cannot leak through:
-#   [a-z]                          — first char must be a letter
+#   [a-z0-9]                       — first char: a letter or digit (TRDD-ZO54IL46)
 #   (?:[a-z0-9-]*[a-z0-9])?        — optional tail ending in non-hyphen
 # Single-letter names like ``a`` still match (per the optional group).
 # Issue #44: the `(?<![A-Za-z0-9~]/)` lookbehind rejects matches where
@@ -98,7 +100,7 @@ _LOOKS_LIKE_AGENT_IDENTIFIER = re.compile(r"[-0-9]")
 # context to fire, so it never strips an in-bounds match when the file
 # starts on ``skills/...``.
 SKILL_REF_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9~]/)(?:skill|skills)/([a-z](?:[a-z0-9-]*[a-z0-9])?)",
+    r"(?<![A-Za-z0-9~]/)(?:skill|skills)/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)",
     re.IGNORECASE,
 )
 
