@@ -57,23 +57,34 @@ def test_missing_file_major(tmp_path):
 
 
 def test_traversal_major(tmp_path):
-    # Mandated code checks ".." only in the "./"-prefixed elif branch, so the
-    # traversal input must carry the "./" prefix to reach the MAJOR traversal
-    # finding (a bare "../evil.js" now draws only the "./"-prefix WARNING).
-    r = _run(tmp_path, ["./../evil.js"])
-    assert any("traversal" in x.message for x in r.results if x.level == "MAJOR")
+    # Native parity (A4, Claude Code 2.1.332, p59): a ".." path that leaves the
+    # plugin root is refused ("The module path leaves the plugin directory");
+    # one that stays inside (p02 "./sub/../register.js") is valid. hooks/ sits
+    # one level under tmp_path, so "./../../evil.js" escapes the plugin root.
+    r = _run(tmp_path, ["./../../evil.js"])
+    assert any("leaves the plugin directory" in x.message for x in r.results if x.level == "MAJOR")
 
 
 def test_no_prefix_warning_not_major(tmp_path):
+    # Native parity (A2, Claude Code 2.1.332, p01/p53): a bare name resolves under
+    # hooks/ like the "./" form. Existing valid module: clean, no WARNING;
+    # missing bare module: MAJOR.
     _run(tmp_path, ["mod.js"])  # creates hooks/ first (fixture-order fix)
-    (tmp_path / "hooks" / "mod.js").write_text("x\n")
+    (tmp_path / "hooks" / "mod.js").write_text("export function register(on) {}\n")
     r = validate_hooks_data(
         {"modules": ["mod.js"]},
         tmp_path,
         HookValidationReport(hook_path=str(tmp_path / "hooks" / "hooks.json")),
     )
-    lvl = [x.level for x in r.results if "not start with" in x.message]
-    assert lvl == ["WARNING"]
+    assert "WARNING" not in _levels(r), [x.message for x in r.results]
+    assert "MAJOR" not in _levels(r), [x.message for x in r.results]
+    assert "CRITICAL" not in _levels(r), [x.message for x in r.results]
+    r2 = validate_hooks_data(
+        {"modules": ["gone.js"]},
+        tmp_path,
+        HookValidationReport(hook_path=str(tmp_path / "hooks" / "hooks.json")),
+    )
+    assert any("does not exist" in x.message for x in r2.results if x.level == "MAJOR")
 
 
 def test_bad_extension_major(tmp_path):

@@ -933,19 +933,23 @@ def validate_modules_entry(data: dict[str, Any], plugin_root: Path | None, repor
         if not entry:
             report.critical(f"'modules[{i}]' must be a non-empty path string")
             continue
-        if not entry.startswith("./"):
-            # mods-reference.md shows the "./" form only AS AN EXAMPLE ("as in
-            # './register.js'"); whether CC rejects a bare name is unprobed —
-            # WARNING, same evidence standard as the extension check.
-            report.warning(
-                f"'modules[{i}]' path does not start with './' (relative to hooks.json): {entry} — "
-                "the doc shows the './' form only as an example; CC behavior on a bare name unprobed"
-            )
-        elif ".." in Path(entry).parts:
+        # Native parity (Claude Code 2.1.332 `claude plugin validate`, gap report
+        # reports_dev/mods-gap A2/A3/A4): every string entry is resolved against
+        # the hooks.json directory, with or without a "./" prefix, and gets the
+        # same extension, existence, containment and register-export checks.
+        # Probes: bare "register.js" p01, "lib/register.js" p03, "../lib/register.js"
+        # p58 load; bare missing p53 ("no such file"), bare without register p54
+        # ("no export named register"), "../../outside.js" p59 ("The module path
+        # leaves the plugin directory") are errors. The old "bare name unprobed"
+        # WARNING skipped all of these checks.
+        if Path(entry).is_absolute():
+            # A3 (p32): native joins "/tmp/register.js" under hooks/ and reports
+            # "hooks/tmp/register.js: no such file", so an absolute path never loads.
             report.major(
-                f"'modules[{i}]' contains path-traversal segment '..': {entry} — "
-                "paths escaping the plugin root do not resolve post-install"
+                f"'modules[{i}]' is an absolute path: {entry} — modules paths are relative to hooks.json "
+                "and an absolute path does not load (Claude Code resolves it under the hooks directory)"
             )
+            continue
         else:
             suffix = Path(entry).suffix
             if suffix not in MOD_MODULE_EXTENSIONS:
@@ -960,11 +964,17 @@ def validate_modules_entry(data: dict[str, Any], plugin_root: Path | None, repor
                     "CC errors on non-listed extensions (oracle-probed, TRDD-TLCJ9LPE)"
                 )
             if hooks_json_dir is not None and plugin_root is not None:
+                # A4 (p02): a ".." segment is NOT an error by itself —
+                # "./sub/../register.js" is valid natively. Only the RESOLVED path
+                # is tested against the plugin root.
                 resolved = (hooks_json_dir / entry).resolve()
                 try:
                     resolved.relative_to(plugin_root.resolve())
                 except ValueError:
-                    report.major(f"'modules[{i}]' resolves outside the plugin root: {entry}")
+                    report.major(
+                        f"'modules[{i}]' module path leaves the plugin directory "
+                        f"(resolves outside the plugin root): {entry}"
+                    )
                 else:
                     if resolved.is_file() and suffix in MOD_MODULE_EXTENSIONS:
                         # TRDD-775XK7HE: only an in-root, existing module with a
@@ -1065,6 +1075,19 @@ def validate_mod_register_export(module_path: Path, entry: str, suffix: str, rep
 
 def validate_event_name(event_name: str, report: ValidationReport) -> bool:
     """Validate a hook event name."""
+    if event_name == "modules":
+        # A6 (Claude Code 2.1.332, probe p04): `modules` is read only as a top-level
+        # key of a hooks FILE (hooks/hooks.json or the file named by manifest
+        # `hooks`). Inline manifest hooks are the event map, so a `modules` key
+        # there is an unknown event: native says "hooks.modules: unknown hook
+        # event; entry ignored at runtime". Severity stays CRITICAL; the message
+        # names the cause instead of the generic unknown-event text.
+        report.critical(
+            "'modules' is not a hook event: it is read only as a top-level key of a hooks FILE "
+            "(hooks/hooks.json or the file named by manifest `hooks`); inline manifest hooks are the "
+            "event map, so this entry is ignored and the mod will not load"
+        )
+        return False
     if event_name not in VALID_HOOK_EVENTS:
         # Fuzzy match for "did you mean?" suggestions
         close = difflib.get_close_matches(event_name, sorted(VALID_HOOK_EVENTS), n=1, cutoff=0.6)
