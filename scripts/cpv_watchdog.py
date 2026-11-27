@@ -109,7 +109,7 @@ def resolve_budget_s() -> float:
 
 
 def _reap_children() -> None:
-    """Best-effort kill of multiprocessing children before we exit.
+    """Best-effort kill of multiprocessing children and scanner process groups before we exit.
 
     Without this the pool workers outlive the parent and become the orphans this
     issue is about, one generation down. Best-effort on purpose: we are already
@@ -124,6 +124,12 @@ def _reap_children() -> None:
                 child.kill()
             except Exception:  # noqa: BLE001, S110 — failure path, must not raise
                 pass
+
+        # issue #276: a watchdog exit left the Cisco scanner's process group running
+        # (os._exit skips atexit). Reap it, but never import the module just to do so.
+        scanner = sys.modules.get("cpv_skill_scanner")
+        if scanner is not None:
+            scanner.kill_live_scanner_groups()
     except Exception:  # noqa: BLE001, S110 — ditto
         pass
 

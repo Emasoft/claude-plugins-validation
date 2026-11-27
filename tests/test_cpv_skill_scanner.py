@@ -344,8 +344,8 @@ class TestRunCiscoScan:
         monkeypatch.setattr(css, "is_uvx_available", lambda: True)
         sample = json.dumps({"results": [{"findings": [{"severity": "info", "rule_id": "r"}]}]})
         monkeypatch.setattr(
-            subprocess,
-            "run",
+            css,
+            "_run_in_own_process_group",
             lambda *a, **kw: _FakeCompleted(stdout=sample, stderr="", returncode=0),
         )
         result = css.run_cisco_scan(tmp_path)
@@ -358,7 +358,7 @@ class TestRunCiscoScan:
         def fake_run(*_a: Any, **_kw: Any) -> None:
             raise subprocess.TimeoutExpired(cmd=["uvx"], timeout=1, output=b"", stderr=b"")
 
-        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(css, "_run_in_own_process_group", fake_run)
         result = css.run_cisco_scan(tmp_path, timeout_seconds=1)
         assert result.invoked is False
         assert "timed out" in result.skipped_reason
@@ -370,7 +370,7 @@ class TestRunCiscoScan:
         def fake_run(*_a: Any, **_kw: Any) -> None:
             raise FileNotFoundError("uvx vanished mid-call")
 
-        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(css, "_run_in_own_process_group", fake_run)
         result = css.run_cisco_scan(tmp_path)
         assert result.invoked is False
         assert "uvx invocation failed" in result.skipped_reason

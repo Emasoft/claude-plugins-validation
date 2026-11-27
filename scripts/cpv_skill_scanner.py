@@ -21,15 +21,25 @@ Reference scan command (assembled by `build_scan_command()`):
         --output-json <path>       # findings written here, then parsed
         --use-behavioral           # AST dataflow (no API key); default on
         --use-trigger              # trigger analysis (no API key); default on
+
+        Process cleanup (issue #276): the scanner runs in its own process group, which is
+        killed on timeout, by the validate watchdog and at interpreter exit. Known limit:
+        if the CPV process itself is SIGKILLed no handler runs, and the scanner group
+        survives that case.
+
 """
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import shutil
+import signal
 import subprocess
+import sys
 import tempfile
+import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,6 +89,83 @@ class CiscoScanResult:
     raw_stdout: str  # Captured stdout (JSON when invoked OK)
     raw_stderr: str  # Captured stderr (diagnostics)
     exit_code: int  # subprocess exit code; -1 if not invoked
+
+
+# Issue #276: subprocess.run(timeout=...) kills only the direct child (uvx). The
+# Python scanner it spawned kept running for 1h25m at 4.4 GB / 327% CPU after
+# CPV had given up on it. The scanner is therefore started as the leader of its
+# own process group / session, tracked here, and the WHOLE group is killed on
+# timeout, on watchdog expiry (cpv_watchdog._reap_children) and at interpreter exit.
+_live_scanners: set[subprocess.Popen[str]] = set()
+_live_scanners_lock = threading.Lock()
+
+
+def _kill_process_group(proc: subprocess.Popen[str]) -> None:
+    """Kill ``proc`` and every descendant that stayed in its process group."""
+    if sys.platform == "win32":
+        proc.kill()
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, check=False)
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def _run_in_own_process_group(cmd: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+    """Run ``cmd`` like ``subprocess.run`` but kill its whole process tree on timeout.
+
+    Raises ``subprocess.TimeoutExpired`` (carrying the partial output) exactly as
+    ``subprocess.run`` does, so callers keep their existing handling.
+    """
+    if sys.platform == "win32":
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
+    else:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+    with _live_scanners_lock:
+        _live_scanners.add(proc)
+    try:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(proc)
+            stdout, stderr = proc.communicate()
+            raise subprocess.TimeoutExpired(cmd, timeout, output=stdout, stderr=stderr) from None
+        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+    finally:
+        with _live_scanners_lock:
+            _live_scanners.discard(proc)
+
+
+def kill_live_scanner_groups() -> None:
+    """Kill every scanner process group still running. Never raises.
+
+    Called from ``atexit`` and from the validate watchdog's reaper so a normal exit,
+    an exception exit or a watchdog abort leaves no scanner grandchild behind
+    (issue #276).
+    """
+    with _live_scanners_lock:
+        procs = list(_live_scanners)
+    for proc in procs:
+        try:
+            _kill_process_group(proc)
+        except Exception:  # noqa: BLE001, S110 — exit path, must not raise
+            pass
+
+
+atexit.register(kill_live_scanner_groups)
 
 
 def is_uvx_available() -> bool:
@@ -249,13 +336,10 @@ def run_cisco_scan(
         )
 
         try:
-            completed = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                check=False,
-            )
+            # issue #276: subprocess.run killed only uvx on timeout, leaving the
+            # Python scanner grandchild running for hours; run it in its own
+            # process group so the whole tree is killed.
+            completed = _run_in_own_process_group(cmd, timeout_seconds)
         except subprocess.TimeoutExpired as exc:
             return CiscoScanResult(
                 invoked=False,
