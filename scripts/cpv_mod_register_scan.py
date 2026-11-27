@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Static check that a Claude Code mod's hooks module exports `register` by name (TRDD-775XK7HE).
 
 Claude Code calls the hooks module's exported `register(on, options)` on load
