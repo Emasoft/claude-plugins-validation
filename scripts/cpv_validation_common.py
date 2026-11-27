@@ -9052,8 +9052,9 @@ def _is_toc_exempt(file_path: Path) -> bool:
     Exempt: SKILL.md, CLAUDE.md, agent files under agents/,
     command files under commands/, rule files under rules/.
     The directory names are matched only INSIDE the enclosing plugin (the
-    nearest ancestor holding `.claude-plugin/plugin.json`); a file outside any
-    plugin is exempt by name only.
+    nearest ancestor holding `.claude-plugin/plugin.json`). A file outside any
+    plugin (a standalone skill or agent tree) is matched on its OWN folder name
+    only, never on folders further up.
     """
     if file_path.name in _TOC_EXEMPT_NAMES:
         return True
@@ -9063,7 +9064,10 @@ def _is_toc_exempt(file_path: Path) -> bool:
     # components below the plugin root may exempt a file.
     root = _enclosing_plugin_root(file_path.parent)
     if root is None:
-        return False
+        # No plugin to anchor to: only the immediate folder counts, so
+        # `agents/x.md` stays exempt (test_toc_embedding list-item case) while a
+        # distant `rules/` ancestor still cannot exempt anything.
+        return file_path.parent.name in _TOC_EXEMPT_DIRS
     try:
         rel_dirs = (file_path.parent.resolve() / file_path.name).relative_to(root).parent.parts
     except (ValueError, OSError):

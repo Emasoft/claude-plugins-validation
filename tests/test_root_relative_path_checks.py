@@ -59,6 +59,22 @@ def test_toc_exempt_nested_dir_inside_plugin(tmp_path: Path) -> None:
     assert _is_toc_exempt(f) is True
 
 
+def test_toc_exempt_outside_plugin_uses_own_folder(tmp_path: Path) -> None:
+    """With no plugin.json above it, a file directly in an ``agents/`` folder is still exempt."""
+    (tmp_path / "agents").mkdir()
+    f = tmp_path / "agents" / "my-agent.md"
+    f.write_text("# a\n", encoding="utf-8")
+    assert _is_toc_exempt(f) is True
+
+
+def test_toc_exempt_outside_plugin_ignores_distant_ancestor(tmp_path: Path) -> None:
+    """With no plugin.json above it, a ``rules`` folder two levels up does not exempt a file."""
+    (tmp_path / "rules" / "docs").mkdir(parents=True)
+    f = tmp_path / "rules" / "docs" / "guide.md"
+    f.write_text("# g\n", encoding="utf-8")
+    assert _is_toc_exempt(f) is False
+
+
 # ── Site 2: _is_own_script ──────────────────────────────────────────────
 
 
