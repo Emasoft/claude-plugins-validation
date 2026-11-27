@@ -3036,6 +3036,42 @@ def _has_shebang(path: Path) -> bool:
         return False
 
 
+def _is_import_only_python_helper(path: Path) -> bool:
+    """Return whether a non-executable Python file is only an importable helper."""
+    import ast
+
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return False
+
+    has_function = False
+    for index, node in enumerate(tree.body):
+        if index == 0 and isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            continue
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        if isinstance(node, ast.FunctionDef):
+            # Function defaults and annotations execute at import time; only literal defaults and no annotations are safe here.
+            if node.decorator_list or node.type_params or node.returns is not None:
+                return False
+            arguments = (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
+            if node.args.vararg is not None:
+                arguments += (node.args.vararg,)
+            if node.args.kwarg is not None:
+                arguments += (node.args.kwarg,)
+            if any(arg.annotation is not None for arg in arguments):
+                return False
+            if any(not isinstance(default, ast.Constant) for default in node.args.defaults):
+                return False
+            if any(default is not None and not isinstance(default, ast.Constant) for default in node.args.kw_defaults):
+                return False
+            has_function = True
+            continue
+        return False
+    return has_function
+
+
 def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
     """Validate scripts/ structure — exec bits + shebangs ONLY.
 
@@ -3112,7 +3148,11 @@ def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
         try:
             with open(script, errors="replace") as f:
                 first_line = f.readline().rstrip("\n")
-            if not first_line.startswith("#!"):
+            # Issue #269: a non-executable .py file that only imports and defines
+            # plain functions is a library module, not a script, so it needs no
+            # shebang. Anything that runs code at import, or carries an exec
+            # bit, is still a script and still needs one.
+            if not first_line.startswith("#!") and not (script.suffix.lower() == ".py" and not IS_WINDOWS and not (script.stat().st_mode & 0o111) and _is_import_only_python_helper(script)):
                 scripts_missing_shebang.append(script.name)
         except (OSError, UnicodeDecodeError):
             pass
@@ -4588,15 +4628,7 @@ EXPECTED_GITIGNORE_CATEGORIES: list[tuple[list[str], str, str]] = [
     ([".claude"], "Claude Code cache directory (.claude/)", "minor"),
     (["llm_externalizer_output"], "LLM Externalizer output directory", "warning"),
     ([".tldr"], "TLDR cache directory (.tldr/)", "warning"),
-    # Agent/script reports — per ~/.claude/rules/agent-reports-location.md,
-    # every plugin MUST have both `reports/` and `reports_dev/` explicitly
-    # gitignored. Reports routinely contain private data (absolute paths,
-    # source snippets, auth tokens in logs, PII in test fixtures), so both
-    # entries MUST be present even if the folders do not yet exist — this
-    # is defensive intent, not a filesystem reflection. The trailing slash
-    # in each pattern disambiguates `reports/` from `reports_dev/` under
-    # the validator's substring-match logic (line 2673). Added v2.25.0.
-    (["reports/"], "Agent/script reports (reports/)", "major"),
+    # Final reports can be tracked; private scratch logs may contain private data.
     (["reports_dev/"], "Dev-only report scratch (reports_dev/)", "warning"),
 ]
 
@@ -4982,8 +5014,13 @@ def _gitignore_covers_category(plugin_root: Path, patterns: list[str], lines: li
             candidates.append(p)
     try:
         # -q exits 0 if ANY listed path is ignored. Run once with all candidates.
+        # `--quiet` accepts a single pathname only: with several positional
+        # candidates git exits 128 ("--quiet is only valid with a single
+        # pathname"), which silently sent every multi-candidate category to
+        # the substring fallback. --stdin takes any number of paths.
         result = subprocess.run(
-            ["git", "check-ignore", "-q", "--", *candidates],
+            ["git", "check-ignore", "-q", "-z", "--stdin"],
+            input=b"".join(os.fsencode(candidate) + b"\0" for candidate in candidates),
             cwd=plugin_root,
             capture_output=True,
             timeout=15,

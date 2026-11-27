@@ -1038,8 +1038,7 @@ class TestValidateGitignore:
         assert any("No .gitignore file found" in m for m in major_msgs)
 
     def test_complete_gitignore_passes(self, tmp_path):
-        """validate_gitignore passes when all categories are covered
-        (including reports/ and reports_dev/ per v2.25.0 rule)."""
+        """validate_gitignore passes when all expected categories are covered."""
         plugin_dir = tmp_path / "good-gi"
         plugin_dir.mkdir()
         gitignore_content = """
@@ -1062,14 +1061,26 @@ venv/
 .claude/
 llm_externalizer_output/
 .tldr/
-reports/
 reports_dev/
 """
         (plugin_dir / ".gitignore").write_text(gitignore_content)
+        (plugin_dir / "reports").mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=plugin_dir, check=True)
         report = ValidationReport()
         validate_gitignore(plugin_dir, report)
         passed_msgs = [r.message for r in report.results if r.level == "PASSED"]
         assert any("covers all expected categories" in m for m in passed_msgs)
+
+    def test_absent_reports_dev_needs_no_ignore_entry(self, tmp_path):
+        """validate_gitignore does not require reports_dev coverage when that directory is absent."""
+        plugin_dir = tmp_path / "absent-reports-dev"
+        plugin_dir.mkdir()
+        (plugin_dir / ".gitignore").write_text("*.pyc\n")
+        subprocess.run(["git", "init", "-q"], cwd=plugin_dir, check=True)
+        report = ValidationReport()
+        validate_gitignore(plugin_dir, report)
+        offending = [r.message for r in report.results if "missing coverage" in r.message and "reports_dev/" in r.message]
+        assert not offending, f"absent reports_dev/ unexpectedly required ignore coverage: {offending}"
 
     def test_gitignore_missing_categories_reports_issues(self, tmp_path):
         """validate_gitignore reports warnings/majors for missing categories
@@ -1119,22 +1130,19 @@ reports_dev/
         offending = [r.message for r in report.results if "missing coverage" in r.message and "reports_dev/" in r.message]
         assert not offending, f"reports_dev/ glob coverage not recognised: {offending}"
 
-    def test_uncovered_reports_still_warns(self, tmp_path):
-        """Issue #98 FN-safe sibling: a genuinely-uncovered required category
-        (real reports/ dir, .gitignore only ignores *.pyc) must STILL emit the
-        MAJOR — git check-ignore exits 1 AND the substring scan misses."""
-        plugin_dir = tmp_path / "uncovered"
+    def test_unignored_reports_dev_reports_warning(self, tmp_path):
+        """validate_gitignore warns when existing reports_dev/ is not ignored."""
+        plugin_dir = tmp_path / "uncovered-dev"
         plugin_dir.mkdir()
-        # No reports/ rule, no *_dev/ glob — reports/ is genuinely uncovered.
         (plugin_dir / ".gitignore").write_text("*.pyc\n")
         subprocess.run(["git", "init", "-q"], cwd=plugin_dir, check=True)
-        (plugin_dir / "reports").mkdir()
+        (plugin_dir / "reports_dev").mkdir()
         report = ValidationReport()
         validate_gitignore(plugin_dir, report)
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
         major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("missing coverage" in m and "reports/" in m for m in major_msgs), (
-            f"uncovered reports/ category did not warn: {[r.message for r in report.results]}"
-        )
+        assert any("missing coverage" in m and "reports_dev/" in m for m in warning_msgs)
+        assert not any("missing coverage" in m and "reports_dev/" in m for m in major_msgs)
 
     def test_not_a_git_repo_falls_back_to_substring(self, tmp_path):
         """Issue #98 graceful fallback: with NO git repo, git check-ignore
@@ -1149,6 +1157,31 @@ reports_dev/
         validate_gitignore(plugin_dir, report)
         offending = [r.message for r in report.results if "missing coverage" in r.message and "reports_dev/" in r.message]
         assert not offending, f"substring fallback failed to recognise literal reports_dev/ line: {offending}"
+
+    def test_not_a_git_repo_wildcard_does_not_escalate_reports_dev(self, tmp_path):
+        """Non-Git substring fallback retains the existing WARNING for wildcard reports_dev coverage."""
+        plugin_dir = tmp_path / "no-git-wildcard"
+        plugin_dir.mkdir()
+        (plugin_dir / ".gitignore").write_text("*_dev/\n")
+        (plugin_dir / "reports_dev").mkdir()
+        report = ValidationReport()
+        validate_gitignore(plugin_dir, report)
+        warning_msgs = [r.message for r in report.results if r.level == "WARNING"]
+        major_msgs = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("missing coverage" in m and "reports_dev/" in m for m in warning_msgs)
+        assert not any("missing coverage" in m and "reports_dev/" in m for m in major_msgs)
+
+    def test_git_wildcard_covers_reports_dev(self, tmp_path):
+        """A real Git repo recognizes `*_dev/` coverage without a reports_dev warning."""
+        plugin_dir = tmp_path / "git-wildcard"
+        plugin_dir.mkdir()
+        (plugin_dir / ".gitignore").write_text("*_dev/\n")
+        subprocess.run(["git", "init", "-q"], cwd=plugin_dir, check=True)
+        (plugin_dir / "reports_dev").mkdir()
+        report = ValidationReport()
+        validate_gitignore(plugin_dir, report)
+        offending = [r.message for r in report.results if "missing coverage" in r.message and "reports_dev/" in r.message]
+        assert not offending, f"Git wildcard coverage was not recognized: {offending}"
 
 
 class TestValidateWorkflowInlinePython:
@@ -1842,6 +1875,46 @@ class TestBinShebangScriptDetection:
         validate_cross_platform(plugin_dir, report)
         warnings = [r.message for r in report.results if r.level == "WARNING"]
         assert any("without platform identifiers" in w for w in warnings), warnings
+
+
+class TestValidateScriptsShebangs:
+    """Issue #269: distinguish import-only helpers from executable scripts."""
+
+    def test_import_only_helper_exempt_but_scripts_and_other_languages_still_flagged(self, tmp_path):
+        """Only non-executable import-only Python helpers are exempt from shebang findings."""
+        import os as _os
+
+        from validate_plugin import validate_scripts
+
+        scripts_dir = tmp_path / "scripts"
+        scripts_dir.mkdir()
+        helper = scripts_dir / "helper.py"
+        helper.write_text("import math\ndef area(radius):\n    return math.pi * radius ** 2\n")
+        (scripts_dir / "consumer.py").write_text("from helper import area\n")
+        executable_helper = scripts_dir / "executable_helper.py"
+        executable_helper.write_text("def area(radius):\n    return radius ** 2\n")
+        cases = {
+            "main_guard.py": "def main():\n    return None\nif __name__ == \"__main__\":\n    main()\n",
+            "top_level_call.py": "def run():\n    return None\nrun()\n",
+            "default_call.py": "def build():\n    return object()\ndef helper(value=build()):\n    return value\n",
+            "vararg_annotation.py": "def helper(*args: call()):\n    return args\n",
+            "kwarg_annotation.py": "def helper(**kwargs: call()):\n    return kwargs\n",
+        }
+        for name, source in cases.items():
+            (scripts_dir / name).write_text(source)
+        shell = scripts_dir / "tool.sh"
+        shell.write_text("echo hello\n")
+        for file in scripts_dir.iterdir():
+            _os.chmod(file, 0o644)
+        _os.chmod(executable_helper, 0o755)
+
+        report = ValidationReport()
+        validate_scripts(tmp_path, report)
+        missing = [result.message for result in report.results if result.level == "MINOR" and "Scripts missing shebang" in result.message]
+        assert len(missing) == 1, missing
+        missing_names = missing[0].split(": ", 1)[1].split(". Without", 1)[0].split(", ")
+        assert "helper.py" not in missing_names
+        assert set(missing_names) == {"consumer.py", *cases, "executable_helper.py", "tool.sh"}
 
 
 class TestShPortableFallback:

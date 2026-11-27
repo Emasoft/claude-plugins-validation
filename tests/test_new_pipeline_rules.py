@@ -417,16 +417,20 @@ reports_dev/
                 f"flagged non-existent .claude/ — v2.25.0 should suppress: {r.message}"
             )
 
-    def test_reports_dir_missing_reports_major(self, tmp_path):
-        """Missing reports/ in gitignore reports MAJOR — only when reports/
-        actually exists (v2.25.0 rule)."""
+    def test_tracked_reports_dir_needs_no_ignore_rule(self, tmp_path):
+        """reports/ holds tracked final reports (issues #274, #275): leaving it
+        out of .gitignore draws no finding at any level."""
         gi = self._full_gitignore().replace("reports/\n", "")
         plugin = _make_plugin(tmp_path, gitignore=gi)
         (plugin / "reports").mkdir()
         report = ValidationReport()
         validate_gitignore(plugin, report)
-        msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("reports/" in m for m in msgs)
+        offending = [
+            r.message
+            for r in report.results
+            if "reports/" in r.message and "reports_dev/" not in r.message
+        ]
+        assert not offending, offending
 
     def test_reports_dev_dir_missing_warns(self, tmp_path):
         """Missing reports_dev/ in gitignore reports WARNING — only when the
@@ -439,20 +443,15 @@ reports_dev/
         msgs = [r.message for r in report.results if r.level == "WARNING"]
         assert any("reports_dev/" in m for m in msgs)
 
-    def test_reports_pattern_does_not_false_match_reports_dev(self, tmp_path):
-        """`reports_dev/` in .gitignore must NOT satisfy the `reports/`
-        requirement (regression guard: trailing-slash substring-matching)."""
-        gi = self._full_gitignore().replace("reports/\n", "")
-        plugin = _make_plugin(tmp_path, gitignore=gi)
-        (plugin / "reports").mkdir()
+    def test_reports_rule_does_not_cover_reports_dev(self, tmp_path):
+        """A `reports/` rule must NOT satisfy the reports_dev/ requirement
+        (regression guard: trailing-slash substring matching)."""
+        plugin = _make_plugin(tmp_path, gitignore="reports/\n")
         (plugin / "reports_dev").mkdir()
         report = ValidationReport()
         validate_gitignore(plugin, report)
-        msgs = [r.message for r in report.results if r.level == "MAJOR"]
-        assert any("reports/" in m for m in msgs), (
-            "reports_dev/ satisfied the reports/ requirement — the validator "
-            "is substring-matching without the trailing slash"
-        )
+        msgs = [r.message for r in report.results if r.level == "WARNING"]
+        assert any("missing coverage" in m and "reports_dev/" in m for m in msgs), msgs
 
     def test_no_gitignore_reports_major(self, tmp_path):
         """Plugin without .gitignore reports MAJOR."""
