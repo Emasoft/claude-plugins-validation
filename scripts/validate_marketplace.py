@@ -782,6 +782,13 @@ RESERVED_MARKETPLACE_NAMES = {
     # exactness so it reports CRITICAL as a canonical reserved name.
     "anthropic-plugin-directory",
     "claude-plugin-directory",
+    # CC v2.1.282–287 sync (plugins-marketplace-reference.md:39-52) —
+    # documented refusals absent from CPV. Add-time refusal per CC = CRITICAL.
+    "inline",  # non-marketplace source id
+    "builtin",  # non-marketplace source id
+    "skills-dir",  # non-marketplace source id
+    "synced",  # non-marketplace source id
+    "claude-plugin-test",  # v2.1.287 — `claude plugin test` CLI name
 }
 
 # plugin-marketplaces.md:170 — "You also can't name a marketplace `npm`, `pip`,
@@ -789,6 +796,23 @@ RESERVED_MARKETPLACE_NAMES = {
 # these, so they are CRITICAL like the reserved set — but matched
 # case-insensitively and EXACTLY (`npmx`, `github-tools` stay valid).
 PACKAGE_MANAGER_MARKETPLACE_NAMES = frozenset({"npm", "pip", "uv", "cargo", "github", "gh"})
+
+# CC v2.1.287 sync (plugins-marketplace-reference.md): the `claudeai-` prefix
+# is a documented refusal (any name starting with it impersonates the
+# claude.ai first-party surface). CRITICAL like the reserved set.
+CLAUDEAI_PREFIX_PATTERN = re.compile(r"^claudeai-")
+
+# v2.1.280 spelling-variant rule (plugins-marketplace-reference.md): a name
+# identical to a reserved name after normalization — lowercase, any run of
+# `.`/`-`/`_`/`@` separators collapsed to one `-`, trailing dots/symbols
+# stripped — is refused exactly like the reserved name itself (e.g.
+# `claude.code.plugins` == `claude-code-plugins`). Deliberately a check-time
+# helper, not a rename of the set: the canonical reserved spellings stay the
+# SSOT.
+def _normalize_marketplace_name(name: str) -> str:
+    lowered = name.lower()
+    normalized = re.sub(r"[.\-_@]+", "-", lowered)
+    return normalized.strip("-.")
 
 # Names Claude CODE accepts but Claude DESKTOP's managed marketplace sync
 # rejects, taking the WHOLE marketplace with it (plugin-marketplaces.md:1153,
@@ -1132,6 +1156,43 @@ def validate_marketplace_name(name: Any, json_path: str) -> list[ValidationResul
                 level="CRITICAL",
                 category="marketplace",
                 message=f"Marketplace name '{name}' is reserved and cannot be used",
+                file=json_path,
+            )
+        )
+    elif _normalize_marketplace_name(name) in {
+        _normalize_marketplace_name(reserved) for reserved in RESERVED_MARKETPLACE_NAMES
+    }:
+        # CC v2.1.280 spelling-variant rule: a name that normalizes onto a
+        # reserved name is refused exactly like the reserved spelling itself.
+        matched = next(
+            reserved
+            for reserved in RESERVED_MARKETPLACE_NAMES
+            if _normalize_marketplace_name(reserved) == _normalize_marketplace_name(name)
+        )
+        results.append(
+            ValidationResult(
+                level="CRITICAL",
+                category="marketplace",
+                message=(
+                    f"Marketplace name '{name}' is a spelling variant of the reserved name "
+                    f"'{matched}' and cannot be used (v2.1.280 normalization: lowercase, "
+                    "separators '.', '-', '_', '@' collapse to '-', trailing dots/symbols stripped)"
+                ),
+                file=json_path,
+            )
+        )
+    elif CLAUDEAI_PREFIX_PATTERN.match(name.lower()) is not None:
+        # CC v2.1.287: any name starting with `claudeai-` impersonates the
+        # claude.ai first-party surface and is refused at add time.
+        results.append(
+            ValidationResult(
+                level="CRITICAL",
+                category="marketplace",
+                message=(
+                    f"Marketplace name '{name}' is refused by Claude Code (v2.1.287+): "
+                    "names starting with the 'claudeai-' prefix are reserved for the "
+                    "first-party claude.ai surface"
+                ),
                 file=json_path,
             )
         )

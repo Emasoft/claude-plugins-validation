@@ -654,6 +654,12 @@ BUILTIN_SLASH_COMMANDS: frozenset[str] = frozenset(
         # VALID_TOOLS): a name leaving the doc table is not proof the runtime
         # dropped it, and keeping a stale name only over-warns on a collision,
         # whereas dropping a live one under-warns. Asymmetric, so retain.
+        # CC v2.1.282–287 sync (commands.md All-commands table): three
+        # documented built-ins absent from the set — a plugin shipping a
+        # command with one of these names collides with the built-in.
+        "plugin-authoring",  # v2.1.287 new built-in mod skill (commands.md:119)
+        "artifact-capabilities",  # commands.md:55 bundled skill
+        "artifact-diagramming",  # commands.md:56 (CC v2.1.221+)
     }
 )
 
@@ -1092,6 +1098,7 @@ VALID_PLUGIN_ENV_VARS = {
     "CLAUDE_CODE_DISABLE_DANGEROUS_RM_TIMEOUT",  # v2.1.281 — disables the rm command timeout guard
     "CLAUDE_CODE_DISABLE_SUBSTITUTION_RM_PROMPT",  # v2.1.281 — suppresses the substitution rm confirmation prompt
     "CLAUDE_CODE_DISABLE_POWERSHELL_CMD_RM_DENY",  # v2.1.283 — opt out of the PowerShell cmd rm deny rule
+    "CLAUDE_CODE_DISABLE_WEB_FETCH",  # v2.1.287 — documented var a plugin may reference (decision (j), TRDD-TLCJ9LPE)
     "VERTEX_REGION_CLAUDE_5_5_SONNET",  # v2.1.284 — Vertex region override for Sonnet 5.5
     "VERTEX_REGION_CLAUDE_5_5_OPUS",  # v2.1.280 (sync miss) — Vertex region override for Opus 5.5
 }

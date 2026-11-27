@@ -105,6 +105,9 @@ KNOWN_SERVER_FIELDS = {
     "timeout",  # Connection timeout
     "oauth",  # OAuth config object with clientId and callbackPort
     "alwaysLoad",  # v2.1.121 — when true, all tools skip tool-search deferral
+    # v2.1.287 (mcp.md) — bare `true` on a server entry speaking the
+    # 2025-11-25 URL-prompt protocol: expose prompts as bare elicitation.
+    "bareElicitationCapability",
 }
 
 # Plugin-specific environment variables
@@ -205,6 +208,15 @@ def validate_mcp_server(
     for key in config.keys():
         if key not in KNOWN_SERVER_FIELDS:
             report.warning(f"Unknown field '{key}' in server {server_name}")
+
+    # v2.1.287 (mcp.md): bareElicitationCapability is a boolean flag — a
+    # non-bool value will not enable the behavior. Surface it as a WARNING,
+    # mirroring the typed-field checks this file already carries.
+    if "bareElicitationCapability" in config and not isinstance(config["bareElicitationCapability"], bool):
+        report.warning(
+            f"Server {server_name} 'bareElicitationCapability' must be a boolean, "
+            f"got {type(config['bareElicitationCapability']).__name__}"
+        )
 
     # Determine transport type
     transport = config.get("type", "stdio")

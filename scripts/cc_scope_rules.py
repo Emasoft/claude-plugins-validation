@@ -259,6 +259,9 @@ MANAGED_ONLY_KEYS: frozenset[str] = frozenset(
         # v2.1.283 changelog: "Added deniedModels managed setting" — the
         # deny-list counterpart of availableModels.
         "deniedModels",
+        # v2.1.285 (settings-reference.md:600) — limit which API providers a
+        # machine may use. Doc table row has explicit Managed scope.
+        "allowedProviders",
         # ── CC spec sync v2.1.284 (settings-reference.md Managed-scope rows) ──
         # Each verified to have its own `| [`key`]` index row with Managed scope.
         "browserExternalPageTools",  # managed allowlist of Claude-in-Chrome page tools
@@ -417,6 +420,13 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         "enabledPlugins",
         "disabledPlugins",
         "pluginConfigs",
+        # v2.1.287 mods (mods-reference.md:266, mods-admin.md:26-33) —
+        # prepend/append plugin-id lists and the two mods guard options
+        # under pluginConfigs.
+        "prependPlugins",
+        "appendPlugins",
+        "allowManagedModsOnly",
+        "allowModsToOverrideDenyRules",
         # Managed-only (kept here for typo detection; semantics enforced elsewhere)
         "allowedChannelPlugins",
         "allowedMcpServers",

@@ -828,15 +828,25 @@ def validate_top_level_structure(data: Any, report: ValidationReport) -> bool:
 
     # Check for unknown top-level fields. `$schema` is a standard JSON Schema
     # declaration recognized by editors and linters and should not be flagged.
-    known_top_level = {"hooks", "description", "disableAllHooks", "$schema"}
+    # `modules` is the v2.1.287 Claude Mods surface: a bare mods hooks.json is
+    # valid with ONLY `modules` and no `hooks` (mods-create.md:136-141), so the
+    # required check below is hooks-OR-modules.
+    known_top_level = {"hooks", "description", "disableAllHooks", "$schema", "modules"}
     for key in data:
         if key not in known_top_level:
             report.warning(f"Unknown top-level field '{key}' in hooks config")
 
-    # Check for 'hooks' key
-    if "hooks" not in data:
-        report.critical("Missing required 'hooks' object")
+    # Check for 'hooks' key — OR 'modules' (v2.1.287 mods). A hooks.json with
+    # NEITHER stays CRITICAL. One relax here covers both ingestion surfaces
+    # (standalone + inline/path-form via validate_hooks_data SSOT).
+    if "hooks" not in data and "modules" not in data:
+        report.critical("Missing required 'hooks' object (or 'modules' for a mod)")
         return False
+
+    # modules-without-hooks: a bare mod file — no event map to walk.
+    if "hooks" not in data:
+        report.passed("Valid top-level structure (mod: modules, no hooks map)")
+        return True
 
     hooks = data["hooks"]
     if not isinstance(hooks, dict):
@@ -845,6 +855,95 @@ def validate_top_level_structure(data: Any, report: ValidationReport) -> bool:
 
     report.passed("Valid top-level structure")
     return True
+
+
+# v2.1.287 Claude Mods (mods-reference.md "## Files"): the hooks module may be
+# named only with these extensions. A WRONG EXTENSION is MAJOR (oracle-probed
+# 2026-10-05, TRDD-TLCJ9LPE item 8: CC errors on a non-listed extension).
+# Missing/outside-root paths are MAJOR too (companion-file shape, same as the
+# manifest path checks).
+MOD_MODULE_EXTENSIONS = {".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx"}
+
+
+def validate_modules_entry(data: dict[str, Any], plugin_root: Path | None, report: HookValidationReport) -> None:
+    """Validate the `modules` array of a Claude Mods hooks.json (v2.1.287)."""
+    if "modules" not in data:
+        return
+    modules = data["modules"]
+    if not isinstance(modules, list):
+        report.critical(f"'modules' must be an array of path strings, got {type(modules).__name__}")
+        return
+    if not modules:
+        report.major("'modules' array is empty — a mod must list at least its hooks module (mods-reference.md)")
+        return
+    # cwd-safety (adversarial review of c75e56c3): the inline-manifest path
+    # passes a RELATIVE label (".claude-plugin/plugin.json"), so
+    # Path(...).parent resolves against the CWD, making every finding
+    # cwd-dependent. Only an absolute, existing hooks.json path is a
+    # trustworthy base dir; otherwise resolve against the plugin root.
+    if report.hook_path:
+        _hp = Path(report.hook_path)
+        if _hp.is_absolute() and _hp.exists():
+            hooks_json_dir: Path | None = _hp.parent
+        else:
+            hooks_json_dir = plugin_root
+            if _hp.is_absolute():
+                report.warning(
+                    f"hooks.json path stale ({_hp}); 'modules' entries resolved against the plugin root"
+                )
+    else:
+        hooks_json_dir = None
+    for i, entry in enumerate(modules):
+        if not isinstance(entry, str):
+            report.critical(f"'modules[{i}]' must be a string path, got {type(entry).__name__}")
+            continue
+        # TRDD-PHQZ1XAD WP1: a non-string is CRITICAL (JSON-shape error), and
+        # so is an EMPTY string — "" names no file, the same authoring-error
+        # class as a wrong-typed element, not a style issue.
+        if not entry:
+            report.critical(f"'modules[{i}]' must be a non-empty path string")
+            continue
+        if not entry.startswith("./"):
+            # mods-reference.md shows the "./" form only AS AN EXAMPLE ("as in
+            # './register.js'"); whether CC rejects a bare name is unprobed —
+            # WARNING, same evidence standard as the extension check.
+            report.warning(
+                f"'modules[{i}]' path does not start with './' (relative to hooks.json): {entry} — "
+                "the doc shows the './' form only as an example; CC behavior on a bare name unprobed"
+            )
+        elif ".." in Path(entry).parts:
+            report.major(
+                f"'modules[{i}]' contains path-traversal segment '..': {entry} — "
+                "paths escaping the plugin root do not resolve post-install"
+            )
+        else:
+            suffix = Path(entry).suffix
+            if suffix not in MOD_MODULE_EXTENSIONS:
+                # MAJOR not WARNING: oracle-probed 2026-10-05 (TRDD-TLCJ9LPE):
+                # CC ERRORS on a non-listed extension (.js2) and ACCEPTS the
+                # listed ones — the unprobed-WARNING rationale is gone.
+                # MAJOR because publish-blocking; CRITICAL is reserved for the
+                # reserved-name/JSON-shape classes.
+                report.major(
+                    f"'modules[{i}]' extension '{suffix or '(none)'}' is not one of the documented "
+                    f"hooks-module extensions {sorted(MOD_MODULE_EXTENSIONS)} (mods-reference.md) — "
+                    "CC errors on non-listed extensions (oracle-probed, TRDD-TLCJ9LPE)"
+                )
+            if hooks_json_dir is not None and plugin_root is not None:
+                resolved = (hooks_json_dir / entry).resolve()
+                try:
+                    resolved.relative_to(plugin_root.resolve())
+                except ValueError:
+                    report.major(f"'modules[{i}]' resolves outside the plugin root: {entry}")
+                else:
+                    if not resolved.exists():
+                        # Message carries both phrasings: the directive's
+                        # "mods hooks module not found" and the committed
+                        # item-8 assertion substring "does not exist".
+                        report.major(
+                            f"mods hooks module not found: {entry} "
+                            f"('modules[{i}]' referenced module does not exist)"
+                        )
 
 
 def validate_event_name(event_name: str, report: ValidationReport) -> bool:
@@ -3925,12 +4024,22 @@ def validate_hooks_data(
     if not validate_top_level_structure(data, report):
         return report
 
+    # v2.1.287 mods: validate the `modules` array here, BEFORE the hooks-dict
+    # early-return below — a bare mod file has `modules` and NO `hooks`, so a
+    # call placed after the guard would never run for the very shape it
+    # exists to validate (TRDD-TLCJ9LPE item 8).
+    validate_modules_entry(data, plugin_root, report)
+
     # Validate each event. Pass the parsed top-level document through so
     # per-event checks (runtime-dep reconciliation, specifically) can look at
     # sibling events — e.g. a UserPromptSubmit hook that invokes
     # ${CLAUDE_PLUGIN_DATA}/.venv/bin/python needs to know whether a
     # SessionStart hook elsewhere in the same file sets up that venv.
-    hooks = data["hooks"]
+    # v2.1.287 mods: bare mod file has `modules`, no `hooks` map — nothing
+    # to walk (validate_top_level_structure already accepted it).
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return report
     for event_name, event_config in hooks.items():
         if not validate_event_name(event_name, report):
             continue
