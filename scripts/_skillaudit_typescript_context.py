@@ -45,6 +45,7 @@ AST-like shape check, not a broad pattern allowlist.
 from __future__ import annotations
 
 import re
+import warnings
 from typing import Final, Literal
 
 ContextVerdict = Literal["safe_literal", "safe_doc", "suspect", "unknown"]
@@ -1571,21 +1572,135 @@ def _regex_body_is_dangerous(body: str) -> bool:
     """True iff a quantified-group BODY itself carries a quantifier or a
     top-level ``|`` alternation (the two ways a quantified group becomes
     catastrophic). ``|`` anywhere in the (paren-free) body is top-level."""
-    if "|" in body:
+    if "|" in body or _REGEXP_OPAQUE_TEMPLATE_ATOM in body:
         return True
     return bool(_INNER_QUANTIFIER_RE.search(body))
 
 
-def _regex_has_catastrophic_shape(pattern: str) -> bool:
+# Delimiter-anchored repetition (client FP report, two linear regexes built
+# with template literals):
+#   ``(?:\.${id})*``  and  ``(?:, *${ENTRY})*``
+# A quantified group whose FIRST token is one mandatory literal delimiter
+# character ``c`` (never itself quantified) and in which NO other token can
+# match ``c`` is unambiguous: every iteration must start at a ``c`` that no
+# other part of the iteration can consume, so the engine has exactly one way to
+# split the input into iterations — linear, not catastrophic, even though the
+# body carries an inner quantifier. Any doubt (alternation, an escape or class
+# we cannot evaluate, an opaque placeholder, a wildcard) → NOT anchored → the
+# shape keeps firing.
+_REGEX_QUANTIFIER_SUFFIX_RE: Final[re.Pattern[str]] = re.compile(r"(?:[?*+]|\{\d+(?:,\d*)?\})\??")
+_REGEX_CLASS_ESCAPES: Final[str] = "dDwWsS"
+_REGEX_ZERO_WIDTH_ESCAPES: Final[str] = "bB"
+
+
+def _regex_body_tokens(body: str) -> list[tuple[str, bool]] | None:
+    """Tokenise a paren-free regex group body into ``(token, is_quantified)``
+    pairs, or ``None`` on anything not understood (alternation, anchors,
+    unknown alphanumeric escapes, empty / nested classes, stray quantifiers)."""
+    tokens: list[tuple[str, bool]] = []
+    i = 0
+    n = len(body)
+    while i < n:
+        ch = body[i]
+        if ch == "\\":
+            if i + 1 >= n:
+                return None
+            esc = body[i + 1]
+            if esc.isalnum() and esc not in _REGEX_CLASS_ESCAPES + _REGEX_ZERO_WIDTH_ESCAPES:
+                return None
+            tok = body[i : i + 2]
+            i += 2
+        elif ch == "[":
+            j = i + 1
+            if j < n and body[j] == "^":
+                j += 1
+            if j >= n or body[j] == "]":
+                return None  # JS ``[]`` / ``[^]`` differ from Python — doubt
+            while j < n and body[j] != "]":
+                if body[j] == "[":
+                    return None
+                j += 2 if body[j] == "\\" else 1
+            if j >= n:
+                return None
+            tok = body[i : j + 1]
+            i = j + 1
+        elif ch in "|()?*+{^$":
+            return None
+        else:
+            tok = ch
+            i += 1
+        suffix = _REGEX_QUANTIFIER_SUFFIX_RE.match(body, i)
+        if suffix:
+            i = suffix.end()
+        tokens.append((tok, suffix is not None))
+    return tokens
+
+
+def _regex_token_can_match(token: str, c: str) -> bool:
+    """True iff the single regex ``token`` can match the character ``c``. Errs
+    toward True (= "can match") on a wildcard, an opaque placeholder, or any
+    class Python cannot compile."""
+    if _REGEXP_ASSEMBLY_PLACEHOLDER in token or _REGEXP_OPAQUE_TEMPLATE_ATOM in token or token == ".":
+        return True
+    if token.startswith("\\"):
+        esc = token[1]
+        if esc in _REGEX_ZERO_WIDTH_ESCAPES:
+            return False
+        if esc in _REGEX_CLASS_ESCAPES:
+            return re.fullmatch(token, c) is not None
+        return esc == c
+    if token.startswith("["):
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                return re.fullmatch(token, c) is not None
+        except re.error:
+            return True
+    return token == c
+
+
+def _regex_group_is_delimiter_anchored(body: str) -> bool:
+    """True iff the quantified-group ``body`` starts with one mandatory literal
+    punctuation/space delimiter that no other token in the body can match."""
+    tokens = _regex_body_tokens(body)
+    if not tokens:
+        return False
+    first, first_quantified = tokens[0]
+    if first_quantified:
+        return False
+    if first.startswith("\\"):
+        delimiter = first[1:]
+    else:
+        delimiter = first
+    if len(delimiter) != 1 or (delimiter == "." and first == "."):
+        return False
+    if not (delimiter.isascii() and delimiter.isprintable() and not delimiter.isalnum()):
+        return False
+    return not any(_regex_token_can_match(tok, delimiter) for tok, _ in tokens[1:])
+
+
+def _regex_has_catastrophic_shape(pattern: str, *, delimiter_anchored_ok: bool = False) -> bool:
     r"""True iff ``pattern`` contains a catastrophic-backtracking shape: a
     group quantified by an unbounded outer quantifier whose body itself has a
     quantifier or a ``|`` alternation (``(a+)+``, ``(\w+)*``, ``(.*)*``,
     ``(a|a)*``, ``(a|ab)*``). FN-safe by construction — only the linear shapes
     (a bare ``\S*`` / ``.+`` not wrapping a quantified-or-alternated group)
-    are NOT flagged here."""
+    are NOT flagged here.
+
+    ``delimiter_anchored_ok`` (used ONLY by the ``new RegExp(...)`` linearity
+    proof) additionally clears a quantified group that is delimiter-anchored
+    (see ``_regex_group_is_delimiter_anchored``): ``(?:\.[0-9A-Za-z-]+)*``."""
     for m in _CATASTROPHIC_REGEX_SHAPE_RE.finditer(pattern):
-        if _regex_body_is_dangerous(m.group("body")):
-            return True
+        if not _regex_body_is_dangerous(m.group("body")):
+            continue
+        # A lookahead/lookbehind group is never a repetition we can reason about.
+        if (
+            delimiter_anchored_ok
+            and not m.group(0).startswith(("(?=", "(?!"))
+            and _regex_group_is_delimiter_anchored(m.group("body"))
+        ):
+            continue
+        return True
     return False
 
 
@@ -1624,6 +1739,13 @@ def _new_regexp_call_first_arg(line: str) -> str | None:
     m = re.search(r"(?:\bnew\s+RegExp|(?<![.\w$])RegExp)\s*\(", line)
     if not m:
         return None
+    # ``line`` may be a multi-line window (the matched line plus the lines a
+    # multi-line call spills onto): the call must START on the matched line (the
+    # first one), never on a later line — else a ``RegExp(`` on a following
+    # line would vouch for an unrelated, non-RegExp match on the first line.
+    first_newline = line.find("\n")
+    if first_newline != -1 and m.start() > first_newline:
+        return None
     i = m.end()  # index just past the opening "("
     depth = 1
     arg_start = i
@@ -1657,13 +1779,85 @@ def _new_regexp_call_first_arg(line: str) -> str | None:
     return line[arg_start:first_arg_end]
 
 
-def _new_regexp_is_provably_linear(line: str) -> bool:
+# Template-literal interpolation ``${expr}`` (no nested braces). A ``\`` right
+# before the ``$`` makes the ``${`` literal text, not an interpolation.
+_TEMPLATE_INTERPOLATION_RE: Final[re.Pattern[str]] = re.compile(r"(?<!\\)\$\{([^{}]*)\}")
+_PLAIN_IDENTIFIER_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_$][\w$]*")
+# Opaque stand-in for a ``${...}`` that cannot be resolved to a same-file
+# ``const NAME = "<string>"``. Unlike ``_REGEXP_ASSEMBLY_PLACEHOLDER`` (an
+# identifier gap in a ``+`` concatenation, treated as inert) it is the WORST
+# case: inside a quantified group it counts as a dangerous body
+# (``_regex_body_is_dangerous``) because the runtime value may itself be a
+# quantified token (``(?:${alt})*``), it can match any delimiter, and it is
+# never a quantifier (the old ``{id}`` brace-quantifier misreading).
+_REGEXP_OPAQUE_TEMPLATE_ATOM: Final[str] = "\x02"
+# Max chain length of ``const A = `…${B}…`; const B = `…${C}…`;`` followed.
+_CONST_RESOLVE_MAX_DEPTH: Final[int] = 3
+# Lines (from the matched one) scanned for the end of a multi-line RegExp call.
+_REGEXP_CALL_WINDOW_LINES: Final[int] = 40
+
+
+def _js_unescape_backslashes(text: str) -> str:
+    r"""JS-unescape ONLY the escaped backslash (``\\`` → ``\``) of a string /
+    template literal's source text. In ``"\\."`` the string VALUE — what the
+    RegExp engine sees — is ``\.`` (an escaped dot); analysing the raw source
+    would misread ``\\+`` as "escaped backslash then a real quantifier"."""
+    return text.replace("\\\\", "\\")
+
+
+def _resolve_template_literal(content: str, source: str, depth: int) -> str:
+    """Return the runtime value of a backtick literal's ``content``:
+    backslash-unescaped text with each ``${NAME}`` replaced by the same-file
+    ``const NAME`` string it names, or by ``_REGEXP_OPAQUE_TEMPLATE_ATOM`` when
+    it cannot be resolved (non-identifier expression, unknown / redeclared name,
+    non-literal initialiser, or recursion deeper than the cap)."""
+    pieces: list[str] = []
+    cursor = 0
+    for m in _TEMPLATE_INTERPOLATION_RE.finditer(content):
+        pieces.append(_js_unescape_backslashes(content[cursor : m.start()]))
+        expr = m.group(1).strip()
+        value = _resolve_const_string(expr, source, depth + 1) if _PLAIN_IDENTIFIER_RE.fullmatch(expr) else None
+        pieces.append(_REGEXP_OPAQUE_TEMPLATE_ATOM if value is None else value)
+        cursor = m.end()
+    pieces.append(_js_unescape_backslashes(content[cursor:]))
+    return "".join(pieces)
+
+
+def _resolve_const_string(name: str, source: str, depth: int) -> str | None:
+    """Value of the file-level ``const NAME = "<string>"`` (single-quote,
+    double-quote or backtick literal; a ``: string`` annotation is allowed), or
+    ``None`` on any doubt: ``NAME`` declared more than once (``const`` / ``let``
+    / ``var`` — shadowing), the initialiser is not a bare string literal (a
+    ``+`` concatenation, a call), or ``depth`` exceeds the cap."""
+    if depth > _CONST_RESOLVE_MAX_DEPTH or not source:
+        return None
+    ident = re.escape(name)
+    if len(re.findall(rf"(?<![\w$.])(?:const|let|var)\s+{ident}(?![\w$])", source)) != 1:
+        return None
+    m = re.search(
+        rf"(?<![\w$.])const\s+{ident}\s*(?::\s*string\s*)?=\s*"
+        r"(?:\"((?:[^\"\\\n]|\\.)*)\"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\]|\\.)*)`)[ \t]*(?:;|$)",
+        source,
+        re.MULTILINE,
+    )
+    if not m:
+        return None
+    if m.group(3) is not None:
+        return _resolve_template_literal(m.group(3), source, depth)
+    return _js_unescape_backslashes(m.group(1) if m.group(1) is not None else m.group(2))
+
+
+def _new_regexp_is_provably_linear(line: str, source: str = "") -> bool:
     r"""True iff a ``new RegExp(...)`` / ``RegExp(...)`` call on ``line`` is a
     provably-LINEAR dynamically-built regex (issue #91): first arg is string
     literals + ``+``-joined non-user identifiers, with NO catastrophic shape in
     any literal part NOR in the assembled skeleton. Returns False (→ the match
     keeps firing) on ANY doubt: a regex literal, a user/request source, a
-    non-identifier filler, or a catastrophic assembled shape."""
+    non-identifier filler, or a catastrophic assembled shape.
+
+    ``line`` is the matched line, optionally followed by the lines a multi-line
+    call spills onto. ``source`` is the whole file, used to resolve
+    ``${NAME}`` template interpolations against ``const NAME = "…"``."""
     arg = _new_regexp_call_first_arg(line)
     if arg is None:
         return False
@@ -1689,6 +1883,16 @@ def _new_regexp_is_provably_linear(line: str) -> bool:
             skeleton_chunks.append(_REGEXP_ASSEMBLY_PLACEHOLDER)
         # The literal's first non-None capture group is its raw inner content.
         inner = next(g for g in sm.groups() if g is not None)
+        # Client FP report (linear regexes built with template literals,
+        # ``new RegExp(`…(?:\\.${id})*…`)``): analyse the string VALUE, not its
+        # source text — backslash-unescape it and resolve ``${NAME}`` against
+        # same-file ``const`` strings. An unresolvable ``${…}`` becomes an opaque
+        # atom (never read as a ``{…}`` brace quantifier, never proof of
+        # linearity). Quoted literals only need the backslash-unescape.
+        if sm.group(3) is not None:
+            inner = _resolve_template_literal(inner, source, 0)
+        else:
+            inner = _js_unescape_backslashes(inner)
         literal_parts.append(inner)
         skeleton_chunks.append(inner)
         cursor = sm.end()
@@ -1704,14 +1908,14 @@ def _new_regexp_is_provably_linear(line: str) -> bool:
 
     # (a) Each individual literal part must be non-catastrophic …
     for raw in literal_parts:
-        if _regex_has_catastrophic_shape(raw):
+        if _regex_has_catastrophic_shape(raw, delimiter_anchored_ok=True):
             return False
     # … and (b) the ASSEMBLED skeleton (literals joined directly, with a neutral
     # placeholder ONLY for an identifier gap) must be non-catastrophic, so a
     # nesting assembled across the ``+`` — whether the split point is an
     # identifier gap OR two directly-adjacent literals — is caught.
     skeleton = "".join(skeleton_chunks)
-    if _regex_has_catastrophic_shape(skeleton):
+    if _regex_has_catastrophic_shape(skeleton, delimiter_anchored_ok=True):
         return False
     return True
 
@@ -1802,7 +2006,12 @@ def classify(
     # FN-safe: a user/request source, a non-identifier filler, a regex literal,
     # or any nested/overlapping-quantifier shape (incl. one assembled across the
     # concatenation, ``'(' + a + '+)+'``) returns False here and keeps firing.
-    if rule_id == "REGEX_DOS" and _new_regexp_is_provably_linear(line):
+    if rule_id == "REGEX_DOS" and _new_regexp_is_provably_linear(
+        # Window = matched line + following lines: a template-literal RegExp may
+        # span several lines (client FP report) and only the first line matches.
+        "\n".join(source.split("\n")[line_idx : line_idx + _REGEXP_CALL_WINDOW_LINES]),
+        source,
+    ):
         return "safe_literal"
 
     # r04/r07 FP iter (2026-05-28) — TOOL_SHADOW / INDIRECT_PROMPT_INJECT
