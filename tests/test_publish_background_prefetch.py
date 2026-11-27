@@ -168,7 +168,9 @@ def test_prefetch_success_path_gh_auth_skips_sync(tmp_path: Path, monkeypatch: p
         # positional or keyword args (publish.run takes both forms).
         cp = MagicMock()
         cp.returncode = 0
-        cp.stdout = ""
+        # The tag guard resolves the tag and HEAD with `git rev-parse` and
+        # refuses empty output, so both lookups get the same commit ID.
+        cp.stdout = "0123456789abcdef0123456789abcdef01234567\n" if "rev-parse" in _cmd else ""
         cp.stderr = ""
         return cp
 
@@ -279,7 +281,9 @@ def test_prefetch_transient_failure_falls_back_to_sync_gh_auth(tmp_path: Path, m
     def fake_run(_cmd, *_args, **_kw):
         cp = MagicMock()
         cp.returncode = 0
-        cp.stdout = ""
+        # The tag guard resolves the tag and HEAD with `git rev-parse` and
+        # refuses empty output, so both lookups get the same commit ID.
+        cp.stdout = "0123456789abcdef0123456789abcdef01234567\n" if "rev-parse" in _cmd else ""
         cp.stderr = ""
         return cp
 
@@ -337,7 +341,9 @@ def test_prefetch_systemexit_re_raises_on_main_thread(tmp_path: Path, monkeypatc
     def fake_run(_cmd, *_args, **_kw):
         cp = MagicMock()
         cp.returncode = 0
-        cp.stdout = ""
+        # The tag guard resolves the tag and HEAD with `git rev-parse` and
+        # refuses empty output, so both lookups get the same commit ID.
+        cp.stdout = "0123456789abcdef0123456789abcdef01234567\n" if "rev-parse" in _cmd else ""
         cp.stderr = ""
         return cp
 

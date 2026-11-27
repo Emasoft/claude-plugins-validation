@@ -2984,11 +2984,22 @@ def _ensure_tag_at_head(plugin_root: Path, tag_name: str, message: str) -> bool:
         print(f"{GREEN}✓ Tag {tag_name} created{NC}")
         return True
 
-    tag_sha = run(["git", "rev-list", "-n", "1", tag_name], cwd=plugin_root, check=False).stdout.strip()
-    head_sha = run(["git", "rev-parse", "HEAD"], cwd=plugin_root, check=False).stdout.strip()
-    if not (tag_sha and head_sha) or tag_sha == head_sha:
-        # Already correct, or the shas are unreadable — the latter is the
-        # pre-existing behaviour and is safe: nothing is moved on a guess.
+    # An unreadable ref cannot prove the tag matches the validated HEAD.
+    tag_result = run(
+        ["git", "rev-parse", "--verify", f"refs/tags/{tag_name}^{{commit}}"], cwd=plugin_root, check=False
+    )
+    tag_sha = tag_result.stdout.strip()
+    if tag_result.returncode != 0 or not tag_sha:
+        print(f"{RED}✗ Could not resolve local tag {tag_name} to a commit. Refusing to continue.{NC}", file=sys.stderr)
+        return False
+
+    head_result = run(["git", "rev-parse", "--verify", "HEAD^{commit}"], cwd=plugin_root, check=False)
+    head_sha = head_result.stdout.strip()
+    if head_result.returncode != 0 or not head_sha:
+        print(f"{RED}✗ Could not resolve HEAD to a commit for tag {tag_name}. Refusing to continue.{NC}", file=sys.stderr)
+        return False
+
+    if tag_sha == head_sha:
         print(f"{GREEN}✓ Tag {tag_name} already present at HEAD{NC}")
         return True
 

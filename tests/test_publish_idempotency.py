@@ -184,6 +184,11 @@ class TestCommitTagIdempotency:
             patch("publish._resolve_owner_repo", return_value=("Emasoft", "demo")),
             patch("publish.git_with_retry"),
         ):
+            # The tag guard resolves the tag and HEAD with `git rev-parse` and
+            # refuses a non-zero or empty answer, so the stub answers both with
+            # the same commit ID (the tag already points at HEAD).
+            fake_run.return_value.returncode = 0
+            fake_run.return_value.stdout = "0123456789abcdef0123456789abcdef01234567\n"
             rc = publish.stage_commit_tag_push(plugin_root, "v2.64.0")
         assert rc == 0
         # No `git add -A` / `git commit` call should have been issued — Gate 10
