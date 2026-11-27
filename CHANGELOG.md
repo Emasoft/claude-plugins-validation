@@ -2,6 +2,26 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.27.0] - 2026-11-27
+
+### Bug Fixes
+
+- **skillaudit:** Table demotion only for prose-file table cells (TRDD-XFADJQV4)
+- **skillaudit:** A literal env-dump-to-network shell command stays visible in Python (TRDD-I88O4Y9K)
+- **skillaudit:** Detect split env-dump-then-send exfil in shell (TRDD-GYK6S60T, TRDD-U0UYW3OD)
+
+### Documentation
+
+- **claude-md:** Re-derive the test-file count for 5.27.0 (603)
+
+### Features
+
+- **mods:** A second hooks.json modules entry is MAJOR (TRDD-RX57X4XD)
+
+### Miscellaneous Tasks
+
+- **hashes:** Regenerate self-hash manifests for the 5.27.0 candidate
+
 ## [5.26.0] - 2026-11-27
 
 ### Bug Fixes
