@@ -2229,6 +2229,10 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "servers",  # MCP server bundles per docs example: ${CLAUDE_PLUGIN_ROOT}/servers/db-server
         "templates",
         "tests",
+        # Gap-report item A1 (mods): the mods spec documents types/index.d.ts (manifest `types`)
+        # as part of a mod; native `claude plugin validate` 2.1.332 accepts it. A CPV-owned
+        # known dir, NOT a manifest-driven exemption (owner policy, issue #237).
+        "types",
         "test",  # singular variant
         # Common non-standard but legitimate dirs
         "lib",
@@ -2498,6 +2502,25 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
     has_content = any((plugin_root / d).is_dir() for d in content_indicators) or any(
         (plugin_root / f).exists() for f in file_indicators
     )
+    # Gap-report item A5 (mods): a mod declares its hooks via the manifest `hooks` field
+    # (e.g. "./custom/hooks.json") with no hooks/ dir. CPV validates that file, so it must also
+    # count as content, else the MAJOR below contradicts it; native `claude plugin validate`
+    # 2.1.332 passes this layout. Only an existing file INSIDE the plugin counts.
+    if not has_content and plugin_json_path.is_file():
+        try:
+            manifest_for_content = json.loads(plugin_json_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            manifest_for_content = None
+        if isinstance(manifest_for_content, dict):
+            hooks_decl = manifest_for_content.get("hooks")
+            hooks_refs = hooks_decl if isinstance(hooks_decl, list) else [hooks_decl]
+            plugin_root_resolved = plugin_root.resolve()
+            for hooks_ref in hooks_refs:
+                if isinstance(hooks_ref, str) and hooks_ref:
+                    hooks_file = (plugin_root / hooks_ref).resolve()
+                    if hooks_file.is_file() and hooks_file.is_relative_to(plugin_root_resolved):
+                        has_content = True
+                        break
     if not has_content:
         report.major(
             "Plugin has a manifest but no content — expected at least one of: "
@@ -7229,6 +7252,10 @@ def _coverage_enumerate_components(plugin_root: Path) -> list[tuple[str, str, st
             if (
                 hook.is_file()
                 and hook.suffix.lower() in _COVERAGE_HOOK_SCRIPT_EXTS
+                # Gap-report item A7 (mods): hooks/register.test.ts matches the .ts script ext
+                # AND _COVERAGE_TEST_GLOBS; a test file is not a testable component, so listing
+                # it as "untested" is circular. Native `claude plugin validate` 2.1.332 passes it.
+                and not any(fnmatch.fnmatchcase(hook.name, g) for g in _COVERAGE_TEST_GLOBS)
                 and not _coverage_path_is_vendored(hook, plugin_root)
             ):
                 rel = hook.relative_to(plugin_root)
