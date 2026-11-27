@@ -301,7 +301,7 @@ def test_symlink_outside_root_is_not_scanned(tmp_path):
 
 
 def test_multi_entry_flags_only_the_bad_module(tmp_path):
-    """Two modules, one valid and one R1: exactly one register MAJOR, naming ./b.js."""
+    """Two modules, one valid and one R1: one register MAJOR naming ./b.js plus the second-entry MAJOR."""
     # Native 2.1.332 refuses a second `modules` entry outright ("names one
     # hooks module per plugin", probe 2026-11-27), so this per-module MAJOR
     # can never land on a natively accepted plugin.
@@ -309,7 +309,11 @@ def test_multi_entry_flags_only_the_bad_module(tmp_path):
     report = HookValidationReport(hook_path=str(hooks_json))
     r = validate_hooks_data({"modules": ["./a.js", "./b.js"]}, tmp_path, report)
     majors = _msgs(r, "MAJOR")
-    assert len(majors) == 1 and "./b.js" in majors[0] and R1 in majors[0]
+    register_majors = [m for m in majors if R1 in m]
+    count_majors = [x.message for x in r.results if x.level == "MAJOR" and "one hooks module per plugin" in x.message]
+    assert len(register_majors) == 1 and "./b.js" in register_majors[0]
+    assert len(count_majors) == 1 and "2 entries" in count_majors[0]
+    assert len(majors) == 1
 
 
 # -- CLI exit codes ------------------------------------------------------------

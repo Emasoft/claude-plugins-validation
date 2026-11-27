@@ -872,9 +872,14 @@ _MOD_REGISTER_MAX_BYTES = 2 * 1024 * 1024
 # Severity per rejection code. Every R-code is an error exit (exit 1) of
 # `claude plugin validate` 2.1.332 on the 95 rejection fixtures, so MAJOR
 # (publish-blocking, the convention for oracle-probed CC errors); not CRITICAL
-# because the runtime effect is untested (TRDD-775XK7HE D1). Gate B.7 decides
-# whether a rule must drop to MINOR: a false MAJOR on an accepted mod is a
-# release blocker.
+# because the runtime effect is untested (TRDD-775XK7HE D1). Held-out gate B.7
+# (2026-11-27, mod-finder catalogue, native verdicts from claude 2.1.331): 0
+# R-codes on 9265 of the 9279 natively accepted modules not used for tuning
+# (14 not fetched), and R1 on both records where native printed "no export
+# named register" (2 catalogue fixtures; a lower bound, since native may stop
+# at an earlier error). R2-R7 never fired on real code, so their positive
+# evidence is the synthetic fixtures only. A false MAJOR on an accepted mod is a
+# release blocker: re-run the sweep before widening a rule.
 _MOD_REGISTER_SEVERITY: dict[str, str] = {code: "MAJOR" for code in ("R1", "R2", "R3", "R4", "R5", "R6", "R7")}
 
 
@@ -889,6 +894,18 @@ def validate_modules_entry(data: dict[str, Any], plugin_root: Path | None, repor
     if not modules:
         report.major("'modules' array is empty — a mod must list at least its hooks module (mods-reference.md)")
         return
+    if len(modules) > 1:
+        # Claude Code 2.1.332 refuses a hooks.json whose `modules` lists more than
+        # one hooks module ("names one hooks module per plugin; a second entry is
+        # refused", probe 2026-11-27, TRDD-775XK7HE follow-up); its directory check
+        # reports HOOKS_SCHEMA_INVALID for the same file. MAJOR, the convention for
+        # an oracle-probed CC error. No early return: each entry is still checked,
+        # so a broken entry is reported alongside the count.
+        report.major(
+            f"'modules' lists {len(modules)} entries — Claude Code allows one hooks module per plugin "
+            'and refuses a second entry ("names one hooks module per plugin; a second entry is refused", '
+            "probed on Claude Code 2.1.332)"
+        )
     # cwd-safety (adversarial review of c75e56c3): the inline-manifest path
     # passes a RELATIVE label (".claude-plugin/plugin.json"), so
     # Path(...).parent resolves against the CWD, making every finding
