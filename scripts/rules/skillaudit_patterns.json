@@ -460,7 +460,10 @@
         "\\b(?:env|printenv)\\b\\s*\\|\\s*(?:socat|netcat|ncat|nc)\\b",
         "\\b(?:curl|wget|nc|ncat|netcat|socat)\\b.{0,120}(?:\\$\\(\\s*|`\\s*)(?:env|printenv)(?:\\s+-0)?\\s*(?:[)`]|\\|\\s*\\w+)",
         "\\b(?:curl|wget|nc|ncat|netcat|socat)\\b.{0,120}/proc/(?:self|\\d+)/environ",
-        "/proc/(?:self|\\d+)/environ.{0,120}\\b(?:curl|wget|nc|ncat|netcat|socat)\\b"
+        "/proc/(?:self|\\d+)/environ.{0,120}\\b(?:curl|wget|nc|ncat|netcat|socat)\\b",
+        "(?:^|[\\s;&|(])(?:env|printenv|export\\s+-p|declare\\s+-x)\\s*>>?\\s*[\"']?(?:[~$.]|[\\w.-]*\\.\\w|/(?:[^d\\s]|d[^e\\s]|de[^v\\s]|dev[^/\\s]))[^\\s;&|)>]*(?:\\s*$|\\s*[;&|)]|\\s+[^\\s>])",
+        "^\\s*\\|\\s*(?:(?:curl|wget)\\b.{0,200}\\s(?:-d|-T|--(?:data(?:-binary|-raw|-ascii)?|json|upload-file|post-file|post-data))(?:\\s+|=)[\"']?@?-[\"']?(?:\\s|$)|(?:nc|ncat|netcat|socat)\\s+\\S)",
+        "(?:^|[\\s;&|(])(?:export\\s+-p|declare\\s+-x)\\s*\\|\\s*(?:curl|wget|socat|netcat|ncat|nc)\\b"
       ],
       "remediation": "Do not fingerprint the host environment (hostname, network interfaces, OS info, user info). If system information is needed for functionality, declare it as a required capability and document why."
     },
@@ -655,7 +658,9 @@
         "\\b(?:env|printenv)\\b\\s*\\|\\s*(?:socat|netcat|ncat|nc)\\b",
         "\\b(?:curl|wget|nc|ncat|netcat|socat)\\b.{0,120}(?:\\$\\(\\s*|`\\s*)(?:env|printenv)(?:\\s+-0)?\\s*(?:[)`]|\\|\\s*\\w+)",
         "\\b(?:curl|wget|nc|ncat|netcat|socat)\\b.{0,120}/proc/(?:self|\\d+)/environ",
-        "/proc/(?:self|\\d+)/environ.{0,120}\\b(?:curl|wget|nc|ncat|netcat|socat)\\b"
+        "/proc/(?:self|\\d+)/environ.{0,120}\\b(?:curl|wget|nc|ncat|netcat|socat)\\b",
+        "^\\s*\\|\\s*(?:(?:curl|wget)\\b.{0,200}\\s(?:-d|-T|--(?:data(?:-binary|-raw|-ascii)?|json|upload-file|post-file|post-data))(?:\\s+|=)[\"']?@?-[\"']?(?:\\s|$)|(?:nc|ncat|netcat|socat)\\s+\\S)",
+        "(?:^|[\\s;&|(])(?:export\\s+-p|declare\\s+-x)\\s*\\|\\s*(?:curl|wget|socat|netcat|ncat|nc)\\b"
       ],
       "remediation": "Never construct shell commands from dynamic input using string concatenation or template literals. Use parameterized APIs (e.g., execFile instead of exec, subprocess.run with array args instead of shell=True). Validate all inputs against strict allowlists. NOTE: the `$(...)` and backtick patterns now require a NON-empty argument after the binary name (was: bare-binary alone matched). This eliminates the Claude Code hook stdin idiom `input=$(cat)` FP, and bare markdown inline-code teaching tool names `\\`curl\\`` / `\\`ls\\``. The pipe/semicolon `(?:;|\\||&&)\\s*\\b(bash|...)` pattern stays intact for real shell metachar use, with markdown-table-cell FP handled in the markdown context classifier."
     },
