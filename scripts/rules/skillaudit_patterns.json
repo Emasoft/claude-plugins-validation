@@ -393,8 +393,8 @@
         "curl.*\\|\\s*(?:bash|sh|python|node|perl)",
         "wget.*\\|\\s*(?:bash|sh|python|node|perl)",
         "import\\(\\s*['\"]https?://",
-        "globalThis\\[.*\\]\\s*=",
-        "window\\[.*\\]\\s*="
+        "\\bglobalThis\\[(?:[^\\[\\]]|\\[[^\\]]*\\])+\\]\\s*=",
+        "\\bwindow\\[(?:[^\\[\\]]|\\[[^\\]]*\\])+\\]\\s*="
       ],
       "remediation": "Do not dynamically load code from external URLs (require(\"https://...\"), eval(fetch(...))). Pin all dependencies to specific versions. Never pipe curl/wget output to a shell interpreter. NOTE: well-known CDN host exclusions (cdn.jsdelivr.net / unpkg.com / esm.sh / etc.) are handled in the markdown classifier (not in the regex itself, to preserve RE2 compatibility — RE2 disallows negative lookahead). Pinned ESM imports from those known CDNs get suppressed at classifier-time."
     },
