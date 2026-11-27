@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -259,6 +260,25 @@ def test_stage_commit_and_push_pushes_only_to_selected_remote(mod, world, monkey
     assert "refs/tags/my-plugin--v1.0.1" in b_refs
     assert world.refs(world.bare_a) == a_before
     assert "git push --atomic plugin" in capsys.readouterr().out
+
+
+def test_pre_push_hook_child_sees_selected_remote_without_mutating_os_environ(mod, world, tmp_path, monkeypatch):
+    """The hook (which runs `publish.py --gate`) gets CPV_PUBLISH_REMOTE via the push env only.
+
+    Exporting it with `os.environ[...] =` inside the generated file is an ENV_INJECTION finding
+    (#231), so the value must reach the hook child through the push subprocess env instead.
+    """
+    monkeypatch.setenv("CPV_SKIP_GH_AUTH_CHECK", "1")
+    seen = tmp_path / "hook-saw-remote.txt"
+    hook = world.root / ".git" / "hooks" / "pre-push"
+    hook.write_text(f"#!/bin/sh\nprintf %s \"$CPV_PUBLISH_REMOTE\" > '{seen}'\n", encoding="utf-8")
+    hook.chmod(0o755)
+    # A global core.hooksPath would bypass .git/hooks; pin this repo to its own hooks dir.
+    _git(world.root, "config", "core.hooksPath", str(hook.parent))
+    mod._publish_remote_override = "plugin"
+    mod.stage_commit_and_push(world.root, "1.0.1", False)
+    assert seen.read_text(encoding="utf-8") == "plugin"
+    assert "CPV_PUBLISH_REMOTE" not in os.environ
 
 
 def test_stage_commit_and_push_dry_run_names_selected_remote(mod, world, capsys):

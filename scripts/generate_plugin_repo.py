@@ -4628,6 +4628,9 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
             # issue #224: the pre-push gate runs inside this call's wall clock.
             timeout=_PUSH_TIMEOUT_SEC,
             max_attempts=_PUSH_MAX_ATTEMPTS,
+            # The pre-push hook runs `publish.py --gate` as a child of this push: hand it the
+            # resolved remote through the child env only (os.environ stays untouched, #231).
+            env={**os.environ, _PUBLISH_REMOTE_ENV: publish_remote},
         )
     except subprocess.CalledProcessError as _push_exc:
         if _push_exc.stderr:
@@ -5355,9 +5358,11 @@ def main() -> int:
     _publish_remote_override = args.remote
     publish_remote = _publish_remote(root)
     # The pre-push hook runs `publish.py --gate` as a CHILD process of the push;
-    # exporting the resolved name makes that child use the same remote instead of
+    # the resolved name reaches that child through the push subprocess env (see
+    # stage_commit_and_push), so it uses the same remote instead of
     # falling back to origin.
-    os.environ[_PUBLISH_REMOTE_ENV] = publish_remote
+    # (os.environ is NOT mutated here: that is an ENV_INJECTION finding in the generated file,
+    # which fails the plugin own --strict skillaudit gate, issue #231.)
 
     # --install-hook mode: just set up the hook and exit
     if args.install_hook:

@@ -294,8 +294,13 @@ def test_notify_job_guarded_on_secret_presence() -> None:
     parsed = yaml.safe_load(gen_notify_marketplace_yml(_params()))
     job = parsed["jobs"]["notify"]
     assert job["env"]["HAS_MARKETPLACE_PAT"].strip() == "${{ secrets.MARKETPLACE_PAT != '' }}"
-    # The first step always runs (no if:) and reports the no-op when missing.
-    first = job["steps"][0]
+    # #286: the first step is the pinned checkout, gated on the secret so a repo without it
+    # still no-ops; it must precede anything that reads the workspace.
+    checkout = job["steps"][0]
+    assert str(checkout.get("uses", "")).startswith("actions/checkout@")
+    assert "HAS_MARKETPLACE_PAT" in checkout["if"]
+    # The next step always runs (no if:) and reports the no-op when missing.
+    first = job["steps"][1]
     assert first["name"] == "Check marketplace secret"
     assert "if" not in first
     # The dispatch + summary + plugin-info steps are gated on the secret.

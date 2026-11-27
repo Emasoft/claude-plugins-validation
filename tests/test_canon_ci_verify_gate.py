@@ -132,7 +132,8 @@ class TestCanonEmitsTheGate:
         # the defect.
         assert "[advisory] CI RED" in body
         assert "does not block the exit code" in body or "never changes the exit code" in body
-        assert "gh run view --log-failed" in body, "must name the follow-up command"
+        # #284: the follow-up command is pinned to the pushed repo with --repo {slug}.
+        assert "gh run view --repo {slug} --log-failed" in body, "must name the follow-up command"
         assert "CI IS RED" not in body, "the failure-shaped verdict label must be gone"
 
     def test_cannot_check_is_never_reported_as_green(self) -> None:

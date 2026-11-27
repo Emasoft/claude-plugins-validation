@@ -37,7 +37,13 @@ def _emitted_helpers() -> SimpleNamespace:
     end = body.index("\ndef ", body.index("def _remote_tag_exists("))
     snippet = body[start:end]
     # #254: the template resolves binaries through its module-level _exe(); same PATH lookup.
-    ns: dict = {"subprocess": subprocess, "Path": Path, "_exe": lambda name: shutil.which(name) or name}
+    # #284: remote selection goes through _publish_remote(); the default is origin.
+    ns: dict = {
+        "subprocess": subprocess,
+        "Path": Path,
+        "_exe": lambda name: shutil.which(name) or name,
+        "_publish_remote": lambda _root: "origin",
+    }
     exec(compile("from __future__ import annotations\n" + snippet, "emitted-helpers", "exec"), ns)  # noqa: S102
     return SimpleNamespace(**ns)
 

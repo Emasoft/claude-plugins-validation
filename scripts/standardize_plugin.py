@@ -3797,8 +3797,10 @@ _CSPELL_BASE_WORDS: tuple[str, ...] = (
     "linkifies",
     "pasteable",
     "reparented",
+    "retarget",
     "semvers",
     "sitecustomize",
+    "unconfigured",
     "unpushed",
     "unrunnable",
 )

@@ -47,6 +47,8 @@ def _generated_helper():
     ns: dict = {"Path": Path, "shutil": shutil, "subprocess": subprocess, "re": __import__("re")}
     # #254: the template resolves binaries through its module-level _exe(); same PATH lookup.
     ns["_exe"] = lambda name: shutil.which(name) or name
+    # #284: remote selection goes through _publish_remote(); the default is origin.
+    ns["_publish_remote"] = lambda _root: "origin"
     exec(compile(ast.Module(body=wanted, type_ignores=[]), "<generated>", "exec"), ns)  # noqa: S102
     return src, ns["_gh_secret_exists"]
 
