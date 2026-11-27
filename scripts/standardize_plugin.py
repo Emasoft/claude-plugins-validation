@@ -4648,8 +4648,10 @@ def fix_missing_files(
         # publish.py with the standard one and break its releases — the exact #128
         # breakage PSS reported. Best-effort: resolve_pipeline_profile falls back to
         # "standard" on any error, so a standard plugin is byte-identically unaffected.
-        from cpv_pipeline_profile import (
-            resolve_pipeline_profile,  # noqa: E402 — sibling import after the scripts/ path insert above
+        from cpv_pipeline_profile import (  # noqa: E402 — sibling import after the scripts/ path insert above
+            _VENDORED_VALIDATOR_SCRIPTS,
+            PROFILE_REMOTE_VALIDATION,
+            resolve_pipeline_profile,
         )
 
         profile = resolve_pipeline_profile(plugin_path)
@@ -4666,6 +4668,18 @@ def fix_missing_files(
         ]
 
         for rel_path, op_kind in process_set:
+            # A remote-validation plugin is de-vendored: it must NOT carry the vendored
+            # validator scripts (cpv_pipeline_profile._VENDORED_VALIDATOR_SCRIPTS, issue
+            # #118 defect 3). audit_standard_files already keeps them out of the MISSING
+            # set, but _FORCE_TEMPLATE_FILES is a blind overwrite list that bypasses the
+            # audit, so --force-templates would re-vendor cpv_network_resilience.py here.
+            if (
+                profile == PROFILE_REMOTE_VALIDATION
+                and rel_path.startswith("scripts/")
+                and rel_path.removeprefix("scripts/") in _VENDORED_VALIDATOR_SCRIPTS
+            ):
+                print(f"  {YELLOW}[skip]{NC} {rel_path} — remote-validation plugins are de-vendored (issue #118)")
+                continue
             gen_func_name = _FILE_TO_GENERATOR[rel_path]
             gen_func = getattr(gen_module, gen_func_name)
 
