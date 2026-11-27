@@ -31,6 +31,7 @@ import tokenize
 from typing import Final, Literal
 
 from _skillaudit_markdown_context import _is_charset_detection_vocab  # type: ignore[import-not-found]
+from _skillaudit_shell_context import _shell_line_is_env_read_to_net_sink  # type: ignore[import-not-found]
 
 ContextVerdict = Literal["safe_literal", "safe_doc", "code_fence_neutral", "suspect", "unknown"]
 
@@ -3546,6 +3547,59 @@ def classify(
     return "unknown"
 
 
+# TRDD-I88O4Y9K — shell interpreters whose ``-c <string>`` argument is a shell command line.
+_SHELL_INTERPRETER_NAMES: Final[frozenset[str]] = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash"})
+
+
+def _const_str(node: ast.AST) -> str | None:
+    """The value of a string Constant, or of a ``+`` concatenation of them; else None."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _const_str(node.left), _const_str(node.right)
+        if left is not None and right is not None:
+            return left + right
+    return None
+
+
+def _literal_shell_command_text(call: ast.Call, qualname: str) -> str | None:
+    """The literal shell command line a shell-reaching call hands to ``/bin/sh -c``, or None.
+
+    Covers the always-shell string sinks and ``shell=<possibly true>`` with a literal string,
+    and an argv list ``[<sh|bash|…>, "-c", "<literal>"]`` (the shell is explicit there)."""
+    first = call.args[0]
+    if isinstance(first, (ast.List, ast.Tuple)):
+        elts = first.elts
+        if len(elts) >= 3:
+            interp, flag, text = _const_str(elts[0]), _const_str(elts[1]), _const_str(elts[2])
+            if (
+                interp is not None
+                and interp.rsplit("/", 1)[-1] in _SHELL_INTERPRETER_NAMES
+                and flag is not None
+                and re.fullmatch(r"-[a-z]*c[a-z]*", flag)
+            ):
+                return text
+        return None
+    if qualname in _ALWAYS_SHELL_STRING_SINKS or _shell_kwarg_is_possibly_true(call):
+        return _const_str(first)
+    return None
+
+
+def _call_pipes_env_dump_to_net_client(call: ast.Call, qualname: str) -> bool:
+    """True iff the shell command LITERAL of this call reads the environment and hands it to a
+    non-loopback network client (``env | curl …``, ``printenv | nc host 9``).
+
+    WHY (TRDD-I88O4Y9K): ``_classify_call`` clears a pure-literal shell command as ``safe_literal``
+    because no attacker-controlled bytes reach the shell. That reasoning does not cover a literal
+    that IS the attack: the program itself ships its whole environment off the machine, so the
+    CMD_INJECTION finding came back info/suppressed in production code. Reuses the shell-side
+    recogniser so both classifiers agree on what an env-to-network pipe is."""
+    text = _literal_shell_command_text(call, qualname)
+    if text is None:
+        return False
+    return any(_shell_line_is_env_read_to_net_sink(chunk) for chunk in (text, *text.splitlines()))
+
+
 def _classify_call(call: ast.Call, qualname: str) -> ContextVerdict | None:
     """Classify a known shell/exec call by its argument shape.
 
@@ -3586,6 +3640,12 @@ def _classify_call(call: ast.Call, qualname: str) -> ContextVerdict | None:
             return "suspect"
 
         first = call.args[0]
+
+        # TRDD-I88O4Y9K — a literal shell command that pipes the environment to a
+        # non-loopback network client is exfiltration, not a "pure literal = safe" case:
+        # keep it visible at declared severity before any safe_literal verdict below.
+        if _call_pipes_env_dump_to_net_client(call, qualname):
+            return "suspect"
 
         # ALWAYS-shell string sinks (os.system / os.popen / subprocess.getoutput
         # / subprocess.getstatusoutput / commands.getoutput /
