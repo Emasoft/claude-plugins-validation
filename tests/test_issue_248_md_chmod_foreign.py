@@ -355,12 +355,20 @@ class TestLinear:
     """The scan grows linearly with the file (the rejected design was quadratic)."""
 
     @pytest.mark.parametrize("risky", [False, True])
-    def test_doubling_the_file_at_most_triples_time(self, tmp_path: Path, risky: bool) -> None:
-        """Time at 2N chmod fences is at most ~3x time at N (best of 3)."""
+    def test_quadrupling_the_file_at_most_octuples_time(self, tmp_path: Path, risky: bool) -> None:
+        """Time at 4N chmod fences is at most 8x time at N (best of 3).
+
+        Why 4N and 8x, not 2N and 3x: linear predicts 4x and quadratic 16x, so the
+        bound sits a factor of 2 from each. The old 2N/3x bound (linear 2x,
+        quadratic 4x) left a 1.5x margin, and under the full parallel suite (the
+        publish fork-parity probe, parallel xdist workers) the larger run, timed later
+        under heavier contention, measured 3.08x and 3.64x while the same test
+        alone measured 2.05x. That was CPU contention, not quadratic growth.
+        """
         root = _make_plugin(tmp_path)
-        small = _best_of_3(_big_doc(1000, risky), root)
+        small = _best_of_3(_big_doc(500, risky), root)
         large = _best_of_3(_big_doc(2000, risky), root)
-        assert large <= 3 * small + 0.05, (small, large)
+        assert large <= 8 * small + 0.05, (small, large)
 
 
 if __name__ == "__main__":
