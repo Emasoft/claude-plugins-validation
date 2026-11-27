@@ -404,3 +404,101 @@ class TestWP4ConstantsMarketplace:
             and ("reserved" in r.message or "impersonate" in r.message or "refused" in r.message)
         ]
         assert not blocking, [(r.level, r.message) for r in blocking]
+
+
+# ---------------------------------------------------------------------------
+# WP2 — validate_plugin.py manifest `types` key (v2.1.287)
+# ---------------------------------------------------------------------------
+from validate_plugin import validate_manifest  # noqa: E402
+
+_WP2_BASE_MANIFEST = {
+    "name": "test-plugin",
+    "version": "1.0.0",
+    "description": "WP2 spec-sync fixture",
+    "author": {"name": "Test Author", "email": "test@example.com"},
+}
+
+
+def _wp2_write_plugin(tmp_path: Path, manifest: dict, files=()) -> Path:
+    """Materialize a minimal plugin: .claude-plugin/plugin.json + extra files."""
+    root = tmp_path / "test-plugin"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest))
+    for rel, content in files:
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    return root
+
+
+class TestWP2ManifestTypes:
+    """WP2 (TRDD-PHQZ1XAD): v2.1.287 `types` manifest key (mods .d.ts declaration path)."""
+
+    def test_types_existing_dts_no_findings(self, tmp_path):
+        """types pointing at an existing in-root .d.ts: no MAJOR, no unknown-field warning."""
+        root = _wp2_write_plugin(
+            tmp_path,
+            {**_WP2_BASE_MANIFEST, "types": "./types/index.d.ts"},
+            files=[("types/index.d.ts", "export declare const state: string;\n")],
+        )
+        report = ValidationReport()
+        validate_manifest(root, report)
+        assert not report.has_major
+        unknown = [
+            r.message
+            for r in report.results
+            if r.level == "WARNING" and "Unknown manifest field" in r.message
+        ]
+        assert not any("types" in m for m in unknown)
+
+    def test_types_escaping_root_is_major(self, tmp_path):
+        """types pointing outside the plugin root -> MAJOR (traversal shape)."""
+        root = _wp2_write_plugin(tmp_path, {**_WP2_BASE_MANIFEST, "types": "./../outside.d.ts"})
+        report = ValidationReport()
+        validate_manifest(root, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("types" in m for m in majors)
+
+    def test_types_missing_file_is_major(self, tmp_path):
+        """types naming a .d.ts that is not on disk -> MAJOR (v2.1.283 shape)."""
+        root = _wp2_write_plugin(tmp_path, {**_WP2_BASE_MANIFEST, "types": "./types/index.d.ts"})
+        report = ValidationReport()
+        validate_manifest(root, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("types" in m and "does not exist" in m for m in majors)
+
+    def test_types_directory_named_dts_is_major(self, tmp_path):
+        """types naming a DIRECTORY called index.d.ts -> MAJOR (is_file, not exists)."""
+        root = _wp2_write_plugin(
+            tmp_path,
+            {**_WP2_BASE_MANIFEST, "types": "./types/index.d.ts"},
+            files=[("types/index.d.ts/placeholder.txt", "x\n")],
+        )
+        report = ValidationReport()
+        validate_manifest(root, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("types" in m and "does not exist" in m for m in majors)
+
+    def test_types_non_string_is_major(self, tmp_path):
+        """types that is not a string -> MAJOR."""
+        root = _wp2_write_plugin(tmp_path, {**_WP2_BASE_MANIFEST, "types": 5})
+        report = ValidationReport()
+        validate_manifest(root, report)
+        majors = [r.message for r in report.results if r.level == "MAJOR"]
+        assert any("types" in m and "must be a string" in m for m in majors)
+
+    def test_manifest_without_types_validates_clean(self, tmp_path):
+        """Positive control: the same manifest minus types draws no MAJOR or CRITICAL."""
+        root = _wp2_write_plugin(tmp_path, dict(_WP2_BASE_MANIFEST))
+        report = ValidationReport()
+        validate_manifest(root, report)
+        assert not report.has_major
+        assert not report.has_critical
+
+    def test_bogus_name_shape_still_fires(self, tmp_path):
+        """Positive control: the name pipeline still runs - a name with a space draws its naming-pattern CRITICAL."""
+        root = _wp2_write_plugin(tmp_path, {**_WP2_BASE_MANIFEST, "name": "my plugin"})
+        report = ValidationReport()
+        validate_manifest(root, report)
+        criticals = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("my plugin" in m for m in criticals)

@@ -1499,6 +1499,9 @@ def validate_manifest(
         # a root-level settings.json in the plugin takes precedence. WARNING-only
         # unknown-field check — no settings-shape validation added (v2.1.284 sync).
         "settings",
+        # v2.1.287 Claude Mods (plugins-manifest-reference.md:146) — path to a
+        # `.d.ts` file declaring a mod's `$.state` values / `$` nouns.
+        "types",
     }
     for key in manifest.keys():
         if key not in known_fields:
@@ -1779,6 +1782,55 @@ def validate_manifest(
                     "target directory is missing (plugins-reference.md:568-571)",
                     ".claude-plugin/plugin.json",
                 )
+
+    # v2.1.287 mods `types` key (plugins-manifest-reference.md:146) — path to a
+    # `.d.ts` file. CC requires it only when the mod uses `$.state`/adds a
+    # namespace, which CPV cannot know statically, so only the shape is checked:
+    # string, `./`-prefix, traversal, extension, on-disk existence. The
+    # path_fields walk above does NOT cover `types` (not in path_fields). Same
+    # MAJOR severity shape as the CC-2.1.283 existence fields.
+    if "types" in manifest:
+        _types_val = manifest["types"]
+        if not isinstance(_types_val, str):
+            report.major(
+                f"Field 'types' must be a string path, got {type(_types_val).__name__}",
+                ".claude-plugin/plugin.json",
+            )
+        elif not _types_val.startswith("./"):
+            report.major(
+                f"Field 'types' path must start with './': {_types_val}",
+                ".claude-plugin/plugin.json",
+            )
+        elif path_has_traversal(_types_val):
+            report.major(
+                f"Field 'types' contains path-traversal segment '..': {_types_val} — "
+                "paths escaping the plugin root do not resolve post-install "
+                "(plugins-reference.md:568-571)",
+                ".claude-plugin/plugin.json",
+            )
+        else:
+            if not _types_val.endswith(".d.ts"):
+                report.major(
+                    f"Field 'types' must point to a .d.ts file (mod type "
+                    f"declarations, plugins-manifest-reference.md:146): {_types_val}",
+                    ".claude-plugin/plugin.json",
+                )
+            _types_resolved = (plugin_root / _types_val).resolve()
+            try:
+                _types_resolved.relative_to(plugin_root.resolve())
+            except ValueError:
+                pass  # out-of-plugin already MAJOR'd by traversal branch
+            else:
+                # is_file(), not exists(): a DIRECTORY named `types/index.d.ts/`
+                # passed exists() but CC would fail to load it as a declaration
+                # file (adversarial-review finding F5).
+                if not _types_resolved.is_file():
+                    report.major(
+                        f"Field 'types' path does not exist: {_types_val} — a mod "
+                        "declaring `types` must ship the .d.ts file "
+                        "(plugins-manifest-reference.md:146)",
+                        ".claude-plugin/plugin.json",
+                    )
 
     # Inline `userConfig` validation was removed here (v2.106): it duplicated
     # `validate_user_config_structure()` (called below at the end of this
