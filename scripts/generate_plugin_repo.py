@@ -1613,8 +1613,11 @@ Modes:
   --print-gates           Print the numbered pipeline stage list and exit 0.
                           Pure information: no side effects, no repo lookup.
   --install-hook          Install git-hooks/pre-push into .git/hooks/ and set core.hooksPath.
-  --install-branch-rules  Apply the cpv-branch-rules GitHub ruleset to the origin
-                          (server-side CI enforcement — run once after first push).
+  --install-branch-rules  Apply the cpv-branch-rules GitHub ruleset to the GitHub repo of
+                          the publish remote (server-side CI enforcement — run once
+                          after first push).
+  --remote NAME           Git remote to publish to (default: $CPV_PUBLISH_REMOTE, else
+                          origin). Must already be configured in this repository.
   (no flag)               Full release pipeline (15 stages, fail-fast). The bump type
                           is AUTO-DETECTED via `git-cliff --bumped-version` from the
                           conventional commits on HEAD.
@@ -1657,7 +1660,7 @@ public and can never abort it): verify CI is green, prove the release installs.
 Gate stages (--gate mode, called by pre-push hook):
    G0. Orchestrator check — direct `git push` is blocked; only publish.py
        may initiate a push (verified via process ancestry, NOT env vars).
-   G1. Version bump check (local vs remote, auto-detects origin/HEAD)
+   G1. Version bump check (local vs remote, auto-detects <publish remote>/HEAD)
    G2. Lint (ruff)
    G2b. Copy-paste check (jscpd, parity with ci.yml Mega-Linter COPYPASTE_JSCPD;
         WARNs+skips if jscpd/npx unavailable so a push is never false-blocked)
@@ -1950,18 +1953,87 @@ def _parse_owner_repo_from_remote(remote_url: str) -> tuple[str, str] | None:
     return match.group(1), match.group(2)
 
 
-def _resolve_owner_repo(plugin_root: Path) -> tuple[str, str]:
-    """Read remote.origin.url, parse (owner, repo). Exit 1 on failure."""
+# Issue #284: the release target used to be a hardcoded `origin`, so a plugin
+# whose publishable repo sits behind another remote (a fork, a mirror, a renamed
+# remote) could not be released. The remote is chosen by --remote, then
+# $CPV_PUBLISH_REMOTE, then the default `origin`.
+# remote.pushDefault is deliberately NOT honoured: it is a repo- or user-wide
+# setting that would silently retarget an IRREVERSIBLE release push without the
+# operator naming the remote on this run (owner decision pending).
+_PUBLISH_REMOTE_ENV = "CPV_PUBLISH_REMOTE"
+_REMOTE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
+_publish_remote_override: str | None = None
+_publish_remote_cache: str | None = None
+
+
+def _remote_url(root: Path, name: str) -> str:
+    """The configured URL of remote `name`, or "" when it is not configured."""
     result = subprocess.run(
-        [_exe("git"), "config", "--get", "remote.origin.url"],
-        cwd=str(plugin_root), capture_output=True, text=True, timeout=10, check=False,
+        [_exe("git"), "config", "--get", f"remote.{name}.url"],
+        cwd=str(root), capture_output=True, text=True, timeout=10, check=False,
     )
-    if result.returncode != 0 or not result.stdout.strip():
-        cprint(f"  {RED}Could not read remote.origin.url. Run: git remote add origin <url>{NC}")
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _publish_remote_source() -> str:
+    """Where the publish remote name came from, for the pre-release banner."""
+    if _publish_remote_override is not None:
+        return "--remote"
+    if os.environ.get(_PUBLISH_REMOTE_ENV):
+        return f"${_PUBLISH_REMOTE_ENV}"
+    return "default"
+
+
+def _publish_remote(root: Path) -> str:
+    """Name of the git remote this run publishes to (--remote, $CPV_PUBLISH_REMOTE, else origin).
+
+    An EXPLICIT name must be well-formed (it ends up in a `git push` argv, so a
+    leading `-` must never get through) and configured; otherwise exit 1 with the
+    fix. The default is returned unchecked, which keeps the behaviour of a repo
+    with no origin exactly as it was.
+    """
+    global _publish_remote_cache
+    if _publish_remote_cache is not None:
+        return _publish_remote_cache
+    explicit = _publish_remote_override
+    if explicit is None:
+        # An empty variable counts as unset; an empty --remote does not (it is invalid).
+        explicit = os.environ.get(_PUBLISH_REMOTE_ENV) or None
+    if explicit is None:
+        return "origin"
+    source = _publish_remote_source()
+    if not _REMOTE_NAME_RE.fullmatch(explicit):
+        cprint(f"  {RED}Invalid publish remote name {explicit!r} (from {source}).{NC}")
+        cprint(f"  {YELLOW}List the configured remotes with: git remote{NC}")
         sys.exit(1)
-    parsed = _parse_owner_repo_from_remote(result.stdout.strip())
+    if not _remote_url(root, explicit):
+        cprint(f"  {RED}Publish remote {explicit!r} (from {source}) is not configured in this repository.{NC}")
+        cprint(f"  {YELLOW}Fix: git remote add {explicit} <url>   (configured remotes: git remote){NC}")
+        sys.exit(1)
+    _publish_remote_cache = explicit
+    return explicit
+
+
+def _describe_publish_remote(root: Path) -> None:
+    """Print the release target (remote, source, URL, owner/repo) before any stage runs."""
+    name = _publish_remote(root)
+    url = _remote_url(root, name)
+    parsed = _parse_owner_repo_from_remote(url)
+    cprint(f"{BOLD}Publish target:{NC} remote {name} (selected by {_publish_remote_source()})")
+    cprint(f"  URL:        {url or '(not configured)'}")
+    cprint(f"  owner/repo: {f'{parsed[0]}/{parsed[1]}' if parsed else 'unknown'}")
+
+
+def _resolve_owner_repo(plugin_root: Path) -> tuple[str, str]:
+    """Read the publish remote's URL, parse (owner, repo). Exit 1 on failure."""
+    name = _publish_remote(plugin_root)
+    url = _remote_url(plugin_root, name)
+    if not url:
+        cprint(f"  {RED}Could not read remote.{name}.url. Run: git remote add {name} <url>{NC}")
+        sys.exit(1)
+    parsed = _parse_owner_repo_from_remote(url)
     if parsed is None:
-        cprint(f"  {RED}Could not parse owner/repo from remote URL: {result.stdout.strip()!r}{NC}")
+        cprint(f"  {RED}Could not parse owner/repo from remote URL: {url!r}{NC}")
         sys.exit(1)
     return parsed
 
@@ -2336,14 +2408,14 @@ def install_hook(root: Path) -> int:
     return 0
 
 
-def _get_origin_slug(root: Path) -> str | None:
-    """Return OWNER/REPO parsed from the current repo's origin remote, or None."""
+def _get_remote_slug(root: Path) -> str | None:
+    """Return OWNER/REPO parsed from the publish remote's URL, or None."""
     try:
         r = subprocess.run(
             # timeout= for consistency with every sibling git helper in this
             # file (audit row 18): a bare `git config` read is instant, and a
             # hang here would stall the branch-rules install with no bound.
-            [_exe("git"), "config", "--get", "remote.origin.url"],
+            [_exe("git"), "config", "--get", f"remote.{_publish_remote(root)}.url"],
             capture_output=True, text=True, cwd=str(root), check=False, timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
@@ -2369,9 +2441,9 @@ def _get_origin_slug(root: Path) -> str | None:
 
 
 def install_branch_rules(root: Path) -> int:
-    """Apply the cpv-branch-rules ruleset to the repo's GitHub origin.
+    """Apply the cpv-branch-rules ruleset to the repo's GitHub repo (the publish remote).
 
-    Auto-detects the OWNER/REPO slug from `git config remote.origin.url` and
+    Auto-detects the OWNER/REPO slug from `git config remote.<name>.url` and
     shells out to `uvx cpv-setup-branch-rules` so downstream plugins do not
     need to vendor setup_branch_rules.py locally. This is the server-side
     gate that enforces CI as a required status check — the local pre-push
@@ -2379,10 +2451,10 @@ def install_branch_rules(root: Path) -> int:
     enforced by GitHub itself.
     """
     cprint(f"\n{BOLD}Installing branch-protection ruleset...{NC}")
-    slug = _get_origin_slug(root)
+    slug = _get_remote_slug(root)
     if slug is None:
-        cprint(f"  {RED}Could not read origin remote URL — skipping.{NC}")
-        cprint(f"  {YELLOW}Set `git remote add origin <url>` first, then retry.{NC}")
+        cprint(f"  {RED}Could not read the URL of remote {_publish_remote(root)!r} — skipping.{NC}")
+        cprint(f"  {YELLOW}Set `git remote add {_publish_remote(root)} <url>` first, then retry.{NC}")
         return 1
     cprint(f"  Target repo: {slug}")
     try:
@@ -2917,26 +2989,27 @@ def run_gate(root: Path) -> int:
         cprint(f"  {GREEN}Orchestrated by publish.py.{NC}")
 
     # Gate 1: Version bump check — local vs remote
-    # Resolves origin/HEAD dynamically so the gate works on both `main` and
+    # Resolves <publish remote>/HEAD dynamically so the gate works on both `main` and
     # `master` default branches (and any other name). If none of the
     # candidates return a remote plugin.json, it's a first push and we allow.
     cprint(f"\n{BLUE}[G1] Checking version bump...{NC}")
     local_ver = get_current_version(root)
     if local_ver:
-        # Try origin/HEAD first (most reliable), then explicit main/master
+        # Try <publish remote>/HEAD first (most reliable), then explicit main/master
+        gate_remote = _publish_remote(root)
         candidates: list[str] = []
         try:
             sym = subprocess.run(
-                [_exe("git"), "symbolic-ref", "refs/remotes/origin/HEAD"],
+                [_exe("git"), "symbolic-ref", f"refs/remotes/{gate_remote}/HEAD"],
                 capture_output=True, text=True, cwd=str(root), timeout=10,
             )
             if sym.returncode == 0 and sym.stdout.strip():
-                # Output looks like "refs/remotes/origin/main"
+                # Output looks like "refs/remotes/<remote>/main"
                 branch = sym.stdout.strip().split("/")[-1]
-                candidates.append(f"origin/{branch}")
+                candidates.append(f"{gate_remote}/{branch}")
         except (OSError, subprocess.SubprocessError):
             pass
-        for fallback in ("origin/main", "origin/master"):
+        for fallback in (f"{gate_remote}/main", f"{gate_remote}/master"):
             if fallback not in candidates:
                 candidates.append(fallback)
         remote_ver: str | None = None
@@ -3744,7 +3817,7 @@ def _gh_secret_exists(plugin_root: Path, secret_name: str) -> bool | None:
     if gh is None:
         return None
     # Why: issue #239 — without --repo, gh infers the repo from cwd/remotes and can
-    # query a different repo than the one being released. Pin it to the origin
+    # query a different repo than the one being released. Pin it to the publish remote
     # slug; no slug or a gh failure = cannot check (None), never a false "absent".
     slug = _current_repo_slug(plugin_root)
     if not slug:
@@ -3760,8 +3833,8 @@ def _gh_secret_exists(plugin_root: Path, secret_name: str) -> bool | None:
 
 
 def _current_repo_slug(plugin_root: Path) -> str | None:
-    """Return owner/repo slug for current git origin, or None."""
-    r = subprocess.run([_exe("git"), "remote", "get-url", "origin"], cwd=str(plugin_root),
+    """Return owner/repo slug for the publish remote, or None."""
+    r = subprocess.run([_exe("git"), "remote", "get-url", _publish_remote(plugin_root)], cwd=str(plugin_root),
                        capture_output=True, text=True, timeout=30)
     if r.returncode != 0:
         return None
@@ -3992,14 +4065,15 @@ def stage_consistency(root: Path) -> None:
     cprint(f"  {GREEN}Consistent.{NC}")
 
 def _read_remote_version(plugin_root: Path) -> str | None:
-    """Read .claude-plugin/plugin.json's `version` from origin/master (or main).
+    """Read .claude-plugin/plugin.json's `version` from <publish remote>/master (or main).
 
     Idempotency baseline: the publish pipeline reads the REMOTE version, not
     the local one, so an interrupted publish that already bumped + committed
     locally cannot double-bump on re-run. Returns None when offline / no
     remote ref / file missing — caller must fall back to local baseline.
     """
-    for ref in ("origin/master", "origin/main", "origin/HEAD"):
+    remote = _publish_remote(plugin_root)
+    for ref in (f"{remote}/master", f"{remote}/main", f"{remote}/HEAD"):
         try:
             r = subprocess.run(
                 [_exe("git"), "show", f"{ref}:.claude-plugin/plugin.json"],
@@ -4082,7 +4156,7 @@ def _remote_tag_state(root: Path, tag: str) -> bool | None:
     """
     try:
         r = subprocess.run(
-            [_exe("git"), "ls-remote", "--tags", "origin", f"refs/tags/{tag}"],
+            [_exe("git"), "ls-remote", "--tags", _publish_remote(root), f"refs/tags/{tag}"],
             capture_output=True, text=True, cwd=str(root),
             check=False, timeout=30,
         )
@@ -4146,7 +4220,7 @@ def _ensure_tag_at_head(root: Path, tag_name: str, message: str) -> bool:
     the tree the gates had just validated.
 
     FAIL-CLOSED. The tag is moved ONLY on the remote's POSITIVE answer that it is
-    unpushed. A tag already on origin is immutable here, and an unreachable
+    unpushed. A tag already on the publish remote is immutable here, and an unreachable
     remote is not consent — an unanswered `ls-remote` must never be read as "the
     tag is not published".
 
@@ -4177,7 +4251,7 @@ def _ensure_tag_at_head(root: Path, tag_name: str, message: str) -> bool:
     remote_state = _remote_tag_state(root, tag_name)
     if remote_state is None:
         cprint(f"  {RED}Local tag {tag_name} points at {tag_sha[:8]} (HEAD {head_sha[:8]}) "
-               f"and origin's tags cannot be read (ls-remote failed). REFUSING to move "
+               f"and the publish remote's tags cannot be read (ls-remote failed). REFUSING to move "
                f"the tag — that is only safe when the remote confirms it is unpushed. "
                f"Re-run once the remote is reachable.{NC}")
         return False
@@ -4200,7 +4274,7 @@ def stage_bump(root: Path, new_ver: str, dry_run: bool) -> None:
     Recovery semantics: when a previous publish was interrupted between the
     local commit+tag and the push (transient network failure during git push,
     pre-push hook reject, etc.), the local repo is at the bumped version while
-    origin is one minor behind. Re-running publish.py would DOUBLE-BUMP
+    the publish remote is one minor behind. Re-running publish.py would DOUBLE-BUMP
     (read-local-then-add-1 → next minor on top of the already-bumped local).
     The fix: read REMOTE plugin.json as baseline, infer bump type from
     local-vs-remote delta, and skip the bump entirely when local already
@@ -4270,14 +4344,14 @@ def detect_bump_type(root: Path) -> str:
     """Auto-detect the next bump type from conventional commits via git-cliff.
 
     Runs `git-cliff --bumped-version` and compares the predicted version to
-    the REMOTE one (origin/master) to determine major/minor/patch. Falls back
+    the REMOTE one (<publish remote>/master) to determine major/minor/patch. Falls back
     to 'patch' on any failure (git-cliff missing, repo empty, parse error) so
     the cornerstone rule — every push is a bump — is never violated.
 
     Idempotency: when the local repo already has a release commit (interrupted
     publish), reading local plugin.json would over-shoot the bump (current is
     already the bumped version, git-cliff would compute current+1). Reading
-    remote/origin gives the true baseline.
+    the remote gives the true baseline.
 
     Conventional commit mapping (git-cliff defaults):
       feat:                 -> minor
@@ -4434,6 +4508,7 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     """
     cprint(f"\n{BOLD}[14/15] Committing and pushing...{NC}")
     tag = f"v{new_ver}"
+    publish_remote = _publish_remote(root)  # issue #284: never a hardcoded origin
     # The DEPENDENCY-RESOLUTION tag. Since Claude Code 2.1.110 a version-constrained
     # dependency ({"name": "<plugin>", "version": ">=1.2"}) is resolved by listing this
     # repo's tags, keeping only those starting with "<plugin>--v", and fetching the
@@ -4469,7 +4544,7 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
             cprint(f"  Would skip dependency tag (already exists locally): {dep_tag}")
         else:
             cprint(f"  Would tag (dependency resolution): {dep_tag}")
-        cprint(f"  Would push (atomic): origin {' '.join(push_refs)}")
+        cprint(f"  Would push (atomic): {publish_remote} {' '.join(push_refs)}")
         return
 
     if head_subject == expected_subject and tree_clean:
@@ -4542,14 +4617,14 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     # transaction in the wire protocol; the server rolls back if any ref
     # update fails. git_with_retry still wraps the call so transient
     # network hiccups (4xx-class permanent errors fall through immediately).
-    cprint(f"  {BLUE}$ git push --atomic origin {' '.join(push_refs)}{NC}")
+    cprint(f"  {BLUE}$ git push --atomic {publish_remote} {' '.join(push_refs)}{NC}")
     # capture_output MUST stay True (the default): the transient classifier
     # reads result.stderr, and with capture_output=False stderr is None, so
     # every failure classified as permanent and the release push could never
     # retry a network blip. Echo the captured stderr so nothing is swallowed.
     try:
         _push_res = git_with_retry(
-            ["git", "push", "--atomic", "origin", *push_refs],
+            ["git", "push", "--atomic", publish_remote, *push_refs],
             cwd=str(root),
             # issue #224: the pre-push gate runs inside this call's wall clock.
             timeout=_PUSH_TIMEOUT_SEC,
@@ -4577,7 +4652,7 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
         else:
             cprint(f"  {YELLOW}Could NOT verify {_verify_tag} on remote (ls-remote found "
                    f"nothing, or the network was unreachable).{NC}")
-            cprint(f"  {YELLOW}  Check with: git ls-remote --tags origin '*{_verify_tag}'{NC}")
+            cprint(f"  {YELLOW}  Check with: git ls-remote --tags {publish_remote} '*{_verify_tag}'{NC}")
 
 def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     """Step 15: Create GitHub release via gh CLI.
@@ -4615,7 +4690,9 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
             notes_usable = False
     # Passing --notes-file and --generate-notes together is undefined across gh
     # versions (some concatenate, some override) — never both.
-    args = ["gh", "release", "create", tag, "--title", tag]
+    # Issue #284: --repo pins the release to the publish remote repo; without it gh
+    # infers the repo from cwd and can create the release on a different one.
+    args = ["gh", "release", "create", tag, "--title", tag, "--repo", f"{owner}/{repo}"]
     if notes_usable:
         args.extend(["--notes-file", str(notes_file)])
     else:
@@ -4988,17 +5065,26 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
         return
     sha = head.stdout.strip()
 
+    # Issue #284: pin gh to the publish remote repo. Without --repo gh infers the
+    # repo from cwd and can report CI of a DIFFERENT repo than the one released.
+    # No slug = nothing to pin to = UNVERIFIED, never a false green.
+    slug = _current_repo_slug(root)
+    if slug is None:
+        cprint(f"  {YELLOW}UNVERIFIED - cannot read the publish remote URL, cannot check CI.{NC}")
+        cprint(f"  {YELLOW}  The release IS published; verify manually.{NC}")
+        return
+
     deadline = time.monotonic() + CI_VERIFY_TIMEOUT_S
     while True:
         try:
             listed = subprocess.run(
-                [_exe("gh"), "run", "list", "--commit", sha, "--limit", "20",
+                [_exe("gh"), "run", "list", "--repo", slug, "--commit", sha, "--limit", "20",
                  "--json", "name,status,conclusion,headBranch"],
                 cwd=str(root), capture_output=True, text=True, timeout=120,
             )
         except subprocess.TimeoutExpired:
             cprint(f"  {YELLOW}UNVERIFIED - `gh run list` timed out (>120s).{NC}")
-            cprint(f"  {YELLOW}  Verify manually: gh run list --commit {sha}{NC}")
+            cprint(f"  {YELLOW}  Verify manually: gh run list --repo {slug} --commit {sha}{NC}")
             return
         if listed.returncode != 0:
             cprint(f"  {YELLOW}UNVERIFIED - `gh run list` exited {listed.returncode}.{NC}")
@@ -5023,7 +5109,7 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
             cprint(f"  {YELLOW}UNVERIFIED - still running after {CI_VERIFY_TIMEOUT_S}s.{NC}")
             # Full sha on purpose: `gh run list --commit` with a short sha
             # silently matches nothing and exits 0.
-            cprint(f"  {YELLOW}  Check with: gh run list --commit {sha}{NC}")
+            cprint(f"  {YELLOW}  Check with: gh run list --repo {slug} --commit {sha}{NC}")
             return
         time.sleep(15)
 
@@ -5046,14 +5132,14 @@ def stage_verify_ci_green(root: Path, dry_run: bool) -> None:
         cprint(f"  {RED}  publish a follow-up patch; do NOT mute the check.{NC}")
         # Two steps, pasteable as written: `gh run view` has no --commit flag,
         # and `gh run list --commit` needs the FULL sha (short sha = silent []).
-        cprint(f"  {RED}  Logs: gh run list --commit {sha}{NC}")
-        cprint(f"  {RED}        then: gh run view --log-failed <run-id>{NC}")
+        cprint(f"  {RED}  Logs: gh run list --repo {slug} --commit {sha}{NC}")
+        cprint(f"  {RED}        then: gh run view --repo {slug} --log-failed <run-id>{NC}")
         return
 
     if unknown:
         names = ", ".join(sorted({str(r.get("name", "?")) for r in unknown}))
         cprint(f"  {YELLOW}? CI verdict UNKNOWN on {sha[:8]}: run cancelled and no successor found - not checked ({names}).{NC}")
-        cprint(f"  {YELLOW}  Verify manually: gh run list --commit {sha}{NC}")
+        cprint(f"  {YELLOW}  Verify manually: gh run list --repo {slug} --commit {sha}{NC}")
         return
 
     names = ", ".join(sorted({str(r.get("name", "?")) for r in runs}))
@@ -5101,6 +5187,12 @@ def _resolve_ci_run_successors(root: Path, sha: str, cancelled_runs: list[dict])
     which `classify_ci_runs` treats as "no successor found".
     """
     result: dict[str, bool] = {}
+    # Issue #284: pin gh to the publish remote repo (no --repo = gh infers it from
+    # cwd and may query a different repo). No slug = no successor can be proven,
+    # so every cancelled run stays UNKNOWN - never a false green.
+    slug = _current_repo_slug(root)
+    if slug is None:
+        return result
     for r in cancelled_runs:
         name = str(r.get("name", "?"))
         if name in result:
@@ -5114,7 +5206,7 @@ def _resolve_ci_run_successors(root: Path, sha: str, cancelled_runs: list[dict])
         # i.e. UNKNOWN, the conservative direction.
         try:
             listed = subprocess.run(
-                [_exe("gh"), "run", "list", "--workflow", name, "--branch", str(branch),
+                [_exe("gh"), "run", "list", "--repo", slug, "--workflow", name, "--branch", str(branch),
                  "--limit", "20", "--json", "headSha,conclusion,status,createdAt"],
                 cwd=str(root), capture_output=True, text=True, timeout=120,
             )
@@ -5221,7 +5313,7 @@ def main() -> int:
                             help="Install pre-push hook into .git/hooks/ and set core.hooksPath")
     mode_group.add_argument("--install-branch-rules", action="store_true",
                             dest="install_branch_rules",
-                            help="Apply the cpv-branch-rules ruleset to the GitHub origin "
+                            help="Apply the cpv-branch-rules ruleset to the GitHub repo of the publish remote "
                                  "(enforces CI as a required status check — the server-side gate)")
     mode_group.add_argument("--patch", action="store_const", dest="bump", const="patch",
                             help="Force a patch bump (override auto-detection)")
@@ -5230,6 +5322,9 @@ def main() -> int:
     mode_group.add_argument("--major", action="store_const", dest="bump", const="major",
                             help="Force a major bump (override auto-detection)")
     parser.add_argument("--dry-run", action="store_true", help="Preview only, no changes")
+    parser.add_argument("--remote", metavar="NAME", default=None,
+                        help="Git remote to publish to (default: $CPV_PUBLISH_REMOTE, else origin). "
+                             "Must already be configured in this repository.")
     parser.add_argument("--canon-version", action="store_true",
                         help="Report the installed vs latest CPV publish-canon version and exit")
     parser.add_argument("--print-gates", action="store_true", dest="print_gates",
@@ -5253,6 +5348,18 @@ def main() -> int:
 
     root = get_repo_root()
 
+    # Issue #284: resolve the publish remote ONCE, right after the repo root is
+    # known and before any mode runs, so --install-branch-rules, the full
+    # pipeline and the --gate child all agree on it. An explicit --remote that is
+    # unconfigured exits 1 here, before any stage has touched the tree.
+    global _publish_remote_override
+    _publish_remote_override = args.remote
+    publish_remote = _publish_remote(root)
+    # The pre-push hook runs `publish.py --gate` as a CHILD process of the push;
+    # exporting the resolved name makes that child use the same remote instead of
+    # falling back to origin.
+    os.environ[_PUBLISH_REMOTE_ENV] = publish_remote
+
     # --install-hook mode: just set up the hook and exit
     if args.install_hook:
         return install_hook(root)
@@ -5265,8 +5372,13 @@ def main() -> int:
     if args.gate:
         return run_gate(root)
 
+    # Say where the release is going BEFORE any stage runs (dry-run included): the
+    # push is irreversible, so the target must be visible while it is still free
+    # to abort.
+    _describe_publish_remote(root)
+
     # Full publish pipeline — auto-detect bump type unless user forced one.
-    # Idempotency: read REMOTE plugin.json (origin/master) as the bump
+    # Idempotency: read REMOTE plugin.json (<publish remote>/master) as the bump
     # baseline. When local is ahead (interrupted publish: bumped + committed
     # but not pushed), bumping from local would double-bump. From remote,
     # bumping recomputes the SAME target as the original interrupted run,
@@ -5291,7 +5403,7 @@ def main() -> int:
         return 1
 
     if remote and local != remote:
-        cprint(f"{YELLOW}Local plugin.json is at {local} but origin is at {remote} — "
+        cprint(f"{YELLOW}Local plugin.json is at {local} but {publish_remote} is at {remote} — "
                f"using remote as bump baseline (interrupted-publish recovery).{NC}")
     current = baseline
 

@@ -668,8 +668,8 @@ class TestPublishPyLanguageGatesIssue175:
         assert "clone" in rb.lower(), "must point to the clone-by-URL build-source model"
 
 
-class TestTemplateGetOriginSlug:
-    """Verify the template's _get_origin_slug URL parser handles common formats.
+class TestTemplateGetRemoteSlug:
+    """Verify the template's _get_remote_slug URL parser handles common formats.
 
     The function is embedded inside the generated publish.py. We extract it by
     parsing the f-string template output and compile the function in isolation
@@ -678,7 +678,7 @@ class TestTemplateGetOriginSlug:
     """
 
     def _extract_and_compile(self):
-        """Return a ready-to-call _get_origin_slug function from the template."""
+        """Return a ready-to-call _get_remote_slug function from the template."""
         import ast as _ast
         import subprocess as _sp
         import types as _types
@@ -690,10 +690,10 @@ class TestTemplateGetOriginSlug:
         tree = _ast.parse(src)
         fn_node = None
         for node in _ast.walk(tree):
-            if isinstance(node, _ast.FunctionDef) and node.name == "_get_origin_slug":
+            if isinstance(node, _ast.FunctionDef) and node.name == "_get_remote_slug":
                 fn_node = node
                 break
-        assert fn_node is not None, "_get_origin_slug missing from template"
+        assert fn_node is not None, "_get_remote_slug missing from template"
         fn_src = _ast.get_source_segment(src, fn_node)
         assert fn_src is not None
 
@@ -711,9 +711,11 @@ class TestTemplateGetOriginSlug:
             "Path": _Path,
             # #254: the template resolves binaries via _exe() (bandit B607); identity is enough here.
             "_exe": lambda name: name,
+            # #284: the slug helper reads the URL of the publish remote; the default is origin.
+            "_publish_remote": lambda _root: "origin",
         }
         exec(fn_src, ns)
-        return ns["_get_origin_slug"], _Result
+        return ns["_get_remote_slug"], _Result
 
     def test_https_with_git_suffix(self):
         """HTTPS URL with .git suffix returns OWNER/REPO."""

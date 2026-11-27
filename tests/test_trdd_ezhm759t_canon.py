@@ -314,7 +314,7 @@ def test_row14_fork_parity_is_a_pipeline_stage_not_only_a_gate() -> None:
 def test_row15_install_hook_reports_a_failed_hookspath_write() -> None:
     """Row 15: a failed `git config core.hooksPath` no longer prints success."""
     src = _src()
-    block = src[src.index("def install_hook("):src.index("def _get_origin_slug(")]
+    block = src[src.index("def install_hook("):src.index("def _get_remote_slug(")]
     assert "cfg = subprocess.run(" in block
     assert "if cfg.returncode != 0:" in block
     assert "FAILED to set git config core.hooksPath" in block
@@ -340,10 +340,10 @@ def test_row17_gate_lint_budget_absorbs_a_cold_uv_sync() -> None:
     assert "timeout=120)" not in block
 
 
-def test_row18_origin_slug_read_is_bounded() -> None:
-    """Row 18: `_get_origin_slug` passes a timeout like every sibling git helper."""
+def test_row18_remote_slug_read_is_bounded() -> None:
+    """Row 18: `_get_remote_slug` passes a timeout like every sibling git helper."""
     src = _src()
-    block = src[src.index("def _get_origin_slug("):src.index("def install_branch_rules(")]
+    block = src[src.index("def _get_remote_slug("):src.index("def install_branch_rules(")]
     assert "timeout=10" in block
 
 

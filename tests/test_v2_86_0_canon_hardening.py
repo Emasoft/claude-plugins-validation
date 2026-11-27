@@ -164,7 +164,7 @@ def test_publish_py_uses_atomic_push():
     atomicity guarantee itself is unchanged.
     """
     py = gen_publish_py(_params())
-    assert '"git", "push", "--atomic", "origin", *push_refs' in py
+    assert '"git", "push", "--atomic", publish_remote, *push_refs' in py
     assert 'push_refs = ["HEAD", tag]' in py
     # The dependency tag must ride in the SAME push — never a separate one, or a
     # release could ship with the plain tag and not the dependency tag.
