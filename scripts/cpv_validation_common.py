@@ -2496,10 +2496,11 @@ ABSOLUTE_PATH_PATTERNS = [
     (re.compile(r'(?<!\$\{)(?<!\$)([A-Z]:[\\\/]Users[\\\/][^\s"\'`>\]})]+)', re.IGNORECASE), "Windows home path"),
     # Unix system paths — non-portable, use env vars or relative paths instead
     # The (?<![#!]) lookbehind skips shebangs like #!/usr/bin/env or #!/bin/bash
+    # A "/" right after "." is ./x or ../x, a relative path (import("../lib/x.ts") used to fire as /lib/x.ts).
     (
         re.compile(
             r"(?<![#!])"
-            r"(?<!\$\{CLAUDE_PLUGIN_ROOT\})(?<!\$\{CLAUDE_PLUGIN_DATA\})(?<!\$\{CLAUDE_PROJECT_DIR\})(?<![\w$\{])"
+            r"(?<!\$\{CLAUDE_PLUGIN_ROOT\})(?<!\$\{CLAUDE_PLUGIN_DATA\})(?<!\$\{CLAUDE_PROJECT_DIR\})(?<![\w$\{.])"
             r'(/(?:usr|opt|etc|var|bin|sbin|lib|root)/[^\s"\'`>\]})]+)'
         ),
         "system absolute path",
