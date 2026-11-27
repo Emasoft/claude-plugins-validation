@@ -340,6 +340,92 @@ def _classify_shell_exec(lines: list[str], line_idx: int, match: str) -> Context
     return "unknown"
 
 
+
+# ── issue #236 — a literal credential header COMPARED inside an assertion ──
+# `assert!(req.contains("Authorization: Bearer test-key"));` only tests text; it
+# sends nothing. Owner policy: NO cfg(test) span demotion (test code runs on dev
+# machines and CI), so this stays a precise, single-line shape check.
+_RUST_STR_LIT: Final[str] = r'"(?:[^"\\]|\\.)*"'
+_RUST_ASSERT_OPEN_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?:debug_)?assert(?P<kind>_eq|_ne)?\s*!\s*\(")
+# A string literal that is only a COMPARISON operand: argument of
+# `.contains(` / `.starts_with(` / `.ends_with(`, or either side of `==` / `!=`.
+_RUST_ASSERT_CMP_LIT_RE: Final[re.Pattern[str]] = re.compile(
+    r"\.\s*(?:contains|starts_with|ends_with)\s*\(\s*" + _RUST_STR_LIT + r"\s*\)"
+    r"|(?:==|!=)\s*" + _RUST_STR_LIT + r"|" + _RUST_STR_LIT + r"\s*(?:==|!=)"
+)
+# `assert_eq!` / `assert_ne!`: literals are masked, then a top-level operand that is
+# exactly one masked literal is a comparison operand.
+_RUST_STR_LIT_RE: Final[re.Pattern[str]] = re.compile(_RUST_STR_LIT)
+_RUST_MASKED_LIT_ONLY_RE: Final[re.Pattern[str]] = re.compile(r"\s*\x00\d+\x00\s*")
+_RUST_MASKED_REF_RE: Final[re.Pattern[str]] = re.compile(r"\x00(\d+)\x00")
+# Anything that makes the line a real credential flow or send: never cleared.
+_RUST_ASSERT_DISQUALIFY_RE: Final[re.Pattern[str]] = re.compile(
+    r"env\s*::\s*var|\bformat\s*!|[{}+]|\.\s*header\s*\(|\.\s*bearer_auth\s*\(|reqwest|curl|Command\s*::\s*new"
+    # a char literal holding a quote, or a raw string, would skew the literal masking
+    r"|'\"'|\br#*\"",
+    re.IGNORECASE,
+)
+
+
+def _rust_token_literal_only_compared_in_assert(line: str, match: str) -> bool:
+    """True iff `line` is ONE single-line assertion macro call and every
+    occurrence of the credential text `match` is a string-literal comparison
+    operand (see the issue #236 block above)."""
+    needle = (match or "").strip().lower()
+    open_m = _RUST_ASSERT_OPEN_RE.match(line)
+    if not needle or needle not in line.lower() or open_m is None:
+        return False
+    if _RUST_ASSERT_DISQUALIFY_RE.search(line):
+        return False
+    # The macro call must be the WHOLE line: its `(` closes at the very end
+    # (optionally followed by `;`), so no second statement can hide beside it.
+    # Literals are blanked first so parens inside them cannot skew the depth.
+    blanked = re.sub(_RUST_STR_LIT, '""', line)
+    depth = 0
+    for idx, ch in enumerate(blanked):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                if blanked[idx + 1 :].strip() not in ("", ";"):
+                    return False
+                break
+    else:
+        return False
+    rest = _RUST_ASSERT_CMP_LIT_RE.sub('""', line)
+    if open_m.group("kind"):
+        # assert_eq!/assert_ne!: only a literal that is a WHOLE top-level macro
+        # operand is a comparison operand. A literal nested in a call
+        # (`assert_eq!(send(u, "Authorization: Bearer x"), 1)`) stays and fires.
+        lits: list[str] = []
+
+        def _mask(m: re.Match[str]) -> str:
+            lits.append(m.group(0))
+            return f"\x00{len(lits) - 1}\x00"
+
+        masked = _RUST_STR_LIT_RE.sub(_mask, rest)
+        kept: list[str] = []
+        depth = 1
+        seg = open_m.end()
+        for idx in range(open_m.end(), len(masked)):
+            ch = masked[idx]
+            if ch in "([":
+                depth += 1
+                continue
+            if ch in ")]":
+                depth -= 1
+            if (ch == "," and depth == 1) or depth == 0:
+                operand = masked[seg:idx]
+                if not _RUST_MASKED_LIT_ONLY_RE.fullmatch(operand):
+                    kept.append(operand)
+                seg = idx + 1
+                if depth == 0:
+                    break
+        rest = _RUST_MASKED_REF_RE.sub(lambda m: lits[int(m.group(1))], ",".join(kept))
+    return needle not in rest.lower()
+
+
 def classify(
     file_path: str,
     content: str,
@@ -428,6 +514,19 @@ def classify(
         # continuation line with no macro token of its own. Resolve the enclosing
         # macro-call span and clear only when NO env::set_var write is in it.
         if _rust_macro_call_span_has_no_env_write(lines, line_idx):
+            return "safe_literal"
+        return "unknown"
+
+    # issue #236 — TOKEN_STEAL on a Rust test assertion that only COMPARES a
+    # literal credential header (`assert!(req.contains("Authorization: Bearer x"))`).
+    # Comparing text sends nothing, so a single-line assertion macro whose
+    # credential text is only a string-literal comparison operand is cleared.
+    # Any env::var / format! / `{}` / `+` / .header( / .bearer_auth( / reqwest /
+    # curl / Command::new on the line, or a non-assertion shape, keeps firing.
+    # Deliberately NOT a cfg(test) span demotion: owner policy — test code runs
+    # on dev machines and CI, so only the assertion shape itself is cleared.
+    if rule_id == "TOKEN_STEAL":
+        if _rust_token_literal_only_compared_in_assert(line, match):
             return "safe_literal"
         return "unknown"
 
