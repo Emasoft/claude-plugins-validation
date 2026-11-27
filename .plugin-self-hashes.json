@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": "2026-11-27T08:22:28+00:00",
+  "computed_at": "2026-11-27T11:57:01+00:00",
   "purpose": "Exhaustive SHA256 manifest of every shipped (git-tracked) file in the plugin. verify_self_integrity rejects any tracked file added, modified, or deleted relative to this manifest; CPV self-scan skips a file ONLY when its hash matches an entry here. One unhashed shipped file would be a poisoning vector, so the manifest is exhaustive (TRDD-b8c6d04f).",
   "files": {
     ".claude-plugin/plugin.json": "sha256:6158aa27adc6fc838048da853c5083ebbabc494eb5feb1e1ad8d99b0d706496a",
@@ -1068,7 +1068,7 @@
     "tests/test_issue_23_force_templates_marketplace.py": "sha256:85659165eba519ec3c73005a93ae292683c5b4d0644961c972f4d9c8820838e1",
     "tests/test_issue_243_wheel_integrity.py": "sha256:b4aec5b292151e92ed843ec33d667b635f877fa799d88b959e33b7a14ff1a2b1",
     "tests/test_issue_246_doclinks_scheme_jsx.py": "sha256:919f1ce93a1435ed7c78fb18fdb310d735035be0b37ce2e8f1aa8781d58f694c",
-    "tests/test_issue_248_md_chmod_foreign.py": "sha256:5ddcd82c4199a50707eeb5f2641315e2dda0ddc5a6d9ae5492f69ad66f70518a",
+    "tests/test_issue_248_md_chmod_foreign.py": "sha256:e8c382f61158ea5831d34ec27e112f2fec620b71355ada887819e3b3cae50259",
     "tests/test_issue_250_251_259_skillaudit.py": "sha256:d5fb827ee8f76aaf115c81af4636d0d6949c4d5a5cdf268f8ac2c60e33a6c943",
     "tests/test_issue_254_canon_linters.py": "sha256:c2cfc455ac12c27a7592f23a08682136f76f3269751e819700278a2791767849",
     "tests/test_issue_255_fail_closed.py": "sha256:075fc78a9139fe5d29e17bda2404b27a37972bbda1f77e8a982a5be622138495",
