@@ -1495,12 +1495,25 @@ def _is_unicode_charset_vocab(line: str) -> bool:
     return bool(_UNICODE_VOCAB_CHAR_RE.search(line))
 
 
+_VERSION_STAR_GROUP_RE: Final[re.Pattern[str]] = re.compile(r"\((?:\?:)?\\\.\\d\+\)\*")
+
+
 def _is_versionish_regex_quantifier(match: str) -> bool:
     """True iff a REGEX_DOS match is the anchored-iteration version-number
-    idiom ``(\\.\\d+)+`` / ``(?:\\.\\d+)+``. Each iteration begins with a
+    idiom ``(\\.\\d+)+`` / ``(?:\\.\\d+)+`` or its ``*`` form
+    ``(\\.\\d+)*`` / ``(?:\\.\\d+)*``. Each iteration begins with a
     LITERAL ``.`` so there is no overlapping-quantifier backtracking —
     linear time, not catastrophic. The classic semver-parsing regex."""
-    return "(\\.\\d+)+" in match or "(?:\\.\\d+)+" in match
+    if "(\\.\\d+)+" in match or "(?:\\.\\d+)+" in match:
+        return True
+    # Issue #264: a dotted-number group repeats a fixed separator followed by
+    # digits, so matches cannot overlap and ``*`` is as linear as ``+``. The
+    # ``*`` form is accepted ONLY when the match is exactly the group: when the
+    # group sits inside another quantified group the catalog match carries the
+    # outer ``(``/``(?:`` prefix (``((?:\.\d+)*``, ``(?:(\.\d+)*``), so the
+    # full-match fails and nested quantifiers (``((?:\.\d+)*)*``,
+    # ``(?:(\.\d+)*)+``) keep firing.
+    return _VERSION_STAR_GROUP_RE.fullmatch(match) is not None
 
 
 # Issue #91 — REGEX_DOS over-fires on a dynamically-built ``new RegExp(...)``
