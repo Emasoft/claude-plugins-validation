@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from cpv_mod_register_scan import RegisterVerdict, scan_register_export
 from cpv_parallel_runner import parallel_scan
 from cpv_validation_common import (
     COLORS,
@@ -864,6 +865,18 @@ def validate_top_level_structure(data: Any, report: ValidationReport) -> bool:
 # manifest path checks).
 MOD_MODULE_EXTENSIONS = {".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx"}
 
+# TRDD-775XK7HE: the `register` export scan reads the whole module into memory
+# and lexes it in pure Python; a hooks module above 2 MiB is not a hand-written
+# entry point, so it is reported as undecided (INFO) instead of being scanned.
+_MOD_REGISTER_MAX_BYTES = 2 * 1024 * 1024
+# Severity per rejection code. Every R-code is an error exit (exit 1) of
+# `claude plugin validate` 2.1.332 on the 95 rejection fixtures, so MAJOR
+# (publish-blocking, the convention for oracle-probed CC errors); not CRITICAL
+# because the runtime effect is untested (TRDD-775XK7HE D1). Gate B.7 decides
+# whether a rule must drop to MINOR: a false MAJOR on an accepted mod is a
+# release blocker.
+_MOD_REGISTER_SEVERITY: dict[str, str] = {code: "MAJOR" for code in ("R1", "R2", "R3", "R4", "R5", "R6", "R7")}
+
 
 def validate_modules_entry(data: dict[str, Any], plugin_root: Path | None, report: HookValidationReport) -> None:
     """Validate the `modules` array of a Claude Mods hooks.json (v2.1.287)."""
@@ -936,7 +949,12 @@ def validate_modules_entry(data: dict[str, Any], plugin_root: Path | None, repor
                 except ValueError:
                     report.major(f"'modules[{i}]' resolves outside the plugin root: {entry}")
                 else:
-                    if not resolved.exists():
+                    if resolved.is_file() and suffix in MOD_MODULE_EXTENSIONS:
+                        # TRDD-775XK7HE: only an in-root, existing module with a
+                        # listed extension is scanned; the earlier branches
+                        # already report every other entry shape.
+                        validate_mod_register_export(resolved, entry, suffix, report)
+                    elif not resolved.exists():
                         # Message carries both phrasings: the directive's
                         # "mods hooks module not found" and the committed
                         # item-8 assertion substring "does not exist".
@@ -944,6 +962,88 @@ def validate_modules_entry(data: dict[str, Any], plugin_root: Path | None, repor
                             f"mods hooks module not found: {entry} "
                             f"('modules[{i}]' referenced module does not exist)"
                         )
+
+
+def _register_finding_message(entry: str, verdict: RegisterVerdict) -> str:
+    """Message for one register-scan verdict; the backticked phrases are the
+    stable substrings tests assert (spec B.3 of TRDD-775XK7HE)."""
+    head = f"mods hooks module {entry}: "
+    at = f" (line {verdict.line})" if verdict.line is not None else ""
+    tail = " (TRDD-775XK7HE, oracle-derived from Claude Code 2.1.332)"
+    code = verdict.code
+    if code == "R1":
+        return (
+            head + "no export named `register` — Claude Code's validator refuses it (\"no export named register\"); "
+            "declare `export function register(on, options) {...}` in this file (TRDD-775XK7HE)"
+        )
+    if code == "R2":
+        return head + f"`register` is re-exported from another file{at} — declare register in this file" + tail
+    if code == "R3":
+        return head + f"`register` is not exported here by name; `export *`{at} is not followed by Claude Code" + tail
+    if code == "R4":
+        return (
+            head + f"`register` is exported as something other than a const function{at} — use "
+            "`export function register(...)` or `export const register = (on, options) => {...}`" + tail
+        )
+    if code == "R5":
+        return head + f"`register` is exported as a class{at}" + tail
+    if code == "R6":
+        return (
+            head + f"`register` is exported as `{verdict.local}`, which is not a function or const function "
+            f"declared at the top of this file{at}" + tail
+        )
+    if code == "R7":
+        return (
+            head + f"export list names `{verdict.local}`, which is not declared in this file{at} — "
+            "Claude Code: does not parse" + tail
+        )
+    raise ValueError(f"no message for register verdict {code}")
+
+
+def validate_mod_register_export(module_path: Path, entry: str, suffix: str, report: HookValidationReport) -> None:
+    """TRDD-775XK7HE: check the hooks module exports `register` by name.
+
+    `claude plugin validate` refuses a mod whose hooks module has no named
+    `register` export in a form it accepts. CPV mirrors the proven rows of the
+    2.1.332 evidence matrix with a static lexical scan: the module is never
+    executed, imported or evaluated, and no sibling file is opened (native
+    does not follow re-exports either). Anything the scanner cannot decide is
+    INFO, never a blocking finding.
+    """
+    file = str(module_path)
+    if module_path.stat().st_size > _MOD_REGISTER_MAX_BYTES:
+        report.info(
+            f"mods hooks module {entry}: could not statically decide the `register` export "
+            "(file larger than 2 MiB); run `claude plugin validate <plugin-dir>`",
+            file,
+        )
+        return
+    try:
+        source = module_path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        report.info(
+            f"mods hooks module {entry}: could not statically decide the `register` export "
+            "(not valid UTF-8); run `claude plugin validate <plugin-dir>`",
+            file,
+        )
+        return
+    verdict = scan_register_export(source, suffix)
+    if verdict.code == "OK":
+        report.passed(f"mods hooks module {entry} exports `register` ({verdict.detail})", file)
+        return
+    if verdict.code == "UNDECIDED":
+        report.info(
+            f"mods hooks module {entry}: could not statically decide the `register` export "
+            f"({verdict.detail}); run `claude plugin validate <plugin-dir>`",
+            file,
+            verdict.line,
+        )
+        return
+    message = _register_finding_message(entry, verdict)
+    if _MOD_REGISTER_SEVERITY[verdict.code] == "MAJOR":
+        report.major(message, file, verdict.line)
+    else:
+        report.minor(message, file, verdict.line)
 
 
 def validate_event_name(event_name: str, report: ValidationReport) -> bool:

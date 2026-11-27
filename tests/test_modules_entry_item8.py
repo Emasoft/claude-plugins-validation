@@ -40,7 +40,8 @@ def test_empty_modules_major(tmp_path):
 
 def test_valid_module_clean(tmp_path):
     _run(tmp_path, ["./mod.js"])  # creates hooks/ first (fixture-order fix)
-    (tmp_path / "hooks" / "mod.js").write_text("export default {};\n")
+    # A valid named `register` export: TRDD-775XK7HE scans every in-root module.
+    (tmp_path / "hooks" / "mod.js").write_text("export function register(on) {}\n")
     r = validate_hooks_data(
         {"modules": ["./mod.js"]},
         tmp_path,
@@ -121,7 +122,7 @@ def test_inline_relative_hook_path_is_cwd_safe(tmp_path):
     # With the fallback the module resolves against plugin_root itself, so
     # the module lives at the plugin root (not under hooks/).
     (tmp_path / "hooks").mkdir()
-    (tmp_path / "mod.js").write_text("x\n")
+    (tmp_path / "mod.js").write_text("export function register(on) {}\n")  # valid mod (TRDD-775XK7HE)
     import os
     old = os.getcwd()
     os.chdir("/")  # a cwd where ".claude-plugin/mod.js" cannot exist
@@ -140,7 +141,7 @@ def test_inline_relative_hook_path_is_cwd_safe(tmp_path):
 def test_stale_absolute_hook_path_warns(tmp_path):
     # Review of 9c2a220a: an absolute-but-deleted hook_path silently degraded
     # to plugin-root resolution; now it emits a visible WARNING.
-    (tmp_path / "mod.js").write_text("x\n")
+    (tmp_path / "mod.js").write_text("export function register(on) {}\n")  # valid mod (TRDD-775XK7HE)
     stale = tmp_path / "moved-away" / "hooks.json"  # absolute, does not exist
     r = validate_hooks_data(
         {"modules": ["./mod.js"]},
