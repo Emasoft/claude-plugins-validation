@@ -112,6 +112,7 @@ class TestConfidenceClassifier:
 
         lines = ["| 1 | `skills/foo/SKILL.md` | `skills/foo/` | `skill_dir` |"]
         cb_map, cb_ranges = native._build_code_block_map(lines)
+        # TRDD-XFADJQV4: table demotion now applies only to prose files (md/mdx/markdown/rst); production callers always pass the real path.
         verdict = native._confidence(
             lines,
             0,
@@ -119,6 +120,7 @@ class TestConfidenceClassifier:
             "CMD_INJECTION",
             cb_map,
             cb_ranges,
+            file_path="SKILL.md",
         )
         assert verdict == "demote"
 

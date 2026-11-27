@@ -682,6 +682,21 @@ def _is_markdown_table(line: str) -> bool:
     return bool(re.match(r"^\s*\|", line))
 
 
+# Suffixes whose lines can be rendered markdown tables. An unknown or empty
+# path is NOT in the set (fail toward keeping the finding); every production
+# caller passes the real file path. TRDD-XFADJQV4: a line starting with `|`
+# in a shell script, or inside a fenced code block, is a pipe continuation
+# (code), not a table cell, so it must not be demoted. Plain `.txt` is
+# excluded too: it can hold shell.
+_MD_TABLE_SUFFIXES: frozenset[str] = frozenset({".md", ".mdx", ".markdown", ".rst"})
+
+
+def _is_markdown_table_cell(line: str, file_path: str, in_code_block: bool) -> bool:
+    if in_code_block or not _is_markdown_table(line):
+        return False
+    return Path(file_path).suffix.lower() in _MD_TABLE_SUFFIXES
+
+
 def _is_markdown_heading(line: str) -> bool:
     return bool(re.match(r"^#+\s", line))
 
@@ -753,11 +768,11 @@ def _code_block_has_placeholder(lines: list[str], ranges: list[_CodeBlockRange],
 # ────────────────────────────────────────────────────────────────────────
 
 
-def _is_instructional_context(lines: list[str], line_idx: int) -> bool:
+def _is_instructional_context(lines: list[str], line_idx: int, cb_map: list[bool], file_path: str) -> bool:
     line = lines[line_idx]
     if _has_placeholder(line):
         return True
-    if _is_markdown_table(line):
+    if _is_markdown_table_cell(line, file_path, cb_map[line_idx]):
         return True
     if _is_markdown_heading(line):
         return True
@@ -2587,7 +2602,7 @@ def _confidence(
     # text in this context. Original skillaudit hard-suppressed
     # CRED_ENV_READ/TOKEN_STEAL here; CPV demotes broadly and keeps
     # the finding visible.
-    if _is_markdown_table(line) and rule_id in _MD_TABLE_SUPPRESSED_RULES:
+    if _is_markdown_table_cell(line, file_path, cb_map[line_idx]) and rule_id in _MD_TABLE_SUPPRESSED_RULES:
         return "demote"
 
     # Pure-data fenced code blocks (json/yaml/toml/ini/env/xml) cannot
@@ -2618,7 +2633,7 @@ def _confidence(
             return "demote"
         if cb_map[line_idx]:
             return "demote"
-    if _is_markdown_table(line) and rule_id in ("CRED_ENV_READ", "TOKEN_STEAL"):
+    if _is_markdown_table_cell(line, file_path, cb_map[line_idx]) and rule_id in ("CRED_ENV_READ", "TOKEN_STEAL"):
         return "demote"
     if re.search(r"Authorization:\s*Bearer", line, re.IGNORECASE):
         if cb_map[line_idx]:
@@ -2714,7 +2729,7 @@ _SAME_LINE_READ_AND_NET_RE: re.Pattern[str] = re.compile(
 _STRUCT_FLOW_WINDOW = 25  # lines a read-var may flow forward to a net sink
 
 
-def _detect_structural_read_to_net(lines: list[str], cb_map: list[bool]) -> list[dict[str, Any]]:
+def _detect_structural_read_to_net(lines: list[str], cb_map: list[bool], file_path: str = "") -> list[dict[str, Any]]:
     """Flag a read→network EXFIL flow, but ONLY when a variable bound from a
     file read is actually referenced by a network call (data-flow link), or a
     read result is piped into a net call on the same line.
@@ -2735,7 +2750,7 @@ def _detect_structural_read_to_net(lines: list[str], cb_map: list[bool]) -> list
     for i, line in enumerate(lines):
         if cb_map[i] and _has_doc_context(lines, i, 8):
             continue
-        if _is_instructional_context(lines, i):
+        if _is_instructional_context(lines, i, cb_map, file_path):
             continue
         if _IMPORT_LINE_RE.search(line):
             # Imports never count as a read OR a net operation.
@@ -3908,7 +3923,7 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
     # literal Python don't produce phantom INTENT_DESTRUCTIVE_INTENT /
     # INTENT_EXPLICIT_EXFILTRATION / SSRF / etc.
     secondary_findings: list[dict[str, Any]] = []
-    secondary_findings.extend(_detect_structural_read_to_net(lines, cb_map))
+    secondary_findings.extend(_detect_structural_read_to_net(lines, cb_map, file_path))
     secondary_findings.extend(_analyze_urls(lines))
     secondary_findings.extend(_detect_public_ip_endpoint(lines))
     secondary_findings.extend(_analyze_intent(lines, cb_map))
