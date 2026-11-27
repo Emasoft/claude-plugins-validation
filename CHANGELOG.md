@@ -2,6 +2,31 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.28.0] - 2026-11-27
+
+### Bug Fixes
+
+- **skillaudit:** Repair seven catalog patterns that held a JSON backspace (TRDD-1STNHQ21)
+- **skillaudit:** Clear TOKEN_STEAL on a Rust assertion that only compares a literal header ([#236](https://github.com/Emasoft/claude-plugins-validation/issues/236))
+- **scanner:** Reap the scanner process group on SIGTERM/SIGINT ([#276](https://github.com/Emasoft/claude-plugins-validation/issues/276))
+- **validate:** Stop flagging helper modules with constants or classes as shebang-less scripts ([#269](https://github.com/Emasoft/claude-plugins-validation/issues/269))
+- **skillaudit:** Accept the star form of the dotted-number version regex ([#264](https://github.com/Emasoft/claude-plugins-validation/issues/264))
+- **skillaudit:** Stop CMD_INJECTION matching a command word inside a regex alternation ([#267](https://github.com/Emasoft/claude-plugins-validation/issues/267))
+- **security:** Clear RC-39 on launchd removals written as inline code in Markdown ([#262](https://github.com/Emasoft/claude-plugins-validation/issues/262))
+- **mods:** Check every hooks modules path like Claude Code does
+- **mods:** Stop three false findings on a documented mod layout
+- **mods:** Flag mods settings that do nothing in a repository settings file
+- **skillaudit:** Report only the command part of a CMD_INJECTION match (#267 regression)
+
+### Documentation
+
+- **claude-md:** Re-derive the test-file count for 5.28.0 (613)
+
+### Miscellaneous Tasks
+
+- **hashes:** Regenerate self-integrity manifests for fix/5280
+- **hashes:** Regenerate self-integrity manifests after the #267 regression fix
+
 ## [5.27.0] - 2026-11-27
 
 ### Bug Fixes
