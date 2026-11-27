@@ -3097,31 +3097,41 @@ def _is_import_only_python_helper(path: Path) -> bool:
     except (OSError, UnicodeDecodeError, SyntaxError):
         return False
 
-    has_function = False
+    # Issue #269: real helper modules carry constants, classes and annotations, so those are allowed.
+    # What makes a file a script is code that runs when it is imported or run: a main guard, a bare
+    # top-level call, a loop, a with/try block, or a call in a default or annotation. Decorators are allowed: @dataclass(frozen=True) is common in helpers.
+    # The caller keeps the executable-bit gate; this only inspects the file content.
+    has_definition = False
     for index, node in enumerate(tree.body):
         if index == 0 and isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
             continue
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
-        if isinstance(node, ast.FunctionDef):
-            # Function defaults and annotations execute at import time; only literal defaults and no annotations are safe here.
-            if node.decorator_list or node.type_params or node.returns is not None:
-                return False
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Defaults and annotations execute at import time; a call in either is top-level code.
             arguments = (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
             if node.args.vararg is not None:
                 arguments += (node.args.vararg,)
             if node.args.kwarg is not None:
                 arguments += (node.args.kwarg,)
-            if any(arg.annotation is not None for arg in arguments):
+            import_time_nodes = [*node.args.defaults, *(d for d in node.args.kw_defaults if d is not None)]
+            import_time_nodes += [arg.annotation for arg in arguments if arg.annotation is not None]
+            if node.returns is not None:
+                import_time_nodes.append(node.returns)
+            if any(isinstance(inner, ast.Call) for expr in import_time_nodes for inner in ast.walk(expr)):
                 return False
-            if any(not isinstance(default, ast.Constant) for default in node.args.defaults):
-                return False
-            if any(default is not None and not isinstance(default, ast.Constant) for default in node.args.kw_defaults):
-                return False
-            has_function = True
+            has_definition = True
             continue
+        if isinstance(node, (ast.ClassDef, ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            has_definition = True
+            continue
+        if isinstance(node, ast.If) and not node.orelse and all(isinstance(inner, (ast.Import, ast.ImportFrom)) for inner in node.body):
+            # Only `if TYPE_CHECKING:` / `if typing.TYPE_CHECKING:` blocks that just import are type-only, never run code.
+            test = node.test
+            if (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"):
+                continue
         return False
-    return has_function
+    return has_definition
 
 
 def validate_scripts(plugin_root: Path, report: ValidationReport) -> None:
