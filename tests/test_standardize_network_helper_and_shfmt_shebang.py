@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 
+import pytest
 from cpv_ci_preflight import _shfmt_shell_paths
 from standardize_plugin import audit_standard_files, fix_missing_files
 
@@ -93,6 +94,7 @@ def test_shfmt_selection_excludes_zsh_shebang(tmp_path: Path) -> None:
     assert "bin/ztool" not in _shfmt_shell_paths(tmp_path)
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="os.mkfifo does not exist on Windows")
 def test_shfmt_selection_skips_fifo_without_blocking(tmp_path: Path) -> None:
     """A named pipe with no extension is skipped instead of opened (opening it would block the gate)."""
     os.mkfifo(tmp_path / "pipe")
