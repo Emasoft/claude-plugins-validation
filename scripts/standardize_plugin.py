@@ -66,6 +66,8 @@ STANDARD_FILES: list[tuple[str, bool, str]] = [
     (".ruff.toml", False, "Canonical ruff configuration"),
     (".bandit.yml", False, "Canonical bandit configuration"),
     ("scripts/publish.py", False, "Publish pipeline script"),
+    # publish.py imports this helper; without it here a plain --fix never creates it.
+    ("scripts/cpv_network_resilience.py", False, "Retry helper imported by publish.py"),
     ("git-hooks/pre-push", False, "Pre-push quality gate hook"),
     (".github/workflows/ci.yml", False, "CI workflow (consolidated: lint + validate + test)"),
     (".github/workflows/release.yml", False, "Release workflow"),
@@ -135,8 +137,22 @@ class AuditItem:
 
 def audit_standard_files(plugin_path: Path) -> list[AuditItem]:
     """Check which standard files exist in the plugin repo."""
+    # Lazy sibling import, same idiom as _canon_incomplete_profiles: scripts/ is on
+    # sys.path only inside the standardize entry points.
+    from cpv_pipeline_profile import (  # noqa: E402 — sibling import, see comment above
+        PROFILE_REMOTE_VALIDATION,
+        resolve_pipeline_profile,
+    )
+
+    # A remote-validation plugin is de-vendored: it must NOT carry the vendored
+    # helper cpv_network_resilience.py (cpv_pipeline_profile._VENDORED_VALIDATOR_SCRIPTS,
+    # issue #118 defect 3), so the helper is not a missing standard file there and a
+    # plain --fix must not re-create it.
+    remote_validation = resolve_pipeline_profile(plugin_path) == PROFILE_REMOTE_VALIDATION
     items: list[AuditItem] = []
     for rel_path, required, description in STANDARD_FILES:
+        if remote_validation and rel_path == "scripts/cpv_network_resilience.py":
+            continue
         full_path = plugin_path / rel_path
         if full_path.exists():
             items.append(AuditItem("files", rel_path, "PASS", f"{description} exists"))

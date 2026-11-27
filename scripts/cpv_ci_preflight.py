@@ -1220,6 +1220,37 @@ def _shell_script_paths(root: Path) -> list[str]:
     return _shipped_file_paths(root, ("*.sh", "*.bash"))
 
 
+# A `#!` line naming a POSIX or bash-family shell: `#!/bin/sh`, `#!/usr/bin/env bash`,
+# `#!/usr/bin/env -S dash -e`. Matched against the first 128 bytes of an extensionless file.
+# zsh is deliberately absent: the gate mirrors Mega-Linter BASH_SHFMT, a bash-family
+# linter, and shfmt would report zsh-only formatting that CI never checks.
+_SHELL_SHEBANG_RE = re.compile(rb"#!\s*(?:/\S*/)?(?:env\s+(?:-\S+\s+)*)?(?:sh|bash|dash)(?=\s|$)")
+
+
+def _shfmt_shell_paths(root: Path) -> list[str]:
+    """Return the shell scripts shfmt lints: `*.sh`/`*.bash` plus extensionless shebang scripts.
+
+    Mega-Linter BASH_SHFMT also checks extensionless shell scripts such as
+    `git-hooks/pre-push`, which only their `#!` line identifies. Without this a
+    local preflight never checks them and CI is the first to report a format diff.
+    The extensionless candidates come from `_shipped_file_paths`, so the gitignore
+    and untracked filter applies to them too; each is read for its first 128 bytes only.
+    """
+    scripts = _shell_script_paths(root)
+    for rel in _shipped_file_paths(root, ("*",)):
+        if Path(rel).suffix:
+            continue
+        # A broken symlink, FIFO or socket is not a script shfmt can check, and
+        # opening a FIFO would block the gate: only regular files are read.
+        if not (root / rel).is_file():
+            continue
+        with (root / rel).open("rb") as fh:
+            head = fh.read(128)
+        if _SHELL_SHEBANG_RE.match(head):
+            scripts.append(rel)
+    return scripts
+
+
 def _python_file_paths(root: Path) -> list[str]:
     """Return the plugin-relative `*.py` paths Mega-Linter feeds ruff and bandit."""
     return _shipped_file_paths(root, ("*.py",))
@@ -1268,7 +1299,8 @@ def _gate_shfmt(result: PreflightResult, enabled: set[str] | None) -> None:
             f"shfmt ({_SHFMT_LINTER_ID}) not enabled in .mega-linter.yml — skipped.",
         )
         return
-    scripts = _shell_script_paths(result.plugin_path)
+    # CI shfmt also checks extensionless shell scripts found by their #! line; see _shfmt_shell_paths.
+    scripts = _shfmt_shell_paths(result.plugin_path)
     if not scripts:
         result.add(
             "shfmt",
