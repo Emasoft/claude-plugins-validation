@@ -6786,11 +6786,9 @@ def gen_ruff_toml(p: PluginParams) -> str:
 # (ruff discovers .ruff.toml) and CI's Mega-Linter (PYTHON_RUFF_CONFIG_FILE).
 # Do not edit: the canonical-pipeline drift check compares this file byte for byte.
 line-length = 120
-# The git hooks are Python but git requires those exact EXTENSIONLESS filenames, so
-# ruff's default discovery skips them and `ruff check git-hooks/` prints "No Python
-# files found" followed by "All checks passed" — a VACUOUS green over the script that
-# gates every push.
-extend-include = ["git-hooks/pre-push"]
+# The canonical git hooks are POSIX shell (#!/usr/bin/env sh), not Python, so ruff
+# must not parse them: adding git-hooks/pre-push to ruff's file set made
+# `ruff check --config .ruff.toml .` fail on the sh hook (issue #272).
 
 [lint]
 select = ["E", "F", "W", "I"]
@@ -7350,6 +7348,15 @@ jobs:
     env:
       HAS_MARKETPLACE_PAT: ${{{{ secrets.MARKETPLACE_PAT != '' }}}}
     steps:
+      # The "Get plugin info" step reads .claude-plugin/plugin.json from the workspace, which is
+      # EMPTY without a checkout — the first run failed with "plugin.json not found"
+      # (issue #286). Gated like the other steps so a repo without the secret still
+      # no-ops cleanly.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        if: env.HAS_MARKETPLACE_PAT == 'true'
+        with:
+          # zizmor artipacked: don't persist the token in .git/config (issue #151).
+          persist-credentials: false
       - name: Check marketplace secret
         # Always runs. When the PAT is missing, emit a friendly notice and let
         # the gated steps below skip — the job still ends green. When present,

@@ -20,6 +20,7 @@ that merely look script-ish must NOT be swept in.
 from __future__ import annotations
 
 import sys
+import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -184,14 +185,19 @@ def test_cpv_own_git_hooks_are_discovered() -> None:
     )
 
 
-def test_scaffolder_emits_extend_include_for_hooks() -> None:
-    """Scaffolder parity: a generated plugin's OWN `ruff check` must see its hooks too.
+def test_scaffolder_does_not_extend_include_shell_hooks() -> None:
+    """Scaffolder parity: the generated hooks are POSIX sh, so the rendered .ruff.toml does not include them (#272)."""
+    from scripts.generate_plugin_repo import PluginParams, gen_ruff_toml  # noqa: PLC0415
 
-    The engine fix covers plugins CPV validates; this covers the plugin's own CI, which
-    runs ruff directly and never goes through CPV's engine.
-    """
-    src = (REPO_ROOT / "scripts" / "generate_plugin_repo.py").read_text(encoding="utf-8")
-    assert "extend-include" in src, (
-        "generate_plugin_repo.py emits no ruff extend-include — every scaffolded plugin's "
-        "git hooks are a vacuous green in its own CI"
+    params = PluginParams(
+        name="my-test-plugin",
+        description="d",
+        author="a",
+        author_email="a@example.com",
+        license="MIT",
+        python_version="3.12",
+        github_owner="o",
+        marketplace="m",
+        version="0.1.0",
     )
+    assert "extend-include" not in tomllib.loads(gen_ruff_toml(params))

@@ -22,6 +22,7 @@ import ast
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -433,13 +434,14 @@ def test_row23_pool_scan_survives_a_directory_named_dot_py() -> None:
 
 
 def test_row24_pyproject_names_no_phantom_pre_commit_hook() -> None:
-    """Row 24: extend-include lists only a hook the scaffold actually emits."""
+    """Row 24: .ruff.toml extend-includes no hook (the scaffold's hooks are sh, #272)."""
     toml = gen_pyproject_toml(_params())
     # #254: the ruff table moved from pyproject.toml into the canonical .ruff.toml.
     from generate_plugin_repo import gen_ruff_toml  # noqa: PLC0415
 
     assert "[tool.ruff" not in toml
-    assert 'extend-include = ["git-hooks/pre-push"]' in gen_ruff_toml(_params())
+    # #272: the canonical pre-push hook is POSIX sh, so ruff must not be pointed at it.
+    assert "extend-include" not in tomllib.loads(gen_ruff_toml(_params()))
     emitted = {rel for rel, _c, _x in generate_all_files(_params())}
     assert "git-hooks/pre-commit" not in emitted, "the phantom entry would now be real"
 
