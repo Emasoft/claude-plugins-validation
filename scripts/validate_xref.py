@@ -99,8 +99,12 @@ _LOOKS_LIKE_AGENT_IDENTIFIER = re.compile(r"[-0-9]")
 # paren isn't alphanumeric). The lookbehind needs two characters of
 # context to fire, so it never strips an in-bounds match when the file
 # starts on ``skills/...``.
+# The second lookbehind `(?<!\w)` is a word boundary before ``skill``: a
+# directory such as ``reports_dev/validate_skill/20260421_...`` ends in
+# ``skill/`` but is not a reference, so ``20260421`` MUST NOT be looked up as
+# a skill name (CPV 5.25.0 CI false positive).
 SKILL_REF_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9~]/)(?:skill|skills)/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)",
+    r"(?<![A-Za-z0-9~]/)(?<!\w)(?:skill|skills)/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)",
     re.IGNORECASE,
 )
 
@@ -912,7 +916,16 @@ def validate_subagent_type_matching(
     # serial path used to see, and we don't waste worker time on files
     # we'll discard. Sorting pins per-platform glob order so parallel
     # output stays deterministic.
-    md_files = sorted(md for md in md_files if not any(should_skip_dir(p) for p in md.parents))
+    # Only ancestors strictly BETWEEN plugin_root and the file count: a hidden
+    # ancestor of the plugin root itself (e.g. .claude/worktrees/<name>) used
+    # to match should_skip_dir for every file and silently drop the whole scan.
+    md_files = sorted(
+        md
+        for md in md_files
+        if not any(
+            should_skip_dir(plugin_root / rel) for rel in md.relative_to(plugin_root).parents if rel != Path(".")
+        )
+    )
 
     # Task #384: per-file extraction in parallel, resolution serial.
     if _xref_parallel_enabled() and len(md_files) > 1:
@@ -1315,7 +1328,16 @@ def validate_skill_refs(
 
     # Filter hidden/cache dirs BEFORE parallel dispatch and sort for
     # deterministic order across platforms. (task #384)
-    file_paths = sorted(fp for fp in file_paths if not any(should_skip_dir(p) for p in fp.parents))
+    # Only ancestors strictly BETWEEN plugin_root and the file count: a hidden
+    # ancestor of the plugin root itself (e.g. .claude/worktrees/<name>) used
+    # to match should_skip_dir for every file and silently drop the whole scan.
+    file_paths = sorted(
+        fp
+        for fp in file_paths
+        if not any(
+            should_skip_dir(plugin_root / rel) for rel in fp.relative_to(plugin_root).parents if rel != Path(".")
+        )
+    )
 
     # Task #384: per-file extraction parallel, serial join below. The
     # worker handles read + _strip_noise + regex + the _plugin_dirs and
