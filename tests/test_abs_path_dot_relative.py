@@ -72,3 +72,21 @@ def test_glued_dot_path_is_not_matched() -> None:
 def test_path_before_sentence_period_is_matched() -> None:
     """The regex keeps a sentence period inside the match; trimming it happens in absolute_path_match_text."""
     assert _system_path_matches("see /usr/lib.") == ["/usr/lib."]
+
+
+def test_scan_mjs_dot_relative_dynamic_import_has_no_finding(tmp_path: Path) -> None:
+    """End to end on a .mjs file, a parent-relative dynamic import raises no finding."""
+    mjs = tmp_path / "a.mjs"
+    mjs.write_text('await import("../lib/pillar/stdio.ts")\n', encoding="utf-8")
+    report = ValidationReport()
+    assert scan_file_for_absolute_paths(mjs, report, "a.mjs") == 0
+    assert report.results == []
+
+
+def test_scan_sh_system_path_is_flagged(tmp_path: Path) -> None:
+    """End to end on a .sh file, a bare system path still raises a finding."""
+    sh = tmp_path / "a.sh"
+    sh.write_text("cat /lib/x\n", encoding="utf-8")
+    report = ValidationReport()
+    assert scan_file_for_absolute_paths(sh, report, "a.sh") >= 1
+    assert any("/lib/x" in result.message for result in report.results)

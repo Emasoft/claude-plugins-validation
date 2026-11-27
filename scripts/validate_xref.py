@@ -99,12 +99,14 @@ _LOOKS_LIKE_AGENT_IDENTIFIER = re.compile(r"[-0-9]")
 # paren isn't alphanumeric). The lookbehind needs two characters of
 # context to fire, so it never strips an in-bounds match when the file
 # starts on ``skills/...``.
-# The second lookbehind `(?<!\w)` is a word boundary before ``skill``: a
-# directory such as ``reports_dev/validate_skill/20260421_...`` ends in
+# The second lookbehind `(?<![\w-])` is a word/hyphen boundary before ``skill``:
+# a directory such as ``reports_dev/validate_skill/20260421_...`` ends in
 # ``skill/`` but is not a reference, so ``20260421`` MUST NOT be looked up as
-# a skill name (CPV 5.25.0 CI false positive).
+# a skill name (CPV 5.25.0 CI false positive). A hyphen-prefixed segment
+# (``my-skill/x``, ``foo-skills/x``) is likewise a different directory whose
+# name merely ends in ``skill``/``skills`` — not the plugin's ``skills/`` dir.
 SKILL_REF_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9~]/)(?<!\w)(?:skill|skills)/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)",
+    r"(?<![A-Za-z0-9~]/)(?<![\w-])(?:skill|skills)/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)",
     re.IGNORECASE,
 )
 

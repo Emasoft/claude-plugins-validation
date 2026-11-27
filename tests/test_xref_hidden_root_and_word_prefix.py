@@ -89,3 +89,13 @@ def test_markdown_link_skill_ref_still_extracted() -> None:
 def test_bare_skill_ref_at_line_start_still_extracted() -> None:
     """A bare ``skills/foo`` at the start of the text still extracts ``foo``."""
     assert SKILL_REF_PATTERN.findall("skills/foo is the entry") == ["foo"]
+
+
+def test_hyphen_prefixed_skill_dir_is_not_a_skill_ref() -> None:
+    """``my-skill/x`` and ``foo-skills/bar`` are other directories, not skill refs."""
+    assert SKILL_REF_PATTERN.findall("see my-skill/20260421 and foo-skills/bar") == []
+
+
+def test_space_prefixed_skills_ref_still_extracted() -> None:
+    """A ``skills/bar`` preceded by a space still extracts ``bar``."""
+    assert SKILL_REF_PATTERN.findall("see skills/bar now") == ["bar"]

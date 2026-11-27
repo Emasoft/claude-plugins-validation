@@ -9051,13 +9051,24 @@ def _is_toc_exempt(file_path: Path) -> bool:
 
     Exempt: SKILL.md, CLAUDE.md, agent files under agents/,
     command files under commands/, rule files under rules/.
+    The directory names are matched only INSIDE the enclosing plugin (the
+    nearest ancestor holding `.claude-plugin/plugin.json`); a file outside any
+    plugin is exempt by name only.
     """
     if file_path.name in _TOC_EXEMPT_NAMES:
         return True
-    for part in file_path.parts:
-        if part in _TOC_EXEMPT_DIRS:
-            return True
-    return False
+    # WHY root-relative: testing the ABSOLUTE parts exempted every file of a
+    # plugin that merely sits under a folder named agents/commands/rules (same
+    # class as the CPV 5.25.0 hidden-ancestor bug in validate_xref). Only
+    # components below the plugin root may exempt a file.
+    root = _enclosing_plugin_root(file_path.parent)
+    if root is None:
+        return False
+    try:
+        rel_dirs = (file_path.parent.resolve() / file_path.name).relative_to(root).parent.parts
+    except (ValueError, OSError):
+        return False
+    return any(part in _TOC_EXEMPT_DIRS for part in rel_dirs)
 
 
 def validate_toc_embedding(

@@ -803,6 +803,31 @@ def _relpath(repo_root: Path, p: str) -> str:
         return p
 
 
+def _is_own_script(f: Path, repo_root: Path) -> bool:
+    """True if ``f`` is a script under the repo's OWN ``scripts/`` tree.
+
+    Test fixtures (e.g. ``tests/fixtures/<plugin>/scripts/...``) have
+    ``scripts`` in their path-parts too, but they're checked-in foreign
+    plugin source — their type errors are the foreign plugin author's
+    responsibility, not CPV's. A file outside ``repo_root`` is never own.
+    """
+    # WHY root-relative: testing the ABSOLUTE parts let folders ABOVE the repo
+    # (a checkout under ``.../tests/...`` or ``.../fixtures/...``, or a worktree
+    # path) change the answer — same class as the CPV 5.25.0 hidden-ancestor
+    # bug in validate_xref. Only components below ``repo_root`` count.
+    try:
+        parts = (f.parent.resolve() / f.name).relative_to(repo_root.resolve()).parent.parts
+    except (ValueError, OSError):
+        return False
+    if "scripts" not in parts:
+        return False
+    if "fixtures" in parts:
+        return False
+    if "tests" in parts and parts.index("tests") < parts.index("scripts"):
+        return False
+    return True
+
+
 def _canonical_python_typechecker(repo_root: Path) -> str:
     """Decide which type-checker the project canonically uses — from config ONLY.
 
@@ -968,22 +993,8 @@ def lint_python(
     # the whole repo (especially test files) surfaces mountains of
     # annotation-unchecked notes that have nothing to do with plugin
     # publishability. The lint_repo orchestrator's primary signal is ruff.
-    # Restrict to scripts under the repo's OWN scripts/ tree. Test
-    # fixtures (e.g. ``tests/fixtures/<plugin>/scripts/...``) have
-    # ``scripts`` in their path-parts too, but they're checked-in
-    # foreign plugin source — their type errors are the foreign plugin
-    # author's responsibility, not CPV's.
-    def _is_own_script(f: Path) -> bool:
-        parts = f.parts
-        if "scripts" not in parts:
-            return False
-        if "fixtures" in parts:
-            return False
-        if "tests" in parts and parts.index("tests") < parts.index("scripts"):
-            return False
-        return True
-
-    mypy_targets = [str(f) for f in files if _is_own_script(f)]
+    # Restrict to scripts under the repo's OWN scripts/ tree (see _is_own_script).
+    mypy_targets = [str(f) for f in files if _is_own_script(f, repo_root)]
     if not mypy_targets:
         return ok
 
@@ -1922,9 +1933,7 @@ def lint_xml(
             # image-pull failed, or only emitted a non-fatal warning). The
             # XML was NOT validated; flag that as a WARNING and let the file
             # pass without a false MAJOR (and without a false `passed`).
-            report.warning(
-                f"xmllint could not run cleanly via docker — XML not validated: {rel}"
-            )
+            report.warning(f"xmllint could not run cleanly via docker — XML not validated: {rel}")
     return ok
 
 
@@ -2694,7 +2703,7 @@ def lint_repo(
             for outcome in ex.map(_run_one, sorted_langs, timeout=phase_budget):
                 results.append(outcome)
         except FuturesTimeoutError:
-            skipped = sorted_langs[len(results):]
+            skipped = sorted_langs[len(results) :]
             report.warning(_phase_budget_skip_message(phase_budget, skipped))
         finally:
             # cancel_futures kills the QUEUED languages immediately; the

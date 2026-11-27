@@ -46,8 +46,12 @@ def calculate_directory_checksum(dir_path: Path, exclude_patterns: list[str] | N
                 if path.name.endswith(pattern[1:]):
                     return True
             else:
-                # Exact match in path parts
-                if pattern in path.parts:
+                # Exact match in path parts. WHY relative to dir_path: testing the
+                # ABSOLUTE parts let a folder ABOVE the plugin (e.g. a ".git" or
+                # "__pycache__" ancestor of a checkout/worktree) exclude every file,
+                # collapsing the checksum to the empty-input hash. Only components
+                # inside the plugin may exclude a file.
+                if pattern in path.relative_to(dir_path).parts:
                     return True
         return False
 
