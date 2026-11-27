@@ -2,6 +2,16 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.25.0] - 2026-11-27
+
+### Miscellaneous Tasks
+
+- Regen self-hash manifests after the #248 timing-test fix
+
+### Testing
+
+- Linear-scan check compares N with 4N under an 8x bound ([#248](https://github.com/Emasoft/claude-plugins-validation/issues/248))
+
 ## [5.24.0] - 2026-11-27
 
 ### Bug Fixes
