@@ -23,9 +23,10 @@ Reference scan command (assembled by `build_scan_command()`):
         --use-trigger              # trigger analysis (no API key); default on
 
         Process cleanup (issue #276): the scanner runs in its own process group, which is
-        killed on timeout, by the validate watchdog and at interpreter exit. Known limit:
-        if the CPV process itself is SIGKILLed no handler runs, and the scanner group
-        survives that case.
+        killed on timeout, by the validate watchdog, at interpreter exit and by SIGTERM/SIGINT
+        handlers (installed lazily from the main thread at the first scanner start). Known
+        limits: if the CPV process itself is SIGKILLed no handler runs and the scanner group
+        survives; a signal landing between Popen and registration of the child can also miss it.
 
 """
 
@@ -97,7 +98,10 @@ class CiscoScanResult:
 # own process group / session, tracked here, and the WHOLE group is killed on
 # timeout, on watchdog expiry (cpv_watchdog._reap_children) and at interpreter exit.
 _live_scanners: set[subprocess.Popen[str]] = set()
-_live_scanners_lock = threading.Lock()
+# RLock, not Lock: the SIGTERM/SIGINT handler runs in the main thread and calls
+# kill_live_scanner_groups(); if the signal lands while the main thread already holds this
+# lock (registering/discarding a child), a plain Lock would self-deadlock.
+_live_scanners_lock = threading.RLock()
 
 
 def _kill_process_group(proc: subprocess.Popen[str]) -> None:
@@ -118,6 +122,8 @@ def _run_in_own_process_group(cmd: list[str], timeout: float) -> subprocess.Comp
     Raises ``subprocess.TimeoutExpired`` (carrying the partial output) exactly as
     ``subprocess.run`` does, so callers keep their existing handling.
     """
+    # Issue #276: install the SIGTERM/SIGINT reapers before the first child exists.
+    _install_signal_reapers()
     if sys.platform == "win32":
         proc = subprocess.Popen(
             cmd,
@@ -134,6 +140,9 @@ def _run_in_own_process_group(cmd: list[str], timeout: float) -> subprocess.Comp
             text=True,
             start_new_session=True,
         )
+    # Known window (issue #276): a SIGTERM/SIGINT delivered after Popen returns but before the
+    # add() below runs the reaper with this child still unregistered, so it is orphaned.
+    # Microseconds wide; closing it needs signals blocked around spawn+register, not done.
     with _live_scanners_lock:
         _live_scanners.add(proc)
     try:
@@ -152,9 +161,9 @@ def _run_in_own_process_group(cmd: list[str], timeout: float) -> subprocess.Comp
 def kill_live_scanner_groups() -> None:
     """Kill every scanner process group still running. Never raises.
 
-    Called from ``atexit`` and from the validate watchdog's reaper so a normal exit,
-    an exception exit or a watchdog abort leaves no scanner grandchild behind
-    (issue #276).
+    Called from ``atexit``, from the SIGTERM/SIGINT handlers and from the validate
+    watchdog's reaper so a normal exit, an exception exit, a terminating signal or a
+    watchdog abort leaves no scanner grandchild behind (issue #276).
     """
     with _live_scanners_lock:
         procs = list(_live_scanners)
@@ -166,6 +175,41 @@ def kill_live_scanner_groups() -> None:
 
 
 atexit.register(kill_live_scanner_groups)
+
+# Issue #276: atexit does not run when the process is killed by the default SIGTERM action,
+# so a SIGTERM left the scanner group orphaned (PPID 1). The handlers below reap the groups,
+# then let the signal take its normal effect (never swallowed). SIGKILL cannot be caught at
+# all: that case stays a known limit. Installed lazily from the first scanner start, not at
+# import, so importing this module has no side effect.
+_signal_handlers_installed = False
+_previous_signal_handlers: dict[int, Any] = {}
+
+
+def _reap_then_chain_signal(signum: int, frame: Any) -> None:
+    """Signal handler: kill live scanner groups, then run the previous disposition."""
+    kill_live_scanner_groups()
+    previous = _previous_signal_handlers.get(signum, signal.SIG_DFL)
+    if callable(previous):
+        # SIGINT: the default handler raises KeyboardInterrupt; any other chained handler runs as before.
+        previous(signum, frame)
+        return
+    # Previous was SIG_DFL: restore it and re-send so the exit status is the normal signal death.
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+
+def _install_signal_reapers() -> None:
+    """Install the SIGTERM/SIGINT reaper handlers once, from the main thread only."""
+    global _signal_handlers_installed  # noqa: PLW0603
+    if _signal_handlers_installed or threading.current_thread() is not threading.main_thread():
+        return
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        previous = signal.getsignal(signum)
+        if previous is signal.SIG_IGN or previous is None:
+            continue  # deliberately ignored (or not installed from Python): leave it alone
+        _previous_signal_handlers[signum] = previous
+        signal.signal(signum, _reap_then_chain_signal)
+    _signal_handlers_installed = True
 
 
 def is_uvx_available() -> bool:
