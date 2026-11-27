@@ -177,7 +177,7 @@ characters — never the value or any prefix.
 
 ## 9. Audit Report Format
 
-The audit writes `$MAIN_ROOT/reports/cpv-migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-pre-migration-audit.md` at the main-repo root (first entry of `git worktree list` — never a linked worktree) containing:
+The audit writes `$MAIN_ROOT/reports_dev/cpv-migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-pre-migration-audit.md` at the main-repo root (first entry of `git worktree list` — never a linked worktree) containing:
 
 1. Target layout (A or B) — collected from the interrogation playbook
 2. Plugin inventory table: `| name | subdir | version | status |`

@@ -87,7 +87,7 @@ will change, and determine every occurrence of the pattern you must fix.
 **Write summary to:**
 
 ```text
-$MAIN_ROOT/reports/cpv-spark-agent/{timestamp}-{slug}.md
+$MAIN_ROOT/reports_dev/cpv-spark-agent/{timestamp}-{slug}.md
 ```
 
 Per `~/.claude/rules/agent-reports-location.md`, resolve `$MAIN_ROOT` via
@@ -166,7 +166,7 @@ assistant: Bounded single-file fix — exactly cpv-spark-agent's lane.
 [Reads README.md around line 413; inspects the block — slash-command syntax]
 [Adds the `text` language tag to the opening fence, same turn]
 [Re-runs validate_documentation.py: the WARNING is gone, no new finding]
-[DONE] fix-readme-langtag — 1 warning cleared. Report: reports/cpv-spark-agent/20260525_142210+0200-fix-readme-langtag.md
+[DONE] fix-readme-langtag — 1 warning cleared. Report: reports_dev/cpv-spark-agent/20260525_142210+0200-fix-readme-langtag.md
 </example>
 
 <example>
@@ -178,5 +178,5 @@ without re-reading.
 [For each path the orchestrator listed: reads the file, locates the dead
 backtick ref, repoints or removes it in the same turn, then lints]
 [Re-validates the 4 files: 0 findings remain]
-[DONE] batch-shard-3 — 4 MINOR findings cleared across 4 files. Report: reports/cpv-spark-agent/20260525_144705+0200-batch-shard-3.md
+[DONE] batch-shard-3 — 4 MINOR findings cleared across 4 files. Report: reports_dev/cpv-spark-agent/20260525_144705+0200-batch-shard-3.md
 </example>

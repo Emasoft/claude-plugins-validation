@@ -169,7 +169,7 @@ When a finding involves Layout C (`.claude-plugin/marketplace.json` AND `plugin.
 
 ## Rules
 
-- **Reports/fix logs/migration logs** → `$MAIN_ROOT/reports/cpv-marketplace-fixer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (migration logs under `$MAIN_ROOT/reports/cpv-migrate-marketplace-architecture/`). `$MAIN_ROOT` is the main-repo root (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp mandatory; both `reports/` and `reports_dev/` are gitignored. The log carries iteration-by-iteration history + final advisory list; return only a one-line summary. NEVER write to `docs_dev/` or a worktree-local `reports/`.
+- **Reports/fix logs/migration logs** → `$MAIN_ROOT/reports_dev/cpv-marketplace-fixer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (migration logs under `$MAIN_ROOT/reports_dev/cpv-migrate-marketplace-architecture/`). `$MAIN_ROOT` is the main-repo root (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp mandatory; `reports_dev/` is gitignored (raw output, scratch, private data); `reports/` is tracked and holds only final, sanitized reports. The log carries iteration-by-iteration history + final advisory list; return only a one-line summary. NEVER write to `docs_dev/` or a worktree-local `reports_dev/`.
 - **Fix ALL non-WARNING issues** — the pre-push hook blocks on CRITICAL, MAJOR, MINOR, AND NIT.
 - **Evaluate every WARNING** — marketplace publish-blockers are especially common (missing `update-submodules.yml`, missing/wrong `MARKETPLACE_PAT`, marketplace.json ↔ plugin.json version mismatch, linked plugin not reachable on GitHub, broken dispatch receiver). Fix these as if they were MAJORs; truly-advisory warnings stay in the final report with a one-line justification. Classification: `skills/cpv-fix-validation/references/iterative-fix-loop.md` §WARNING-evaluation-rules.
 - **Architectural findings are non-mechanical** — full user interrogation via `cpv-migrate-marketplace-architecture`.
@@ -201,16 +201,16 @@ If you encounter these in a marketplace migration scenario, hand off to the cpv-
 ## Examples
 
 <example>
-user: Fix issues in reports/validate_marketplace/20260421_183012+0200-my-hub.md
+user: Fix issues in reports_dev/validate_marketplace/20260421_183012+0200-my-hub.md
 assistant: Reading the report...
 Found 1 architecture-category finding plus 4 mechanical findings. Pausing mechanical fixes — the architecture finding means I need to walk you through a layout migration before touching anything else.
 [Hands off to cpv-migrate-marketplace-architecture interrogation playbook]
 </example>
 
 <example>
-user: Fix the pipeline issues in reports/validate_marketplace_pipeline/20260421_183012+0200-acme.md
+user: Fix the pipeline issues in reports_dev/validate_marketplace_pipeline/20260421_183012+0200-acme.md
 assistant: Reading the report...
 Found 3 issues: 1 MAJOR (missing scripts/publish.py), 2 MINOR (missing cliff.toml, stale CHANGELOG.md).
 [Consults cpv-fix-marketplace-validation for publish.py scaffolding, then cpv-canonical-pipeline for cliff.toml + CHANGELOG.md]
-[DONE] fixed 3 of 3 issues. Report: reports/cpv-marketplace-fixer-agent/20260421_184530+0200-acme.md
+[DONE] fixed 3 of 3 issues. Report: reports_dev/cpv-marketplace-fixer-agent/20260421_184530+0200-acme.md
 </example>

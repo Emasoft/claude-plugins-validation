@@ -69,7 +69,7 @@ For each file: present + non-empty + (where applicable) shape-match against the 
 | `.github/workflows/notify-marketplace.yml` (Layout A) | `DOC-053 [MAJOR] missing notify-marketplace workflow — marketplace cache goes stale after publish` |
 | `cliff.toml` | `DOC-054 [MINOR] missing cliff.toml — CHANGELOG won't auto-generate` |
 | `CHANGELOG.md` | `DOC-055 [MINOR] missing CHANGELOG.md` |
-| `reports/` + `reports_dev/` not in `.gitignore` | `DOC-056 [MAJOR] reports/ and reports_dev/ not gitignored — reports may leak private data` |
+| `reports_dev/` not in `.gitignore` | `DOC-056 [MAJOR] reports_dev/ not gitignored — reports may leak private data` |
 
 ### D7 — README / CONTRIBUTING coverage
 
@@ -227,11 +227,11 @@ Return EXACTLY one line:
 [project-<plugin_index>] <label>: fixed=<X> pending=<Y> (status: <status_path>)                # fix / same-turn
 ```
 
-Do NOT render menus. Do NOT mutate `~/.claude/` beyond the iron-rule fix categories. Per-scope reports live under `$MAIN_ROOT/reports/scope-doctor/<ts±tz>-<project>.md`.
+Do NOT render menus. Do NOT mutate `~/.claude/` beyond the iron-rule fix categories. Per-scope reports live under `$MAIN_ROOT/reports_dev/scope-doctor/<ts±tz>-<project>.md`.
 
 ## 4. Report markdown template
 
-Write ALL findings (validator + D1..D9) to ONE report at `$MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (`$MAIN_ROOT` = `git worktree list | head -n1 | awk '{print $1}'`):
+Write ALL findings (validator + D1..D9) to ONE report at `$MAIN_ROOT/reports_dev/cpv-plugin-diagnoser-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (`$MAIN_ROOT` = `git worktree list | head -n1 | awk '{print $1}'`):
 
 ```markdown
 # CPV Doctor report — <target>

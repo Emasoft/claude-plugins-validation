@@ -70,7 +70,7 @@ this work agent.
 
 ### Phase 1 — Audit
 
-Run the cache validator. Anchor the report path to `$MAIN_ROOT` — the **main checkout root** (first entry of `git worktree list`), NEVER the linked worktree's own root. The worktree's local `./reports/` is gitignored and disappears when the worktree is removed/merged, so writing reports there loses the audit trail. `${CLAUDE_PROJECT_DIR}` resolves to the WORKTREE root when Claude Code is launched inside a linked worktree, so it is only safe as a fallback for non-git contexts.
+Run the cache validator. Anchor the report path to `$MAIN_ROOT` — the **main checkout root** (first entry of `git worktree list`), NEVER the linked worktree's own root. The worktree's local `./reports_dev/` is gitignored and disappears when the worktree is removed/merged, so writing reports there loses the audit trail. `${CLAUDE_PROJECT_DIR}` resolves to the WORKTREE root when Claude Code is launched inside a linked worktree, so it is only safe as a fallback for non-git contexts.
 
 Both the assignment AND the use must happen IN THE SAME Bash tool call — shell variables do NOT persist across separate Bash tool calls.
 
@@ -80,7 +80,7 @@ MAIN_ROOT="$(git worktree list 2>/dev/null | head -n1 | awk '{print $1}')"
 [ -z "$MAIN_ROOT" ] && MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"   # fallback only for non-git
 TS="$(date +%Y%m%d_%H%M%S%z)"
 SLUG="$(basename "<plugin_or_project_path>")"
-REPORT_DIR="$MAIN_ROOT/reports/validate_cache"
+REPORT_DIR="$MAIN_ROOT/reports_dev/validate_cache"
 mkdir -p "$REPORT_DIR"
 FINDINGS_JSON="$REPORT_DIR/${TS}-${SLUG}.json"
 LEDGER_JSON="$REPORT_DIR/${TS}-${SLUG}.ledger.json"
@@ -256,7 +256,7 @@ Max 2 lines back. Never paste code, scan output, or long lists.
 
 ## Reporting (HARD)
 
-When you finish, output ONLY the one-line summary above. The full audit + fix detail belongs in the report file under `$MAIN_ROOT/reports/validate_cache/<timestamp>-<slug>-final.md` (where `MAIN_ROOT` is resolved as in Phase 1 — first entry of `git worktree list`, NEVER the linked worktree's own root). Never paste code blocks, file diffs, or long lists into your reply — those flood the calling agent's context window for no reason.
+When you finish, output ONLY the one-line summary above. The full audit + fix detail belongs in the report file under `$MAIN_ROOT/reports_dev/validate_cache/<timestamp>-<slug>-final.md` (where `MAIN_ROOT` is resolved as in Phase 1 — first entry of `git worktree list`, NEVER the linked worktree's own root). Never paste code blocks, file diffs, or long lists into your reply — those flood the calling agent's context window for no reason.
 
 ## Examples
 
@@ -267,7 +267,7 @@ assistant: I'll audit, fix, and re-validate.
 [Phase 2: applies cache-fixes.md#ca-01 (removes the dynamic-timestamp placeholder from CLAUDE.md), commits]
 [Phase 2: applies cache-fixes.md#ca-04 (removes model: from SKILL.md, suggests dedicated agent), commits]
 [Phase 3: re-validates → verdict VALID]
-[DONE] 4 of 4 findings fixed. Report: reports/validate_cache/20260421_184530+0200-my-plugin-final.md
+[DONE] 4 of 4 findings fixed. Report: reports_dev/validate_cache/20260421_184530+0200-my-plugin-final.md
 </example>
 
 <example>
@@ -277,5 +277,5 @@ assistant: I'll do CA-01..CA-07 first, then ask before each Phase-4 refactor.
 [Phase 4: presents a numbered Unicode table (1 — Apply / 2 — Skip / 0 — Cancel & stop) proposing to split CLAUDE.md (12k chars) → cached core + 3 references/ — NEVER AskUserQuestion]
 [On the user picking 1 (Apply): applies the split, commits, re-validates]
 [Appends ## Cache Notes block to CLAUDE.md documenting rationale]
-[DONE] CA-rules clean + 1 broader refactor applied. Report: reports/validate_cache/20260421_192015+0200-my-plugin-broader-final.md
+[DONE] CA-rules clean + 1 broader refactor applied. Report: reports_dev/validate_cache/20260421_192015+0200-my-plugin-broader-final.md
 </example>

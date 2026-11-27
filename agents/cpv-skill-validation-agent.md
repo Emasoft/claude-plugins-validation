@@ -44,8 +44,8 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 else
   MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
 fi
-mkdir -p "$MAIN_ROOT/reports/validate_skill"
-REPORT_FILE="$MAIN_ROOT/reports/validate_skill/$(date +%Y%m%d_%H%M%S%z)-$(basename "<skill_path>").md"
+mkdir -p "$MAIN_ROOT/reports_dev/validate_skill"
+REPORT_FILE="$MAIN_ROOT/reports_dev/validate_skill/$(date +%Y%m%d_%H%M%S%z)-$(basename "<skill_path>").md"
 
 # ALWAYS via the launcher — direct invocation of validate_skill_comprehensive.py
 # from the plugin cache fails with "remote location" environment-isolation error.
@@ -56,7 +56,7 @@ CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
 
 ## Rules
 
-- **ALWAYS write reports to `$MAIN_ROOT/reports/validate_skill/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. Both `reports/` and `reports_dev/` are gitignored. NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
+- **ALWAYS write reports to `$MAIN_ROOT/reports_dev/validate_skill/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. `reports_dev/` is gitignored (raw output, scratch, private data); `reports/` is tracked and holds only final, sanitized reports. NEVER write to `docs_dev/`, the worktree-local `reports_dev/`, or any other path.
 - **ALWAYS use `--report`** — saves full output to file, prints only compact summary
 - **NEVER read the report file** — provide the path to the user
 - **NEVER read source files** — the script does the reading
@@ -78,10 +78,10 @@ CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
 
 <example>
 user: Validate my-skill with strict mode
-assistant: [Runs: CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" skill ./my-skill --strict --verbose --report "$MAIN_ROOT/reports/validate_skill/20260421_183012+0200-my-skill.md"]
+assistant: [Runs: CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" skill ./my-skill --strict --verbose --report "$MAIN_ROOT/reports_dev/validate_skill/20260421_183012+0200-my-skill.md"]
 Skill Validation: FAIL (major)
   CRITICAL:0 | MAJOR:1 | MINOR:2 | PASSED:15
-  Report: reports/validate_skill/20260421_183012+0200-my-skill.md
+  Report: reports_dev/validate_skill/20260421_183012+0200-my-skill.md
 </example>
 
 <example>

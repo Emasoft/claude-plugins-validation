@@ -65,7 +65,7 @@ Situation 3 (v2.91.0 batch-fix): the orchestrator AUTO-DISPATCHES the batch prot
 ```
 [BATCH_REQUIRED] 47 findings exceed single-agent capacity (safe-ceiling=20).
 plugin-root: <plugin-root>
-Triage report: <plugin-root>/reports/cpv-plugin-fixer-agent/<timestamp>-triage.md
+Triage report: <plugin-root>/reports_dev/cpv-plugin-fixer-agent/<timestamp>-triage.md
 ```
 You CANNOT launch shard-fixers yourself (subagents cannot spawn subagents); `[BATCH_REQUIRED]` hands control to the orchestrator, which dispatches N parallel `Agent()` calls and the aggregator.
 
@@ -140,7 +140,7 @@ When the user asks "fix/upgrade the pipeline" / "match the latest CPV pipeline",
 
 ## Rules
 
-- **ALWAYS write reports/fix logs to `$MAIN_ROOT/reports/cpv-plugin-fixer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** (`$MAIN_ROOT` = main-repo root via `git worktree list | head -n1 | awk '{print $1}'`, never a linked worktree; `reports/`+`reports_dev/` gitignored). The log holds the iteration history, per-batch diffs, and advisory-warning list; return only a one-line summary.
+- **ALWAYS write reports/fix logs to `$MAIN_ROOT/reports_dev/cpv-plugin-fixer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** (`$MAIN_ROOT` = main-repo root via `git worktree list | head -n1 | awk '{print $1}'`, never a linked worktree; `reports_dev/` is gitignored, `reports/` is tracked and holds only final, sanitized reports). The log holds the iteration history, per-batch diffs, and advisory-warning list; return only a one-line summary.
 - **Evaluate every WARNING.** Publish-blockers (missing CI/`notify-marketplace.yml`/`publish.py`, version mismatch across manifests, unsatisfiable dependency, `platform:` vs script-extension mismatch) MUST be fixed; advisory warnings stay listed with a one-line justification (`iterative-fix-loop.md`).
 - **Own the full loop**; never read files speculatively (only those the CURRENT report points at), and never lower severity / add ignore rules / patch the validator to converge.
 - **Token budget:** locate patterns with MCP search tools (grepika, serena, tldr), verify docs via WebFetch, offload bounded analysis to LLM Externalizer (`mcp__plugin_llm-externalizer_llm-externalizer__*`).
@@ -154,13 +154,13 @@ When the user asks "fix/upgrade the pipeline" / "match the latest CPV pipeline",
 ## Examples
 
 <example>
-user: Fix issues in reports/validate_plugin/20260421_183012+0200-my-plugin.md
+user: Fix issues in reports_dev/validate_plugin/20260421_183012+0200-my-plugin.md
 assistant: [report has 3 issues → consults fix guide, fixes, re-validates: clean]
-[DONE] fixed 3 of 3 issues. Report: reports/cpv-plugin-fixer-agent/20260421_184530+0200-my-plugin.md
+[DONE] fixed 3 of 3 issues. Report: reports_dev/cpv-plugin-fixer-agent/20260421_184530+0200-my-plugin.md
 </example>
 
 <example>
 user: Fix ~/Code/my-plugin/
 assistant: [Path Resolution confirms root; Iter 1: 5 findings → fixed; Iter 2: 1 MINOR → fixed; Iter 3: 0 findings, 2 advisory WARNINGs]
-[DONE] iterations=3, clean. Report: reports/cpv-plugin-fixer-agent/20260421_191205+0200-my-plugin.md
+[DONE] iterations=3, clean. Report: reports_dev/cpv-plugin-fixer-agent/20260421_191205+0200-my-plugin.md
 </example>

@@ -24,8 +24,8 @@ LAUNCHER="${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py"
 # Allowlist the dev's own username so the privacy scan does not false-positive
 # on local paths under /Users/<me>/ or /home/<me>/.
 export CLAUDE_PRIVATE_USERNAMES="$(whoami)"
-mkdir -p "$MAIN_ROOT/reports/<component>"
-REPORT_FILE="$MAIN_ROOT/reports/<component>/$TS-$SLUG.md"
+mkdir -p "$MAIN_ROOT/reports_dev/<component>"
+REPORT_FILE="$MAIN_ROOT/reports_dev/<component>/$TS-$SLUG.md"
 ```
 
 Every leaf inherits the exported `CLAUDE_PRIVATE_USERNAMES` from this prologue,
@@ -560,7 +560,7 @@ on the resolved path, then drill in. Per-leaf recipes:
 - **execution**:
   ```bash
   CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
-    python "$LAUNCHER" plugin "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_plugin/$TS-$SLUG.md"
+    python "$LAUNCHER" plugin "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_plugin/$TS-$SLUG.md"
   ```
 
 #### 3.1.2 Single component — Level-2 sub-menu
@@ -597,7 +597,7 @@ END THE TURN.
 - **execution**:
   ```bash
   CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
-    python "$LAUNCHER" skill "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_skill/$TS-$SLUG.md"
+    python "$LAUNCHER" skill "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_skill/$TS-$SLUG.md"
   ```
 
 ##### 3.1.2.2 Agent .md
@@ -606,7 +606,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" agent "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_agent/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_agent/$TS-$SLUG.md"
   ```
 
 ##### 3.1.2.3 Command .md
@@ -615,7 +615,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" command "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_command/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_command/$TS-$SLUG.md"
   ```
 
 ##### 3.1.2.4 Hook (hooks.json)
@@ -624,7 +624,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" hook "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_hook/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_hook/$TS-$SLUG.md"
   ```
 
 ##### 3.1.2.5 MCP server
@@ -633,7 +633,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" mcp "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_mcp/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_mcp/$TS-$SLUG.md"
   ```
 
 ##### 3.1.2.6 LSP server
@@ -642,7 +642,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" lsp "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_lsp/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_lsp/$TS-$SLUG.md"
   ```
 
 ##### 3.1.2.7 Output-style or Rule file — Level-3 sub-menu
@@ -673,7 +673,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" project-scope "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_project_scope/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_project_scope/$TS-$SLUG.md"
   ```
 - **note**: there is no dedicated `validate_output_style.py`; output-style
   files are checked as part of `project-scope` validation.
@@ -684,7 +684,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" rules "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_rules/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_rules/$TS-$SLUG.md"
   ```
 
 ##### 3.1.2.8 Agent + its skill closure
@@ -700,7 +700,7 @@ scored a clean 100/100 before this row existed.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" agent "$TARGET_PATH" --closure \
-    --report "$MAIN_ROOT/reports/validate_agent/$TS-$SLUG-closure.md"
+    --report "$MAIN_ROOT/reports_dev/validate_agent/$TS-$SLUG-closure.md"
   ```
 - **note**: pass `--skills-root PATH` (repeatable) to pin the search roots
   instead of auto-resolving plugin / project / user scope — that is what makes
@@ -738,7 +738,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" marketplace "$TARGET_PATH" --strict \
-    --report "$MAIN_ROOT/reports/validate_marketplace/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_marketplace/$TS-$SLUG.md"
   ```
 
 ##### 3.1.3.2 GitHub (owner/repo)
@@ -747,7 +747,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" github --marketplace "$REPO" \
-    --report "$MAIN_ROOT/reports/validate_github_marketplace/$TS-$(echo "$REPO" | tr '/' '_').md"
+    --report "$MAIN_ROOT/reports_dev/validate_github_marketplace/$TS-$(echo "$REPO" | tr '/' '_').md"
   ```
 
 ##### 3.1.3.3 Any git URL (gitlab/bitbucket/self-hosted/SSH)
@@ -761,7 +761,7 @@ END THE TURN.
     i=$((i+1)); [ $i -ge 30 ] && exit 1; sleep 6
   done
   uv run --with pyyaml python "$LAUNCHER" marketplace "$TMPDIR_X/repo" --strict \
-    --report "$MAIN_ROOT/reports/validate_marketplace/$TS-$(basename "$GIT_URL" .git).md"
+    --report "$MAIN_ROOT/reports_dev/validate_marketplace/$TS-$(basename "$GIT_URL" .git).md"
   ```
 - **note**: respects `~/.claude/rules/github-timeouts.md` retry pattern. The
   temp checkout is cleaned up via the `trap` regardless of validation
@@ -773,7 +773,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" settings-marketplace "$TARGET_PATH" --strict \
-    --report "$MAIN_ROOT/reports/validate_settings_marketplace/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_settings_marketplace/$TS-$SLUG.md"
   ```
 
 #### 3.1.4 Scope — Level-2 sub-menu
@@ -804,7 +804,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" project-scope "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_project_scope/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_project_scope/$TS-$SLUG.md"
   ```
 
 ##### 3.1.4.2 Local-scope (not in git)
@@ -813,7 +813,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" local-scope "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_local_scope/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_local_scope/$TS-$SLUG.md"
   ```
 
 #### 3.1.5 Specific quality check — Level-2 sub-menu
@@ -858,7 +858,7 @@ the same workflow directly from top-level row 3.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" xref "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_xref/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_xref/$TS-$SLUG.md"
   ```
 
 ##### 3.1.5.4 Documentation
@@ -867,7 +867,7 @@ the same workflow directly from top-level row 3.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" docs "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_documentation/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_documentation/$TS-$SLUG.md"
   ```
 
 ##### 3.1.5.5 File encoding
@@ -876,7 +876,7 @@ the same workflow directly from top-level row 3.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" encoding "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_encoding/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_encoding/$TS-$SLUG.md"
   ```
 
 ##### 3.1.5.6 Lint pass (ruff / mypy / shellcheck)
@@ -885,7 +885,7 @@ the same workflow directly from top-level row 3.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" lint "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/lint/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/lint/$TS-$SLUG.md"
   ```
 
 ##### 3.1.5.7 Other (enterprise / scoring / telemetry) — Level-3 sub-menu
@@ -917,7 +917,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" enterprise "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_enterprise/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_enterprise/$TS-$SLUG.md"
   ```
 
 ###### 3.1.5.7.2 Scoring self-check
@@ -926,7 +926,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" scoring "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_scoring/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_scoring/$TS-$SLUG.md"
   ```
 
 ###### 3.1.5.7.3 Telemetry hazards
@@ -935,7 +935,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" telemetry "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_telemetry/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_telemetry/$TS-$SLUG.md"
   ```
 
 #### 3.1.6 From GitHub — Level-2 sub-menu
@@ -968,7 +968,7 @@ END THE TURN.
 - **execution** (without audit):
   ```bash
   CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
-    python "$LAUNCHER" github --plugin "$REPO" --report "$MAIN_ROOT/reports/validate_github_plugin/$TS-$(echo "$REPO" | tr '/' '_').md"
+    python "$LAUNCHER" github --plugin "$REPO" --report "$MAIN_ROOT/reports_dev/validate_github_plugin/$TS-$(echo "$REPO" | tr '/' '_').md"
   ```
 - **execution** (with audit): append `--audit` before `--report`.
 - **fallback** (security-only direct URL ingestion, v2.48+):
@@ -983,7 +983,7 @@ END THE TURN.
 - **execution**:
   ```bash
   CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
-    python "$LAUNCHER" github --marketplace "$REPO" --report "$MAIN_ROOT/reports/validate_github_marketplace/$TS-$(echo "$REPO" | tr '/' '_').md"
+    python "$LAUNCHER" github --marketplace "$REPO" --report "$MAIN_ROOT/reports_dev/validate_github_marketplace/$TS-$(echo "$REPO" | tr '/' '_').md"
   ```
 
 #### 3.1.7 Batch / fleet — Level-2 sub-menu (v2.101.0)
@@ -1475,7 +1475,7 @@ driver captured per run — it never simulates one, and reports UNKNOWN instead.
   ```bash
   uv run --with pyyaml python "$LAUNCHER" agent-eval "$ORIGINAL" \
     --all-in-one "$AIO" --plugin-omni "$OMNI" --skills-root "$PLUGIN/skills" \
-    --report "$MAIN_ROOT/reports/cpv-agent-eval/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/cpv-agent-eval/$TS-$SLUG.md"
   ```
 - **note**: pass `--skills-root` pointing at the real skills. Without it a variant's
   preloads may not resolve, and an unresolvable preload is priced at 0 tokens — which
@@ -2025,7 +2025,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" security "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_security/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_security/$TS-$SLUG.md"
   ```
 
 #### 3.16.2 Plugin from github.com URL
@@ -2034,7 +2034,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" security "https://github.com/$REPO" \
-    --report "$MAIN_ROOT/reports/validate_security/$TS-$(echo "$REPO" | tr '/' '_').md"
+    --report "$MAIN_ROOT/reports_dev/validate_security/$TS-$(echo "$REPO" | tr '/' '_').md"
   ```
 
 #### 3.16.3 Plugin from arbitrary git URL
@@ -2048,7 +2048,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" security "$ARCHIVE_PATH" \
-    --report "$MAIN_ROOT/reports/validate_security/$TS-$(basename "$ARCHIVE_PATH").md"
+    --report "$MAIN_ROOT/reports_dev/validate_security/$TS-$(basename "$ARCHIVE_PATH").md"
   ```
 
 #### 3.16.5 Marketplace tree-scan-once
@@ -2057,7 +2057,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" security --marketplace "$SPEC" \
-    --report "$MAIN_ROOT/reports/validate_security/$TS-marketplace-$(echo "$SPEC" | tr '/:' '_').md"
+    --report "$MAIN_ROOT/reports_dev/validate_security/$TS-marketplace-$(echo "$SPEC" | tr '/:' '_').md"
   ```
 
 #### 3.16.6 Loose / flat skill pack
@@ -2066,7 +2066,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" security "$TARGET_PATH" --loose \
-    --report "$MAIN_ROOT/reports/validate_security/$TS-loose-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_security/$TS-loose-$SLUG.md"
   ```
 
 #### 3.16.7..3.16.11 Per-scanner focus (rows cc-audit / tirith / trufflehog / semgrep / Cisco)
@@ -2080,7 +2080,7 @@ this when they pick one.
   the report filename):
   ```bash
   uv run --with pyyaml python "$LAUNCHER" security "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_security/$TS-<scanner>-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_security/$TS-<scanner>-$SLUG.md"
   ```
 - **note**: there is **no single-scanner isolation flag** — by design the
   external scanners are not opt-out and `validate_security` ALWAYS runs the
@@ -2107,7 +2107,7 @@ telling you which agent owns the risk.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" agent-security "$TARGET_PATH" --strict \
-    --report "$MAIN_ROOT/reports/cpv_agent_security/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/cpv_agent_security/$TS-$SLUG.md"
   ```
 - **note**: a narrow scan must never read cleaner than the plugin-wide one on
   the same content. Every scanner that could not run is reported SKIPPED and the
@@ -2166,7 +2166,7 @@ END THE TURN.
 - **execution**:
   ```bash
   uv run --with pyyaml python "$LAUNCHER" cache "$TARGET_PATH" \
-    --report "$MAIN_ROOT/reports/validate_cache/$TS-$SLUG.md"
+    --report "$MAIN_ROOT/reports_dev/validate_cache/$TS-$SLUG.md"
   ```
 
 #### 3.3.2 Audit + auto-fix

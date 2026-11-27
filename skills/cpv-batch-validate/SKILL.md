@@ -94,7 +94,7 @@ Two artefacts:
    `DONE: plugins=N valid=X invalid=Y warning-only=Z. Reports under <session_dir>/.`
 
 Per-plugin validation reports live under
-`$MAIN_ROOT/reports/validate_plugin/<ts±tz>-<plugin>.md` (written
+`$MAIN_ROOT/reports_dev/validate_plugin/<ts±tz>-<plugin>.md` (written
 by the dispatched subagents, not by this skill). Per-plugin status
 JSONs live under
 `<session_dir>/plugin-<index>.status.json`.

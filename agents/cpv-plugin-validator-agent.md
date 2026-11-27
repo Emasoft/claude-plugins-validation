@@ -65,7 +65,7 @@ CPV scripts in the plugin cache REFUSE to run when invoked directly — they req
 
 Use `${CLAUDE_PLUGIN_ROOT}` (set by Claude Code at agent-invocation time) — it points at the locally-installed CPV plugin's current version. Do NOT hand-resolve cache paths with `find` or `ls`.
 
-Every report path follows `$MAIN_ROOT/reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`. Compose the path with this prologue before running any validator:
+Every report path follows `$MAIN_ROOT/reports_dev/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`. Compose the path with this prologue before running any validator:
 
 ```bash
 # TARGET_PATH is the element being validated (plugin / skill / hook / …).
@@ -81,22 +81,22 @@ fi
 TS="$(date +%Y%m%d_%H%M%S%z)"
 SLUG="$(basename "$TARGET_PATH")"
 LAUNCHER="${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py"
-mkdir -p "$MAIN_ROOT/reports/<component>"
+mkdir -p "$MAIN_ROOT/reports_dev/<component>"
 ```
 
 Then run any of these (substitute the matching `<component>` — each script gets its own subfolder):
 
 ```bash
 # Full plugin validation (component: validate_plugin)
-CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml python "$LAUNCHER" plugin "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_plugin/$TS-$SLUG.md"
+CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml python "$LAUNCHER" plugin "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_plugin/$TS-$SLUG.md"
 
 # Per-component validators (one component per script — never lump them into one folder).
 # Every command validates "$TARGET_PATH" so the report SLUG matches the path scanned.
-uv run --with pyyaml python "$LAUNCHER" skill          "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_skill/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" hook           "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_hook/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" mcp            "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_mcp/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" marketplace    "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_marketplace/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" xref           "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_xref/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" skill          "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_skill/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" hook           "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_hook/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" mcp            "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_mcp/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" marketplace    "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_marketplace/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" xref           "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_xref/$TS-$SLUG.md"
 # `xref` includes ghost-agent dispatch detection (TRDD-25b9be90):
 #   * RC-GHOST-DISPATCH-001 (CRITICAL) — Task() / subagent_type references an
 #     agent that doesn't exist (built-in / in-plugin / user-scope). Runtime
@@ -107,8 +107,8 @@ uv run --with pyyaml python "$LAUNCHER" xref           "$TARGET_PATH" --report "
 #     `other-plugin:agent` — verified at runtime, not at validate time.
 # Since v2.91.0, validate_plugin also invokes xref as part of the main pipeline,
 # so these findings surface in `cpv-validate-plugin` reports without a separate xref run.
-uv run --with pyyaml python "$LAUNCHER" docs           "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_documentation/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" security       "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_security/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" docs           "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_documentation/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" security       "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_security/$TS-$SLUG.md"
 # `security` is the most comprehensive checker — in-process AI/security rule packs PLUS five
 # external scanners (v2.48: gitleaks dropped, trufflehog covers the same detectors with
 # parallel-safe concurrency): cc-audit (npx → persistent), tirith (PATH/docker/nix),
@@ -121,18 +121,18 @@ uv run --with pyyaml python "$LAUNCHER" security       "$TARGET_PATH" --report "
 # .claude-plugin/ precondition for flat skill packs. Env knobs: `CPV_NO_TIRITH_INSTALL=1`,
 # `CPV_NO_FCLONES_INSTALL=1`, `CPV_CISCO_SCAN_TIMEOUT_S=<seconds>`. Run
 # `cpv-doctor --install-scanners` to pre-install every external scanner.
-uv run --with pyyaml python "$LAUNCHER" rules          "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_rules/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" enterprise     "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_enterprise/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" encoding       "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_encoding/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" scoring        "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_scoring/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" command        "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_command/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" agent          "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_agent/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" lsp            "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_lsp/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" lint           "$TARGET_PATH" --report "$MAIN_ROOT/reports/lint/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" rules          "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_rules/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" enterprise     "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_enterprise/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" encoding       "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_encoding/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" scoring        "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_scoring/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" command        "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_command/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" agent          "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_agent/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" lsp            "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_lsp/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" lint           "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/lint/$TS-$SLUG.md"
 
 # Scope validators (validate .claude/ + .mcp.json + CLAUDE.md under a project path)
-uv run --with pyyaml python "$LAUNCHER" project-scope  "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_project_scope/$TS-$SLUG.md"
-uv run --with pyyaml python "$LAUNCHER" local-scope    "$TARGET_PATH" --report "$MAIN_ROOT/reports/validate_local_scope/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" project-scope  "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_project_scope/$TS-$SLUG.md"
+uv run --with pyyaml python "$LAUNCHER" local-scope    "$TARGET_PATH" --report "$MAIN_ROOT/reports_dev/validate_local_scope/$TS-$SLUG.md"
 ```
 
 ## Batch modes (TRDD-3dcbb37c)
@@ -166,7 +166,7 @@ Steps (both modes):
 
 1. Resolve `$MAIN_ROOT` via the standard `git worktree list` prologue.
 2. Compose the report path as
-   `$MAIN_ROOT/reports/<component>/$TS-<display_name>.md` per the
+   `$MAIN_ROOT/reports_dev/<component>/$TS-<display_name>.md` per the
    `agent-reports-location` rule.
 3. Run the validator (per the table above). Capture the SUMMARY line.
 4. Write the per-plugin status JSON to `status_path` with these keys
@@ -218,7 +218,7 @@ Steps (both modes):
 
 ## Rules
 
-- **ALWAYS write reports to `$MAIN_ROOT/reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. Both `reports/` and `reports_dev/` are gitignored. NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
+- **ALWAYS write reports to `$MAIN_ROOT/reports_dev/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. `reports_dev/` is gitignored (raw output, scratch, private data); `reports/` is tracked and holds only final, sanitized reports. NEVER write to `docs_dev/`, the worktree-local `reports_dev/`, or any other path.
 - **ALWAYS use `--report`** — saves full output to file, prints only compact summary to stdout
 - **NEVER read the report file** — provide the path to the user
 - **NEVER read source files** — the scripts do the reading
@@ -242,18 +242,18 @@ Steps (both modes):
 
 <example>
 user: Validate my-plugin before release
-assistant: [Runs: CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin ./my-plugin --verbose --report "$MAIN_ROOT/reports/validate_plugin/20260421_183012+0200-my-plugin.md"]
+assistant: [Runs: CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" plugin ./my-plugin --verbose --report "$MAIN_ROOT/reports_dev/validate_plugin/20260421_183012+0200-my-plugin.md"]
 Plugin Validation: FAIL (major)
   CRITICAL:0 | MAJOR:1 | MINOR:2 | PASSED:154
-  Report: reports/validate_plugin/20260421_183012+0200-my-plugin.md
+  Report: reports_dev/validate_plugin/20260421_183012+0200-my-plugin.md
 </example>
 
 <example>
 user: Can you fix the issues?
-assistant: Run `/cpv-main-menu → Fix` and point it at `reports/validate_plugin/20260421_183012+0200-my-plugin.md` to fix the issues from that report (it dispatches the cpv-plugin-fixer-agent agent).
+assistant: Run `/cpv-main-menu → Fix` and point it at `reports_dev/validate_plugin/20260421_183012+0200-my-plugin.md` to fix the issues from that report (it dispatches the cpv-plugin-fixer-agent agent).
 </example>
 
 <example>
 user: Can you fix the marketplace issues?
-assistant: Run `/cpv-main-menu → Fix → Fix marketplace issues` and point it at `reports/validate_marketplace/20260421_183012+0200-my-hub.md` (marketplace reports must go to the cpv-marketplace-fixer-agent agent, not the cpv-plugin-fixer-agent).
+assistant: Run `/cpv-main-menu → Fix → Fix marketplace issues` and point it at `reports_dev/validate_marketplace/20260421_183012+0200-my-hub.md` (marketplace reports must go to the cpv-marketplace-fixer-agent agent, not the cpv-plugin-fixer-agent).
 </example>

@@ -2201,7 +2201,7 @@ def validate_structure(plugin_root: Path, report: ValidationReport, marketplace_
         "target",
         "output-styles",
         "design",  # TRDD design docs (design/tasks/)
-        "reports",  # v2.24.0 — mandated report output folder (gitignored; see cpv_validation_common.resolve_reports_dir())
+        "reports",  # v2.24.0 — report output folder; tracked finals live here, script output goes to reports_dev/ (see cpv_validation_common.resolve_reports_dir())
         "reviews",  # code-review output folder (recognised built-in; TRDD-02e1672b)
         "workflows",  # Workflow-DSL scripts (Claude Code 2.1.154+ Workflow tool / ultracode); #94. Files inside are still security-scanned — this only stops the structural RC-NONSTD-DIR-001 MAJOR.
         # Common dirs across many plugins (added v2.23.2 after empirical scan
@@ -9402,7 +9402,7 @@ def _derive_cache_report_path(main_report_path: Path) -> Path:
     """Sibling path for the separate cache-audit report.
 
     ``…/validate_plugin/<ts>-<slug>.md`` → ``…/<ts>-<slug>-cache-audit.md``
-    (same directory as the main report — no assumption about the reports/
+    (same directory as the main report — no assumption about the reports_dev/
     tree layout, so it works whatever path the launcher passed).
     """
     return main_report_path.with_name(f"{main_report_path.stem}-cache-audit{main_report_path.suffix}")

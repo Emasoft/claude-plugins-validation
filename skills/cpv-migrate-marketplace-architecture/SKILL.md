@@ -51,7 +51,7 @@ Copy this checklist and track your progress:
 - **A**: N plugin repos + cleaned marketplace (github sources, tagged), each wired for auto-notify.
 - **B**: same repo with `publish.py`, `cliff.toml`, CI, `CHANGELOG.md`, atomic commit tagged.
 - **C**: same repo gains the second manifest with self-entry (`source: "./"`), name+version aligned, `publish.py` bumps both atomically.
-- Migration log at `$MAIN_ROOT/reports/cpv-migrate-marketplace-architecture/<ts±tz>-<slug>.md`
+- Migration log at `$MAIN_ROOT/reports_dev/cpv-migrate-marketplace-architecture/<ts±tz>-<slug>.md`
 
 ## Error Handling
 

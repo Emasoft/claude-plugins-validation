@@ -279,9 +279,9 @@ architecture warnings in the report:
 
 ```bash
 MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
-mkdir -p "$MAIN_ROOT/reports/cpv-migrate-marketplace-architecture"
+mkdir -p "$MAIN_ROOT/reports_dev/cpv-migrate-marketplace-architecture"
 uv run --with pyyaml python scripts/validate_marketplace.py . --strict \
-  2>&1 | tee "$MAIN_ROOT/reports/cpv-migrate-marketplace-architecture/$(date +%Y%m%d_%H%M%S%z)-layout-b-verify.log"
+  2>&1 | tee "$MAIN_ROOT/reports_dev/cpv-migrate-marketplace-architecture/$(date +%Y%m%d_%H%M%S%z)-layout-b-verify.log"
 ```
 
 Also run the per-plugin validator against every subdirectory so the report
@@ -309,6 +309,6 @@ Layout B is fully additive, so rollback is simple:
   discipline upgrade is rolled back.
 
 Record every rollback decision in
-`$MAIN_ROOT/reports/cpv-migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
+`$MAIN_ROOT/reports_dev/cpv-migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
 at the main-repo root (first entry of `git worktree list`) under a fresh
 timestamped entry.

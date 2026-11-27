@@ -183,14 +183,19 @@ def test_skillaudit_filter_gives_absolute_paths_no_path_exemption(tmp_path: Path
     assert vs.skillaudit_should_skip(str(plug / "skills" / "s" / "payload.md"), 1) is False
 
 
-def test_in_plugin_reports_dir_is_still_exempt(tmp_path: Path) -> None:
-    """Regression guard (passes on base too): a reports/ folder INSIDE the plugin keeps today's exemption."""
+def test_in_plugin_reports_dev_dir_is_exempt_but_tracked_reports_is_not(tmp_path: Path) -> None:
+    """A reports_dev/ folder INSIDE the plugin keeps its exemption; reports/ is tracked (#270) and is NOT exempt."""
     plug = _plugin(tmp_path, "clean")
-    inside = plug / "reports"
+    inside = plug / "reports_dev"
     inside.mkdir()
     (inside / "x.md").write_text(PAYLOAD, encoding="utf-8")
     assert vs.make_cisco_should_skip(plug)(str(inside / "x.md"), 1) is True
-    assert vs.skillaudit_should_skip("reports/x.md", 1) is True
+    assert vs.skillaudit_should_skip("reports_dev/x.md", 1) is True
+    tracked = plug / "reports"
+    tracked.mkdir()
+    (tracked / "x.md").write_text(PAYLOAD, encoding="utf-8")
+    assert vs.make_cisco_should_skip(plug)(str(tracked / "x.md"), 1) is False
+    assert vs.skillaudit_should_skip("reports/x.md", 1) is False
 
 
 def test_pytest_tmp_root_matches_none_of_the_predicates(tmp_path: Path) -> None:

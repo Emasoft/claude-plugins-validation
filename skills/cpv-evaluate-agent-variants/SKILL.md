@@ -101,7 +101,7 @@ Procedure:
 
 ## Output
 
-- A findings-style report under `reports/cpv-agent-eval/` (or at `--report PATH`), with
+- A findings-style report under `reports_dev/cpv-agent-eval/` (or at `--report PATH`), with
   a numbered table per tier: the Tier-1 measurements, the projected N-turn cost, the
   Tier-1 delta, the Tier-1 notes, and — when `--live` ran — the Tier-2 `run_summary`,
   the Tier-2 delta, and any UNKNOWN rows with their reason.

@@ -264,7 +264,7 @@ Automatic: developer pushes to plugin repo -> `notify-marketplace.yml` fires `re
 Move plugins from `--source-marketplace` to `<placeholder-for-marketplace-repo-name>`. Both must exist. For each plugin: copy entry to target `marketplace.json`, repoint `notify-marketplace.yml` to target via `gh api`, remove entry from source, regenerate READMEs on both, validate both.
 
 ```bash
-# Resolve the main-repo root so --report writes under <repo>/reports/ (worktree-aware).
+# Resolve the main-repo root so --report writes under <repo>/reports_dev/ (worktree-aware).
 MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
 SOURCE="<placeholder-for-source-marketplace>" && TARGET="<placeholder-for-marketplace-repo-name>"
 SOURCE_JSON=$(gh api "repos/$OWNER/$SOURCE/contents/.claude-plugin/marketplace.json" -q '.content' | base64 --decode)
@@ -285,8 +285,8 @@ uv run python scripts/render_readme_table.py && git add .claude-plugin/marketpla
 # Update target: regenerate, push, validate both
 cd "$TARGET" && uv run python scripts/render_readme_table.py
 git add .claude-plugin/marketplace.json README.md && git commit -m "Migrate in: ${PLUGINS_TO_MIGRATE[*]}" && git push
-uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace /tmp/source-mkt --verbose --report $MAIN_ROOT/reports/validate_marketplace/$(date +%Y%m%d_%H%M%S%z)-source.md
-uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace "$TARGET" --verbose --report $MAIN_ROOT/reports/validate_marketplace/$(date +%Y%m%d_%H%M%S%z)-target.md
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace /tmp/source-mkt --verbose --report $MAIN_ROOT/reports_dev/validate_marketplace/$(date +%Y%m%d_%H%M%S%z)-source.md
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace "$TARGET" --verbose --report $MAIN_ROOT/reports_dev/validate_marketplace/$(date +%Y%m%d_%H%M%S%z)-target.md
 ```
 
 Reference: [Plugin Linking Guide](plugin-linking-guide.md)
@@ -301,9 +301,9 @@ Reference: [Plugin Linking Guide](plugin-linking-guide.md)
 ### Step 1: Validate marketplace structure
 
 ```bash
-# Resolve the main-repo root so --report writes under <repo>/reports/ (worktree-aware).
+# Resolve the main-repo root so --report writes under <repo>/reports_dev/ (worktree-aware).
 MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
-uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace <placeholder-for-marketplace-path> --verbose --report $MAIN_ROOT/reports/validate_marketplace/$(date +%Y%m%d_%H%M%S%z)-<slug>.md
+uv run --with pyyaml python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" marketplace <placeholder-for-marketplace-path> --verbose --report $MAIN_ROOT/reports_dev/validate_marketplace/$(date +%Y%m%d_%H%M%S%z)-<slug>.md
 ```
 
 Confirm: marketplace.json is valid, all plugin entries have source config, workflows are installed.

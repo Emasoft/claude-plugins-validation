@@ -57,7 +57,7 @@ input table.
 - Unicode-bordered status table.
 - One-line DONE summary.
 - Per-project final scope-doctor reports under
-  `$MAIN_ROOT/reports/scope-doctor/<ts±tz>-<project>-same-turn.md`.
+  `$MAIN_ROOT/reports_dev/scope-doctor/<ts±tz>-<project>-same-turn.md`.
 - Per-project status JSONs.
 
 ## Token contract

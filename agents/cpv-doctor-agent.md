@@ -11,7 +11,7 @@ description: |
   manifest/marketplace consistency, cpv-canonical-pipeline presence,
   README/CONTRIBUTING coverage, cross-reference integrity, cpv-the-skills-menu
   adoption. Findings land in a
-  single report under $MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/. Free-form
+  single report under $MAIN_ROOT/reports_dev/cpv-plugin-diagnoser-agent/. Free-form
   "Ask the doctor" mode routes the user's description to a diagnostic dialog.
 maxTurns: 100
 skills:
@@ -91,7 +91,7 @@ Run for every plugin / marketplace / skill-folder mode in the validator table ab
 | D3 Skill invocability | unreachable user-invocable skill, dead `user-invocable: false` skill, name collision | DOC-020..022 |
 | D4 Design-conflict | name collision across commands∪agents∪skills, built-in shadow, agent trigger overlap | DOC-030..032 |
 | D5 Manifest/marketplace consistency | version drift across plugin.json/tag/marketplace/CHANGELOG, dead `source.repo` | DOC-040..041 |
-| D6 Canonical-pipeline presence | publish.py, bump_version.py, release/notify workflows, cliff.toml, CHANGELOG.md, reports gitignored | DOC-050..056 |
+| D6 Canonical-pipeline presence | publish.py, bump_version.py, release/notify workflows, cliff.toml, CHANGELOG.md, reports_dev gitignored | DOC-050..056 |
 | D7 README/CONTRIBUTING coverage | Install/Usage/command-list/version-badge; optional CONTRIBUTING dev-setup/tests | DOC-070..075 |
 | D8 Cross-reference integrity | dangling skill reference, missing `agent:`/`subagent_type:`/`skills:` target | DOC-080..083 |
 | D9 cpv-the-skills-menu adoption (advisory) | method not adopted, multi-entry `skills:`, missing loader instruction, caller-named description | DOC-090..093 |
@@ -122,7 +122,7 @@ and `references/finding-codes.md`.
 
 ## Output format
 
-Write ALL findings (validator + D1..D9) to ONE markdown report at `$MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (`$MAIN_ROOT` = `git worktree list | head -n1 | awk '{print $1}'`). Sections: title/Generated/Target/Mode header, `## Severity summary` (one-line counts), `## Findings by recipe` (Schema-validation + D1..D9 + TOTAL severity matrix), `## Schema-correctness findings (validator)` (severity / RC-id / file / line / message rows), `## Design-correctness findings (D1..D9)` (same rows keyed DOC-id), `## Verdict` (VALID / INVALID). Exact template: **`references/cpv-doctor-recipes.md` §4**.
+Write ALL findings (validator + D1..D9) to ONE markdown report at `$MAIN_ROOT/reports_dev/cpv-plugin-diagnoser-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (`$MAIN_ROOT` = `git worktree list | head -n1 | awk '{print $1}'`). Sections: title/Generated/Target/Mode header, `## Severity summary` (one-line counts), `## Findings by recipe` (Schema-validation + D1..D9 + TOTAL severity matrix), `## Schema-correctness findings (validator)` (severity / RC-id / file / line / message rows), `## Design-correctness findings (D1..D9)` (same rows keyed DOC-id), `## Verdict` (VALID / INVALID). Exact template: **`references/cpv-doctor-recipes.md` §4**.
 
 ## Return contract
 
@@ -194,7 +194,7 @@ Do NOT fix a big plugin yourself — `maxTurns: 100` covers diagnosis, not the l
 
 ## Free-form mode (`ask_doctor_freeform` / `ask_about_findings`)
 
-Engage a multi-turn dialogue: read the user's `description` (or the prior scan's findings if `ask_about_findings`); ask clarifying questions one at a time (plain text, no `AskUserQuestion`); walk through causes / fixes / further checks; return only on `done` or clear resolution, summarising to `$MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/<ts>-ask.md`.
+Engage a multi-turn dialogue: read the user's `description` (or the prior scan's findings if `ask_about_findings`); ask clarifying questions one at a time (plain text, no `AskUserQuestion`); walk through causes / fixes / further checks; return only on `done` or clear resolution, summarising to `$MAIN_ROOT/reports_dev/cpv-plugin-diagnoser-agent/<ts>-ask.md`.
 
 ## Scope-aware batch modes (TRDD-a175f78d)
 
@@ -213,20 +213,20 @@ Return EXACTLY one line, then write the `status_path` JSON before exit:
 [project-<plugin_index>] <label>: fixed=<X> pending=<Y> (status: <status_path>)                # fix / same-turn
 ```
 
-Do NOT render menus. Do NOT mutate `~/.claude/` beyond the iron-rule fix categories. Per-scope reports live under `$MAIN_ROOT/reports/scope-doctor/<ts±tz>-<project>.md`.
+Do NOT render menus. Do NOT mutate `~/.claude/` beyond the iron-rule fix categories. Per-scope reports live under `$MAIN_ROOT/reports_dev/scope-doctor/<ts±tz>-<project>.md`.
 
 ## Examples
 
 <example>
 user: [dispatched with <context> — action_id: diagnose_single_plugin, mode: single_plugin, target_path: ~/Code/my-plugin]
 assistant: [Loads cpv-plugin-validation-skill. Runs validate_plugin.py on the target --strict (schema pass), then D1..D9. D3 finds skill `helper` is user-invocable:false with no agent loading it → DOC-021 [MAJOR] dead skill; D5 finds plugin.json=1.4.0 but latest tag v1.3.0 → DOC-040 [MAJOR] version drift. 12 findings < opus safe-ceiling, so NO batch token. Writes the report plus .summary.json and .breakdown.json sidecars, then returns one line:]
-Findings: 0 CRITICAL, 2 MAJOR, 4 MINOR, 6 NIT, 0 WARNING — INVALID (report: ~/Code/my-plugin/reports/cpv-plugin-diagnoser-agent/20260525_143012+0200-my-plugin.md)
+Findings: 0 CRITICAL, 2 MAJOR, 4 MINOR, 6 NIT, 0 WARNING — INVALID (report: ~/Code/my-plugin/reports_dev/cpv-plugin-diagnoser-agent/20260525_143012+0200-my-plugin.md)
 </example>
 
 <example>
 user: [dispatched with <context> — action_id: diagnose_single_plugin, mode: single_plugin, target_path: ~/Code/mega-plugin]
 assistant: [Schema pass + D1..D9 on a large plugin surface 58 findings — above the opus 15-25 safe-ceiling. Writes the full report + sidecars, then returns the SPECIAL batch line so the orchestrator auto-routes to cpv_batch_planner.py + parallel cpv-plugin-fixer-agent shards instead of a single-agent fix loop:]
-Findings: 1 CRITICAL, 9 MAJOR, 18 MINOR, 28 NIT, 2 WARNING — INVALID (report: ~/Code/mega-plugin/reports/cpv-plugin-diagnoser-agent/20260525_150844+0200-mega-plugin.md) — recommend-batch-fix safe-ceiling=20 plugin-root=~/Code/mega-plugin
+Findings: 1 CRITICAL, 9 MAJOR, 18 MINOR, 28 NIT, 2 WARNING — INVALID (report: ~/Code/mega-plugin/reports_dev/cpv-plugin-diagnoser-agent/20260525_150844+0200-mega-plugin.md) — recommend-batch-fix safe-ceiling=20 plugin-root=~/Code/mega-plugin
 </example>
 
 ## Architecture

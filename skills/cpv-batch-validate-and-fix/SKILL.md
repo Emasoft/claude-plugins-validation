@@ -73,7 +73,7 @@ table — every shape is supported identically.
   agent transcript).
 - One-line DONE summary.
 - Per-plugin final re-check reports under
-  `$MAIN_ROOT/reports/validate_plugin/<ts±tz>-<plugin>-same-turn.md`.
+  `$MAIN_ROOT/reports_dev/validate_plugin/<ts±tz>-<plugin>-same-turn.md`.
 - Per-plugin status JSONs under
   `<session_dir>/plugin-<index>.status.json` (carries before /
   after counts + `fps_verified` total).

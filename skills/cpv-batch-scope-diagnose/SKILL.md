@@ -59,7 +59,7 @@ The orchestrator body lives in this plugin's
 - Unicode-bordered status table (one row per project).
 - One-line DONE summary.
 - Per-project scope-doctor reports under
-  `$MAIN_ROOT/reports/scope-doctor/<ts±tz>-<project>.md`.
+  `$MAIN_ROOT/reports_dev/scope-doctor/<ts±tz>-<project>.md`.
 - Per-project status JSONs.
 
 ## Token contract

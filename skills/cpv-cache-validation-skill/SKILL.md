@@ -44,7 +44,7 @@ self-scan filter chain (skips catalog / test / dev-scratch files).
 1. Read [references/launcher-invocation.md](references/launcher-invocation.md) for the canonical bash one-liner (alias `cache`).
    > The one-liner · Why the launcher is mandatory · Direct invocation (development only)
 2. Resolve `MAIN_ROOT` via `git worktree list | head -n1`.
-3. Run the launcher with `--report "$MAIN_ROOT/reports/validate_cache/<TS>-<slug>.md"`.
+3. Run the launcher with `--report "$MAIN_ROOT/reports_dev/validate_cache/<TS>-<slug>.md"`.
 4. Read the compact summary from stdout, full details from the report file.
 5. (Fix workflow only — cpv-cache-optimizer-agent.) Group findings by CA-NN, apply `cache-fixes.md#ca-nn` from `skills/cpv-fix-validation/references/`, re-run, iterate until ZERO CA findings remain. Every CA finding is a WARNING, so the verdict is VALID from the start — terminate on an empty findings set, not on VALID.
 
@@ -83,7 +83,7 @@ CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
 Copy this checklist and track your progress:
 
 - [ ] Resolve `MAIN_ROOT` via `git worktree list | head -n1`
-- [ ] Build report path under `${MAIN_ROOT}/reports/validate_cache/<TS>-<slug>.md`
+- [ ] Build report path under `${MAIN_ROOT}/reports_dev/validate_cache/<TS>-<slug>.md`
 - [ ] `mkdir -p` the parent directory
 - [ ] Run via launcher: `python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" cache <path> --report <path>`
 - [ ] Read summary from stdout, details from the report file

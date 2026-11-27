@@ -1119,13 +1119,12 @@ Thumbs.db
 # examples_dev, downloads_dev, libs_dev, builds_dev, etc.
 *_dev/
 
-# Agent/script reports — ALWAYS gitignored since they often contain private data
-# (full paths, source snippets, API output, validation results, env metadata).
-# Canonical rule: every agent/skill/script that saves a report MUST write
-# under the main-repo `./reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`.
-# Neither folder may ever be tracked. `reports_dev/` is also covered by the
-# `*_dev/` rule above, listed explicitly because both entries must be present.
-reports/
+# Agent/script reports. `reports/` is TRACKED: it holds only final, succinct
+# reports, each run through a secrets sanitizer before it is committed.
+# `reports_dev/` is IGNORED: raw output, partial reports, scratch and anything
+# private (full paths, source snippets, API output, env metadata).
+# `reports_dev/` is also covered by the `*_dev/` rule above; it is listed
+# explicitly so the intent survives an edit to that wildcard.
 reports_dev/
 
 # Node
@@ -4400,7 +4399,7 @@ def detect_bump_type(root: Path) -> str:
 
 
 def _write_release_notes(root: Path, new_ver: str, tag: str) -> None:
-    """Render THIS release's notes — the section for `tag` alone — under reports/.
+    """Render THIS release's notes — the section for `tag` alone — under reports_dev/.
 
     A SEPARATE artifact from CHANGELOG.md, and the separation is the whole point.
     CHANGELOG.md is FULL HISTORY and has to be (`-o` overwrites, so `--unreleased`
@@ -4414,8 +4413,8 @@ def _write_release_notes(root: Path, new_ver: str, tag: str) -> None:
     since the previous tag — and `--strip all` drops the changelog header/footer,
     which are boilerplate inside a release body.
 
-    The output goes to the gitignored `reports/` tree, NEVER into the repo
-    proper: a file sitting in the working tree at release time is one `git add`
+    The output goes to the gitignored `reports_dev/` tree, NEVER into a tracked folder:
+    `reports/` is tracked, and a file sitting there at release time is one `git add`
     away from being swept into the release commit.
 
     BEST-EFFORT on purpose. Any failure leaves no usable notes file and
@@ -4423,7 +4422,7 @@ def _write_release_notes(root: Path, new_ver: str, tag: str) -> None:
     best-effort slice is worse than generated notes — a mis-sliced body ships the
     PREVIOUS release's notes under the new tag.
     """
-    notes = root / "reports" / "publish" / f"release-notes-{new_ver}.md"
+    notes = root / "reports_dev" / "publish" / f"release-notes-{new_ver}.md"
     try:
         notes.parent.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
@@ -4442,7 +4441,7 @@ def _write_release_notes(root: Path, new_ver: str, tag: str) -> None:
         for line in tail:
             cprint(f"  {YELLOW}  {line}{NC}")
         return
-    cprint(f"  {GREEN}Release notes for {tag} rendered to reports/publish/"
+    cprint(f"  {GREEN}Release notes for {tag} rendered to reports_dev/publish/"
            f"release-notes-{new_ver}.md.{NC}")
 
 
@@ -4554,7 +4553,7 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
         # Issue #186 — stage TRACKED modifications only; never `git add -A`.
         # Untracked files at this point are not part of the release: gate 1
         # already required a clean tree, so anything still untracked is
-        # reports/ (which "routinely contain private data — absolute paths,
+        # reports_dev/ (which "routinely contain private data — absolute paths,
         # usernames, internal hostnames, tokens caught in logs"), local
         # scratch, or leftovers from a failed run. A release commit is pushed
         # to a public repo AND is the artifact users install, so an accidental
@@ -4673,7 +4672,7 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     _ensure_gh_auth(owner, repo)
     # THIS RELEASE'S notes, never CHANGELOG.md. Step 9 renders the section for
     # this tag alone (`git-cliff --unreleased --strip all`) into the gitignored
-    # reports/ tree; CHANGELOG.md is full history, so passing it here would
+    # reports_dev/ tree; CHANGELOG.md is full history, so passing it here would
     # publish the whole project history as this one release's body and would
     # eventually breach GitHub's 125,000-character release-body limit AFTER the
     # tag is already public.
@@ -4681,7 +4680,7 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     # The path is spelled out here as well as in `_write_release_notes` so each
     # stage stands alone (they are exercised independently); the two spellings
     # are pinned identical by the canon's tests.
-    notes_file = root / "reports" / "publish" / f"release-notes-{new_ver}.md"
+    notes_file = root / "reports_dev" / "publish" / f"release-notes-{new_ver}.md"
     notes_usable = False
     if notes_file.is_file():
         try:
@@ -6835,8 +6834,9 @@ ENABLE_LINTERS:
 # #257 item 5: NO FILTER_REGEX_EXCLUDE. Everything git-tracked is linted, no exceptions.
 # The old list (dev dirs, .claude/, .tldr/, test fixtures) excluded content that
 # plugins DO track (e.g. .claude/project/memory/, fixture files). Untracked paths
-# need no entry: CI lints a clean checkout (gitignored dev/report dirs never exist
-# there), and IGNORE_GITIGNORED_FILES defaults to true (megalinter docs/configuration.md:
+# need no entry: CI lints a clean checkout (gitignored dev dirs such as reports_dev/
+# never exist there; tracked reports/ IS linted), and IGNORE_GITIGNORED_FILES defaults
+# to true (megalinter docs/configuration.md:
 # "MegaLinter will skip files ignored by git using .gitignore file").
 
 # #254: PYTHON_RUFF and PYTHON_BANDIT read CPV-authored config files that sit at the
@@ -7115,7 +7115,7 @@ def gen_cspell_json(p: PluginParams, files: list[tuple[str, str, bool]]) -> str:
         "version": "0.2",
         "language": "en",
         # CI only ever spell-checks tracked files; a local `cspell lint .` would
-        # otherwise walk gitignored trees (reports/, .venv/) and fail on content
+        # otherwise walk gitignored trees (reports_dev/, .venv/) and fail on content
         # CI never sees — the opposite of parity.
         "useGitignore": True,
         "ignorePaths": list(_CSPELL_IGNORE_PATHS),

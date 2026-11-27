@@ -36,7 +36,7 @@ another. Each phase runs N times (default 3); we report the median wall
 time and the per-run distribution.
 
 The report is written to
-``$MAIN_ROOT/reports/security-benchmark/<YYYYMMDD_HHMMSS±HHMM>-bench.md``
+``$MAIN_ROOT/reports_dev/security-benchmark/<YYYYMMDD_HHMMSS±HHMM>-bench.md``
 per the agent-reports-location rule.
 
 The benchmark is non-destructive — no files modified, no git ops, no
@@ -67,7 +67,7 @@ def _resolve_main_root() -> Path:
     """Return the main repo root, worktree-aware.
 
     Per the agent-reports-location rule, report files must land under
-    ``$MAIN_ROOT/reports/<component>/`` where ``$MAIN_ROOT`` is the MAIN
+    ``$MAIN_ROOT/reports_dev/<component>/`` where ``$MAIN_ROOT`` is the MAIN
     repo (not the linked worktree we may currently be in). ``git
     worktree list`` always lists the main checkout first.
     """
@@ -89,16 +89,16 @@ def _resolve_main_root() -> Path:
 def _compose_report_path(base: Path, component: str, slug: str) -> Path:
     """Compose the canonical report path per agent-reports-location rule.
 
-    Format: ``<base>/reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md``
+    Format: ``<base>/reports_dev/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md``
     Local time + GMT offset (compact ±HHMM form) — never UTC, never
     ``±HH:MM`` (Windows-unsafe).
 
-    ``base`` is the report ROOT (a directory under which a ``reports/``
+    ``base`` is the report ROOT (a directory under which a ``reports_dev/``
     subdir will be created). The default caller passes ``$MAIN_ROOT``;
     tests pass a ``tmp_path`` so the report does NOT pollute the real
-    ``$MAIN_ROOT/reports/`` tree.
+    ``$MAIN_ROOT/reports_dev/`` tree.
     """
-    report_dir = base / "reports" / component
+    report_dir = base / "reports_dev" / component
     report_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S%z")
     return report_dir / f"{ts}-{slug}.md"
@@ -543,7 +543,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--component",
         default="security-benchmark",
-        help="Report subdir under reports/ (default: security-benchmark).",
+        help="Report subdir under reports_dev/ (default: security-benchmark).",
     )
     parser.add_argument(
         "--slug",
@@ -556,7 +556,7 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Override the report root directory. Default: $MAIN_ROOT resolved via "
             "`git worktree list` (first entry = main checkout). Tests pass a "
-            "tmp_path so the test report does NOT pollute the real reports/ tree."
+            "tmp_path so the test report does NOT pollute the real reports_dev/ tree."
         ),
     )
     parser.add_argument(

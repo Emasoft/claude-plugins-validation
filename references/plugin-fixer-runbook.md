@@ -39,7 +39,7 @@ Run these, in order, with `cwd` = plugin root:
    (`awk '/^### run_all_checks$/,/^### END_RUN_ALL$/' "$CHECKLIST" | sed '1d;$d' > /tmp/run_all_checks.sh`),
    `source` it (plus the plugin's `run_migration_checks.sh` under `scripts/`
    if present), then `run_all_checks "$PWD"`. It writes a Unicode-bordered
-   table to `$MAIN_ROOT/reports/canonical-pipeline-migration/<ts±tz>-run-all.md`
+   table to `$MAIN_ROOT/reports_dev/canonical-pipeline-migration/<ts±tz>-run-all.md`
    and **exits 0 only if every BLOCKER + MAJOR passes**. If run_all_checks
    does NOT exit 0: print `[PARTIAL]`, surface the failed CHECK-NN list with
    file:line, and STOP — do NOT proceed to publish, do NOT silently

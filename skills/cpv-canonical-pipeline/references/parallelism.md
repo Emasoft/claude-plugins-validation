@@ -38,7 +38,7 @@ Component breakdown of the 180 s saved:
 | Orchestrator dispatch | < 1 % | ~1 s | `ThreadPoolExecutor` over independent validator phases |
 
 Local benchmark script (records 3-run median + writes a markdown report
-under `reports/menu-migration-planning/`):
+under `reports_dev/menu-migration-planning/`):
 
 ```bash
 uv run python scripts/cpv_validate_benchmark.py --runs 3 --clear-cache

@@ -20,7 +20,7 @@ layers:
 
 Speedup is computed against Phase A (the all-serial baseline). The
 benchmark also prints a tidy table and writes a Markdown report to
-``$MAIN_ROOT/reports/menu-migration-planning/{YYYYMMDD_HHMMSS±HHMM}-task384-A10-benchmark.md``
+``$MAIN_ROOT/reports_dev/menu-migration-planning/{YYYYMMDD_HHMMSS±HHMM}-task384-A10-benchmark.md``
 per the agent-reports-location rule.
 
 Notes
@@ -54,7 +54,7 @@ def _resolve_main_root() -> Path:
     """Return the main repo root, worktree-aware.
 
     Per the agent-reports-location rule, report files must land under
-    ``$MAIN_ROOT/reports/<component>/`` where ``$MAIN_ROOT`` is the MAIN
+    ``$MAIN_ROOT/reports_dev/<component>/`` where ``$MAIN_ROOT`` is the MAIN
     repo (not the linked worktree we may currently be in). ``git
     worktree list`` always lists the main checkout first.
     """
@@ -76,12 +76,12 @@ def _resolve_main_root() -> Path:
 def _report_path(component: str, slug: str) -> Path:
     """Compose the canonical report path per agent-reports-location rule.
 
-    Format: ``$MAIN_ROOT/reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md``
+    Format: ``$MAIN_ROOT/reports_dev/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md``
     Local time + GMT offset (compact ±HHMM form) — never UTC, never
     ``±HH:MM`` (Windows-unsafe).
     """
     main_root = _resolve_main_root()
-    report_dir = main_root / "reports" / component
+    report_dir = main_root / "reports_dev" / component
     report_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S%z")
     return report_dir / f"{ts}-{slug}.md"
@@ -259,7 +259,7 @@ def main() -> int:
     parser.add_argument(
         "--component",
         default="menu-migration-planning",
-        help="Report subdir under reports/ (default: menu-migration-planning).",
+        help="Report subdir under reports_dev/ (default: menu-migration-planning).",
     )
     parser.add_argument(
         "--slug",
@@ -273,7 +273,7 @@ def main() -> int:
             "Override the report root directory. Default: $MAIN_ROOT resolved via "
             "`git worktree list` (first entry = main checkout). Set this to the "
             "worktree path when running the benchmark from a worktree and wanting "
-            "the report to land in the worktree's own reports/ tree."
+            "the report to land in the worktree's own reports_dev/ tree."
         ),
     )
     parser.add_argument(
@@ -429,7 +429,7 @@ def main() -> int:
             # wanting the report local to that worktree (rather than the
             # main repo, which is git-worktree-list's first answer).
             base = Path(args.report_root).resolve()
-            report_dir = base / "reports" / args.component
+            report_dir = base / "reports_dev" / args.component
             report_dir.mkdir(parents=True, exist_ok=True)
             ts = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S%z")
             report_file = report_dir / f"{ts}-{args.slug}.md"

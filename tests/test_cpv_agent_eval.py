@@ -592,11 +592,11 @@ class TestReport:
         assert "one-for-all" in text
         assert "NOT-EVALUATED" in text
 
-    def test_default_report_path_is_under_reports_cpv_agent_eval(self, plugin: Path):
-        """Reports land under reports/cpv-agent-eval/ with a timestamped filename."""
+    def test_default_report_path_is_under_reports_dev_cpv_agent_eval(self, plugin: Path):
+        """Reports land under reports_dev/cpv-agent-eval/ with a timestamped filename."""
         path = default_report_path(plugin / "agents" / "orig.md")
         assert path.parent.name == "cpv-agent-eval"
-        assert path.parent.parent.name == "reports"
+        assert path.parent.parent.name == "reports_dev"
         assert path.suffix == ".md"
 
 

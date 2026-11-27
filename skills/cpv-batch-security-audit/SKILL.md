@@ -74,7 +74,7 @@ table — every shape is supported identically.
   agent transcript).
 - One-line DONE summary.
 - Per-plugin `validate_security` reports under
-  `$MAIN_ROOT/reports/validate_security/<ts±tz>-<plugin>.md`.
+  `$MAIN_ROOT/reports_dev/validate_security/<ts±tz>-<plugin>.md`.
 - Per-plugin status JSONs under
   `<session_dir>/plugin-<index>.status.json`.
 

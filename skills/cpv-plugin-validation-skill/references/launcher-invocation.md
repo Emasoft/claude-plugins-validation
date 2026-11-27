@@ -26,8 +26,8 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 else
   MAIN_ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
 fi
-mkdir -p "$MAIN_ROOT/reports/validate_<component>"
-REPORT_FILE="$MAIN_ROOT/reports/validate_<component>/$(date +%Y%m%d_%H%M%S%z)-<slug>.md"
+mkdir -p "$MAIN_ROOT/reports_dev/validate_<component>"
+REPORT_FILE="$MAIN_ROOT/reports_dev/validate_<component>/$(date +%Y%m%d_%H%M%S%z)-<slug>.md"
 
 CLAUDE_PRIVATE_USERNAMES="$(whoami)" uv run --with pyyaml \
   python "${CLAUDE_PLUGIN_ROOT}/scripts/remote_validation.py" \

@@ -29,12 +29,12 @@ Deep AI analysis. Opus 1M, ~10-50× tokens of script validation.
    > The one-liner · Why the launcher is mandatory · Direct invocation (development only)
 2. Read SKILL.md / agent .md
 3. Evaluate 7 pillars + applicable conditional security pillars
-4. Write report → `$MAIN_ROOT/reports/cpv-semantic-validator-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
+4. Write report → `$MAIN_ROOT/reports_dev/cpv-semantic-validator-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
 5. Return `[DONE] Grade: X. Report: <filepath>`
 
 ## Output
 
-- **Grade**: A-F. **Criteria**: Pass/Partial/Fail per pillar. **Report**: `$MAIN_ROOT/reports/cpv-semantic-validator-agent/<ts±tz>-<slug>.md`. Both `reports/` and `reports_dev/` gitignored.
+- **Grade**: A-F. **Criteria**: Pass/Partial/Fail per pillar. **Report**: `$MAIN_ROOT/reports_dev/cpv-semantic-validator-agent/<ts±tz>-<slug>.md`. `reports_dev/` is gitignored (raw output, scratch, private data); `reports/` is tracked and holds only final, sanitized reports.
 
 ## Error Handling
 
@@ -122,4 +122,4 @@ Copy this checklist and track your progress:
 - [ ] Baseline script validation
 - [ ] Evaluate pillars + conditionals
 - [ ] Review A-F grade
-- [ ] Report to `$MAIN_ROOT/reports/cpv-semantic-validator-agent/`
+- [ ] Report to `$MAIN_ROOT/reports_dev/cpv-semantic-validator-agent/`

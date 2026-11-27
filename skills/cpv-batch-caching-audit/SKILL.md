@@ -56,7 +56,7 @@ table — every shape is supported identically.
 - Unicode-bordered status table (one row per plugin).
 - One-line DONE summary.
 - Per-plugin cache-audit reports under
-  `$MAIN_ROOT/reports/validate_cache/<ts±tz>-<plugin>.md`.
+  `$MAIN_ROOT/reports_dev/validate_cache/<ts±tz>-<plugin>.md`.
 - Per-plugin status JSONs under
   `<session_dir>/plugin-<index>.status.json`.
 

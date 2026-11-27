@@ -6908,7 +6908,7 @@ def resolve_project_root(anchor: Path | None = None) -> Path:
     """Resolve the **main-repo root** for the reports-location rule.
 
     The rule (agent-reports-location.md) requires reports to land under the
-    main-repo `./reports/`, even when the caller runs inside a linked
+    main-repo `./reports_dev/`, even when the caller runs inside a linked
     ``git worktree``. ``git worktree list`` always lists the main worktree
     first, so its first entry is the canonical source of truth.
 
@@ -6994,17 +6994,19 @@ def resolve_reports_dir(
     *,
     ensure: bool = True,
 ) -> Path:
-    """Resolve ``$MAIN_ROOT/reports/<component>/`` per the agent-reports rule.
+    """Resolve ``$MAIN_ROOT/reports_dev/<component>/`` for raw script output.
 
-    Every agent, skill, and script that saves a report MUST write into the
-    directory returned here. Reports often contain private data (full paths,
-    source snippets, validation output, user decisions), so the folder is
-    gitignored by convention. Reports from a linked worktree still land in
-    the **main** repo's ``reports/`` — never the worktree's own.
+    Every script that saves a report MUST write into the directory returned
+    here. Script reports are raw machine output (full paths, source snippets,
+    scanner output, validation output), so they go to ``reports_dev/``, which
+    is gitignored. ``reports/`` is git-tracked and holds only final, succinct,
+    sanitized reports written by humans or agents, never by these scripts.
+    Reports from a linked worktree still land in the **main** repo's
+    ``reports_dev/`` — never the worktree's own.
 
     Args:
         component: Per-component subfolder name (agent name, script name,
-            skill name). When omitted, returns the top-level ``reports/``
+            skill name). When omitted, returns the top-level ``reports_dev/``
             folder — callers should always pass a component, but the
             legacy form remains supported for one-off ad-hoc writes.
         anchor: Optional starting path; defaults to the current directory.
@@ -7012,10 +7014,10 @@ def resolve_reports_dir(
             exist.
 
     Returns:
-        Absolute path to the ``reports/<component>/`` (or ``reports/``)
+        Absolute path to the ``reports_dev/<component>/`` (or ``reports_dev/``)
         directory under the main-repo root.
     """
-    reports = resolve_project_root(anchor) / "reports"
+    reports = resolve_project_root(anchor) / "reports_dev"
     if component:
         reports = reports / component
     if ensure:
@@ -7033,7 +7035,7 @@ def build_report_path(
 ) -> Path:
     """Return the canonical report path for a new artefact.
 
-    Produces ``$MAIN_ROOT/reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.<ext>``
+    Produces ``$MAIN_ROOT/reports_dev/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.<ext>``
     per the mandatory format in ``~/.claude/rules/agent-reports-location.md``.
 
     Args:

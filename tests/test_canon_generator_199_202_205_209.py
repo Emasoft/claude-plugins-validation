@@ -190,18 +190,21 @@ def test_the_two_notes_paths_are_spelled_identically() -> None:
     stage_changelog never wrote, silently falling back to --generate-notes forever.
     """
     emitted = _emitted_publish()
-    spelling = 'root / "reports" / "publish" / f"release-notes-{new_ver}.md"'
+    spelling = 'root / "reports_dev" / "publish" / f"release-notes-{new_ver}.md"'
     assert _func_source(emitted, "_write_release_notes").count(spelling) == 1
     assert _func_source(emitted, "stage_gh_release").count(spelling) == 1
 
 
 def test_the_notes_file_lands_outside_the_tracked_tree() -> None:
-    """It must be gitignored, or the release commit can sweep it in (#186)."""
+    """Notes go under gitignored reports_dev/; reports/ is tracked and must stay un-ignored (#186, #270)."""
     emitted = _emitted_publish()
-    assert 'root / "reports" / "publish"' in emitted
+    assert 'root / "reports_dev" / "publish"' in emitted
     gitignore = gen.gen_gitignore(_params())
-    assert re.search(r"^reports/$", gitignore, re.MULTILINE), (
-        "reports/ must stay gitignored — it is what makes the notes path safe"
+    assert re.search(r"^reports_dev/$", gitignore, re.MULTILINE), (
+        "reports_dev/ must stay gitignored — it is what makes the notes path safe"
+    )
+    assert not re.search(r"^/?reports/$", gitignore, re.MULTILINE), (
+        "reports/ is tracked (final sanitized reports) and must not be gitignored"
     )
 
 
@@ -238,7 +241,7 @@ def _run_stage_gh_release(root: Path, gh_returncode: int = 0) -> list[str]:
 
 
 def _write_notes(root: Path, text: str) -> Path:
-    notes = root / "reports" / "publish" / "release-notes-1.2.3.md"
+    notes = root / "reports_dev" / "publish" / "release-notes-1.2.3.md"
     notes.parent.mkdir(parents=True, exist_ok=True)
     notes.write_text(text, encoding="utf-8")
     return notes
@@ -387,7 +390,7 @@ def test_real_git_cliff_end_to_end(tmp_path: Path) -> None:
     commit("fix: ping @alice @bob and (@carol), see @dave.", "4")
     commit("chore: leave `@backticked` alone, add @types/node and @lru_cache", "5")
 
-    notes = repo / "reports" / "publish" / "release-notes-0.2.0.md"
+    notes = repo / "reports_dev" / "publish" / "release-notes-0.2.0.md"
     notes.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git-cliff", "--bump", "--tag", "v0.2.0", "-o", "CHANGELOG.md"],
                    cwd=repo, check=True, capture_output=True, timeout=300)

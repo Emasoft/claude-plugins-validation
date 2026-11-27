@@ -68,7 +68,7 @@ Run the security scan ONE MORE TIME as a clean-room re-check, independent of the
 
 ## Phase 5 — report
 
-Write the per-finding before/after diff + outcome (devitalized: transform T#, OR flagged: reason) to `$MAIN_ROOT/reports/cpv-plugin-devitalizer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (`$MAIN_ROOT` = main-repo root via `git worktree list | head -n1 | awk '{print $1}'`, never a linked worktree; `reports/` is gitignored). Mark each transform that is also a security improvement (T1 / T5 / T9 / dead-sink removal) as such. End with the two-perspective close: what a perfectionist would still object to (the remaining flagged-not-devitalized load-bearing findings and why each is irreducible) vs what a pragmatist accepts (the plugin now passes the gate honestly, with the irreducible items surfaced for an explicit human decision). Return ONE line.
+Write the per-finding before/after diff + outcome (devitalized: transform T#, OR flagged: reason) to `$MAIN_ROOT/reports_dev/cpv-plugin-devitalizer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (`$MAIN_ROOT` = main-repo root via `git worktree list | head -n1 | awk '{print $1}'`, never a linked worktree; `reports_dev/` is gitignored (raw output, scratch, private data); `reports/` is tracked and holds only final, sanitized reports). Mark each transform that is also a security improvement (T1 / T5 / T9 / dead-sink removal) as such. End with the two-perspective close: what a perfectionist would still object to (the remaining flagged-not-devitalized load-bearing findings and why each is irreducible) vs what a pragmatist accepts (the plugin now passes the gate honestly, with the irreducible items surfaced for an explicit human decision). Return ONE line.
 
 ## Hard rules — NON-NEGOTIABLE
 
@@ -87,15 +87,15 @@ The classification step (dead-vs-live, finite-value-set, is-this-a-detector-sign
 ## Examples
 
 <example>
-user: Devitalize the threats in reports/validate_security/20260421_183012+0200-my-plugin.md
+user: Devitalize the threats in reports_dev/validate_security/20260421_183012+0200-my-plugin.md
 assistant: [report has 6 execution-class findings → classify, devitalize 5 inert shapes, re-scan after each; 1 live installer flagged]
-[DONE] 5 devitalized, 1 flagged (live installer). Report: reports/cpv-plugin-devitalizer-agent/20260421_184530+0200-my-plugin.md
+[DONE] 5 devitalized, 1 flagged (live installer). Report: reports_dev/cpv-plugin-devitalizer-agent/20260421_184530+0200-my-plugin.md
 </example>
 
 <example>
 user: Make ~/Code/my-plugin pass the security gate at --strict
 assistant: [Phase 0 confirms plugin; Iter 1: 9 findings → 7 devitalized; Iter 2: 2 demoted-to-NIT → shapes transformed; Phase 4 clean-room re-scan: 0 blocking]
-[DONE] iterations=2, 9 devitalized, clean. Report: reports/cpv-plugin-devitalizer-agent/20260421_191205+0200-my-plugin.md
+[DONE] iterations=2, 9 devitalized, clean. Report: reports_dev/cpv-plugin-devitalizer-agent/20260421_191205+0200-my-plugin.md
 </example>
 
 ## Iterate to a clean, green result (loop discipline)

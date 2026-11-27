@@ -2841,7 +2841,7 @@ def stage_changelog(plugin_root: Path, tag_name: str, new_version: str) -> tuple
     )
     print(f"{GREEN}✓ CHANGELOG.md updated with {tag_name}{NC}")
     # Canonical report path per agent-reports-location.md:
-    #   $MAIN_ROOT/reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md
+    #   $MAIN_ROOT/reports_dev/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md
     release_notes_file = build_report_path(
         component="publish",
         slug=f"release-notes-{new_version}",
@@ -3223,7 +3223,7 @@ def stage_release_changes(plugin_root: Path) -> None:
     """Stage the release commit WITHOUT absorbing untracked files (issue #186).
 
     `git add -A` stages untracked files too. At release time a plugin tree
-    routinely holds `reports/` (CPV's own convention says these "routinely
+    routinely holds `reports_dev/` (CPV's own convention says these "routinely
     contain private data — absolute paths, usernames, internal hostnames,
     proprietary source, tokens caught in logs"), local scratch, editor
     artifacts, and whatever a failed earlier run left behind. A release commit

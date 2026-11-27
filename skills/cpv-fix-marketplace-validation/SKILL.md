@@ -47,7 +47,7 @@ If a report mixes both kinds, fix the mechanical findings first, then hand off t
 
 ## Output
 
-The fixer logs each fix to `$MAIN_ROOT/reports/cpv-marketplace-fixer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the **main-repo root** (first entry of `git worktree list`). Both `reports/` and `reports_dev/` gitignored.
+The fixer logs each fix to `$MAIN_ROOT/reports_dev/cpv-marketplace-fixer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the **main-repo root** (first entry of `git worktree list`). `reports_dev/` is gitignored (raw output, scratch, private data); `reports/` is tracked and holds only final, sanitized reports.
 
 ## Error Handling
 

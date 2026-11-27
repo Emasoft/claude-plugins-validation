@@ -59,7 +59,7 @@ table — every shape is supported identically.
 - Unicode-bordered status table (one row per plugin).
 - One-line DONE summary.
 - Per-plugin combined re-check reports under
-  `$MAIN_ROOT/reports/validate_plugin/<ts±tz>-<plugin>-full-sweep.md`.
+  `$MAIN_ROOT/reports_dev/validate_plugin/<ts±tz>-<plugin>-full-sweep.md`.
 - Per-plugin status JSONs with a `by_checker` sub-object carrying
   before/after counts per checker (validate / security / cache).
 - Per-plugin commit batches in each plugin's git tree.

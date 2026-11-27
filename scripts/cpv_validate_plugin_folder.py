@@ -19,9 +19,10 @@ validators directly here would silently drop that guarantee on exactly the
 folders users point this at (an installed plugin scanning a foreign repo).
 
 READ-ONLY: nothing is ever written inside the target. The merged report lands
-under the CALLER's ``reports/cpv-validate-plugin-folder/`` per the agent-reports
-rule. When the target IS the caller's project, that directory is the
-conventional gitignored report location, not a modification of the plugin.
+under the CALLER's ``reports_dev/cpv-validate-plugin-folder/`` (gitignored raw
+output; ``reports/`` is tracked and holds only final sanitized reports). When the
+target IS the caller's project, that directory is the gitignored report location,
+not a modification of the plugin.
 """
 
 from __future__ import annotations

@@ -67,7 +67,7 @@ assistant: [queues the §3.1 Validate sub-menu]
 user: 1
 assistant: Path to the plugin to validate?
 user: ~/Code/my-plugin/
-assistant: [runs the launcher] ✓ Plugin Validation: PASS. Report: reports/validate_plugin/20260502_143012+0200-my-plugin.md
+assistant: [runs the launcher] ✓ Plugin Validation: PASS. Report: reports_dev/validate_plugin/20260502_143012+0200-my-plugin.md
 [queues the §3.10 post-validate menu]
 user: 0
 assistant: Done.

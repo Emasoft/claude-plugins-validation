@@ -330,7 +330,7 @@ def _external_finding_is_gitignored(file_ref: str, gi: Any) -> bool:
     subprocesses over the WHOLE plugin tree and cannot use CPV's
     gitignore-aware walk. They post-filter findings against a HARDCODED
     dev-scratch dir list (``_is_dev_scratch_path`` → ``_DEV_SCRATCH_DIR_PARTS``),
-    which only covers ``docs_dev/`` / ``scripts_dev/`` / ``reports/`` / … and
+    which only covers ``docs_dev/`` / ``scripts_dev/`` / ``reports_dev/`` / … and
     misses any OTHER gitignored sub-tree a plugin keeps — research corpora,
     vendored reference repos, extracted archives (the reported case: a
     gitignored ``INPUT_DEV/**/*.zip`` corpus producing ~97 trufflehog hits).
@@ -1582,7 +1582,9 @@ _DEV_SCRATCH_DIR_PARTS = (
     "/libs_dev/",
     "/builds_dev/",
     "/reports_dev/",
-    "/reports/",
+    # NOT "/reports/": it is git-TRACKED (final sanitized reports), so exempting it would
+    # hide findings in shipped content (scan-evasion). An untracked gitignored reports/
+    # is still dropped by _external_finding_is_gitignored.
     *_TRDD_LIFECYCLE_DIR_PARTS,
     # v2.45 FP3 — Claude Code chat history exports (raw transcripts,
     # gitignored, never executed) and anthropic_dev/ (vendored Anthropic
@@ -10114,7 +10116,7 @@ def check_semgrep(plugin_path: Path, report: ValidationReport) -> int:
         if cpv_self_scan_skip(rel):
             continue
         # v2.43/v2.44 — drop findings inside vendored / cached / build dirs, gitignored
-        # dev-scratch dirs (docs_dev/, reports/, ...) and test files (fixture tokens by
+        # dev-scratch dirs (docs_dev/, reports_dev/, ...) and test files (fixture tokens by
         # design). TRDD-N4GLZXZ6 (#259): judged on the plugin-RELATIVE path only; `rel`
         # itself stays raw for the gitignore check and the emitted finding.
         rel_in_plugin = judge.rel(rel) or ""
@@ -11329,7 +11331,7 @@ def _resolve_report_root() -> Path:
 
     Anchors reports to the **main checkout root** (first entry of
     ``git worktree list``) so they survive when a linked worktree is
-    removed/merged. ``./reports/`` is gitignored everywhere; writing
+    removed/merged. ``./reports_dev/`` is gitignored everywhere; writing
     inside a worktree's local copy loses the audit trail.
 
     Resolution order:
@@ -11729,7 +11731,7 @@ def _run_marketplace_scan(args: argparse.Namespace) -> int:
          peer's cache copy). No coverage hole from dedup.
       7. Emit per-plugin step tables + dedup-summary section + master
          summary table. Master report path unchanged:
-         ``$MAIN_ROOT/reports/security/marketplace_<TS>-<label>.md``.
+         ``$MAIN_ROOT/reports_dev/security/marketplace_<TS>-<label>.md``.
 
     Returns the worst exit code across all plugins (so CI gates work as
     before).
@@ -11750,7 +11752,7 @@ def _run_marketplace_scan(args: argparse.Namespace) -> int:
     # Build report path (timestamped, anchored to main checkout root).
     ts = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d_%H%M%S%z")
     safe_label = re.sub(r"[^A-Za-z0-9._-]+", "-", label)
-    report_path = _resolve_report_root() / "reports" / "security" / f"marketplace_{ts}-{safe_label}.md"
+    report_path = _resolve_report_root() / "reports_dev" / "security" / f"marketplace_{ts}-{safe_label}.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Build report body in-memory, also tee'd to stdout.
@@ -12291,7 +12293,7 @@ Exit Codes:
             #   1. main checkout root from `git worktree list` — anchors
             #      reports to the primary working tree so they survive
             #      when a linked worktree gets removed/merged. The
-            #      worktree's local `./reports/` is gitignored
+            #      worktree's local `./reports_dev/` is gitignored
             #      everywhere, so writing there loses the audit trail.
             #   2. CLAUDE_PROJECT_DIR — only as fallback when not in a
             #      git context. Inside a linked worktree,
@@ -12303,7 +12305,7 @@ Exit Codes:
             ts = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d_%H%M%S%z")
             base_root = _resolve_report_root()
             slug = plugin_path.name or "plugin"
-            report_path = base_root / "reports" / "security" / f"{ts}-{slug}.md"
+            report_path = base_root / "reports_dev" / "security" / f"{ts}-{slug}.md"
 
         # Snapshot the per-scan step log NOW (before save_* runs and
         # potentially clears any module state). The same snapshot is used

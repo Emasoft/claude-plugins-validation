@@ -26,7 +26,7 @@ not want to open the menu first.
    multi-file work the subagent may itself fan out to specialised CPV work agents
    (`cpv-plugin-fixer-agent`, `cpv-cache-optimizer-agent`, and the like).
 3. Relay the subagent's final one-line result and the path to the report it wrote
-   under `reports/`.
+   under `reports_dev/`.
 
 ## Notes
 

@@ -68,7 +68,7 @@ are rejected.
 - Unicode-bordered status table (one row per project).
 - One-line DONE summary.
 - Per-project scope-doctor fix reports under
-  `$MAIN_ROOT/reports/scope-doctor/<ts±tz>-<project>-fix.md`.
+  `$MAIN_ROOT/reports_dev/scope-doctor/<ts±tz>-<project>-fix.md`.
 - Per-project status JSONs carrying `before` / `after` /
   `pending_fixes`.
 

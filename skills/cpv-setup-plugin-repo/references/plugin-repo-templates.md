@@ -150,11 +150,12 @@ Thumbs.db
 # examples_dev, downloads_dev, libs_dev, builds_dev, etc.
 *_dev/
 
-# Agent/script reports — ALWAYS gitignored since they often contain private data
-# (full paths, source snippets, API output, validation results, env metadata).
-# Rule: write reports under `./reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
-# at the MAIN-repo root (worktree-aware). Neither folder may be tracked.
-reports/
+# Agent/script reports. `reports/` is TRACKED: it holds only final, succinct
+# reports, each run through a secrets sanitizer before it is committed.
+# `reports_dev/` is IGNORED: raw output, partial reports, scratch and anything
+# private (full paths, source snippets, API output, env metadata).
+# `reports_dev/` is also covered by the `*_dev/` rule above; it is listed
+# explicitly so the intent survives an edit to that wildcard.
 reports_dev/
 
 # Node
@@ -170,7 +171,7 @@ Cargo.lock
 
 ### Notes
 - The `*_dev/` pattern ignores all development artifact folders (docs_dev, scripts_dev, tests_dev, etc.).
-- Both `reports/` and `reports_dev/` are **mandatory** explicit entries: every agent/skill/script writes reports under `./reports/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the main-repo root (worktree-aware). Neither may ever be tracked — reports often contain private data (full paths, source snippets, validation output, user decisions).
+- `reports_dev/` is a **mandatory** explicit entry: every agent/skill/script writes reports under `./reports_dev/<component>/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` at the main-repo root (worktree-aware) — reports often contain private data (full paths, source snippets, validation output, user decisions). `reports_dev/` is gitignored; `reports/` is tracked and holds only final, sanitized reports, so it is NOT listed.
 - Add language-specific entries if your plugin uses languages beyond Python (e.g. TypeScript, Go, Rust).
 
 ---

@@ -41,7 +41,7 @@ Checklist: validate→ledger → MECH-first → INTEL read-once → delta → te
 
 ## Output
 
-Fix log → `$MAIN_ROOT/reports/cpv-plugin-fixer-agent/<ts±tz>-<slug>.md`.
+Fix log → `$MAIN_ROOT/reports_dev/cpv-plugin-fixer-agent/<ts±tz>-<slug>.md`.
 
 ## Error Handling
 

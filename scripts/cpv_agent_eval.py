@@ -961,7 +961,7 @@ def render_report(static: StaticTierResult, live: LiveTierResult | None) -> str:
 
 
 def default_report_path(agent_path: Path) -> Path:
-    """``<main-repo-root>/reports/cpv-agent-eval/<ts±tz>-<slug>.md``.
+    """``<main-repo-root>/reports_dev/cpv-agent-eval/<ts±tz>-<slug>.md``.
 
     Reuses ``validate_security._resolve_report_root`` so the anchor logic (main checkout
     root → ``CLAUDE_PROJECT_DIR`` → ``$TMPDIR``) has exactly one definition.
@@ -970,7 +970,7 @@ def default_report_path(agent_path: Path) -> Path:
 
     stamp = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d_%H%M%S%z")
     slug = agent_path.stem or "agent"
-    return _resolve_report_root() / "reports" / "cpv-agent-eval" / f"{stamp}-{slug}.md"
+    return _resolve_report_root() / "reports_dev" / "cpv-agent-eval" / f"{stamp}-{slug}.md"
 
 
 # ---------------------------------------------------------------------------
@@ -1049,7 +1049,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Directory holding the captured per-run timing.json files (default: <tasks dir>/runs)",
     )
     parser.add_argument("--json", action="store_true", help="Emit the raw JSON payload (stdout stays pure JSON)")
-    parser.add_argument("--report", default=None, metavar="PATH", help="Write the report here instead of reports/")
+    parser.add_argument("--report", default=None, metavar="PATH", help="Write the report here instead of reports_dev/")
     parser.add_argument(
         "--benchmark",
         default=None,

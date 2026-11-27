@@ -17,8 +17,8 @@ the skill know what to expect.
 ## Path-only stdout by default
 
 Without `--json` or `--report`, the script auto-saves the aggregated
-report to `$MAIN_ROOT/reports/validate_security/<timestamp>-<plugin>.md`
-(or `$TMPDIR/reports/security/...` on a remote `uvx` invocation) and
+report to `$MAIN_ROOT/reports_dev/validate_security/<timestamp>-<plugin>.md`
+(or `$TMPDIR/reports_dev/security/...` on a remote `uvx` invocation) and
 prints **only** the compact summary to stdout. The calling agent reads
 the report file only when the user asks for details.
 

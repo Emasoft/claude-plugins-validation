@@ -102,7 +102,7 @@ that explicitly as UNKNOWN rather than folding it into a pass.
 ## Read-only guarantee
 
 No file inside the target is created, modified or deleted. The merged report is
-written to the CALLER's `reports/cpv-validate-plugin-folder/` — the
+written to the CALLER's `reports_dev/cpv-validate-plugin-folder/` — the
 conventional gitignored report location — never inside the scanned folder when
 it is a different tree.
 
@@ -110,7 +110,7 @@ it is a different tree.
 
 On stdout: a severity table (CRITICAL/MAJOR/MINOR/NIT counts per scan
 that ran), the path to the merged report file under
-`reports/cpv-validate-plugin-folder/`, and — for every scan that did not
+`reports_dev/cpv-validate-plugin-folder/`, and — for every scan that did not
 come back clean — the name of the agent that fixes that finding class
 (for example `cpv-plugin-fixer-agent` for structural findings or
 `cpv-plugin-leaks-preventer-agent` for a leaked secret). The exit code

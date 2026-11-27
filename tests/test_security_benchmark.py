@@ -14,7 +14,7 @@ Per the spec:
 - run with ``--runs 1 --no-report`` → exits 0, prints all 5 phase lines
 - ``--clear-cache`` flag wipes cache between phases (verified via spy)
 - report path resolution honors ``--report-root`` override
-- report is written under ``reports/security-benchmark/`` by default
+- report is written under ``reports_dev/security-benchmark/`` by default
 - per-run distribution is captured (not just median)
 - phase A < phase D OR docs explain why
 - script gracefully reports when google-re2 unavailable (phase C falls
@@ -245,8 +245,8 @@ def test_report_root_override(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """--report-root <path> should redirect the report under <path>/reports/
-    instead of the default $MAIN_ROOT/reports/."""
+    """--report-root <path> should redirect the report under <path>/reports_dev/
+    instead of the default $MAIN_ROOT/reports_dev/."""
     fake_plugin = tmp_path / "fake_plugin"
     fake_plugin.mkdir()
     report_root = tmp_path / "custom_reports"
@@ -265,7 +265,7 @@ def test_report_root_override(
     assert rc == 0
 
     # Report must land under the override path, NOT under $MAIN_ROOT
-    expected_dir = report_root / "reports" / "security-benchmark"
+    expected_dir = report_root / "reports_dev" / "security-benchmark"
     assert expected_dir.is_dir(), f"Expected dir not created: {expected_dir}"
 
     reports = list(expected_dir.glob("*-test-bench.md"))
@@ -276,7 +276,7 @@ def test_report_root_override(
 
 
 # ---------------------------------------------------------------------------
-# Test 5 — default report path is under reports/security-benchmark/
+# Test 5 — default report path is under reports_dev/security-benchmark/
 # ---------------------------------------------------------------------------
 
 
@@ -285,7 +285,7 @@ def test_default_report_path_under_security_benchmark(
     tmp_path: Path,
 ) -> None:
     """When --report-root is omitted, the report goes under
-    <main-root>/reports/security-benchmark/ (we monkeypatch
+    <main-root>/reports_dev/security-benchmark/ (we monkeypatch
     _resolve_main_root to point at tmp_path)."""
     fake_plugin = tmp_path / "fake_plugin"
     fake_plugin.mkdir()
@@ -304,7 +304,7 @@ def test_default_report_path_under_security_benchmark(
     ])
     assert rc == 0
 
-    expected_dir = fake_main_root / "reports" / "security-benchmark"
+    expected_dir = fake_main_root / "reports_dev" / "security-benchmark"
     assert expected_dir.is_dir()
     reports = list(expected_dir.glob("*-default-path-test.md"))
     assert len(reports) == 1
@@ -351,7 +351,7 @@ def test_per_run_distribution_captured_in_report(
     ])
     assert rc == 0
 
-    reports = list((report_root / "reports" / "security-benchmark").glob("*-distribution-test.md"))
+    reports = list((report_root / "reports_dev" / "security-benchmark").glob("*-distribution-test.md"))
     assert len(reports) == 1
     body = reports[0].read_text(encoding="utf-8")
 
@@ -400,7 +400,7 @@ def test_phase_a_vs_d_relationship_documented(
     ])
     assert rc == 0
 
-    reports = list((report_root / "reports" / "security-benchmark").glob("*-tradeoff-test.md"))
+    reports = list((report_root / "reports_dev" / "security-benchmark").glob("*-tradeoff-test.md"))
     assert len(reports) == 1
     body = reports[0].read_text(encoding="utf-8")
 
@@ -445,7 +445,7 @@ def test_re2_unavailable_fallback_reported(
     ])
     assert rc == 0
 
-    reports = list((report_root / "reports" / "security-benchmark").glob("*-re2-fallback.md"))
+    reports = list((report_root / "reports_dev" / "security-benchmark").glob("*-re2-fallback.md"))
     assert len(reports) == 1
     body = reports[0].read_text(encoding="utf-8")
 
@@ -551,7 +551,7 @@ def test_compose_report_path_creates_directory(tmp_path: Path) -> None:
     # Note: base does NOT exist yet
     path = sec_bench._compose_report_path(base, "security-benchmark", "smoke")
     assert path.parent.is_dir()
-    assert path.parent == base / "reports" / "security-benchmark"
+    assert path.parent == base / "reports_dev" / "security-benchmark"
     assert path.name.endswith("-smoke.md")
 
 

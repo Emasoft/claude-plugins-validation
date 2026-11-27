@@ -405,7 +405,7 @@ class TestG3PrivateInfoClassifiable:
         )
         assert _classify_security_buckets(_rc_report(prose_only)) == set()
 
-    def test_emitted_message_actually_carries_the_id(self) -> None:
+    def test_emitted_message_actually_carries_the_id(self, tmp_path: Path) -> None:
         """The real scanner emits the [RC-135] prefix (end-to-end wiring, not just the test string).
 
         Drives ``scan_file_for_private_info`` on a file with a leaked private
@@ -414,20 +414,16 @@ class TestG3PrivateInfoClassifiable:
         """
         from cpv_validation_common import scan_file_for_private_info
 
-        tmp = Path(__file__).parent.parent / "reports" / "_secaudit_tmp_privinfo.json"
-        tmp.parent.mkdir(parents=True, exist_ok=True)
+        tmp = tmp_path / "_secaudit_tmp_privinfo.json"
         tmp.write_text('{"cache": "/Users/secretagent007/cache"}', encoding="utf-8")
-        try:
-            report = ValidationReport()
-            count = scan_file_for_private_info(
-                tmp, report, "config.json", additional_usernames={"secretagent007"}
-            )
-            assert count >= 1
-            crit_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
-            assert any("[RC-135]" in m for m in crit_msgs), "emitted finding must carry the [RC-135] id"
-            assert _classify_security_buckets(report) == {"B"}
-        finally:
-            tmp.unlink(missing_ok=True)
+        report = ValidationReport()
+        count = scan_file_for_private_info(
+            tmp, report, "config.json", additional_usernames={"secretagent007"}
+        )
+        assert count >= 1
+        crit_msgs = [r.message for r in report.results if r.level == "CRITICAL"]
+        assert any("[RC-135]" in m for m in crit_msgs), "emitted finding must carry the [RC-135] id"
+        assert _classify_security_buckets(report) == {"B"}
 
 
 # =====================================================================

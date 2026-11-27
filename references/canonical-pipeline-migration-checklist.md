@@ -720,14 +720,14 @@ uv run python scripts/validate_plugin.py . --strict --json 2>/dev/null | \
 
 ## Category 6 — `.gitignore` + dev folders (CHECK-32..36)
 
-### CHECK-32 [BLOCKER] `/reports/` AND `/reports_dev/` listed in `.gitignore`
-**Why**: Reports contain private data (paths, tokens, internal notes). Per `~/.claude/rules/agent-reports-location.md` both MUST be gitignored.
+### CHECK-32 [BLOCKER] `reports_dev/` ignored and `reports/` not ignored in `.gitignore`
+**Why**: `reports_dev/` holds raw reports (paths, tokens, internal notes) and MUST be gitignored (directly or via `*_dev/`); `reports/` is tracked and holds only final, sanitized reports, so it MUST NOT be ignored.
 **Verify**:
 ```bash
-grep -qxF '/reports/' .gitignore && grep -qxF '/reports_dev/' .gitignore
+git check-ignore -q reports_dev/x && ! git check-ignore -q reports/x
 ```
 **Pass when**: exit 0.
-**On fail**: append both lines to `.gitignore`.
+**On fail**: add `reports_dev/` (or `*_dev/`) to `.gitignore` and remove any `reports/` entry.
 
 ### CHECK-33 [MAJOR] `/.trashcan/` listed in `.gitignore`
 **Why**: `ai-maestro-janitor:janitor-safe-delete` writes `claude-plugins-validation/.trashcan/`. Per CPV memory: this directory must never be committed.
@@ -1603,7 +1603,7 @@ run_all_checks() {
   local ts; ts="$(date +%Y%m%d_%H%M%S%z)"
   local main_root; main_root="$(git worktree list 2>/dev/null | head -n1 | awk '{print $1}')"
   [ -z "$main_root" ] && main_root="$plugin_root"
-  local out_dir="$main_root/reports/canonical-pipeline-migration"
+  local out_dir="$main_root/reports_dev/canonical-pipeline-migration"
   mkdir -p "$out_dir"
   local log="$out_dir/${ts}-run-all.log"
   local report="$out_dir/${ts}-run-all.md"
@@ -1645,7 +1645,7 @@ run_all_checks() {
     "29|MAJOR|cpv.allow_root_dirs covers non-std|cpv_check_29"
     "30|MINOR|Version bumped if changes since tag|cpv_check_30"
     "31|MINOR|No unknown plugin.json keys|cpv_check_31"
-    "32|BLOCKER|/reports/ + /reports_dev/ ignored|cpv_check_32"
+    "32|BLOCKER|reports_dev/ ignored + reports/ not ignored|cpv_check_32"
     "33|MAJOR|/.trashcan/ in .gitignore|cpv_check_33"
     "34|MINOR|*_dev/ folders gitignored|cpv_check_34"
     "35|MINOR|No tracked file under *_dev/|cpv_check_35"
@@ -1783,7 +1783,7 @@ run_all_checks() {
   - `1` — at least one BLOCKER or MAJOR check failed
   - `2` — usage error (cannot cd to plugin root)
 - Timestamps follow the canonical local-time + GMT-offset format (`%Y%m%d_%H%M%S%z`), per `~/.claude/rules/agent-reports-location.md`.
-- Output report goes to `$MAIN_ROOT/reports/canonical-pipeline-migration/<ts>-run-all.md`.
+- Output report goes to `$MAIN_ROOT/reports_dev/canonical-pipeline-migration/<ts>-run-all.md`.
 
 ---
 

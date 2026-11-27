@@ -34,7 +34,7 @@ Validates Claude Code plugins against 190+ structural and quality rules covering
 ## Output
 
 - Exit codes: 0 (pass), 1 (CRITICAL), 2 (MAJOR), 3 (MINOR), 4 (NIT, --strict). WARNING never blocks.
-- Report at `$MAIN_ROOT/reports/validate_plugin/<TS>-<slug>.md`.
+- Report at `$MAIN_ROOT/reports_dev/validate_plugin/<TS>-<slug>.md`.
 - For A-F semantic grades use `/cpv-semantic-validation`.
 
 ## Error Handling

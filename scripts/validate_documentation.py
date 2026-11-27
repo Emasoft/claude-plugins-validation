@@ -458,7 +458,7 @@ def validate_broken_links(plugin_path: Path, report: DocumentationValidationRepo
     Only SHIPPED documentation is examined and only GENUINELY broken local
     relative links are flagged:
 
-    * Gitignored / dev-scratch trees (docs_dev/, reports/, *_dev/, .git/,
+    * Gitignored / dev-scratch trees (docs_dev/, reports_dev/, *_dev/, .git/,
       node_modules/, .venv/, .trashcan/, …) and templates/ are skipped — the
       former are never shipped, the latter contains intentional placeholders.
     * Link targets inside fenced code blocks or inline code spans are ignored

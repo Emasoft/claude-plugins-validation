@@ -156,7 +156,7 @@ Scan for:
 ## Phase 8 — Write report
 
 Write a structured Markdown report to:
-`$MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/<YYYYMMDD_HHMMSS±HHMM>-<plugin-name>.md`
+`$MAIN_ROOT/reports_dev/cpv-plugin-diagnoser-agent/<YYYYMMDD_HHMMSS±HHMM>-<plugin-name>.md`
 
 The report has 8 sections (one per phase) plus a top-of-document
 summary table:

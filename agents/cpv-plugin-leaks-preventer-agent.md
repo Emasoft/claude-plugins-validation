@@ -81,7 +81,7 @@ Run the security scan ONE MORE TIME as a clean-room re-check, independent of the
 
 ## Phase 5 — report
 
-Write the per-finding before/after + outcome (redacted → runtime-read / hardened: recipe / FLAGGED: reason) to `$MAIN_ROOT/reports/cpv-plugin-leaks-preventer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (`$MAIN_ROOT` = main-repo root via `git worktree list | head -n1 | awk '{print $1}'`, never a linked worktree; `reports/` is gitignored). Note any Bucket-A execution-class findings still present → recommend the `cpv-plugin-devitalizer-agent` agent for those. End with the two-perspective close: what a perfectionist would still object to (the remaining flagged-not-fixed items and why each needs a human decision — a verified live secret to rotate, an intended insecure-by-design fixture, a "safeguard" on a path whose behavior change the user must approve) vs what a pragmatist accepts (the plugin now passes the gate honestly, with the irreducible items surfaced for an explicit human decision). Return ONE line.
+Write the per-finding before/after + outcome (redacted → runtime-read / hardened: recipe / FLAGGED: reason) to `$MAIN_ROOT/reports_dev/cpv-plugin-leaks-preventer-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md` (`$MAIN_ROOT` = main-repo root via `git worktree list | head -n1 | awk '{print $1}'`, never a linked worktree; `reports_dev/` is gitignored (raw output, scratch, private data); `reports/` is tracked and holds only final, sanitized reports). Note any Bucket-A execution-class findings still present → recommend the `cpv-plugin-devitalizer-agent` agent for those. End with the two-perspective close: what a perfectionist would still object to (the remaining flagged-not-fixed items and why each needs a human decision — a verified live secret to rotate, an intended insecure-by-design fixture, a "safeguard" on a path whose behavior change the user must approve) vs what a pragmatist accepts (the plugin now passes the gate honestly, with the irreducible items surfaced for an explicit human decision). Return ONE line.
 
 ## Hard rules — NON-NEGOTIABLE
 
@@ -101,15 +101,15 @@ The classification step (is-this-a-real-secret-vs-a-public-example, is-this-inpu
 ## Examples
 
 <example>
-user: Redact the leaks and harden the safeguards in reports/validate_security/20260421_183012+0200-my-plugin.md
+user: Redact the leaks and harden the safeguards in reports_dev/validate_security/20260421_183012+0200-my-plugin.md
 assistant: [report has 3 Bucket-B + 2 Bucket-C findings → classify, redact 2 secrets to runtime-reads, harden 2 unsafe parses, re-scan after each; 1 trufflehog-verified live token flagged for rotate + purge]
-[DONE] 2 redacted (runtime-read), 2 hardened, 1 flagged (live secret — rotate + purge). Report: reports/cpv-plugin-leaks-preventer-agent/20260421_184530+0200-my-plugin.md
+[DONE] 2 redacted (runtime-read), 2 hardened, 1 flagged (live secret — rotate + purge). Report: reports_dev/cpv-plugin-leaks-preventer-agent/20260421_184530+0200-my-plugin.md
 </example>
 
 <example>
 user: Make ~/Code/my-plugin pass the security gate at --strict without suppressing anything
 assistant: [Phase 0 confirms plugin; Iter 1: 6 leak/safeguard findings → 4 fixed; Iter 2: 2 demoted-to-NIT → fixes completed; Phase 4 clean-room re-scan: 0 blocking; 1 Bucket-A finding noted → recommend cpv-plugin-devitalizer-agent]
-[DONE] iterations=2, 4 fixed, clean for B/C; 1 execution-class noted (run cpv-plugin-devitalizer-agent). Report: reports/cpv-plugin-leaks-preventer-agent/20260421_191205+0200-my-plugin.md
+[DONE] iterations=2, 4 fixed, clean for B/C; 1 execution-class noted (run cpv-plugin-devitalizer-agent). Report: reports_dev/cpv-plugin-leaks-preventer-agent/20260421_191205+0200-my-plugin.md
 </example>
 
 ## Iterate to a clean, green result (loop discipline)

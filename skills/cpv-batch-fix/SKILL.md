@@ -80,7 +80,7 @@ Knobs (forwarded to the orchestrator):
 - One-line DONE summary —
   `DONE: plugins=N clean=X fixed=Y partial=Z failed=W. Reports under <session_dir>/.`
 - Per-plugin final validation reports under
-  `$MAIN_ROOT/reports/validate_plugin/<ts±tz>-<plugin>.md`.
+  `$MAIN_ROOT/reports_dev/validate_plugin/<ts±tz>-<plugin>.md`.
 - Per-plugin status JSONs carrying `before` and `after` counts.
 - Per-plugin commit batches in each plugin's git tree.
 

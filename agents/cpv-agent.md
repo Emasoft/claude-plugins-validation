@@ -104,7 +104,7 @@ Write the detailed output to a report file and return only its path plus a
 one-line status — never dump full validator output into the reply.
 
 ```text
-$MAIN_ROOT/reports/cpv/{timestamp}-{slug}.md
+$MAIN_ROOT/reports_dev/cpv/{timestamp}-{slug}.md
 ```
 
 Per `~/.claude/rules/agent-reports-location.md`, resolve `$MAIN_ROOT` via
@@ -139,7 +139,7 @@ user: Use CPV to security-scan the plugin at ./my-plugin.
 assistant: Security-scan is row 4 of the menu.
 [Loads cpv-the-skills-menu; dispatches cpv-plugin-validator-agent to run the full security
 pipeline — 5 external scanners + native skillaudit — on ./my-plugin]
-[DONE] security-scan — 0 CRITICAL, 1 MAJOR. Report: reports/cpv/20260605_101122+0200-security-scan-my-plugin.md
+[DONE] security-scan — 0 CRITICAL, 1 MAJOR. Report: reports_dev/cpv/20260605_101122+0200-security-scan-my-plugin.md
 </example>
 
 <example>
@@ -147,7 +147,7 @@ user: My plugin has validation errors — read the CPV skills menu and fix them.
 assistant: Validate-then-fix; the menu says dispatch the fixer, never hand-edit.
 [Loads cpv-the-skills-menu; dispatches cpv-plugin-fixer-agent to validate ./my-plugin,
 verify false positives, fix every real finding, and re-validate to clean]
-[DONE] fix — 7 findings → 0 after fix. Report: reports/cpv/20260605_101533+0200-fix-my-plugin.md
+[DONE] fix — 7 findings → 0 after fix. Report: reports_dev/cpv/20260605_101533+0200-fix-my-plugin.md
 </example>
 
 <example>
@@ -155,7 +155,7 @@ user: Publish ./my-plugin to GitHub and add it to the emasoft marketplace.
 assistant: Publish + marketplace is row 10 — an outward-facing step, so I confirm the target first.
 [Loads cpv-the-skills-menu; confirms repo name + marketplace; dispatches
 cpv-plugin-creator-agent to scaffold the repo + CI/CD, publish, and register it]
-[DONE] publish — v0.1.0 released, registered in emasoft. Report: reports/cpv/20260605_102014+0200-publish-my-plugin.md
+[DONE] publish — v0.1.0 released, registered in emasoft. Report: reports_dev/cpv/20260605_102014+0200-publish-my-plugin.md
 </example>
 
 ## Blocking findings: dispatch the fixer, or list the remedies

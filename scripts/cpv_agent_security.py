@@ -922,7 +922,7 @@ def _add_closure_context(result: AgentSecurityResult) -> None:
 
 
 def _default_report_path(agent_path: Path) -> Path:
-    """``<main-repo-root>/reports/agent-security/<ts±tz>-<slug>.md``.
+    """``<main-repo-root>/reports_dev/agent-security/<ts±tz>-<slug>.md``.
 
     Reuses ``validate_security._resolve_report_root`` so the anchor logic (main
     checkout root → ``CLAUDE_PROJECT_DIR`` → ``$TMPDIR``) has one definition.
@@ -931,7 +931,7 @@ def _default_report_path(agent_path: Path) -> Path:
 
     ts = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d_%H%M%S%z")
     slug = agent_path.stem or "agent"
-    return _resolve_report_root() / "reports" / "agent-security" / f"{ts}-{slug}.md"
+    return _resolve_report_root() / "reports_dev" / "agent-security" / f"{ts}-{slug}.md"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -989,7 +989,7 @@ def main(argv: list[str] | None = None) -> int:
         "--report",
         type=str,
         default=None,
-        help="Write the detailed report to this path instead of the default reports/ location",
+        help="Write the detailed report to this path instead of the default reports_dev/ location",
     )
     parser.add_argument(
         "--no-external-scanners",

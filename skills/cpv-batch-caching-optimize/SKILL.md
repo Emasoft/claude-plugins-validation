@@ -63,7 +63,7 @@ table — every shape is supported identically.
   `clean` / `fixed` / `partial` / `failed` labels.
 - One-line DONE summary.
 - Per-plugin final cache reports under
-  `$MAIN_ROOT/reports/validate_cache/<ts±tz>-<plugin>-final.md`.
+  `$MAIN_ROOT/reports_dev/validate_cache/<ts±tz>-<plugin>-final.md`.
 - Per-plugin status JSONs under
   `<session_dir>/plugin-<index>.status.json` (carrying both
   `before` and `after` severity counts).

@@ -58,7 +58,7 @@ Full steps and the mandatory launcher one-liner are in `cpv-semantic-validation-
 2. **Read the actual SKILL.md / agent .md files** for semantic evaluation.
 3. **Evaluate each criterion** below (Pass / Partial / Fail).
 4. **Grade A-F** per the gates below.
-5. **Write report** to `$MAIN_ROOT/reports/cpv-semantic-validator-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`.
+5. **Write report** to `$MAIN_ROOT/reports_dev/cpv-semantic-validator-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`.
 6. **Return**: `[DONE] Grade: X. Report: <filepath>`.
 
 ## Parallel Evaluation for Multiple Files
@@ -69,7 +69,7 @@ When the user provides multiple skill paths or an entire plugin path:
 - **Evaluate each file independently** — spawn one subagent per file using the Agent tool with `subagent_type: "cpv-spark-agent"` and `model: "opus"`. Each subagent receives:
   - The file path to evaluate
   - The 7 core semantic criteria plus the conditional Channel Source Security pillar (copied from this agent's instructions) — the conditional pillar fires only when the enclosing plugin's `plugin.json` declares a non-empty `channels` array
-  - Instructions to write its grade to `$MAIN_ROOT/reports/cpv-semantic-validator-agent/<YYYYMMDD_HHMMSS±HHMM>-<filename>.md` — the subagent MUST resolve `$MAIN_ROOT` via `git worktree list | head -n1`, never write to a worktree-local path
+  - Instructions to write its grade to `$MAIN_ROOT/reports_dev/cpv-semantic-validator-agent/<YYYYMMDD_HHMMSS±HHMM>-<filename>.md` — the subagent MUST resolve `$MAIN_ROOT` via `git worktree list | head -n1`, never write to a worktree-local path
 - **Collect results** from all parallel evaluations
 - **Write consolidated report** with per-file grades and overall summary
 
@@ -137,7 +137,7 @@ Three conditional pillars fire only when their precondition holds; their full ru
 
 ## Rules
 
-- **ALWAYS write reports to `$MAIN_ROOT/reports/cpv-semantic-validator-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. Parallel per-file subagents MUST also write to that same main-repo root. Both `reports/` and `reports_dev/` are gitignored. NEVER write to `docs_dev/`, the worktree-local `reports/`, or any other path.
+- **ALWAYS write reports to `$MAIN_ROOT/reports_dev/cpv-semantic-validator-agent/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`** — `$MAIN_ROOT` is the **main-repo root** (first entry of `git worktree list`), never a linked worktree. Per-component subfolder + local-time+GMT-offset timestamp are mandatory. Parallel per-file subagents MUST also write to that same main-repo root. `reports_dev/` is gitignored (raw output, scratch, private data); `reports/` is tracked and holds only final, sanitized reports. NEVER write to `docs_dev/`, the worktree-local `reports_dev/`, or any other path.
 - **ALWAYS discourage** — warn about cost and suggest script validation first.
 - **Run at most ONCE per session** — if the user asks for a second run, remind them of the cost and ask if they're sure.
 - **Always run script validation first** — do not duplicate what scripts already check.
@@ -169,7 +169,7 @@ assistant: Running baseline script validation...
 [Runs the launcher: remote_validation.py skill ./my-skill --strict]
 Now performing deep semantic analysis...
 [Reads SKILL.md, evaluates 7 criteria]
-[DONE] Grade: B. 5 Pass, 2 Partial. Report: reports/cpv-semantic-validator-agent/20260421_183012+0200-my-skill.md
+[DONE] Grade: B. 5 Pass, 2 Partial. Report: reports_dev/cpv-semantic-validator-agent/20260421_183012+0200-my-skill.md
 </example>
 
 <example>
@@ -180,5 +180,5 @@ user: Yes
 assistant: Running baseline script validation on all files...
 [Spawns N parallel subagents, one per file]
 [Collects grades]
-[DONE] 11 files evaluated. Grades: A(3), B(5), C(2), D(1). Report: reports/cpv-semantic-validator-agent/20260421_183012+0200-full-plugin.md
+[DONE] 11 files evaluated. Grades: A(3), B(5), C(2), D(1). Report: reports_dev/cpv-semantic-validator-agent/20260421_183012+0200-full-plugin.md
 </example>

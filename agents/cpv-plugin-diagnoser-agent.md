@@ -147,7 +147,7 @@ Full steps: `references/plugin-diagnoser-runbook.md`.
 
 ### Phase 8 — Write report
 Write a structured Markdown report to
-`$MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/<YYYYMMDD_HHMMSS±HHMM>-<plugin-name>.md`
+`$MAIN_ROOT/reports_dev/cpv-plugin-diagnoser-agent/<YYYYMMDD_HHMMSS±HHMM>-<plugin-name>.md`
 — 8 sections (one per phase) plus a top-of-document summary table.
 Full summary-table layout: `references/plugin-diagnoser-runbook.md`.
 
@@ -178,7 +178,7 @@ Full per-key dispatch steps (incl. the G/(d) PAT sub-flow): `references/plugin-d
 - **NEVER use AskUserQuestion** — render menus via the claude-menu-system
   bridge (`scripts/print_menu.py`), never inline; route the next-turn key
   through the Phase 9 FIXED letter→action map.
-- **ALWAYS write the report to `$MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/`** —
+- **ALWAYS write the report to `$MAIN_ROOT/reports_dev/cpv-plugin-diagnoser-agent/`** —
   per the agent-reports-location rule.
 - **ALWAYS wait for the user's choice** at phase 9 — do not auto-dispatch.
 - **Token-bounded summary** — return ≤5 lines + the report path. Never
@@ -194,7 +194,7 @@ Verdict: NEEDS_UPGRADE (3 CRITICAL, 7 MAJOR, 12 MINOR, 4 WARNING)
 Pipeline staleness: §3a (1 .sh script), §3c (8 os.path uses), §4 (publish.py needs idempotency)
 Marketplace: REGISTERED in <marketplace> (notify-workflow OK, PAT OK)
 Cache sync: 2 versions behind (cached v1.2.0, latest v1.4.0 — 4 days old)
-Report: $MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/<ts>-<plugin>.md
+Report: $MAIN_ROOT/reports_dev/cpv-plugin-diagnoser-agent/<ts>-<plugin>.md
 ```
 
 Followed by the phase-9 follow-up menu.
@@ -211,7 +211,7 @@ Security: trufflehog flagged 1 hardcoded API key (validate_security.py:1043)
 Cross-platform: 3 bash hook commands use `set -euo pipefail`
 Marketplace: NOT REGISTERED (no notify-marketplace.yml found)
 Cache sync: not applicable (running from local clone)
-Report: $MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/20260508_193000+0200-old-plugin.md
+Report: $MAIN_ROOT/reports_dev/cpv-plugin-diagnoser-agent/20260508_193000+0200-old-plugin.md
 [Queues Phase 9 follow-up menu via print_menu.py; ends turn — CMS Stop hook emits via systemMessage]
 user: J
 assistant: [Dispatches cpv-plugin-fixer-agent with min_severity=MAJOR + pipeline-migration prompt]
@@ -234,7 +234,7 @@ Plugin: formatter@1.2.0
 Verdict: HEALTHY (0 CRITICAL, 0 MAJOR, 1 MINOR)
 Marketplace: REGISTERED (notify-workflow OK, PAT OK)
 Cache sync: 2 versions behind (cached v1.2.0, latest v1.4.0 — 4 days old)
-Report: $MAIN_ROOT/reports/cpv-plugin-diagnoser-agent/20260508_193000+0200-formatter.md
+Report: $MAIN_ROOT/reports_dev/cpv-plugin-diagnoser-agent/20260508_193000+0200-formatter.md
 [Queues Phase 9 menu via print_menu.py; ends turn]
 user: S
 assistant: Run `claude plugin update formatter@my-marketplace` now? (yes/no)

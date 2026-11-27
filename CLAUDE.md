@@ -168,7 +168,7 @@ uv run python scripts/publish.py --patch   # | --minor | --major
    use a generic uppercase blob.
 7. **re2 compatibility:** `skillaudit_patterns.json` regexes must be
    re2-safe (no lookbehind/lookahead) — CI runs without google-re2.
-8. **Reports** go under `reports/` and `reports_dev/` (BOTH gitignored).
+8. **Reports** go under `reports_dev/` (gitignored: raw output, scratch, private data); `reports/` is tracked and holds only final, sanitized reports.
 9. **Release staging — Gate 1's clean-tree refusal is the ONLY thing keeping a stray
    edit out of a release commit** — `stage_release_changes` is not a second filter.
    It runs

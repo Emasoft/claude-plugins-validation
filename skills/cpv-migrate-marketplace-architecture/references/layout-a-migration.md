@@ -341,7 +341,7 @@ every operation was additive:
   delete the new repos.
 
 Record every rollback step in
-`$MAIN_ROOT/reports/cpv-migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
+`$MAIN_ROOT/reports_dev/cpv-migrate-marketplace-architecture/<YYYYMMDD_HHMMSS±HHMM>-<slug>.md`
 at the main-repo root (first entry of `git worktree list` — never a linked
-worktree) so the audit trail is complete. Both `reports/` and
-`reports_dev/` are gitignored.
+worktree) so the audit trail is complete. `reports_dev/` is gitignored (raw output, scratch, private data);
+`reports/` is tracked and holds only final, sanitized reports.
