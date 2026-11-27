@@ -4802,8 +4802,8 @@ def stage_verify_ci_green(
             return 0
         time.sleep(poll_s)
 
-    # A conclusion of `skipped`/`neutral` is not a failure (CPV's own PyPI
-    # workflow is deliberately dormant and always reports `skipped`). A
+    # A conclusion of `skipped`/`neutral` is not a failure (a workflow whose
+    # jobs are all gated off by an `if:` reports `skipped`). A
     # `cancelled` run is not automatically a failure either (issue #220): the
     # concurrency group cancels a run that a newer push to the same branch
     # superseded, which looks identical to a genuine user-cancel unless we
