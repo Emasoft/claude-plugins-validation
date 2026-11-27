@@ -2,17 +2,33 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
-## [5.25.0] - 2026-11-27
+## [5.26.0] - 2026-11-27
+
+### Bug Fixes
+
+- **xref:** Scan plugins under a hidden ancestor; validate_skill/ is not a skill ref
+- **paths:** ./x and ../x are relative, not system absolute paths
+- **skillaudit:** Clear a benign env read in shell when no exfil sink is near
+- **generator:** Shfmt-clean pre-push, no cache in release.yml, bounded publish.py calls
+- **paths:** Path checks look only below the plugin root; hyphen prefix is not a skill ref
+- **skillaudit:** An env read sent to a network client stays visible in shell test paths
+- **standardize:** --fix creates the publish retry helper; local shfmt sees hook scripts
+- **skillaudit:** Catalog catches env dumps sent through socat, netcat, $(env) and /proc environ
+- **standardize:** --force-templates never re-vendors validators into a remote-validation plugin (TRDD-5NI88T3T)
+- **skillaudit:** A piped env dump in a curl subshell keeps its CMD_INJECTION finding (TRDD-BMZOIIDF)
+- **skillaudit:** REGEX_DOS proves template-literal regexes with a unique delimiter linear
+- **toc:** Outside any plugin, the file's own folder decides the TOC exemption
 
 ### Miscellaneous Tasks
 
-- Regen self-hash manifests after the #248 timing-test fix
+- Regen self-hash manifests for the 5.26.0 fixes
+- Regen self-hash manifests after the TOC fallback fix
 
 ### Testing
 
-- Linear-scan check compares N with 4N under an 8x bound ([#248](https://github.com/Emasoft/claude-plugins-validation/issues/248))
+- Skip the FIFO shfmt test where os.mkfifo does not exist
 
-## [5.24.0] - 2026-11-27
+## [5.25.0] - 2026-11-27
 
 ### Bug Fixes
 
@@ -49,6 +65,11 @@ All notable changes to the Claude Plugins Validation plugin will be documented i
 - Regen self-hash manifests for 5.24.0
 - Regen self-hash manifests after the suite fixes
 - Regen self-hash manifests after the shebang fix
+- Regen self-hash manifests after the #248 timing-test fix
+
+### Testing
+
+- Linear-scan check compares N with 4N under an 8x bound ([#248](https://github.com/Emasoft/claude-plugins-validation/issues/248))
 
 ## [5.23.2] - 2026-11-20
 
