@@ -9584,6 +9584,34 @@ def _rc39_line_is_pure_launchd_removal(line: str) -> bool:
     return all(_rc39_segment_is_removal(s) for s in segments)
 
 
+_RC39_MARKDOWN_SUFFIXES: tuple[str, ...] = (".md", ".mdx", ".markdown")
+
+
+def _rc39_markdown_inline_code_is_removal(rel_path: object, line: str) -> bool:
+    """True iff a Markdown ``line`` has balanced inline-code spans, every span that
+    matches an RC-39 pattern is a pure launchd removal, and the prose outside the
+    spans matches no RC-39 pattern (issue #262 A).
+
+    Why: removal instructions written as inline code in docs ("`launchctl bootout ...`
+    then `rm -f ~/Library/LaunchAgents/x.plist`") are not persistence, but the shell
+    lexer cannot read a whole prose line. Each span is judged on its own so an
+    install/load/cp/tee span on the same line still fires; an odd backtick count
+    (unbalanced span) and any persistence match in the surrounding prose fail closed.
+    Markdown only: in a shell file backticks are command substitution."""
+    if not str(rel_path).lower().endswith(_RC39_MARKDOWN_SUFFIXES):
+        return False
+    parts = line.split("`")
+    if len(parts) % 2 == 0:  # odd number of backticks: unbalanced, fail closed
+        return False
+    for index, part in enumerate(parts):
+        if index % 2 == 0:  # prose outside the spans
+            if any(p.search(part) for p in PERSISTENCE_PATTERNS):
+                return False
+        elif any(p.search(part) for p in PERSISTENCE_PATTERNS) and not _rc39_line_is_pure_launchd_removal(part):
+            return False
+    return True
+
+
 def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
     """RC-65 (cloud IMDS), RC-39 (persistence), RC-70 (obfuscated exec),
     RC-164 (copy-only in-plugin script-write guard, issue #152)."""
@@ -9668,7 +9696,10 @@ def check_phase2e_extras(plugin_path: Path, report: ValidationReport) -> int:
                     # chained install/load/write visible. Gated on the launchd path
                     # patterns so no other RC-39 shape is ever cleared by it.
                     # (`continue`, not `break`: the other patterns on this same line must still run.)
-                    if "library/launch" in m.group(0).lower() and _rc39_line_is_pure_launchd_removal(line):
+                    if "library/launch" in m.group(0).lower() and (
+                        _rc39_line_is_pure_launchd_removal(line)
+                        or _rc39_markdown_inline_code_is_removal(rel_path, line)
+                    ):
                         continue
                     level = effective_severity("major", rel_path)
                     getattr(report, level)(
