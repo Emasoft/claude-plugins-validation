@@ -47,7 +47,6 @@ class _Params:
     author = "Emasoft"
     repo_url = "https://github.com/Emasoft/canontest"
     cpv_ref_resolved = "v5.1.0"
-    cpv_source = "git"
 
 
 def _canon() -> str:

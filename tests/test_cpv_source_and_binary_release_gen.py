@@ -6,15 +6,13 @@
     ``gh release upload``, ``SHA256SUMS``, least-privilege split, SHA-pinned
     actions) and carries the push/PR ``build-smoke`` "untested-until-release"
     guard.
-  * CHANGE 2 (#137) — the ``--cpv-source {git,pypi}`` selector: the default
-    ``git`` source keeps the historical ``git+https://…@<ref>`` form at every
-    generated callsite (NON-BREAKING), and ``pypi`` switches every callsite to
-    the prebuilt wheel ``claude-plugins-validation==<ver>`` and drops the
-    ``--with pyyaml`` shim (pyyaml is a declared wheel dependency).
+  * CHANGE 2 (#137) — CPV is fetched only from GitHub: every generated callsite
+    uses the historical ``git+https://…@<ref>`` form (NON-BREAKING), the
+    generator offers no ``--cpv-source`` option, and every callsite keeps the
+    ``--with pyyaml`` shim.
 
-Every guard is TWO-SIDED: the default behavior is asserted UNCHANGED and the
-opt-in switch is asserted to flip every site — so a regression in either
-direction fails a test.
+Every guard is TWO-SIDED where a switch exists; for CHANGE 2 the default is
+asserted unchanged and the removed option is asserted to stay removed.
 """
 
 from __future__ import annotations
@@ -36,7 +34,6 @@ import cpv_pipeline_profile as prof  # noqa: E402
 from generate_plugin_repo import (  # noqa: E402
     PluginParams,
     cpv_uvx_from_arg,
-    cpv_uvx_needs_pyyaml,
     gen_ci_yml,
     gen_publish_py,
     gen_release_binaries_yml,
@@ -130,36 +127,13 @@ def test_binary_release_template_passes_actionlint() -> None:
     assert r.returncode == 0, f"actionlint failed:\n{r.stdout}\n{r.stderr}"
 
 
-# ── CHANGE 2: the --cpv-source {git,pypi} selector (#137) ────────────────────
-
-
-def test_default_cpv_source_is_git() -> None:
-    """The default is `git` — the historical behavior is NON-BREAKING."""
-    assert _params().cpv_source == "git"
+# ── CHANGE 2: CPV is fetched only from GitHub (#137) ─────────────────────────
 
 
 def test_cpv_uvx_from_arg_git_is_pinned_url() -> None:
     """git source → the exact pinned `git+…@<ref>` form."""
     p = _params(cpv_ref="v2.137.0")
     assert cpv_uvx_from_arg(p) == f"{_CPV_GIT_URL}@v2.137.0"
-
-
-def test_cpv_uvx_from_arg_pypi_is_version_pinned_wheel() -> None:
-    """pypi source + a version ref → `claude-plugins-validation==<ver>` (leading v stripped)."""
-    p = _params(cpv_source="pypi", cpv_ref="v2.137.0")
-    assert cpv_uvx_from_arg(p) == "claude-plugins-validation==2.137.0"
-
-
-def test_cpv_uvx_from_arg_pypi_nonversion_degrades_to_bare_dist() -> None:
-    """pypi + a branch/SHA ref (no published wheel) → bare dist (no unsatisfiable ==main)."""
-    assert cpv_uvx_from_arg(_params(cpv_source="pypi", cpv_ref="main")) == "claude-plugins-validation"
-    assert cpv_uvx_from_arg(_params(cpv_source="pypi", cpv_ref="abc1234")) == "claude-plugins-validation"
-
-
-def test_cpv_uvx_needs_pyyaml_only_for_git() -> None:
-    """git needs the --with pyyaml shim; the pypi wheel declares pyyaml as a dep."""
-    assert cpv_uvx_needs_pyyaml(_params()) is True
-    assert cpv_uvx_needs_pyyaml(_params(cpv_source="pypi")) is False
 
 
 def test_gen_ci_yml_git_default_unchanged() -> None:
@@ -169,13 +143,6 @@ def test_gen_ci_yml_git_default_unchanged() -> None:
     assert _CPV_WHEEL not in ci
 
 
-def test_gen_ci_yml_pypi_switches_every_cpv_ref() -> None:
-    """gen_ci_yml with --cpv-source pypi emits the wheel form, ZERO git+ CPV refs."""
-    ci = gen_ci_yml(_params(cpv_source="pypi", cpv_ref="v2.137.0"))
-    assert "claude-plugins-validation==2.137.0" in ci
-    assert _CPV_GIT_URL not in ci
-
-
 def test_gen_publish_py_git_default_unchanged() -> None:
     """gen_publish_py default keeps the pinned git+ form at every CPV callsite."""
     pub = gen_publish_py(_params(cpv_ref="v2.137.0"))
@@ -183,8 +150,13 @@ def test_gen_publish_py_git_default_unchanged() -> None:
     assert _CPV_WHEEL not in pub
 
 
-def test_gen_publish_py_pypi_switches_and_drops_pyyaml() -> None:
-    """gen_publish_py with --cpv-source pypi switches every CPV callsite to the wheel."""
-    pub = gen_publish_py(_params(cpv_source="pypi", cpv_ref="v2.137.0"))
-    assert "claude-plugins-validation==2.137.0" in pub
-    assert _CPV_GIT_URL not in pub
+def test_generator_cli_has_no_cpv_source_flag() -> None:
+    """The generator offers no alternative CPV source option; CPV is fetched only from GitHub."""
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "generate_plugin_repo.py"), "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "--cpv-source" not in result.stdout

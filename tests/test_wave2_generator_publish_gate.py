@@ -312,19 +312,8 @@ def test_template_runs_the_preflight_BEFORE_bump_commit_tag_push() -> None:
         assert i_pre < main_src.index(later), f"{later} must run AFTER the preflight"
 
 
-def test_template_compiles_for_both_cpv_sources() -> None:
-    for source in ("git", "pypi"):
-        src = gen_publish_py(_params(cpv_source=source))
-        compile(src, f"<publish-{source}.py>", "exec")
-
-
-def test_template_pypi_variant_strips_the_pyyaml_shim_from_the_new_callsite() -> None:
-    """The new CPV callsite must spell `--with pyyaml` in one of the three forms
-    the pypi post-process strips — otherwise the pypi wheel variant would ship a
-    stale shim."""
-    src = gen_publish_py(_params(cpv_source="pypi"))
-    assert '"--with", "pyyaml"' not in src
-    assert "claude-plugins-validation==" in src
+def test_template_compiles() -> None:
+    compile(gen_publish_py(_params()), "<publish.py>", "exec")
 
 
 def test_template_preflight_never_hard_requires_a_tool() -> None:

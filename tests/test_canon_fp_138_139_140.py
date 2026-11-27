@@ -167,9 +167,8 @@ def test_139_default_cpv_ref_falls_back_to_master_when_uninspectable(monkeypatch
 
 
 def test_139_git_callsites_contain_no_at_main() -> None:
-    """publish.py / ci.yml / release.yml at the DEFAULT git source pin a version, never @main."""
+    """publish.py / ci.yml / release.yml pin a version, never @main."""
     p = _params()
-    assert p.cpv_source == "git"  # default source unchanged
     for text in (gen_publish_py(p), gen_ci_yml(p), gen_release_yml(p)):
         assert "@main" not in text
         assert "claude-plugins-validation@main" not in text
@@ -182,18 +181,6 @@ def test_139_git_from_arg_no_main() -> None:
     from_arg = cpv_uvx_from_arg(_params())
     assert "@main" not in from_arg
     assert from_arg.startswith(f"{_CPV_GIT_URL}@v")
-
-
-def test_139_pypi_path_not_broken_by_master_fallback() -> None:
-    """#137 pypi path still strips the leading v (wheel form); a branch ref → bare dist."""
-    # A concrete version under pypi → bare wheel version (no leading v).
-    pv = cpv_uvx_from_arg(_params(cpv_source="pypi", cpv_ref="v2.137.0"))
-    assert pv == "claude-plugins-validation==2.137.0"
-    # The 'master' branch fallback is NOT a published wheel version, so the pypi
-    # form must degrade to the bare dist name — never an unsatisfiable ==master.
-    pm = cpv_uvx_from_arg(_params(cpv_source="pypi", cpv_ref="master"))
-    assert pm == "claude-plugins-validation"
-    assert "==master" not in pm
 
 
 # ── #138: REPOSITORY_GITLEAKS removed from the MegaLinter config ──────────────

@@ -56,7 +56,6 @@ def _params() -> PluginParams:
         strip_dev=False,
         marketplace_owner="Emasoft",
         cpv_ref="",
-        cpv_source="git",
         force_notify=False,
     )
 
