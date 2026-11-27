@@ -10,6 +10,7 @@
 - [§4 — Make publish.py idempotent — interrupted-publish recovery](#4--make-publishpy-idempotent-interrupted-publish-recovery)
 - [§5 — Sanitize every script-input parameter against injection](#5--sanitize-every-script-input-parameter-against-injection)
 - [§6 — #137-143 CI-parity defects](#6--137-143-ci-parity-defects)
+- [§7 — Local publish gate skips a check CI runs via RC-PUBLISH-GATE-PARITY-001](#7--local-publish-gate-skips-a-check-ci-runs-via-rc-publish-gate-parity-001)
 
 ---
 
@@ -666,6 +667,27 @@ CI-parity proof on its own — read the per-check verdicts.
 cpv-remote-validate ci-preflight .
 # expect: CIP-1..8 PASS (or a non-blocking WARNING when a gate's tool is
 #         absent); no BLOCK from any parity gate.
+```
+
+---
+
+## §7 — Local publish gate skips a check CI runs via `[RC-PUBLISH-GATE-PARITY-001]`
+
+**Finding:** MAJOR. A CI workflow runs mypy (a direct `mypy` command, or Mega-Linter with `PYTHON_MYPY` enabled or with no explicit linter list), but no non-comment line of `scripts/publish.py` runs mypy or `ci-preflight`. A type error then passes the local gate, the tag is pushed, and the CI run fails after the tag is public (issue #280). The check applies even when `scripts/publish.py` is listed in `cpv.pipeline.intentional_divergence`.
+
+**Fix:** add a mypy step (the canonical gate G2d) to the plugin's own `publish.py`, before the push. A generated canonical `publish.py` already has it; in an adapted copy, for example:
+
+```python
+subprocess.run(["uv", "run", "mypy", "scripts/", "--ignore-missing-imports"], cwd=root, check=True)
+```
+
+Or run CPV's CI pre-flight from `publish.py` (`cpv-remote-validate ci-preflight .`), which runs the same mypy gate. Do not delete the mypy step from the workflow to silence the finding: the workflow is what catches a type error after a push.
+
+### Verify (§7)
+
+```bash
+uv run python scripts/validate_plugin.py . --strict
+# expect: no `[RC-PUBLISH-GATE-PARITY-001]` finding
 ```
 
 ---

@@ -285,7 +285,7 @@ RC-LEGACY-PIPELINE-001 · §1 — Fix dangling script references · §2 — Migr
 whole-repo lint via cpv_lint_engine · §3 — Cross-platform Python — bash to
 Python, os.path to pathlib · §4 — Make publish.py idempotent —
 interrupted-publish recovery · §5 — Sanitize every script-input parameter
-against injection.
+against injection · §6 — #137-143 CI-parity defects · §7 — Local publish gate skips a check CI runs via RC-PUBLISH-GATE-PARITY-001.
 
 ## 12. Phase 0.5 triage — evidence + safe-ceiling detail
 
