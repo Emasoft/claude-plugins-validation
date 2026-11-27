@@ -1711,6 +1711,14 @@ import tempfile
 import time
 from pathlib import Path
 
+# Every subprocess.run in this file carries an explicit timeout so a hung
+# git/gh/tool call fails fast instead of blocking the release pipeline
+# (UBS py.security.subprocess-timeout). _GIT_TIMEOUT_S bounds local git
+# queries; _NET_TIMEOUT_S bounds network operations (a push can be slow) and
+# matches cpv_network_resilience.DEFAULT_TIMEOUT_SEC.
+_GIT_TIMEOUT_S = 60
+_NET_TIMEOUT_S = 600
+
 # Load gh / git retry wrappers from the sibling module so every push +
 # `gh release create` survives transient github.com hiccups (the retry
 # pattern from ~/.claude/rules/github-timeouts.md). Shipped verbatim
@@ -1746,13 +1754,15 @@ except ImportError:
         kwargs.pop("backoff", None)
         kwargs.setdefault("check", True)
         kwargs.setdefault("capture_output", False)
-        return subprocess.run(cmd, **kwargs)
+        # Same per-attempt bound as cpv_network_resilience.DEFAULT_TIMEOUT_SEC;
+        # a hung gh call must raise TimeoutExpired, never block the pipeline.
+        return subprocess.run(cmd, timeout=kwargs.pop("timeout", _NET_TIMEOUT_S), **kwargs)
     def git_with_retry(cmd, **kwargs):  # type: ignore[no-redef, misc]
         kwargs.pop("max_attempts", None)
         kwargs.pop("backoff", None)
         kwargs.setdefault("check", True)
         kwargs.setdefault("capture_output", False)
-        return subprocess.run(cmd, **kwargs)
+        return subprocess.run(cmd, timeout=kwargs.pop("timeout", _NET_TIMEOUT_S), **kwargs)
 
 # -- ANSI colors ---------------------------------------------------------------
 
@@ -1930,7 +1940,8 @@ def run(
 
 def get_repo_root() -> Path:
     r = subprocess.run([_exe("git"), "rev-parse", "--show-toplevel"],
-                       capture_output=True, text=True, check=True)
+                       capture_output=True, text=True, check=True,
+                       timeout=_GIT_TIMEOUT_S)
     return Path(r.stdout.strip())
 
 
@@ -2395,11 +2406,19 @@ def install_hook(root: Path) -> int:
     # unconditionally, so a failed config write reported "installed" and every
     # later push was silently ungated — the worst possible thing to be wrong
     # about, because the whole point of this command is that pushes ARE gated.
-    cfg = subprocess.run([_exe("git"), "config", "core.hooksPath", "git-hooks"],
-                         cwd=str(root), check=False)
-    if cfg.returncode != 0:
+    # A hung `git config` must fail the same way a non-zero exit does (return 1
+    # with the manual-fix hint), never hang the install or be swallowed.
+    try:
+        cfg_rc: int | None = subprocess.run(
+            [_exe("git"), "config", "core.hooksPath", "git-hooks"],
+            cwd=str(root), check=False, timeout=_GIT_TIMEOUT_S,
+        ).returncode
+    except subprocess.TimeoutExpired:
+        cfg_rc = None
+    if cfg_rc != 0:
+        cfg_why = "timed out" if cfg_rc is None else f"exit {cfg_rc}"
         cprint(f"  {RED}FAILED to set git config core.hooksPath = git-hooks "
-               f"(exit {cfg.returncode}).{NC}")
+               f"({cfg_why}).{NC}")
         cprint(f"  {RED}The hook file was copied, but git may not run it. Set it by hand:{NC}")
         cprint(f"  {RED}  git config core.hooksPath git-hooks{NC}")
         return 1
@@ -4568,7 +4587,8 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
             if (root / _gen).exists():
                 run(["git", "add", "--", _gen], cwd=root)
         _st = subprocess.run([_exe("git"), "status", "--porcelain"], cwd=root,
-                             capture_output=True, text=True, check=False)
+                             capture_output=True, text=True, check=False,
+                             timeout=_GIT_TIMEOUT_S)
         _stray = [ln[3:].strip() for ln in _st.stdout.splitlines() if ln.startswith("??")]
         if _stray:
             cprint(f"  {YELLOW}NOT staged — untracked files are never swept into a release (#186):{NC}")
@@ -5964,11 +5984,11 @@ set -u
 # with an explicit message is the honest outcome; silently failing the ancestry
 # probe would block every push including publish.py's own, with no reason given.
 case "$(uname -s 2>/dev/null || echo unknown)" in
-    Linux|Darwin|*BSD|DragonFly|SunOS|AIX|CYGWIN*|MSYS*|MINGW*) : ;;
-    *)
-        echo "publish.py canon is POSIX-only (macOS/Linux); Windows is unsupported" >&2
-        exit 1
-        ;;
+Linux | Darwin | *BSD | DragonFly | SunOS | AIX | CYGWIN* | MSYS* | MINGW*) : ;;
+*)
+	echo "publish.py canon is POSIX-only (macOS/Linux); Windows is unsupported" >&2
+	exit 1
+	;;
 esac
 
 REPO_ROOT="$(git rev-parse --show-toplevel)" || exit 1
@@ -5981,54 +6001,53 @@ default_branch="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/d
 
 # Full release gate: only publish.py may push the default branch / tags.
 run_release_gate() {
-    if command -v uv >/dev/null 2>&1; then
-        uv run python scripts/publish.py --gate
-    else
-        python3 scripts/publish.py --gate
-    fi
+	if command -v uv >/dev/null 2>&1; then
+		uv run python scripts/publish.py --gate
+	else
+		python3 scripts/publish.py --gate
+	fi
 }
 
 # Secret-scan ONLY the new commits of a feature-branch push.
 #   $1 local sha   $2 remote sha   $3 short branch name
 # Returns 0 (clean -> allow) or non-zero (secret found / cannot scan -> block).
 secret_scan_range() {
-    if ! command -v trufflehog >/dev/null 2>&1; then
-        echo "BLOCKED: trufflehog is not installed — a feature-branch push must be" >&2
-        echo "         secret-scanned first. Install trufflehog" >&2
-        echo "         (https://github.com/trufflesecurity/trufflehog)" >&2
-        echo "         or push through scripts/publish.py." >&2
-        return 1
-    fi
-    # Scan from the commit already on the remote (nothing new before it). For a
-    # brand-new branch (remote side all-zeros) start from the default branch tip
-    # so inherited history is not re-scanned; if none resolves, scan the whole
-    # branch (a fresh repo has no inherited content to false-positive on).
-    base=""
-    if [ "$2" != "$ZERO" ]; then
-        base="$2"
-    elif [ -n "$default_branch" ]; then
-        base="$(git rev-parse --verify --quiet "origin/$default_branch" 2>/dev/null \
-             || git rev-parse --verify --quiet "$default_branch" 2>/dev/null || true)"
-    fi
-    # Issue #213 — `$3` is the branch name on the REMOTE side, which need not
-    # exist locally: `git push origin HEAD:refs/heads/some-name` makes
-    # trufflehog log "unable to resolve ref", scan 0 chunks / 0 bytes, and exit
-    # 0. `--fail` only fires on a secret FOUND, so a scan that never looked was
-    # indistinguishable from a clean one and the push was allowed. Resolve the
-    # ref ourselves first and fail closed, which is what the header promises.
-    if ! git rev-parse --verify --quiet "$3" >/dev/null 2>&1; then
-        echo "BLOCKED: cannot secret-scan this push — the pushed branch name '$3'" >&2
-        echo "         does not resolve to a local ref, so trufflehog would scan" >&2
-        echo "         0 bytes and exit 0 (an unscanned push, not a clean one)." >&2
-        echo "         Push a real local branch (git push origin <branch>), or" >&2
-        echo "         push through scripts/publish.py." >&2
-        return 1
-    fi
-    if [ -n "$base" ]; then
-        trufflehog git "file://$REPO_ROOT" --since-commit "$base" --branch "$3" --no-update --fail
-    else
-        trufflehog git "file://$REPO_ROOT" --branch "$3" --no-update --fail
-    fi
+	if ! command -v trufflehog >/dev/null 2>&1; then
+		echo "BLOCKED: trufflehog is not installed — a feature-branch push must be" >&2
+		echo "         secret-scanned first. Install trufflehog" >&2
+		echo "         (https://github.com/trufflesecurity/trufflehog)" >&2
+		echo "         or push through scripts/publish.py." >&2
+		return 1
+	fi
+	# Scan from the commit already on the remote (nothing new before it). For a
+	# brand-new branch (remote side all-zeros) start from the default branch tip
+	# so inherited history is not re-scanned; if none resolves, scan the whole
+	# branch (a fresh repo has no inherited content to false-positive on).
+	base=""
+	if [ "$2" != "$ZERO" ]; then
+		base="$2"
+	elif [ -n "$default_branch" ]; then
+		base="$(git rev-parse --verify --quiet "origin/$default_branch" 2>/dev/null || git rev-parse --verify --quiet "$default_branch" 2>/dev/null || true)"
+	fi
+	# Issue #213 — `$3` is the branch name on the REMOTE side, which need not
+	# exist locally: `git push origin HEAD:refs/heads/some-name` makes
+	# trufflehog log "unable to resolve ref", scan 0 chunks / 0 bytes, and exit
+	# 0. `--fail` only fires on a secret FOUND, so a scan that never looked was
+	# indistinguishable from a clean one and the push was allowed. Resolve the
+	# ref ourselves first and fail closed, which is what the header promises.
+	if ! git rev-parse --verify --quiet "$3" >/dev/null 2>&1; then
+		echo "BLOCKED: cannot secret-scan this push — the pushed branch name '$3'" >&2
+		echo "         does not resolve to a local ref, so trufflehog would scan" >&2
+		echo "         0 bytes and exit 0 (an unscanned push, not a clean one)." >&2
+		echo "         Push a real local branch (git push origin <branch>), or" >&2
+		echo "         push through scripts/publish.py." >&2
+		return 1
+	fi
+	if [ -n "$base" ]; then
+		trufflehog git "file://$REPO_ROOT" --since-commit "$base" --branch "$3" --no-update --fail
+	else
+		trufflehog git "file://$REPO_ROOT" --branch "$3" --no-update --fail
+	fi
 }
 
 release_push=0
@@ -6037,37 +6056,37 @@ scan_failed=0
 
 # git feeds "<local ref> <local sha> <remote ref> <remote sha>" lines on stdin.
 while read -r localref localsha remoteref remotesha; do
-    [ -z "$localref" ] && continue
-    [ "$localsha" = "$ZERO" ] && continue    # ref deletion — nothing to gate/scan
-    case "$remoteref" in
-        refs/tags/*|refs/heads/main|refs/heads/master)
-            release_push=1
-            ;;
-        refs/heads/*)
-            short=${remoteref#refs/heads/}
-            if [ -n "$default_branch" ] && [ "$short" = "$default_branch" ]; then
-                release_push=1
-            else
-                saw_feature=1
-                secret_scan_range "$localsha" "$remotesha" "$short" || scan_failed=1
-            fi
-            ;;
-        *)
-            release_push=1    # unknown ref shape — gate conservatively
-            ;;
-    esac
+	[ -z "$localref" ] && continue
+	[ "$localsha" = "$ZERO" ] && continue # ref deletion — nothing to gate/scan
+	case "$remoteref" in
+	refs/tags/* | refs/heads/main | refs/heads/master)
+		release_push=1
+		;;
+	refs/heads/*)
+		short=${remoteref#refs/heads/}
+		if [ -n "$default_branch" ] && [ "$short" = "$default_branch" ]; then
+			release_push=1
+		else
+			saw_feature=1
+			secret_scan_range "$localsha" "$remotesha" "$short" || scan_failed=1
+		fi
+		;;
+	*)
+		release_push=1 # unknown ref shape — gate conservatively
+		;;
+	esac
 done
 
 # A release ref is present, or nothing parsed -> enforce the full release gate.
 if [ "$release_push" -eq 1 ] || [ "$saw_feature" -eq 0 ]; then
-    run_release_gate
-    exit $?
+	run_release_gate
+	exit $?
 fi
 
 # Feature-branch-only push: allowed iff every secret scan passed.
 if [ "$scan_failed" -eq 1 ]; then
-    echo "BLOCKED: secret scan failed for a feature-branch push (see above)." >&2
-    exit 1
+	echo "BLOCKED: secret scan failed for a feature-branch push (see above)." >&2
+	exit 1
 fi
 exit 0
 """
@@ -6530,12 +6549,14 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        # enable-cache: true keys an actions/cache on UV_CACHE_DIR so the
-        # cold `uvx --from git+…` build of CPV (12-20 min, issue #114) is
-        # paid ONCE per lockfile/runner; later runs restore the warm cache.
+        # enable-cache: false (zizmor cache-poisoning, HIGH): a tag-triggered
+        # release workflow must never restore a cache that an earlier, less
+        # trusted run (PR, branch push) could have written, because the
+        # restored files would then execute inside the release job that
+        # publishes artifacts. The uv build costs a few seconds without it.
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
-          enable-cache: true
+          enable-cache: false
 
       - name: Set up Python
         run: uv python install {p.python_version}
@@ -6620,7 +6641,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
-          enable-cache: true
+          enable-cache: false
 
       - name: Set up Python
         run: uv python install {p.python_version}

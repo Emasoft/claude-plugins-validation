@@ -315,8 +315,8 @@ def test_row15_install_hook_reports_a_failed_hookspath_write() -> None:
     """Row 15: a failed `git config core.hooksPath` no longer prints success."""
     src = _src()
     block = src[src.index("def install_hook("):src.index("def _get_remote_slug(")]
-    assert "cfg = subprocess.run(" in block
-    assert "if cfg.returncode != 0:" in block
+    assert "core.hooksPath" in block and "subprocess.run(" in block
+    assert "if cfg_rc != 0:" in block
     assert "FAILED to set git config core.hooksPath" in block
 
 
