@@ -6058,6 +6058,57 @@ def validate_pipeline_script_refs(plugin_root: Path, report: ValidationReport) -
             )
 
 
+# RC-PUBLISH-GATE-PARITY-001 (issue #280). Both probes are deliberately
+# comment-blind: a `# mypy` mention runs nothing, so it must not count as the
+# local gate covering mypy. Same non-comment-line shape as cpv_ci_preflight's
+# MYPY_WORKFLOW_RUN_PATTERN so the CI side and the local side judge alike.
+_PUBLISH_MYPY_RE = re.compile(r"(?m)^[^#\n]*\bmypy\b")
+# `ci-preflight` / `cpv_ci_preflight` on a non-comment line: CPV's CI-parity
+# preflight itself runs the mypy gate (G2d), so delegating to it covers mypy.
+_PUBLISH_CI_PREFLIGHT_RE = re.compile(r"(?m)^[^#\n]*(?:ci-preflight|cpv_ci_preflight)")
+
+
+def validate_publish_gate_parity(plugin_root: Path, report: ValidationReport) -> None:
+    """BLOCK a local publish gate that skips a mypy check CI enforces (RC-PUBLISH-GATE-PARITY-001).
+
+    Why this exists (issue #280): a plugin's release.yml ran
+    ``uv run mypy scripts/ --ignore-missing-imports`` but its local
+    ``scripts/publish.py`` gate never ran mypy, so publish.py pushed a tag
+    carrying a type error and the Release run failed AFTER the tag was public.
+    The plugin listed ``scripts/publish.py`` under
+    ``cpv.pipeline.intentional_divergence``, which demoted CPV's drift finding
+    (RC-PIPELINE-DRIFT-001) to INFO — nothing said the local gate skips a check
+    CI enforces.
+
+    This check is deliberately independent of ``intentional_divergence``: a
+    declared divergence must not hide a gate gap, so the key is never read here.
+    """
+    publish = plugin_root / "scripts" / "publish.py"
+    if not publish.is_file():
+        return
+    try:
+        from cpv_ci_preflight import _mypy_workflow_wired
+    except ImportError:
+        return
+    if not _mypy_workflow_wired(plugin_root):
+        return
+    try:
+        text = publish.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    if _PUBLISH_MYPY_RE.search(text) or _PUBLISH_CI_PREFLIGHT_RE.search(text):
+        return
+    report.major(
+        "[RC-PUBLISH-GATE-PARITY-001] scripts/publish.py never runs mypy, but a CI workflow does "
+        "(Release/Lint type check). A type error passes the local publish gate, the tag is pushed, "
+        "and the CI run fails after the tag is public (issue #280). Add a mypy step to the local "
+        "gate (canonical gate G2d: `uv run mypy scripts/ --ignore-missing-imports`), or run "
+        "`cpv-remote-validate ci-preflight .` from publish.py. This check applies even when "
+        "publish.py is declared in cpv.pipeline.intentional_divergence.",
+        file="scripts/publish.py",
+    )
+
+
 # ── RC-WORKFLOW-PATH-BROKEN (issue #21 ask #2) ────────────────────────────────
 # Path-shape heuristic: a token is "path-like" if it starts with one of these
 # prefixes or carries a trailing ".sh"/".py" extension. We DELIBERATELY keep
@@ -9871,6 +9922,7 @@ def main() -> int:
         ("validate_workflow_cpv_ref", validate_workflow_cpv_ref, ((), {})),
         ("validate_pipeline_readiness", validate_pipeline_readiness, ((), {})),
         ("validate_pipeline_script_refs", validate_pipeline_script_refs, ((), {})),
+        ("validate_publish_gate_parity", validate_publish_gate_parity, ((), {})),
         ("validate_workflow_path_broken", validate_workflow_path_broken, ((), {})),
         # TRDD-WT0FLTMM: BLOCK GitHub-Actions expression injection (CWE-94) — an
         # untrusted `${{ ... }}` spliced into a `run:` / github-script `script:`
