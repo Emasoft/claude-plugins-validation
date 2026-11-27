@@ -4157,13 +4157,21 @@ def _ensure_tag_at_head(root: Path, tag_name: str, message: str) -> bool:
         run(["git", "tag", "-a", tag_name, "-m", message], cwd=root)
         cprint(f"  {GREEN}Tag {tag_name} created.{NC}")
         return True
-    tag_sha = run(["git", "rev-list", "-n", "1", tag_name], cwd=root,
-                  check=False, capture=True).stdout.strip()
-    head_sha = run(["git", "rev-parse", "HEAD"], cwd=root,
-                   check=False, capture=True).stdout.strip()
-    if not (tag_sha and head_sha) or tag_sha == head_sha:
-        # Already correct, or the shas are unreadable — the latter is the
-        # historical behaviour and is safe: nothing is moved on a guess.
+    # An unreadable ref cannot prove the tag matches the validated HEAD: refuse
+    # instead of reading a failed lookup as "already at HEAD" (TRDD-4DC84M2T).
+    tag_result = run(["git", "rev-parse", "--verify", f"refs/tags/{tag_name}^{{commit}}"],
+                     cwd=root, check=False, capture=True)
+    tag_sha = tag_result.stdout.strip()
+    if tag_result.returncode != 0 or not tag_sha:
+        cprint(f"  {RED}Could not resolve local tag {tag_name} to a commit. Refusing to continue.{NC}")
+        return False
+    head_result = run(["git", "rev-parse", "--verify", "HEAD^{commit}"], cwd=root,
+                      check=False, capture=True)
+    head_sha = head_result.stdout.strip()
+    if head_result.returncode != 0 or not head_sha:
+        cprint(f"  {RED}Could not resolve HEAD to a commit for tag {tag_name}. Refusing to continue.{NC}")
+        return False
+    if tag_sha == head_sha:
         cprint(f"  {GREEN}Tag {tag_name} already present at HEAD.{NC}")
         return True
     remote_state = _remote_tag_state(root, tag_name)
