@@ -1105,13 +1105,45 @@ def _argv_checkov(tool_bin: str, root: Path) -> list[str]:
     return [tool_bin, "--directory", ".", "--compact", "--quiet"]
 
 
+def _trivy_skip_dirs(root: Path) -> list[str]:
+    """Return the shallowest plugin-relative directories holding only unshipped content.
+
+    WHY (issue #272): `trivy fs .` walks gitignored untracked dirs (`*_dev/`,
+    `node_modules/`) that a CI checkout of the published artifact never contains, so
+    the preflight failed on findings CI would never see. `gitignored_unshipped_paths`
+    collapses a fully-ignored-untracked dir to one entry (`--directory`) and does NOT
+    collapse a dir holding a tracked file, so every directory entry here is safe to
+    skip and a tracked file inside a gitignored dir is still scanned. No git: nothing
+    is skipped on gitignore grounds (the present tree IS the artifact). `--skip-dirs`
+    takes glob patterns, so a name with glob metacharacters could match a shipped dir
+    and hide it from the scan; such a dir is left scanned (fail safe: scan more, never less).
+    """
+    try:
+        from cpv_validation_common import gitignored_unshipped_paths  # noqa: PLC0415
+    except ImportError:
+        return []
+    unshipped = gitignored_unshipped_paths(root)
+    if unshipped is None:
+        return []
+    return sorted(
+        {
+            entry
+            for entry in unshipped
+            if entry and entry != "." and not set(entry) & set("*?[]{}\\") and (root / entry).is_dir()
+        }
+    )
+
+
 def _argv_trivy(tool_bin: str, root: Path) -> list[str]:
     # Mirror Mega-Linter REPOSITORY_TRIVY: filesystem scan. `--exit-code 1` makes
     # trivy exit non-zero when a finding at/above the severity threshold exists
     # (default behaviour for misconfig/secret findings is exit 0, so the explicit
     # flag is what surfaces a real failure the CI gate would also surface).
-    _ = root
-    return [tool_bin, "fs", "--exit-code", "1", "--no-progress", "."]
+    # `--skip-dirs` per unshipped dir (issue #272): CI's checkout of the published
+    # artifact never contains them, so skipping is parity, not a weaker scan; tracked
+    # files inside a gitignored dir are still scanned because their dir is not skipped.
+    skips = [arg for d in _trivy_skip_dirs(root) for arg in ("--skip-dirs", d)]
+    return [tool_bin, "fs", "--exit-code", "1", "--no-progress", *skips, "."]
 
 
 _ARGV_CHUNK = 500
