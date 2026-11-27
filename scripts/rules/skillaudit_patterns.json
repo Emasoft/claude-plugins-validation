@@ -646,7 +646,7 @@
         "child_process.*exec.*\\+",
         "os\\.system\\s*\\(.*(?:format|%s|\\+|f['\"])",
         "subprocess\\.(?:call|run|Popen)\\s*\\(.*(?:format|%s|\\+|f['\"]|shell\\s*=\\s*True)",
-        "(?:;|\\||&&)\\s*\\b(?:curl|wget|nc|bash|sh|python|perl|ruby|php)(?:$|[^\\w-])",
+        "(?P<m>(?:;|\\||&&)\\s*\\b(?:curl|wget|nc|bash|sh|python|perl|ruby|php))(?:$|[^\\w-])",
         "\\$\\((?:curl|wget)\\s+\\S",
         "\\$\\((?:cat|ls|whoami|id|uname)\\s+\\S",
         "`\\s*\\b(?:curl|wget|cat|ls|whoami|id|uname)\\b(?:\\s+[^`]*)?`",

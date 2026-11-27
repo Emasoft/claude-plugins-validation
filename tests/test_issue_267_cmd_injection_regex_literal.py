@@ -72,9 +72,9 @@ def test_command_word_with_trailing_word_character_is_not_flagged(line: str) -> 
 
 
 def _pipe_pattern() -> re.Pattern[str]:
-    """The catalog CMD_INJECTION entry that starts with `(?:;|\\||&&)`, compiled as the scanner does."""
+    """The catalog CMD_INJECTION entry that starts with `(?P<m>(?:;|\\||&&)`, compiled as the scanner does."""
     rules = json.loads(CATALOG.read_bytes())["rules"]
-    found = [p for r in rules if r["id"] == "CMD_INJECTION" for p in r["patterns"] if p.startswith("(?:;|\\||&&)")]
+    found = [p for r in rules if r["id"] == "CMD_INJECTION" for p in r["patterns"] if p.startswith("(?P<m>(?:;|\\||&&)")]
     assert len(found) == 1
     return re.compile(found[0], re.IGNORECASE)
 
@@ -111,3 +111,36 @@ def test_edited_catalog_pattern_itself_matches_real_pipes(line: str) -> None:
 def test_edited_catalog_pattern_itself_rejects_non_commands(line: str) -> None:
     """The edited catalog pattern does not match a hyphenated or digit-suffixed name, nor the regex literal."""
     assert _pipe_pattern().search(line) is None
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("x | sh\"", "| sh"),
+        ("cat x |bash>out", "|bash"),
+        ("echo $x | sh", "| sh"),
+        ("ls; bash -c id", "; bash"),
+        ("(x|sh)", "|sh"),
+    ],
+)
+def test_reported_match_excludes_the_consumed_terminator(line: str, expected: str) -> None:
+    """`_reported_match` gives the (?P<m>) part only, never the consumed terminator, so context classifiers see text that occurs in the source."""
+    m = _pipe_pattern().search(line)
+    assert m is not None
+    assert native._reported_match(m) == expected
+    assert native._reported_match(m) in line
+
+
+def test_reported_match_falls_back_to_whole_match_without_named_group() -> None:
+    """A pattern with no `m` group reports `group(0)` unchanged."""
+    m = re.search(r"b+", "abbbc")
+    assert m is not None
+    assert native._reported_match(m) == "bbb"
+
+
+def test_scan_reports_match_without_terminator() -> None:
+    """The finding `match` field for `x | sh\"` is exactly `| sh` (no trailing quote)."""
+    findings = native.scan_content("x | sh\"\n", "scripts/x.sh")
+    matches = [f["match"] for f in findings if f["ruleId"] == "CMD_INJECTION" and not f.get("suppressed")]
+    assert "| sh" in matches
+    assert all(not s.endswith("\"") for s in matches)

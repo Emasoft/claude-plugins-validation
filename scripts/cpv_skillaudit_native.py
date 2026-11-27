@@ -3797,6 +3797,23 @@ class SkillAuditScanResult:
 _MAX_SCAN_LINE = 2000
 
 
+def _reported_match(m: re.Match[str]) -> str:
+    """Text of a catalog match that classifiers and reports must see.
+
+    RE2 has no lookahead, so a pattern that must look at the character after
+    its real match (for example a trailing "not followed by a hyphen") has to
+    CONSUME that terminator, and ``m.group(0)`` then includes it (``| sh"``).
+    The context classifiers test whether the match text sits inside a string
+    literal (``match in node.value``); with a stray terminator the text no
+    longer occurs there and the inert-data suppression silently stops working
+    (regression from #267). Such a pattern marks the part to report with a
+    named group ``(?P<m>...)``; every other pattern reports ``group(0)``.
+    """
+    if "m" in m.re.groupindex and m.group("m") is not None:
+        return m.group("m")
+    return m.group(0)
+
+
 def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
     """Run the full skillaudit native scan on a single string of content.
 
@@ -3851,11 +3868,12 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
                 if not m:
                     continue
                 in_cb = cb_map[i]
+                reported = _reported_match(m)
                 lang = _code_block_lang(cb_ranges, i) or ""
                 verdict = _confidence(
                     lines,
                     i,
-                    m.group(0),
+                    reported,
                     rule_id,
                     cb_map,
                     cb_ranges,
@@ -3911,7 +3929,7 @@ def scan_content(content: str, file_path: str = "") -> list[dict[str, Any]]:
                         "description": rule_desc,
                         "line": i + 1,
                         "lineContent": line.strip()[:200],
-                        "match": m.group(0),
+                        "match": reported,
                         "suppressed": suppressed,
                         "demoted": demoted,
                     }
