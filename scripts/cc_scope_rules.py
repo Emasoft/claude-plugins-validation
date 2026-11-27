@@ -53,6 +53,12 @@ __all__ = [
     "PROJECT_REJECTED_NESTED_KEYS",
     "PROJECT_LOCAL_REJECTED_ENV_VAR_NAMES",
     "USER_MANAGED_SETTINGS_ONLY_KEYS",
+    "MODS_MANAGED_ONLY_PLUGIN_LIST_KEYS",
+    "MODS_GUARD_OPTION_KEYS",
+    "MODS_GUARD_PLUGIN_ID",
+    "MODS_GUARD_WRONG_PLUGIN_ID",
+    "MODS_DEAD_FUNCTION_HOOKS_ENV",
+    "flag_mods_settings_scope",
     "MANAGED_ONLY_KEYS",
     "MANAGED_ONLY_NESTED_KEYS",
     "GLOBAL_CONFIG_KEYS",
@@ -208,6 +214,77 @@ USER_MANAGED_SETTINGS_ONLY_KEYS: frozenset[str] = frozenset(
         "dialogExpiry",  # v2.1.224 — settings.md "Read from user, managed, and --settings sources only"
     }
 )
+
+# ── Mods settings-scope rules (gap report B1/B2/B3/B5; spec: mods admin chapter
+# "Install your organization mods and set the order" and "Set options on the
+# built-in guard", mods-reference "Settings and environment variables") ──────
+# prependPlugins / appendPlugins are read ONLY from managed settings (user
+# settings only on an unmanaged non-Team/Enterprise machine), never from a
+# repository settings file. They stay in KNOWN_SETTINGS_KEYS (typo detection)
+# and are NOT in MANAGED_ONLY_KEYS (that set is also read for other scopes);
+# flag_mods_settings_scope flags them in project/local scope instead.
+MODS_MANAGED_ONLY_PLUGIN_LIST_KEYS: frozenset[str] = frozenset({"prependPlugins", "appendPlugins"})
+
+# The two guard options are read ONLY under
+# pluginConfigs["cc-plugin-sec-default@builtin"].options in managed settings;
+# a top-level copy changes nothing.
+MODS_GUARD_OPTION_KEYS: frozenset[str] = frozenset({"allowManagedModsOnly", "allowModsToOverrideDenyRules"})
+MODS_GUARD_PLUGIN_ID: str = "cc-plugin-sec-default@builtin"
+MODS_GUARD_WRONG_PLUGIN_ID: str = "sec-default@builtin"
+
+# Ignored at any value since Claude Code 2.1.287 (admin chapter: a `0` there
+# leaves mods on); the managed guard options are the real kill-switch.
+MODS_DEAD_FUNCTION_HOOKS_ENV: str = "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"
+
+
+def flag_mods_settings_scope(data: dict, report: ValidationReport, file_label: str) -> None:
+    """Flag mods settings that do nothing in a repository settings file.
+
+    Shared by the project (``.claude/settings.json``) and local
+    (``.claude/settings.local.json``) scope validators so both emit the same
+    findings. B1/B2/B3 are MAJOR like every other "key ignored at this scope"
+    finding; B5 is a WARNING (dead kill-switch, no breakage).
+    """
+    for key in sorted(MODS_MANAGED_ONLY_PLUGIN_LIST_KEYS):
+        if key in data:
+            report.major(
+                (
+                    f"{file_label} has '{key}' — Claude Code reads this only from "
+                    "managed settings, never from a repository settings file, so "
+                    "it changes nothing here. Set it in managed settings."
+                ),
+                file_label,
+            )
+    for key in sorted(MODS_GUARD_OPTION_KEYS):
+        if key in data:
+            report.major(
+                (
+                    f"{file_label} has misplaced guard option '{key}': it belongs "
+                    f'under pluginConfigs["{MODS_GUARD_PLUGIN_ID}"].options in '
+                    "managed settings; at top level it has no effect."
+                ),
+                file_label,
+            )
+    plugin_configs = data.get("pluginConfigs")
+    if isinstance(plugin_configs, dict) and MODS_GUARD_WRONG_PLUGIN_ID in plugin_configs:
+        report.major(
+            (
+                f"{file_label} pluginConfigs uses id '{MODS_GUARD_WRONG_PLUGIN_ID}' — "
+                f"the only accepted guard id is '{MODS_GUARD_PLUGIN_ID}' "
+                "(with the cc-plugin- prefix); the other form is not recognised."
+            ),
+            file_label,
+        )
+    env = data.get("env")
+    if isinstance(env, dict) and MODS_DEAD_FUNCTION_HOOKS_ENV in env:
+        report.warning(
+            (
+                f"{file_label} sets env.{MODS_DEAD_FUNCTION_HOOKS_ENV} — ignored at "
+                "any value since Claude Code 2.1.287 (a '0' does not turn mods "
+                "off). Use the managed guard options instead."
+            ),
+            file_label,
+        )
 
 # Per permissions.md + settings.md "Managed-only settings": these keys are
 # silently ignored unless they appear in a managed settings file (macOS:
@@ -421,12 +498,13 @@ KNOWN_SETTINGS_KEYS: frozenset[str] = frozenset(
         "disabledPlugins",
         "pluginConfigs",
         # v2.1.287 mods (mods-reference.md:266, mods-admin.md:26-33) —
-        # prepend/append plugin-id lists and the two mods guard options
-        # under pluginConfigs.
+        # prepend/append plugin-id lists stay KNOWN (typo detection) but are
+        # flagged by flag_mods_settings_scope outside managed settings. The two
+        # guard options (allowManagedModsOnly, allowModsToOverrideDenyRules) are
+        # deliberately NOT known top-level keys: gap report B2 — Claude Code reads
+        # them only under pluginConfigs["cc-plugin-sec-default@builtin"].options.
         "prependPlugins",
         "appendPlugins",
-        "allowManagedModsOnly",
-        "allowModsToOverrideDenyRules",
         # Managed-only (kept here for typo detection; semantics enforced elsewhere)
         "allowedChannelPlugins",
         "allowedMcpServers",

@@ -119,12 +119,15 @@ class TestWP3McpSettings:
         """The v2.1.285 provider allowlist is registered managed-only."""
         assert "allowedProviders" in cc_scope_rules.MANAGED_ONLY_KEYS
 
-    def test_mods_guard_keys_known_not_managed_only(self):
-        """The two mods guards mirror pluginConfigs: known keys, not in the
-        managed-only set (their scope binds under pluginConfigs at runtime)."""
+    def test_mods_guard_keys_not_top_level_known(self):
+        """The two mods guard options are read ONLY under
+        pluginConfigs["cc-plugin-sec-default@builtin"].options in managed settings
+        (mods admin chapter, gap report B2), so they are NOT known top-level keys;
+        a top-level copy is flagged by flag_mods_settings_scope instead."""
         for key in WP3_PLUGINCONFIGS_GUARD_KEYS:
-            assert key in cc_scope_rules.KNOWN_SETTINGS_KEYS, key
+            assert key not in cc_scope_rules.KNOWN_SETTINGS_KEYS, key
             assert key not in cc_scope_rules.MANAGED_ONLY_KEYS, key
+            assert key in cc_scope_rules.MODS_GUARD_OPTION_KEYS, key
 
     def test_any_file_keys_are_known_not_managed_only(self):
         """prependPlugins/appendPlugins are known user-or-managed list keys."""

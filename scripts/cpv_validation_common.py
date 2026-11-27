@@ -1095,6 +1095,7 @@ VALID_PLUGIN_ENV_VARS = {
     # CC spec sync v2.1.284 (env-vars.md, in-window only). The 233 pre-existing
     # doc vars missing from this set are TRDD-D9ISDLOZ — NOT bulk-added blind.
     "CLAUDE_CODE_PLUGIN_DIRS",  # v2.1.280 — additional plugin directories to load
+    "CLAUDE_CODE_PLUGIN_DIR_WATCH",  # gap report B6 — documented env var (mods-reference "Settings and environment variables"); sibling of CLAUDE_CODE_PLUGIN_DIRS
     "CLAUDE_CODE_DISABLE_DANGEROUS_RM_TIMEOUT",  # v2.1.281 — disables the rm command timeout guard
     "CLAUDE_CODE_DISABLE_SUBSTITUTION_RM_PROMPT",  # v2.1.281 — suppresses the substitution rm confirmation prompt
     "CLAUDE_CODE_DISABLE_POWERSHELL_CMD_RM_DENY",  # v2.1.283 — opt out of the PowerShell cmd rm deny rule

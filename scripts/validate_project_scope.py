@@ -97,6 +97,7 @@ from cc_scope_rules import (
     MAX_MARKDOWN_BYTES,
     MAX_MCP_JSON_BYTES,
     MAX_SETTINGS_JSON_BYTES,
+    MODS_GUARD_OPTION_KEYS,
     NO_EFFECT_SETTINGS_KEYS,
     PLUGIN_ONLY_KEYS,
     PROJECT_LOCAL_REJECTED_ENV_VAR_NAMES,
@@ -109,6 +110,7 @@ from cc_scope_rules import (
     classify_folder_scope,
     contains_absolute_home_path,
     find_git_root,
+    flag_mods_settings_scope,
     gitignore_covers_path,
     is_secret_value,
     list_tracked_files_under,
@@ -736,6 +738,8 @@ def _flag_unknown_settings_keys(data: dict[str, Any], report: ValidationReport, 
         PROJECT_REJECTED_KEYS
         | USER_MANAGED_SETTINGS_ONLY_KEYS
         | MANAGED_ONLY_KEYS
+        # B2: guard options are flagged by flag_mods_settings_scope — one finding per key.
+        | MODS_GUARD_OPTION_KEYS
         | _MANAGED_ONLY_NESTED_KEYS_TOP
         | GLOBAL_CONFIG_KEYS
         | PLUGIN_ONLY_KEYS
@@ -782,6 +786,8 @@ def validate_settings_json_project_scope(settings_path: Path, report: Validation
     _flag_permissions_default_mode(data, report, file_label)
     _flag_malformed_permission_rules(data, report, file_label)
     _flag_ignored_env_var_names(data, report, file_label)
+    # Mods settings-scope gaps B1/B2/B3/B5 (mods admin chapter) — shared with local scope.
+    flag_mods_settings_scope(data, report, file_label)
     _flag_secrets_in_env(data, report, file_label)
     _flag_machine_specific_command_paths(data, report, file_label)
     _flag_hook_command_paths(data, report, file_label)
