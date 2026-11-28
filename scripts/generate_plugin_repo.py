@@ -2951,6 +2951,27 @@ def _fork_parity_probe(root: Path, suite_timeout: float) -> int:
         shutil.rmtree(_site, ignore_errors=True)
 
 
+def _git_tracked_only(root: Path, candidates: list[Path]) -> list[Path] | None:
+    """Return the candidates that git TRACKS, or None when git cannot answer.
+
+    Issue #292: G2f ran shellcheck on everything `rglob` found, including gitignored
+    untracked scratch that neither CI nor any other gate ever sees, and that blocked
+    a real pre-push. `git ls-files` lists exactly the shipped population; a tracked
+    file under an ignored directory is still listed, so it is never skipped. None
+    means git failed (not a repo, timeout): the caller BLOCKS rather than guessing.
+    """
+    try:
+        r = subprocess.run(
+            [_exe("git"), "ls-files", "-z"], cwd=str(root), capture_output=True,
+            timeout=_GIT_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    tracked = {os.fsdecode(p) for p in r.stdout.split(b"\0") if p}
+    return [s for s in candidates if s.relative_to(root).as_posix() in tracked]
+
+
 def run_gate(root: Path) -> int:
     """Quality gate. Blocks on any quality issue; returns 0 if clean.
 
@@ -3289,10 +3310,17 @@ def run_gate(root: Path) -> int:
     # No shell -> skip. Shell present but `shellcheck` absent -> WARN+skip (CI's
     # Mega-Linter BASH_SHELLCHECK backstops); shellcheck ran + found issues -> BLOCK.
     cprint(f"\n{BLUE}[G2f] Shell lint (shellcheck, issue #175)...{NC}")
-    _shell_scripts = [
+    _sh_candidates = [
         s for s in list(root.rglob("*.sh")) + list(root.rglob("*.bash"))
         if not any(part in _compiled_skip for part in s.relative_to(root).parts)
     ]
+    # Issue #292: lint ONLY git-tracked scripts -- the population CI and the other
+    # gates see. rglob also finds gitignored/untracked scratch (e.g. scripts_dev/),
+    # which blocked a real pre-push. An unanswerable git query BLOCKS (fail closed).
+    _shell_scripts = _git_tracked_only(root, _sh_candidates)
+    if _shell_scripts is None:
+        cprint(f"  {RED}BLOCKED: `git ls-files` failed, cannot tell which shell scripts are tracked.{NC}")
+        return 1
     if not _shell_scripts:
         cprint(f"  {GREEN}No shell scripts -- skipped.{NC}")
     elif shutil.which("shellcheck") is None:
