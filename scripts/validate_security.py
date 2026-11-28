@@ -1573,6 +1573,19 @@ _TRDD_LIFECYCLE_DIR_PARTS = (
     "/design/refused/",
 )
 
+# Issue #271(c): the PRRD (`design/requirements/`) and the specs (`design/specs/`)
+# are the same tracked, never-loaded project-design corpus as the TRDD lifecycle
+# zones above, so quoted rule text in them (e.g. "CORRECTED RULE: ...") fired
+# INDIRECT_PROMPT_INJECT (CRITICAL) while the identical prose in design/tasks/
+# did not. Kept SEPARATE from _TRDD_LIFECYCLE_DIR_PARTS on purpose: that constant
+# also gates the `trdd-` filename checks (self-scan eligibility, security-fix
+# reference) and is pinned to exactly the four lifecycle zones, whereas these two
+# dirs hold PRRD.md / spec files that are not TRDD cards.
+_DESIGN_DOC_DIR_PARTS = (
+    "/design/requirements/",
+    "/design/specs/",
+)
+
 _DEV_SCRATCH_DIR_PARTS = (
     "/docs_dev/",
     "/scripts_dev/",
@@ -1587,6 +1600,7 @@ _DEV_SCRATCH_DIR_PARTS = (
     # hide findings in shipped content (scan-evasion). An untracked gitignored reports/
     # is still dropped by _external_finding_is_gitignored.
     *_TRDD_LIFECYCLE_DIR_PARTS,
+    *_DESIGN_DOC_DIR_PARTS,  # #271(c): PRRD + specs, same never-loaded corpus
     # v2.45 FP3 — Claude Code chat history exports (raw transcripts,
     # gitignored, never executed) and anthropic_dev/ (vendored Anthropic
     # docs / env-var references downloaded for development reference,
