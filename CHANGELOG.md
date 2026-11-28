@@ -2,6 +2,27 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.29.1] - 2026-11-28
+
+### Bug Fixes
+
+- **paths:** Treat Homebrew keg-only opt/ paths as system binary locations ([#295](https://github.com/Emasoft/claude-plugins-validation/issues/295))
+- **ci-preflight:** Cspell and shfmt on tracked files; shfmt selection per Mega-Linter ([#296](https://github.com/Emasoft/claude-plugins-validation/issues/296))
+- **release:** Write validation-report.txt to RUNNER_TEMP while validating
+
+### Documentation
+
+- CLAUDE.md test-file count 626 for 5.29.1
+
+### Miscellaneous Tasks
+
+- Regenerate self-hash manifests for 5.29.1
+- Regenerate self-hash manifests for 5.29.1
+
+### Testing
+
+- Time the #248 linearity check in CPU time, not wall time
+
 ## [5.29.0] - 2026-11-28
 
 ### Bug Fixes
