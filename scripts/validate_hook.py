@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from cpv_mod_register_scan import RegisterVerdict, scan_register_export
+from cpv_mod_register_scan import BodyFinding, RegisterVerdict, scan_module_body, scan_register_export
 from cpv_parallel_runner import parallel_scan
 from cpv_validation_common import (
     COLORS,
@@ -882,6 +882,160 @@ _MOD_REGISTER_MAX_BYTES = 2 * 1024 * 1024
 # release blocker: re-run the sweep before widening a rule.
 _MOD_REGISTER_SEVERITY: dict[str, str] = {code: "MAJOR" for code in ("R1", "R2", "R3", "R4", "R5", "R6", "R7")}
 
+# TRDD-29QP66H2 batch 1 (gap items C2, C3, C4, C9): module-body rules, each a
+# native error of `claude plugin validate` 2.1.332 on the fixtures named at the
+# message. Severity bar of TRDD-775XK7HE (R1-R7 comment above): MAJOR only when
+# (1) the rule matches native on every fixture and probe, and (2) a held-out
+# sweep of the natively-accepted catalogue (mod-finder snapshot d6ae7485, claude
+# 2.1.331 verdicts, 9494 fetched modules; split fixed before the first run:
+# dev = idx % 5 == 0, held-out = the rest; the dev slice found two rule
+# defects, TS `import("x")` types and annotated consts, fixed before the
+# held-out run, which then ran once with no rule change) finds nothing:
+#   C2   0 findings on 7418 held-out accepted modules (8 with a telemetry hook); 2 true positives on failed records.
+#   C3   0 findings on 7418 (1170 with turn.step/process.spawn); 3 INFO for imported hook names.
+#   C4-specifier, C4-dynamic: 0 on 7418 (7100 with imports); true positives on failed records.
+#   C4-outside: 0 on 7418 (4473 with relative imports); 4 true positives on failed records.
+#   C9   0 on 7418, but no catalogue module nests anywhere near 2000 scopes: the zero is vacuous and the
+#        evidence is the boundary probes only (register body + 1999 scopes passes, + 2000 errors, on blocks,
+#        arrow bodies, while, if and object methods; object literals, parens, arrays do not count).
+# C4-missing and C4-noncode are WARNING although native errors on them (p49, p50):
+# the catalogue holds the hooks module only, never its siblings, so bar (2) cannot be
+# met for any rule that stats a sibling file. Raise them once a sweep with sibling
+# files exists. A false MAJOR on an accepted mod is a release blocker: re-run
+# the sweep before widening a rule.
+_MOD_BODY_SEVERITY: dict[str, str] = {
+    "C2": "MAJOR",
+    "C3": "MAJOR",
+    "C4-specifier": "MAJOR",
+    "C4-dynamic": "MAJOR",
+    "C4-outside": "MAJOR",
+    "C4-missing": "WARNING",
+    "C4-noncode": "WARNING",
+    "C9": "MAJOR",
+}
+_CODE_EXTENSION_LIST = ".ts, .tsx, .jsx, .js, .mjs, .cjs, .mts or .cts"
+_JS_FAMILY_SUFFIXES = (".js", ".jsx", ".mjs", ".cjs")
+
+
+def _resolve_relative_import(base_dir: Path, spec: str, plugin_root: Path) -> tuple[str, Path]:
+    """Resolve one relative import of a hooks module like Claude Code 2.1.332.
+
+    Returns ("ok" | "outside" | "missing" | "noncode", the lexically joined target).
+    Resolution is deliberately generous (native accepts an extensionless name, a
+    directory index, a `.js` specifier whose file is `.ts`/`.tsx`, `.mjs` for `.mts`:
+    probes i-rel-extless, i-rel-dir-index, i-ts-js-to-ts, j-ts-js-to-tsx,
+    j-ts-mjs-to-mts, j-rel-dot-slash), because a missed finding is cheap and a false one is not.
+    Containment is lexical (no symlink resolution): p48 and probe j-rel-parent-escape-missing
+    error whether or not the file exists.
+    """
+    target = Path(os.path.normpath(base_dir / spec))
+    try:
+        target.relative_to(plugin_root)
+    except ValueError:
+        return "outside", target
+    if target.is_file():
+        return ("ok" if target.suffix in MOD_MODULE_EXTENSIONS else "noncode"), target
+    names = [target.with_name(target.name + ext) for ext in MOD_MODULE_EXTENSIONS]
+    if target.suffix in _JS_FAMILY_SUFFIXES:
+        names += [target.with_suffix(ext) for ext in MOD_MODULE_EXTENSIONS]
+    if target.is_dir():
+        names += [target / f"index{ext}" for ext in MOD_MODULE_EXTENSIONS]
+    if any(name.is_file() for name in names):
+        return "ok", target
+    return "missing", target
+
+
+def _body_finding_message(entry: str, origin: str, finding: BodyFinding) -> str:
+    """Message for one module-body finding. The native sentence is quoted so a
+    reader can grep the same words in `claude plugin validate` output."""
+    head = f"mods hooks module {entry}: "
+    tail = " (TRDD-29QP66H2, oracle-derived from Claude Code 2.1.332)"
+    if finding.code == "C2":
+        return (
+            head + f'the hook on "{finding.detail}" stands on the telemetry stream "anthropic" (a matcher names it, '
+            'or a telemetry hook names no "to" and so stands on every stream), which is for the plugins built into '
+            f'the CLI; name the collector on each telemetry hook: on("{finding.detail}", {{ to: "collector" }}, hook)'
+            + tail
+        )
+    if finding.code == "C3":
+        return (
+            head + f'the hook on "{finding.detail}" is not an async generator: {finding.detail} streams, so it takes '
+            "async function* ($, e, next) { ... }, which yields the chunks and returns the result" + tail
+        )
+    if finding.code == "C3-undecided":
+        return (
+            head + f"could not statically decide whether the hook `{finding.detail}` on a streaming event "
+            "(turn.step, process.spawn) is an async generator (it is not a function declared at the top of this "
+            "file); run `claude plugin validate <plugin-dir>`"
+        )
+    if finding.code == "C4-specifier":
+        return (
+            head + f'cannot import "{finding.detail}" (from {origin}): a hooks module imports its own files by '
+            'relative path and "claude-code", nothing else' + tail
+        )
+    if finding.code == "C4-dynamic":
+        return (
+            head + "a dynamic import(); a hooks module imports its own files with an import declaration, as in "
+            'import { name } from "./file.js"' + tail
+        )
+    if finding.code == "C9":
+        return head + finding.detail + tail
+    raise ValueError(f"no message for body finding {finding.code}")
+
+
+def _emit_body_finding(report: HookValidationReport, code: str, message: str, file: str, line: int | None) -> None:
+    severity = _MOD_BODY_SEVERITY[code]
+    if severity == "MAJOR":
+        report.major(message, file, line)
+    elif severity == "WARNING":
+        report.warning(message, file, line)
+    else:
+        report.minor(message, file, line)
+
+
+def validate_mod_body(
+    module_path: Path, entry: str, suffix: str, plugin_root: Path, report: HookValidationReport
+) -> None:
+    """TRDD-29QP66H2: module-body rules C2 (telemetry collector), C3 (streaming hooks are async
+    generators), C4 (imports) and C9 (2000-scope limit) on a hooks module that exists inside the plugin.
+
+    Static like the register scan: the module is never executed and no import target is
+    opened, only stat-ed. A module the register scan reported as too large, not UTF-8 or
+    not lexable gets no body finding here (that scan already printed the INFO).
+    """
+    if module_path.stat().st_size > _MOD_REGISTER_MAX_BYTES:
+        return
+    try:
+        source = module_path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        return
+    file = str(module_path)
+    root = plugin_root.resolve()
+    origin = module_path.relative_to(root).as_posix()
+    scan = scan_module_body(source, suffix)
+    for finding in scan.findings:
+        message = _body_finding_message(entry, origin, finding)
+        if finding.code == "C3-undecided":
+            report.info(message, file, finding.line)
+        else:
+            _emit_body_finding(report, finding.code, message, file, finding.line)
+    for imp in scan.relative_imports:
+        status, target = _resolve_relative_import(module_path.parent, imp.spec, root)
+        if status == "ok":
+            continue
+        head = f'mods hooks module {entry}: cannot import "{imp.spec}" (from {origin}): '
+        if status == "outside":
+            message = head + "it is outside the plugin's folder"
+        elif status == "missing":
+            message = head + "no such file in the plugin"
+        else:
+            message = (
+                head + f"{target.relative_to(root).as_posix()} is not named like code and was not loaded: a hooks "
+                f"module and the files it imports end in {_CODE_EXTENSION_LIST}"
+            )
+        message += " (TRDD-29QP66H2, oracle-derived from Claude Code 2.1.332)"
+        _emit_body_finding(report, f"C4-{status}", message, file, imp.line)
+
 
 def validate_modules_entry(data: dict[str, Any], plugin_root: Path | None, report: HookValidationReport) -> None:
     """Validate the `modules` array of a Claude Mods hooks.json (v2.1.287)."""
@@ -981,6 +1135,7 @@ def validate_modules_entry(data: dict[str, Any], plugin_root: Path | None, repor
                         # listed extension is scanned; the earlier branches
                         # already report every other entry shape.
                         validate_mod_register_export(resolved, entry, suffix, report)
+                        validate_mod_body(resolved, entry, suffix, plugin_root, report)
                     elif not resolved.exists():
                         # Message carries both phrasings: the directive's
                         # "mods hooks module not found" and the committed

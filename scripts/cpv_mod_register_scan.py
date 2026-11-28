@@ -105,6 +105,17 @@ class _Undecided(Exception):
     """The scanner cannot decide; the message is the INFO detail."""
 
 
+class _TooDeep(_Undecided):
+    """More than 2000 nested scopes: a native ERROR ("code nested too deep to
+    scan", fixture p44), unlike every other _Undecided, which is only a limit
+    of this scanner. The message equals the plain depth limit, so the
+    `register` verdict stays UNDECIDED with an unchanged detail."""
+
+    def __init__(self, message: str, line: int) -> None:
+        super().__init__(message)
+        self.line = line
+
+
 @dataclass
 class _RegisterExport:
     form: str  # function | const-fn | const-r4 | const-unverified | letvar-r4 | letvar-unverified
@@ -118,7 +129,12 @@ class _Lexer:
     """Spec B.2 lexer: drops comments, keeps decoded strings, folds templates
     to one opaque token, tells regex from division by the previous token."""
 
-    def __init__(self, src: str, jsx: bool) -> None:
+    def __init__(self, src: str, jsx: bool, max_depth: int = _MAX_DEPTH) -> None:
+        self.max_depth = max_depth
+        # Open `{` that start a function body or block (see _opens_scope): native
+        # counts only these toward its 2000-scope limit, never parens, arrays or
+        # object literals (probes d-objlit, e-paren, e-array of TRDD-29QP66H2).
+        self.scopes_open = 0
         self.s = src
         self.n = len(src)
         self.i = 0
@@ -128,11 +144,30 @@ class _Lexer:
         self.match: dict[int, int] = {}
         self.outer_depth = 0
 
+    @staticmethod
+    def _opens_scope(toks: list[Tok], stack: list[tuple[str, int, bool]], in_template: bool) -> bool:
+        """True when the `{` about to be pushed starts a function body or a
+        block, the only braces native counts toward its 2000-scope limit
+        (probes d-brace, e-arrowbody, e-while, e-if, e-objfn: register body +
+        1999 inner scopes passes, +2000 errors; d-objlit: 2500 nested object
+        literals pass). Decided by the previous token, so an object literal
+        (`= {`, `: {`, `return {`, `({`) is never counted: an UNDER-count only
+        ever fails open, an over-count would be a false finding."""
+        prev = toks[-1] if toks else None
+        if prev is None:
+            return not in_template  # a `{` opening the file is a bare block
+        if prev.kind == "punct":
+            if prev.value in (")", "=>", ";", "}"):
+                return True
+            # `{{`: a block inside a block; inside an object literal it is invalid code.
+            return prev.value == "{" and bool(stack) and stack[-1][2]
+        return prev.kind == "ident" and prev.value in ("else", "try", "finally", "do")
+
     def run(self, in_template: bool) -> list[Tok]:
         """Lex until EOF (outer level) or the `}` closing a template `${`."""
         s, n = self.s, self.n
         toks: list[Tok] = []
-        stack: list[tuple[str, int]] = []
+        stack: list[tuple[str, int, bool]] = []
         nl = True
 
         def emit(kind: str, value: str, line: int) -> None:
@@ -241,15 +276,20 @@ class _Lexer:
                 self.i += 2
                 continue
             if c in _OPENERS:
-                if self.outer_depth + len(stack) >= _MAX_DEPTH:
+                is_scope = c == "{" and self._opens_scope(toks, stack, in_template)
+                if is_scope and self.scopes_open >= _MAX_DEPTH:
+                    raise _TooDeep(f"more than {_MAX_DEPTH} nested scopes", self.line)
+                if self.outer_depth + len(stack) >= self.max_depth:
                     raise _Undecided(f"more than {_MAX_DEPTH} nested scopes")
                 emit("punct", c, self.line)
-                stack.append((c, len(toks) - 1))
+                stack.append((c, len(toks) - 1, is_scope))
+                self.scopes_open += is_scope
             elif c in _CLOSERS:
                 if not stack or _OPENERS[stack[-1][0]] != c:
                     raise _Undecided(f"unbalanced '{c}' at line {self.line}")
                 emit("punct", c, self.line)
-                _, open_index = stack.pop()
+                _, open_index, was_scope = stack.pop()
+                self.scopes_open -= was_scope
                 if not in_template:
                     self.match[open_index] = len(toks) - 1
             else:
@@ -938,16 +978,22 @@ class _Parser:
         return RegisterVerdict("UNDECIDED", e.line, local, f"export list local `{local}` not classified")
 
 
+def _strip_prelude(source: str) -> str:
+    """Drop a BOM and blank a `#!` line (keeping its length, so line numbers hold)."""
+    src = source[1:] if source.startswith(_BOM) else source
+    if src.startswith("#!"):
+        newline = src.find("\n")
+        src = "" if newline < 0 else " " * newline + src[newline:]
+    return src
+
+
 def scan_register_export(source: str, suffix: str) -> RegisterVerdict:
     """Decide statically whether a hooks module source exports `register`
     the way `claude plugin validate` 2.1.332 accepts. suffix selects TS
     erasure (.ts .tsx .mts .cts) and JSX lexing (.jsx .tsx)."""
     ts = suffix in TS_SUFFIXES
     jsx = suffix in JSX_SUFFIXES
-    src = source[1:] if source.startswith(_BOM) else source
-    if src.startswith("#!"):
-        newline = src.find("\n")
-        src = "" if newline < 0 else " " * newline + src[newline:]
+    src = _strip_prelude(source)
     try:
         lexer = _Lexer(src, jsx)
         toks = lexer.run(in_template=False)
@@ -967,3 +1013,378 @@ def scan_register_export(source: str, suffix: str) -> RegisterVerdict:
         # decoys X01, X02, X16, X17 stay MAJOR because the guard is JSX-only.
         return RegisterVerdict("UNDECIDED", None, None, "JSX module whose raw text mentions `export ... register`")
     return verdict
+
+
+# ---------------------------------------------------------------------------
+# Module-body rules C2, C3, C4, C9 (TRDD-29QP66H2, mods gap list batch 1)
+#
+# `claude plugin validate` 2.1.332 reads a hooks module far beyond its
+# `register` export. These rules mirror four of its errors from the token
+# stream, with the same contract as the register scan: pure, never executes,
+# never opens a sibling file, and an UNDER-detection (fail open) is always
+# preferred to a false finding. Every rule is ORACLE-DERIVED: the fixture ids
+# (p06 ...) are those of reports_dev/mods-gap, the probe names (t-*, g-*, i-*,
+# j-*, d-*, e-*, u-*) those of reports_dev/5290/probe, all run on 2.1.332.
+# ---------------------------------------------------------------------------
+
+BodyCode = Literal["C2", "C3", "C3-undecided", "C4-specifier", "C4-dynamic", "C9"]
+
+# Hooks of these events stand on the "anthropic" telemetry stream unless a
+# matcher names `to: "collector"` (mods reference, Telemetry; p06 vs p07).
+_TELEMETRY_EVENTS = frozenset({"telemetry.log", "telemetry.mark"})
+# These events stream, so their hook is an async generator (p14, p34).
+_STREAMING_EVENTS = frozenset({"turn.step", "process.spawn"})
+_SCOPE_LIMIT_MESSAGE = (
+    f"code nested too deep to scan: more than {_MAX_DEPTH} scopes (functions, blocks, loops) open inside one another"
+)
+# The body scan never feeds the recursive parser, so its lexer may go far past
+# the register scan's total bracket depth: native's limit counts scopes only.
+_BODY_MAX_BRACKET_DEPTH = _MAX_DEPTH * 50
+
+
+@dataclass(frozen=True)
+class BodyFinding:
+    """One module-body rule hit. line: 1-based. detail: the event name (C2, C3),
+    the identifier (C3-undecided) or the import specifier (C4-specifier)."""
+
+    code: BodyCode
+    line: int
+    detail: str
+
+
+@dataclass(frozen=True)
+class RelativeImport:
+    """A relative import of the hooks module; the caller resolves it on disk."""
+
+    spec: str
+    line: int
+
+
+@dataclass(frozen=True)
+class BodyScan:
+    """Findings plus the relative imports to resolve. Empty when the source
+    could not be lexed (the register scan already reports that as INFO)."""
+
+    findings: tuple[BodyFinding, ...]
+    relative_imports: tuple[RelativeImport, ...]
+
+
+def _is_relative_specifier(spec: str) -> bool:
+    return spec in (".", "..") or spec.startswith(("./", "../"))
+
+
+class _BodyScanner:
+    """Walks the depth-0 and call-site tokens of a hooks module."""
+
+    def __init__(self, toks: list[Tok], match: dict[int, int], ts: bool) -> None:
+        self.t = toks
+        self.ts = ts
+        self.p = _Parser(toks, match, Counter(), ts)
+        self.findings: list[BodyFinding] = []
+        self.relative: list[RelativeImport] = []
+        # Top-level function bindings: name -> "asyncgen" | "other" | "unknown".
+        self.top_fns: dict[str, str] = {}
+
+    def run(self) -> None:
+        self.collect_top_functions()
+        for j, tk in enumerate(self.t):
+            if tk.kind != "ident":
+                continue
+            prev = self.p.tok(j - 1)
+            if prev is not None and (
+                (prev.kind == "punct" and prev.value in (".", "?."))
+                or (prev.kind == "ident" and prev.value == "function")
+            ):
+                continue  # `emitter.on(...)`, `x.import(...)`, `function on(...)` are not the forms native reads
+            if tk.value == "import":
+                self.on_import(j)
+            elif tk.value == "export" and tk.depth == 0:
+                self.on_export(j)
+            elif tk.value == "on":
+                self.on_call(j)
+
+    # -- C4: imports ---------------------------------------------------
+    def add_specifier(self, spec: Tok) -> None:
+        value = spec.value
+        if value.startswith(_ESCAPED_STRING_MARK) or value == "claude-code":
+            return  # an escaped specifier is not trusted; "claude-code" is the one allowed package
+        if _is_relative_specifier(value):
+            self.relative.append(RelativeImport(value, spec.line))
+        else:
+            self.findings.append(BodyFinding("C4-specifier", spec.line, value))
+
+    def on_import(self, j: int) -> None:
+        nxt = self.p.tok(j + 1)
+        if nxt is None:
+            return
+        if nxt.kind == "punct" and nxt.value == "(":
+            # p47 (and probes i-dyn-nonliteral, i-dyn-claude-code): native refuses every import(),
+            # whatever its target and wherever it stands. In a TypeScript module an `import("x")` in
+            # TYPE position (`$: import("claude-code").EngineInterface`) is erased and accepted
+            # (found on 2 natively accepted catalogue mods), so there only a value position counts:
+            # after `await` or `return`, or at the start of a statement.
+            prev = self.p.tok(j - 1)
+            value_position = prev is None or (
+                (prev.kind == "ident" and prev.value in ("await", "return"))
+                or (prev.kind == "punct" and prev.value in (";", "{", "}"))
+            )
+            if not self.ts or value_position:
+                self.findings.append(BodyFinding("C4-dynamic", self.t[j].line, ""))
+            return
+        if self.t[j].depth != 0 or (nxt.kind == "punct" and nxt.value == "."):
+            return  # `import.meta`, or not an import declaration
+        p = self.p
+        k = j + 1
+        if self.ts and p.is_id(k, "type") and not (p.is_id(k + 1, "from") or p.is_p(k + 1, ",")):
+            return  # `import type ...` is erased by the TS compile (probes i-npm-type-ts, j-ts-type-ns)
+        first = p.tok(k)
+        if first is None:
+            return
+        if first.kind == "str":
+            self.add_specifier(first)  # `import "x"`
+            return
+        if p.is_id(k) and p.is_p(k + 1, "="):
+            return  # TS `import x = require("x")` passes natively (probe i-require-ts)
+        all_inline_type = self.ts and p.is_p(k, "{") and self.only_inline_types(k)
+        m = k
+        while True:
+            tk = p.tok(m)
+            if tk is None or p.is_p(m, ";"):
+                return
+            if p.is_opener(m):
+                close = p.match.get(m)
+                if close is None:
+                    return
+                m = close + 1
+                continue
+            if tk.kind == "ident" and tk.value == "from":
+                spec = p.tok(m + 1)
+                if spec is not None and spec.kind == "str":
+                    if not all_inline_type:  # `import { type A, type B } from` is erased (probe i-npm-typeinline-ts)
+                        self.add_specifier(spec)
+                    return
+            if m > k and tk.nl and tk.kind == "ident" and tk.value in _BOUNDARY_KEYWORDS:
+                return  # a new statement began before any `from`
+            m += 1
+
+    def only_inline_types(self, brace: int) -> bool:
+        """`{ type A, type B }`: every specifier carries the `type` modifier."""
+        close = self.p.match.get(brace)
+        if close is None or close == brace + 1:
+            return False
+        entries = self.split(brace + 1, close, self.t[brace].depth + 1)
+        return all(
+            e - s >= 2 and self.t[s].kind == "ident" and self.t[s].value == "type" and self.t[s + 1].value != "as"
+            for s, e in entries
+        )
+
+    def on_export(self, j: int) -> None:
+        """`export ... from "x"` is an import for native (probes i-export-from-npm, i-export-star-npm);
+        `export type ... from` is erased (probe j-ts-export-type-from)."""
+        p = self.p
+        k = j + 1
+        if p.is_p(k, "*"):
+            m = k + 1
+            if p.is_id(m, "as"):
+                m += 2
+        elif p.is_p(k, "{"):
+            close = p.match.get(k)
+            if close is None:
+                return
+            m = close + 1
+        else:
+            return
+        spec = p.tok(m + 1)
+        if p.is_id(m, "from") and spec is not None and spec.kind == "str":
+            self.add_specifier(spec)
+
+    # -- C2, C3: on("<event>", ...) ------------------------------------
+    def split(self, start: int, stop: int, depth: int) -> list[tuple[int, int]]:
+        """Comma-separated, non-empty token ranges [s, e) between start and stop at bracket depth `depth`."""
+        out: list[tuple[int, int]] = []
+        s = start
+        for i in range(start, stop):
+            tk = self.t[i]
+            if tk.depth == depth and tk.kind == "punct" and tk.value == ",":
+                if i > s:
+                    out.append((s, i))
+                s = i + 1
+        if stop > s:
+            out.append((s, stop))
+        return out
+
+    def on_call(self, j: int) -> None:
+        p = self.p
+        event = p.tok(j + 2)
+        close = p.match.get(j + 1)
+        if not p.is_p(j + 1, "(") or close is None or event is None or event.kind != "str":
+            return
+        if event.value not in _TELEMETRY_EVENTS and event.value not in _STREAMING_EVENTS:
+            return
+        args = self.split(j + 2, close, self.t[j + 1].depth + 1)
+        if not args or args[0] != (j + 2, j + 3):
+            return
+        if event.value in _TELEMETRY_EVENTS:
+            self.check_telemetry(self.t[j].line, event.value, args)
+        else:
+            self.check_streaming(self.t[j].line, event.value, args)
+
+    def check_telemetry(self, line: int, event: str, args: list[tuple[int, int]]) -> None:
+        """C2, native (p06): `its hooks stand on the telemetry stream "anthropic" (a matcher names it,
+        or a telemetry hook names no "to" and so stands on every stream) ... name the collector on each
+        telemetry hook: on("telemetry.log", { to: "collector" }, hook)`. p07 passes."""
+        if len(args) == 2:
+            if self.t[args[1][0]].value != "{":  # `on(event, { ... })` has no hook: another native message
+                self.findings.append(BodyFinding("C2", line, event))
+        elif len(args) >= 3:
+            s, e = args[1]
+            if self.t[s].value == "{" and self.p.match.get(s) == e - 1 and self.matcher_on_anthropic(s):
+                self.findings.append(BodyFinding("C2", line, event))
+
+    def matcher_on_anthropic(self, brace: int) -> bool:
+        """True when the matcher object literal stands on the anthropic stream: no `to` key, or
+        `to` naming "anthropic" (probes u-matcher-x, t-to-anthropic, t2-to-both, u-to-both-reversed).
+        A spread, shorthand, method, computed key or non-literal `to` has its own native message: False."""
+        t = self.t
+        has_to = False
+        for s, e in self.split(brace + 1, self.p.match[brace], t[brace].depth + 1):
+            key, colon = t[s], t[s + 1] if s + 1 < e else None
+            if key.kind not in ("ident", "str") or colon is None or colon.kind != "punct" or colon.value != ":":
+                return False
+            if key.value != "to":
+                continue
+            has_to = True
+            value = t[s + 2 : e]
+            if len(value) == 1 and value[0].kind == "str":
+                names = [value[0].value]
+            elif value and value[0].value == "[" and self.p.match.get(s + 2) == e - 1:
+                inner = value[1:-1]
+                if any(x.kind != "str" and not (x.kind == "punct" and x.value == ",") for x in inner):
+                    return False
+                names = [x.value for x in inner if x.kind == "str"]
+            else:
+                return False
+            if "anthropic" in names:
+                return True
+        return not has_to
+
+    def check_streaming(self, line: int, event: str, args: list[tuple[int, int]]) -> None:
+        """C3, native (p14, p34): `the hook on "turn.step" is not an async generator: turn.step streams,
+        so it takes async function* ($, e, next) { ... }`. Native also resolves a hook NAME to a function
+        declared at the top of the file or a const bound to one (probes g-ident-nongen, g2-const-fn-expr)."""
+        if len(args) < 2:
+            return
+        s, e = args[-1]
+        kind = self.classify_function(s, e)
+        if isinstance(kind, tuple):
+            resolved = self.top_fns.get(kind[1], "unknown")
+            if resolved == "unknown":
+                self.findings.append(BodyFinding("C3-undecided", line, kind[1]))
+                return
+            kind = resolved
+        if kind == "other":
+            self.findings.append(BodyFinding("C3", line, event))
+
+    def classify_function(self, s: int, e: int) -> str | tuple[str, str] | None:
+        """Return "asyncgen", "other" (a function literal that is not an async generator), ("name", id)
+        for a bare identifier, None for anything else (a member, a call, a parenthesised form)."""
+        t, p = self.t, self.p
+        first = t[s]
+        if first.kind == "ident" and first.value == "async" and p.is_id(s + 1, "function"):
+            return ("asyncgen" if p.is_p(s + 2, "*") else "other") if self.ends_with_body(e) else None
+        if first.kind == "ident" and first.value == "function":
+            return "other" if self.ends_with_body(e) else None  # `function` and `function*`: both refused by native
+        if self.is_arrow(s, e):
+            return "other"
+        if e - s == 1 and first.kind == "ident":
+            return ("name", first.value)
+        return None
+
+    def ends_with_body(self, e: int) -> bool:
+        """The range ends with a `}`: a function literal, not `function () {}.bind(x)`."""
+        return self.p.is_p(e - 1, "}")
+
+    def is_arrow(self, s: int, e: int) -> bool:
+        """`x => ...`, `async x => ...`, `(...) => ...`, `async (...) => ...`, with a TS return type allowed."""
+        t, p = self.t, self.p
+        i = s
+        if p.is_id(i, "async") and not p.is_p(i + 1, "=>"):
+            i += 1
+        if i >= e:
+            return False
+        if t[i].kind == "ident" and p.is_p(i + 1, "=>"):
+            return True
+        close = p.match.get(i) if p.is_p(i, "(") else None
+        if close is None:
+            return False
+        if p.is_p(close + 1, "=>"):
+            return True
+        if self.ts and p.is_p(close + 1, ":"):
+            m = close + 2
+            while m < e:
+                if p.is_opener(m):
+                    inner = p.match.get(m)
+                    if inner is None:
+                        return False
+                    m = inner + 1
+                    continue
+                if p.is_p(m, "=>") and t[m].depth == t[s].depth:
+                    return True
+                m += 1
+        return False
+
+    def bind(self, name: str, kind: str) -> None:
+        old = self.top_fns.get(name)
+        self.top_fns[name] = kind if old in (None, kind) else "unknown"
+
+    def collect_top_functions(self) -> None:
+        """Bind every top-level `function name` declaration and `const name = <function literal>`;
+        a `let` or `var`, a local or an imported name stays unbound (probes g2-let-asyncgen,
+        g2-local-decl, g2-import-ident)."""
+        p = self.p
+        for j, tk in enumerate(self.t):
+            if tk.depth != 0 or tk.kind != "ident" or tk.value not in ("function", "const"):
+                continue
+            prev = p.tok(j - 1)
+            if prev is not None and prev.kind == "punct" and prev.value in (".", "?."):
+                continue
+            is_async = tk.value == "function" and prev is not None and prev.kind == "ident" and prev.value == "async"
+            b = j - 1 if is_async else j
+            while p.is_id(b - 1, "export") or p.is_id(b - 1, "default"):
+                b -= 1
+            if not p.stmt_start(b):
+                continue  # a function EXPRESSION, whose name binds nowhere outside itself
+            if tk.value == "function":
+                k = j + 2 if p.is_p(j + 1, "*") else j + 1
+                name = p.tok(k)
+                if name is not None and name.kind == "ident":
+                    self.bind(name.value, "asyncgen" if is_async and p.is_p(j + 1, "*") else "other")
+            elif p.is_id(j + 1) and (p.is_p(j + 2, "=") or (self.ts and p.is_p(j + 2, ":"))):
+                try:
+                    # `const stepped: Hook<"turn.step"> = async function* ...` (TS): skip the annotation.
+                    eq = p.skip_type(j + 3, "eq", None) if p.is_p(j + 2, ":") else j + 2
+                except _Undecided:
+                    continue
+                end = p.scan_decl_end(eq + 1) if p.is_p(eq, "=") else eq
+                kind = self.classify_function(eq + 1, end) if end > eq + 1 else None
+                self.bind(self.t[j + 1].value, kind if isinstance(kind, str) else "unknown")
+
+
+def scan_module_body(source: str, suffix: str) -> BodyScan:
+    """Statically apply the module-body rules C2, C3, C4 and C9 to a hooks module source.
+    suffix selects TS erasure (.ts .tsx .mts .cts) and JSX lexing (.jsx .tsx), as for the register scan."""
+    ts = suffix in TS_SUFFIXES
+    jsx = suffix in JSX_SUFFIXES
+    try:
+        lexer = _Lexer(_strip_prelude(source), jsx, max_depth=_BODY_MAX_BRACKET_DEPTH)
+        toks = lexer.run(in_template=False)
+        scanner = _BodyScanner(toks, lexer.match, ts)
+        scanner.run()
+    except _TooDeep as exc:
+        # C9, native (p44): `code nested too deep to scan: more than 2000 scopes (functions, blocks,
+        # loops) open inside one another`; the boundary was probed on blocks, arrow bodies, while, if
+        # and object methods (register body + 1999 passes, + 2000 errors).
+        return BodyScan((BodyFinding("C9", exc.line, _SCOPE_LIMIT_MESSAGE),), ())
+    except (_Undecided, RecursionError):
+        return BodyScan((), ())
+    return BodyScan(tuple(scanner.findings), tuple(scanner.relative))
