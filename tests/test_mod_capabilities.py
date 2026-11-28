@@ -242,12 +242,14 @@ def test_member_call_named_on_is_not_a_hook(tmp_path: Path) -> None:
     assert "hooks: none" in inventory(findings)
 
 
-def test_as_user_true_is_major(tmp_path: Path) -> None:
-    """$.prompt.submit with asUser: true is MAJOR."""
+def test_as_user_true_is_warning(tmp_path: Path) -> None:
+    """$.prompt.submit with asUser: true is a WARNING (owner decision 2026-11-28: MAJOR would fail
+    335 of 7418 accepted catalogue modules)."""
     src = """export function register(on) { on("session.start", async ($, e, next) => { await $.prompt.submit("hi", { asUser: true }); return next(e) }) }"""
     findings = scan(tmp_path, src)
     assert rules(findings) == [RULE_ASUSER]
-    assert majors(findings)[0].severity == "major"
+    assert majors(findings) == []
+    assert flagged(findings)[0].severity == "warning"
 
 
 @pytest.mark.parametrize("opts", ["", ", { asUser: false }", ", { other: 1 }", ", {}"])

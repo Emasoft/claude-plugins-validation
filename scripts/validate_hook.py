@@ -1044,10 +1044,11 @@ def validate_mod_capabilities(module_path: Path, plugin_root: Path, report: Hook
     Severity follows the owner decision of 2026-11-28 ("Inventory + risky") and the sweep of the
     natively-accepted catalogue (9494 modules, dev = idx % 5 == 0, held-out = the rest, run once
     with no rule change after the dev slice found one defect, a catch chained as on(...).catch()):
-    MOD-CAP-ENV-SET-LOADER and MOD-CAP-ASUSER-SUBMIT stay MAJOR by owner decision (held-out
-    accepted modules: 6 PATH writes in 5 modules, 445 asUser submits in 335 modules; all genuine
-    uses of the capability); MOD-CAP-GATE-FAILS-OPEN is a WARNING because the held-out sweep found
-    it in 1556 of 7418 accepted modules, which MAJOR would fail.
+    MOD-CAP-ENV-SET-LOADER stays MAJOR by owner decision (held-out accepted modules: 6 PATH writes
+    in 5 modules, all genuine uses of the capability). MOD-CAP-ASUSER-SUBMIT is a WARNING by owner
+    decision 2026-11-28, because MAJOR would fail 335 of 7418 accepted modules (445 asUser submits).
+    MOD-CAP-GATE-FAILS-OPEN is a WARNING because the held-out sweep found it in 1556 of 7418
+    accepted modules, which MAJOR would fail.
     """
     file = str(module_path)
     for cap in scan_mod_capabilities(module_path, plugin_root):

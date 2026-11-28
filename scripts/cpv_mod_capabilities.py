@@ -11,7 +11,8 @@ for each of three risky shapes (MAJOR unless stated):
 - MOD-CAP-GATE-FAILS-OPEN (WARNING, see check_gate): a gating hook (tool.call, tool.check,
   plugin.register) whose inline handler awaits work and holds no `catch` anywhere (a catch
   chained as `on(...).catch(h)` counts), so a throw makes the host let the call through;
-- MOD-CAP-ASUSER-SUBMIT: `$.prompt.submit(..., { asUser: true })`.
+- MOD-CAP-ASUSER-SUBMIT (WARNING by owner decision 2026-11-28, after the held-out sweep found it in
+  335 of 7418 accepted modules): `$.prompt.submit(..., { asUser: true })`.
 
 Fail-open contract (same as cpv_mod_register_scan): the module is only ever lexed,
 never executed, imported or evaluated, and no sibling file is opened. Whatever the
@@ -245,7 +246,7 @@ class _ModScan:
                 if state == "true":
                     self.flagged.append(
                         Finding(
-                            "major",
+                            "warning",
                             RULE_ASUSER,
                             f"`$.prompt.submit` with asUser: true (line {line}): the text reaches the "
                             "model as if the user had typed it",
