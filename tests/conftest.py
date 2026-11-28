@@ -198,6 +198,35 @@ def _integrity_audit_log_in_tmp(monkeypatch: pytest.MonkeyPatch, tmp_path_factor
     monkeypatch.setattr(_pvh, "_AUDIT_LOG", tmp_path_factory.getbasetemp() / "integrity-audit.log")
 
 
+
+@pytest.fixture(autouse=True)
+def _restore_no_bytecode_preamble_state():
+    """Restore the process-wide bytecode settings the #256 preamble changes.
+
+    remote_validation.main() and the cli.py wrappers set sys.pycache_prefix to
+    their own file path (so every cache read fails and modules compile from
+    source), plus PYTHONPYCACHEPREFIX / PYTHONDONTWRITEBYTECODE for children.
+    That is correct for a real CLI process, which exits afterwards. A test that
+    calls main() in-process would leave the prefix pointing at a FILE, and any
+    later test in the same xdist worker that compiles explicitly
+    (py_compile.compile(doraise=True)) fails with NotADirectoryError. The
+    failure depended on xdist scheduling: the full suite passed once and the
+    publish gate then failed on the same commit. Restoring after every test
+    keeps tests independent of each other.
+    """
+    saved_prefix = sys.pycache_prefix
+    saved_dont_write = sys.dont_write_bytecode
+    saved_env = {key: os.environ.get(key) for key in ("PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE")}
+    yield
+    sys.pycache_prefix = saved_prefix
+    sys.dont_write_bytecode = saved_dont_write
+    for key, value in saved_env.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
 @pytest.fixture
 def temp_dir():
     """Create a temporary directory for test files.
