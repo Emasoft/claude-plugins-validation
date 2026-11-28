@@ -73,7 +73,7 @@ def _verify(root: Path, monkeypatch: pytest.MonkeyPatch) -> bool:
 
 def _empty_git(root: Path) -> None:
     """The attacker-made `.git`: a valid, initialised repository whose index is empty."""
-    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "init", "-q", str(root)], check=True, timeout=60)
 
 
 def _plant(root: Path) -> None:
@@ -92,7 +92,7 @@ def test_empty_git_dir_does_not_hide_an_added_file(armed: None, tmp_path: Path, 
 
 def test_ancestor_git_repo_does_not_hide_an_added_file(armed: None, tmp_path: Path, monkeypatch, capsys) -> None:  # noqa: ANN001
     """An install inside an unrelated ancestor git work tree must not blind added-file detection."""
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=60)
     root = _plugin(tmp_path)
     _plant(root)
     assert pvh._detect_added_files(root, _manifest(root)["files"]) == [EVIL]  # type: ignore[arg-type]
@@ -103,8 +103,8 @@ def test_ancestor_git_repo_does_not_hide_an_added_file(armed: None, tmp_path: Pa
 def test_untracked_added_file_in_a_real_git_clone_is_caught(armed: None, tmp_path: Path) -> None:
     """Even a genuine git root: a file nobody `git add`ed is on disk, so it is an added file."""
     root = _plugin(tmp_path)
-    subprocess.run(["git", "init", "-q", str(root)], check=True)
-    subprocess.run(["git", "-C", str(root), "add", ".claude-plugin/plugin.json", "scripts/a.py"], check=True)
+    subprocess.run(["git", "init", "-q", str(root)], check=True, timeout=60)
+    subprocess.run(["git", "-C", str(root), "add", ".claude-plugin/plugin.json", "scripts/a.py"], check=True, timeout=60)
     _plant(root)
     assert pvh._detect_added_files(root, _manifest(root)["files"]) == [EVIL]  # type: ignore[arg-type]
 
@@ -113,7 +113,7 @@ def test_untracked_added_file_in_a_real_git_clone_is_caught(armed: None, tmp_pat
 def test_clean_copy_passes(armed: None, tmp_path: Path, monkeypatch, layout: str) -> None:  # noqa: ANN001
     """Control: with no extra file the check passes under every layout (no false positive)."""
     if layout == "ancestor-git":
-        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=60)
     root = _plugin(tmp_path)
     if layout == "empty-git":
         _empty_git(root)
@@ -123,12 +123,12 @@ def test_clean_copy_passes(armed: None, tmp_path: Path, monkeypatch, layout: str
 def test_release_candidate_enumeration_still_uses_git(tmp_path: Path) -> None:
     """The anchored release-candidate path keeps the git set (clean tree, HEAD pinned): gitignored files stay invisible."""
     root = _plugin(tmp_path)
-    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "init", "-q", str(root)], check=True, timeout=60)
     (root / ".gitignore").write_text("local_only/\n", encoding="utf-8")
     (root / "local_only").mkdir()
     (root / "local_only" / "note.py").write_text("y = 2\n", encoding="utf-8")
     subprocess.run(
-        ["git", "-C", str(root), "add", ".gitignore", ".claude-plugin/plugin.json", "scripts/a.py"], check=True
+        ["git", "-C", str(root), "add", ".gitignore", ".claude-plugin/plugin.json", "scripts/a.py"], check=True, timeout=60
     )
     files = {**_manifest(root)["files"], ".gitignore": _sha(root / ".gitignore")}  # type: ignore[dict-item]
     assert pvh._detect_added_files(root, files, include_disk_walk=False) == []  # type: ignore[arg-type]
@@ -137,7 +137,7 @@ def test_release_candidate_enumeration_still_uses_git(tmp_path: Path) -> None:
 
 def test_generation_on_the_real_repo_is_unchanged() -> None:
     """Control: manifest generation still lists exactly the git-tracked set minus the two manifest files."""
-    out = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z"], capture_output=True, check=True).stdout
+    out = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z"], capture_output=True, check=True, timeout=60).stdout
     tracked = {e for e in out.decode("utf-8", errors="surrogateescape").split("\0") if e}
     expected = {e for e in tracked if Path(e).name not in pch._MANIFEST_BASENAMES}
     assert pch.enumerate_shipped_files(REPO) == expected
