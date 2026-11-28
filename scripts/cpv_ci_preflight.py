@@ -58,12 +58,15 @@ Run via the launcher:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import inspect
+import os
 import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
+import tempfile
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -871,6 +874,48 @@ def _megalinter_enable_list_is_explicit(root: Path) -> bool:
     return _parse_enabled_linters(text)
 
 
+@contextlib.contextmanager
+def _tracked_snapshot(root: Path) -> Iterator[Path | None]:
+    """Yield a temp dir holding exactly the git-tracked files of `root` (working-tree content).
+
+    WHY (issue #293): CI lints a clean checkout, which holds exactly the tracked files
+    with their working-tree content. `checkov` / `trivy` run on the dirty working tree
+    instead also walk gitignored untracked scratch (`reports_dev/`, `scripts_dev/`,
+    `.pytest_cache/`) and fail on findings CI never sees. Scanning this snapshot is
+    parity with CI, not a weaker scan: every tracked file is scanned as it is on disk.
+    Yields None when `root` is not a git work tree (or git is unavailable): there the
+    tree IS the artifact, so the caller scans `root` as before. Tracked paths missing
+    on disk (deleted, not yet committed) and directories (gitlinks / submodules) are skipped.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached"],
+            capture_output=True,
+            text=True,
+            errors="surrogateescape",
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        yield None
+        return
+    if proc.returncode != 0:
+        yield None
+        return
+    with tempfile.TemporaryDirectory(prefix="cpv-preflight-tracked-") as tmp:
+        dest_root = Path(tmp)
+        for rel in proc.stdout.split("\0"):
+            if not rel:
+                continue
+            src = root / rel
+            if not os.path.lexists(src) or (src.is_dir() and not src.is_symlink()):
+                continue
+            dst = dest_root / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst, follow_symlinks=False)
+        yield dest_root
+
+
 def _gate_megalinter_tool(
     result: PreflightResult,
     *,
@@ -881,6 +926,7 @@ def _gate_megalinter_tool(
     build_argv: Callable[[str, Path], list[str]],
     enabled: set[str] | None,
     build_argvs: Callable[[str, Path], list[list[str]]] | None = None,
+    scan_tracked_snapshot: bool = False,
 ) -> None:
     """One Mega-Linter sub-linter parity probe, following the gate contract.
 
@@ -926,19 +972,22 @@ def _gate_megalinter_tool(
     # One argv normally; a per-file linter fed a long file list is split into chunks (see
     # `_chunked_argvs`) so a big plugin cannot hit the OS argument-length limit. A chunk
     # that exits non-zero fails the gate; the outputs of failing chunks are concatenated.
-    argvs = build_argvs(tool_bin, result.plugin_path) if build_argvs else [build_argv(tool_bin, result.plugin_path)]
     failed_out: list[str] = []
     try:
-        for argv in argvs:
-            proc = subprocess.run(
-                argv,
-                cwd=str(result.plugin_path),
-                capture_output=True,
-                text=True,
-                timeout=_MEGALINTER_TIMEOUT,
-            )
-            if proc.returncode != 0:
-                failed_out.append((proc.stdout or proc.stderr or "").strip())
+        snapshot_cm = _tracked_snapshot(result.plugin_path) if scan_tracked_snapshot else contextlib.nullcontext(None)
+        with snapshot_cm as snap:
+            scan_root = result.plugin_path if snap is None else snap
+            argvs = build_argvs(tool_bin, scan_root) if build_argvs else [build_argv(tool_bin, scan_root)]
+            for argv in argvs:
+                proc = subprocess.run(
+                    argv,
+                    cwd=str(scan_root),
+                    capture_output=True,
+                    text=True,
+                    timeout=_MEGALINTER_TIMEOUT,
+                )
+                if proc.returncode != 0:
+                    failed_out.append((proc.stdout or proc.stderr or "").strip())
     except (OSError, subprocess.TimeoutExpired) as exc:
         result.add(
             gate,
@@ -1431,6 +1480,7 @@ def _gate_megalinter(result: PreflightResult) -> None:
         tool_name="checkov",
         install_hint="pip install checkov",
         build_argv=_argv_checkov,
+        scan_tracked_snapshot=True,
         enabled=enabled,
     )
     _gate_megalinter_tool(
@@ -1440,6 +1490,7 @@ def _gate_megalinter(result: PreflightResult) -> None:
         tool_name="trivy",
         install_hint="https://aquasecurity.github.io/trivy",
         build_argv=_argv_trivy,
+        scan_tracked_snapshot=True,
         enabled=enabled,
     )
     _gate_ruff(result, enabled)
