@@ -2,6 +2,25 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.30.0] - 2026-11-28
+
+### Bug Fixes
+
+- **security:** Design/requirements and design/specs are non-shipped design corpus ([#271](https://github.com/Emasoft/claude-plugins-validation/issues/271))
+- **integrity:** Skip build/dist/reports-style dirs only at the plugin root (TRDD-Z2GGOPPX)
+
+### Documentation
+
+- CLAUDE.md test-file count 629 for 5.30.0
+
+### Features
+
+- **mods:** Module-body rules batch 2, C1 C5 C6 C7 C8 (TRDD-29QP66H2)
+
+### Miscellaneous Tasks
+
+- Regenerate self-hash manifests for 5.30.0
+
 ## [5.29.1] - 2026-11-28
 
 ### Bug Fixes
