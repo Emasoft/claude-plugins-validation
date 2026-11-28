@@ -114,6 +114,7 @@ from cpv_validation_common import (
     is_pth_with_exec,
     is_sample_file,
     is_shadowed_tool_name,
+    is_system_profile_username,
     is_test_path,
     is_typosquat,
     print_report_summary,
@@ -5314,6 +5315,11 @@ def scan_for_user_paths(content: str, file_path: str, report: ValidationReport) 
                 if username_match:
                     candidate = username_match.group(1).lower().strip()
                     if candidate in EXAMPLE_USERNAMES:
+                        continue
+                    # Issue #285 (owner decision 2026-11-28, TRDD-DH3PAC5I): an OS system
+                    # profile (Default, Public, Shared, ...) is not a person, so no private
+                    # data. The patterns stop at whitespace, so "All Users" never reaches here.
+                    if is_system_profile_username(candidate):
                         continue
                 report.major(
                     f"[RC-135] Hardcoded user-home path (`{match.group()}`) "

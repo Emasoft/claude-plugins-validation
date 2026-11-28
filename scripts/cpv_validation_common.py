@@ -2440,6 +2440,30 @@ _SYSTEM_LOGIN_NAMES: frozenset[str] = frozenset({"root", "runner"})
 _NON_PERSONAL_LOGIN_NAMES = EXAMPLE_USERNAMES | _SYSTEM_LOGIN_NAMES
 
 
+# Issue #285 (owner decision 2026-11-28, recorded on TRDD-DH3PAC5I): the OS system
+# profile folders are not people, so a path under them carries no private data and
+# must not be reported as a private home path. EXACTLY these five names, nothing
+# else: bob/alice/any real-looking login still fires, and this set is NOT consulted
+# by the CRITICAL private-username loop (CLAUDE_PRIVATE_USERNAMES). Lowercase;
+# defined inside CPV, never by a scanned plugin.
+_SYSTEM_PROFILE_USERNAMES: frozenset[str] = frozenset({"default", "default user", "public", "all users", "shared"})
+
+
+def is_system_profile_username(username: str, following_text: str = "") -> bool:
+    """True when ``username`` (the segment after Users/home) names an OS system profile (issue #285), case-insensitive.
+
+    The username regexes stop at whitespace, so the two-word profiles arrive split:
+    "Default User" as ``default`` (already in the set) and "All Users" as ``all``.
+    ``all`` is exempt only when ``following_text`` (the text right after the matched
+    segment) continues with `` users`` and then a separator or the end, so `All Bob`
+    and `Allusers` stay findings.
+    """
+    name = username.lower()
+    if name in _SYSTEM_PROFILE_USERNAMES:
+        return True
+    return name == "all" and re.match(r"\s+users(?:[\\/]|$)", following_text, re.IGNORECASE) is not None
+
+
 # Task G item 3: characters that mark a matched "path" as a regex pattern (a
 # detector source such as `/home/[^/]+/`), not a literal path. `.` is NOT here:
 # it is the most common character of a real file name, and treating it as regex
@@ -8264,6 +8288,10 @@ def scan_file_for_private_info(
                     # absolute-path rule still flags the path (task G 4k).
                     if extracted_username in EXAMPLE_USERNAMES or extracted_username in _SYSTEM_LOGIN_NAMES:
                         continue
+                    # Issue #285 (owner decision 2026-11-28, TRDD-DH3PAC5I): an OS system
+                    # profile (Default, Public, Shared, ...) is not a person, so no private data.
+                    if is_system_profile_username(extracted_username):
+                        continue
                     # `/home/$USER/`: an env-var username (see the twin note in
                     # scan_file_for_absolute_paths, task G item 3).
                     if extracted_username.startswith("$"):
@@ -8592,6 +8620,12 @@ def scan_file_for_absolute_paths(
                 extracted_username = username_match.group(1).lower()
                 # Skip example usernames in documentation
                 if extracted_username in EXAMPLE_USERNAMES:
+                    continue
+                # Issue #285 (owner decision 2026-11-28, TRDD-DH3PAC5I): an OS system
+                # profile (Default, Public, All Users, Shared) is not a person, so no
+                # private data. `all` is the first word of the whitespace-split
+                # "All Users", so the text after the match is passed for that check.
+                if is_system_profile_username(extracted_username, content[match.end() : match.end() + 16]):
                     continue
                 # `/home/$USER/...`: an env-var username, not a literal one. The
                 # bare `$` used to be swallowed by the metachar skip above; that
