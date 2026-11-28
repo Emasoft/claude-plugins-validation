@@ -1956,6 +1956,171 @@ def _is_benign_global_property_assignment(line: str) -> bool:
     return not _EXTERNAL_CODE_LOAD_RE.search(line)
 
 
+# Issue #267 (CREDENTIAL_DISCOVERY half) — a credential FILENAME literal that
+# sits only in a deny-list is a name comparison, not discovery.
+#
+# WHY: the catalog pattern ``\.git-credentials\b`` fired MAJOR on
+# ``const DENY = [".env", ".git-credentials"]; if (DENY.includes(name)) …``.
+# A deny-list COMPARES names; a stealer READS files. So the filename literal is
+# benign only when (a) it is a string element of an array / Set literal that is
+# used in this file ONLY through ``.includes(`` / ``.has(`` / ``.indexOf(``
+# membership tests, AND (b) the file contains NO read / enumeration / copy /
+# exec / outbound-body sink ANYWHERE. The sink check is deliberately file-level
+# and fails closed: one sink anywhere keeps the rule firing, because a stealer
+# that reads ``home + '/' + n`` for ``n`` in the same list is the exact shape of
+# the ctrl/discover.ts control. Anything the mini-lexer cannot tokenize or
+# bracket-match also falls through to "fire".
+_CRED_FILE_SINK_RE: Final[re.Pattern[str]] = re.compile(
+    r"""
+      \bread(?:File|dir|TextFile|Dir|Link)\w*          # readFile(Sync) / readdir(Sync) / Deno.readTextFile
+    | \b(?:fs|fsp|promises)\s*\.\s*(?:promises\s*\.\s*)?read\w*   # fs.read / fs.promises.read*
+    | \bcreateReadStream\b
+    | \bopen\w*\s*\(                                    # open( / openSync( / opendir( / openAsBlob(
+    | \bopendir\w*\b
+    | \bglob(?:Sync|by)?\b                              # glob / globSync / globby
+    | \bBun\s*\.\s*(?:file|\$)
+    | \bDeno\s*\.\s*(?:open|readDir)
+    | \b(?:copyFile|cp|sendFile)\w*\s*\(
+    | \$\s*`                                            # zx / Bun shell template
+    | \b(?:exec|spawn)\w*\s*\([^;]{0,300}?\b(?:cat|type|more|less|head|tail|base64|cp|curl|scp)\b
+    | \b(?:fetch|axios(?:\.\w+)?|got(?:\.\w+)?|https?\.request|\.post|\.put)\s*\([^;]{0,400}?\b(?:body|data|formData|FormData)\b
+    | \bnew\s+FormData\b
+    """,
+    re.VERBOSE | re.DOTALL,
+)
+
+_TS_LEX_RE: Final[re.Pattern[str]] = re.compile(
+    r"""
+      (?P<ws>\s+)
+    | (?P<comment>//[^\n]*|/\*.*?\*/)
+    | (?P<str>'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*")
+    | (?P<tmpl>`(?:\\.|[^`\\])*`)
+    | (?P<punct>[\[\](){},])
+    | (?P<other>[^\s\[\](){},'"`/]+|/)
+    """,
+    re.VERBOSE | re.DOTALL,
+)
+
+_CRED_DECL_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?P<export>\bexport\s+)?\b(?:const|let|var)\s+(?P<name>[A-Za-z_$][\w$]*)\s*"
+    r"(?::[^=;]{0,80})?=\s*(?P<set>new\s+(?:Readonly)?Set(?:<[^<>]*>)?\s*\(\s*)?\Z"
+)
+_CRED_INLINE_SET_RE: Final[re.Pattern[str]] = re.compile(r"\bnew\s+(?:Readonly)?Set(?:<[^<>]*>)?\s*\(\s*\Z")
+_CRED_MEMBERSHIP_TAIL_RE: Final[re.Pattern[str]] = re.compile(r"\s*\??\.\s*(?:includes|has|indexOf)\s*\(")
+# End of the declaration statement: `;`, or a newline NOT followed by a token
+# that would continue the expression (``.map(…)`` / ``(``/ ``[`` / operator).
+_CRED_STMT_END_RE: Final[re.Pattern[str]] = re.compile(
+    r"[ \t]*(?:as\s+const[ \t]*)?(?:;|(?://[^\n]*)?(?:\r?\n|\Z)(?!\s*(?:[.?(\[`+\-*]|/(?![/*]))))"
+)
+
+
+def _ts_lex(source: str) -> list[tuple[str, int, int]] | None:
+    """Tokenize ``source`` into (kind, start, end); ``None`` when any char is unlexable (fail closed)."""
+    toks: list[tuple[str, int, int]] = []
+    pos = 0
+    while pos < len(source):
+        m = _TS_LEX_RE.match(source, pos)
+        if m is None or m.end() == pos:
+            return None
+        kind = m.lastgroup or ""
+        if kind != "ws":
+            toks.append((kind, m.start(), m.end()))
+        pos = m.end()
+    return toks
+
+
+def _innermost_array_around(source: str, toks: list[tuple[str, int, int]], offset: int) -> tuple[int, int] | None:
+    """Token indexes (open, close) of the innermost ``[...]`` containing ``offset``; ``None`` on unbalanced brackets."""
+    pairs = {"[": "]", "(": ")", "{": "}"}
+    stack: list[tuple[str, int]] = []
+    best: tuple[int, int] | None = None
+    for i, (kind, start, _end) in enumerate(toks):
+        if kind != "punct":
+            continue
+        ch = source[start]
+        if ch in pairs:
+            stack.append((ch, i))
+        elif ch in ")]}":
+            if not stack or pairs[stack[-1][0]] != ch:
+                return None
+            open_ch, open_i = stack.pop()
+            if open_ch == "[" and toks[open_i][1] < offset < start and (best is None or open_i > best[0]):
+                best = (open_i, i)
+    return best if not stack else None
+
+
+def _credential_literal_only_in_membership_list(source: str, line_idx: int, match: str) -> bool:
+    """True iff EVERY occurrence of ``match`` on the line is a string element of an
+    array / Set literal that is used here only for ``.includes/.has/.indexOf`` tests,
+    and the file has no read / enumeration / exec / outbound-body sink anywhere."""
+    lines = source.split("\n")
+    if not match or not (0 <= line_idx < len(lines)) or _CRED_FILE_SINK_RE.search(source):
+        return False
+    line = lines[line_idx]
+    line_start = sum(len(x) + 1 for x in lines[:line_idx])
+    occurrences = [line_start + m.start() for m in re.finditer(re.escape(match), line)]
+    toks = _ts_lex(source)
+    if not occurrences or toks is None:
+        return False
+    return all(_offset_in_membership_list(source, toks, off) for off in occurrences)
+
+
+def _offset_in_membership_list(source: str, toks: list[tuple[str, int, int]], offset: int) -> bool:
+    span = _innermost_array_around(source, toks, offset)
+    if span is None:
+        return False
+    open_i, close_i = span
+    inside = toks[open_i + 1 : close_i]
+    # Every element is a plain string literal (no ``${}`` interpolation); the
+    # match sits inside one of them (not in a comment).
+    for kind, start, end in inside:
+        if kind == "punct" and source[start] == ",":
+            continue
+        if kind == "comment":
+            continue
+        if kind == "str" or (kind == "tmpl" and "${" not in source[start:end]):
+            continue
+        return False
+    if not any(k in ("str", "tmpl") and s <= offset < e for k, s, e in inside):
+        return False
+    prefix = source[: toks[open_i][1]]
+    after = source[toks[close_i][2] :]
+    # Inline: ``[...].includes(x)`` / ``new Set([...]).has(x)``.
+    if _CRED_MEMBERSHIP_TAIL_RE.match(re.sub(r"^\s*as\s+const", "", after)) and not _CRED_INLINE_SET_RE.search(prefix):
+        return True
+    inline_set = _CRED_INLINE_SET_RE.search(prefix)
+    if inline_set and re.match(r"\s*\)", after) and _CRED_MEMBERSHIP_TAIL_RE.match(after[after.index(")") + 1 :]):
+        return True
+    # Named: ``const DENY = [...]`` / ``const DENY = new Set([...])``, not exported.
+    decl = _CRED_DECL_RE.search(prefix[-300:])
+    if decl is None or decl.group("export"):
+        return False
+    rest = after
+    if decl.group("set"):
+        close = re.match(r"\s*\)", rest)
+        if close is None:
+            return False
+        rest = rest[close.end() :]
+    if _CRED_STMT_END_RE.match(rest) is None:
+        return False
+    name_pos = len(prefix) - len(prefix[-300:]) + decl.start("name")
+    return _name_used_only_for_membership(source, decl.group("name"), name_pos)
+
+
+def _name_used_only_for_membership(source: str, name: str, decl_name_pos: int) -> bool:
+    """Every reference to ``name`` besides its declaration is ``name.includes(`` / ``.has(`` / ``.indexOf(``; at least one exists."""
+    uses = 0
+    for m in re.finditer(r"(?<![\w$])" + re.escape(name) + r"(?![\w$])", source):
+        if m.start() == decl_name_pos:
+            continue
+        if source[max(0, m.start() - 1) : m.start()] == ".":
+            return False
+        if _CRED_MEMBERSHIP_TAIL_RE.match(source[m.end() :]) is None:
+            return False
+        uses += 1
+    return uses > 0
+
+
 def classify(
     file_path: str,
     source: str,
@@ -2152,6 +2317,11 @@ def classify(
         # it benign. Keep those visible.
         return "safe_literal"
 
+    # Issue #267 — CREDENTIAL_DISCOVERY on a credential filename literal that is
+    # only a deny-list entry (name comparison, no file access in the whole file).
+    # See `_credential_literal_only_in_membership_list` for why it fails closed.
+    if rule_id == "CREDENTIAL_DISCOVERY" and _credential_literal_only_in_membership_list(source, line_idx, match):
+        return "safe_literal"
     # ── CRED_ENV_READ — "MCP server reading its own API key" FP. ──
     # The matched substring is a `process.env.<KNOWN_KEY>` read. If
     # the surrounding ±5 lines contain no outbound HTTP sink to an
