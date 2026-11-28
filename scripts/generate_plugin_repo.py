@@ -7241,8 +7241,9 @@ def gen_release_binaries_yml(p: PluginParams) -> str:
       2. a least-privilege split — the build + smoke jobs are ``contents: read``
          and EXACTLY ONE job (``release``) is ``contents: write``;
       3. a ``SHA256SUMS`` checksum step;
-      4. a build ``matrix`` over targets (aarch64/x86_64 × apple-darwin/
-         unknown-linux-gnu).
+      4. a build ``matrix`` over targets — ALL platforms (owner rule 2026-11-28):
+         aarch64/x86_64 × apple-darwin / unknown-linux-gnu / pc-windows-msvc
+         (Windows assets get ``.exe``).
 
     It also carries a ``build-smoke`` job that compiles on push/PR — the
     "untested-until-release" guard (a tag-only build that no push job exercises
@@ -7301,12 +7302,22 @@ jobs:
   # BEFORE a tag is cut — the "untested-until-release" guard. Mirrors the real
   # release build command so a tag build can never surprise you.
   build-smoke:
-    name: Build smoke (untested-until-release guard)
+    name: Build smoke ${{ matrix.os }} (untested-until-release guard)
     if: github.event_name == 'push' || github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     permissions:
       contents: read
+    # bash on every OS (Windows runners default to PowerShell).
+    defaults:
+      run:
+        shell: bash
+    # All three OS families, so a Windows (or macOS) break is caught on push/PR
+    # BEFORE a tag is cut.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -7332,18 +7343,32 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    # bash on every OS (Windows runners default to PowerShell).
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
+            exe: ""
           - target: x86_64-apple-darwin
             os: macos-latest
+            exe: ""
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+            exe: ""
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            exe: ""
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            exe: ".exe"
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            exe: ".exe"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -7354,12 +7379,20 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target "${{ matrix.target }}"
       - name: Stage binary + per-asset checksum
+        # Windows binaries carry `.exe` (matrix.exe); the asset is named
+        # `<bin>-<target>[.exe]`. Runs under bash on every OS (job default shell);
+        # Windows Git-Bash has sha256sum, macOS has shasum.
         run: |
           mkdir -p out
-          bin="target/${{ matrix.target }}/release/@@BIN@@"
-          asset="out/@@BIN@@-${{ matrix.target }}"
+          bin="target/${{ matrix.target }}/release/@@BIN@@${{ matrix.exe }}"
+          asset="out/@@BIN@@-${{ matrix.target }}${{ matrix.exe }}"
           cp "$bin" "$asset"
-          shasum -a 256 "$asset" | awk '{print $1}' > "$asset.sha256"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sum="$(sha256sum "$asset")"
+          else
+            sum="$(shasum -a 256 "$asset")"
+          fi
+          echo "${sum%% *}" > "$asset.sha256"
       - name: Upload build artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
