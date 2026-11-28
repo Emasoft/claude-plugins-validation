@@ -1136,6 +1136,11 @@ def _gate_cspell(result: PreflightResult, enabled: set[str] | None) -> None:
             "this probe and CI's Mega-Linter cspell then read.",
         )
         return
+    # WHY (issue #296, incomplete fix of #293): CI lints a clean checkout. Run on the dirty tree,
+    # cspell also read gitignored scratch (`scripts_dev/...`) that CI never has, and failed on
+    # words CI never sees. `scan_tracked_snapshot=True` runs it with cwd = the git-tracked files
+    # of the plugin (the same `_tracked_snapshot` checkov/trivy use). The cspell config and the
+    # dictionary files it references are found there only if they are tracked, as in CI.
     _gate_megalinter_tool(
         result,
         gate="cspell",
@@ -1144,6 +1149,7 @@ def _gate_cspell(result: PreflightResult, enabled: set[str] | None) -> None:
         install_hint="npm i -g cspell",
         build_argv=_argv_cspell,
         enabled=enabled,
+        scan_tracked_snapshot=True,
     )
 
 
@@ -1265,38 +1271,49 @@ def _shipped_file_paths(root: Path, patterns: tuple[str, ...]) -> list[str]:
 
 
 def _shell_script_paths(root: Path) -> list[str]:
-    """Return the plugin-relative `*.sh`/`*.bash` paths shellcheck/shfmt lint."""
+    """Return the plugin-relative `*.sh`/`*.bash` paths shellcheck lints (shfmt has `_shfmt_shell_paths`)."""
     return _shipped_file_paths(root, ("*.sh", "*.bash"))
 
 
-# A `#!` line naming a POSIX or bash-family shell: `#!/bin/sh`, `#!/usr/bin/env bash`,
-# `#!/usr/bin/env -S dash -e`. Matched against the first 128 bytes of an extensionless file.
-# zsh is deliberately absent: the gate mirrors Mega-Linter BASH_SHFMT, a bash-family
-# linter, and shfmt would report zsh-only formatting that CI never checks.
-_SHELL_SHEBANG_RE = re.compile(rb"#!\s*(?:/\S*/)?(?:env\s+(?:-\S+\s+)*)?(?:sh|bash|dash)(?=\s|$)")
+# WHY (issue #296): the file selection of Mega-Linter v8.8.0's BASH_SHFMT, taken from
+# megalinter/descriptors/bash.megalinter-descriptor.yml at the v8.8.0 tag. BASH_SHFMT declares
+# no file filter of its own, so it inherits the BASH descriptor's:
+#   file_extensions: ["", ".sh", ".bash", ".dash", ".ksh"]
+#   file_contains_regex_extensions: [""]
+#   file_contains_regex: ["^#!/usr/bin/env bash", "^#!/bin/bash", "^#!/bin/sh"]
+# and megalinter/utils.py `filter_files` applies the content regex ONLY to files whose extension
+# is in `file_contains_regex_extensions` (here the empty extension), as
+# `re.compile("|".join(file_contains_regex), flags=re.MULTILINE).search(content)`: the regex may
+# match at the start of ANY line of the file, and it is a prefix match. So a `.dash`/`.ksh`
+# file is linted, and an extensionless file is linted only when a line begins with one of the
+# three literals above. `#!/usr/bin/env sh` (the canon `git-hooks/pre-push`), `#!/usr/bin/env dash`
+# and `#!/usr/bin/env zsh` match none of them, so CI never runs shfmt on those files, and a
+# local preflight that did would report a CI failure CI never produces.
+_SHFMT_EXTENSIONS = frozenset({"", ".sh", ".bash", ".dash", ".ksh"})
+_SHFMT_CONTENT_RE = re.compile(r"^#!/usr/bin/env bash|^#!/bin/bash|^#!/bin/sh", re.MULTILINE)
 
 
 def _shfmt_shell_paths(root: Path) -> list[str]:
-    """Return the shell scripts shfmt lints: `*.sh`/`*.bash` plus extensionless shebang scripts.
+    """Return the files Mega-Linter v8.8.0's BASH_SHFMT lints, filtered like `_shipped_file_paths`.
 
-    Mega-Linter BASH_SHFMT also checks extensionless shell scripts such as
-    `git-hooks/pre-push`, which only their `#!` line identifies. Without this a
-    local preflight never checks them and CI is the first to report a format diff.
-    The extensionless candidates come from `_shipped_file_paths`, so the gitignore
-    and untracked filter applies to them too; each is read for its first 128 bytes only.
+    Selection rules and their source: see the comment on `_SHFMT_EXTENSIONS`. Candidates come
+    from `_shipped_file_paths`, so gitignored untracked scratch (`scripts_dev/`) is never linted.
     """
-    scripts = _shell_script_paths(root)
+    scripts: list[str] = []
     for rel in _shipped_file_paths(root, ("*",)):
-        if Path(rel).suffix:
+        extension = os.path.splitext(os.path.basename(rel))[1]
+        if extension not in _SHFMT_EXTENSIONS:
             continue
         # A broken symlink, FIFO or socket is not a script shfmt can check, and
         # opening a FIFO would block the gate: only regular files are read.
         if not (root / rel).is_file():
             continue
-        with (root / rel).open("rb") as fh:
-            head = fh.read(128)
-        if _SHELL_SHEBANG_RE.match(head):
-            scripts.append(rel)
+        if extension == "":
+            # Same decoding as Mega-Linter's `file_contains`: utf-8, undecodable bytes ignored.
+            content = (root / rel).read_bytes().decode("utf-8", errors="ignore")
+            if _SHFMT_CONTENT_RE.search(content) is None:
+                continue
+        scripts.append(rel)
     return scripts
 
 
@@ -1348,24 +1365,40 @@ def _gate_shfmt(result: PreflightResult, enabled: set[str] | None) -> None:
             f"shfmt ({_SHFMT_LINTER_ID}) not enabled in .mega-linter.yml — skipped.",
         )
         return
-    # CI shfmt also checks extensionless shell scripts found by their #! line; see _shfmt_shell_paths.
+    # Select the files Mega-Linter's BASH_SHFMT selects; see _shfmt_shell_paths.
     scripts = _shfmt_shell_paths(result.plugin_path)
     if not scripts:
         result.add(
             "shfmt",
             _SEV_PASS,
-            "No *.sh/*.bash files — shfmt not needed (Mega-Linter parity).",
+            "No shell files Mega-Linter BASH_SHFMT selects — shfmt not needed (Mega-Linter parity).",
         )
         return
+
+    def _present(root: Path) -> list[str]:
+        # WHY (issue #296): the gate runs on the tracked-files snapshot (as checkov/trivy do, #293),
+        # so only tracked files exist under `root`. An untracked, non-gitignored new script is in
+        # `scripts` but not in the snapshot; passing it would make shfmt fail on a missing file.
+        return [s for s in scripts if (root / s).is_file()]
+
+    def _argv(tool_bin: str, root: Path) -> list[str]:
+        # `-d` prints a diff and exits non-zero when a file is not formatted.
+        return [tool_bin, "-d", *_present(root)]
+
+    def _argvs(tool_bin: str, root: Path) -> list[list[str]]:
+        # No file left in the snapshot: run nothing, because `shfmt -d` with no files reads stdin and hangs.
+        return [_argv(tool_bin, root)] if _present(root) else []
+
     _gate_megalinter_tool(
         result,
         gate="shfmt",
         linter_id=_SHFMT_LINTER_ID,
         tool_name="shfmt",
         install_hint="https://github.com/mvdan/sh",
-        # `-d` prints a diff and exits non-zero when a file is not formatted.
-        build_argv=lambda tool_bin, _root: [tool_bin, "-d", *scripts],
+        build_argv=_argv,
+        build_argvs=_argvs,
         enabled=enabled,
+        scan_tracked_snapshot=True,
     )
 
 

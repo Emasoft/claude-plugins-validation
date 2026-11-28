@@ -163,7 +163,11 @@ def test_dictionary_present_and_clean_spelling_passes(
 
     assert f.severity == "PASS"
     assert calls, "with a dictionary present the probe MUST invoke cspell — not skip it"
-    assert calls[0][1] == "lint"
+    # #296: the gate now builds a tracked-files snapshot first, so the fake also
+    # records that `git -C <root> ls-files` call; assert on the cspell call itself.
+    cspell_calls = [c for c in calls if str(c[0]).endswith("cspell")]
+    assert cspell_calls, f"no cspell invocation recorded: {calls}"
+    assert cspell_calls[0][1] == "lint"
 
 
 def test_dictionary_present_but_real_misspelling_still_fails(
