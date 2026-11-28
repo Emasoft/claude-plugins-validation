@@ -188,21 +188,43 @@ def _git_tracked_files(plugin_root: Path) -> set[str] | None:
 
 
 # Directories that never ship (build artifacts, caches, dev-scratch). Used
-# ONLY by the non-git walk fallback — `git ls-files` already excludes
-# gitignored dirs. Single source of truth for both the manifest builder and
+# ONLY by the non-git walk — `git ls-files` already excludes gitignored dirs.
+# Single source of truth for both the manifest builder and
 # verify_self_integrity's added-file detection.
-_SHIPPED_WALK_SKIP_DIRS = frozenset(
+#
+# TRDD-Z2GGOPPX: the walk used to skip a file when ANY path component was in one
+# merged skip set, so `scripts/build/evil.py`, `skills/x/dist/evil.py` or
+# `scripts/reports/evil.py` was invisible to added-file detection — and this walk
+# is the safety net when git lists nothing (TRDD-DDL1C1T2). A name like `build`
+# or `reports` is a never-shipped dir only at the plugin root, so the set is split
+# by where a match is allowed.
+
+# Tool-regenerated caches that legitimately appear at ANY depth (Python and its
+# linters write them next to the code they ran on). Safe to skip anywhere: the
+# entry points never read bytecode or tool caches (issue #256).
+_WALK_SKIP_ANY_DEPTH = frozenset(
+    {
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+    }
+)
+
+# Never-shipped dirs skipped ONLY as the FIRST component of the plugin-relative
+# path. Nested, the same name is ordinary plugin content an attacker can plant
+# under (TRDD-Z2GGOPPX). The runtime-state dirs (.in_use, .trashcan, .rechecker,
+# .audit, .cpv-cache, .scan-cache) are created at the plugin/project root only —
+# CPV's own scripts create none of them below the root (searched
+# scripts/*.py 2026-11-28) — so they are top-level too.
+_WALK_SKIP_TOP_LEVEL = frozenset(
     {
         ".git",
         ".venv",
         "venv",
-        "__pycache__",
         "node_modules",
         "dist",
         "build",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
         ".idea",
         ".vscode",
         "reports",
@@ -283,7 +305,10 @@ def walk_shipped_files(plugin_root: Path) -> set[str]:
         if not path.is_file():
             continue
         rel = path.relative_to(plugin_root)
-        if any(part in _SHIPPED_WALK_SKIP_DIRS for part in rel.parts):
+        # TRDD-Z2GGOPPX: a never-shipped dir name skips only at the plugin root; the
+        # tool caches skip at any depth. A nested `build`/`dist`/`reports` is plantable content.
+        # A root-level FILE that merely shares a skip name (a file called `build`) is not a dir: keep it.
+        if (len(rel.parts) > 1 and rel.parts[0] in _WALK_SKIP_TOP_LEVEL) or any(part in _WALK_SKIP_ANY_DEPTH for part in rel.parts):
             continue
         rel_path = str(rel).replace("\\", "/")
         if rel.name in _MANIFEST_BASENAMES:

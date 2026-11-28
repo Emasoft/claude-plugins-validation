@@ -812,9 +812,10 @@ def _detect_added_wheel_files(site_packages: Path, expected: set[str]) -> list[s
     cruft basenames below. Everything else is reported, including a sourceless
     `*.pyc` outside `__pycache__` (importable; no legitimate wheel ships one)
     and any non-.pyc file inside `__pycache__` (a namespace-package path).
-    The plugin-mode `_SHIPPED_WALK_SKIP_DIRS` is deliberately NOT reused: it
-    skips `build`, `dist`, `reports`, ..., which would let
-    `scripts/build/evil.py` hide.
+    The plugin-mode walk skip sets (`_WALK_SKIP_TOP_LEVEL` / `_WALK_SKIP_ANY_DEPTH`)
+    are deliberately NOT reused: this walk has its own, narrower rule, and a skip
+    list matching `build`, `dist` or `reports` at any depth would let
+    `scripts/build/evil.py` hide (TRDD-Z2GGOPPX).
 
     Skipping `__pycache__/*.pyc` is sound only because the entry points never
     read or write bytecode (issue #256); see the no-bytecode blocks there.

@@ -4,7 +4,7 @@ on a fresh (non-git) install because CPV's own runtime-state dirs (`.in_use/`
 PID-locks, `.trashcan/`, …) were walked by the FS-walk manifest fallback and then
 flagged as "added" (not-in-manifest) files.
 
-The fix adds those runtime dirs to `_SHIPPED_WALK_SKIP_DIRS`, so the non-git walk
+The fix adds those runtime dirs to `_WALK_SKIP_TOP_LEVEL` (TRDD-Z2GGOPPX split the old skip set), so the non-git walk
 (and therefore the added-file detection that shares it) ignores them — exactly as
 `git ls-files` already does on a source checkout.
 """
