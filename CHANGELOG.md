@@ -2,6 +2,45 @@
 
 All notable changes to the Claude Plugins Validation plugin will be documented in this file.
 
+## [5.29.0] - 2026-11-28
+
+### Bug Fixes
+
+- **skillaudit:** Clear CREDENTIAL_DISCOVERY on a filename in a TS deny-list with no read sink ([#267](https://github.com/Emasoft/claude-plugins-validation/issues/267))
+- **integrity:** Never read or write bytecode in the processes that verify CPV (#256 item 7, TRDD-O3K5H8GG)
+- **paths:** Exempt OS system profile folders from the home-path findings ([#285](https://github.com/Emasoft/claude-plugins-validation/issues/285))
+- **integrity:** An empty or foreign .git can no longer hide an added file (TRDD-DDL1C1T2)
+- **mods:** MOD-CAP-ASUSER-SUBMIT is a WARNING (owner decision, TRDD-29QP66H2)
+- **generator:** Canon publish.py G2f shellchecks only git-tracked scripts ([#292](https://github.com/Emasoft/claude-plugins-validation/issues/292))
+- **ci-preflight:** Run checkov and trivy on the git-tracked files only ([#293](https://github.com/Emasoft/claude-plugins-validation/issues/293))
+- **skillaudit:** Clear TOOL_SHADOW and A2A_DATA_LEAK false positives in JS bundles ([#294](https://github.com/Emasoft/claude-plugins-validation/issues/294))
+
+### Documentation
+
+- Re-derive CLAUDE.md inventory counts for 5.29.0
+- CLAUDE.md test-file count 622 after the #293 test
+- CLAUDE.md test-file count 623 after the #294 test
+
+### Features
+
+- **mods:** Capability scanner for mod hooks modules, not wired yet (TRDD-29QP66H2)
+- **mods:** Offline module-body rules for telemetry, async generators, imports and nesting (TRDD-29QP66H2)
+- **generator:** Build binary releases for Windows too (owner rule: every plugin is multiplatform)
+- **mods:** Wire the capability scanner into hook validation (TRDD-29QP66H2)
+
+### Miscellaneous Tasks
+
+- Regenerate self-hash manifests for 5.29.0
+- Regenerate self-hash manifests for 5.29.0
+- Regenerate self-hash manifests for 5.29.0
+- Regenerate self-hash manifests for 5.29.0
+- Regenerate self-hash manifests for 5.29.0
+
+### Testing
+
+- Bound every git subprocess in the DDL1C1T2 test with timeout=60
+- Restore the #256 no-bytecode process state after every test
+
 ## [5.28.0] - 2026-11-27
 
 ### Bug Fixes
