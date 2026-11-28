@@ -877,13 +877,20 @@ _DEFINEPROPERTY_LOCAL_TARGET_RE: Final[re.Pattern[str]] = re.compile(
 # The descriptor / surrounding shape that confirms a benign module-interop or
 # self-object defineProperty: a forwarding getter (``get:()=>r[o]`` /
 # ``get:function(){return …}``), the ``enumerable:!0`` re-export flag, a
-# ``Symbol.toStringTag`` with ``'Module'``, or a feature-detect getter.
+# ``Symbol.toStringTag`` with ``'Module'``, a feature-detect getter, or (issue
+# #294) a bare boolean-literal marker ``{ value: true }`` — js-yaml's own-key
+# marker ``Object.defineProperty(objectKeys, pairKey, { value: true })``. WHY: a
+# boolean literal is inert data, it cannot install a handler, so it cannot
+# shadow a tool; ``{value: maliciousHandler}`` (identifier / function) is not
+# matched here and keeps firing. The literal must be the WHOLE descriptor value
+# (``,`` / ``}`` right after it) so ``{value: true && hijack}`` is not cleared.
 _DEFINEPROPERTY_INTEROP_SHAPE_RE: Final[re.Pattern[str]] = re.compile(
     r"get\s*:\s*(?:\(\s*\)\s*=>|function\b)"
     r"|enumerable\s*:\s*(?:!0|true)"
     r"|Symbol\.toStringTag"
     r"|set\s*:\s*(?:\(|function\b)"
-    r"|value\s*:\s*['\"]Module['\"]",
+    r"|value\s*:\s*['\"]Module['\"]"
+    r"|\{\s*value\s*:\s*(?:true|false|!0|!1)\s*[,}]",
 )
 
 
@@ -913,6 +920,70 @@ def _is_module_interop_or_self_defineproperty(source_line: str, match: str) -> b
     # ``Object.defineProperty(localObj, k, {value: maliciousHandler})`` that is
     # NOT a forwarding/feature-detect shape does not get a free pass.
     return bool(_DEFINEPROPERTY_INTEROP_SHAPE_RE.search(source_line))
+
+
+# Issue #294 — A2A_DATA_LEAK pattern 2 (``(?:artifact|message|metadata).*(?:attach|
+# append|embed).*(?:env|credential|secret|token|key|config|password)``) fired on a
+# CLI refusal message — ``throw new UsageError(`...metadata block ... appended ...
+# <key:value>...`)`` — pure prose in a user-facing error string: nothing is sent
+# anywhere. WHY a classifier and not a pattern tweak: the catalog pattern is a
+# prose-shape detector shared with markdown/skill text, where it is right.
+# Narrow, fail-closed discriminator: the match lies fully INSIDE a single string
+# literal that is the first argument of ``new <X>Error(...)`` / ``new <X>Exception(...)``
+# (the literal opens on the call line, or alone on the line right after a line
+# ending ``new <X>Error(``), the literal has no ``${`` interpolation, and it
+# carries no agent/A2A cue word — an error string that talks to an agent
+# ("send the conversation to the agent") keeps firing. No file/path exemption.
+_ERROR_CTOR_OPEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bnew\s+(?:[A-Za-z_$][\w$]*)?(?:Error|Exception)\s*\(\s*([\"'`])"
+)
+_ERROR_CTOR_LINE_END_RE: Final[re.Pattern[str]] = re.compile(r"\bnew\s+(?:[A-Za-z_$][\w$]*)?(?:Error|Exception)\s*\($")
+_A2A_AGENT_CUE_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:agents?|sub-?agents?|a2a|llm|assistant|claude)\b", re.IGNORECASE
+)
+
+
+def _closing_quote_index(text: str, start: int, quote: str) -> int:
+    """Index of the first unescaped ``quote`` in ``text`` at/after ``start``, else -1."""
+    i = start
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == quote:
+            return i
+        i += 1
+    return -1
+
+
+def _is_error_message_literal(source: str, line_idx: int, match: str) -> bool:
+    """True iff ``match`` sits wholly inside a plain string literal that is the
+    message argument of ``new <X>Error(...)`` / ``new <X>Exception(...)`` and the
+    literal has no ``${`` interpolation and no agent/A2A cue word (issue #294)."""
+    lines = source.split("\n")
+    line = lines[line_idx]
+    at = line.find(match)
+    if at < 0:
+        return False
+    openers = [(m.end() - 1, m.group(1)) for m in _ERROR_CTOR_OPEN_RE.finditer(line)]
+    stripped = line.lstrip()
+    if stripped[:1] in ("'", '"', "`"):
+        prev = line_idx - 1
+        while prev >= 0 and not lines[prev].strip():
+            prev -= 1
+        if prev >= 0 and _ERROR_CTOR_LINE_END_RE.search(lines[prev].rstrip()):
+            openers.append((len(line) - len(stripped), stripped[0]))
+    for open_idx, quote in openers:
+        close_idx = _closing_quote_index(line, open_idx + 1, quote)
+        if close_idx < 0 or not (open_idx < at and at + len(match) <= close_idx):
+            continue
+        literal = line[open_idx + 1 : close_idx]
+        if quote == "`" and "${" in literal:
+            continue
+        if _A2A_AGENT_CUE_RE.search(literal):
+            continue
+        return True
+    return False
 
 
 # r07 jarrodwatts FP iter1 (2026-05-28) — test fixture arrays of
@@ -2225,6 +2296,17 @@ def classify(
     # TOOL_SHADOW patterns (``__proto__ =`` / ``monkeypatch`` / ``Proxy(target``)
     # are not in scope of this branch and keep firing.
     if rule_id == "TOOL_SHADOW" and _is_module_interop_or_self_defineproperty(line, match):
+        return "safe_literal"
+
+    # Issue #294 — A2A_DATA_LEAK on prose inside a CLI refusal message,
+    # ``throw new UsageError("...metadata block ... appended ... <key:value>")``:
+    # a user-facing error string sends nothing anywhere. Cleared ONLY when the
+    # match is wholly inside the plain string literal that is the message argument
+    # of ``new <X>Error(...)``, with no ``${`` interpolation and no agent/A2A cue
+    # word in that literal (see ``_is_error_message_literal``); a real outbound
+    # send (fetch/post body, A2A message construction) is not such a literal and
+    # keeps firing. No path / file-type exemption.
+    if rule_id == "A2A_DATA_LEAK" and _is_error_message_literal(source, line_idx, match):
         return "safe_literal"
 
     # r07 jarrodwatts FP iter1 (2026-05-28) — INVISIBLE_UNICODE_RAW pattern
