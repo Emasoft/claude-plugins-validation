@@ -35,7 +35,13 @@ from pathlib import Path
 from typing import Any, cast
 
 from cpv_mod_capabilities import scan_mod_capabilities
-from cpv_mod_register_scan import BodyFinding, RegisterVerdict, scan_module_body, scan_register_export
+from cpv_mod_register_scan import (
+    BodyFinding,
+    RegisterVerdict,
+    scan_module_body,
+    scan_register_export,
+    undeclared_state_refs,
+)
 from cpv_parallel_runner import parallel_scan
 from cpv_validation_common import (
     COLORS,
@@ -913,6 +919,37 @@ _MOD_BODY_SEVERITY: dict[str, str] = {
     "C4-missing": "WARNING",
     "C4-noncode": "WARNING",
     "C9": "MAJOR",
+    # Batch 2 (C1, C5, C6, C8; C7 is in validate_manifest): the same bar. Fixture matrix vs native
+    # 2.1.332, re-run fresh on 239 cases (62 mods-gap fixtures p00-p59, 177 probes e-*, d-*, d2-*, s-*,
+    # t-*, c-* of reports_dev/mods-expert/batch2/final-20261128/probe) and compared rule by rule: no case
+    # where CPV gives a C1, C5, C6, C7 or C8 finding that native does not (both: C1 23, C5 34, C6 19,
+    # C7 15, C8 16). Native-only, an under-detection: on or $ forwarded to a helper or used inside a
+    # template (e-helper-forward, e-template, d-helper-alias, d-template-use), a Client module that is
+    # not a plain string literal (c-nonliteral, c-template). Sweep of the same catalogue and split, with
+    # each record's plugin.json, types contract (named or the default ./types/index.d.ts) and Client
+    # targets fetched at its pinned sha (a target counts as present only on an HTTP success). The dev
+    # slice found 4 rule defects, all fixed before the held-out run (TS `($.state.get as T)(...)`, `$`
+    # in JSX text, the default contract, `$ === x` read as a binding); held-out then ran once with no
+    # rule change, 7418 accepted modules. A replication on the final code gave the same records, both
+    # through the scanner and through this caller (validate_mod_body and validate_manifest on each
+    # record rebuilt as a plugin directory; negative controls: an empty contract makes C6 fire on 4105
+    # accepted modules, absent Client targets make C8 fire on 293):
+    #   C1  0 findings (7132 modules with on("<literal>")); 3 plausible TPs on failed records
+    #       ("classic.SessionStartt" twice, "tool.result"). The event table is pinned to 2.1.332: a
+    #       release that adds an event gets a false C1 here until the table is regenerated.
+    #   C5  0 findings; 12 plausible TPs on failed records (alias, destructure and value fixtures).
+    #   C6  0 findings on 16037 references compared with a parsed key set (in 4105 modules; 5883 more
+    #       references skipped because their PluginState entry is not an inline object type); 6
+    #       plausible TPs on failed records.
+    #   C7  0 findings on 4631 named contracts; 2 plausible TPs (`export {}`) on failed records.
+    #   C8  0 findings on 565 Client modules in 293 modules, every target present at its sha.
+    "C1": "MAJOR",
+    "C5": "MAJOR",
+    "C6": "MAJOR",
+    "C8-not-relative": "MAJOR",
+    "C8-noncode": "MAJOR",
+    "C8-outside": "MAJOR",
+    "C8-missing": "MAJOR",
 }
 _CODE_EXTENSION_LIST = ".ts, .tsx, .jsx, .js, .mjs, .cjs, .mts or .cts"
 _JS_FAMILY_SUFFIXES = (".js", ".jsx", ".mjs", ".cjs")
@@ -944,6 +981,58 @@ def _resolve_relative_import(base_dir: Path, spec: str, plugin_root: Path) -> tu
     if any(name.is_file() for name in names):
         return "ok", target
     return "missing", target
+
+
+def _resolve_client_module(base_dir: Path, spec: str, plugin_root: Path) -> tuple[str, Path | None]:
+    """Resolve the `module` of a Client element like Claude Code 2.1.332 (probes c-* of batch 2).
+
+    Returns ("ok" | "not-relative" | "noncode" | "outside" | "missing", the lexically joined target).
+    Stricter than an import: the path is taken as written, relative to the hooks module, with no
+    extension swap and no directory index (c-js-to-ts, c-extless, c-dir-index error natively), and
+    containment is lexical (c-outside errors whether or not the file exists).
+    """
+    if not spec.startswith(("./", "../")):
+        return "not-relative", None
+    if Path(spec).suffix not in MOD_MODULE_EXTENSIONS:
+        return "noncode", None
+    target = Path(os.path.normpath(base_dir / spec))
+    try:
+        target.relative_to(plugin_root)
+    except ValueError:
+        return "outside", target
+    return ("ok" if target.is_file() else "missing"), target
+
+
+def _state_contract(plugin_root: Path) -> tuple[str, str | None, str] | None:
+    """(manifest name, contract source or None, how native names the contract) for C6, or None when
+    C6 cannot be decided. Native reads the manifest `types`, else ./types/index.d.ts (probes
+    s3-default-types-ok/-miss); with neither file every reference is undeclared (p11b). A malformed,
+    missing, oversized or non-UTF-8 named contract decides nothing: validate_manifest reports its shape."""
+    try:
+        manifest = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("name"), str):
+        return None
+    named = "types" in manifest
+    rel = manifest.get("types") if named else "./types/index.d.ts"
+    if not isinstance(rel, str) or not rel.startswith("./") or not rel.endswith(".d.ts"):
+        return None
+    target = (plugin_root / rel).resolve()
+    try:
+        target.relative_to(plugin_root.resolve())
+    except ValueError:
+        return None
+    if not target.is_file():
+        return None if named else (manifest["name"], None, "the manifest's types contract")
+    if target.stat().st_size > _MOD_REGISTER_MAX_BYTES:
+        return None
+    try:
+        source = target.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    label = "the manifest's types contract" if named else "the types contract at ./types/index.d.ts"
+    return manifest["name"], source, label
 
 
 def _body_finding_message(entry: str, origin: str, finding: BodyFinding) -> str:
@@ -981,6 +1070,10 @@ def _body_finding_message(entry: str, origin: str, finding: BodyFinding) -> str:
         )
     if finding.code == "C9":
         return head + finding.detail + tail
+    if finding.code == "C1":
+        return head + finding.detail + "; on is always on(\"<event>\", hook)" + tail
+    if finding.code == "C5":
+        return head + finding.detail + "; $ is always spelled $.noun.event(...) at the call site" + tail
     raise ValueError(f"no message for body finding {finding.code}")
 
 
@@ -998,11 +1091,15 @@ def validate_mod_body(
     module_path: Path, entry: str, suffix: str, plugin_root: Path, report: HookValidationReport
 ) -> None:
     """TRDD-29QP66H2: module-body rules C2 (telemetry collector), C3 (streaming hooks are async
-    generators), C4 (imports) and C9 (2000-scope limit) on a hooks module that exists inside the plugin.
+    generators), C4 (imports) and C9 (2000-scope limit) of batch 1, and C1 (event names of on),
+    C5 ($ only as $.noun.event(...)), C6 ($.state references declared in the types contract) and
+    C8 (Client modules) of batch 2, on a hooks module that exists inside the plugin. C7 (exports of
+    the types contract) is checked by validate_manifest.
 
-    Static like the register scan: the module is never executed and no import target is
-    opened, only stat-ed. A module the register scan reported as too large, not UTF-8 or
-    not lexable gets no body finding here (that scan already printed the INFO).
+    Static like the register scan: the module is never executed and no import or Client target is
+    opened, only stat-ed; C6 reads the manifest and its types contract as text. A module the
+    register scan reported as too large, not UTF-8 or not lexable gets no body finding here (that
+    scan already printed the INFO).
     """
     if module_path.stat().st_size > _MOD_REGISTER_MAX_BYTES:
         return
@@ -1036,6 +1133,36 @@ def validate_mod_body(
             )
         message += " (TRDD-29QP66H2, oracle-derived from Claude Code 2.1.332)"
         _emit_body_finding(report, f"C4-{status}", message, file, imp.line)
+    # C6 (TRDD-29QP66H2 batch 2): this plugin's $.state references against its types contract.
+    if scan.state_refs:
+        contract = _state_contract(root)
+        if contract is not None:
+            name, contract_source, label = contract
+            undeclared = undeclared_state_refs(scan.state_refs, name, contract_source)
+            for ref in undeclared or []:
+                message = (
+                    f"mods hooks module {entry}: {ref.plugin}.{ref.key} is not declared: {label} must name it in "
+                    f"interface PluginState {{ {ref.plugin}: {{ {ref.key}: ... }} }}"
+                    " (TRDD-29QP66H2, oracle-derived from Claude Code 2.1.332)"
+                )
+                _emit_body_finding(report, "C6", message, file, ref.line)
+    # C8 (batch 2): the module of each Client element, resolved from this hooks module.
+    for client in scan.client_modules:
+        status, client_target = _resolve_client_module(module_path.parent, client.spec, root)
+        if status == "ok":
+            continue
+        head = f'mods hooks module {entry}: Client module "{client.spec}"'
+        if status == "not-relative":
+            message = head + " is not relative: spell the surface module's path from this file (\"./board.tsx\")"
+        elif status == "noncode":
+            message = head + f" is not named like code: a surface module's path ends in {_CODE_EXTENSION_LIST}"
+        elif status == "outside":
+            message = head + " leaves the plugin's folder"
+        else:
+            relative = client_target.relative_to(root).as_posix() if client_target is not None else client.spec
+            message = head + f": {relative}: no such file"
+        message += " (TRDD-29QP66H2, oracle-derived from Claude Code 2.1.332)"
+        _emit_body_finding(report, f"C8-{status}", message, file, client.line)
 
 
 def validate_mod_capabilities(module_path: Path, plugin_root: Path, report: HookValidationReport) -> None:

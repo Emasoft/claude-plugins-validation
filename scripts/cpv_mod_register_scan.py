@@ -1016,24 +1016,100 @@ def scan_register_export(source: str, suffix: str) -> RegisterVerdict:
 
 
 # ---------------------------------------------------------------------------
-# Module-body rules C2, C3, C4, C9 (TRDD-29QP66H2, mods gap list batch 1)
+# Module-body rules C2, C3, C4, C9 (TRDD-29QP66H2, mods gap list batch 1) and
+# C1, C5, C6, C8 (batch 2; C7, the types contract, is further below)
 #
 # `claude plugin validate` 2.1.332 reads a hooks module far beyond its
-# `register` export. These rules mirror four of its errors from the token
-# stream, with the same contract as the register scan: pure, never executes,
-# never opens a sibling file, and an UNDER-detection (fail open) is always
-# preferred to a false finding. Every rule is ORACLE-DERIVED: the fixture ids
-# (p06 ...) are those of reports_dev/mods-gap, the probe names (t-*, g-*, i-*,
-# j-*, d-*, e-*, u-*) those of reports_dev/5290/probe, all run on 2.1.332.
+# `register` export. This scan mirrors the errors of it that the token stream
+# decides (C1-C5, C9) and collects the $.state references (C6) and the Client
+# modules (C8) the caller checks against files on disk, with the same contract
+# as the register scan: pure, never executes, never opens a sibling file, and
+# an UNDER-detection (fail open) is always preferred to a false finding. Every
+# rule is ORACLE-DERIVED: the fixture ids (p06 ...) are those of
+# reports_dev/mods-gap; the batch-1 probe names (t-*, g-*, i-*, j-*, d-*, e-*,
+# u-*) are those of reports_dev/5290/probe, the batch-2 probe names (e-*, d-*,
+# d2-*, s-*, t-*, c-*) those of reports_dev/mods-expert/batch2/final-20261128/probe;
+# all ran on 2.1.332.
 # ---------------------------------------------------------------------------
 
-BodyCode = Literal["C2", "C3", "C3-undecided", "C4-specifier", "C4-dynamic", "C9"]
+BodyCode = Literal["C1", "C2", "C3", "C3-undecided", "C4-specifier", "C4-dynamic", "C5", "C9"]
 
 # Hooks of these events stand on the "anthropic" telemetry stream unless a
 # matcher names `to: "collector"` (mods reference, Telemetry; p06 vs p07).
 _TELEMETRY_EVENTS = frozenset({"telemetry.log", "telemetry.mark"})
 # These events stream, so their hook is an async generator (p14, p34).
 _STREAMING_EVENTS = frozenset({"turn.step", "process.spawn"})
+# C1: every event name of Claude Code 2.1.332, the 171 string literals of `EventName` in the types that
+# release writes (.claude-plugin/types/claude-code/index.d.ts, first line "Written by Claude Code 2.1.332"),
+# read with the TypeScript checker; one fixture hooking all 171 passes native validate (probe e-all-events).
+# PINNED TO 2.1.332: a later release that adds an event makes this table refuse it until it is regenerated
+# (the TypeScript checker over `EventName`, script in reports_dev/mods-expert/batch2) and diffed; the CI
+# cross-check against native validate is what notices.
+_EVENT_NAMES = frozenset(
+    """
+    agent.call agent.limits agent.list agent.offer agent.register agent.report agent.spawn
+    attribution.text audio.play audio.speak classic.ConfigChange classic.CwdChanged
+    classic.DirectoryAdded classic.Elicitation classic.ElicitationResult classic.FileChanged
+    classic.InstructionsLoaded classic.MessageDisplay classic.Notification classic.PermissionDenied
+    classic.PermissionRequest classic.PostCompact classic.PostModelSwitch classic.PostToolBatch
+    classic.PostToolUse classic.PostToolUseFailure classic.PreCompact classic.PreModelSwitch
+    classic.PreSkillShellCommand classic.PreToolUse classic.SessionEnd classic.SessionStart
+    classic.Setup classic.Stop classic.StopFailure classic.SubagentStart classic.SubagentStop
+    classic.TaskCompleted classic.TaskCreated classic.TeammateIdle classic.UserPromptExpansion
+    classic.UserPromptSubmit classic.WorktreeCreate classic.WorktreeRemove clock.after clock.every
+    clock.now clock.sleep command.describe command.list command.register command.run config.describe
+    config.list config.set engine.create env.get env.set fs.ancestors fs.exists fs.list fs.read fs.stat
+    fs.write http.fetch mcp.call mcp.connect model.classify model.complete model.fork plugin.register
+    process.hookEnv process.run process.spawn prompt.attachment prompt.autocomplete prompt.change
+    prompt.compose prompt.context prompt.edit prompt.fill prompt.mention prompt.paint prompt.read
+    prompt.section prompt.submit prompt.suggest session.append session.attach session.authorize
+    session.compact session.cwd session.detach session.end session.id session.identity session.info
+    session.machine session.measure session.messages session.model session.receive session.redact
+    session.repo session.root session.send session.start session.stop session.surface session.surfaces
+    session.turns session.usage session.version settings.read skill.prompt state.get state.set
+    store.delete store.get store.keys store.set telemetry.log telemetry.mark theme.clear theme.set
+    tool.call tool.check tool.describe tool.judge tool.list tool.offer tool.register tool.run turn.abort
+    turn.complete turn.start turn.step ui.blit ui.cancelNotify ui.close ui.copy ui.fault ui.focus
+    ui.input ui.invalidate ui.log ui.message ui.notice ui.notify ui.offer ui.open ui.panes ui.place
+    ui.pointer ui.press ui.render ui.resolve ui.scroll ui.select ui.selection ui.status ui.tip ui.toast
+    ui.view vcs.detect vcs.diff vcs.isolate vcs.list vcs.release vcs.status wasm.compile
+    """.split()
+)
+# The namespaces those names start with. Native refuses an unknown name only under one of these heads, or a
+# name with no dot at all (probes e-tool-cal, e-classic-bogus, e-ui-ask, e-plugin-name, e-two-dots, e-dotless,
+# e-head-only, e-core-head-types); a name under any other head passes (e-unknown-head, e-case-head,
+# e-dep-namespace: a namespace another plugin adds), so the scan never judges it.
+_EVENT_NAMESPACES = frozenset(name.split(".", 1)[0] for name in _EVENT_NAMES)
+_NOT_A_PATTERN = 'is not an event name or a pattern ("*", "<prefix>.*", or "!" before either)'
+# C5: words a `$` may follow in code; after any other word on the same line it is prose (JSX text).
+_KEYWORDS_BEFORE_VALUE = frozenset(
+    "return typeof instanceof in of new delete void throw case do else yield await extends".split()
+)
+
+
+def _event_problem(pattern: str) -> str | None:
+    """The native C1 sentence for the first argument of on(...), or None when native accepts it or the
+    form is unprobed. Probes: e-empty, e-trailing-space, e-star-call, e-glob-double (not a pattern),
+    e-neg-star, e-double-neg, e-neg-unknown ("!tool.cal" reports "tool.cal"), e-all-globs, e-all-negations."""
+    if pattern == "" or any(ch.isspace() for ch in pattern):
+        return f'"{pattern}" {_NOT_A_PATTERN}'
+    if pattern.startswith("!!"):
+        return f'"{pattern}" is not a pattern: "!" negates once'
+    negated = pattern.startswith("!")
+    body = pattern[1:] if negated else pattern
+    if body == "*":
+        return f'"{pattern}" is not a pattern: it selects no event' if negated else None
+    if "*" in body:
+        if body.endswith(".*") and body.count("*") == 1:
+            return None  # `<prefix>.*`: every core prefix passes (e-all-globs), an unknown one too (e-unknown-head-glob)
+        return f'"{pattern}" {_NOT_A_PATTERN}'
+    if "!" in body or body in _EVENT_NAMES:
+        return None
+    if "." in body and body.split(".", 1)[0] not in _EVENT_NAMESPACES:
+        return None
+    return f'"{body}" is not an event'
+
+
 _SCOPE_LIMIT_MESSAGE = (
     f"code nested too deep to scan: more than {_MAX_DEPTH} scopes (functions, blocks, loops) open inside one another"
 )
@@ -1044,8 +1120,8 @@ _BODY_MAX_BRACKET_DEPTH = _MAX_DEPTH * 50
 
 @dataclass(frozen=True)
 class BodyFinding:
-    """One module-body rule hit. line: 1-based. detail: the event name (C2, C3),
-    the identifier (C3-undecided) or the import specifier (C4-specifier)."""
+    """One module-body rule hit. line: 1-based. detail: the event name (C2, C3), the identifier
+    (C3-undecided), the import specifier (C4-specifier) or the native sentence (C1, C5, C9)."""
 
     code: BodyCode
     line: int
@@ -1067,6 +1143,26 @@ class BodyScan:
 
     findings: tuple[BodyFinding, ...]
     relative_imports: tuple[RelativeImport, ...]
+    state_refs: tuple[StateRef, ...] = ()
+    client_modules: tuple[ClientModule, ...] = ()
+
+
+@dataclass(frozen=True)
+class StateRef:
+    """A `$.state` reference whose plugin and key are string literals (C6); the caller compares it
+    with the `interface PluginState` of the manifest's types contract."""
+
+    plugin: str
+    key: str
+    line: int
+
+
+@dataclass(frozen=True)
+class ClientModule:
+    """The string-literal `module` of a Client element (C8); the caller resolves it on disk."""
+
+    spec: str
+    line: int
 
 
 def _is_relative_specifier(spec: str) -> bool:
@@ -1076,7 +1172,7 @@ def _is_relative_specifier(spec: str) -> bool:
 class _BodyScanner:
     """Walks the depth-0 and call-site tokens of a hooks module."""
 
-    def __init__(self, toks: list[Tok], match: dict[int, int], ts: bool) -> None:
+    def __init__(self, toks: list[Tok], match: dict[int, int], ts: bool, jsx: bool = False) -> None:
         self.t = toks
         self.ts = ts
         self.p = _Parser(toks, match, Counter(), ts)
@@ -1084,6 +1180,11 @@ class _BodyScanner:
         self.relative: list[RelativeImport] = []
         # Top-level function bindings: name -> "asyncgen" | "other" | "unknown".
         self.top_fns: dict[str, str] = {}
+        # C6 state references and C8 Client modules, resolved by the caller against files on disk.
+        self.state_refs: list[StateRef] = []
+        self.clients: list[ClientModule] = []
+        self.jsx = jsx
+        self._jsx_text: set[int] | None = None
 
     def run(self) -> None:
         self.collect_top_functions()
@@ -1102,6 +1203,13 @@ class _BodyScanner:
                 self.on_export(j)
             elif tk.value == "on":
                 self.on_call(j)
+        # Batch 2 passes. An _Undecided inside one of them drops only that pass: it must never erase
+        # the C2-C4 findings above, which a whole-scan _Undecided would.
+        for batch2_pass in (self.check_registrations, self.collect_state_refs, self.collect_clients):
+            try:
+                batch2_pass()
+            except (_Undecided, RecursionError):
+                continue
 
     # -- C4: imports ---------------------------------------------------
     def add_specifier(self, spec: Tok) -> None:
@@ -1369,16 +1477,462 @@ class _BodyScanner:
                 kind = self.classify_function(eq + 1, end) if end > eq + 1 else None
                 self.bind(self.t[j + 1].value, kind if isinstance(kind, str) else "unknown")
 
+    # -- C1, C5: register, its on(...) calls and their hooks ------------
+    # Native 2.1.332 (probes e-* and d-* of reports_dev/mods-expert batch 2) reads `on` as the first
+    # parameter of `register` whatever its name (e-param-hook) and never a module-level `on`
+    # (e-top-level, e-other-name-module-on); it reads `$` as the first parameter of each hook whatever
+    # its name (d-other-param-alias) and never a module-level `$` (d-module-dollar). Native also follows
+    # `on` and `$` into helpers they are passed to (e-helper-forward, d-helper-alias); this scan does not,
+    # an under-detection, never a false finding.
+    def params(self, k: int) -> tuple[str | None, int] | None:
+        """(first parameter name or None, index of the closing paren) of the parameter list at k."""
+        p = self.p
+        close = p.match.get(k) if p.is_p(k, "(") else None
+        if close is None:
+            return None
+        first = p.tok(k + 1)
+        named = first is not None and first.kind == "ident" and any(p.is_p(k + 2, v) for v in (",", ")", ":", "=", "?"))
+        return (first.value if named and first is not None else None), close
+
+    def function_body(self, m: int, arrow: bool, stop: int | None) -> tuple[int, int] | None:
+        """Token range [lo, hi) of the body after a parameter list ending at m - 1: `=> { ... }`, `=> expr`
+        (up to stop, the end of the argument), or `{ ... }`; a TS return-type annotation is skipped."""
+        p = self.p
+        if self.ts and p.is_p(m, ":"):
+            m += 1
+            while p.tok(m) is not None and not p.is_p(m, "=>" if arrow else "{"):
+                if p.is_p(m, ";"):
+                    return None
+                if p.is_opener(m):
+                    close = p.match.get(m)
+                    if close is None:
+                        return None
+                    m = close + 1
+                    continue
+                m += 1
+        if arrow:
+            if not p.is_p(m, "=>"):
+                return None
+            m += 1
+            if not p.is_p(m, "{"):
+                return (m, stop) if stop is not None and stop > m else None
+        if not p.is_p(m, "{"):
+            return None
+        close = p.match.get(m)
+        return None if close is None else (m + 1, close)
+
+    def function_literal(self, s: int, stop: int | None) -> tuple[str | None, int, int] | None:
+        """(first parameter, body lo, body hi) of the function literal at s: `[async] function [*] [name]
+        (...) {...}`, `[async] (...) => ...` or `[async] x => ...`; None for any other form."""
+        p = self.p
+        k = s
+        if p.is_id(k, "async") and not p.is_p(k + 1, "=>"):
+            k += 1
+        if p.is_id(k, "function"):
+            k += 1
+            if p.is_p(k, "*"):
+                k += 1
+            if p.is_id(k):
+                k += 1
+            got = self.params(k)
+            body = None if got is None else self.function_body(got[1] + 1, False, stop)
+            return None if got is None or body is None else (got[0], body[0], body[1])
+        if p.is_id(k) and p.is_p(k + 1, "=>"):
+            body = self.function_body(k + 1, True, stop)
+            return None if body is None else (self.t[k].value, body[0], body[1])
+        got = self.params(k)
+        body = None if got is None else self.function_body(got[1] + 1, True, stop)
+        return None if got is None or body is None else (got[0], body[0], body[1])
+
+    def top_function(self, j: int) -> tuple[str | None, int, int] | None:
+        """The function a depth-0 binding at j names: `function NAME (...)` (j at NAME) or
+        `const|let|var NAME [: T] = <function literal>`."""
+        p = self.p
+        if p.is_id(j - 1, "function"):
+            got = self.params(j + 1)
+            body = None if got is None else self.function_body(got[1] + 1, False, None)
+            return None if got is None or body is None else (got[0], body[0], body[1])
+        if not any(p.is_id(j - 1, kw) for kw in ("const", "let", "var")):
+            return None
+        eq = j + 1
+        if self.ts and p.is_p(eq, ":"):
+            eq = p.skip_type(j + 2, "eq", None)
+        return self.function_literal(eq + 1, None) if p.is_p(eq, "=") else None
+
+    def find_register(self) -> tuple[str, int, int] | None:
+        """(first parameter, body lo, body hi) of the one depth-0 `register` function, or None."""
+        found: list[tuple[str | None, int, int] | None] = []
+        for j, tk in enumerate(self.t):
+            if tk.depth == 0 and tk.kind == "ident" and tk.value == "register" and not self.p.is_p(j - 1, "."):
+                if self.p.is_id(j - 1, "function") or any(self.p.is_id(j - 1, kw) for kw in ("const", "let", "var")):
+                    found.append(self.top_function(j))
+        if len(found) != 1 or found[0] is None or found[0][0] is None:
+            return None
+        name, lo, hi = found[0]
+        return (name, lo, hi) if name is not None else None
+
+    def named_functions(self) -> dict[str, tuple[str | None, int, int] | None]:
+        """Top-level `function NAME` and `const NAME = <function literal>` bindings (None when repeated)."""
+        out: dict[str, tuple[str | None, int, int] | None] = {}
+        for j, tk in enumerate(self.t):
+            if tk.depth != 0 or tk.kind != "ident" or self.p.is_p(j - 1, ".") or self.p.is_p(j - 1, "?."):
+                continue
+            if self.p.is_id(j - 1, "function") or any(self.p.is_id(j - 1, kw) for kw in ("const", "let", "var")):
+                try:
+                    got = self.top_function(j)
+                except _Undecided:
+                    got = None
+                out[tk.value] = None if tk.value in out else got
+        return out
+
+    def enclosing_opener(self, j: int) -> int | None:
+        """Index of the innermost bracket that contains token j."""
+        d = self.t[j].depth
+        for i in range(j - 1, -1, -1):
+            tk = self.t[i]
+            if tk.depth < d - 1:
+                return None
+            if tk.depth == d - 1 and tk.kind == "punct" and tk.value in _OPENERS:
+                return i
+        return None
+
+    def rebinds(self, name: str, lo: int, hi: int) -> bool:
+        """True when `name` is declared again inside [lo, hi): `const|let|var|function|class name`,
+        `name =>`, a destructuring declaration, or a parameter of a nested function or catch clause.
+        Native refuses that shadowing with its own message (probe e-shadow-inner); the scan then decides nothing."""
+        p, t = self.p, self.t
+        for j in range(lo, hi):
+            tk = t[j]
+            if tk.kind != "ident" or tk.value != name or p.is_p(j - 1, ".") or p.is_p(j - 1, "?."):
+                continue
+            if any(p.is_id(j - 1, kw) for kw in ("const", "let", "var", "function", "class")) or p.is_p(j + 1, "=>"):
+                return True
+            o = self.enclosing_opener(j)
+            if o is None:
+                continue
+            if t[o].value == "(":
+                close = p.match.get(o)
+                if close is not None and (p.is_p(close + 1, "=>") or (self.ts and p.is_p(close + 1, ":"))):
+                    return True
+                if p.is_id(o - 1, "function") or p.is_id(o - 1, "catch") or (p.is_id(o - 1) and p.is_id(o - 2, "function")):
+                    return True
+                if close is not None and p.is_id(o - 1) and p.is_p(close + 1, "{"):
+                    return True  # method shorthand `name(on) { ... }`
+            elif any(p.is_id(o - 1, kw) for kw in ("const", "let", "var")):
+                return True
+        return False
+
+    def check_registrations(self) -> None:
+        """C1 on the event of every `on(...)` inside register, C5 on the `$` of every hook it registers."""
+        reg = self.find_register()
+        if reg is None:
+            return
+        on_name, lo, hi = reg
+        if self.rebinds(on_name, lo, hi):
+            return
+        p, t = self.p, self.t
+        named: dict[str, tuple[str | None, int, int] | None] | None = None
+        seen: set[tuple[int, str]] = set()
+        for j in range(lo, hi):
+            tk = t[j]
+            if tk.kind != "ident" or tk.value != on_name or not p.is_p(j + 1, "("):
+                continue
+            if p.is_p(j - 1, ".") or p.is_p(j - 1, "?.") or p.is_id(j - 1, "function"):
+                continue
+            close = p.match.get(j + 1)
+            if close is None:
+                continue
+            args = self.split(j + 2, close, t[j + 1].depth + 1)
+            if len(args) < 2:
+                continue  # `on(event)` alone has its own native message (probe e-no-hook)
+            s, e = args[0]
+            if e - s == 1 and t[s].kind == "str" and not t[s].value.startswith(_ESCAPED_STRING_MARK):
+                problem = _event_problem(t[s].value)
+                if problem is not None:
+                    self.findings.append(BodyFinding("C1", tk.line, problem))
+            hs, he = args[-1]
+            hook = self.function_literal(hs, he)
+            if hook is not None and hook[2] > he:
+                continue
+            if hook is None and he - hs == 1 and t[hs].kind == "ident":
+                named = self.named_functions() if named is None else named
+                hook = named.get(t[hs].value)
+            if hook is None or hook[0] is None or self.rebinds(hook[0], hook[1], hook[2]):
+                continue
+            for m in range(hook[1], hook[2]):
+                use = t[m]
+                if use.kind != "ident" or use.value != hook[0] or p.is_p(m - 1, ".") or p.is_p(m - 1, "?."):
+                    continue
+                problem = None if self.in_jsx_text(m) else self.dollar_problem(m)
+                if problem is not None and (use.line, problem) not in seen:
+                    seen.add((use.line, problem))
+                    self.findings.append(BodyFinding("C5", use.line, problem))
+
+    def dollar_problem(self, j: int) -> str | None:
+        """The native C5 sentence for the use of a hook's `$` at token j, or None when native accepts it
+        (`$.noun.method(...)`, `$.plugin.name`, `$.plugin.root`, `h($)`, `($).fs...`) or the form is unprobed."""
+        p, t = self.p, self.t
+        prev, nxt = p.tok(j - 1), p.tok(j + 1)
+        if prev is not None and prev.kind == "ident" and prev.value not in _KEYWORDS_BEFORE_VALUE and not self.t[j].nl:
+            return None  # `word $` is no code: JSX text or prose (catalogue dev slice, context-lens)
+        if nxt is not None and nxt.kind == "punct" and nxt.value in ("[", "?."):
+            return "a computed or optional member access on $"  # d-computed-root, d-optional-root (p10)
+        if self.ts and prev is not None and prev.kind == "ident" and prev.value == "typeof":
+            return None  # `typeof $` may stand in a TS type, which the compile erases
+        if p.is_p(j + 1, "."):
+            noun = p.tok(j + 2)
+            if noun is None or noun.kind != "ident":
+                return None
+            if noun.value == "plugin":
+                if p.is_p(j + 3, ".") and p.is_id(j + 4) and t[j + 4].value in ("name", "root"):
+                    return None
+                return "$.plugin is used other than as $.plugin.name or $.plugin.root"  # d-plugin-noun
+            if self.ts and (p.is_p(j + 3, "!") or p.is_id(j + 3, "as") or p.is_id(j + 3, "satisfies")):
+                return None
+            if not p.is_p(j + 3, "."):
+                # d-alias-noun (p09), d-optional-noun, d-computed-method, d-pass-noun, d-await-noun
+                return f"$.{noun.value} is used as a value (a noun of $ bound, passed or read)"
+            method, call = p.tok(j + 4), p.tok(j + 5)
+            if method is None or method.kind != "ident" or p.is_p(j + 5, "("):
+                return None
+            if call is not None and (
+                call.kind == "tmpl"
+                or (self.ts and ((call.kind == "punct" and call.value in ("<", "!")) or (call.kind == "ident" and call.value in ("as", "satisfies"))))
+            ):
+                return None
+            # d-method-ref, d-optional-call, d-bind, d-noun-method-member
+            return f"$.{noun.value}.{method.value} is used as a value (an event of $ bound, passed or read) instead of called"
+        if prev is None or nxt is None:
+            return None
+        if prev.kind == "punct" and prev.value == "(" and nxt.kind == "punct" and nxt.value == ")":
+            return None  # `h($)` (p31) and `($).fs.read()` (d-paren-root) pass
+        if nxt.kind == "ident" and nxt.value in ("as", "satisfies"):
+            return None
+        binary = ("===", "!==", "==", "!=")
+        if (nxt.kind == "punct" and nxt.value in binary) or (prev.kind == "punct" and prev.value in binary) or (
+            prev.kind == "ident" and prev.value in ("in", "instanceof")
+        ):
+            return "$ itself is used in a BinaryExpression (bound, passed, spread, returned or read)"  # d-in-root, d-eq-root
+        if prev.kind == "punct" and prev.value == "=":
+            o = self.enclosing_opener(j)
+            if o is not None and t[o].value == "(":
+                return None  # a default parameter or a parenthesised assignment: unprobed
+            if self.declares(j - 1):
+                return "$ itself is bound to a name (bound, passed, spread, returned or read)"  # d-alias-bare, d-destructure
+            return "$ itself is assigned (bound, passed, spread, returned or read)"  # d-let-bare
+        if prev.kind == "ident" and prev.value == "return":
+            return "$ itself is returned (bound, passed, spread, returned or read)"  # d-return-root
+        if prev.kind == "punct" and prev.value == "...":
+            return "$ itself is spread (bound, passed, spread, returned or read)"  # d-root-spread
+        if not self.ts and prev.kind == "ident" and prev.value == "typeof":
+            return "$ itself is used in a UnaryExpression (bound, passed, spread, returned or read)"  # d-typeof-root
+        o = self.enclosing_opener(j)
+        if o is None or not (nxt.kind == "punct" and nxt.value in (",", "}", "]")):
+            return None
+        if t[o].value == "{" and prev.kind == "punct" and prev.value == ":":
+            key, before = p.tok(j - 2), p.tok(j - 3)
+            if key is not None and key.kind in ("ident", "str") and before is not None and before.kind == "punct" and before.value in ("{", ","):
+                return "$ itself is put in an object (bound, passed, spread, returned or read)"  # d-obj-root
+        if t[o].value == "[" and prev.kind == "punct" and prev.value in ("[", ","):
+            before = p.tok(o - 1)
+            if before is None or (before.kind == "punct" and before.value not in (")", "]")) or (
+                before.kind == "ident" and before.value == "return"
+            ):
+                return "$ itself is put in an array (bound, passed, spread, returned or read)"  # d-arr-root
+        return None
+
+    def declares(self, eq: int) -> bool:
+        """True when the `=` at eq ends the binding of a `const|let|var` declaration."""
+        d = self.t[eq].depth
+        for i in range(eq - 1, max(eq - 64, -1), -1):
+            tk = self.t[i]
+            if tk.depth < d or (tk.depth == d and tk.kind == "punct" and tk.value in (";", "=", ",")):
+                return False
+            if tk.depth == d and tk.kind == "ident" and tk.value in ("const", "let", "var"):
+                return True
+        return False
+
+    # -- C6: $.state references with literal plugin and key --------------
+    def claude_code_imports(self) -> dict[str, str]:
+        """Local name -> imported name for `import { atom, update as up } from "claude-code"`."""
+        p, t, out = self.p, self.t, {}
+        for j, tk in enumerate(t):
+            if tk.depth != 0 or tk.kind != "ident" or tk.value != "import" or p.is_p(j - 1, "."):
+                continue
+            k = j + 1
+            if p.is_id(k) and p.is_p(k + 1, ","):
+                k += 2
+            close = p.match.get(k) if p.is_p(k, "{") else None
+            spec = None if close is None else p.tok(close + 2)
+            if close is None or not p.is_id(close + 1, "from") or spec is None or spec.kind != "str" or spec.value != "claude-code":
+                continue
+            for s, e in self.split(k + 1, close, t[k].depth + 1):
+                if e - s == 1 and t[s].kind == "ident":
+                    out[t[s].value] = t[s].value
+                elif e - s == 3 and t[s].kind == "ident" and p.is_id(s + 1, "as") and t[s + 2].kind == "ident":
+                    out[t[s + 2].value] = t[s].value
+        return out
+
+    def ref_literal(self, s: int, e: int) -> tuple[str, str] | None:
+        """(plugin, key) of the argument [s, e) when it is `{ plugin: "p", key: "k" [, id: x] }`,
+        optionally followed by TS `as const`; None for any other shape."""
+        p, t = self.p, self.t
+        close = p.match.get(s) if p.is_p(s, "{") else None
+        if close is None or not (close == e - 1 or (close == e - 3 and p.is_id(e - 2, "as") and p.is_id(e - 1, "const"))):
+            return None
+        fields: dict[str, tuple[int, int]] = {}
+        for a, b in self.split(s + 1, close, t[s].depth + 1):
+            key = t[a].value if t[a].kind in ("ident", "str") else None
+            if b - a < 3 or not p.is_p(a + 1, ":") or key not in ("plugin", "key", "id") or key in fields:
+                return None
+            fields[key] = (a + 2, b)
+        if "plugin" not in fields or "key" not in fields:
+            return None
+        values = []
+        for name in ("plugin", "key"):
+            a, b = fields[name]
+            if b - a != 1 or t[a].kind != "str" or t[a].value.startswith(_ESCAPED_STRING_MARK):
+                return None
+            values.append(t[a].value)
+        return values[0], values[1]
+
+    def collect_state_refs(self) -> None:
+        """C6, native (p11b, p12d, probes s-*): every reference whose plugin and key are string literals,
+        given to `$.state.get|set` or to `atom`/`memberOf` (first argument) or `read`/`update` (second
+        argument) imported from "claude-code", written there or in a top-level const, is listed."""
+        p, t = self.p, self.t
+        imports = self.claude_code_imports()
+        consts: dict[str, tuple[str, str] | None] = {}
+        for j, tk in enumerate(t):
+            if tk.depth == 0 and tk.kind == "ident" and tk.value == "const" and p.is_id(j + 1) and p.is_p(j + 2, "="):
+                end = p.scan_decl_end(j + 3)
+                name = t[j + 1].value
+                consts[name] = None if name in consts else self.ref_literal(j + 3, end)
+        for j, tk in enumerate(t):
+            if tk.kind != "ident" or not p.is_p(j + 1, "("):
+                continue
+            member = p.is_p(j - 1, ".") or p.is_p(j - 1, "?.")
+            if member and tk.value in ("get", "set") and p.is_id(j - 2, "state") and p.is_p(j - 3, "."):
+                index = 0
+            elif not member and not p.is_id(j - 1, "function") and imports.get(tk.value) in ("atom", "memberOf"):
+                index = 0
+            elif not member and not p.is_id(j - 1, "function") and imports.get(tk.value) in ("read", "update"):
+                index = 1
+            else:
+                continue
+            close = p.match.get(j + 1)
+            args = [] if close is None else self.split(j + 2, close, t[j + 1].depth + 1)
+            if len(args) <= index:
+                continue
+            s, e = args[index]
+            ref = self.ref_literal(s, e)
+            if ref is None and e - s == 1 and t[s].kind == "ident":
+                ref = consts.get(t[s].value)
+            if ref is not None:
+                self.state_refs.append(StateRef(ref[0], ref[1], tk.line))
+
+    # -- C8: the module of each Client element ---------------------------
+    def collect_clients(self) -> None:
+        """C8, native (p56, p57, probes c-*): native reads the `module` of every `Client({ ... })` call,
+        bare or as a member (c-member, c-local-fn), and of every JSX `<Client module="...">` (c-jsx-*)."""
+        p, t = self.p, self.t
+        for j, tk in enumerate(t):
+            if tk.kind != "ident" or tk.value != "Client":
+                continue
+            if p.is_p(j + 1, "(") and not (p.is_id(j - 1, "new") or p.is_id(j - 1, "function")):
+                close = p.match.get(j + 1)
+                args = [] if close is None else self.split(j + 2, close, t[j + 1].depth + 1)
+                if not args or not p.is_p(args[0][0], "{") or p.match.get(args[0][0]) != args[0][1] - 1:
+                    continue
+                o = args[0][0]
+                for a, b in self.split(o + 1, args[0][1] - 1, t[o].depth + 1):
+                    if b - a == 3 and t[a].kind in ("ident", "str") and t[a].value == "module" and p.is_p(a + 1, ":"):
+                        self.add_client(t[a + 2])
+            elif self.jsx and p.is_p(j - 1, "<"):
+                m = j + 1
+                while m < len(t) and t[m].depth == tk.depth and not (p.is_p(m, ">") or p.is_p(m, "/>")):
+                    if p.is_opener(m):
+                        m = p.match.get(m, m) + 1
+                        continue
+                    if p.is_id(m, "module") and p.is_p(m + 1, "=") and m + 2 < len(t):
+                        self.add_client(t[m + 2])
+                    m += 1
+
+    def add_client(self, value: Tok) -> None:
+        if value.kind == "str" and not value.value.startswith(_ESCAPED_STRING_MARK):
+            self.clients.append(ClientModule(value.value, value.line))
+
+    # -- JSX text: words between tags are no code -------------------------
+    def in_jsx_text(self, j: int) -> bool:
+        """True when token j is JSX text (a child of an element that is neither `{...}` nor an element)."""
+        if not self.jsx:
+            return False
+        if self._jsx_text is None:
+            mask: set[int] = set()
+            i = 0
+            while i < len(self.t):
+                i = self.jsx_element(i, mask) if self.jsx_opens(i, in_children=False) else i + 1
+            self._jsx_text = mask
+        return j in self._jsx_text
+
+    def jsx_opens(self, i: int, in_children: bool) -> bool:
+        """`<` that opens an element or fragment: followed by a name or `>`, and, outside JSX children,
+        standing where an expression starts (never `a < b` or TS `f<T>()`)."""
+        p = self.p
+        nxt = p.tok(i + 1)
+        if not p.is_p(i, "<") or nxt is None or not (nxt.kind == "ident" or (nxt.kind == "punct" and nxt.value == ">")):
+            return False
+        if in_children:
+            return True
+        prev = p.tok(i - 1)
+        if prev is None:
+            return True
+        if prev.kind == "punct":
+            return prev.value in ("(", ",", "=", ":", "?", "[", "{", "=>", "&&", "||", "??", "!")
+        return prev.kind == "ident" and prev.value in ("return", "yield", "default", "case", "else", "do", "await")
+
+    def jsx_element(self, i: int, mask: set[int]) -> int:
+        """Skip the element whose `<` is at i, adding its text children to mask; returns the index after it."""
+        p, t, n = self.p, self.t, len(self.t)
+        d = t[i].depth
+        m = i + 1
+        if not p.is_p(m, ">"):
+            while m < n and not (t[m].depth == d and t[m].kind == "punct" and t[m].value in (">", "/>")):
+                if t[m].depth < d:
+                    return m
+                m = p.match.get(m, m) + 1 if p.is_opener(m) else m + 1
+            if m >= n or t[m].value == "/>":
+                return m + 1
+        m += 1
+        while m < n:
+            tk = t[m]
+            if tk.depth < d:
+                return m
+            if tk.depth == d and tk.kind == "punct" and tk.value == "</":
+                while m < n and not (t[m].depth == d and t[m].kind == "punct" and t[m].value == ">"):
+                    m += 1
+                return m + 1
+            if tk.depth == d and self.jsx_opens(m, in_children=True):
+                m = self.jsx_element(m, mask)
+                continue
+            if tk.kind == "punct" and tk.value == "{":
+                m = p.match.get(m, m) + 1
+                continue
+            mask.add(m)
+            m += 1
+        return m
+
 
 def scan_module_body(source: str, suffix: str) -> BodyScan:
-    """Statically apply the module-body rules C2, C3, C4 and C9 to a hooks module source.
+    """Statically apply the module-body rules C1-C5, C9 to a hooks module source and collect the
+    $.state references (C6) and Client modules (C8) the caller checks against files on disk.
     suffix selects TS erasure (.ts .tsx .mts .cts) and JSX lexing (.jsx .tsx), as for the register scan."""
     ts = suffix in TS_SUFFIXES
     jsx = suffix in JSX_SUFFIXES
     try:
         lexer = _Lexer(_strip_prelude(source), jsx, max_depth=_BODY_MAX_BRACKET_DEPTH)
         toks = lexer.run(in_template=False)
-        scanner = _BodyScanner(toks, lexer.match, ts)
+        scanner = _BodyScanner(toks, lexer.match, ts, jsx)
         scanner.run()
     except _TooDeep as exc:
         # C9, native (p44): `code nested too deep to scan: more than 2000 scopes (functions, blocks,
@@ -1387,4 +1941,169 @@ def scan_module_body(source: str, suffix: str) -> BodyScan:
         return BodyScan((BodyFinding("C9", exc.line, _SCOPE_LIMIT_MESSAGE),), ())
     except (_Undecided, RecursionError):
         return BodyScan((), ())
-    return BodyScan(tuple(scanner.findings), tuple(scanner.relative))
+    return BodyScan(
+        tuple(scanner.findings), tuple(scanner.relative), tuple(scanner.state_refs), tuple(scanner.clients)
+    )
+
+
+# ---------------------------------------------------------------------------
+# The types contract (TRDD-29QP66H2 batch 2: C6 declarations, C7 exports)
+#
+# The manifest `types` names a .d.ts contract. Native 2.1.332 reads it token by
+# token, never as TypeScript (probe t-export-multiline: `export` and `type` on
+# two lines pass). Same contract as the module scan: pure, never executes,
+# never opens another file, and anything unread decides nothing.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TypesContract:
+    """What a types contract holds. exports: (line, the token after it) for every top-level `export`
+    not followed by `type` or `interface` (C7). state: plugin -> the keys `interface PluginState`
+    declares for it, or None when an entry could not be read. state_known: False when a PluginState
+    lies outside `declare module "claude-code"`, extends another type, or the file did not lex; C6
+    then decides nothing."""
+
+    exports: tuple[tuple[int, str], ...]
+    state: tuple[tuple[str, frozenset[str] | None], ...]
+    state_known: bool
+
+
+def _type_members(t: list[Tok], match: dict[int, int], o: int) -> list[tuple[str | None, int, int]] | None:
+    """Members of the object type `{ ... }` at token o, as (key, value start, value end). An index
+    signature `[k: T]: V` gives key None (native counts it as no key: probe s-index-sig). None when a
+    member is not a plain `[readonly] key[?]: T` or method `key(...)` (a mapped or computed key, an
+    accessor, an escaped string key, a line the reader cannot place)."""
+    close = match.get(o)
+    if close is None:
+        return None
+    d = t[o].depth + 1
+
+    def member_head(i: int) -> tuple[str | None, int] | None:
+        """(key, index after the key and its `?`) when a member starts at i."""
+        if t[i].kind == "punct" and t[i].value == "[":
+            end = match.get(i)
+            if end is None or not (i + 2 < close and t[i + 1].kind == "ident" and t[i + 2].value == ":"):
+                return None
+            return (None, end + 1) if t[end + 1].value == ":" else None
+        if t[i].kind == "ident" and t[i].value == "readonly" and t[i + 1].kind in ("ident", "str"):
+            i += 1
+        key = t[i]
+        if key.kind not in ("ident", "str", "num") or key.value.startswith(_ESCAPED_STRING_MARK):
+            return None
+        k = i + 1
+        if t[k].kind == "punct" and t[k].value == "?":
+            k += 1
+        if t[k].kind == "punct" and t[k].value in (":", "(", "<"):
+            return key.value, k
+        return None
+
+    out: list[tuple[str | None, int, int]] = []
+    i = o + 1
+    while i < close:
+        if t[i].kind == "punct" and t[i].value in (";", ","):
+            i += 1
+            continue
+        head = member_head(i)
+        if head is None:
+            return None
+        key, k = head
+        start = k + 1 if t[k].value == ":" else k
+        m = start
+        while m < close:
+            tk = t[m]
+            if tk.depth == d and tk.kind == "punct" and tk.value in (";", ","):
+                break
+            if tk.depth == d and tk.nl and m > start:
+                if tk.kind in ("ident", "str") or (tk.kind == "punct" and tk.value == "["):
+                    if member_head(m) is not None:
+                        break
+                    if tk.kind != "punct" and not (t[m - 1].kind == "punct" and t[m - 1].value in ("|", "&", "=>", ":", "?", "<", ",", "=")):
+                        return None  # a new line the reader cannot place: decide nothing
+            if tk.kind == "punct" and tk.value in _OPENERS:
+                end = match.get(m)
+                if end is None:
+                    return None
+                m = end + 1
+                continue
+            m += 1
+        out.append((key, start, m))
+        i = m
+    return out
+
+
+def scan_types_contract(source: str) -> TypesContract:
+    """Read a mod's types contract (.d.ts) lexically: the C7 exports and the C6 PluginState keys."""
+    try:
+        lexer = _Lexer(_strip_prelude(source), False, max_depth=_BODY_MAX_BRACKET_DEPTH)
+        t = lexer.run(in_template=False)
+    except (_Undecided, RecursionError):
+        return TypesContract((), (), False)
+    match = lexer.match
+    p = _Parser(t, match, Counter(), True)
+    exports: list[tuple[int, str]] = []
+    state: dict[str, frozenset[str] | None] = {}
+    known = True
+    for j, tk in enumerate(t):
+        if tk.kind != "ident" or p.is_p(j - 1, "."):
+            continue
+        if tk.value == "export" and tk.depth == 0:
+            nxt = p.tok(j + 1)
+            if nxt is None or not (nxt.kind == "ident" and nxt.value in ("type", "interface")):
+                # C7, native (p12, p15, probes t-*): `export` at the top level is followed by `type` or `interface`
+                exports.append((tk.line, "" if nxt is None else nxt.value))
+        if tk.value != "interface" or not p.is_id(j + 1, "PluginState"):
+            continue
+        holder = None
+        for i in range(j - 1, -1, -1):
+            if t[i].depth == tk.depth - 1 and t[i].kind == "punct" and t[i].value == "{":
+                holder = i
+                break
+        in_module = (
+            holder is not None
+            and holder >= 3
+            and p.is_id(holder - 3, "declare")
+            and p.is_id(holder - 2, "module")
+            and t[holder - 1].kind == "str"
+            and t[holder - 1].value == "claude-code"
+            and t[holder].depth == 0
+        )
+        members = _type_members(t, match, j + 2) if in_module and p.is_p(j + 2, "{") else None
+        if members is None:
+            known = False
+            continue
+        for plugin, s, e in members:
+            if plugin is None:
+                continue
+            keys = None
+            if t[s].kind == "punct" and t[s].value == "{" and match.get(s) == e - 1:
+                inner = _type_members(t, match, s)
+                keys = None if inner is None else frozenset(k for k, _, _ in inner if k is not None)
+            old = state.get(plugin, frozenset())
+            state[plugin] = None if keys is None or old is None else old | keys
+    return TypesContract(tuple(exports), tuple(sorted(state.items())), known)
+
+
+def undeclared_state_refs(refs: tuple[StateRef, ...], plugin_name: str, contract_source: str | None) -> list[StateRef] | None:
+    """C6, native (p11b, p12d, probes s-*): the references of this plugin (other plugins' are never
+    checked, probe s-other-plugin) whose key its types contract does not declare, one per plugin.key.
+    contract_source None means the manifest names no `types`: every reference is undeclared (s-atom-no-types).
+    None when the contract cannot be read (C6 then decides nothing); a plugin entry the reader could
+    not parse decides nothing for its own references."""
+    own = [r for r in refs if r.plugin == plugin_name]
+    if not own:
+        return []
+    declared: dict[str, frozenset[str] | None] = {}
+    if contract_source is not None:
+        contract = scan_types_contract(contract_source)
+        if not contract.state_known:
+            return None
+        declared = dict(contract.state)
+    out: list[StateRef] = []
+    seen: set[str] = set()
+    for ref in own:
+        keys = declared.get(ref.plugin, frozenset())
+        if keys is not None and ref.key not in keys and ref.key not in seen:
+            seen.add(ref.key)
+            out.append(ref)
+    return out

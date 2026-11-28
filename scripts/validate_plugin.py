@@ -72,6 +72,7 @@ if __name__ in ("__main__", "__mp_main__"):
 
 from cpv_dependency_schema import validate_dependency_element
 from cpv_lint_engine import lint_repo as run_lint_engine
+from cpv_mod_register_scan import scan_types_contract
 from cpv_validation_common import (
     COLORS,
     ValidationReport,
@@ -1848,6 +1849,29 @@ def validate_manifest(
                         "(plugins-manifest-reference.md:146)",
                         ".claude-plugin/plugin.json",
                     )
+                else:
+                    # C7 (TRDD-29QP66H2 batch 2), native 2.1.332 (p12, p15, p16, probes t-* of batch 2):
+                    # every top-level `export` of the contract is followed by `type` or `interface`; the
+                    # check reads tokens, not TypeScript (t-export-multiline passes). Only the contract the
+                    # manifest names is held to it: a default ./types/index.d.ts is not (s3-default-contract-c7).
+                    try:
+                        _types_text = (
+                            _types_resolved.read_bytes().decode("utf-8")
+                            if _types_resolved.stat().st_size <= 2 * 1024 * 1024
+                            else None
+                        )
+                    except UnicodeDecodeError:
+                        _types_text = None
+                    for _export_line, _export_word in (
+                        scan_types_contract(_types_text).exports if _types_text is not None else ()
+                    ):
+                        report.major(
+                            f"Field 'types' contract {_types_val}, line {_export_line}: `export` at the top level is "
+                            "followed by `type` or `interface`: a contract exports types and nothing else "
+                            f"(got `export {_export_word}`; TRDD-29QP66H2, oracle-derived from Claude Code 2.1.332)",
+                            _types_val.removeprefix("./"),
+                            _export_line,
+                        )
 
     # Inline `userConfig` validation was removed here (v2.106): it duplicated
     # `validate_user_config_structure()` (called below at the end of this
