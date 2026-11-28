@@ -53,6 +53,23 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
+
+# #256: never read or write bytecode in a process that runs the integrity check. A
+# __pycache__/*.pyc whose header matches the verified .py is loaded INSTEAD of it, so a
+# planted pyc runs unverified code while verify_self_integrity() passes (and a pyc for the
+# verifier itself makes the check pass for a tampered source). This block must stay inline
+# and run before the first CPV import: a shared helper would itself be loaded from a pyc.
+# Pointing the prefix at this file (an existing regular file, absolute so a changed working
+# directory cannot matter) makes every cache read fail with OSError, so every module is
+# compiled from source; no trusted cache directory is introduced. The environment copies
+# reach child interpreters. Gated so that tests importing this module leave their own
+# process untouched.
+if __name__ in ("__main__", "__mp_main__"):
+    sys.dont_write_bytecode = True
+    sys.pycache_prefix = os.path.abspath(__file__)
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+    os.environ["PYTHONPYCACHEPREFIX"] = os.path.abspath(__file__)
+
 from cpv_dependency_schema import validate_dependency_element
 from cpv_lint_engine import lint_repo as run_lint_engine
 from cpv_validation_common import (

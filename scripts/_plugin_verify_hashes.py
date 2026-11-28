@@ -37,6 +37,11 @@ Behavior:
        against the manifest of its exact release tag, only for the files the
        wheel ships, and REFUSES likewise; so does a root that is neither a
        wheel nor a plugin.
+    5. Bytecode (issue #256): the walk skips `__pycache__/*.pyc`, which is sound
+       only because the entry points that run this check never read or write
+       bytecode (the no-bytecode block below the imports, in validate_plugin.py,
+       validate_marketplace.py, remote_validation.py and cli.py). A sourceless
+       `.pyc` / `.pyo` / `.pyd` outside `__pycache__` is reported as an added file.
 
 Every CPV validator entry point (`validate_security.py`,
 `validate_plugin.py`, `validate_skill.py`, `validate_marketplace.py`,
@@ -68,6 +73,22 @@ from http.client import HTTPException
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
+
+# #256: never read or write bytecode in a process that runs the integrity check. A
+# __pycache__/*.pyc whose header matches the verified .py is loaded INSTEAD of it, so a
+# planted pyc runs unverified code while verify_self_integrity() passes (and a pyc for the
+# verifier itself makes the check pass for a tampered source). This block must stay inline
+# and run before the first CPV import: a shared helper would itself be loaded from a pyc.
+# Pointing the prefix at this file (an existing regular file, absolute so a changed working
+# directory cannot matter) makes every cache read fail with OSError, so every module is
+# compiled from source; no trusted cache directory is introduced. The environment copies
+# reach child interpreters. Gated so that tests importing this module leave their own
+# process untouched.
+if __name__ in ("__main__", "__mp_main__"):
+    sys.dont_write_bytecode = True
+    sys.pycache_prefix = os.path.abspath(__file__)
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+    os.environ["PYTHONPYCACHEPREFIX"] = os.path.abspath(__file__)
 
 REPO_OWNER = "Emasoft"
 REPO_NAME = "claude-plugins-validation"
@@ -778,6 +799,9 @@ def _detect_added_wheel_files(site_packages: Path, expected: set[str]) -> list[s
     The plugin-mode `_SHIPPED_WALK_SKIP_DIRS` is deliberately NOT reused: it
     skips `build`, `dist`, `reports`, ..., which would let
     `scripts/build/evil.py` hide.
+
+    Skipping `__pycache__/*.pyc` is sound only because the entry points never
+    read or write bytecode (issue #256); see the no-bytecode blocks there.
     """
     added: list[str] = []
     for top in _WHEEL_TOP_DIRS:

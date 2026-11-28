@@ -217,6 +217,21 @@ _COMMANDS: dict[str, str] = {
 
 
 def main() -> int:
+    # #256: never read or write bytecode in a process that runs the integrity check. A
+    # __pycache__/*.pyc whose header matches the verified .py is loaded INSTEAD of it, so a
+    # planted pyc runs unverified code while the integrity check passes (and a pyc for the
+    # verifier itself makes the check pass for a tampered source). This block must stay inline
+    # and run before the first CPV import: a shared helper would itself be loaded from a pyc.
+    # Pointing the prefix at this file (an existing regular file, absolute so a changed working
+    # directory cannot matter) makes every cache read fail with OSError, so every module is
+    # compiled from source; no trusted cache directory is introduced. The environment copies
+    # reach child interpreters (the validator this launcher dispatches to, spawn workers).
+    # Not gated on __name__: under the wheel console script this runs as scripts.remote_validation.
+    sys.dont_write_bytecode = True
+    sys.pycache_prefix = os.path.abspath(__file__)
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+    os.environ["PYTHONPYCACHEPREFIX"] = os.path.abspath(__file__)
+
     # Bound the run before anything else (#190). This is the process the
     # reporter found orphaned at ppid=1, 3h and 11h old — `cpv-remote-validate`
     # is the launcher, so the budget has to start here and not only in the

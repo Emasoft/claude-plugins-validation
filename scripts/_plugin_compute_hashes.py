@@ -233,8 +233,13 @@ _SHIPPED_WALK_SKIP_DIRS = frozenset(
 # Runtime / OS cruft that can appear inside an install dir but is never a
 # shipped (git-tracked) file. Excluded from the non-git walk so the manifest
 # never hashes them AND verify_self_integrity's added-file detection never
-# false-flags a developer's `.DS_Store` or a stray `.pyc` as an inoculated
-# file. The git path needs no such list — `git ls-files` excludes them.
+# false-flags a developer's `.DS_Store` as an inoculated file. The git path
+# needs no such list — `git ls-files` excludes them. NOT listed on purpose
+# (#256): `.pyc`, `.pyo`, `.pyd`. A sourceless `scripts/x.pyc` (or a native
+# `.pyd`) beside the sources is importable code, so it must surface as an added
+# file, as the wheel check already does; the caches Python itself writes live
+# under `__pycache__/`, which the walk skips as a directory, and the entry
+# points never read them (see the #256 blocks in the validators).
 #
 # `.orphaned_at` (GitHub issue #70-C): the Claude Code plugin-cache HOST — NOT
 # CPV — drops this marker into a `<cache>/<plugin>/<version>/` dir once a newer
@@ -247,7 +252,7 @@ _SHIPPED_WALK_SKIP_DIRS = frozenset(
 # agent / hook is still caught (proved by the scoped-fix test). Same family as
 # the closed #66 `.in_use` PID-lock fix.
 _RUNTIME_CRUFT_BASENAMES = frozenset({".DS_Store", "Thumbs.db", "desktop.ini", ".orphaned_at"})
-_RUNTIME_CRUFT_SUFFIXES = (".pyc", ".pyo", ".pyd", ".swp", ".swo", ".swn", ".orig", ".bak", ".tmp")
+_RUNTIME_CRUFT_SUFFIXES = (".swp", ".swo", ".swn", ".orig", ".bak", ".tmp")
 
 
 def _is_runtime_cruft(rel_path: str) -> bool:
