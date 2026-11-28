@@ -343,11 +343,16 @@ def _big_doc(n_blocks: int, risky: bool) -> str:
 
 
 def _best_of_3(content: str, root: Path) -> float:
+    # CPU time of this process, not wall time: the check is a single in-process
+    # call, and quadratic growth is CPU work, so process_time still catches it.
+    # Wall time also counts the time other processes hold the CPU. In the v5.29.1
+    # publish gate (parallel xdist under host load) it measured 0.126 s vs
+    # 1.277 s, a 10x ratio with no change to the code, and blocked the release.
     best = float("inf")
     for _ in range(3):
-        t0 = time.perf_counter()
+        t0 = time.process_time()
         guard.inplugin_script_write_findings(content, _DOC, root)
-        best = min(best, time.perf_counter() - t0)
+        best = min(best, time.process_time() - t0)
     return best
 
 
