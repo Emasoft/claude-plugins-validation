@@ -4,6 +4,7 @@ inventory plus the three risky shapes. Every MAJOR rule is tested two-sided."""
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from cpv_mod_capabilities import (  # noqa: E402
     Finding,
     scan_mod_capabilities,
 )
+from validate_hook import HookValidationReport, validate_hooks_data  # noqa: E402
 
 # Probe fixture p37-env-set of the mods gap evidence, verbatim.
 P37 = r"""export function register(on) {
@@ -48,8 +50,13 @@ def majors(findings: list[Finding]) -> list[Finding]:
     return [f for f in findings if f.severity == "major"]
 
 
+def flagged(findings: list[Finding]) -> list[Finding]:
+    """Every finding above INFO: MAJOR and WARNING."""
+    return [f for f in findings if f.severity != "info"]
+
+
 def rules(findings: list[Finding]) -> list[str]:
-    return [f.rule for f in majors(findings)]
+    return [f.rule for f in flagged(findings)]
 
 
 def inventory(findings: list[Finding]) -> str:
@@ -72,6 +79,7 @@ def test_p37_env_set_path_is_major_and_inventory_matches_native(tmp_path: Path) 
     findings = scan(tmp_path, P37)
     assert rules(findings) == [RULE_ENV_LOADER]
     assert majors(findings)[0].line == 2
+    assert majors(findings)[0].severity == "major"
     text = inventory(findings)
     assert "calls: $.env.set, $.http.fetch, $.process.run" in text
     assert "hooks: session.start" in text
@@ -134,7 +142,9 @@ def test_gate_awaiting_without_catch_is_major(tmp_path: Path, event: str) -> Non
     """A gating hook that awaits and has no catch fails open: MAJOR."""
     findings = scan(tmp_path, gate(event, "{ const r = await $.http.fetch(e.url); return next(e) }"))
     assert rules(findings) == [RULE_GATE_OPEN]
-    assert majors(findings)[0].line == 2
+    assert flagged(findings)[0].line == 2
+    # Sweep result: accepted catalogue modules carry this shape in volume, so it is a WARNING.
+    assert flagged(findings)[0].severity == "warning"
 
 
 @pytest.mark.parametrize(
@@ -149,7 +159,7 @@ def test_gate_awaiting_without_catch_is_major(tmp_path: Path, event: str) -> Non
 )
 def test_gate_with_catch_or_nothing_awaited_is_not_major(tmp_path: Path, body: str) -> None:
     """.catch, try/catch, or a handler that awaits nothing (p00 shape) is not MAJOR."""
-    assert majors(scan(tmp_path, gate("tool.call", body))) == []
+    assert flagged(scan(tmp_path, gate("tool.call", body))) == []
 
 
 def test_p00_pass_through_gate_is_not_major(tmp_path: Path) -> None:
@@ -165,9 +175,32 @@ def test_gate_try_finally_without_catch_is_major(tmp_path: Path) -> None:
     assert rules(scan(tmp_path, gate("tool.check", body))) == [RULE_GATE_OPEN]
 
 
+def test_gate_with_chained_catch_on_the_registration_is_not_major(tmp_path: Path) -> None:
+    """Sweep defect: `on(...).catch(handler)` registers the hook error handler (316 of 1003
+    flagged accepted-catalogue hooks in the dev split). Only the catch chained directly onto
+    the on(...) call counts: another hook's chained catch, or a chained finally, does not."""
+    body = "{ const r = await $.http.fetch(e.url); return next(e) }"
+    chained = f"""export function register(on) {{
+  on("tool.call", async ($, e, next) => {body}).catch(($, e, next) => ({{ deny: "failed" }}))
+}}
+"""
+    assert flagged(scan(tmp_path, chained)) == []
+    other_hook = f"""export function register(on) {{
+  on("tool.call", async ($, e, next) => {body})
+  on("turn.start", async ($, e, next) => next(e)).catch(($, e, next) => next(e))
+}}
+"""
+    assert rules(scan(tmp_path, other_hook)) == [RULE_GATE_OPEN]
+    finally_only = f"""export function register(on) {{
+  on("tool.call", async ($, e, next) => {body}).finally(() => undefined)
+}}
+"""
+    assert rules(scan(tmp_path, finally_only)) == [RULE_GATE_OPEN]
+
+
 def test_non_gating_event_awaiting_is_not_major(tmp_path: Path) -> None:
     """Only tool.call, tool.check and plugin.register are gates."""
-    assert majors(scan(tmp_path, gate("session.start", "{ await $.http.fetch(e.url); return next(e) }"))) == []
+    assert flagged(scan(tmp_path, gate("session.start", "{ await $.http.fetch(e.url); return next(e) }"))) == []
 
 
 def test_gate_with_matcher_object_uses_last_argument(tmp_path: Path) -> None:
@@ -187,7 +220,7 @@ export function register(on) {
 }
 """
     findings = scan(tmp_path, src)
-    assert majors(findings) == []
+    assert flagged(findings) == []
     assert "not an inline function" in inventory(findings)
 
 
@@ -214,7 +247,7 @@ def test_as_user_true_is_major(tmp_path: Path) -> None:
     src = """export function register(on) { on("session.start", async ($, e, next) => { await $.prompt.submit("hi", { asUser: true }); return next(e) }) }"""
     findings = scan(tmp_path, src)
     assert rules(findings) == [RULE_ASUSER]
-    assert "$.prompt.submit" in inventory(findings)
+    assert majors(findings)[0].severity == "major"
 
 
 @pytest.mark.parametrize("opts", ["", ", { asUser: false }", ", { other: 1 }", ", {}"])
@@ -349,3 +382,28 @@ def test_lexer_contract_this_scanner_relies_on() -> None:
     assert toks[lexer.match[1]].value == ")"
     assert lexer.match[1] == len(toks) - 1
     assert lexer.idents["$"] == 1
+
+
+def test_validate_hooks_data_reports_capabilities_with_owner_severities(tmp_path: Path) -> None:
+    """Wiring (TRDD-29QP66H2): a plugin whose module writes PATH gets the MAJOR through validate_hook,
+    an awaiting tool.call hook a WARNING, and every scanned module its inventory INFO."""
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    (hooks / "register.js").write_text(
+        "export function register(on) {\n"
+        '  on("session.start", async ($, e, next) => { $.env.set("PATH", x); return next(e) })\n'
+        '  on("tool.call", async ($, e, next) => { await $.http.fetch(e.url); return next(e) })\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    (hooks / "clean.js").write_text(P00, encoding="utf-8")
+    data = {"modules": ["./register.js", "./clean.js"]}
+    (hooks / "hooks.json").write_text(json.dumps(data), encoding="utf-8")
+    report = validate_hooks_data(data, tmp_path, HookValidationReport(hook_path=str(hooks / "hooks.json")))
+
+    def found(rule: str) -> list[str]:
+        return [r.level for r in report.results if f"[{rule}]" in r.message]
+
+    assert found(RULE_ENV_LOADER) == ["MAJOR"]
+    assert found(RULE_GATE_OPEN) == ["WARNING"]
+    assert found(RULE_INVENTORY) == ["INFO", "INFO"]

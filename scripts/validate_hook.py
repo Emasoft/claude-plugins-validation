@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from cpv_mod_capabilities import scan_mod_capabilities
 from cpv_mod_register_scan import BodyFinding, RegisterVerdict, scan_module_body, scan_register_export
 from cpv_parallel_runner import parallel_scan
 from cpv_validation_common import (
@@ -1037,6 +1038,28 @@ def validate_mod_body(
         _emit_body_finding(report, f"C4-{status}", message, file, imp.line)
 
 
+def validate_mod_capabilities(module_path: Path, plugin_root: Path, report: HookValidationReport) -> None:
+    """TRDD-29QP66H2 D1/D2: capability inventory (INFO) and risky shapes of a hooks module.
+
+    Severity follows the owner decision of 2026-11-28 ("Inventory + risky") and the sweep of the
+    natively-accepted catalogue (9494 modules, dev = idx % 5 == 0, held-out = the rest, run once
+    with no rule change after the dev slice found one defect, a catch chained as on(...).catch()):
+    MOD-CAP-ENV-SET-LOADER and MOD-CAP-ASUSER-SUBMIT stay MAJOR by owner decision (held-out
+    accepted modules: 6 PATH writes in 5 modules, 445 asUser submits in 335 modules; all genuine
+    uses of the capability); MOD-CAP-GATE-FAILS-OPEN is a WARNING because the held-out sweep found
+    it in 1556 of 7418 accepted modules, which MAJOR would fail.
+    """
+    file = str(module_path)
+    for cap in scan_mod_capabilities(module_path, plugin_root):
+        message = f"[{cap.rule}] {cap.message}"
+        if cap.severity == "major":
+            report.major(message, file, cap.line)
+        elif cap.severity == "warning":
+            report.warning(message, file, cap.line)
+        else:
+            report.info(message, file, cap.line)
+
+
 def validate_modules_entry(data: dict[str, Any], plugin_root: Path | None, report: HookValidationReport) -> None:
     """Validate the `modules` array of a Claude Mods hooks.json (v2.1.287)."""
     if "modules" not in data:
@@ -1136,6 +1159,9 @@ def validate_modules_entry(data: dict[str, Any], plugin_root: Path | None, repor
                         # already report every other entry shape.
                         validate_mod_register_export(resolved, entry, suffix, report)
                         validate_mod_body(resolved, entry, suffix, plugin_root, report)
+                        # Owner decision 2026-11-28 (TRDD-29QP66H2): capability inventory plus
+                        # risky shapes; severities and sweep evidence at validate_mod_capabilities.
+                        validate_mod_capabilities(resolved, plugin_root, report)
                     elif not resolved.exists():
                         # Message carries both phrasings: the directive's
                         # "mods hooks module not found" and the committed

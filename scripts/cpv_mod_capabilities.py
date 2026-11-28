@@ -3,14 +3,14 @@
 
 TRDD-29QP66H2, gap items D1 and D2 (owner decision 2026-11-28, "Inventory + risky"):
 one INFO per module listing every literal `$.noun.method(` call, every hook event
-the module registers and every literal host passed to `$.http.fetch`, plus a MAJOR
-for each of three dangerous shapes:
+the module registers and every literal host passed to `$.http.fetch`, plus one finding
+for each of three risky shapes (MAJOR unless stated):
 
 - MOD-CAP-ENV-SET-LOADER: `$.env.set` of PATH, PYTHONPATH, NODE_OPTIONS, LD_* or DYLD_*
   (names compared case-insensitively, because Windows spells PATH as Path);
-- MOD-CAP-GATE-FAILS-OPEN: a gating hook (tool.call, tool.check, plugin.register)
-  whose inline handler awaits work and holds no `catch` anywhere, so a throw
-  makes the host let the call through;
+- MOD-CAP-GATE-FAILS-OPEN (WARNING, see check_gate): a gating hook (tool.call, tool.check,
+  plugin.register) whose inline handler awaits work and holds no `catch` anywhere (a catch
+  chained as `on(...).catch(h)` counts), so a throw makes the host let the call through;
 - MOD-CAP-ASUSER-SUBMIT: `$.prompt.submit(..., { asUser: true })`.
 
 Fail-open contract (same as cpv_mod_register_scan): the module is only ever lexed,
@@ -36,7 +36,7 @@ from urllib.parse import urlsplit
 
 from cpv_mod_register_scan import _ESCAPED_STRING_MARK, JSX_SUFFIXES, Tok, _Lexer, _Undecided
 
-Severity = Literal["info", "major"]
+Severity = Literal["info", "warning", "major"]
 
 RULE_INVENTORY = "MOD-CAP-INVENTORY"
 RULE_ENV_LOADER = "MOD-CAP-ENV-SET-LOADER"
@@ -107,7 +107,7 @@ class _ModScan:
         self.events: set[str] = set()
         self.hosts: list[str] = []
         self.undecided: list[str] = []
-        self.majors: list[Finding] = []
+        self.flagged: list[Finding] = []
 
     # -- token helpers -------------------------------------------------
     def is_p(self, j: int, value: str) -> bool:
@@ -227,7 +227,7 @@ class _ModScan:
             return
         for name in names:
             if _is_loader_env_name(name):
-                self.majors.append(
+                self.flagged.append(
                     Finding(
                         "major",
                         RULE_ENV_LOADER,
@@ -243,7 +243,7 @@ class _ModScan:
             if self.is_object_literal(rng):
                 state = self.as_user_state(rng[0])
                 if state == "true":
-                    self.majors.append(
+                    self.flagged.append(
                         Finding(
                             "major",
                             RULE_ASUSER,
@@ -329,9 +329,13 @@ class _ModScan:
                 continue
             self.events.add(event)
             if event in GATING_EVENTS:
-                self.check_gate(tk.line, event, args)
+                # `on(...).catch(handler)` registers the hook error handler: arg_ranges
+                # returned a list, so the opener has a closer.
+                close = self.match[i + 1]
+                chained_catch = self.is_p(close + 1, ".") and self.is_id(close + 2, "catch")
+                self.check_gate(tk.line, event, args, chained_catch)
 
-    def check_gate(self, line: int, event: str, args: list[tuple[int, int]]) -> None:
+    def check_gate(self, line: int, event: str, args: list[tuple[int, int]], chained_catch: bool) -> None:
         if len(args) < 2:
             return
         start, end = args[-1]
@@ -342,16 +346,18 @@ class _ModScan:
         if not inline:
             self.note(f"`{event}` handler at line {line} is not an inline function")
             return
-        has_catch = any(self.is_id(k, "catch") for k in range(start, end))
+        has_catch = chained_catch or any(self.is_id(k, "catch") for k in range(start, end))
         awaits = any(
             (self.is_id(k, "await") and not self.after_member_dot(k))
             or (self.is_id(k, "then") and self.after_member_dot(k) and self.is_p(k + 1, "("))
             for k in range(start, end)
         )
         if awaits and not has_catch:
-            self.majors.append(
+            self.flagged.append(
                 Finding(
-                    "major",
+                    # WARNING, not MAJOR: held-out sweep of 7418 accepted catalogue modules found the shape in
+                    # 1556 of them (21%, 2416 hooks), so MAJOR would fail one accepted mod in five; owner decides.
+                    "warning",
                     RULE_GATE_OPEN,
                     f"`{event}` hook at line {line} awaits work with no catch (no try/catch, no .catch): "
                     "a throw or rejection fails open and the gated call goes through; "
@@ -397,4 +403,4 @@ def scan_mod_capabilities(module_path: Path, plugin_root: Path) -> list[Finding]
         return [Finding("info", RULE_INVENTORY, prefix + lexed + ")", None)]
     scan = _ModScan(lexed)
     scan.run()
-    return [scan.inventory(shown), *sorted(scan.majors, key=lambda f: f.line or 0)]
+    return [scan.inventory(shown), *sorted(scan.flagged, key=lambda f: f.line or 0)]
