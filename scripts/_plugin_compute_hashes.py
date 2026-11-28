@@ -267,34 +267,18 @@ def _is_runtime_cruft(rel_path: str) -> bool:
     return rel_path.endswith(_RUNTIME_CRUFT_SUFFIXES)
 
 
-def enumerate_shipped_files(plugin_root: Path) -> set[str]:
-    """Return the relative paths of every shipped (git-tracked) file.
+def walk_shipped_files(plugin_root: Path) -> set[str]:
+    """Return every file ON DISK under plugin_root, minus never-shipped dirs and runtime cruft.
 
-    SINGLE SOURCE OF TRUTH for "what ships" (TRDD-b8c6d04f). Used by BOTH
-    `compute_manifest` (hash each entry) AND
-    `_plugin_verify_hashes.verify_self_integrity` (added-file detection:
-    any on-disk file NOT in the manifest is an added/inoculated file).
-    Because both sides enumerate identically, runtime cruft / caches /
-    gitignored files are excluded symmetrically and never false-flag.
-
-    Dual path, mirroring how a plugin is shipped:
-      * `git ls-files` when plugin_root is a git repo — the exact shipped set.
-      * a directory walk minus `_SHIPPED_WALK_SKIP_DIRS` and runtime cruft
-        when it is not (uvx / tarball / sparse install with no `.git`).
-
-    The two manifest files are always excluded — they cannot contain their
-    own hash (chicken-and-egg), so they are neither hashed nor flagged.
+    Never consults git. TRDD-DDL1C1T2: a git index found in an install dir is
+    attacker-controllable (a planted `git init` gives an empty index, and an
+    install inside an unrelated ancestor work tree gets that repo's index), so
+    the added-file check in `_plugin_verify_hashes._detect_added_files` unions
+    this walk into its answer: an index can add names to the set, never hide one.
+    The two manifest files are excluded (they cannot hash themselves).
     """
     out: set[str] = set()
-    tracked = _git_tracked_files(plugin_root)
-    if tracked is not None:
-        for rel_path in tracked:
-            if Path(rel_path).name in _MANIFEST_BASENAMES:
-                continue
-            out.add(rel_path)
-        return out
-    # Fallback: not a git repo. Walk the tree, excluding never-shipped dirs
-    # and runtime cruft. No eligibility filter — exhaustive by design.
+    # No eligibility filter — exhaustive by design.
     for path in plugin_root.rglob("*"):
         if not path.is_file():
             continue
@@ -308,6 +292,28 @@ def enumerate_shipped_files(plugin_root: Path) -> set[str]:
             continue
         out.add(rel_path)
     return out
+
+
+def enumerate_shipped_files(plugin_root: Path) -> set[str]:
+    """Return the relative paths of every shipped (git-tracked) file.
+
+    The set MANIFEST GENERATION hashes (`compute_manifest`), and the git half of
+    the verifier's added-file detection (TRDD-b8c6d04f). On its own it is NOT a
+    safe answer to "which files are on disk in an install dir" (TRDD-DDL1C1T2),
+    so the verifier also unions `walk_shipped_files`.
+
+    Dual path, mirroring how a plugin is shipped:
+      * `git ls-files` when plugin_root is a git repo — the exact shipped set.
+      * `walk_shipped_files` when it is not (uvx / tarball / sparse install
+        with no `.git`).
+
+    The two manifest files are always excluded — they cannot contain their
+    own hash (chicken-and-egg), so they are neither hashed nor flagged.
+    """
+    tracked = _git_tracked_files(plugin_root)
+    if tracked is None:
+        return walk_shipped_files(plugin_root)
+    return {rel_path for rel_path in tracked if Path(rel_path).name not in _MANIFEST_BASENAMES}
 
 
 def compute_manifest(plugin_root: Path) -> dict[str, object]:

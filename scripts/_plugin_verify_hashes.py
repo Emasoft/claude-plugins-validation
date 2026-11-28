@@ -324,7 +324,9 @@ class _AddedFilesError(Exception):
     """The added-file enumeration could not run; the message is the refusal reason (issue #255)."""
 
 
-def _detect_added_files(plugin_root: Path, manifest_files: dict[str, object]) -> list[str]:
+def _detect_added_files(
+    plugin_root: Path, manifest_files: dict[str, object], *, include_disk_walk: bool = True
+) -> list[str]:
     """Shipped files present on disk but ABSENT from the canonical manifest.
 
     TRDD-b8c6d04f change 3 — integrity verification must be BIDIRECTIONAL.
@@ -336,11 +338,20 @@ def _detect_added_files(plugin_root: Path, manifest_files: dict[str, object]) ->
     entries that are ALREADY in the manifest. "Even one file skipped is
     enough to poison the plugin" — so an extra file must be caught too.
 
-    Enumeration reuses `enumerate_shipped_files` (the same git-tracked / walk
-    logic the manifest builder uses), so runtime cruft, caches, and
-    gitignored files are excluded symmetrically and never false-flag. The two
-    manifest files are excluded by the enumerator. Returns a sorted list of
-    relative paths.
+    TRDD-DDL1C1T2: a git index found in an install dir is attacker-controllable.
+    `enumerate_shipped_files` trusts `git ls-files`, so a planted `git init` (empty
+    index), or an install sitting inside an unrelated ancestor work tree, made it
+    return set() and a planted `scripts/evil_added.py` passed. A file nobody
+    `git add`ed is invisible to the index even in a genuine clone. With
+    `include_disk_walk` (the default) the answer is therefore the UNION of the git
+    set and `walk_shipped_files` (what is ON DISK, never git): the index can add
+    names, never hide one. Only the release-candidate path passes False: it has
+    already proven HEAD == the anchored commit, the work tree top level == root
+    and a clean `status --untracked-files=all`, and compares `ls-files` against
+    the manifest itself; there a disk walk would flag gitignored dev files.
+
+    Runtime cruft and caches are excluded symmetrically by both enumerators and
+    the two manifest files are excluded. Returns a sorted list of relative paths.
 
     Issue #255: an enumeration failure RAISES `_AddedFilesError`. It used to
     return [] ("no added files"), so breaking the import or the walk made
@@ -350,12 +361,14 @@ def _detect_added_files(plugin_root: Path, manifest_files: dict[str, object]) ->
         scripts_dir = Path(__file__).resolve().parent
         if str(scripts_dir) not in sys.path:
             sys.path.insert(0, str(scripts_dir))
-        from _plugin_compute_hashes import enumerate_shipped_files
+        from _plugin_compute_hashes import enumerate_shipped_files, walk_shipped_files
     except ImportError as exc:
         raise _AddedFilesError(f"the added-file check could not load enumerate_shipped_files: {exc}") from exc
     manifest_set = {k for k in manifest_files if isinstance(k, str)}
     try:
         on_disk = enumerate_shipped_files(plugin_root)
+        if include_disk_walk:
+            on_disk = on_disk | walk_shipped_files(plugin_root)
     except (OSError, ValueError) as exc:
         raise _AddedFilesError(f"the added-file check could not list the files of {plugin_root}: {exc}") from exc
     return sorted(on_disk - manifest_set)
@@ -617,7 +630,10 @@ def _release_candidate_reasons(root: Path, anchor: str) -> tuple[list[str], int]
         reasons.append(f"{rel_path}: tracked by git but absent from the manifest")
     # Issue #255: an enumeration failure is a refusal reason, never "no added files".
     try:
-        added_files = _detect_added_files(root, files)
+        # TRDD-DDL1C1T2: git-only here on purpose. This path already proved HEAD == the
+        # anchored commit, top level == root and a clean `status --untracked-files=all`, so
+        # the index is not attacker-controlled; a disk walk would flag gitignored dev files.
+        added_files = _detect_added_files(root, files, include_disk_walk=False)
     except _AddedFilesError as exc:
         added_files = []
         reasons.append(str(exc))
