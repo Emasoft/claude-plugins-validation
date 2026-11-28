@@ -2596,8 +2596,21 @@ ALLOWED_DOC_PATH_PREFIXES = {
     "/run/",  # Runtime data
 }
 
-# System binary paths — expected for tool detection, not portability issues
-_SYSTEM_BINARY_PREFIXES = ("/usr/bin/", "/usr/local/bin/", "/opt/homebrew/bin/", "/bin/", "/sbin/", "/usr/sbin/")
+# System binary paths — expected for tool detection, not portability issues.
+# Issue #295: `/opt/homebrew/opt/` and `/usr/local/opt/` are listed because a
+# keg-only Homebrew formula (e.g. node@22) is linked ONLY under
+# <prefix>/opt/<formula>, never into <prefix>/bin. That is its sole, fixed install
+# location with no plugin-relative form, so a MINOR on it is never actionable.
+_SYSTEM_BINARY_PREFIXES = (
+    "/usr/bin/",
+    "/usr/local/bin/",
+    "/opt/homebrew/bin/",
+    "/opt/homebrew/opt/",
+    "/usr/local/opt/",
+    "/bin/",
+    "/sbin/",
+    "/usr/sbin/",
+)
 
 # The same locations named as a BARE directory, with no trailing slash. Every
 # entry above ends in `/`, so `startswith()` alone matches `/usr/bin/python` but
