@@ -84,12 +84,20 @@ jobs:
         # FINAL REPORT, which the validator generates at the end by program
         # structure, not output waiting in a buffer. Do not expect it to stream
         # the report; do expect it to timestamp the progress markers correctly.
+        #
+        # The report is written to $RUNNER_TEMP, OUTSIDE the checkout. The
+        # integrity check finds added files by a disk walk as well as
+        # `git ls-files` (TRDD-DDL1C1T2), so a validation-report.txt `tee`d
+        # into the repo root while the validator runs is reported as an
+        # added/inoculated file and the validator exits 2 — the red v5.29.0
+        # Release run. The upload step below reads it from the same place; the
+        # artifact and the release asset keep the name validation-report.txt.
         env:
           PYTHONUNBUFFERED: "1"
         run: |
           set +e
           uv run python scripts/validate_plugin.py . --verbose --strict --no-color 2>&1 \
-            | tee validation-report.txt
+            | tee "$RUNNER_TEMP/validation-report.txt"
           exit_code=${PIPESTATUS[0]}
           set -e
           if [ "$exit_code" -eq 0 ]; then
@@ -97,7 +105,7 @@ jobs:
             exit 0
           fi
           if [ "$exit_code" -ge 1 ] && [ "$exit_code" -le 4 ] \
-             && grep -q "SUMMARY: CRITICAL=" validation-report.txt; then
+             && grep -q "SUMMARY: CRITICAL=" "$RUNNER_TEMP/validation-report.txt"; then
             echo "::error::Validation failed (exit $exit_code: CRITICAL/MAJOR/MINOR/NIT found)"
             exit "$exit_code"
           fi
@@ -111,7 +119,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: validation-report
-          path: validation-report.txt
+          path: ${{ runner.temp }}/validation-report.txt
           if-no-files-found: error
           retention-days: 7
 

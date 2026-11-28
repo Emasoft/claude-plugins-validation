@@ -295,14 +295,13 @@ def test_rc8_handler_is_a_valid_shell_script(gen) -> None:
 
 
 def test_rc8_ci_report_is_written_outside_the_checkout() -> None:
-    """ci.yml captures to $RUNNER_TEMP so the validator cannot scan its own report."""
+    """ci.yml and release.yml both capture to $RUNNER_TEMP so the validator cannot scan its own report."""
     ci = gen_ci_yml(_params())
     assert '"$RUNNER_TEMP/cpv-validation-report.txt"' in ci
-    # POSITIVE CONTROL: release.yml still writes into the workspace, because the
-    # report is uploaded as a release asset (issue #121) — the two differ on
-    # purpose, and the asset name must not change.
+    # release.yml also writes outside the checkout (the integrity disk walk would
+    # flag an in-tree report), while the release asset name stays unchanged.
     rel = gen_release_yml(_params())
-    assert '"validation-report.txt"' in rel
+    assert '"$RUNNER_TEMP/validation-report.txt"' in rel
     assert "gh release upload" in rel and "validation-report.txt" in rel
 
 

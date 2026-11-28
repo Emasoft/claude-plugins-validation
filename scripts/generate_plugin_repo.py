@@ -621,8 +621,8 @@ def gen_cpv_validate_run_block(p: PluginParams, report_path: str) -> str:
         p: the plugin params (its ``cpv_ref_resolved`` pins the CPV source).
         report_path: where to capture the validator's combined output. ci.yml
             keeps it OUT of the checkout (``$RUNNER_TEMP``) so the validator
-            cannot scan its own report; release.yml writes it into the workspace
-            because the file is uploaded as a release asset (issue #121).
+            cannot scan its own report; release.yml does the same (the report
+            is handed to the release job as an artifact, issue #121).
     """
     cpv_from = cpv_uvx_from_arg(p)
     return f"""set +e
@@ -6522,15 +6522,19 @@ def gen_release_yml(p: PluginParams) -> str:
     # Use p.python_version instead of hardcoded 3.12
     # The pinned CPV source + RC-8 (exit-code triage) both live in
     # the SHARED gen_cpv_validate_run_block, so this workflow and ci.yml cannot
-    # drift apart on either. The report is written into the WORKSPACE (not
-    # $RUNNER_TEMP like ci.yml) because it is uploaded as a release asset below
-    # (issue #121) — the historical filename is kept so the asset name is stable.
+    # drift apart on either. The report is written to $RUNNER_TEMP, OUTSIDE the
+    # checkout, like ci.yml: the integrity check finds added files by a disk
+    # walk as well as `git ls-files` (TRDD-DDL1C1T2), so a report `tee`d into
+    # the workspace root while validating is flagged as an added file and the
+    # validator exits 2 (the red v5.29.0 Release run). The upload-artifact step
+    # reads it from there; the artifact and release asset name stays
+    # validation-report.txt (issue #121).
     #
     # Historical note: this block used to be built with SINGLE-`\` Python source
     # continuations, which eat the newline and emit one FLATTENED shell line. The
     # shared helper emits real multi-line shell continuations instead; the
     # command is identical, only its line-wrapping changed.
-    validate_block = gen_cpv_validate_run_block(p, "validation-report.txt")
+    validate_block = gen_cpv_validate_run_block(p, "$RUNNER_TEMP/validation-report.txt")
     # Same shard vocabulary as gen_ci_yml — both are driven by TEST_SHARD_COUNT
     # so the matrix and pyproject's pytest-split dev requirement cannot desync.
     shard_groups = ", ".join(str(i) for i in range(1, TEST_SHARD_COUNT + 1))
@@ -6644,7 +6648,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: validation-report
-          path: validation-report.txt
+          path: ${{{{ runner.temp }}}}/validation-report.txt
           if-no-files-found: error
           retention-days: 7
 

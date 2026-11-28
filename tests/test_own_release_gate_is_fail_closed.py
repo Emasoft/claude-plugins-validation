@@ -49,7 +49,7 @@ def test_release_gate_streams_and_reads_the_validators_status() -> None:
     """A job killed at its cap never reaches a trailing `cat`, so the log would
     show nothing at all about what was running (#180)."""
     step = _validate_step()
-    assert "| tee validation-report.txt" in step, "the validate step no longer streams its output"
+    assert '| tee "$RUNNER_TEMP/validation-report.txt"' in step, "the validate step no longer streams its output"
     assert "PIPESTATUS[0]" in step, "reads tee's status instead of the validator's"
     assert "exit_code=$?" not in step, "reads $? after a pipeline — that is tee's exit code"
 

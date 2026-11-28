@@ -442,7 +442,8 @@ class TestWP2ManifestTypes:
         root = _wp2_write_plugin(
             tmp_path,
             {**_WP2_BASE_MANIFEST, "types": "./types/index.d.ts"},
-            files=[("types/index.d.ts", "export declare const state: string;\n")],
+            # A contract native 2.1.332 accepts: `export` followed by `type` (C7, TRDD-29QP66H2 batch 2).
+            files=[("types/index.d.ts", "export type State = string;\n")],
         )
         report = ValidationReport()
         validate_manifest(root, report)
